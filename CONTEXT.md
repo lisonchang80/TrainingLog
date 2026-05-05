@@ -52,17 +52,18 @@ _Avoid_: Tag（過泛）, Phase（暗示時序）, Mode
 **Template** (UI: 課表):
 單次訓練的範本（例：「胸日」、「腿日」），用來生出 Session。**儲存完整處方**：有序的 Exercise 清單（含 SetGroup 結構）+ 每個 Exercise 的組數、目標重量、目標 reps。
 **Identity = (name, Program, Program 副標籤) 三元組**。同 name 配不同 (Program, 副標籤) 組合視為不同 Template entity（例：「胸日 (增肌-Q1, 10-12RM)」、「胸日 (增肌-Q1, 8-10RM)」、「胸日 (力量-Q2, 6RM)」為三個獨立 Template）。
+**「Template」= entity（三元組整體）**；**「Template name」= 字串 label**（例：「胸日」這個字串本身）。同 name 的多個 Template 是獨立的 sibling entities，**不是「1 個 Template 的多個版本」**。schema / ADR / 處方 / Snapshot / Save-back / 歷史指標 scope 一律以 Template entity 為單位；UI 顯示用「name (主標籤, 副標籤)」格式（例：「胸日 (增肌-Q1, 10-12RM)」）。
 **Exercise 清單分兩區**：
 - **一般動作區**：處方 per `(name, Program, 副標籤)` 三元組獨立，跟著週期化變化
-- **常設動作區**：處方 per `name` **共享**（同 name 的所有三元組 instances 共用同一份處方）。新建三元組時**自動繼承**同 name 已有的常設動作池（含處方）
+- **常設動作區**：處方 per `name` **共享**（同 name 的所有 sibling Templates 共用同一份處方）。新建三元組時**自動繼承**同 name 已有的常設動作池（含處方）
 動作可在 Template 編輯頁透過動作右上設置「設為常設運動」/「設為一般運動」在兩區之間移動。
-UI 上 Template 清單以 name 分組顯示，使用者點 name 後再選 (Program, 副標籤) 組合即定位到具體 Template。
-_Avoid_: Routine, Workout template, 模板, 範本
+UI 上 Template 清單以 **Template name** 分組顯示，使用者點 name 後再選 (Program, 副標籤) 組合即定位到具體 Template。
+_Avoid_: Routine, Workout template, 模板, 範本; 「Template instance」（避免 instance / entity 雙詞混用，一律稱 Template 或 sibling Templates）
 
 **常設動作** (UI: 常設運動):
-Template 內的 Exercise 分區之一（對 vs 一般動作）。處方 per Template name 共享，跨同 name 的所有 (Program, 副標籤) instances 不變。
+Template 內的 Exercise 分區之一（對 vs 一般動作）。處方 per Template name 共享，跨同 name 的所有 sibling Templates 不變。
 **設計目的**：讓 finisher / 收操 / 暖身 / 不參與週期化進展的動作能維持單一處方源 — 修改一處同步到所有 sibling Templates，避免人工同步。
-**舉例**：「胸日」這個 Template name 有三個 instances（10-12RM / 8-10RM / 6-8RM），蝴蝶機作為 finisher 屬於常設動作 → 三個 instances 都顯示同一筆「蝴蝶機 30kg×15×2」，改其中一個就改全部。
+**舉例**：「胸日」這個 Template name 有三個 sibling Templates（10-12RM / 8-10RM / 6-8RM），蝴蝶機作為 finisher 屬於常設動作 → 三個 sibling Templates 都顯示同一筆「蝴蝶機 30kg×15×2」，改其中一個就改全部。
 _Avoid_: 永久動作、固定動作、Evergreen exercise（內部 codename 可用）
 
 **Snapshot semantics**:
@@ -71,14 +72,13 @@ Session 由 Template 生出時，**複製** Template 當下的完整處方（Exe
 
 **Save-back semantics** (Session → Template 反向更新):
 Session 結束時，若實際組數/重量/次數與 snapshot 處方不同，跳「是否同意修改模板？」dialog。同意則依動作所屬分區決定傳播範圍：
-- **一般動作的修改**：只更新本次 Session 對應的 (Template name, **這個** Program, **這個** 副標籤) 三元組的 Template 處方（其他 sibling instances 不動）
-- **常設動作的修改**：更新該 Template name 下**所有** (Program, 副標籤) instances 的 Template 處方（因為常設動作的處方是 name-level 共享）
+- **一般動作的修改**：只更新本次 Session 對應的 (Template name, **這個** Program, **這個** 副標籤) 三元組的 Template 處方（其他 sibling Templates 不動）
+- **常設動作的修改**：更新該 Template name 下**所有** sibling Templates 的 Template 處方（因為常設動作的處方是 name-level 共享）
 拒絕則：本次 Session 內仍保留實際數據（不影響歷史紀錄），Template 處方不動。
-_儲存實作（每個 instance 各存一份 + propagate vs 抽出 common 表 + JOIN 渲染）留 ADR 決定，CONTEXT.md 只鎖 semantics。_
+_儲存實作（每個 Template 各存一份 + propagate vs 抽出 common 表 + JOIN 渲染）留 ADR 決定，CONTEXT.md 只鎖 semantics。_
 
 **Autofill** (UI: 自動帶入):
-Session 開始時，每個 Exercise 的組數 + 目標重量 + 目標 reps **直接從 Template 處方帶入**（即 snapshot 內容）。
-_待 Q6.3 釐清：當有同 Template 的歷史 Session 時，是否覆寫或對照「上次實際達成」（progressive overload 場景）？_
+Session 開始時，每個 Exercise 的組數 + 目標重量 + 目標 reps **直接從 Template 處方帶入**（即 snapshot 內容）。**歷史 Sessions 不影響 input 預填值** — 上次實績、最大容量、最大重量等資訊以「歷史指標」形式 inline 顯示在動作名旁，由使用者自行決定要否手動覆寫 input（不自動覆寫，避免破壞 Template 處方語意）。
 
 **Extra Exercise** (UI: 額外動作):
 Session 中**不在**所選 Template 裡、臨時加做的動作。Session end 時可被 Split 出去。
@@ -123,7 +123,9 @@ _Avoid_: Gear, 器械（口語可）
 
 **Set** (UI: 組):
 紀錄的最小單位 — 一次完整的舉起/放下動作序列。必填：**weight + reps**。
-選填（UI 預設折疊）：RPE、組間休息、備註、是否暖身組。
+**完成標記** (`is_done`)：per-set 勾選欄位，標示該組是否實際做完。Volume 進度與 PR 判定僅計入 `is_done = true` 的 sets。
+**Set type**：暖身組（warmup） / 正式組（working set）。UI 顯示時暖身組以「熱」label 取代序號，**正式組編號從 1 起算（不含暖身組）**（例：2 暖身 + 3 正式 = 列表顯示「熱 / 熱 / 1 / 2 / 3」，**不採訓記式的「熱 / 熱 / 3 / 4 / 5」**）。
+選填（UI 預設折疊）：RPE、組間休息、備註。
 _Avoid_: Rep（rep 是 set 內的次數，不是同義詞）
 
 **SetGroup**:
@@ -133,6 +135,41 @@ _Avoid_: Rep（rep 是 set 內的次數，不是同義詞）
 其他進階組型（rest-pause、AMRAP、cluster、giant set）v1 暫不建模，使用者用備註欄記。
 _Avoid_: Set Block, Cluster（cluster 是另一種特定組型）
 
+**Exercise 備註** (UI: per-Exercise 備註):
+Session 中每個 Exercise 的自由文字 textarea。獨立於 Set-level 備註。例：「左肩有點緊」「換到 squat rack #3」。
+
+**容量** (UI: 容量):
+**容量 = weight × reps**（per-set 級單位）。per-Exercise 容量 = sum(每組 weight × reps for `is_done` sets)；Session 容量 = sum(該 Session 全部 Exercises 的容量)。
+**注意**：未來改用 1RM-based 量化或 effective volume 時這個定義要重看。
+_Avoid_: Volume（中英混用會混淆）、Tonnage（口語不直覺）
+
+**Volume 進度** (UI: 已完成 / 計畫總量):
+即時顯示 (累計實際容量) / (Template 處方計畫容量)。per-Exercise（例：0.0/2080.0）+ per-Session 兩級。
+計畫容量 = sum(處方每組 weight × reps × sets)。
+
+**歷史指標** (UI: 動作名下方 inline reference 一列 3 chip):
+Session 內 Exercise 卡片在動作名下方排一列 3 個 chip。三個指標：
+- **上次**：最近一個 Session 中**容量最大那組**的 weight × reps
+- **容量峰**：全歷史 Sessions 中**容量最大那組**的 weight × reps
+- **重量峰**：全歷史 Sessions 中**重量最大那組**的 weight × reps
+
+**Scope 與 Fallback 規則（兩階）**：
+- **Tier 1**（嚴格 scope）：該 Template entity (三元組) 的歷史 Sessions
+- **Tier 2**（fallback）：(Template name, Program 副標籤) 跨 Program 主標籤的歷史 Sessions（保 rep range 不變）
+- **Tier 3 不啟用**：跨 Program 副標籤 (rep range) 的歷史對 progressive overload 無意義，不退此階
+- **三 chip 同步 tier**：要嘛全 Tier 1（無 ↑）、要嘛全 Tier 2（全 ↑）、要嘛全「—」。Tier 1 entity 一旦有任何 Session 就鎖 Tier 1（即使 Tier 2 數字更高），保 scope 純度與使用者心智模型一致
+
+**視覺規則**：
+- Tier 1：chip 顯示純數字，例：`[上次 85×8]`
+- Tier 2：chip 加淡色 ↑ icon，例：`[上次 85×8 ↑]`；tap chip 跳 tooltip 顯示「來自 *其他 Template* `name (Program 主, 副標籤)`」+ 該 Session 日期
+- 全空：chip 灰底顯示「—」，例：`[上次 —]`，tap 不展開
+
+**範例**：`深蹲` <br> `[上次 85×8] [容量峰 80×10] [重量峰 100×3]`
+
+**重要**：歷史指標**不**自動覆寫 Session 開始的 input 預填值（input 始終是 Template 處方），只是讓使用者**看到**參考數字以利 progressive overload 判讀。覆寫由使用者手動操作。
+
+**歷史頁**：per-Exercise「動作歷史」按鈕開啟完整列表，scope 細節待 Q6.3-γ-iii 確定。
+
 ## Relationships
 
 - 一個 **Program** = 起始日期 + 循環長度 + 循環次數 + 日曆網格。包含 N 個 **循環**（N = 循環次數），每個循環長 D 天（D = 循環長度）。日曆網格 = N × D 個 cells，每個 cell = (循環 index, day index, Date, Template, Program 副標籤)
@@ -141,10 +178,10 @@ _Avoid_: Set Block, Cluster（cluster 是另一種特定組型）
 - 預設循環間 pattern（Template + 休息日）一致（fan-out from 循環 1）；任一 cell 可手動 override
 - 一個 **Template** 必綁定 1 個 **Program**（含預設「無」= 無 Program 隸屬的 freestyle Template，不出現在任何 Program 日曆）+ 1 個 **Program 副標籤**（含「無」）
 - **Template identity = (name, Program, Program 副標籤) 三元組**：name 相同但 (Program, 副標籤) 不同 → 不同 Template entity
-- 一個 **Template** 內 Exercise 清單分 **一般動作區** + **常設動作區**：一般動作處方 per 三元組獨立；常設動作處方 per name 共享（同 name 所有三元組 instances 共用），新建三元組時自動繼承同 name 的常設動作池
+- 一個 **Template** 內 Exercise 清單分 **一般動作區** + **常設動作區**：一般動作處方 per 三元組獨立；常設動作處方 per name 共享（同 name 所有 sibling Templates 共用），新建三元組時自動繼承同 name 的常設動作池
 - 一個 **Template** 可生出 0..N 個 **Sessions**
 - 一個 **Session** 可選擇性地參考 0..1 個 **Template**（freestyle Session 沒有）
-- **Session → Template Save-back 傳播**：Session 結束時若實際數據與處方不同 → 「同意修改？」dialog；同意則一般動作只更新本三元組、常設動作更新該 name 下所有 instances
+- **Session → Template Save-back 傳播**：Session 結束時若實際數據與處方不同 → 「同意修改？」dialog；同意則一般動作只更新本三元組、常設動作更新該 name 下所有 sibling Templates
 - **Session 與 Program 日曆 cell 對應 by date**（display time 比對，不需要 persistent FK，進入路徑不影響；單 active Program 限制下，每個 Session 最多 overlay 1 個 Program 的 cell）
 - cell 顯示規則：
   - 計畫 + 同日 Session 匹配 (Template + 副標籤一致) → **✅**
@@ -182,7 +219,13 @@ _Avoid_: Set Block, Cluster（cluster 是另一種特定組型）
     - ✅ **D-ii.b** 步驟導航：linear next/back，**只有預覽頁（step 6）才暴露跳轉** — 每個 section 旁有「✏️ 改」按鈕回對應 step。Step 4（每訓練日 Template）允許跳過（cell 顯示 `?` 待補，處理 Templates 還沒建好的 first-run 情境）；step 5（每循環副標籤）必填但「無」是合法選項。
     - ✅ **D-iii** 中途退出 = lossless：「跳過 / 改手動排」按鈕語意是「不要 wizard 牽著走、繼續編這個 Program」→ 已填的全部保留進手動排頁。**schema 含意**：wizard 是 Program record 的 guided editor（不是 staging area）；Program record 在 step 1 名稱完成時即建立，後續所有 step 都是 in-place update。
     - ✅ **D-iv (v1 簡化)** 刪除 Program 流程：wizard 過程中**沒有**「取消 / 捨棄」action（只能上一步往回退）。建好之後在 Program 詳情頁才能刪除。
-- **Q6.3 Autofill 與歷史互動**：有歷史 Session 時，是否覆寫 / 對照 Template 處方（progressive overload 場景）？
+- **Q6.3 Autofill 與歷史互動 / 歷史指標**：
+  - ✅ **Q6.3-α** Autofill source = Template 處方（snapshot 即填）；歷史不覆寫 input，走 inline 歷史指標路線
+  - ✅ **Q6.3-β** 歷史指標 scope = per Template entity (三元組)（scope a）
+  - ✅ **Q6.3 baseline UI**：per-set ✓ 完成勾、per-Exercise 備註、per-Exercise volume 進度、熱身組 label「熱」+ 正式組從 1 起、拿掉 per-Exercise 簡單/正常/困難、拿掉 AI 按鈕、Apple Watch 控制（在錶練）deferred
+  - ✅ **Q6.3-γ-i** 三指標版面 = 動作名下方一列 3 chip（B 方案）
+  - ✅ **Q6.3-γ-ii** 無歷史 fallback = 兩階：Tier 1 entity 嚴格 → Tier 2 (Template name, 副標籤) 跨 Program 主標籤；Tier 3 不啟用；三 chip 同步 tier；Tier 2 chip 加 ↑ icon + tap chip 顯示來源 tooltip
+  - ⏳ **Q6.3-γ-iii 待 grill**：「動作歷史」按鈕完整列表頁 UX、scope 是否與 inline 一致 / 是否提供切換 / per-Exercise 還是 per-Template entity 為主軸
 - **Q8 Personal Record (PR) 定義**：PR 是 per Exercise 還是 per (Exercise, rep range)？E1RM 計算法？
 - **Q9 Body data**：體重、圍度、進度照片是否進同一個資料庫？跟 HealthKit 怎麼分工？
 - **Q10 Sync / multi-device**：純 local-first 還是 iCloud/CloudKit 同步？影響 schema 是否需要 conflict-resolution 欄位
