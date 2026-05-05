@@ -8,14 +8,13 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 - **Routing**: expo-router (file-based, tabs template)
 - **Storage**: SQLite via `expo-sqlite` (planned; local-first)
 - **Health integration**: HealthKit via `react-native-health` (planned; requires Expo Dev Build)
-- **Apple Watch**: deferred — separate native SwiftUI watch app post-Mac purchase (nice-to-have)
+- **Apple Watch**: deferred — separate native SwiftUI watch app, post-v1 (nice-to-have)
 
 ## Development environment
 
-- **Primary OS**: Windows 11 (developer machine)
-- **Preview**: Expo Go on iPhone (scan QR from `npx expo start`)
-- **Build / TestFlight / App Store submission**: requires macOS — planned for after Mac purchase. Use EAS Build (cloud) as interim option for dev clients.
-- **Native iOS Simulator**: not available on Windows — use Expo Go on real iPhone instead.
+- **Primary OS**: macOS (Mac mini M4 Pro) — switched from Windows 11 on 2026-05-06
+- **Preview**: iOS Simulator on Mac (`npx expo start` → press `i`) or Expo Go on iPhone (QR scan)
+- **Build / TestFlight / App Store submission**: requires Apple Developer Program ($99/yr) — deferred until first TestFlight build for friend testing
 
 ## Agent skills
 
