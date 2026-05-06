@@ -9,7 +9,7 @@ TrainingLog 紀錄 **重訓 (weight training) Sessions only**。有氧、HIIT、
 Cardio 資料的呈現透過 HealthKit 整合：
 - v1：READ Apple Health 的 cardio workouts，在 TrainingLog 顯示摘要（不存獨立資料）
 - v1.5+：WRITE TrainingLog Session 回 HealthKit 為 `HKWorkoutType=traditionalStrengthTraining`，讓 Apple Health 活動圓圈紀錄到
-- v2+：READ body data（bodyweight、HRV、睡眠等）給訓練 readiness 用
+- v2+：READ body data（bodyweight、HRV、睡眠等）給訓練 readiness 用、整合智能體脂計 / 體重秤等外部來源（v1 自家 schema 已存 bodyweight / PBF / SMM 純手動，見「Body data」段）
 - 詳細 HealthKit 邊界見 Q11
 
 ## Language
@@ -131,7 +131,7 @@ _Avoid_: Gear, 器械（口語可）
 **完成標記** (`is_done`)：per-set 勾選欄位，標示該組是否實際做完。Volume 進度與 PR 判定僅計入 `is_done = true` 的 sets。
 **Set type**：暖身組（warmup） / 正式組（working set）。UI 顯示時暖身組以「熱」label 取代序號，**正式組編號從 1 起算（不含暖身組）**（例：2 暖身 + 3 正式 = 列表顯示「熱 / 熱 / 1 / 2 / 3」，**不採訓記式的「熱 / 熱 / 3 / 4 / 5」**）。
 選填（UI 預設折疊）：RPE、組間休息、備註。
-_Avoid_: Rep（rep 是 set 內的次數，不是同義詞）
+_Avoid_: Rep（rep 是 set 內的次數，不是同義詞）；**weight ≠ bodyweight**（Set 的 weight = 每組負重，個人體重見「Body data」段）
 
 **SetGroup**:
 把多個 Set 組成一個訓練單元。v1 支援兩種型態：
@@ -211,6 +211,34 @@ per-Exercise「動作歷史」按鈕開啟完整列表頁。
 **進入路徑**：(1) Session 內 per-Exercise「動作歷史」按鈕、(2) 歷史分頁某 Session 內 per-Exercise、(3) Exercise library / 動作管理頁（後者 v1 尚未 spec）。三入口共用同一頁
 **空狀態**：「還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。」
 
+**Body data** (UI: 身體數據):
+個人身體狀態的時序紀錄，與訓練 entity（Session / Exercise / Set）獨立。v1 三個 metric：
+- **bodyweight** (體重，kg)：必填
+- **PBF** (體脂率，% 數字如 `18.5` 表示 18.5%)：選填
+- **SMM** (骨骼肌重，kg)：選填，取 InBody / Tanita 體組成計的 skeletal muscle mass，**非 lean body mass**（HealthKit 兩者不同欄位，不可混）
+
+**頻率**：一天可多筆（晨/晚體重差異 1-2kg 真實）。`measured_at` 為 timestamp 不是 date。
+
+**儲存**：一張表 `body_metric`，三欄合一筆（一次量測 = 一筆 row）。InBody 一次出三值 → 一筆完整 row；單獨用體重秤 → 一筆 bodyweight 有值、pbf / smm 為 NULL。NULL 在 SQLite 幾乎零成本，不需拆三張表。`source` 欄位 v1 永遠 `'manual'`，v2+ HealthKit READ 整合時新增 `'healthkit'`。
+
+**單位 (kg ↔ lb)**：schema 一律存 kg / %（**不存 unit 欄位**）。kg/lb 顯示切換在 Settings 層處理 = `unit_preference: 'kg' | 'lb'`，影響 UI 顯示與 input field 的轉換規則；趨勢圖、容量計算、PR 比對全部用 kg 算保持一致。**同一個 unit_preference 同步影響 Set 的 weight 顯示與輸入**（不分兩個設定）。
+
+**v1 資料來源**：純手動輸入。schema 預留 `source` 欄位讓 v2+ HealthKit READ 零 migration 成本介接；v1 不開 Apple Health body data 整合戰線（避免一次撞上 Expo Dev Build / 雙來源衝突解 / source-of-truth 三件事）。
+
+**與訓練的耦合（load_type 三類）**：Exercise 帶 `load_type ∈ {loaded, bodyweight, assisted}`。v1 容量 / PR 計算規則：
+- **A. loaded**（槓鈴/啞鈴/史密斯/滑輪/固定機械）：`weight × reps`，bodyweight 不進
+- **B. bodyweight**（徒手 / 加重引體 / 加重 dip 等）：`weight × reps`，bodyweight 不進。**守 lifting community 紀錄慣例**「+10kg 引體」非「83kg 引體」。純徒手 set (`weight=0`) 跳過 PR check（避免 weight=0 PR 無意義）。動作歷史頁可顯示「當天 bw 73」純 context label
+- **C. assisted**（助力機 / 阻力帶輔助引體・dip）：`(bw_snapshot − weight) × reps`，**bodyweight 進計算**。asymmetry 理由：C 類 user 幾乎都是新手轉接期，UX 服務「離徒手目標還差多遠」的進步追蹤比慣例優先；B 類 user profile 跨度大（新手到加掛 50kg 進階者），守慣例優先
+
+**Session 開始時 snapshot bodyweight**：query body_metric 取 `measured_at <= session.start_time` 最新一筆，鎖進 `session.bodyweight_snapshot_kg REAL NULL`。後續所有 C 類 set 共用同一 snapshot 值（一次 Session 內不變）。**無 snapshot 時 fallback**：C 類容量 / PR 顯示「—」+ 提示「未紀錄當天體重」；A / B 類照常運作。
+
+**「動作 mechanics 是否改變」分割原則**（承襲 ADR-0001 器械分割精神）：
+- **不改 mechanics 的加重** = 同一 Exercise，weight 欄位記加重值（例：徒手引體 ↔ 腰掛 10kg 引體）
+- **改變 mechanics 的加重** = 不同 Exercise（例：徒手單腿蹲 ↔ 啞鈴單腿蹲 ↔ 壺鈴單腿蹲 ↔ 槓鈴單腿蹲，4 個獨立 Exercise）
+- 灰色 case（半輔助 / 離心 only / 異速組）v1 不建模，使用者用備註欄記
+
+_Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取代 SMM；體脂率存成小數 `0.185`（v1 統一用百分比數字 `18.5`）；對 B 類動作把 bodyweight 加進負荷計算（違反 lifting 慣例，且打亂 Q8 PR 演算法）
+
 ## Relationships
 
 - 一個 **Program** = 起始日期 + 循環長度 + 循環次數 + 日曆網格。包含 N 個 **循環**（N = 循環次數），每個循環長 D 天（D = 循環長度）。日曆網格 = N × D 個 cells，每個 cell = (循環 index, day index, Date, Template, Program 副標籤)
@@ -281,7 +309,26 @@ per-Exercise「動作歷史」按鈕開啟完整列表頁。
   - ✅ **Q8-δ** PR 類型 = 重量 PR + 容量 PR 兩種，per bucket 各自獨立（B 方案）。不走 E1RM（估算值對自用 + 增肌取向價值有限；schema 不擋未來 v1.5+ 加）。同一 set 同時觸發兩種 PR 時 UI 合併顯示「重量 + 容量雙 PR」一次慶祝
   - ✅ **Q8-ε** 觸發 + 慶祝 = Hybrid（C 方案）：set ✓ 完成立刻判定，達 PR 顯示 1.5 秒小型 toast（不擋互動）；Session 結束跳 summary 頁列出本次打破的所有 PR + 本次 vs 上次對照。同 session 內 PR 被後續 set 蓋過時 toast 自然消失（toast 是過渡視覺、不爭議）；session-end summary 只列「per bucket 本 session 最終最高那筆」（不重複列同 bucket 多筆）
   - ✅ **Q8-ζ** inline chip 維持 inline scope 不對齊 PR（A 方案；遵守 ADR-0006 dual scope 設計）。配套修正：(1) 動作歷史頁 header 改稱「全時 PR：重量 X / 容量 Y」用 PR 字眼明示；(2) inline Tier 1 chip 也加 tap → tooltip「本 slot (`name (主, 副)`) 歷史最佳」；(3) CONTEXT.md 明文記錄 chip 峰值 ≠ PR、各服務不同決策問題
-- **Q9 Body data**：體重、圍度、進度照片是否進同一個資料庫？跟 HealthKit 怎麼分工？
+- **Q9 Body data**：
+  - ✅ **Q9.1** v1 scope = bodyweight + PBF + SMM 三個 metric；圍度（多部位）、進度照片（檔案儲存策略 + gallery UI）延到 v2
+  - ✅ **Q9.2.a** 命名：bodyweight（體重）/ PBF（體脂率，百分比數字 18.5）/ SMM（skeletal muscle mass，骨骼肌重，非 lean body mass）。明確 disambiguate Set 的 weight ≠ bodyweight
+  - ✅ **Q9.2.b** Schema 形狀 = 一張 `body_metric` 表合三欄（option A）；一天多筆（PK = id，欄位 measured_at 為 timestamp）；pbf / smm 可 NULL
+  - ✅ **Q9.2.b-bis** 單位：schema 鎖 kg / %（不存 unit 欄位），kg/lb 切換在 Settings 層 `unit_preference`，UI 顯示與輸入時換算；同設定同步影響 Set 的 weight 顯示
+  - ✅ **Q9.2.c** v1 資料來源 = 純手動；schema 預留 `source` 欄位（v1 永遠 `'manual'`），v2+ 加 HealthKit READ 零 migration 成本
+  - ✅ **Q9.2.d** Exercise 加 `load_type ∈ {loaded, bodyweight, assisted}` 三類分割（依「動作 mechanics 是否改變」原則，承襲 ADR-0001 器械分割精神）。v1 容量/PR 計算規則：
+    - **A 類 loaded**（槓鈴/啞鈴/史密斯/滑輪/固定機械）：`weight × reps`（bw 不進）
+    - **B 類 bodyweight**（徒手 / 加重引體 / 加重 dip）：`weight × reps`（bw 不進，守 lifting 慣例「+10kg 引體」非「83kg 引體」）；純徒手 set (weight=0) 跳過 PR check
+    - **C 類 assisted**（助力機 / 阻力帶輔助引體・dip）：`(bw − weight) × reps`（**asymmetric**：bw 進計算，給新手「離徒手還差多遠」的進步指標）
+    - asymmetry 理由：B 類 user profile 跨度大（守訓練圈紀錄慣例優先），C 類專屬新手轉接期（進階者不用助力機，UX 服務新手進步追蹤優先）
+  - ✅ **Q9.2.d-i** bodyweight snapshot 來源 = Session 開始時 query body_metric 最新一筆鎖進 Session；schema 加欄位 `session.bodyweight_snapshot_kg REAL NULL`
+  - ✅ **Q9.2.d-ii** 無 bw snapshot fallback：C 類容量 / PR 顯示「—」+ 提示「未紀錄當天體重」；A / B 類照常運作不受影響
+  - ✅ **Q9.2.d-iii** bodyweight 變動 PR 公平性：v1 接受 noise（新手用助力機週期短，bw 變動 ≤ 2kg 可忽略）；UI 在 PR 觸發時可標示「含 bw 變動」（v1.5+ 再決定要不要顯示，不影響 schema）
+  - ✅ **ADR-0007**：Load type taxonomy + bodyweight calculation asymmetry — 已寫入 `docs/adr/0007-load-type-taxonomy-and-bodyweight-asymmetry.md`
+  - ✅ **Q9.2.e** 身體數據頁 v1 範圍：
+    - **輸入 UI** = α + γ 雙入口：(α) 底部 tab 加「身體」獨立分頁（主入口、看歷史 / 補記）+ (γ) Session 開始前 inline prompt「今天要記體重嗎？」（contextual，降低 C 類動作沒 bw_snapshot 的痛點）
+    - **趨勢圖** = 預設三線共圖（bodyweight + SMM 共用左 Y 軸 kg，PBF 用右 Y 軸 %；圖例可 toggle 個別 series）+ 切換按鈕「分視」→ 三張獨立圖縱向 stack
+    - **單位 toggle** = Settings 分頁「單位偏好」一個 `unit_preference: 'kg' | 'lb'` toggle，**整 app 同步切換**（影響 Set weight、body_metric bodyweight / SMM、容量顯示，全部走同一 preference）
+    - Chart 庫選型 v1 實作時評估（victory-native / react-native-chart-kit / 其他），現在不釘
 - **Q10 Sync / multi-device**：純 local-first 還是 iCloud/CloudKit 同步？影響 schema 是否需要 conflict-resolution 欄位
 - **Q11 HealthKit 整合邊界**（範圍已擴至 cardio）：
   - **READ** v1：Apple Health 的 cardio workouts（有氧 / HIIT / 跑步等）→ TrainingLog 顯示摘要（不存獨立資料）
