@@ -108,18 +108,39 @@ Exercise 的主要訓練部位，第一層分類。共 11 類：
 胸、背、腿、臀、肩、斜方肌、二頭、三頭、小腿、前臂、核心。
 _Avoid_: Body part, 肌群（口語可，schema 用 MuscleGroup）
 
-**Sub-Group** (UI: 細部位):
-Muscle Group 下的細分（optional，部分 MG 才有）。Exercise 可選擇性地 tag 一個 Sub-Group。
+**Muscle** (UI: 部位細分) (ADR-0010 — 取代既有「Sub-Group」)：
+Muscle Group 下的解剖學細分，**19 個 muscle**，每個 muscle 屬於 exactly 1 MG。Exercise 透過 `exercise_muscle` m:n 表關聯多個 muscle 並標 role（primary / secondary），給 Exercise 詳情頁人體圖與部位活化視覺化使用。
 
-| Muscle Group | Sub-Groups |
+| Muscle Group | Muscles |
 |---|---|
-| 胸 | 上胸 / 中下胸 |
-| 背 | 水平 / 垂直 _（功能分類：拉的方向）_ |
-| 腿 | 腿前 / 腿後 |
-| 臀 | 上臀 / 下臀 |
-| 肩 | 前束 / 中束 / 後束 |
-| 二頭 | 內側頭 / 外側頭 _（口語，解剖學名為短頭 / 長頭）_ |
-| 斜方肌、三頭、小腿、前臂、核心 | _無 SG_ |
+| 胸 (2) | 上胸 / 中下胸 |
+| 背 (2) | 背部 / 下背 |
+| 腿 (2) | 股四 / 膕繩 |
+| 臀 (2) | 上臀部 / 下臀部 |
+| 肩 (3) | 前束 / 中束 / 後束 |
+| 斜方肌 (1) | 斜方肌 |
+| 二頭 (2) | 二頭長頭 / 二頭短頭 |
+| 三頭 (1) | 三頭 |
+| 小腿 (1) | 小腿 |
+| 前臂 (1) | 前臂 |
+| 核心 (2) | 側腹 / 腹肌 |
+
+合計 **19 muscle**。命名採解剖學標準（二頭長頭/短頭）+ 訓練圈口語（上下胸、上下臀、股四/膕繩、側腹/腹肌）混搭：單字優先標準、多字優先口語。
+
+**Exercise → muscle mapping**（透過 `exercise_muscle` 表）：
+- **primary** = 1-3 個 muscle（核心活化、訓練動量主要承擔）
+- **secondary** = 0-N 個 muscle（協同 / 穩定）
+- 一個 exercise 最少 1 個 primary muscle；secondary 可空
+- `exercise.muscle_group_id` 仍保留為「主要 MG 分類」單一 FK（filter / 統計頁各部位容量 / 獎章 first_combo / pr_per_mg 用），v1 手動指定不自動推算
+
+例：
+- 平板槓鈴臥推 → primary: 中下胸 / 三頭 / 前束；secondary: 上胸 / 前臂 / 核心
+- T-bar row → primary: 背部 / 下背 / 二頭長頭 / 二頭短頭；secondary: 後束 / 前臂 / 核心
+- 深蹲 → primary: 股四 / 上臀部 / 下臀部；secondary: 膕繩 / 下背 / 核心 / 小腿
+
+ADR-0010 局部 reverse ADR-0002：**僅**反轉「背的 SG = 水平/垂直」這一條（改為 背部 / 下背 解剖切）；其他 ADR-0002 結論（11 MG 列表、腹歸核心、臀獨立、腿前/後切分精神）全部保留。
+
+**體圖 asset**：前後身兩張 SVG（CC0 / Wikimedia Commons 解剖圖作參考、自製）；19 muscle 各自獨立 path with unique id；統計頁 heatmap (by 11 MG aggregate) + Exercise 詳情頁 (by 19 muscle individual highlight) **共用同一個 SVG**，省一張資產。男女不分（v1.5+ 加切換）。
 
 **Equipment** (UI: 器材):
 Exercise 使用的器械類型，第二層分類。共 8 類：
@@ -178,11 +199,13 @@ Session 內 Exercise 卡片在動作名下方排一列 3 個 chip。三個指標
 **Personal Record / PR** (UI: PR / 個人紀錄):
 某 Exercise 的最佳成績紀錄。**Identity = (Exercise, rep bucket)**：每個動作在每個 rep bucket 內各有獨立 PR（per Exercise 不分 reps 太粗、per exact rep count 太細）。
 **Bucket 邊界（v1 system-fixed，v1.5+ 開放自訂；schema 留口不 hardcode）**：
-- `1-3` 純力量
+- `1-3` 最大力量
 - `4-6` 力量
 - `7-10` 增肌
-- `11-15` 增肌耐力
-- `16+` 純耐力
+- `11-15` 肌耐力
+- `16+` 耐力
+
+bucket 命名修正紀錄（ADR-0009）：原命名「純力量 / 增肌耐力 / 純耐力」中的「純」字奇怪；「增肌耐力」實為「增肌+耐力 crossover」但需要解釋 = 命名失敗。新命名 5 桶各自獨立、自我解釋；「肌耐力」（局部肌肉抗疲勞）vs「耐力」（全身代謝耐力）刻意區分。
 
 
 PR 類型（per bucket 各自獨立，v1 兩種；E1RM PR 不在 v1）：
@@ -198,6 +221,40 @@ PR 類型（per bucket 各自獨立，v1 兩種；E1RM PR 不在 v1）：
 **Bucket 邊界 / 是否可自訂 / 觸發條件 / 慶祝 UX → 待 grill**。
 **注意**：inline 歷史指標的「容量峰 / 重量峰」chip 與 PR 概念**重疊但不等價** — chip 受 inline scope (Tier 1/2) 限制且不分 rep bucket；PR 走 bucket-based 全時 scope。Q8 收尾時要決定 chip 顯示是否改對齊 PR 定義。
 _Avoid_: 個人最佳（口語可，schema/UI 用 PR 或個人紀錄）
+
+**歷史頁三 sub-tab**（UI: 歷史 / 統計 / 獎章）（ADR-0009）：
+
+歷史 tab 升級為三 sub-tab 結構，sub-tab 切換以頂部 segmented control 呈現：
+
+- **歷史**：既有 Session list（按日期倒序，沿用 ADR-0006 / Q6.3）
+- **統計**：訓練部位概況（人體圖）+ 各部位容量 + 運動時長；頂部時間選擇器（年/月/日/自選）
+- **獎章**：解鎖中獎章 grid + 未解鎖灰階預告 + 進度條；分類 tab `[全部] [部位] [訓練目的] [里程碑]`
+
+**統計頁** (UI: 統計)：
+
+頂部 segmented control `[年] [月] [日] [自選]`，自選展開 date range picker；所有統計區段的數值依當前選擇期間動態重算。
+
+- **訓練部位概況**：人體部位圖（前後身兩張、11 MG path），用 **per-Session 次數**（不是容量）著色 — Session 含 ≥1 set `is_done=true` 屬於 MG_X → 該 Session 對 MG_X 計 +1。理由：容量會讓腿 / 背天然壓垮所有部位，無法回答「balance check」本意。顏色 = 期間內 11 MG 次數分布算 5 階分位數（Q20/Q40/Q60/Q80/Q100）冷藍 → 暖紅 gradient；0 次 = 灰；tap MG path 顯示「胸 · 5 次」氣泡。v1 自畫 SVG，男女不分（neutral / male body asset），v1.5+ 加性別切換。
+- **各部位容量**：each MG → 期間內容量加總（沿用 ADR-0007 load_type 三類規則），bar chart desc。
+- **運動時長**：總時長 + 平均單次 + 最長單次三指標。資料來源優先序：(1) 自家 `session.ended_at - session.started_at` 為主、(2) HKWorkout.duration 為 fallback。理由：started_at / ended_at 在 iPhone SQLite 即時可用；HKWorkout 由 Watch 端寫可能延遲到帳。Schema 加 `session.ended_at TIMESTAMP NULL`，in-session pause 不算結束（pause 期間仍累計時長）。
+
+**獎章頁** (UI: 獎章) (ADR-0009)：
+
+四類獎章，總計 **255 個 achievement_definition**（系統 seed，使用者不可刪減；v1.5+ 評估自訂）：
+
+| 類別 | 維度 | 階梯 | 數量 |
+|---|---|---|---|
+| **第一次 (部位, 訓練目的)** | 笛卡爾積：11 MG × 5 bucket | n/a (1 次性) | 55 |
+| **各部位 N 次 PR** | 11 MG × 6 階段 × 2 PR 類型 (重量/容量) | 等差 1/10/20/30/40/50 | 132 |
+| **各訓練目的 N 次 PR** | 5 bucket × 6 階段 × 2 PR 類型 | 等差 1/10/20/30/40/50 | 60 |
+| **N 次重訓**（全 app Session 計數） | 1 條 progression | 等比 1/5/10/25/50/100/250/500 | 8 |
+
+**計數規則**：
+- 第一次 (部位, 訓練目的)：Session 中至少 1 set `is_done=true`、(MG, bucket) tuple 之前未組合解鎖過；一個 Session 可一次解鎖多個（例：胸日 / 8-10RM 做胸 + 三頭 → 解鎖兩個）；bucket 由 set 的 reps 推算，warmup set 也算
+- N 次 PR：重量 PR 與容量 PR 分開計數；同一個 PR 同時推進「該 MG 計數」+「該 bucket 計數」兩條（v1 兩維度互補設計，不笛卡爾積避免 660 獎章爆炸）；純徒手 (weight=0) set 跳過 PR check（沿用 ADR-0006）
+- N 次重訓：全 app Session 計數，不分 MG / bucket；條件 = ended_at 寫入 + ≥1 set `is_done=true`（純空 Session 不算）
+
+**觸發時機**：Session 結束 summary 計算時統一檢查（不在 in-session 即時觸發，避免打斷組間呼吸）。Watch v1 結束 summary 卡片**不**顯示獎章（避免 Watch 端 query achievement state；獎章 unlock 計算與顯示**只在 iPhone**）；使用者結束訓練後拿手機看獎章 sub-tab 會看到本次解鎖。
 
 **動作歷史頁** (UI: 動作歷史)：
 per-Exercise「動作歷史」按鈕開啟完整列表頁。
@@ -364,10 +421,34 @@ _Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取
   - ~~v1.5+：TrainingLog Session WRITE 回 HealthKit~~ → **已提前到 v1**（Q10 / ADR-0008，由 Watch 端 HKWorkoutSession 寫入）
   - **READ** v2+：bodyweight、HRV、睡眠等 body data
   - HealthKit Permission UX（v1）：app 第一次啟動時系統 dialog 請求 `HKWorkoutType` + `HKQuantityTypeIdentifier.heartRate` 兩個 scope
+- **Q12 歷史頁三 sub-tab + 成就系統 + 統計頁**（ADR-0009 已釘）：
+  - ✅ **Q12.1** PR bucket 命名修正：`最大力量 / 力量 / 增肌 / 肌耐力 / 耐力`（取代「純力量 / 力量 / 增肌 / 增肌耐力 / 純耐力」）
+  - ✅ **Q12.2** 歷史頁分三 sub-tab：歷史 / 統計 / 獎章（segmented control 切換）
+  - ✅ **Q12.3** 統計頁時間選擇 = 年/月/日/自選（segmented control + date range picker）
+  - ✅ **Q12.4** 訓練部位概況人體圖：用 **per-Session 次數**著色（不是容量；容量會讓腿/背天然壓垮）；11 MG 5 階分位數冷藍 → 暖紅 gradient；v1 自畫 SVG / 男女不分；tap MG 顯示氣泡
+  - ✅ **Q12.5** 各部位容量 = bar chart desc（沿用 ADR-0007 load_type 三類規則）
+  - ✅ **Q12.6** 運動時長：自家 `session.ended_at - session.started_at` 為主、HKWorkout.duration fallback；新增 `session.ended_at TIMESTAMP NULL` 欄位；in-session pause 不算結束
+  - ✅ **Q12.7** 獎章 4 類別 / 255 個 achievement_definition：第一次 (MG, bucket) 笛卡爾積 55 + 各部位 N 次 PR 132 + 各訓練目的 N 次 PR 60 + N 次重訓 8
+  - ✅ **Q12.8** N 次 PR 維度 = v1 兩維度獨立（per MG + per bucket 互補，不笛卡爾積避免 660 獎章爆炸）；重量 / 容量分開計數
+  - ✅ **Q12.9** 觸發時機 = Session 結束 summary 統一檢查；Watch v1 結束 summary 卡片不顯示獎章（避免 Watch query achievement state）；獎章 unlock 計算與顯示**只在 iPhone**
+  - ✅ **Q12.10** Schema：新增 `achievement_definition` (255 系統 seed) + `achievement_unlock` (使用者解鎖紀錄，autoincrement int 主鍵) + `session.ended_at` 欄位
+  - ✅ **拒絕的替代方案**：人體圖容量上色 / per-Set / per-Exercise 計數 / 獎章動態 derive / in-session 即時觸發 / Watch 端顯示獎章 / N 次 PR 笛卡爾積 (660 個) / N 次 PR 全 app 一條計數 (12 個) / 獎章 v1 自訂 / HKWorkout.duration 為主 / 訓記式階梯 (7/30/100/365) / bucket 簡化命名 (C 案) / bucket 訓記/Strong 命名 (B 案)
+  - ✅ **ADR-0009**：歷史頁三 sub-tab + 成就系統 + 統計頁 — 已寫入 `docs/adr/0009-history-page-three-sub-tabs-and-achievement-system.md`
+- **Q13 Anatomical muscle layer + Exercise primary/secondary mapping**（ADR-0010 已釘）：
+  - ✅ **Q13.1** Sub-Group 升級為 anatomical muscle layer（19 muscle，每個 muscle 屬於 exactly 1 MG）
+  - ✅ **Q13.2** 19 muscle 列表：胸(上胸/中下胸) + 背(背部/下背) + 腿(股四/膕繩) + 臀(上臀部/下臀部) + 肩(前束/中束/後束) + 斜方肌 + 二頭(二頭長頭/二頭短頭) + 三頭 + 小腿 + 前臂 + 核心(側腹/腹肌)
+  - ✅ **Q13.3** Exercise → muscle m:n with role ∈ {primary, secondary}；primary 1-3 個 + secondary 0-N 個；Custom Exercise 允許 mapping 為空
+  - ✅ **Q13.4** ADR-0002 局部反轉：**僅**反轉「背 SG = 水平/垂直」→「背部 / 下背」解剖切；其他 ADR-0002 結論全保留
+  - ✅ **Q13.5** 二頭命名修正：「內側頭 / 外側頭」→「二頭長頭 / 二頭短頭」（解剖學標準，配合 ADR-0009 命名 pattern）
+  - ✅ **Q13.6** Schema：DROP TABLE sub_group + DROP exercise.sub_group_id；CREATE TABLE muscle (id / name / mg_id / display_order) + exercise_muscle (m:n with role)；exercise.muscle_group_id 保留
+  - ✅ **Q13.7** 體圖 asset 來源 = CC0 / Wikimedia Commons 解剖圖 → 自製 SVG（前後身兩張 + 19 muscle path）；統計頁 heatmap (by 11 MG) + Exercise 詳情頁 (by 19 muscle) 共用同一 SVG；男女不分，v1.5+ 加切換
+  - ✅ **Q13.8** 動圖 / 示意圖 / 文字說明 v1 全延 v1.5+（自製成本太高、版權風險、內建動作 lifter 都熟）
+  - ✅ **拒絕的替代方案**：完整解剖 muscle (30-40 個) / 完整 reverse ADR-0002 / 三級 mapping (primary/synergist/stabilizer) / 連續強度 0-100% / 請插畫家 / AI 生成 / 用 lib / 三層階層 (MG → SG → muscle) / 維持二頭口語命名 / Custom Exercise 強制 mapping
+  - ✅ **ADR-0010**：Anatomical muscle layer + Exercise primary/secondary mapping — 已寫入 `docs/adr/0010-anatomical-muscle-layer-and-exercise-mapping.md`
 
 ## Flagged ambiguities
 
 - 「課表」一詞口語上有時指 Program、有時指 Template — 已固定為 **Template**。Program 改稱「計畫」。
 - 「Program」口語可同時指：(1)「訓練計畫 entity」（=「Program 主標籤」，帶日曆）；(2)「Program 副標籤」（per-cell rep range tag）。schema 拆為 **Program** + **Program 副標籤** 兩個 entity；UI 上分別在「Program 分頁」（管理計畫）與「日曆 cell 的副標籤按鈕」呈現。
-- 「腹部」與「核心」常被當同義詞使用 — 已決定 **不設「腹部」MG**，所有腹直肌/腹斜/腹橫的直接訓練（卷腹、側棒、leg raise）以及抗旋/抗伸穩定訓練（Pallof press, dead bug, bird-dog）都歸入 **核心**。
-- 「二頭 → 內側頭 / 外側頭」是口語命名；解剖學正名為 **短頭 / 長頭**（外側頭 = 長頭）。schema/UI 一律用內/外側頭。
+- 「腹部」與「核心」常被當同義詞使用 — 已決定 **不設「腹部」MG**，所有腹直肌/腹斜/腹橫的直接訓練（卷腹、側棒、leg raise）以及抗旋/抗伸穩定訓練（Pallof press, dead bug, bird-dog）都歸入 **核心**。注意：核心 MG 內仍可拆 muscle (側腹 / 腹肌)，這發生在 muscle layer，不違反「11 MG 不設腹部」原則。
+- 「二頭 → 內側頭 / 外側頭」原為口語命名，**ADR-0010 已反轉為解剖學標準「二頭長頭 / 二頭短頭」**（外側頭 = 長頭、內側頭 = 短頭）。schema / UI 一律用長/短頭。
