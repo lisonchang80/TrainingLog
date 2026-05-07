@@ -68,6 +68,8 @@ rm -rf dist && npx expo export -p ios   # Metro bundle compiles
 If any fail, fix before commit. Common gotchas:
 - After adding a migration that seeds new rows, slice-1 tests asserting `toHaveLength(1)` will break — bump expectation + use `find(name === ...)` instead of `[0]` positional access.
 - Lint complains about `Array<T>` syntax — use `T[]` instead.
+- **jest test fixture pollution**: a `const fixture = {...}` declared inside a `describe` block is shared across `it` cases — if any test mutates it (e.g. `fixture.exercises.push(...)` to assert mutation isolation), later tests see the polluted version. Use a factory `const buildFixture = () => ({...})` and call it inside each `it`. Slice 3 hit this when the "mutating source template after snapshot" case left a 3rd exercise behind for the next test.
+- **Adding a new tab requires icon mapping**: `components/ui/icon-symbol.tsx` keeps an explicit `SF Symbols → MaterialIcons` `MAPPING`. If you reference an unmapped name in `_layout.tsx`, TypeScript blocks via the `IconSymbolName` keyof guard. Add the entry first (e.g. `'doc.text': 'description'`).
 
 ## 6. Commit (logical units)
 
@@ -115,6 +117,12 @@ PR title under 70 chars. Body cites the issue's exact acceptance criteria so rev
 Walk the user through the manual flow corresponding to the acceptance criteria. **The smoke test is what catches platform bugs unit tests miss** — slice 1 caught the Hermes-no-crypto bug only on real device because tests injected fake uuid.
 
 If user does the steps themselves, just monitor + ask for screenshots at key states. After verification, kill Metro: `pkill -f "expo start"`.
+
+### Smoke-test gotchas to mention upfront
+
+- **iOS Simulator software keyboard hidden by default**: the simulator pipes the Mac keyboard in as a "hardware keyboard", so tapping a `TextInput` shows a cursor but no on-screen keyboard. Tell the user to **type with the Mac keyboard directly** (cursor is in the field — it just works), or press **⌘K** in the Simulator to toggle software keyboard. Otherwise they'll think the input is broken.
+- **Routes outside the `(tabs)` group hide the bottom tab bar**: `app/template/[id].tsx` and `app/session/[id].tsx` are siblings of the `(tabs)` group, so when pushed they fully cover the tab bar. The auto-generated header back button (e.g. `< (tabs)`) sometimes fails to fire on the simulator, leaving the user stranded with no way out. **Recovery**: Cmd+R in the Simulator to reload JS, or kill + relaunch the app. **Polish fix for later**: present these screens as modal (`presentation: 'modal'` in `Stack.Screen` options) or mount inside the tabs group as a sub-route. Don't block ship for this; capture as a follow-up issue.
+- **Placeholder text vs entered text**: `TextInput placeholder` renders in grey; an empty field with the cursor in it still counts as empty. Users may think `60` is already entered when it's just placeholder. If they report "Save Set does nothing", first check the field colors.
 
 ## 9. Merge — from main repo, NOT worktree
 
