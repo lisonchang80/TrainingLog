@@ -47,6 +47,71 @@ export async function listAllSetsWithExercise(
 }
 
 /**
+ * All sets in a single session, ordered by ordering ascending (the order the
+ * user recorded them). Used by the Session detail / summary screen and by
+ * the Today screen to show "what you've already done in this session".
+ */
+export async function listSetsBySession(
+  db: Database,
+  session_id: string
+): Promise<SetWithExercise[]> {
+  return db.getAllAsync<SetWithExercise>(
+    `SELECT s.id, s.session_id, s.exercise_id, s.weight_kg, s.reps,
+            s.is_skipped, s.ordering, s.created_at,
+            e.name AS exercise_name
+       FROM "set" s
+       JOIN exercise e ON e.id = s.exercise_id
+      WHERE s.session_id = ?
+      ORDER BY s.ordering ASC`,
+    session_id
+  );
+}
+
+/**
+ * Insert one set into an OPEN session. Caller must ensure the session exists
+ * and is still in_progress (per the Session Manager state machine).
+ *
+ * Ordering is computed as (current max ordering in session) + 1, scoped per
+ * session so each session counts from 1. UUID is REQUIRED (no default) — see
+ * the same Hermes-no-global-crypto note on `recordSetAsAutoSession`.
+ */
+export async function recordSetInSession(
+  db: Database,
+  args: {
+    session_id: string;
+    input: RecordSetInput;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ set_id: string; ordering: number }> {
+  const err = validateRecordSet(args.input);
+  if (err) throw new Error(err);
+
+  const set_id = args.uuid();
+  const now = args.now ?? Date.now;
+  const ts = now();
+
+  const row = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+    args.session_id
+  );
+  const ordering = (row?.max_ordering ?? 0) + 1;
+
+  await insertSet(db, {
+    id: set_id,
+    session_id: args.session_id,
+    exercise_id: args.input.exercise_id,
+    weight_kg: args.input.weight_kg,
+    reps: args.input.reps,
+    is_skipped: 0,
+    ordering,
+    created_at: ts,
+  });
+
+  return { set_id, ordering };
+}
+
+/**
  * High-level entry point used by the Today tab.
  *
  * Per the #2 design decision: each Save auto-creates a Session, inserts the Set,
