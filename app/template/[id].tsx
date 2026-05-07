@@ -29,6 +29,7 @@ import {
   getTemplate,
   listTemplateExerciseRows,
   removeTemplateExercise,
+  setTemplateExerciseEvergreen,
   updateTemplateName,
   type TemplateExerciseRow,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -66,6 +67,7 @@ export default function TemplateEditorScreen() {
   const [defaultSets, setDefaultSets] = useState('3');
   const [defaultReps, setDefaultReps] = useState('10');
   const [defaultWeight, setDefaultWeight] = useState('');
+  const [addAsEvergreen, setAddAsEvergreen] = useState(false);
 
   const [busy, setBusy] = useState(false);
 
@@ -137,6 +139,7 @@ export default function TemplateEditorScreen() {
         default_sets: sets,
         default_reps: reps,
         default_weight_kg: weight,
+        is_evergreen: addAsEvergreen ? 1 : 0,
         uuid: randomUUID,
       });
       await refresh();
@@ -154,6 +157,21 @@ export default function TemplateEditorScreen() {
       await refresh();
     } catch (e) {
       Alert.alert('Remove failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggleEvergreen = async (rowId: string, current: 0 | 1) => {
+    setBusy(true);
+    try {
+      await setTemplateExerciseEvergreen(db, {
+        template_exercise_id: rowId,
+        is_evergreen: current === 1 ? 0 : 1,
+      });
+      await refresh();
+    } catch (e) {
+      Alert.alert('Update failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -228,6 +246,8 @@ export default function TemplateEditorScreen() {
   }
 
   const exById = (exId: string) => exercises.find((e) => e.id === exId);
+  const evergreenRows = rows.filter((r) => r.is_evergreen === 1);
+  const generalRows = rows.filter((r) => r.is_evergreen === 0);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -260,36 +280,53 @@ export default function TemplateEditorScreen() {
             </Text>
           </Pressable>
 
-          <Text style={styles.section}>Exercises in this template</Text>
           {rows.length === 0 ? (
-            <Text style={styles.muted}>No exercises yet — add one below.</Text>
+            <>
+              <Text style={styles.section}>Exercises in this template</Text>
+              <Text style={styles.muted}>No exercises yet — add one below.</Text>
+            </>
           ) : (
-            rows.map((r) => {
-              const ex = exById(r.exercise_id);
-              return (
-                <View key={r.id} style={styles.row}>
-                  <View style={styles.rowMain}>
-                    <Text style={styles.rowOrdering}>#{r.ordering}</Text>
-                    <View style={styles.rowText}>
-                      <Text style={styles.rowName}>{ex?.name ?? '(unknown)'}</Text>
-                      <Text style={styles.rowDetails}>
-                        {r.default_sets} × {r.default_reps ?? '—'}
-                        {r.default_weight_kg != null ? ` @ ${r.default_weight_kg} kg` : ''}
-                      </Text>
-                    </View>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => onRemoveRow(r.id)}
-                    style={({ pressed }) => [
-                      styles.removeBtn,
-                      pressed && styles.btnPressed,
-                    ]}>
-                    <Text style={styles.removeBtnText}>Remove</Text>
-                  </Pressable>
-                </View>
-              );
-            })
+            <>
+              <View style={styles.zoneHeader}>
+                <Text style={styles.zoneTitle}>常設動作區</Text>
+                <Text style={styles.zoneHint}>每次都做的固定動作</Text>
+              </View>
+              {evergreenRows.length === 0 ? (
+                <Text style={styles.zoneEmpty}>
+                  No evergreen exercises — tap ☆ on a general row to mark it.
+                </Text>
+              ) : (
+                evergreenRows.map((r) => (
+                  <ExerciseRow
+                    key={r.id}
+                    row={r}
+                    name={exById(r.exercise_id)?.name ?? '(unknown)'}
+                    onRemove={() => onRemoveRow(r.id)}
+                    onToggleEvergreen={() => onToggleEvergreen(r.id, r.is_evergreen)}
+                  />
+                ))
+              )}
+
+              <View style={styles.zoneHeader}>
+                <Text style={styles.zoneTitle}>一般動作區</Text>
+                <Text style={styles.zoneHint}>跟著週期化變化的動作</Text>
+              </View>
+              {generalRows.length === 0 ? (
+                <Text style={styles.zoneEmpty}>
+                  No general-zone exercises.
+                </Text>
+              ) : (
+                generalRows.map((r) => (
+                  <ExerciseRow
+                    key={r.id}
+                    row={r}
+                    name={exById(r.exercise_id)?.name ?? '(unknown)'}
+                    onRemove={() => onRemoveRow(r.id)}
+                    onToggleEvergreen={() => onToggleEvergreen(r.id, r.is_evergreen)}
+                  />
+                ))
+              )}
+            </>
           )}
 
           <Text style={styles.section}>Add exercise</Text>
@@ -352,6 +389,17 @@ export default function TemplateEditorScreen() {
           </View>
 
           <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: addAsEvergreen }}
+            onPress={() => setAddAsEvergreen((v) => !v)}
+            style={styles.evergreenChk}>
+            <Text style={styles.evergreenChkBox}>{addAsEvergreen ? '☑︎' : '☐'}</Text>
+            <Text style={styles.evergreenChkLabel}>
+              加入常設動作區（不會被 Save-back 移除）
+            </Text>
+          </Pressable>
+
+          <Pressable
             accessibilityRole="button"
             onPress={onAddExercise}
             disabled={busy}
@@ -380,6 +428,51 @@ export default function TemplateEditorScreen() {
   );
 }
 
+function ExerciseRow({
+  row,
+  name,
+  onRemove,
+  onToggleEvergreen,
+}: {
+  row: TemplateExerciseRow;
+  name: string;
+  onRemove: () => void;
+  onToggleEvergreen: () => void;
+}) {
+  const star = row.is_evergreen === 1 ? '★' : '☆';
+  return (
+    <View style={styles.row}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          row.is_evergreen === 1 ? 'Move to general zone' : 'Mark as evergreen'
+        }
+        onPress={onToggleEvergreen}
+        style={({ pressed }) => [styles.starBtn, pressed && styles.btnPressed]}>
+        <Text style={[styles.starText, row.is_evergreen === 1 && styles.starActive]}>
+          {star}
+        </Text>
+      </Pressable>
+      <View style={styles.rowMain}>
+        <Text style={styles.rowOrdering}>#{row.ordering}</Text>
+        <View style={styles.rowText}>
+          <Text style={styles.rowName}>{name}</Text>
+          <Text style={styles.rowDetails}>
+            {row.default_sets} × {row.default_reps ?? '—'}
+            {row.default_weight_kg != null ? ` @ ${row.default_weight_kg} kg` : ''}
+          </Text>
+        </View>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onRemove}
+        style={({ pressed }) => [styles.removeBtn, pressed && styles.btnPressed]}>
+        <Text style={styles.removeBtnText}>Remove</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   flex: { flex: 1 },
@@ -403,6 +496,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   startBtnText: { color: 'white', fontSize: 15, fontWeight: '700' },
+  zoneHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  zoneTitle: { fontSize: 16, fontWeight: '700' },
+  zoneHint: { fontSize: 12, opacity: 0.6 },
+  zoneEmpty: { fontSize: 13, opacity: 0.55, fontStyle: 'italic', paddingVertical: 4 },
+  starBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  starText: { fontSize: 22, opacity: 0.45 },
+  starActive: { color: '#cc7a00', opacity: 1 },
+  evergreenChk: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  evergreenChkBox: { fontSize: 18, width: 24 },
+  evergreenChkLabel: { fontSize: 13, opacity: 0.85 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -158,9 +158,17 @@ export default function TodayScreen() {
     try {
       const ended_at = Date.now();
       await endSession(db, { id: session_id, ended_at });
-      // Validate the transition then redirect to the detail/summary screen.
+      // Validate the transition then redirect.
       endState(sessionState, ended_at);
-      router.push(`/session/${session_id}`);
+      // If this Session was started from a Template (plan rows have a
+      // template_id), intercept with the Save-back review screen first;
+      // otherwise go straight to the summary.
+      const fromTemplate = plan.some((p) => p.template_id != null);
+      if (fromTemplate) {
+        router.push(`/save-back/${session_id}`);
+      } else {
+        router.push(`/session/${session_id}`);
+      }
       // Local state will reset on next focus via refresh().
     } catch (e) {
       Alert.alert('Could not end session', e instanceof Error ? e.message : String(e));
