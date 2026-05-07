@@ -85,4 +85,10 @@ Only offer to create an ADR when all three are true:
 
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
 
+### Post-grill: sweep PRD + memory if they exist
+
+If a PRD has already been published (e.g., as issue #1) when this grill round adds a new ADR, the grill round is **not complete** when ADR + CONTEXT.md are updated — PRD body and user-level memory will drift. Use the `feature-decision-sweep` skill to handle the full 4-location update (ADR → CONTEXT.md → PRD body → memory).
+
+This is project-specific to TrainingLog. For other projects without published PRDs, ADR + CONTEXT.md is sufficient.
+
 </supporting-info>
