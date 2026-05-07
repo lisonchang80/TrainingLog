@@ -22,6 +22,7 @@ const MAPPING = {
   'list.bullet': 'list',
   'figure.stand': 'accessibility',
   'gearshape.fill': 'settings',
+  'doc.text': 'description',
 } as IconMapping;
 
 /**
