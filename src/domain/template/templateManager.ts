@@ -21,6 +21,12 @@ export interface TemplateExerciseSpec {
   default_sets: number;
   default_reps: number | null;
   default_weight_kg: number | null;
+  /**
+   * 1 = 常設 (evergreen, can't be removed via Save-back) / 0 = 一般 (general).
+   * Slice 4 only enforces per-Template semantics; sibling-Template propagation
+   * lands with Program / 副標籤 in a later slice (per ADR-0005).
+   */
+  is_evergreen: 0 | 1;
 }
 
 export interface TemplateData {
@@ -67,6 +73,8 @@ export interface SessionExerciseSnapshot {
   planned_reps: number | null;
   planned_weight_kg: number | null;
   template_id: string;
+  /** Frozen copy of the source TemplateExerciseSpec.is_evergreen at snapshot time. */
+  is_evergreen: 0 | 1;
 }
 
 /**
@@ -98,5 +106,6 @@ export function snapshotForSession(args: {
     planned_reps: ex.default_reps,
     planned_weight_kg: ex.default_weight_kg,
     template_id: args.template.id,
+    is_evergreen: ex.is_evergreen,
   }));
 }
