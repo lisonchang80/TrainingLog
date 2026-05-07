@@ -6,11 +6,11 @@ iOS 重訓紀錄 App。記錄一次次去健身房的訓練內容，並支援長
 
 TrainingLog 紀錄 **重訓 (weight training) Sessions only**。有氧、HIIT、跑步等非重訓運動由使用者直接在 Apple 健身 App 執行，本 app **不提供 cardio entry point**，**未來更新也不規劃自建 cardio session schema**（理由：Apple Fitness + Apple Watch 對心率 / GPS / 卡路里整合難以追上；多元運動 schema 會破壞 Set = weight + reps 的乾淨假設；focus 是 v1 核心競爭力）。
 
-Cardio 資料的呈現透過 HealthKit 整合：
-- v1：READ Apple Health 的 cardio workouts，在 TrainingLog 顯示摘要（不存獨立資料）
-- v1.5+：WRITE TrainingLog Session 回 HealthKit 為 `HKWorkoutType=traditionalStrengthTraining`，讓 Apple Health 活動圓圈紀錄到
-- v2+：READ body data（bodyweight、HRV、睡眠等）給訓練 readiness 用、整合智能體脂計 / 體重秤等外部來源（v1 自家 schema 已存 bodyweight / PBF / SMM 純手動，見「Body data」段）
-- 詳細 HealthKit 邊界見 Q11
+HealthKit 整合（v1 / v1.5+ / v2+ 三階）：
+- **v1**（提前）：WRITE TrainingLog Session 回 HealthKit `HKWorkoutType=traditionalStrengthTraining`（由 Watch 端 `HKWorkoutSession` 寫入；含 duration / 卡路里 / 平均+max HR / custom `trainingLogSessionUUID`），iPhone 端 READ 回拿 HKWorkout.UUID + 4 metric 進 `session.healthkit_workout_uuid`
+- **v1.5+**：READ Apple Health 的 cardio workouts（有氧 / HIIT / 跑步等）→ TrainingLog 顯示摘要（不存獨立資料）
+- **v2+**：READ body data（bodyweight、HRV、睡眠等）給訓練 readiness 用、整合智能體脂計 / 體重秤等外部來源（v1 自家 schema 已存 bodyweight / PBF / SMM 純手動，見「Body data」段）
+- 詳細 HealthKit 邊界 + Watch 整合見 ADR-0008；剩餘 Q11 v2+ body data READ 細節未定
 
 ## Language
 
@@ -232,6 +232,8 @@ per-Exercise「動作歷史」按鈕開啟完整列表頁。
 
 **Session 開始時 snapshot bodyweight**：query body_metric 取 `measured_at <= session.start_time` 最新一筆，鎖進 `session.bodyweight_snapshot_kg REAL NULL`。後續所有 C 類 set 共用同一 snapshot 值（一次 Session 內不變）。**無 snapshot 時 fallback**：C 類容量 / PR 顯示「—」+ 提示「未紀錄當天體重」；A / B 類照常運作。
 
+**Pre-session 階段鎖定（ADR-0008 補丁，Watch α 模型專用）**：bw_snapshot 在 iPhone 算 Stage 2 prefetch payload 時就鎖入並推給 Watch，**不是** in-session 點「開始訓練」按鈕那一刻 — 因為 in-session 時 iPhone 可能已不在 BLE 範圍（i 場景：放包包鎖屏；ii 場景：留車上 / 家裡）。pre-session 後再量體重的情境罕見，v1 接受此 trade-off。
+
 **「動作 mechanics 是否改變」分割原則**（承襲 ADR-0001 器械分割精神）：
 - **不改 mechanics 的加重** = 同一 Exercise，weight 欄位記加重值（例：徒手引體 ↔ 腰掛 10kg 引體）
 - **改變 mechanics 的加重** = 不同 Exercise（例：徒手單腿蹲 ↔ 啞鈴單腿蹲 ↔ 壺鈴單腿蹲 ↔ 槓鈴單腿蹲，4 個獨立 Exercise）
@@ -329,12 +331,39 @@ _Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取
     - **趨勢圖** = 預設三線共圖（bodyweight + SMM 共用左 Y 軸 kg，PBF 用右 Y 軸 %；圖例可 toggle 個別 series）+ 切換按鈕「分視」→ 三張獨立圖縱向 stack
     - **單位 toggle** = Settings 分頁「單位偏好」一個 `unit_preference: 'kg' | 'lb'` toggle，**整 app 同步切換**（影響 Set weight、body_metric bodyweight / SMM、容量顯示，全部走同一 preference）
     - Chart 庫選型 v1 實作時評估（victory-native / react-native-chart-kit / 其他），現在不釘
-- **Q10 Sync / multi-device**：純 local-first 還是 iCloud/CloudKit 同步？影響 schema 是否需要 conflict-resolution 欄位
-- **Q11 HealthKit 整合邊界**（範圍已擴至 cardio）：
-  - **READ** v1：Apple Health 的 cardio workouts（有氧 / HIIT / 跑步等）→ TrainingLog 顯示摘要（不存獨立資料）
-  - **WRITE** v1.5+：TrainingLog Session → Apple Health `HKWorkoutType=traditionalStrengthTraining`
+- **Q10 Multi-device 策略 + Watch v1 範圍**（ADR-0008 已釘）：
+  - ✅ **Q10.1** 多裝置情境 = iPhone (RN/Expo) + Apple Watch (SwiftUI)，v1 一起做（Mac mini M4 Pro 環境就位後解鎖 watchOS dev，原本「Watch deferred」決策推翻）
+  - ✅ **Q10.1.1** Watch 角色 = α 簡易（完整 Session UI 但功能受限）+ c (HKWorkoutSession 心率+卡路里+workout 寫入)
+  - ✅ **Q10.2** 主從關係 = α（Watch 主），訓練全程 iPhone 不掏（i 主：iPhone 在包包/置物櫃 BLE 範圍；ii 偶爾：留車上 / 家裡）
+  - ✅ **Q10.2.5** Sync 路徑 = C（prefetch + event queue）。**iPhone = SQLite source of truth；Watch = in-memory + UserDefaults backup（不做 Watch 端 SQLite）**
+    - Stage 1（app launch）：iPhone push 所有 Template metadata + active Program + unit_preference 用 `updateApplicationContext`
+    - Stage 2（pre-session）：iPhone push 該 Template 完整結構 + chip 預計算 + bw_snapshot 用 `sendMessage`
+    - Watch → iPhone events：`transferUserInfo` OS-managed reliable delivery（iPhone 不在範圍時 cache，連上自動補送）
+    - Conflict 模型 = 架構上不存在 conflict（Watch 只新增 Set）
+  - ✅ **Q10.2.6** Active Program 期間 manual flow = 選 name 自動套**當期副標籤** 1-tap；找不到對應三元組則 fallback Layer 2 顯示該 name 所有 sibling 組合（edge case 規則）
+  - ✅ **Pre-session vs in-session 兩態**：
+    - Pre-session：選定 Template → ▶ 開始訓練按鈕；HKWorkoutSession 未啟、Session row 未創建
+    - In-session：點按鈕 → 原子操作 ① `HKWorkoutSession.start()` ② Session row 創建 (UUID + bw_snapshot + started_at) ③ 計時開跑
+  - ✅ **bw_snapshot 鎖定時機補丁**：在 pre-session 階段（iPhone 算 Stage 2 payload 時）鎖入；補丁進 Q9.2.d-i 上方 Body data 段
+  - ✅ **Schema 影響（最小）**：
+    - UUID 主鍵範圍 = 僅 Session / Set / body_metric 三張表（兩端都新增的 entity）；其他表保留 autoincrement int
+    - 新增 `set.is_skipped BOOLEAN DEFAULT FALSE`（Watch #11 跳過 Exercise UI）
+    - 新增 `session.healthkit_workout_uuid TEXT NULL`（HKWorkout link）
+    - **不需要** updated_at / last_modified_device 欄位
+  - ✅ **Q10.5** Pre-session payload **永不過期**（transient state；cancel 重 prefetch 是 1~2 tap 自助）
+  - ✅ **Q10.6 Watch v1 功能 17 條** + 主畫面 list view 一路排下去 + 水平 swipe 3 分頁 (list ↔ NowPlaying ↔ metrics) + #11 跳過 Exercise collapse 成「動作名（跳過）」一行
+  - ✅ **Complication** = a 簡單版（app icon, 1-tap 啟動）；進階版（顯示今日排程）延 v1.5+
+  - ✅ **Watch Settings** = 不做（unit_preference 由 prefetch 帶；其他由 watchOS system 管）
+  - ✅ **HealthKit 整合**（v1 提前）：HKWorkoutType=`traditionalStrengthTraining`；Watch 寫 metadata duration/卡路里/平均+max HR + custom `trainingLogSessionUUID`；iPhone READ 4 metric + HKWorkout.UUID 進 `session.healthkit_workout_uuid`
+  - ✅ **Engineering**：Monorepo（現有 TrainingLog repo + watchOS target 進 ios/ 資料夾，CONTEXT.md / ADR 維持單一 source）；SwiftUI native + WatchConnectivity；schema TS+Swift 雙寫，ADR/CONTEXT 當 source of truth
+  - ✅ **時程 + ADP**：v1 ship 預估 26 週，30+ hrs/週投入；Apple Developer Program v1 day 1 買 ($99/年)，365 天涵蓋整個 26 週開發 + ship 後 26 週 polish / TestFlight
+  - ✅ **拒絕的替代方案**：路徑 B (Watch 端完整 SQLite + bidirectional sync) / 路徑 A (純 push) / Watch 角色 b/c-only/d / Pre-session payload TTL / Complication 進階版 / Watch Settings 頁 / Watch 端輸入 body data / Set note 文字 / Template-Program-Exercise 編輯
+  - ✅ **ADR-0008**：Multi-device strategy + Watch v1 scope — 已寫入 `docs/adr/0008-multi-device-strategy-and-watch-v1-scope.md`
+- **Q11 HealthKit 整合邊界（剩餘部分）**：
+  - ~~v1：Apple Health cardio workouts READ~~ → **延 v1.5+**（先 ship v1 再做）
+  - ~~v1.5+：TrainingLog Session WRITE 回 HealthKit~~ → **已提前到 v1**（Q10 / ADR-0008，由 Watch 端 HKWorkoutSession 寫入）
   - **READ** v2+：bodyweight、HRV、睡眠等 body data
-  - 何時同步、Permission UX、conflict 處理細節未定
+  - HealthKit Permission UX（v1）：app 第一次啟動時系統 dialog 請求 `HKWorkoutType` + `HKQuantityTypeIdentifier.heartRate` 兩個 scope
 
 ## Flagged ambiguities
 
