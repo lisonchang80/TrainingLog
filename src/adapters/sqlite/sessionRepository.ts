@@ -56,3 +56,74 @@ export async function listSessions(db: Database): Promise<Session[]> {
       ORDER BY started_at DESC`
   );
 }
+
+/**
+ * One row per planned exercise inside a Session. Snapshot of a Template
+ * captured at Session start (slice 3). `template_id` is nullable so a
+ * "blank" Session (started without a Template) holds zero rows here.
+ */
+export interface SessionExerciseRow {
+  id: string;
+  session_id: string;
+  exercise_id: string;
+  ordering: number;
+  planned_sets: number;
+  planned_reps: number | null;
+  planned_weight_kg: number | null;
+  template_id: string | null;
+}
+
+export async function insertSessionExercise(
+  db: Database,
+  row: SessionExerciseRow
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    row.id,
+    row.session_id,
+    row.exercise_id,
+    row.ordering,
+    row.planned_sets,
+    row.planned_reps,
+    row.planned_weight_kg,
+    row.template_id
+  );
+}
+
+export async function listSessionExercises(
+  db: Database,
+  session_id: string
+): Promise<SessionExerciseRow[]> {
+  return db.getAllAsync<SessionExerciseRow>(
+    `SELECT id, session_id, exercise_id, ordering,
+            planned_sets, planned_reps, planned_weight_kg, template_id
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    session_id
+  );
+}
+
+export interface SessionExerciseRowWithName extends SessionExerciseRow {
+  exercise_name: string;
+}
+
+/** Same as `listSessionExercises` but joins exercise.name for UI display. */
+export async function listSessionExercisesWithName(
+  db: Database,
+  session_id: string
+): Promise<SessionExerciseRowWithName[]> {
+  return db.getAllAsync<SessionExerciseRowWithName>(
+    `SELECT se.id, se.session_id, se.exercise_id, se.ordering,
+            se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id,
+            e.name AS exercise_name
+       FROM session_exercise se
+       JOIN exercise e ON e.id = se.exercise_id
+      WHERE se.session_id = ?
+      ORDER BY se.ordering ASC`,
+    session_id
+  );
+}

@@ -21,6 +21,8 @@ import {
   createSession,
   endSession,
   getActiveSession,
+  listSessionExercisesWithName,
+  type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
   listSetsBySession,
@@ -55,6 +57,7 @@ export default function TodayScreen() {
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SetWithExercise[]>([]);
+  const [plan, setPlan] = useState<SessionExerciseRowWithName[]>([]);
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,12 +70,22 @@ export default function TodayScreen() {
     setExercises(exs);
     setSessionState(fromRow(active));
     if (active) {
-      const sets = await listSetsBySession(db, active.id);
+      const [sets, planned] = await Promise.all([
+        listSetsBySession(db, active.id),
+        listSessionExercisesWithName(db, active.id),
+      ]);
       setSetsInSession(sets);
+      setPlan(planned);
+      // If the session was started from a template, default the picker to the
+      // first planned exercise so the user can record against it immediately.
+      setSelectedExerciseId(
+        (prev) => prev ?? planned[0]?.exercise_id ?? exs[0]?.id ?? null
+      );
     } else {
       setSetsInSession([]);
+      setPlan([]);
+      setSelectedExerciseId((prev) => prev ?? exs[0]?.id ?? null);
     }
-    setSelectedExerciseId((prev) => prev ?? exs[0]?.id ?? null);
   }, [db]);
 
   // Re-fetch on every focus so returning from the detail screen resets us.
@@ -90,6 +103,7 @@ export default function TodayScreen() {
       await createSession(db, { id, started_at });
       setSessionState(startState({ id, started_at }));
       setSetsInSession([]);
+      setPlan([]);
     } catch (e) {
       Alert.alert('Could not start session', e instanceof Error ? e.message : String(e));
     } finally {
@@ -192,6 +206,33 @@ export default function TodayScreen() {
             Session in progress · {setsInSession.length} set
             {setsInSession.length === 1 ? '' : 's'}
           </Text>
+
+          {plan.length > 0 && (
+            <>
+              <Text style={styles.label}>Today&apos;s plan</Text>
+              <View style={styles.planList}>
+                {plan.map((p) => {
+                  const done = setsInSession.filter(
+                    (s) => s.exercise_id === p.exercise_id
+                  ).length;
+                  const complete = done >= p.planned_sets;
+                  return (
+                    <View key={p.id} style={styles.planRow}>
+                      <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
+                      <View style={styles.planText}>
+                        <Text style={styles.planName}>{p.exercise_name}</Text>
+                        <Text style={styles.planDetails}>
+                          {done}/{p.planned_sets} sets
+                          {p.planned_reps != null ? ` · target ${p.planned_reps} reps` : ''}
+                          {p.planned_weight_kg != null ? ` @ ${p.planned_weight_kg} kg` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
 
           <Text style={styles.label}>Exercise</Text>
           <ScrollView
@@ -345,4 +386,18 @@ const styles = StyleSheet.create({
   setRowExercise: { fontSize: 15, fontWeight: '600' },
   setRowDetails: { fontSize: 14 },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.3)' },
+  planList: { gap: 6, paddingVertical: 4 },
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(127,127,127,0.10)',
+    borderRadius: 10,
+  },
+  planMark: { fontSize: 18, width: 22, textAlign: 'center' },
+  planText: { flex: 1 },
+  planName: { fontSize: 15, fontWeight: '600' },
+  planDetails: { fontSize: 12, opacity: 0.7 },
 });
