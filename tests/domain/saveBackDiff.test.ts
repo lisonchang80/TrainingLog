@@ -32,17 +32,55 @@ describe('Save-back differential — pure logic', () => {
   ];
 
   describe('aggregateActuals', () => {
-    it('counts non-skipped sets and reports last set per exercise', () => {
+    it('uniform sets at one (reps, weight): one group, full count', () => {
       const sets: RawSetRow[] = [
-        { exercise_id: 'bench', weight_kg: 50, reps: 10, is_skipped: 0, ordering: 1 },
+        { exercise_id: 'bench', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 1 },
         { exercise_id: 'bench', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 2 },
-        { exercise_id: 'bench', weight_kg: 65, reps: 8, is_skipped: 0, ordering: 3 },
+        { exercise_id: 'bench', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 3 },
         { exercise_id: 'squat', weight_kg: 100, reps: 5, is_skipped: 0, ordering: 4 },
       ];
-      const out = aggregateActuals(sets);
-      expect(out).toEqual([
-        { exercise_id: 'bench', setCount: 3, reps: 8, weight_kg: 65 },
+      expect(aggregateActuals(sets)).toEqual([
+        { exercise_id: 'bench', setCount: 3, reps: 10, weight_kg: 60 },
         { exercise_id: 'squat', setCount: 1, reps: 5, weight_kg: 100 },
+      ]);
+    });
+
+    it('modal-group heuristic: 4 working sets + 1 deload → reports the work set', () => {
+      // Real bug from slice-4 smoke test: user did 4 × 8 @ 70 kg + 1 × 10 @ 20 kg
+      // and got "5 × 10 @ 20 kg" because the old heuristic took the last set.
+      // The modal group (8 reps, 70 kg) wins by count.
+      const sets: RawSetRow[] = [
+        { exercise_id: 'bench', weight_kg: 70, reps: 8, is_skipped: 0, ordering: 1 },
+        { exercise_id: 'bench', weight_kg: 70, reps: 8, is_skipped: 0, ordering: 2 },
+        { exercise_id: 'bench', weight_kg: 70, reps: 8, is_skipped: 0, ordering: 3 },
+        { exercise_id: 'bench', weight_kg: 70, reps: 8, is_skipped: 0, ordering: 4 },
+        { exercise_id: 'bench', weight_kg: 20, reps: 10, is_skipped: 0, ordering: 5 },
+      ];
+      expect(aggregateActuals(sets)).toEqual([
+        { exercise_id: 'bench', setCount: 4, reps: 8, weight_kg: 70 },
+      ]);
+    });
+
+    it('all groups singletons (pyramid): tiebreak picks heaviest weight', () => {
+      const sets: RawSetRow[] = [
+        { exercise_id: 'squat', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 1 },
+        { exercise_id: 'squat', weight_kg: 80, reps: 8, is_skipped: 0, ordering: 2 },
+        { exercise_id: 'squat', weight_kg: 100, reps: 5, is_skipped: 0, ordering: 3 },
+      ];
+      expect(aggregateActuals(sets)).toEqual([
+        { exercise_id: 'squat', setCount: 1, reps: 5, weight_kg: 100 },
+      ]);
+    });
+
+    it('equal-count groups at same weight: tiebreak picks earliest appearance', () => {
+      const sets: RawSetRow[] = [
+        { exercise_id: 'bench', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 1 },
+        { exercise_id: 'bench', weight_kg: 60, reps: 10, is_skipped: 0, ordering: 2 },
+        { exercise_id: 'bench', weight_kg: 60, reps: 8, is_skipped: 0, ordering: 3 },
+        { exercise_id: 'bench', weight_kg: 60, reps: 8, is_skipped: 0, ordering: 4 },
+      ];
+      expect(aggregateActuals(sets)).toEqual([
+        { exercise_id: 'bench', setCount: 2, reps: 10, weight_kg: 60 },
       ]);
     });
 

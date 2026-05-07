@@ -17,11 +17,20 @@
  *                → propose appending it to the Template (always to the
  *                general zone).
  *
- * Aggregation heuristic for the "actual" side:
- *   - sets   = total count of non-skipped sets logged for that exercise
- *   - reps   = the *last* set's reps  (deterministic, traceable; matches the
- *              user's mental model "this is what I went with at the end").
- *   - weight = the *last* set's weight (same reasoning).
+ * Aggregation heuristic for the "actual" side (per exercise):
+ *   - Group all non-skipped sets by their (reps, weight_kg) tuple.
+ *   - Pick the *modal* group (largest count). This represents the user's
+ *     "work set" pattern; warmups, deloads, and one-off back-off sets are
+ *     correctly demoted instead of distorting the proposal.
+ *   - Tiebreak: prefer the heavier weight; then earliest appearance.
+ *   - `setCount` = size of the modal group (NOT total sets), so the proposed
+ *     "X × R @ W kg" is internally consistent — exactly the way a strength
+ *     trainer reads a plan.
+ *
+ * Example: user logs 4 sets at (8 reps, 70 kg) plus 1 set at (10 reps, 20 kg).
+ *   - Old "last set" heuristic produced "5 × 10 @ 20 kg" — wrong.
+ *   - Modal-group heuristic produces "4 × 8 @ 70 kg" — what the user actually
+ *     wanted to save back.
  *
  * Pure functions only — no side effects, no DB, no React. The caller is
  * responsible for building the `actual` shape from raw set rows; see the
@@ -46,10 +55,15 @@ export interface SessionPlanRow {
 /** Aggregated actuals for one exercise inside a Session. */
 export interface SessionActualRow {
   exercise_id: string;
+  /**
+   * Number of sets in the modal (reps, weight) group — see module docstring.
+   * Smaller than the user's total sets when warmups / deloads / outliers
+   * exist. Zero is filtered out by `computeSaveBackDiff`.
+   */
   setCount: number;
-  /** Representative reps — see module docstring. null when no sets logged. */
+  /** Modal group's reps. null when no sets logged. */
   reps: number | null;
-  /** Representative weight (kg) — see module docstring. null when no sets logged. */
+  /** Modal group's weight (kg). null when no sets logged. */
   weight_kg: number | null;
 }
 
@@ -63,33 +77,74 @@ export interface RawSetRow {
 }
 
 /**
- * Reduce raw set_log rows into per-exercise summaries: count + last set's
- * weight/reps. Skipped sets are dropped before aggregation.
+ * Reduce raw set_log rows into per-exercise summaries using the modal-group
+ * heuristic described in the module docstring.
  *
- * Stable order: the result preserves the first-appearance order of each
- * exercise in `sets` (sorted ascending by `ordering` first).
+ * Skipped sets are dropped before aggregation. Output order preserves the
+ * first-appearance order of each exercise (sorted by `ordering` ascending
+ * first), so the diff entries downstream stay in a predictable order.
  */
 export function aggregateActuals(sets: RawSetRow[]): SessionActualRow[] {
   const sorted = [...sets]
     .filter((s) => !s.is_skipped)
     .sort((a, b) => a.ordering - b.ordering);
-  const map = new Map<string, SessionActualRow>();
+
+  // Bucket sets per exercise (preserving first-appearance order).
+  const byExercise = new Map<string, RawSetRow[]>();
   for (const s of sorted) {
-    const existing = map.get(s.exercise_id);
-    if (existing) {
-      existing.setCount += 1;
-      existing.reps = s.reps;
-      existing.weight_kg = s.weight_kg;
-    } else {
-      map.set(s.exercise_id, {
-        exercise_id: s.exercise_id,
-        setCount: 1,
-        reps: s.reps,
-        weight_kg: s.weight_kg,
-      });
-    }
+    const arr = byExercise.get(s.exercise_id);
+    if (arr) arr.push(s);
+    else byExercise.set(s.exercise_id, [s]);
   }
-  return Array.from(map.values());
+
+  const out: SessionActualRow[] = [];
+  for (const [exercise_id, exSets] of byExercise) {
+    type Group = {
+      reps: number | null;
+      weight: number | null;
+      count: number;
+      firstOrdering: number;
+    };
+    const groups = new Map<string, Group>();
+    for (const s of exSets) {
+      const key = `${s.reps}|${s.weight_kg}`;
+      const g = groups.get(key);
+      if (g) g.count += 1;
+      else
+        groups.set(key, {
+          reps: s.reps,
+          weight: s.weight_kg,
+          count: 1,
+          firstOrdering: s.ordering,
+        });
+    }
+
+    let best: Group | null = null;
+    for (const g of groups.values()) {
+      if (!best) {
+        best = g;
+        continue;
+      }
+      if (g.count > best.count) {
+        best = g;
+        continue;
+      }
+      if (g.count === best.count) {
+        const bw = best.weight ?? -Infinity;
+        const gw = g.weight ?? -Infinity;
+        if (gw > bw) best = g;
+        else if (gw === bw && g.firstOrdering < best.firstOrdering) best = g;
+      }
+    }
+
+    out.push({
+      exercise_id,
+      setCount: best?.count ?? 0,
+      reps: best?.reps ?? null,
+      weight_kg: best?.weight ?? null,
+    });
+  }
+  return out;
 }
 
 export type SaveBackChangeType = 'modify' | 'add' | 'remove';
