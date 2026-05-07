@@ -28,11 +28,12 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
     db.close();
   });
 
-  it('seeds the built-in Bench Press exercise via v001 migration', async () => {
+  it('seeds the built-in Bench Press exercise via v001 + more via v002', async () => {
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(1);
-    expect(exercises[0]).toMatchObject({
-      name: 'Bench Press',
+    // v001 seeds Bench Press; v002 (slice 2) adds 6 more compound lifts.
+    expect(exercises).toHaveLength(7);
+    const bench = exercises.find((e) => e.name === 'Bench Press');
+    expect(bench).toMatchObject({
       load_type: 'loaded',
       is_builtin: 1,
       is_archived: 0,
@@ -79,13 +80,16 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
   });
 
   it('joins exercise name when reading via listAllSetsWithExercise', async () => {
-    const [exercise] = await listExercises(db);
+    // After v002, listExercises returns 7 rows alphabetically — pick Bench
+    // Press explicitly so this assertion stays stable.
+    const exercises = await listExercises(db);
+    const bench = exercises.find((e) => e.name === 'Bench Press')!;
     let counter = 0;
     const uuid = () => `id-${++counter}`;
 
     await recordSetAsAutoSession(
       db,
-      { exercise_id: exercise.id, weight_kg: 80, reps: 5 },
+      { exercise_id: bench.id, weight_kg: 80, reps: 5 },
       uuid
     );
 
@@ -122,6 +126,6 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
   it('migration is idempotent — running twice does not create extra exercise rows', async () => {
     await migrate(db); // already ran in beforeEach; this is the second call
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(1);
+    expect(exercises).toHaveLength(7);
   });
 });

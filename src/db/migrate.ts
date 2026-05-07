@@ -1,5 +1,6 @@
 import type { Database } from './types';
 import { v001_initial } from './schema/v001_initial';
+import { v002_more_exercises } from './schema/v002_more_exercises';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -15,6 +16,7 @@ type MigrationFn = (db: Database) => Promise<void>;
 
 const migrations: Record<number, MigrationFn> = {
   1: v001_initial,
+  2: v002_more_exercises,
 };
 
 export async function migrate(db: Database): Promise<void> {
