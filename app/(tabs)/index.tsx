@@ -1,98 +1,158 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { randomUUID } from 'expo-crypto';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useDatabase } from '@/components/database-provider';
+import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
+import { recordSetAsAutoSession } from '@/src/adapters/sqlite/setRepository';
+import type { Exercise } from '@/src/domain/exercise/types';
+import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 
-export default function HomeScreen() {
+/**
+ * Today tab — record a single Set.
+ *
+ * Slice-1 simplification: only one built-in Exercise (Bench Press) is shown
+ * pre-selected; an Exercise picker arrives in slice 2 (Exercise library).
+ * Save creates an auto-Session containing the set, then closes the Session
+ * (see `recordSetAsAutoSession`).
+ */
+export default function TodayScreen() {
+  const db = useDatabase();
+  const [exercise, setExercise] = useState<Exercise | null>(null);
+  const [weight, setWeight] = useState('');
+  const [reps, setReps] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    listExercises(db).then((rows) => {
+      setExercise(rows[0] ?? null);
+    });
+  }, [db]);
+
+  const onSave = async () => {
+    if (!exercise) {
+      Alert.alert('No exercise loaded yet');
+      return;
+    }
+    const weight_kg = Number(weight);
+    const repsNum = Number(reps);
+    const err = validateRecordSet({
+      exercise_id: exercise.id,
+      weight_kg,
+      reps: repsNum,
+    });
+    if (err) {
+      Alert.alert('Invalid input', err);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await recordSetAsAutoSession(
+        db,
+        { exercise_id: exercise.id, weight_kg, reps: repsNum },
+        randomUUID
+      );
+      setWeight('');
+      setReps('');
+      Alert.alert('Saved', `${exercise.name} · ${weight_kg} kg × ${repsNum} reps`);
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}>
+        <View style={styles.body}>
+          <Text style={styles.heading}>Record a set</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+          <Text style={styles.label}>Exercise</Text>
+          <View style={styles.fixedExercise}>
+            <Text style={styles.fixedExerciseText}>
+              {exercise ? exercise.name : 'Loading...'}
+            </Text>
+          </View>
+
+          <Text style={styles.label}>Weight (kg)</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            value={weight}
+            onChangeText={setWeight}
+            placeholder="60"
+            placeholderTextColor="#999"
+          />
+
+          <Text style={styles.label}>Reps</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="number-pad"
+            value={reps}
+            onChangeText={setReps}
+            placeholder="10"
+            placeholderTextColor="#999"
+          />
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={onSave}
+            disabled={saving || !exercise}
+            style={({ pressed }) => [
+              styles.saveBtn,
+              (saving || !exercise) && styles.saveBtnDisabled,
+              pressed && styles.saveBtnPressed,
+            ]}>
+            <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save Set'}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: { flex: 1 },
+  flex: { flex: 1 },
+  body: { padding: 24, gap: 12 },
+  heading: { fontSize: 28, fontWeight: '700', marginBottom: 8 },
+  label: { fontSize: 14, fontWeight: '500', marginTop: 8, opacity: 0.7 },
+  fixedExercise: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+  },
+  fixedExerciseText: { fontSize: 16, fontWeight: '500' },
+  input: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    fontSize: 18,
+  },
+  saveBtn: {
+    marginTop: 24,
+    paddingVertical: 16,
+    borderRadius: 12,
+    backgroundColor: '#0a7ea4',
     alignItems: 'center',
-    gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  saveBtnDisabled: { opacity: 0.5 },
+  saveBtnPressed: { opacity: 0.85 },
+  saveBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
 });
