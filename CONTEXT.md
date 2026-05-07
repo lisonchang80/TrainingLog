@@ -298,6 +298,33 @@ per-Exercise「動作歷史」按鈕開啟完整列表頁。
 
 _Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取代 SMM；體脂率存成小數 `0.185`（v1 統一用百分比數字 `18.5`）；對 B 類動作把 bodyweight 加進負荷計算（違反 lifting 慣例，且打亂 Q8 PR 演算法）
 
+**Backup / Sync** (UI: 備份):
+TrainingLog 的資料保護策略。v1 scope = **(a) 換手機 + (b) 災難恢復 + (d) JSON export**；**(c) 多裝置即時 sync 排除**（自用 + 沒 iPad app + Watch 已透過 ADR-0008 處理）。
+
+**Mechanism**：iCloud Drive 自動備份整個 SQLite 檔（不採 CloudKit row-level — c 排除即 overkill）。App 在 iCloud ubiquity container 開「TrainingLog」folder，內含 `backup.sqlite`（最新）+ `backup.previous.sqlite`（上一份 rotate）。User 在 iCloud Drive 看得到該 folder + 兩個 .sqlite 檔，可手動下載 / share。
+
+**觸發 + 保留**：
+- 觸發點 = Session 結束 + App 進 background（兩者皆觸發，5min debounce 避免重複）
+- 保留策略 = 最新 + 上一份 = 2 份 atomic rotate（rename `backup.sqlite` → `backup.previous.sqlite` 後寫新 `backup.sqlite`）
+
+**Restore UX**：第一次啟動 detect 到 iCloud 有備份 → 跳確認框（含日期 + 內容預覽，例「142 個 Session、最後一筆 2026-04-30」）→ user 二選「還原 / 全新開始」。Restore 完成 = skip onboarding 直接進主畫面。沒登 iCloud → 警告但允許進 app + Settings 永久紅警示「未啟用 iCloud 備份」。
+
+**Settings 搬進 SQLite**：新增 `app_settings(key TEXT PK, value TEXT)` 表收所有偏好（unit_preference / dark mode / 預設休息時間 / `backup_mode` 等），跟 SQLite 一起被涵蓋。**AsyncStorage 不適合 user-facing 偏好**（restore 後跟 SQLite 反同步，user 慣 lb 變 kg 會炸）。
+
+**Watch sync vs Backup 順序保證**：iPhone 維護 `pending_watch_sync: bool` 旗標。Backup callback 時若 flag clean → 立即執行（95% 場景）；若 dirty → 延遲到 sync 完，**最多等 5 分鐘**force backup（escape hatch；避免 Watch 出 BLE 範圍永遠等不到）。新增 `session.last_watch_sync_at TIMESTAMP NULL` 紀錄完整度。Force backup 缺漏時 Settings 顯示警告。
+
+**Backup mode toggle**：Settings 提供「自動備份 ON / OFF」（預設 ON）。OFF = 純手動（只有「立即備份」按鈕觸發）。Manual 模式下 b1 escalation threshold 從 3 → 7 天（手動是 expected behavior）。
+
+**Failure escalation**：
+- iCloud 寫入失敗（容量滿 / 網路錯誤）：Settings 紅警示 + push notification
+- 連續 3 天（auto）/ 7 天（manual）沒成功：push + Settings + 主畫面 banner
+- Restore 時 `backup.sqlite` 壞 → 自動 fallback `backup.previous.sqlite`（兩份都壞 → JSON export 手動 recovery）
+- iCloud Drive 不可用 / 換 Apple ID → 啟動 detect + Settings 永久紅警示 + 一次 alert
+
+**JSON Export (d)**：完整 dump（Exercise / Template / Session / Set / body_metric / app_settings 全表）→ JSON format → iOS Share Sheet（AirDrop / Mail / Files / Notes）。v1 export only，import 延 v1.5+。不加密（自用無個資；要加密 user 自己用 7zip 包）。
+
+_Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual export 無 auto cloud（user 必然忘）；依賴 iOS 系統 iCloud Backup（不可靠）；Settings 留 AsyncStorage（restore 後反同步）；JSON v1 雙向 import（跟 A 方案 SQLite restore 衝突，UX 兩條路混亂）。詳見 ADR-0011。
+
 ## Relationships
 
 - 一個 **Program** = 起始日期 + 循環長度 + 循環次數 + 日曆網格。包含 N 個 **循環**（N = 循環次數），每個循環長 D 天（D = 循環長度）。日曆網格 = N × D 個 cells，每個 cell = (循環 index, day index, Date, Template, Program 副標籤)
@@ -445,6 +472,18 @@ _Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取
   - ✅ **Q13.8** 動圖 / 示意圖 / 文字說明 v1 全延 v1.5+（自製成本太高、版權風險、內建動作 lifter 都熟）
   - ✅ **拒絕的替代方案**：完整解剖 muscle (30-40 個) / 完整 reverse ADR-0002 / 三級 mapping (primary/synergist/stabilizer) / 連續強度 0-100% / 請插畫家 / AI 生成 / 用 lib / 三層階層 (MG → SG → muscle) / 維持二頭口語命名 / Custom Exercise 強制 mapping
   - ✅ **ADR-0010**：Anatomical muscle layer + Exercise primary/secondary mapping — 已寫入 `docs/adr/0010-anatomical-muscle-layer-and-exercise-mapping.md`
+- **Q14 Backup / Sync 策略**（ADR-0011 已釘）：
+  - ✅ **Q14.1** Scope：v1 必做 a (換手機) + b (災難恢復)；v1 加分 d (JSON export)；**c (多裝置即時 sync) 排除**（自用 + 沒 iPad app + Watch 已 ADR-0008 處理）
+  - ✅ **Q14.2** Mechanism：A — iCloud Drive 自動備份整個 SQLite 檔（拒 B CloudKit row-level / C 純 manual / D 依賴 iOS 系統備份）；Expo native module 或 react-native-cloud-storage 整合 ubiquity container
+  - ✅ **Q14.3** 觸發 + 保留：a3 (Session 結束 + app background, 5min debounce) + b2 (最新 + 上一份 2 份 atomic rotate)
+  - ✅ **Q14.4** Restore + 邊界：a2 (確認框含日期 + 內容預覽) + b2 (沒登 iCloud 警告但允許進 app) + c1 (skip onboarding) + s2 (Settings 搬進 SQLite — 新增 `app_settings(key, value)` 表)
+  - ✅ **Q14.5** JSON export：a2 完整 dump + b1 JSON + c1 export only (v1) + d1 不加密 + e1 Share Sheet
+  - ✅ **Q14.6** Watch sync vs Backup 順序保證：A3 — `pending_watch_sync` 旗標 + 5min timeout escape；新增 `session.last_watch_sync_at TIMESTAMP NULL`；force backup 缺漏時 Settings 顯示警告
+  - ✅ **Q14.7** Failure escalation：a1 寫入失敗紅警示 + push / b1 連續 3 天（auto）/ 7 天（manual）escalation / c1 自動 fallback `backup.previous.sqlite` / d1 iCloud 不可用永久紅警示 + 一次 alert
+  - ✅ **Q14.8** Mode toggle：B — 預設 auto + Settings「自動備份」toggle 切 manual；OFF = 純手動 + escalation threshold 3 → 7 天
+  - ✅ **Schema 影響**：新增 `app_settings(key TEXT PK, value TEXT)` 表 + `session.last_watch_sync_at TIMESTAMP NULL` 欄位 + backup metadata（`backup_log` 表或 `app_settings` key）；不需要 row-level `last_modified` / `soft_delete`（c 排除）
+  - ✅ **拒絕的替代方案**：CloudKit row-level / 純 manual export / iOS 系統 iCloud Backup / A1 等 Watch confirm / A2 立即不管 Watch / A4 觸發兩次 / Settings 留 AsyncStorage / JSON v1 雙向 import / Backup encryption / 三段式 mode (auto / manual / disabled) / 多版本保留 (b3 / b4) / 只保留 1 份 (b1) / Force 登 iCloud / Restore 自動執行不問
+  - ✅ **ADR-0011**：Backup and Sync Strategy for v1 — 已寫入 `docs/adr/0011-backup-and-sync-strategy.md`
 
 ## Flagged ambiguities
 
