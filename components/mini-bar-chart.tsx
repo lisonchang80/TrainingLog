@@ -10,7 +10,7 @@
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Line, Rect } from 'react-native-svg';
+import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
 export interface BarData {
   label: string;
@@ -106,15 +106,27 @@ export function MiniBarChart({
             strokeDasharray="3,3"
           />
         ) : null}
+        {/* X-axis labels rendered as SvgText so rotation doesn't get clipped
+            by RN flex slot width (smoke round-3: "2021" was truncating to
+            "20..."). textAnchor="end" + rotate around (cx, cy) gives a
+            tick-anchored, upward-tilted label. */}
+        {data.map((d, i) => {
+          const cx = PAD_X + i * barSlot + barSlot / 2;
+          const cy = PAD_TOP + usableHeight + 14;
+          return (
+            <SvgText
+              key={`x-${i}`}
+              x={cx}
+              y={cy}
+              fontSize={10}
+              fill="#6B7280"
+              textAnchor="end"
+              transform={`rotate(-30 ${cx} ${cy})`}>
+              {d.label}
+            </SvgText>
+          );
+        })}
       </Svg>
-      {/* X-axis labels — overlaid as RN Text for crisp rendering */}
-      <View style={[styles.xAxisRow, { width: usableWidth, left: PAD_X }]}>
-        {data.map((d, i) => (
-          <Text key={i} style={styles.xAxisLabel} numberOfLines={1}>
-            {d.label}
-          </Text>
-        ))}
-      </View>
       {/* Optional bar value labels */}
       {showBarValues ? (
         <View style={[styles.barValueRow, { width: usableWidth, left: PAD_X }]}>
@@ -134,20 +146,7 @@ export function MiniBarChart({
 }
 
 const styles = StyleSheet.create({
-  xAxisRow: {
-    position: 'absolute',
-    bottom: 4,
-    flexDirection: 'row',
-  },
-  xAxisLabel: {
-    flex: 1,
-    fontSize: 10,
-    textAlign: 'center',
-    color: '#6B7280',
-    // -45° tilt keeps long labels (e.g. "2021", "12/31") legible inside the
-    // 25-pixel bar slot — feedback from year-scale smoke (#3).
-    transform: [{ rotate: '-30deg' }],
-  },
+  // (X-axis labels are now SvgText inside the Svg — see render above.)
   barValueRow: {
     position: 'absolute',
     top: 0,
