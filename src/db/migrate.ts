@@ -5,6 +5,7 @@ import { v003_templates } from './schema/v003_templates';
 import { v004_evergreen_zone } from './schema/v004_evergreen_zone';
 import { v005_program } from './schema/v005_program';
 import { v006_muscle_layer } from './schema/v006_muscle_layer';
+import { v007_body_metric } from './schema/v007_body_metric';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -25,6 +26,7 @@ const migrations: Record<number, MigrationFn> = {
   4: v004_evergreen_zone,
   5: v005_program,
   6: v006_muscle_layer,
+  7: v007_body_metric,
 };
 
 export async function migrate(db: Database): Promise<void> {
