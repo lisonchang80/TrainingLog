@@ -34,6 +34,10 @@ export default function RootLayout() {
             name="exercise/new"
             options={{ presentation: 'modal', title: 'New Exercise' }}
           />
+          <Stack.Screen
+            name="exercise-history/[id]"
+            options={{ presentation: 'modal', title: '動作歷史' }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
