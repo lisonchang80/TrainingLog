@@ -321,16 +321,20 @@ export function BodyHeatmap({ mgQuintile, mgCount }: BodyHeatmapProps) {
   );
 }
 
-/** Legend strip showing the 5-quintile colour scale. */
+/** Legend strip showing the 5-quintile colour scale, labelled as rank percentiles. */
 export function BodyHeatmapLegend() {
+  // Each quintile's upper-bound percentile (e.g. Q1 = bottom 20% → label "20%").
+  const PERCENTILE_LABELS = ['20%', '40%', '60%', '80%', '100%'] as const;
   return (
     <View style={styles.legendRow}>
-      <View style={[styles.swatch, { backgroundColor: COLOR_ZERO, borderWidth: 1, borderColor: COLOR_OUTLINE }]} />
-      <Text style={styles.legendText}>0</Text>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, { backgroundColor: COLOR_ZERO, borderWidth: 1, borderColor: COLOR_OUTLINE }]} />
+        <Text style={styles.legendText}>0</Text>
+      </View>
       {QUINTILE_COLORS.map((c, i) => (
         <View key={i} style={styles.legendItem}>
           <View style={[styles.swatch, { backgroundColor: c }]} />
-          <Text style={styles.legendText}>Q{i + 1}</Text>
+          <Text style={styles.legendText}>{PERCENTILE_LABELS[i]}</Text>
         </View>
       ))}
     </View>

@@ -35,7 +35,7 @@ export interface MiniBarChartProps {
 }
 
 const PAD_TOP = 16;
-const PAD_BOTTOM = 18;
+const PAD_BOTTOM = 28; // extra space for rotated X-axis labels
 const PAD_X = 4;
 const AVG_LINE_COLOR = '#EF4444';
 const TRACK_COLOR = '#E5E7EB';
@@ -136,14 +136,17 @@ export function MiniBarChart({
 const styles = StyleSheet.create({
   xAxisRow: {
     position: 'absolute',
-    bottom: 2,
+    bottom: 4,
     flexDirection: 'row',
   },
   xAxisLabel: {
     flex: 1,
-    fontSize: 9,
+    fontSize: 10,
     textAlign: 'center',
     color: '#6B7280',
+    // -45° tilt keeps long labels (e.g. "2021", "12/31") legible inside the
+    // 25-pixel bar slot — feedback from year-scale smoke (#3).
+    transform: [{ rotate: '-30deg' }],
   },
   barValueRow: {
     position: 'absolute',

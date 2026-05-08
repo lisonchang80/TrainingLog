@@ -130,6 +130,8 @@ export function StatsPanel() {
   );
   // Order MGs by total 6-period capacity desc, but ALWAYS show all 11 (zero
   // MGs render flat — user wants a visual catalogue of what's missing too).
+  // Average is computed over BUCKETS WITH DATA only (smoke feedback: zero
+  // buckets shouldn't drag the avg line down).
   const mgRows = useMemo(() => {
     return MUSCLE_GROUP_SEEDS.map((mg) => {
       const buckets =
@@ -140,7 +142,8 @@ export function StatsPanel() {
           capacity: 0,
         }));
       const total = buckets.reduce((s, b) => s + b.capacity, 0);
-      const avg = total / 6;
+      const nonZeroCount = buckets.reduce((n, b) => n + (b.capacity > 0 ? 1 : 0), 0);
+      const avg = nonZeroCount > 0 ? total / nonZeroCount : 0;
       return { mg_id: mg.id, mg_name: mg.name, buckets, total, avg };
     }).sort((a, b) => b.total - a.total);
   }, [capacityByMg, boundaries]);
@@ -150,9 +153,14 @@ export function StatsPanel() {
     () => durationHistogram(records, period, now),
     [records, period, now]
   );
+  // Average over BUCKETS WITH DATA only — smoke feedback: zero-period buckets
+  // (e.g. user only trained in 3 of the last 6 weeks) shouldn't pull the avg
+  // line toward zero.
   const durationAvgMs = useMemo(() => {
-    const total = durationBuckets.reduce((s, b) => s + b.total_ms, 0);
-    return total / 6;
+    const nonZero = durationBuckets.filter((b) => b.total_ms > 0);
+    if (nonZero.length === 0) return 0;
+    const total = nonZero.reduce((s, b) => s + b.total_ms, 0);
+    return total / nonZero.length;
   }, [durationBuckets]);
   const durationTotalSessions = useMemo(
     () => durationBuckets.reduce((s, b) => s + b.session_count, 0),
