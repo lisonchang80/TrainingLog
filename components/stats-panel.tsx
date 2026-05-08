@@ -15,6 +15,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
 import { useDatabase } from '@/components/database-provider';
 import { BodyHeatmap, BodyHeatmapLegend, type Quintile } from '@/components/body-heatmap';
@@ -61,25 +62,45 @@ function formatCapacityShort(n: number): string {
   return String(Math.round(n));
 }
 
+function startOfDay(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function formatAnchorLabel(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+
 export function StatsPanel() {
   const db = useDatabase();
   const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
-  // We freeze "now" per load so all derived data shares the same boundaries,
-  // and avoid re-render skew between heatmap + histograms.
-  const [nowSnapshot, setNowSnapshot] = useState<number>(() => Date.now());
+  // Anchor date drives the histogram X-axis. Default = today at 00:00 local.
+  // -5..0 buckets are computed BACKWARD from this date in the selected scale.
+  const [anchorDate, setAnchorDate] = useState<Date>(() => startOfDay(new Date()));
+  const [showPicker, setShowPicker] = useState(false);
 
   const load = useCallback(async () => {
-    const now = new Date();
-    const boundaries = bucketBoundaries(period, now);
+    const boundaries = bucketBoundaries(period, anchorDate);
     const wide = {
       start_ms: boundaries[0].start_ms,
       end_ms: boundaries[5].end_ms,
     };
     const recs = await loadStatsSetRecords(db, wide);
-    setNowSnapshot(now.getTime());
     setRecords(recs);
-  }, [db, period]);
+  }, [db, period, anchorDate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -87,9 +108,23 @@ export function StatsPanel() {
     }, [load])
   );
 
-  const now = useMemo(() => new Date(nowSnapshot), [nowSnapshot]);
-  const boundaries = useMemo(() => bucketBoundaries(period, now), [period, now]);
+  const boundaries = useMemo(() => bucketBoundaries(period, anchorDate), [period, anchorDate]);
   const currentBucket = boundaries[5];
+  const isAnchorToday = useMemo(() => isSameDay(anchorDate, new Date()), [anchorDate]);
+
+  const onChangeDate = useCallback(
+    (event: DateTimePickerEvent, selected?: Date) => {
+      // iOS inline picker fires `set` on each tap; Android closes the dialog.
+      if (event.type === 'dismissed') {
+        setShowPicker(false);
+        return;
+      }
+      if (selected) {
+        setAnchorDate(startOfDay(selected));
+      }
+    },
+    []
+  );
 
   // ---- Heatmap (current period only) ----------------------------------------
   const currentBucketRecords = useMemo(
@@ -125,8 +160,8 @@ export function StatsPanel() {
 
   // ---- Capacity histograms per MG (-5..0) ----------------------------------
   const capacityByMg = useMemo(
-    () => capacityHistogramByMg(records, period, now),
-    [records, period, now]
+    () => capacityHistogramByMg(records, period, anchorDate),
+    [records, period, anchorDate]
   );
   // Order MGs by total 6-period capacity desc, but ALWAYS show all 11 (zero
   // MGs render flat — user wants a visual catalogue of what's missing too).
@@ -150,8 +185,8 @@ export function StatsPanel() {
 
   // ---- Duration histogram (-5..0) ------------------------------------------
   const durationBuckets: DurationBucket[] = useMemo(
-    () => durationHistogram(records, period, now),
-    [records, period, now]
+    () => durationHistogram(records, period, anchorDate),
+    [records, period, anchorDate]
   );
   // Average over BUCKETS WITH DATA only — smoke feedback: zero-period buckets
   // (e.g. user only trained in 3 of the last 6 weeks) shouldn't pull the avg
@@ -186,6 +221,38 @@ export function StatsPanel() {
           </Pressable>
         ))}
       </View>
+
+      {/* Anchor date row */}
+      <View style={styles.anchorRow}>
+        <Pressable
+          style={styles.anchorBtn}
+          onPress={() => setShowPicker((s) => !s)}>
+          <Text style={styles.anchorBtnLabel}>錨點</Text>
+          <Text style={styles.anchorBtnDate}>{formatAnchorLabel(anchorDate)}</Text>
+          <Text style={styles.anchorBtnCaret}>{showPicker ? '▴' : '▾'}</Text>
+        </Pressable>
+        {!isAnchorToday ? (
+          <Pressable
+            style={styles.anchorTodayBtn}
+            onPress={() => {
+              setAnchorDate(startOfDay(new Date()));
+              setShowPicker(false);
+            }}>
+            <Text style={styles.anchorTodayText}>今天</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {showPicker ? (
+        <View style={styles.pickerWrap}>
+          <DateTimePicker
+            value={anchorDate}
+            mode="date"
+            display="inline"
+            maximumDate={new Date()}
+            onChange={onChangeDate}
+          />
+        </View>
+      ) : null}
 
       {/* Body heatmap */}
       <View style={styles.card}>
@@ -268,6 +335,32 @@ const styles = StyleSheet.create({
   periodBtnActive: { backgroundColor: '#fff' },
   periodBtnText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
   periodBtnTextActive: { color: '#111827', fontWeight: '700' },
+  anchorRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  anchorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  anchorBtnLabel: { fontSize: 13, color: '#6B7280' },
+  anchorBtnDate: { flex: 1, fontSize: 14, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
+  anchorBtnCaret: { fontSize: 14, color: '#6B7280' },
+  anchorTodayBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#111827',
+    borderRadius: 10,
+  },
+  anchorTodayText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  pickerWrap: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 4,
+  },
   card: {
     backgroundColor: 'rgba(127,127,127,0.08)',
     borderRadius: 12,
