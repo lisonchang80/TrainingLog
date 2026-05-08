@@ -15,7 +15,7 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 
 - **Primary OS**: macOS (Mac mini M4 Pro) — switched from Windows 11 on 2026-05-06
 - **Preview**: iOS Simulator on Mac (`npx expo start` → press `i`) or Expo Go on iPhone (QR scan)
-- **Build / TestFlight / App Store submission**: Apple Developer Program ($99/yr) purchased on 2026-05-07 (order W1540856250); enrollment pending Apple's 24–48 hr review. Required from slice 11 onwards (HealthKit + App Group entitlements); slices 1–10 run on Expo Go without it.
+- **Build / TestFlight / App Store submission**: Apple Developer Program ($99/yr) purchased on 2026-05-07 (order W1540856250); enrollment **active** since 2026-05-08 (Welcome to ADP + App Store Connect emails received). Required from slice 11 onwards (HealthKit + App Group entitlements); slices 1–10 run on Expo Go without it.
 
 ## Testing
 
