@@ -62,6 +62,10 @@ import {
   type SessionState,
 } from '@/src/domain/session/sessionManager';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
+import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { detectPRBreaks } from '@/src/domain/pr/prEngine';
+import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
+import type { PRDelta } from '@/src/domain/pr/types';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -95,6 +99,8 @@ export default function TodayScreen() {
   const [inlineBwInput, setInlineBwInput] = useState('');
   const [inlinePbfInput, setInlinePbfInput] = useState('');
   const [inlineSmmInput, setInlineSmmInput] = useState('');
+  const [lastPRDelta, setLastPRDelta] = useState<PRDelta | null>(null);
+  const [lastPRExerciseName, setLastPRExerciseName] = useState<string>('');
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms] = await Promise.all([
@@ -269,7 +275,7 @@ export default function TodayScreen() {
 
     setBusy(true);
     try {
-      await recordSetInSession(db, {
+      const result = await recordSetInSession(db, {
         session_id,
         input: { exercise_id: selectedExerciseId, weight_kg, reps: repsNum },
         uuid: randomUUID,
@@ -278,6 +284,43 @@ export default function TodayScreen() {
       setReps('');
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+
+      // PR Engine: fetch prior sets for this exercise (strictly before the
+      // just-inserted set), then detect bucket-level + cross-bucket PR breaks.
+      const exerciseObj =
+        exercises.find((e) => e.id === selectedExerciseId) ?? null;
+      if (exerciseObj) {
+        const priors = await listPriorSetsForExercise(
+          db,
+          selectedExerciseId,
+          result.created_at
+        );
+        const delta = detectPRBreaks({
+          new_set: {
+            weight_kg,
+            reps: repsNum,
+            load_type: exerciseObj.load_type,
+            bw_snapshot_kg: bwSnapshotKg,
+          },
+          prior_sets: priors.map((p) => ({
+            weight_kg: p.weight_kg,
+            reps: p.reps,
+            load_type: exerciseObj.load_type,
+            bw_snapshot_kg: p.bw_snapshot_kg,
+          })),
+        });
+        if (
+          delta.breaks.length > 0 ||
+          delta.is_all_time_weight_pr ||
+          delta.is_all_time_volume_pr
+        ) {
+          setLastPRDelta(delta);
+          setLastPRExerciseName(exerciseObj.name);
+        } else {
+          setLastPRDelta(null);
+          setLastPRExerciseName('');
+        }
+      }
     } catch (e) {
       Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     } finally {
@@ -541,7 +584,19 @@ export default function TodayScreen() {
             </>
           )}
 
-          <Text style={styles.label}>Exercise</Text>
+          <View style={styles.exerciseHeaderRow}>
+            <Text style={styles.label}>Exercise</Text>
+            {selectedExerciseId ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  router.push(`/exercise-history/${selectedExerciseId}`)
+                }
+                style={styles.linkBtn}>
+                <Text style={styles.linkBtnText}>📖 動作歷史</Text>
+              </Pressable>
+            ) : null}
+          </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -598,6 +653,36 @@ export default function TodayScreen() {
             <Text style={styles.saveBtnText}>{busy ? 'Saving…' : 'Save Set'}</Text>
           </Pressable>
 
+          {lastPRDelta ? (
+            <View style={styles.prBanner}>
+              <View style={styles.prBannerHeader}>
+                <Text style={styles.prBannerTitle}>🏆 PR! · {lastPRExerciseName}</Text>
+                <Pressable
+                  onPress={() => {
+                    setLastPRDelta(null);
+                    setLastPRExerciseName('');
+                  }}
+                  style={styles.linkBtn}>
+                  <Text style={styles.linkBtnText}>關閉</Text>
+                </Pressable>
+              </View>
+              {sortBreaksForDisplay(lastPRDelta.breaks).map((b, idx) => (
+                <Text key={`${b.bucket}-${b.type}-${idx}`} style={styles.prBannerLine}>
+                  {bucketLabel(b.bucket)} · {b.type === 'weight' ? '重量' : '容量'} PR
+                  {b.prior_best == null
+                    ? '（第一次）'
+                    : ` · 從 ${formatPRDeltaValue(b.prior_best, b.type, unit)} → ${formatPRDeltaValue(b.new_value, b.type, unit)}`}
+                </Text>
+              ))}
+              {lastPRDelta.is_all_time_weight_pr ? (
+                <Text style={styles.prBannerAllTime}>★ 全紀錄重量 PR</Text>
+              ) : null}
+              {lastPRDelta.is_all_time_volume_pr ? (
+                <Text style={styles.prBannerAllTime}>★ 全紀錄容量 PR</Text>
+              ) : null}
+            </View>
+          ) : null}
+
           <Text style={styles.label}>Sets in this session</Text>
           {setsInSession.length === 0 ? (
             <Text style={styles.emptyText}>None yet — record your first set above.</Text>
@@ -634,6 +719,22 @@ export default function TodayScreen() {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+/**
+ * Format a PR delta value for the chip line. Weight values display in the
+ * user's unit; volume is internally kg-reps but rendered with the unit suffix
+ * so the user reads it consistently.
+ */
+function formatPRDeltaValue(
+  raw: number,
+  type: 'weight' | 'volume',
+  unit: UnitPreference
+): string {
+  if (!Number.isFinite(raw)) return '—';
+  if (type === 'weight') return formatWeight(raw, unit);
+  const display = kgToDisplay(raw, unit);
+  return `${display.toFixed(0)} ${unit}-reps`;
 }
 
 const styles = StyleSheet.create({
@@ -763,4 +864,26 @@ const styles = StyleSheet.create({
   inlineBodyField: { flex: 1, gap: 4 },
   inlineFieldLabel: { fontSize: 11, opacity: 0.7 },
   inlineHint: { fontSize: 11, opacity: 0.6 },
+  exerciseHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  prBanner: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,180,0,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,140,0,0.4)',
+    gap: 4,
+  },
+  prBannerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  prBannerTitle: { fontSize: 15, fontWeight: '700' },
+  prBannerLine: { fontSize: 13 },
+  prBannerAllTime: { fontSize: 12, fontWeight: '700', color: '#b35900' },
 });
