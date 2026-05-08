@@ -25,6 +25,7 @@ describe('Template Manager — pure logic', () => {
           default_sets: 3,
           default_reps: 10,
           default_weight_kg: 60,
+          is_evergreen: 0,
         },
       ],
     };
@@ -48,6 +49,7 @@ describe('Template Manager — pure logic', () => {
               default_sets: 3,
               default_reps: null,
               default_weight_kg: null,
+              is_evergreen: 0,
             },
           ],
         })
@@ -112,6 +114,7 @@ describe('Template Manager — pure logic', () => {
           default_sets: 3,
           default_reps: 10,
           default_weight_kg: 60,
+          is_evergreen: 0,
         },
         {
           exercise_id: 'ohp',
@@ -119,6 +122,7 @@ describe('Template Manager — pure logic', () => {
           default_sets: 4,
           default_reps: 8,
           default_weight_kg: 40,
+          is_evergreen: 0,
         },
       ],
     });
@@ -142,9 +146,9 @@ describe('Template Manager — pure logic', () => {
         id: 'tpl-1',
         name: 't',
         exercises: [
-          { exercise_id: 'a', ordering: 5, default_sets: 1, default_reps: null, default_weight_kg: null },
-          { exercise_id: 'b', ordering: 17, default_sets: 1, default_reps: null, default_weight_kg: null },
-          { exercise_id: 'c', ordering: 99, default_sets: 1, default_reps: null, default_weight_kg: null },
+          { exercise_id: 'a', ordering: 5, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
+          { exercise_id: 'b', ordering: 17, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
+          { exercise_id: 'c', ordering: 99, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
         ],
       };
       const rows = snapshotForSession({
@@ -160,9 +164,9 @@ describe('Template Manager — pure logic', () => {
         id: 'tpl-1',
         name: 't',
         exercises: [
-          { exercise_id: 'b', ordering: 2, default_sets: 1, default_reps: null, default_weight_kg: null },
-          { exercise_id: 'a', ordering: 1, default_sets: 1, default_reps: null, default_weight_kg: null },
-          { exercise_id: 'c', ordering: 3, default_sets: 1, default_reps: null, default_weight_kg: null },
+          { exercise_id: 'b', ordering: 2, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
+          { exercise_id: 'a', ordering: 1, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
+          { exercise_id: 'c', ordering: 3, default_sets: 1, default_reps: null, default_weight_kg: null, is_evergreen: 0 },
         ],
       };
       const rows = snapshotForSession({
@@ -203,6 +207,7 @@ describe('Template Manager — pure logic', () => {
         default_sets: 5,
         default_reps: null,
         default_weight_kg: null,
+        is_evergreen: 0,
       });
       expect(rows).toHaveLength(2);
       expect(rows[0].planned_sets).toBe(3);
@@ -226,6 +231,22 @@ describe('Template Manager — pure logic', () => {
         uuid: () => 'x',
       });
       expect(rows.every((r) => r.session_id === 'session-X')).toBe(true);
+    });
+
+    it('propagates is_evergreen from each TemplateExerciseSpec into the snapshot', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-1',
+        name: 'Mixed',
+        exercises: [
+          { exercise_id: 'main', ordering: 1, default_sets: 5, default_reps: 5, default_weight_kg: 80, is_evergreen: 0 },
+          { exercise_id: 'finisher', ordering: 2, default_sets: 3, default_reps: 12, default_weight_kg: 30, is_evergreen: 1 },
+        ],
+      };
+      const rows = snapshotForSession({ template: tpl, session_id: 's', uuid: () => 'x' });
+      expect(rows.map((r) => [r.exercise_id, r.is_evergreen])).toEqual([
+        ['main', 0],
+        ['finisher', 1],
+      ]);
     });
 
     it('returns an empty array for a template with no exercises', () => {

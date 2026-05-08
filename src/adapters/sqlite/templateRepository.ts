@@ -31,6 +31,8 @@ export interface TemplateExerciseRow {
   default_sets: number;
   default_reps: number | null;
   default_weight_kg: number | null;
+  /** 1 = 常設 zone (no Save-back removal), 0 = 一般 zone. */
+  is_evergreen: 0 | 1;
 }
 
 /** All templates with a count of how many exercises each holds; newest-edited first. */
@@ -59,7 +61,7 @@ export async function getTemplate(
   );
   if (!tpl) return null;
   const exercises = await db.getAllAsync<TemplateExerciseSpec>(
-    `SELECT exercise_id, ordering, default_sets, default_reps, default_weight_kg
+    `SELECT exercise_id, ordering, default_sets, default_reps, default_weight_kg, is_evergreen
        FROM template_exercise
       WHERE template_id = ?
       ORDER BY ordering ASC`,
@@ -124,6 +126,7 @@ export async function addTemplateExercise(
     default_sets: number;
     default_reps: number | null;
     default_weight_kg: number | null;
+    is_evergreen?: 0 | 1;
     uuid: () => string;
     now?: () => number;
   }
@@ -137,15 +140,16 @@ export async function addTemplateExercise(
   const ordering = (row?.max_ordering ?? 0) + 1;
   await db.runAsync(
     `INSERT INTO template_exercise
-       (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg, is_evergreen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     args.template_id,
     args.exercise_id,
     ordering,
     args.default_sets,
     args.default_reps,
-    args.default_weight_kg
+    args.default_weight_kg,
+    args.is_evergreen ?? 0
   );
   await db.runAsync(
     `UPDATE template SET updated_at = ? WHERE id = ?`,
@@ -153,6 +157,37 @@ export async function addTemplateExercise(
     args.template_id
   );
   return { id, ordering };
+}
+
+/**
+ * Toggle the evergreen flag on a single template_exercise row. Used by the
+ * editor's star/zone toggle. No-op when the row is already in the requested
+ * state. Bumps the parent template's `updated_at`.
+ */
+export async function setTemplateExerciseEvergreen(
+  db: Database,
+  args: {
+    template_exercise_id: string;
+    is_evergreen: 0 | 1;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  const row = await db.getFirstAsync<{ template_id: string }>(
+    `SELECT template_id FROM template_exercise WHERE id = ?`,
+    args.template_exercise_id
+  );
+  if (!row) return;
+  await db.runAsync(
+    `UPDATE template_exercise SET is_evergreen = ? WHERE id = ?`,
+    args.is_evergreen,
+    args.template_exercise_id
+  );
+  await db.runAsync(
+    `UPDATE template SET updated_at = ? WHERE id = ?`,
+    ts,
+    row.template_id
+  );
 }
 
 /** Remove one exercise row from a Template by its row id. No-op if missing. */
@@ -187,7 +222,7 @@ export async function listTemplateExerciseRows(
   template_id: string
 ): Promise<TemplateExerciseRow[]> {
   return db.getAllAsync<TemplateExerciseRow>(
-    `SELECT id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg
+    `SELECT id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg, is_evergreen
        FROM template_exercise
       WHERE template_id = ?
       ORDER BY ordering ASC`,

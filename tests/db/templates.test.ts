@@ -93,6 +93,7 @@ describe('Template + snapshot isolation (slice 3)', () => {
       default_sets: 3,
       default_reps: 10,
       default_weight_kg: 60,
+      is_evergreen: 0,
     });
 
     // List view shows the count.

@@ -71,6 +71,8 @@ export interface SessionExerciseRow {
   planned_reps: number | null;
   planned_weight_kg: number | null;
   template_id: string | null;
+  /** Frozen copy of the source template_exercise.is_evergreen at snapshot time. */
+  is_evergreen: 0 | 1;
 }
 
 export async function insertSessionExercise(
@@ -80,8 +82,8 @@ export async function insertSessionExercise(
   await db.runAsync(
     `INSERT INTO session_exercise
        (id, session_id, exercise_id, ordering,
-        planned_sets, planned_reps, planned_weight_kg, template_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.session_id,
     row.exercise_id,
@@ -89,7 +91,8 @@ export async function insertSessionExercise(
     row.planned_sets,
     row.planned_reps,
     row.planned_weight_kg,
-    row.template_id
+    row.template_id,
+    row.is_evergreen
   );
 }
 
@@ -99,7 +102,7 @@ export async function listSessionExercises(
 ): Promise<SessionExerciseRow[]> {
   return db.getAllAsync<SessionExerciseRow>(
     `SELECT id, session_id, exercise_id, ordering,
-            planned_sets, planned_reps, planned_weight_kg, template_id
+            planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen
        FROM session_exercise
       WHERE session_id = ?
       ORDER BY ordering ASC`,
@@ -118,7 +121,7 @@ export async function listSessionExercisesWithName(
 ): Promise<SessionExerciseRowWithName[]> {
   return db.getAllAsync<SessionExerciseRowWithName>(
     `SELECT se.id, se.session_id, se.exercise_id, se.ordering,
-            se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id,
+            se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id, se.is_evergreen,
             e.name AS exercise_name
        FROM session_exercise se
        JOIN exercise e ON e.id = se.exercise_id
