@@ -26,6 +26,14 @@ export default function RootLayout() {
             name="program/[id]"
             options={{ title: 'Program' }}
           />
+          <Stack.Screen
+            name="exercise/[id]"
+            options={{ title: 'Exercise' }}
+          />
+          <Stack.Screen
+            name="exercise/new"
+            options={{ presentation: 'modal', title: 'New Exercise' }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

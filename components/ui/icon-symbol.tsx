@@ -24,6 +24,7 @@ const MAPPING = {
   'gearshape.fill': 'settings',
   'doc.text': 'description',
   'calendar': 'calendar-today',
+  'dumbbell': 'fitness-center',
 } as IconMapping;
 
 /**

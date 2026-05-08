@@ -34,9 +34,9 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
     db.close();
   });
 
-  it('seeds 7 built-in exercises after v001 + v002', async () => {
+  it('seeds the full Exercise Library after v001 + v002 + v006', async () => {
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(7);
+    expect(exercises).toHaveLength(66);
     const names = exercises.map((e) => e.name).sort();
     expect(names).toContain('Bench Press');
     expect(names).toContain('Back Squat');
@@ -180,9 +180,9 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
     expect(await listSetsBySession(db, 's')).toHaveLength(0);
   });
 
-  it('migration is idempotent — re-running keeps 7 exercises', async () => {
+  it('migration is idempotent — re-running keeps the full Exercise Library', async () => {
     await migrate(db);
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(7);
+    expect(exercises).toHaveLength(66);
   });
 });
