@@ -183,7 +183,7 @@ export function StatsPanel() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>訓練部位概況 · {currentBucket.label}</Text>
         <Text style={styles.cardSubtitle}>顏色 = per-Session 次數分位</Text>
-        <BodyHeatmap mgQuintile={mgQuintile} />
+        <BodyHeatmap mgQuintile={mgQuintile} mgCount={freqByMg} />
         <BodyHeatmapLegend />
         {totalSessionsCurrent === 0 ? (
           <Text style={styles.emptyText}>本期間尚無 Session</Text>

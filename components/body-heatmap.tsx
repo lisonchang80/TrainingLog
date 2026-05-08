@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Text as SvgText } from 'react-native-svg';
 
 import {
   MG_BACK,
@@ -33,6 +33,33 @@ import {
   MG_TRAP,
   MG_TRICEP,
 } from '@/src/db/seed/v006ExerciseLibrary';
+
+// Label coordinates for the front + back SVG views. Hand-picked to sit roughly
+// at each MG region's centre while staying off the silhouette outline.
+interface MgLabel {
+  mg_id: string;
+  short: string; // 1-2 char display
+  x: number;
+  y: number;
+}
+
+const FRONT_LABELS: readonly MgLabel[] = [
+  { mg_id: MG_SHOULDER, short: '肩', x: 50, y: 105 },
+  { mg_id: MG_CHEST, short: '胸', x: 100, y: 122 },
+  { mg_id: MG_BICEP, short: '二頭', x: 50, y: 152 },
+  { mg_id: MG_CORE, short: '核心', x: 100, y: 178 },
+  { mg_id: MG_FOREARM, short: '前臂', x: 53, y: 195 },
+  { mg_id: MG_LEG, short: '腿', x: 82, y: 280 },
+  { mg_id: MG_CALF, short: '小腿', x: 82, y: 360 },
+];
+const BACK_LABELS: readonly MgLabel[] = [
+  { mg_id: MG_TRAP, short: '斜方', x: 100, y: 102 },
+  { mg_id: MG_SHOULDER, short: '肩', x: 50, y: 105 },
+  { mg_id: MG_BACK, short: '背', x: 100, y: 138 },
+  { mg_id: MG_TRICEP, short: '三頭', x: 50, y: 152 },
+  { mg_id: MG_GLUTE, short: '臀', x: 100, y: 230 },
+  { mg_id: MG_LEG, short: '腿', x: 82, y: 285 },
+];
 
 const COLOR_OUTLINE = '#9CA3AF';
 const QUINTILE_COLORS: readonly string[] = [
@@ -52,6 +79,11 @@ export interface BodyHeatmapProps {
    * MGs absent from this map render in zero-grey.
    */
   mgQuintile: Map<string, Quintile>;
+  /**
+   * Optional mg_id → per-Session frequency. When provided, labels render as
+   * "MG · N"; otherwise they show just the MG name.
+   */
+  mgCount?: Map<string, number>;
 }
 
 const fillForMg = (mg: string, mgQuintile: Map<string, Quintile>): string => {
@@ -60,7 +92,38 @@ const fillForMg = (mg: string, mgQuintile: Map<string, Quintile>): string => {
   return QUINTILE_COLORS[q];
 };
 
-function FrontBody({ mgQuintile }: BodyHeatmapProps) {
+function MgLabels({
+  labels,
+  mgCount,
+}: {
+  labels: readonly MgLabel[];
+  mgCount?: Map<string, number>;
+}) {
+  return (
+    <>
+      {labels.map((l) => {
+        const c = mgCount?.get(l.mg_id);
+        const text = c != null && c > 0 ? `${l.short}·${c}` : l.short;
+        return (
+          <SvgText
+            key={`${l.mg_id}-${l.x}-${l.y}`}
+            x={l.x}
+            y={l.y}
+            fontSize={8}
+            fontWeight="700"
+            fill="#1F2937"
+            stroke="#FFFFFF"
+            strokeWidth={0.5}
+            textAnchor="middle">
+            {text}
+          </SvgText>
+        );
+      })}
+    </>
+  );
+}
+
+function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
   const f = (mg: string) => fillForMg(mg, mgQuintile);
   return (
     <Svg viewBox="0 0 200 400" width={140} height={280}>
@@ -143,11 +206,12 @@ function FrontBody({ mgQuintile }: BodyHeatmapProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
+      <MgLabels labels={FRONT_LABELS} mgCount={mgCount} />
     </Svg>
   );
 }
 
-function BackBody({ mgQuintile }: BodyHeatmapProps) {
+function BackBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
   const f = (mg: string) => fillForMg(mg, mgQuintile);
   return (
     <Svg viewBox="0 0 200 400" width={140} height={280}>
@@ -237,20 +301,21 @@ function BackBody({ mgQuintile }: BodyHeatmapProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
+      <MgLabels labels={BACK_LABELS} mgCount={mgCount} />
     </Svg>
   );
 }
 
-export function BodyHeatmap({ mgQuintile }: BodyHeatmapProps) {
+export function BodyHeatmap({ mgQuintile, mgCount }: BodyHeatmapProps) {
   return (
     <View style={styles.row}>
       <View style={styles.column}>
         <Text style={styles.label}>正面</Text>
-        <FrontBody mgQuintile={mgQuintile} />
+        <FrontBody mgQuintile={mgQuintile} mgCount={mgCount} />
       </View>
       <View style={styles.column}>
         <Text style={styles.label}>背面</Text>
-        <BackBody mgQuintile={mgQuintile} />
+        <BackBody mgQuintile={mgQuintile} mgCount={mgCount} />
       </View>
     </View>
   );
