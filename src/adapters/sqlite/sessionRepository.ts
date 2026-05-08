@@ -3,12 +3,30 @@ import type { Session } from '../../domain/session/types';
 
 export async function createSession(
   db: Database,
-  args: { id: string; started_at: number }
+  args: { id: string; started_at: number; bodyweight_snapshot_kg?: number | null }
 ): Promise<void> {
   await db.runAsync(
-    `INSERT INTO session (id, started_at) VALUES (?, ?)`,
+    `INSERT INTO session (id, started_at, bodyweight_snapshot_kg) VALUES (?, ?, ?)`,
     args.id,
-    args.started_at
+    args.started_at,
+    args.bodyweight_snapshot_kg ?? null
+  );
+}
+
+/**
+ * Set the bodyweight snapshot for a session. Caller is responsible for
+ * enforcing the lock semantics (see `bodyMetricManager.canWriteBwSnapshot`) —
+ * this function blindly overwrites the column. UI gates this behind
+ * "session is idle" or "snapshot is still null".
+ */
+export async function setSessionBwSnapshot(
+  db: Database,
+  args: { id: string; bodyweight_snapshot_kg: number | null }
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session SET bodyweight_snapshot_kg = ? WHERE id = ?`,
+    args.bodyweight_snapshot_kg,
+    args.id
   );
 }
 
