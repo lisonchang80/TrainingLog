@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
+import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   createSession,
   endSession,
@@ -29,7 +30,13 @@ import {
   recordSetInSession,
   type SetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
+import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import type { Exercise } from '@/src/domain/exercise/types';
+import {
+  todayCell,
+  utcMsToIsoDate,
+} from '@/src/domain/program/programManager';
+import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
 import {
   IDLE,
   canRecordSet,
@@ -61,14 +68,25 @@ export default function TodayScreen() {
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
   const [busy, setBusy] = useState(false);
+  const [activeProgram, setActiveProgram] = useState<ProgramWithCells | null>(null);
+  const [templatesById, setTemplatesById] = useState<Record<string, TemplateSummary>>({});
+  const [programCellToday, setProgramCellToday] = useState<ProgramCell | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active] = await Promise.all([
+    const [exs, active, prog, tpls] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
+      getActiveProgram(db),
+      listTemplates(db),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
+    setActiveProgram(prog);
+    const tplMap: Record<string, TemplateSummary> = {};
+    for (const t of tpls) tplMap[t.id] = t;
+    setTemplatesById(tplMap);
+    const cell = todayCell({ active: prog, today: utcMsToIsoDate(Date.now()) });
+    setProgramCellToday(cell);
     if (active) {
       const [sets, planned] = await Promise.all([
         listSetsBySession(db, active.id),
@@ -177,11 +195,32 @@ export default function TodayScreen() {
     }
   };
 
+  const todayTemplate = programCellToday?.template_id
+    ? templatesById[programCellToday.template_id] ?? null
+    : null;
+  const programBanner = activeProgram ? (
+    <View style={styles.programBanner}>
+      <Text style={styles.programBannerName} numberOfLines={1}>
+        {activeProgram.program.name}
+        {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
+      </Text>
+      {programCellToday ? (
+        <Text style={styles.programBannerCell}>
+          今天：{todayTemplate ? todayTemplate.name : '休息日'}
+          {programCellToday.sub_tag ? ` · ${programCellToday.sub_tag}` : ''}
+        </Text>
+      ) : (
+        <Text style={styles.programBannerCell}>今天不在 Program 範圍內</Text>
+      )}
+    </View>
+  ) : null;
+
   if (sessionState.status === 'idle') {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.idleBody}>
           <Text style={styles.heading}>Today</Text>
+          {programBanner}
           <Text style={styles.idleHint}>No session in progress.</Text>
           <Pressable
             accessibilityRole="button"
@@ -210,6 +249,7 @@ export default function TodayScreen() {
         style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
           <Text style={styles.heading}>Today</Text>
+          {programBanner}
           <Text style={styles.subhead}>
             Session in progress · {setsInSession.length} set
             {setsInSession.length === 1 ? '' : 's'}
@@ -408,4 +448,14 @@ const styles = StyleSheet.create({
   planText: { flex: 1 },
   planName: { fontSize: 15, fontWeight: '600' },
   planDetails: { fontSize: 12, opacity: 0.7 },
+  programBanner: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: 'rgba(10,126,164,0.12)',
+    gap: 4,
+    marginVertical: 8,
+  },
+  programBannerName: { fontSize: 14, fontWeight: '700', color: '#0a7ea4' },
+  programBannerCell: { fontSize: 13 },
 });

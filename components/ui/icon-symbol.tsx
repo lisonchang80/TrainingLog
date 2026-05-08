@@ -23,6 +23,7 @@ const MAPPING = {
   'figure.stand': 'accessibility',
   'gearshape.fill': 'settings',
   'doc.text': 'description',
+  'calendar': 'calendar-today',
 } as IconMapping;
 
 /**
