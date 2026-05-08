@@ -83,7 +83,7 @@ export async function recordSetInSession(
     uuid: () => string;
     now?: () => number;
   }
-): Promise<{ set_id: string; ordering: number }> {
+): Promise<{ set_id: string; ordering: number; created_at: number }> {
   const err = validateRecordSet(args.input);
   if (err) throw new Error(err);
 
@@ -108,7 +108,7 @@ export async function recordSetInSession(
     created_at: ts,
   });
 
-  return { set_id, ordering };
+  return { set_id, ordering, created_at: ts };
 }
 
 /**
