@@ -1,6 +1,6 @@
 ---
 name: Ship Slice
-description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-4.
+description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-5.
 ---
 
 # Ship Slice
@@ -141,15 +141,23 @@ If the merge succeeds on GitHub but local cleanup fails (e.g. worktree directory
 
 ```bash
 git worktree remove ~/code/TrainingLog-worktrees/slice-NN-<kebab-name>
-git push origin --delete slice/NN-<kebab-name>   # if remote still has it
 git branch -D slice/NN-<kebab-name>              # -D is required: squash creates a different SHA, so -d says "not fully merged"
-git fetch --prune && git pull
+git pull --ff-only origin main
+```
+
+**Then ALWAYS verify the remote branch was deleted** — `gh pr merge --delete-branch` aborts the WHOLE delete step (local AND remote) when local fails, but its log only mentions the local error so it _looks_ like remote was handled. Slice 5 found `remotes/origin/slice/04-saveback` still alive a week after slice 4 supposedly cleaned up, because slice 4 trusted "merge succeeded" without checking remote.
+
+```bash
+git ls-remote origin 'refs/heads/slice/*'   # should be empty post-cleanup
+# if anything is listed, delete it (one-shot, multiple branches OK):
+git push origin --delete slice/NN-<kebab-name> [slice/MM-other-leftover ...]
+git fetch --prune
 ```
 
 Sanity check at the end:
 ```bash
 git worktree list   # should show only the main repo
-git branch -a       # should show only main + remotes/origin/main
+git branch -a       # should show only main + remotes/origin/main (NO slice/* anywhere)
 git log --oneline -3   # newest commit = the squashed slice merge
 ```
 
