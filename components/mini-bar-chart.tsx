@@ -36,7 +36,11 @@ export interface MiniBarChartProps {
 
 const PAD_TOP = 16;
 const PAD_BOTTOM = 28; // extra space for rotated X-axis labels
-const PAD_X = 4;
+// Asymmetric horizontal padding: left needs more room because rotated -30°
+// X-axis labels with textAnchor="end" extend up-and-left from each tick.
+// Without this, the first label (e.g. "2021") gets clipped to "021".
+const PAD_LEFT = 22;
+const PAD_RIGHT = 4;
 const AVG_LINE_COLOR = '#EF4444';
 const TRACK_COLOR = '#E5E7EB';
 
@@ -51,7 +55,7 @@ export function MiniBarChart({
   showBarValues = false,
 }: MiniBarChartProps) {
   const usableHeight = height - PAD_TOP - PAD_BOTTOM;
-  const usableWidth = width - PAD_X * 2;
+  const usableWidth = width - PAD_LEFT - PAD_RIGHT;
   const max = Math.max(
     ...data.map((d) => d.value),
     avgLine ?? 0,
@@ -69,16 +73,16 @@ export function MiniBarChart({
       <Svg width={width} height={height}>
         {/* Baseline */}
         <Line
-          x1={PAD_X}
+          x1={PAD_LEFT}
           y1={PAD_TOP + usableHeight}
-          x2={width - PAD_X}
+          x2={width - PAD_RIGHT}
           y2={PAD_TOP + usableHeight}
           stroke={TRACK_COLOR}
           strokeWidth={1}
         />
         {/* Bars */}
         {data.map((d, i) => {
-          const x = PAD_X + i * barSlot + barInset;
+          const x = PAD_LEFT + i * barSlot + barInset;
           const y = yFor(d.value);
           const h = PAD_TOP + usableHeight - y;
           if (d.value <= 0) return null;
@@ -97,9 +101,9 @@ export function MiniBarChart({
         {/* Average line */}
         {avgLine != null && avgLine > 0 ? (
           <Line
-            x1={PAD_X}
+            x1={PAD_LEFT}
             y1={yFor(avgLine)}
-            x2={width - PAD_X}
+            x2={width - PAD_RIGHT}
             y2={yFor(avgLine)}
             stroke={AVG_LINE_COLOR}
             strokeWidth={1.2}
@@ -111,7 +115,7 @@ export function MiniBarChart({
             "20..."). textAnchor="end" + rotate around (cx, cy) gives a
             tick-anchored, upward-tilted label. */}
         {data.map((d, i) => {
-          const cx = PAD_X + i * barSlot + barSlot / 2;
+          const cx = PAD_LEFT + i * barSlot + barSlot / 2;
           const cy = PAD_TOP + usableHeight + 14;
           return (
             <SvgText
@@ -129,7 +133,7 @@ export function MiniBarChart({
       </Svg>
       {/* Optional bar value labels */}
       {showBarValues ? (
-        <View style={[styles.barValueRow, { width: usableWidth, left: PAD_X }]}>
+        <View style={[styles.barValueRow, { width: usableWidth, left: PAD_LEFT }]}>
           {data.map((d, i) => (
             <Text key={i} style={styles.barValueLabel} numberOfLines={1}>
               {d.value > 0 ? formatBarValue(d.value) : ''}
