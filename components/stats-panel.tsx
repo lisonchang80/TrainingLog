@@ -1,12 +1,16 @@
 /**
- * Stats sub-tab — period selector + body heatmap + capacity bars + duration.
+ * Stats sub-tab — period selector + body heatmap + capacity histograms +
+ * duration histogram.
  *
- * Slice 9 / ADR-0009. v1 period selector covers 年/月/日; 自選 falls back to
- * all-time (date-range picker is a v1.5+ polish item).
+ * Slice 9 / ADR-0009 + smoke feedback #5/#6:
+ *   - Period selector covers 年/月/月 (replaced 日/自選)
+ *   - Body heatmap colours by per-Session frequency in the CURRENT period
+ *   - Each MG renders its own 6-bar histogram (capacity over -5..0)
+ *   - Duration is a 6-bar histogram with a horizontal average line
  *
- * Heatmap colour: per-Session frequency mapped to 5 quintile colour stops
- * (zero stays grey). Capacity bars: per-MG total volume, sorted desc, bar
- * width proportional to the period's max capacity.
+ * Implementation: load a single wide range (-5..0 periods) once per period
+ * change, then derive both the heatmap (current period only) and the
+ * histograms (all 6 buckets) from the same record set.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
@@ -14,20 +18,25 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
 import { BodyHeatmap, BodyHeatmapLegend, type Quintile } from '@/components/body-heatmap';
+import { MiniBarChart } from '@/components/mini-bar-chart';
 import { loadStatsSetRecords } from '@/src/adapters/sqlite/statsRepository';
 import {
-  durationStatsOverPeriod,
-  mgCapacityOverPeriod,
+  bucketBoundaries,
+  capacityHistogramByMg,
+  durationHistogram,
   mgFrequencyOverPeriod,
   percentileBucketize,
 } from '@/src/domain/stats/statsEngine';
-import type { StatsSetRecord } from '@/src/domain/stats/types';
+import type {
+  CapacityBucket,
+  DurationBucket,
+  PeriodScale,
+  StatsSetRecord,
+} from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
 
-type PeriodKey = 'year' | 'month' | 'week';
-
 interface PeriodChoice {
-  key: PeriodKey;
+  key: PeriodScale;
   label: string;
 }
 
@@ -37,45 +46,38 @@ const PERIOD_CHOICES: readonly PeriodChoice[] = [
   { key: 'week', label: '週' },
 ];
 
-function rangeFor(period: PeriodKey, now = new Date()): { start_ms: number; end_ms: number } {
-  if (period === 'year') {
-    const start = new Date(now.getFullYear(), 0, 1).getTime();
-    const end = new Date(now.getFullYear() + 1, 0, 1).getTime();
-    return { start_ms: start, end_ms: end };
-  }
-  if (period === 'month') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
-    return { start_ms: start, end_ms: end };
-  }
-  // 'week' — Monday 00:00 to next Monday 00:00 (ISO-style week, common in TW)
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay(); // 0=Sun..6=Sat
-  const diffToMon = dow === 0 ? -6 : 1 - dow;
-  d.setDate(d.getDate() + diffToMon);
-  const start = d.getTime();
-  const end = start + 7 * 24 * 60 * 60 * 1000;
-  return { start_ms: start, end_ms: end };
-}
-
-function formatDuration(ms: number): string {
+function formatDurationShort(ms: number): string {
   if (ms <= 0) return '—';
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
-  if (h === 0) return `${m} 分`;
-  return `${h} 時 ${m} 分`;
+  if (h === 0) return `${m}m`;
+  return `${h}h${m > 0 ? ` ${m}m` : ''}`;
+}
+
+function formatCapacityShort(n: number): string {
+  if (n === 0) return '';
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(Math.round(n));
 }
 
 export function StatsPanel() {
   const db = useDatabase();
-  const [period, setPeriod] = useState<PeriodKey>('week');
+  const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
+  // We freeze "now" per load so all derived data shares the same boundaries,
+  // and avoid re-render skew between heatmap + histograms.
+  const [nowSnapshot, setNowSnapshot] = useState<number>(() => Date.now());
 
   const load = useCallback(async () => {
-    const range = rangeFor(period);
-    const recs = await loadStatsSetRecords(db, range);
+    const now = new Date();
+    const boundaries = bucketBoundaries(period, now);
+    const wide = {
+      start_ms: boundaries[0].start_ms,
+      end_ms: boundaries[5].end_ms,
+    };
+    const recs = await loadStatsSetRecords(db, wide);
+    setNowSnapshot(now.getTime());
     setRecords(recs);
   }, [db, period]);
 
@@ -85,13 +87,24 @@ export function StatsPanel() {
     }, [load])
   );
 
-  // Derived stats
-  const freqByMg = useMemo(() => mgFrequencyOverPeriod(records), [records]);
-  const capacityByMg = useMemo(() => mgCapacityOverPeriod(records), [records]);
-  const duration = useMemo(() => durationStatsOverPeriod(records), [records]);
+  const now = useMemo(() => new Date(nowSnapshot), [nowSnapshot]);
+  const boundaries = useMemo(() => bucketBoundaries(period, now), [period, now]);
+  const currentBucket = boundaries[5];
 
-  // Heatmap quintiles. 0-frequency MGs stay zero (grey); non-zero values are
-  // bucketed into 5 quintiles.
+  // ---- Heatmap (current period only) ----------------------------------------
+  const currentBucketRecords = useMemo(
+    () =>
+      records.filter(
+        (r) =>
+          r.session_started_at >= currentBucket.start_ms &&
+          r.session_started_at < currentBucket.end_ms
+      ),
+    [records, currentBucket]
+  );
+  const freqByMg = useMemo(
+    () => mgFrequencyOverPeriod(currentBucketRecords),
+    [currentBucketRecords]
+  );
   const mgQuintile = useMemo(() => {
     const out = new Map<string, Quintile>();
     const nonZeroMgs: { mg: string; count: number }[] = [];
@@ -104,28 +117,47 @@ export function StatsPanel() {
     nonZeroMgs.forEach((x, i) => out.set(x.mg, buckets[i] as Quintile));
     return out;
   }, [freqByMg]);
+  const totalSessionsCurrent = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of currentBucketRecords) s.add(r.session_id);
+    return s.size;
+  }, [currentBucketRecords]);
 
-  const maxCapacity = useMemo(() => {
-    let max = 0;
-    for (const v of capacityByMg.values()) if (v > max) max = v;
-    return max;
-  }, [capacityByMg]);
+  // ---- Capacity histograms per MG (-5..0) ----------------------------------
+  const capacityByMg = useMemo(
+    () => capacityHistogramByMg(records, period, now),
+    [records, period, now]
+  );
+  // Order MGs by total 6-period capacity desc, but ALWAYS show all 11 (zero
+  // MGs render flat — user wants a visual catalogue of what's missing too).
+  const mgRows = useMemo(() => {
+    return MUSCLE_GROUP_SEEDS.map((mg) => {
+      const buckets =
+        capacityByMg.get(mg.id) ??
+        boundaries.map<CapacityBucket>((b) => ({
+          offset: b.offset,
+          label: b.label,
+          capacity: 0,
+        }));
+      const total = buckets.reduce((s, b) => s + b.capacity, 0);
+      const avg = total / 6;
+      return { mg_id: mg.id, mg_name: mg.name, buckets, total, avg };
+    }).sort((a, b) => b.total - a.total);
+  }, [capacityByMg, boundaries]);
 
-  const sortedCapacity = useMemo(() => {
-    return MUSCLE_GROUP_SEEDS.map((mg) => ({
-      id: mg.id,
-      name: mg.name,
-      capacity: capacityByMg.get(mg.id) ?? 0,
-    }))
-      .filter((x) => x.capacity > 0)
-      .sort((a, b) => b.capacity - a.capacity);
-  }, [capacityByMg]);
-
-  const totalSessions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const r of records) seen.add(r.session_id);
-    return seen.size;
-  }, [records]);
+  // ---- Duration histogram (-5..0) ------------------------------------------
+  const durationBuckets: DurationBucket[] = useMemo(
+    () => durationHistogram(records, period, now),
+    [records, period, now]
+  );
+  const durationAvgMs = useMemo(() => {
+    const total = durationBuckets.reduce((s, b) => s + b.total_ms, 0);
+    return total / 6;
+  }, [durationBuckets]);
+  const durationTotalSessions = useMemo(
+    () => durationBuckets.reduce((s, b) => s + b.session_count, 0),
+    [durationBuckets]
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
@@ -149,57 +181,61 @@ export function StatsPanel() {
 
       {/* Body heatmap */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>訓練部位概況</Text>
+        <Text style={styles.cardTitle}>訓練部位概況 · {currentBucket.label}</Text>
         <Text style={styles.cardSubtitle}>顏色 = per-Session 次數分位</Text>
         <BodyHeatmap mgQuintile={mgQuintile} />
         <BodyHeatmapLegend />
-        {totalSessions === 0 ? (
+        {totalSessionsCurrent === 0 ? (
           <Text style={styles.emptyText}>本期間尚無 Session</Text>
         ) : null}
       </View>
 
-      {/* Capacity bars */}
+      {/* Per-MG capacity histograms */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>各部位容量</Text>
-        {sortedCapacity.length === 0 ? (
-          <Text style={styles.emptyText}>—</Text>
-        ) : (
-          sortedCapacity.map((row) => {
-            const widthPct = maxCapacity > 0 ? (row.capacity / maxCapacity) * 100 : 0;
-            return (
-              <View key={row.id} style={styles.capacityRow}>
-                <Text style={styles.capacityName}>{row.name}</Text>
-                <View style={styles.capacityBarTrack}>
-                  <View style={[styles.capacityBarFill, { width: `${widthPct}%` }]} />
-                </View>
-                <Text style={styles.capacityValue}>
-                  {row.capacity.toLocaleString('en-US')}
+        <Text style={styles.cardTitle}>各部位容量 · 近 6 期</Text>
+        <Text style={styles.cardSubtitle}>
+          每格一個部位 · 紅虛線 = 6 期平均
+        </Text>
+        <View style={styles.mgGrid}>
+          {mgRows.map((row) => (
+            <View key={row.mg_id} style={styles.mgCell}>
+              <View style={styles.mgCellHeader}>
+                <Text style={styles.mgCellName}>{row.mg_name}</Text>
+                <Text style={styles.mgCellTotal}>
+                  {formatCapacityShort(row.total) || '—'}
                 </Text>
               </View>
-            );
-          })
-        )}
+              <MiniBarChart
+                data={row.buckets.map((b) => ({ label: b.label, value: b.capacity }))}
+                avgLine={row.avg}
+                width={150}
+                height={70}
+                barColor="#6366F1"
+                formatAvg={formatCapacityShort}
+              />
+            </View>
+          ))}
+        </View>
       </View>
 
-      {/* Duration */}
+      {/* Duration histogram */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>運動時長</Text>
-        <View style={styles.durationRow}>
-          <View style={styles.durationCell}>
-            <Text style={styles.durationLabel}>總時長</Text>
-            <Text style={styles.durationValue}>{formatDuration(duration.total_ms)}</Text>
-          </View>
-          <View style={styles.durationCell}>
-            <Text style={styles.durationLabel}>平均</Text>
-            <Text style={styles.durationValue}>{formatDuration(duration.avg_ms)}</Text>
-          </View>
-          <View style={styles.durationCell}>
-            <Text style={styles.durationLabel}>最長</Text>
-            <Text style={styles.durationValue}>{formatDuration(duration.longest_ms)}</Text>
-          </View>
-        </View>
+        <Text style={styles.cardTitle}>運動時長 · 近 6 期</Text>
+        <Text style={styles.cardSubtitle}>
+          每根長條 = 該期累計時長 · 紅虛線 = 6 期平均
+        </Text>
+        <MiniBarChart
+          data={durationBuckets.map((b) => ({ label: b.label, value: b.total_ms }))}
+          avgLine={durationAvgMs}
+          width={320}
+          height={150}
+          barColor="#10B981"
+          formatAvg={formatDurationShort}
+          formatBarValue={formatDurationShort}
+          showBarValues
+        />
         <Text style={styles.durationFootnote}>
-          {duration.session_count} 次已完成 Session
+          6 期共 {durationTotalSessions} 次已完成 Session
         </Text>
       </View>
     </ScrollView>
@@ -233,20 +269,26 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700' },
   cardSubtitle: { fontSize: 12, color: '#6B7280' },
   emptyText: { fontSize: 13, color: '#6B7280', textAlign: 'center', paddingVertical: 16 },
-  capacityRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  capacityName: { width: 56, fontSize: 13, fontWeight: '500' },
-  capacityBarTrack: {
-    flex: 1,
-    height: 10,
-    backgroundColor: 'rgba(127,127,127,0.18)',
-    borderRadius: 4,
-    overflow: 'hidden',
+  mgGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 8,
   },
-  capacityBarFill: { height: '100%', backgroundColor: '#6366F1' },
-  capacityValue: { width: 64, textAlign: 'right', fontSize: 12, fontVariant: ['tabular-nums'] },
-  durationRow: { flexDirection: 'row', gap: 12 },
-  durationCell: { flex: 1, alignItems: 'center', gap: 4 },
-  durationLabel: { fontSize: 12, color: '#6B7280' },
-  durationValue: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  durationFootnote: { fontSize: 11, color: '#6B7280', textAlign: 'center', marginTop: 4 },
+  mgCell: {
+    width: '48%',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 8,
+    gap: 4,
+  },
+  mgCellHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  mgCellName: { fontSize: 13, fontWeight: '700' },
+  mgCellTotal: { fontSize: 11, color: '#6B7280', fontVariant: ['tabular-nums'] },
+  durationFootnote: {
+    fontSize: 11,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
+  },
 });
