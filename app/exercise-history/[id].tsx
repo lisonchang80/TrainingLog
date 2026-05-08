@@ -36,6 +36,7 @@ export default function ExerciseHistoryScreen() {
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
   const [bucketFilter, setBucketFilter] = useState<BucketKey | 'all'>('all');
+  const [chartMetric, setChartMetric] = useState<'weight' | 'volume'>('weight');
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -83,7 +84,10 @@ export default function ExerciseHistoryScreen() {
       .filter((s) => s.sets.length > 0);
   }, [sessions, bucketFilter]);
 
-  const trendPoints = useMemo(() => buildTrendPoints(sessions, header), [sessions, header]);
+  const trendPoints = useMemo(
+    () => buildTrendPoints(filteredSessions, header, chartMetric),
+    [filteredSessions, header, chartMetric]
+  );
 
   if (!id) return null;
 
@@ -122,7 +126,8 @@ export default function ExerciseHistoryScreen() {
               {BUCKETS.map((b) => (
                 <FilterChip
                   key={b.key}
-                  label={`${b.min}${b.max ?? '+'}`}
+                  label={bucketLabel(b.key)}
+                  sublabel={`(${b.max == null ? `${b.min}+` : `${b.min}~${b.max}`}RM)`}
                   active={bucketFilter === b.key}
                   onPress={() => setBucketFilter(b.key)}
                 />
@@ -132,8 +137,42 @@ export default function ExerciseHistoryScreen() {
             {/* Trend chart */}
             {trendPoints.length >= 2 ? (
               <View style={styles.chartCard}>
-                <Text style={styles.cardTitle}>趨勢（每次 Session 最重一組）</Text>
-                <TrendChart points={trendPoints} unit={unit} />
+                <View style={styles.chartHeader}>
+                  <Text style={styles.cardTitle}>
+                    趨勢（每次 Session{chartMetric === 'weight' ? '最重一組' : '容量最大一組'}）
+                  </Text>
+                  <View style={styles.metricToggle}>
+                    <Pressable
+                      onPress={() => setChartMetric('weight')}
+                      style={[
+                        styles.metricToggleBtn,
+                        chartMetric === 'weight' && styles.metricToggleBtnActive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.metricToggleText,
+                          chartMetric === 'weight' && styles.metricToggleTextActive,
+                        ]}>
+                        重量
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setChartMetric('volume')}
+                      style={[
+                        styles.metricToggleBtn,
+                        chartMetric === 'volume' && styles.metricToggleBtnActive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.metricToggleText,
+                          chartMetric === 'volume' && styles.metricToggleTextActive,
+                        ]}>
+                        容量
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+                <TrendChart points={trendPoints} unit={unit} metric={chartMetric} />
               </View>
             ) : null}
 
@@ -211,10 +250,12 @@ function HeaderCard({
 
 function FilterChip({
   label,
+  sublabel,
   active,
   onPress,
 }: {
   label: string;
+  sublabel?: string;
   active: boolean;
   onPress: () => void;
 }) {
@@ -229,6 +270,15 @@ function FilterChip({
       <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
         {label}
       </Text>
+      {sublabel ? (
+        <Text
+          style={[
+            styles.filterChipSubtext,
+            active && styles.filterChipSubtextActive,
+          ]}>
+          {sublabel}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -320,9 +370,11 @@ function SessionRow({
 function TrendChart({
   points,
   unit,
+  metric,
 }: {
   points: TrendPoint[];
   unit: UnitPreference;
+  metric: 'weight' | 'volume';
 }) {
   const W = 320;
   const H = 160;
@@ -332,7 +384,7 @@ function TrendChart({
   const PR = 12;
 
   const xs = points.map((p) => p.t);
-  const ys = points.map((p) => p.weight);
+  const ys = points.map((p) => p.value);
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
   const yMin = Math.min(...ys);
@@ -345,8 +397,10 @@ function TrendChart({
     H - PB - ((v - yMin) / ySpan) * (H - PT - PB);
 
   const polyline = points
-    .map((p) => `${scaleX(p.t).toFixed(1)},${scaleY(p.weight).toFixed(1)}`)
+    .map((p) => `${scaleX(p.t).toFixed(1)},${scaleY(p.value).toFixed(1)}`)
     .join(' ');
+
+  const fmt = metric === 'weight' ? formatPRWeight : formatVolume;
 
   return (
     <View>
@@ -363,7 +417,7 @@ function TrendChart({
           <Circle
             key={idx}
             cx={scaleX(p.t)}
-            cy={scaleY(p.weight)}
+            cy={scaleY(p.value)}
             r={3.5}
             fill="#0a7ea4"
           />
@@ -371,7 +425,7 @@ function TrendChart({
       </Svg>
       <View style={styles.chartLegend}>
         <Text style={styles.chartLegendText}>
-          範圍 {formatPRWeight(yMin, unit)} – {formatPRWeight(yMax, unit)}
+          範圍 {fmt(yMin, unit)} – {fmt(yMax, unit)}
         </Text>
       </View>
     </View>
@@ -380,28 +434,47 @@ function TrendChart({
 
 interface TrendPoint {
   t: number;
-  weight: number;
+  value: number;
 }
 
 function buildTrendPoints(
   sessions: ExerciseHistorySession[],
-  header: ExerciseHistoryHeader | null
+  header: ExerciseHistoryHeader | null,
+  metric: 'weight' | 'volume'
 ): TrendPoint[] {
   if (!header) return [];
   const points: TrendPoint[] = [];
   // Iterate chronologically (sessions list is DESC; reverse for chart)
   const ordered = [...sessions].reverse();
   for (const sess of ordered) {
-    let topEff: number | null = null;
-    for (const set of sess.sets) {
-      if (set.weight_kg == null || set.reps == null) continue;
-      const eff = effectiveLoad(set.weight_kg, header.load_type, set.bw_snapshot_kg);
-      if (eff == null) continue;
-      if (header.load_type === 'assisted' && eff <= 0) continue;
-      if (topEff == null || eff > topEff) topEff = eff;
-    }
-    if (topEff != null) {
-      points.push({ t: sess.session_started_at, weight: topEff });
+    if (metric === 'weight') {
+      let topEff: number | null = null;
+      for (const set of sess.sets) {
+        if (set.weight_kg == null || set.reps == null) continue;
+        const eff = effectiveLoad(set.weight_kg, header.load_type, set.bw_snapshot_kg);
+        if (eff == null) continue;
+        if (header.load_type === 'assisted' && eff <= 0) continue;
+        if (topEff == null || eff > topEff) topEff = eff;
+      }
+      if (topEff != null) {
+        points.push({ t: sess.session_started_at, value: topEff });
+      }
+    } else {
+      // volume = highest per-set volume in this session (symmetric with weight mode)
+      let topVol: number | null = null;
+      for (const set of sess.sets) {
+        const v = setVolume({
+          weight_kg: set.weight_kg,
+          reps: set.reps,
+          load_type: header.load_type,
+          bw_snapshot_kg: set.bw_snapshot_kg,
+        });
+        if (v == null) continue;
+        if (topVol == null || v > topVol) topVol = v;
+      }
+      if (topVol != null) {
+        points.push({ t: sess.session_started_at, value: topVol });
+      }
     }
   }
   return points;
@@ -447,19 +520,38 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 999,
+    borderRadius: 16,
     backgroundColor: 'rgba(127,127,127,0.12)',
+    alignItems: 'center',
+    minWidth: 60,
   },
   filterChipActive: { backgroundColor: '#0a7ea4' },
-  filterChipText: { fontSize: 12, fontWeight: '500' },
+  filterChipText: { fontSize: 12, fontWeight: '600' },
   filterChipTextActive: { color: 'white' },
+  filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
+  filterChipSubtextActive: { color: 'white', opacity: 0.85 },
   chartCard: {
     padding: 12,
     borderRadius: 12,
     backgroundColor: 'rgba(127,127,127,0.06)',
     gap: 8,
   },
-  cardTitle: { fontSize: 14, fontWeight: '600' },
+  cardTitle: { fontSize: 14, fontWeight: '600', flex: 1 },
+  chartHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  metricToggle: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    padding: 2,
+  },
+  metricToggleBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+  },
+  metricToggleBtnActive: { backgroundColor: '#0a7ea4' },
+  metricToggleText: { fontSize: 12, fontWeight: '500' },
+  metricToggleTextActive: { color: 'white' },
   chartLegend: { flexDirection: 'row', justifyContent: 'flex-end' },
   chartLegendText: { fontSize: 11, opacity: 0.6 },
   sessionCard: {

@@ -65,7 +65,7 @@ import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { detectPRBreaks } from '@/src/domain/pr/prEngine';
 import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
-import type { PRDelta } from '@/src/domain/pr/types';
+import type { BucketKey, PRDelta } from '@/src/domain/pr/types';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -335,6 +335,9 @@ export default function TodayScreen() {
     try {
       const ended_at = Date.now();
       await endSession(db, { id: session_id, ended_at });
+      // Clear PR banner so it doesn't bleed into the next session.
+      setLastPRDelta(null);
+      setLastPRExerciseName('');
       // Validate the transition then redirect.
       endState(sessionState, ended_at);
       // If this Session was started from a Template (plan rows have a
@@ -666,14 +669,27 @@ export default function TodayScreen() {
                   <Text style={styles.linkBtnText}>關閉</Text>
                 </Pressable>
               </View>
-              {sortBreaksForDisplay(lastPRDelta.breaks).map((b, idx) => (
-                <Text key={`${b.bucket}-${b.type}-${idx}`} style={styles.prBannerLine}>
-                  {bucketLabel(b.bucket)} · {b.type === 'weight' ? '重量' : '容量'} PR
-                  {b.prior_best == null
-                    ? '（第一次）'
-                    : ` · 從 ${formatPRDeltaValue(b.prior_best, b.type, unit)} → ${formatPRDeltaValue(b.new_value, b.type, unit)}`}
-                </Text>
-              ))}
+              {(() => {
+                const sorted = sortBreaksForDisplay(lastPRDelta.breaks);
+                let prevBucket: BucketKey | null = null;
+                return sorted.map((b, idx) => {
+                  const showBucket = b.bucket !== prevBucket;
+                  prevBucket = b.bucket;
+                  return (
+                    <View key={`${b.bucket}-${b.type}-${idx}`}>
+                      {showBucket ? (
+                        <Text style={styles.prBannerBucket}>{bucketLabel(b.bucket)}</Text>
+                      ) : null}
+                      <Text style={styles.prBannerLine}>
+                        · {b.type === 'weight' ? '重量' : '容量'} PR
+                        {b.prior_best == null
+                          ? '（第一次）'
+                          : ` · 從 ${formatPRDeltaValue(b.prior_best, b.type, unit)} → ${formatPRDeltaValue(b.new_value, b.type, unit)}`}
+                      </Text>
+                    </View>
+                  );
+                });
+              })()}
               {lastPRDelta.is_all_time_weight_pr ? (
                 <Text style={styles.prBannerAllTime}>★ 全紀錄重量 PR</Text>
               ) : null}
@@ -884,6 +900,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   prBannerTitle: { fontSize: 15, fontWeight: '700' },
-  prBannerLine: { fontSize: 13 },
+  prBannerBucket: { fontSize: 13, fontWeight: '700', color: '#b35900', marginTop: 2 },
+  prBannerLine: { fontSize: 13, marginLeft: 6 },
   prBannerAllTime: { fontSize: 12, fontWeight: '700', color: '#b35900' },
 });
