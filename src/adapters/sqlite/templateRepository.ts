@@ -17,11 +17,18 @@ export interface TemplateRow {
   name: string;
   created_at: number;
   updated_at: number;
+  /** ADR-0003: nullable. NULL = 自由 (free) template; non-null = attached to a Program. */
+  program_id: string | null;
+  /** ADR-0003: nullable per-Template 副標籤; together with `(name, program_id)` forms the identity triple. */
+  sub_tag: string | null;
 }
 
 export interface TemplateSummary extends TemplateRow {
   exerciseCount: number;
 }
+
+/** Classification derived from (program_id, sub_tag), per ADR-0003. */
+export type TemplateKind = 'main' | 'sub' | 'free';
 
 export interface TemplateExerciseRow {
   id: string;
@@ -39,12 +46,58 @@ export interface TemplateExerciseRow {
 export async function listTemplates(db: Database): Promise<TemplateSummary[]> {
   return db.getAllAsync<TemplateSummary>(
     `SELECT t.id, t.name, t.created_at, t.updated_at,
+            t.program_id, t.sub_tag,
             COUNT(te.id) AS exerciseCount
        FROM template t
        LEFT JOIN template_exercise te ON te.template_id = t.id
       GROUP BY t.id
       ORDER BY t.updated_at DESC`
   );
+}
+
+/**
+ * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
+ * (name, program_id, sub_tag) triple becomes the Template's new identity.
+ * Caller should ensure (name, program_id, sub_tag) is unique within the DB.
+ */
+export async function attachTemplateToProgram(
+  db: Database,
+  args: {
+    template_id: string;
+    program_id: string | null;
+    sub_tag: string | null;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.runAsync(
+    `UPDATE template SET program_id = ?, sub_tag = ?, updated_at = ? WHERE id = ?`,
+    args.program_id,
+    args.sub_tag,
+    ts,
+    args.template_id
+  );
+}
+
+/**
+ * Classify a template as main / sub / free.
+ *   - free: no program_id
+ *   - sub:  program_id set AND another template in the same program shares this name
+ *   - main: program_id set AND it's the only template with this name in the program
+ *           (or the canonical "primary" — for slice 5 we treat the first attached as main)
+ *
+ * Slice 5 keeps this simple: any Template with program_id set is "main" for its
+ * (name, program_id, sub_tag) tuple unless a sibling with the same name shares
+ * the program — then ALL siblings (including this one) are "sub" except the
+ * one matching its program's "primary cell" (the first cell using this name).
+ * For now, the simpler heuristic: free vs (main + sub) — UI can refine later.
+ */
+export function classifyTemplate(args: {
+  program_id: string | null;
+  sameNameSiblingCount: number;
+}): TemplateKind {
+  if (args.program_id == null) return 'free';
+  return args.sameNameSiblingCount > 1 ? 'sub' : 'main';
 }
 
 /**

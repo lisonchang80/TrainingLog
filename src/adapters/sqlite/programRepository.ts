@@ -1,0 +1,216 @@
+import type { Database } from '../../db/types';
+import type {
+  ProgramCell,
+  ProgramCore,
+  ProgramWithCells,
+} from '../../domain/program/types';
+
+/**
+ * Persistence layer for Program + cells (slice 5).
+ *
+ * Same pure-function-over-`Database` pattern as templateRepository. Handles
+ * the "at most one active program" invariant at write time (createProgram +
+ * setActiveProgram) since SQLite partial-unique-index support is awkward to
+ * test on better-sqlite3.
+ *
+ * Per ADR-0003: a Template's identity is the triple `(name, program_id,
+ * sub_tag)` — this repository attaches/detaches templates to a Program but
+ * does NOT enforce triple uniqueness in SQL (the wizard validates pre-insert;
+ * a future slice may add a unique index when name-level propagation lands).
+ */
+
+export interface ProgramRow extends ProgramCore {
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ProgramSummary {
+  id: string;
+  name: string;
+  main_tag: string | null;
+  cycle_length: number;
+  cycle_count: number;
+  start_date: string;
+  is_active: 0 | 1;
+  cellCount: number;
+}
+
+export async function listPrograms(db: Database): Promise<ProgramSummary[]> {
+  return db.getAllAsync<ProgramSummary>(
+    `SELECT p.id, p.name, p.main_tag, p.cycle_length, p.cycle_count,
+            p.start_date, p.is_active,
+            COUNT(c.id) AS cellCount
+       FROM program p
+       LEFT JOIN program_cell c ON c.program_id = p.id
+      GROUP BY p.id
+      ORDER BY p.is_active DESC, p.updated_at DESC`
+  );
+}
+
+export async function getProgram(
+  db: Database,
+  id: string
+): Promise<ProgramWithCells | null> {
+  const p = await db.getFirstAsync<ProgramRow>(
+    `SELECT id, name, main_tag, cycle_length, cycle_count, start_date,
+            is_active, created_at, updated_at
+       FROM program WHERE id = ?`,
+    id
+  );
+  if (!p) return null;
+  const cells = await db.getAllAsync<ProgramCell>(
+    `SELECT id, program_id, cycle_index, day_index, template_id, sub_tag
+       FROM program_cell
+      WHERE program_id = ?
+      ORDER BY cycle_index ASC, day_index ASC`,
+    id
+  );
+  return {
+    program: {
+      id: p.id,
+      name: p.name,
+      main_tag: p.main_tag,
+      cycle_length: p.cycle_length,
+      cycle_count: p.cycle_count,
+      start_date: p.start_date,
+      is_active: p.is_active,
+    },
+    cells,
+  };
+}
+
+/** The currently-active program (or null). Used by Today to resolve "today's cell". */
+export async function getActiveProgram(
+  db: Database
+): Promise<ProgramWithCells | null> {
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM program WHERE is_active = 1 LIMIT 1`
+  );
+  if (!row) return null;
+  return getProgram(db, row.id);
+}
+
+/**
+ * Create a Program and (optionally) its full cell grid in one transaction.
+ * If `cells` is provided, every cell is INSERTed; otherwise the program is
+ * empty and cells can be added later (not currently exposed by the wizard).
+ *
+ * `is_active` is forced to 0 here — call `setActiveProgram(id)` afterwards
+ * if the caller wants to flip the flag (which also de-activates any other
+ * active program in the same transaction).
+ */
+export async function createProgram(
+  db: Database,
+  args: {
+    program: ProgramCore;
+    cells?: ProgramCell[];
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      args.program.id,
+      args.program.name,
+      args.program.main_tag,
+      args.program.cycle_length,
+      args.program.cycle_count,
+      args.program.start_date,
+      ts,
+      ts
+    );
+    for (const c of args.cells ?? []) {
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        c.id,
+        c.program_id,
+        c.cycle_index,
+        c.day_index,
+        c.template_id,
+        c.sub_tag
+      );
+    }
+  });
+}
+
+/**
+ * Mark `id` active and de-activate every other program. Atomic via a single
+ * transaction. No-op if `id` doesn't exist.
+ */
+export async function setActiveProgram(
+  db: Database,
+  args: { id: string; now?: () => number }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`UPDATE program SET is_active = 0`);
+    await db.runAsync(
+      `UPDATE program SET is_active = 1, updated_at = ? WHERE id = ?`,
+      ts,
+      args.id
+    );
+  });
+}
+
+/** Clear `is_active` on every program. */
+export async function clearActiveProgram(db: Database): Promise<void> {
+  await db.runAsync(`UPDATE program SET is_active = 0`);
+}
+
+/**
+ * Permanently remove a Program and its cells. Templates that point at this
+ * program (`template.program_id`) are NOT cascaded — they're "orphaned" and
+ * become 自由 templates. This matches ADR-0003's stance that Template entities
+ * live independently from their parent Program (they own their snapshot
+ * history; deleting Program shouldn't shred prior Sessions' lineage).
+ */
+export async function deleteProgram(db: Database, id: string): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    // Orphan attached templates rather than deleting them.
+    await db.runAsync(
+      `UPDATE template SET program_id = NULL, sub_tag = NULL WHERE program_id = ?`,
+      id
+    );
+    await db.runAsync(`DELETE FROM program_cell WHERE program_id = ?`, id);
+    await db.runAsync(`DELETE FROM program WHERE id = ?`, id);
+  });
+}
+
+/**
+ * Update a single cell's `template_id` / `sub_tag`. Used by post-wizard cell
+ * edits (e.g. "I want Day 3 of cycle 2 to use template X with sub_tag '8RM'
+ * instead"). No-op if the cell doesn't exist.
+ */
+export async function updateCell(
+  db: Database,
+  args: {
+    cell_id: string;
+    template_id: string | null;
+    sub_tag: string | null;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  const row = await db.getFirstAsync<{ program_id: string }>(
+    `SELECT program_id FROM program_cell WHERE id = ?`,
+    args.cell_id
+  );
+  if (!row) return;
+  await db.runAsync(
+    `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+    args.template_id,
+    args.sub_tag,
+    args.cell_id
+  );
+  await db.runAsync(
+    `UPDATE program SET updated_at = ? WHERE id = ?`,
+    ts,
+    row.program_id
+  );
+}
