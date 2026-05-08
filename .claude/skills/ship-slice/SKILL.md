@@ -1,6 +1,6 @@
 ---
 name: Ship Slice
-description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-5.
+description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-6.
 ---
 
 # Ship Slice
@@ -28,6 +28,8 @@ npm install --no-audit --no-fund
 ```
 
 The worktree starts with no `node_modules` — installing is mandatory before anything else (otherwise `expo install`, `npx tsc`, jest all fail).
+
+**Adding a new native module mid-slice**: use `npx expo install <pkg>` (NOT `npm install <pkg>`). `expo install` picks the version compatible with the current Expo SDK; raw `npm install` will pull `latest` and silently break iOS bundling. Slice 6 hit this — `react-native-svg` is the canonical example. The user-level "不要幫忙裝工具" preference is about system-level tools (brew / xcode-select), NOT project npm deps tracked in package.json — but still ask the user before adding a new dep, since it changes the lockfile and adds attack surface.
 
 ## 3. Read the issue spec
 
@@ -126,6 +128,7 @@ If user does the steps themselves, just monitor + ask for screenshots at key sta
 - **Routes outside the `(tabs)` group hide the bottom tab bar**: `app/template/[id].tsx` and `app/session/[id].tsx` are siblings of the `(tabs)` group, so when pushed they fully cover the tab bar. The auto-generated header back button (e.g. `< (tabs)`) sometimes fails to fire on the simulator, leaving the user stranded with no way out. **Recovery**: Cmd+R in the Simulator to reload JS, or kill + relaunch the app. **Polish fix for later**: present these screens as modal (`presentation: 'modal'` in `Stack.Screen` options) or mount inside the tabs group as a sub-route. Don't block ship for this; capture as a follow-up issue.
 - **Placeholder text vs entered text**: `TextInput placeholder` renders in grey; an empty field with the cursor in it still counts as empty. Users may think `60` is already entered when it's just placeholder. If they report "Save Set does nothing", first check the field colors.
 - **Aggregation: use the modal group, not the last set**: when summarising user-logged sets back into a single `(sets, reps, weight)` tuple (Save-back, history rollups, Watch quick-stats), the naive "total count + last set's reps/weight" heuristic is wrong — a backoff / deload set at the end dominates the summary. Slice-4 smoke caught it: user logged `4 × 8 @ 70 kg` then `1 × 10 @ 20 kg`, got "5 × 10 @ 20 kg" proposed. Group sets by `(reps, weight)` tuple, pick the modal (largest count) group, tiebreak on heavier weight then earliest appearance, and report the modal group's count — internally consistent and matches the user's "work set" mental model. Reach for this pattern any time you condense N sets to one summary row.
+- **Don't hand the user expected counts you didn't compute from the seed**: when telling the user "search press → 8 動作" / "MG=胸 → 9 個", count the literal seed array first (e.g. grep the seed file for the muscle/load_type) — eyeballing breeds off-by-three errors that look like real filter bugs to the user. Slice 6 smoke had three wrong predicted counts (11→9, 11→8, 11→8) because the seed kept growing while I was eyeballing the same mental model. If you can't be bothered to compute, say "filter should narrow the list" without a number; the user's screen IS the ground truth.
 
 ## 9. Merge — from main repo, NOT worktree
 
