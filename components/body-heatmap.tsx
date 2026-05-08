@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Line as SvgLine, Path, Text as SvgText } from 'react-native-svg';
 
 import {
   MG_BACK,
@@ -34,31 +34,39 @@ import {
   MG_TRICEP,
 } from '@/src/db/seed/v006ExerciseLibrary';
 
-// Label coordinates for the front + back SVG views. Hand-picked to sit roughly
-// at each MG region's centre while staying off the silhouette outline.
+// Label coordinates with leader lines (smoke round-2 #2: pull labels outside
+// body silhouette + bigger font for legibility).
+//
+//   Front view: extended viewBox left by 80px → labels sit at x = -8, end-aligned
+//   Back view:  extended viewBox right by 80px → labels sit at x = 208, start-aligned
+//
+// `anchor` = the (x, y) inside the body region the leader line points to.
+// `label`  = the (x, y) at the outer edge where the text renders.
 interface MgLabel {
   mg_id: string;
-  short: string; // 1-2 char display
-  x: number;
-  y: number;
+  short: string;
+  anchorX: number;
+  anchorY: number;
+  labelX: number;
+  labelY: number;
 }
 
 const FRONT_LABELS: readonly MgLabel[] = [
-  { mg_id: MG_SHOULDER, short: '肩', x: 50, y: 105 },
-  { mg_id: MG_CHEST, short: '胸', x: 100, y: 122 },
-  { mg_id: MG_BICEP, short: '二頭', x: 50, y: 152 },
-  { mg_id: MG_CORE, short: '核心', x: 100, y: 178 },
-  { mg_id: MG_FOREARM, short: '前臂', x: 53, y: 195 },
-  { mg_id: MG_LEG, short: '腿', x: 82, y: 280 },
-  { mg_id: MG_CALF, short: '小腿', x: 82, y: 360 },
+  { mg_id: MG_SHOULDER, short: '肩', anchorX: 50, anchorY: 110, labelX: -8, labelY: 105 },
+  { mg_id: MG_CHEST, short: '胸', anchorX: 100, anchorY: 122, labelX: -8, labelY: 135 },
+  { mg_id: MG_BICEP, short: '二頭', anchorX: 50, anchorY: 150, labelX: -8, labelY: 165 },
+  { mg_id: MG_CORE, short: '核心', anchorX: 100, anchorY: 175, labelX: -8, labelY: 195 },
+  { mg_id: MG_FOREARM, short: '前臂', anchorX: 55, anchorY: 195, labelX: -8, labelY: 225 },
+  { mg_id: MG_LEG, short: '腿', anchorX: 82, anchorY: 280, labelX: -8, labelY: 280 },
+  { mg_id: MG_CALF, short: '小腿', anchorX: 82, anchorY: 360, labelX: -8, labelY: 360 },
 ];
 const BACK_LABELS: readonly MgLabel[] = [
-  { mg_id: MG_TRAP, short: '斜方', x: 100, y: 102 },
-  { mg_id: MG_SHOULDER, short: '肩', x: 50, y: 105 },
-  { mg_id: MG_BACK, short: '背', x: 100, y: 138 },
-  { mg_id: MG_TRICEP, short: '三頭', x: 50, y: 152 },
-  { mg_id: MG_GLUTE, short: '臀', x: 100, y: 230 },
-  { mg_id: MG_LEG, short: '腿', x: 82, y: 285 },
+  { mg_id: MG_TRAP, short: '斜方', anchorX: 100, anchorY: 100, labelX: 208, labelY: 100 },
+  { mg_id: MG_SHOULDER, short: '肩', anchorX: 150, anchorY: 105, labelX: 208, labelY: 130 },
+  { mg_id: MG_BACK, short: '背', anchorX: 100, anchorY: 138, labelX: 208, labelY: 160 },
+  { mg_id: MG_TRICEP, short: '三頭', anchorX: 150, anchorY: 152, labelX: 208, labelY: 195 },
+  { mg_id: MG_GLUTE, short: '臀', anchorX: 100, anchorY: 230, labelX: 208, labelY: 235 },
+  { mg_id: MG_LEG, short: '腿', anchorX: 82, anchorY: 285, labelX: 208, labelY: 285 },
 ];
 
 const COLOR_OUTLINE = '#9CA3AF';
@@ -95,9 +103,11 @@ const fillForMg = (mg: string, mgQuintile: Map<string, Quintile>): string => {
 function MgLabels({
   labels,
   mgCount,
+  textAnchor,
 }: {
   labels: readonly MgLabel[];
   mgCount?: Map<string, number>;
+  textAnchor: 'start' | 'end';
 }) {
   return (
     <>
@@ -105,18 +115,25 @@ function MgLabels({
         const c = mgCount?.get(l.mg_id);
         const text = c != null && c > 0 ? `${l.short}·${c}` : l.short;
         return (
-          <SvgText
-            key={`${l.mg_id}-${l.x}-${l.y}`}
-            x={l.x}
-            y={l.y}
-            fontSize={8}
-            fontWeight="700"
-            fill="#1F2937"
-            stroke="#FFFFFF"
-            strokeWidth={0.5}
-            textAnchor="middle">
-            {text}
-          </SvgText>
+          <React.Fragment key={l.mg_id}>
+            <SvgLine
+              x1={l.anchorX}
+              y1={l.anchorY}
+              x2={l.labelX}
+              y2={l.labelY}
+              stroke="#9CA3AF"
+              strokeWidth={0.6}
+            />
+            <SvgText
+              x={l.labelX}
+              y={l.labelY + 4}
+              fontSize={12}
+              fontWeight="600"
+              fill="#1F2937"
+              textAnchor={textAnchor}>
+              {text}
+            </SvgText>
+          </React.Fragment>
         );
       })}
     </>
@@ -126,7 +143,7 @@ function MgLabels({
 function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
   const f = (mg: string) => fillForMg(mg, mgQuintile);
   return (
-    <Svg viewBox="0 0 200 400" width={140} height={280}>
+    <Svg viewBox="-80 0 280 400" width={160} height={228}>
       {/* Head */}
       <Path
         d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
@@ -206,7 +223,7 @@ function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
-      <MgLabels labels={FRONT_LABELS} mgCount={mgCount} />
+      <MgLabels labels={FRONT_LABELS} mgCount={mgCount} textAnchor="end" />
     </Svg>
   );
 }
@@ -214,7 +231,7 @@ function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
 function BackBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
   const f = (mg: string) => fillForMg(mg, mgQuintile);
   return (
-    <Svg viewBox="0 0 200 400" width={140} height={280}>
+    <Svg viewBox="0 0 280 400" width={160} height={228}>
       {/* Head */}
       <Path
         d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
@@ -301,7 +318,7 @@ function BackBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
-      <MgLabels labels={BACK_LABELS} mgCount={mgCount} />
+      <MgLabels labels={BACK_LABELS} mgCount={mgCount} textAnchor="start" />
     </Svg>
   );
 }
