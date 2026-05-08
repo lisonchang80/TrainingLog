@@ -1,6 +1,6 @@
 ---
 name: Ship Slice
-description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1 + 2.
+description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-4.
 ---
 
 # Ship Slice
@@ -42,7 +42,7 @@ gh issue view N
 Layer separation per ADR-0001:
 
 - **Pure logic** — `src/domain/<area>/` — no DB, no React, no platform APIs. Unit-tested with plain jest in `tests/domain/`.
-- **Schema** — new migration in `src/db/schema/vNNN_<name>.ts` registered in `src/db/migrate.ts`. Always `INSERT OR IGNORE` for seeds (idempotency). Bump `vNNN`.
+- **Schema** — new migration in `src/db/schema/vNNN_<name>.ts` registered in `src/db/migrate.ts`. Always `INSERT OR IGNORE` for seeds (idempotency). Bump `vNNN`. **`ALTER TABLE ADD COLUMN` for a NOT NULL column must include `DEFAULT <value>`** — SQLite refuses to add a NOT NULL column without a default because existing rows have no value for it. Slice 4 (`is_evergreen INTEGER NOT NULL DEFAULT 0`) is the canonical example.
 - **Repository** — `src/adapters/sqlite/<area>Repository.ts` — pure functions taking `Database` (from `src/db/types.ts`). DB-integration tested in `tests/db/`.
 - **UI** — `app/(tabs)/*` for tabs, `app/<route>/[id].tsx` for detail screens. Uses `useDatabase()` from `components/database-provider.tsx`.
 
@@ -52,6 +52,7 @@ Layer separation per ADR-0001:
 - **uuid injection is REQUIRED**: any function that generates UUIDs takes `uuid: () => string` as a non-default parameter. Production callers pass `randomUUID` from `expo-crypto`; tests pass deterministic stubs. **Never** default to `() => crypto.randomUUID()` — Hermes (RN runtime) lacks global `crypto`, will crash on save at runtime.
 - **clock injection optional**: `now: () => number = Date.now` for test determinism. OK to default.
 - **State derived from DB**: UI doesn't hold lifecycle state in React-only state. Use `useFocusEffect(refresh)` to re-query DB on every focus. Lift DB rows into pure-logic state via `fromRow`.
+- **UI name-lookup must seed from every data source**: when a screen renders rows that come from multiple queries (e.g. plan rows + actual set rows in Save-back), build the `exercise_id → name` map from BOTH sides — not just one. Slice 4 shipped a Save-back where Modify/Add cards rendered names but Remove cards showed a raw UUID, because the name map was seeded only from set rows; planned-but-skipped exercises had no matching set row. Either use the `*WithName` JOIN variant on the plan side or merge two lookups before render.
 
 ## 5. Verify
 
@@ -69,6 +70,7 @@ If any fail, fix before commit. Common gotchas:
 - After adding a migration that seeds new rows, slice-1 tests asserting `toHaveLength(1)` will break — bump expectation + use `find(name === ...)` instead of `[0]` positional access.
 - Lint complains about `Array<T>` syntax — use `T[]` instead.
 - **jest test fixture pollution**: a `const fixture = {...}` declared inside a `describe` block is shared across `it` cases — if any test mutates it (e.g. `fixture.exercises.push(...)` to assert mutation isolation), later tests see the polluted version. Use a factory `const buildFixture = () => ({...})` and call it inside each `it`. Slice 3 hit this when the "mutating source template after snapshot" case left a 3rd exercise behind for the next test.
+- **Adding a required field to a domain interface breaks prior-slice fixtures**: tests that use strict `toEqual({...})` against the type will fail because the fixture object literal no longer matches the now-wider type. Slice 4 hit this when `is_evergreen: 0 | 1` was added to `TemplateExerciseSpec` / `SessionExerciseRow` / `TemplateExerciseRow` and broke `tests/domain/templateManager.test.ts` + `tests/db/templates.test.ts`. Before pushing, grep for `toEqual({` in `tests/` and add the new field to every matching fixture; don't trust "all tests in my new file pass" as proof everything's green.
 - **Adding a new tab requires icon mapping**: `components/ui/icon-symbol.tsx` keeps an explicit `SF Symbols → MaterialIcons` `MAPPING`. If you reference an unmapped name in `_layout.tsx`, TypeScript blocks via the `IconSymbolName` keyof guard. Add the entry first (e.g. `'doc.text': 'description'`).
 
 ## 6. Commit (logical units)
@@ -123,6 +125,7 @@ If user does the steps themselves, just monitor + ask for screenshots at key sta
 - **iOS Simulator software keyboard hidden by default**: the simulator pipes the Mac keyboard in as a "hardware keyboard", so tapping a `TextInput` shows a cursor but no on-screen keyboard. Tell the user to **type with the Mac keyboard directly** (cursor is in the field — it just works), or press **⌘K** in the Simulator to toggle software keyboard. Otherwise they'll think the input is broken.
 - **Routes outside the `(tabs)` group hide the bottom tab bar**: `app/template/[id].tsx` and `app/session/[id].tsx` are siblings of the `(tabs)` group, so when pushed they fully cover the tab bar. The auto-generated header back button (e.g. `< (tabs)`) sometimes fails to fire on the simulator, leaving the user stranded with no way out. **Recovery**: Cmd+R in the Simulator to reload JS, or kill + relaunch the app. **Polish fix for later**: present these screens as modal (`presentation: 'modal'` in `Stack.Screen` options) or mount inside the tabs group as a sub-route. Don't block ship for this; capture as a follow-up issue.
 - **Placeholder text vs entered text**: `TextInput placeholder` renders in grey; an empty field with the cursor in it still counts as empty. Users may think `60` is already entered when it's just placeholder. If they report "Save Set does nothing", first check the field colors.
+- **Aggregation: use the modal group, not the last set**: when summarising user-logged sets back into a single `(sets, reps, weight)` tuple (Save-back, history rollups, Watch quick-stats), the naive "total count + last set's reps/weight" heuristic is wrong — a backoff / deload set at the end dominates the summary. Slice-4 smoke caught it: user logged `4 × 8 @ 70 kg` then `1 × 10 @ 20 kg`, got "5 × 10 @ 20 kg" proposed. Group sets by `(reps, weight)` tuple, pick the modal (largest count) group, tiebreak on heavier weight then earliest appearance, and report the modal group's count — internally consistent and matches the user's "work set" mental model. Reach for this pattern any time you condense N sets to one summary row.
 
 ## 9. Merge — from main repo, NOT worktree
 
