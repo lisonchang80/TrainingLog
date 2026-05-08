@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { applySaveBack } from '@/src/adapters/sqlite/saveBackRepository';
-import { listSessionExercises } from '@/src/adapters/sqlite/sessionRepository';
+import { listSessionExercisesWithName } from '@/src/adapters/sqlite/sessionRepository';
 import { listSetsBySession } from '@/src/adapters/sqlite/setRepository';
 import {
   aggregateActuals,
@@ -61,7 +61,7 @@ export default function SaveBackScreen() {
   const refresh = useCallback(async () => {
     if (!id) return;
     const [planRows, actualSets] = await Promise.all([
-      listSessionExercises(db, id),
+      listSessionExercisesWithName(db, id),
       listSetsBySession(db, id),
     ]);
     const tplId = planRows.find((p) => p.template_id != null)?.template_id ?? null;
@@ -81,11 +81,11 @@ export default function SaveBackScreen() {
     setAccepted(
       Object.fromEntries(diff.map((_, i) => [i, true]))
     );
-    // Build a name lookup so cards can show the exercise name without a JOIN.
-    // Names come from set rows (which already join exercise.name); for planned
-    // exercises that were never logged we don't have a name, so cards fall back
-    // to the exercise_id (acceptable for the rare 'remove' card).
+    // Build a name lookup so every card type can show the exercise name without
+    // a JOIN at render time. Plan rows cover 'modify' and 'remove' (the latter
+    // never has matching set rows), set rows cover 'add' (no matching plan row).
     const names: Record<string, string> = {};
+    for (const p of planRows) names[p.exercise_id] = p.exercise_name;
     for (const set of actualSets) names[set.exercise_id] = set.exercise_name;
     setExerciseNames(names);
     setLoaded(true);
