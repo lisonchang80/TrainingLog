@@ -30,8 +30,9 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
 
   it('seeds the built-in Bench Press exercise via v001 + more via v002', async () => {
     const exercises = await listExercises(db);
-    // v001 seeds Bench Press; v002 (slice 2) adds 6 more compound lifts.
-    expect(exercises).toHaveLength(7);
+    // v001 seeds Bench Press; v002 (slice 2) adds 6 more compound lifts;
+    // v006 (slice 6) adds the rest of the Exercise Library — 66 total.
+    expect(exercises).toHaveLength(66);
     const bench = exercises.find((e) => e.name === 'Bench Press');
     expect(bench).toMatchObject({
       load_type: 'loaded',
@@ -126,6 +127,6 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
   it('migration is idempotent — running twice does not create extra exercise rows', async () => {
     await migrate(db); // already ran in beforeEach; this is the second call
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(7);
+    expect(exercises).toHaveLength(66);
   });
 });

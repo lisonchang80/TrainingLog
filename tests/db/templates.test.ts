@@ -36,9 +36,9 @@ describe('Template + snapshot isolation (slice 3)', () => {
     db.close();
   });
 
-  it('migration v003 creates the three template tables (still 7 seeded exercises)', async () => {
+  it('migration v003 creates the three template tables (Exercise Library seeded by v001/v002/v006)', async () => {
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(7);
+    expect(exercises).toHaveLength(66);
     // Tables exist if these queries don't throw.
     expect(await listTemplates(db)).toEqual([]);
   });
