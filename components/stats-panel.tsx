@@ -24,7 +24,7 @@ import {
 import type { StatsSetRecord } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
 
-type PeriodKey = 'year' | 'month' | 'day' | 'all';
+type PeriodKey = 'year' | 'month' | 'week';
 
 interface PeriodChoice {
   key: PeriodKey;
@@ -34,8 +34,7 @@ interface PeriodChoice {
 const PERIOD_CHOICES: readonly PeriodChoice[] = [
   { key: 'year', label: '年' },
   { key: 'month', label: '月' },
-  { key: 'day', label: '日' },
-  { key: 'all', label: '自選' },
+  { key: 'week', label: '週' },
 ];
 
 function rangeFor(period: PeriodKey, now = new Date()): { start_ms: number; end_ms: number } {
@@ -49,15 +48,15 @@ function rangeFor(period: PeriodKey, now = new Date()): { start_ms: number; end_
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
     return { start_ms: start, end_ms: end };
   }
-  if (period === 'day') {
-    const d = new Date(now);
-    d.setHours(0, 0, 0, 0);
-    const start = d.getTime();
-    const end = start + 24 * 60 * 60 * 1000;
-    return { start_ms: start, end_ms: end };
-  }
-  // 'all' — wide enough to cover any data the user has
-  return { start_ms: 0, end_ms: now.getTime() + 24 * 60 * 60 * 1000 };
+  // 'week' — Monday 00:00 to next Monday 00:00 (ISO-style week, common in TW)
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const dow = d.getDay(); // 0=Sun..6=Sat
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + diffToMon);
+  const start = d.getTime();
+  const end = start + 7 * 24 * 60 * 60 * 1000;
+  return { start_ms: start, end_ms: end };
 }
 
 function formatDuration(ms: number): string {
@@ -71,7 +70,7 @@ function formatDuration(ms: number): string {
 
 export function StatsPanel() {
   const db = useDatabase();
-  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [period, setPeriod] = useState<PeriodKey>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
 
   const load = useCallback(async () => {
