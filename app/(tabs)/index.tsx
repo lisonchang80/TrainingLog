@@ -198,6 +198,7 @@ export default function TodayScreen() {
       setSessionState(startState({ id, started_at }));
       setSetsInSession([]);
       setPlan([]);
+      setBwSnapshotKg(bwKg);
       setPrePromptVisible(false);
       setPreBwInput('');
       // Reload body metrics so latestPerMetric reflects the new entry.
@@ -439,13 +440,6 @@ export default function TodayScreen() {
             Session in progress · {setsInSession.length} set
             {setsInSession.length === 1 ? '' : 's'}
           </Text>
-          {bwSnapshotKg != null ? (
-            <View style={styles.snapshotBadge}>
-              <Text style={styles.snapshotBadgeText}>
-                🔒 BW snapshot · {formatWeight(bwSnapshotKg, unit)}
-              </Text>
-            </View>
-          ) : null}
 
           {/* Inline body data panel — quick add during session */}
           <View style={styles.inlineBodyHeader}>
@@ -458,6 +452,13 @@ export default function TodayScreen() {
               </Text>
             </Pressable>
           </View>
+          {bwSnapshotKg != null ? (
+            <View style={styles.snapshotBadge}>
+              <Text style={styles.snapshotBadgeText}>
+                🔒 BW snapshot · {formatWeight(bwSnapshotKg, unit)}
+              </Text>
+            </View>
+          ) : null}
           {inlinePanelOpen && (
             <View style={styles.inlineBodyBox}>
               <View style={styles.inlineBodyRow}>
