@@ -1,6 +1,6 @@
 ---
 name: Ship Slice
-description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, real-device smoke test, squash merge from main repo, branch cleanup. Encodes lessons from slices 1-7.
+description: End-to-end workflow for shipping one vertical slice (issue #N) of TrainingLog. Triggers - "開始 #N" / "ship slice N" / "start slice N". Covers worktree setup, build, verify (jest/tsc/lint/expo-doctor/Metro), commit + push + PR, smoke test (Expo Go for slices 1-8, Simulator dev build slice 9+), squash merge from main repo, branch cleanup. Encodes lessons from slices 1-9.
 ---
 
 # Ship Slice
@@ -114,13 +114,17 @@ EOF
 
 PR title under 70 chars. Body cites the issue's exact acceptance criteria so review is mechanical.
 
-## 8. Real-device smoke test
+## 8. Smoke test
 
-`npx expo start --ios` (background) → boots iPhone simulator with Expo Go.
+**Slices 1–8**: `npx expo start --ios` (background) → boots iPhone simulator with Expo Go.
+
+**Slice 9 onwards**: `npx expo run:ios --device "iPhone 17"` (background) → builds dev build natively, installs to simulator, launches. First run is 5–10 min cold build; budget for it. Pod install needs `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (see gotcha below).
 
 Walk the user through the manual flow corresponding to the acceptance criteria. **The smoke test is what catches platform bugs unit tests miss** — slice 1 caught the Hermes-no-crypto bug only on real device because tests injected fake uuid.
 
-If user does the steps themselves, just monitor + ask for screenshots at key states. After verification, kill Metro: `pkill -f "expo start"`.
+If user does the steps themselves, just monitor + ask for screenshots at key states. After verification, kill Metro: `pkill -f "expo start"` (or `expo run`).
+
+For slice 9+, sub-agent `simulator-smoke-db` (Haiku) can verify post-flow DB state automatically via `xcrun simctl get_app_container` — invoke for deterministic state checks; UI judgement still goes to the user.
 
 ### Smoke-test gotchas to mention upfront
 
@@ -132,6 +136,10 @@ If user does the steps themselves, just monitor + ask for screenshots at key sta
 - **DB write that immediately re-renders → seed derived state in the same callback, don't rely on next focus refresh**: when an action both writes to DB AND transitions the screen into a new render path (e.g. pre-session confirm: createSession → render in_progress UI in same tick), the derived state used by that new render path must be set in the same callback. `useFocusEffect(refresh)` only fires on focus change — if you stay on the same tab, the next render reads the OLD derived state and the user sees a missing/stale UI piece. Slice 7 smoke caught this: `bwSnapshotKg` was only seeded inside `refresh()`, so confirming the pre-prompt left the 🔒 badge invisible until the user tab-switched. Fix: `setBwSnapshotKg(bwKg)` right next to `setSessionState(startState(...))` in the confirm handler. Whenever you call a `setX(...)` that flips the visible UI branch, scan the new branch's render for any state it reads that came from a Promise.all in `refresh()` — those need a synchronous local set too.
 - **Concept-group your status badges, don't orphan them between unrelated headers**: when a UI status badge (lock indicator, snapshot value, sync state, validation flag) belongs conceptually to a feature block, place it inside that block's visual region. Slice 7 smoke had `🔒 BW snapshot · 72.0 kg` placed between the "Session in progress · 0 sets" subhead and the "Body data" header, which read as orphan text — user immediately asked "should this be under Body data?". Rule of thumb: if removing the badge would leave the surrounding section coherent, it's in the wrong place. Put it under the most-related section header, not in the gap between two sections.
 - **Metro fast-refresh silently stuck → restart with `--clear`**: during in-flight smoke, you may patch a UI file but the simulator keeps showing the OLD version even after Cmd+R. Symptoms: Metro log shows zero bundling activity post-edit; `git diff` confirms the edit landed; `tsc` / `lint` are clean; user reloads but sees stale UI. This means the file watcher missed the change OR Hermes is serving a cached pre-built bundle. **Fix**: `pkill -f "expo start"` then relaunch with `npx expo start --ios --clear` — the `--clear` flag rebuilds the Metro cache from scratch (`warning: Bundler cache is empty, rebuilding` confirms). Don't waste loops sending Cmd+R when the bundle log shows no compile activity; trust the Metro log over the simulator. Slice 8 smoke hit this twice — chip label fix didn't surface until cache was busted.
+- **Cocoapods 1.16.2 + Ruby 4.0.3 unicode bug → set UTF-8 locale**: when a worktree first hits `npx expo run:ios` (which auto-runs `pod install`), pod install crashes with `Encoding::CompatibilityError: Unicode Normalization not appropriate for ASCII-8BIT`. Root cause: Ruby 4.0+ changed default encoding handling, Cocoapods 1.16.2 didn't catch up. **Fix**: prefix with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install`. Slice 9 first dev-build attempt hit this. Add to slice prep checklist whenever a new worktree needs `pod install`.
+- **Worktree first `expo run:ios` is COLD-build slow (5-10 min)**: each git worktree has its own gitignored `ios/` directory. `expo prebuild` regenerates from scratch, then xcodebuild compiles all 92+ pods (reanimated, Hermes, RN core) without DerivedData reuse from the main repo's build. Don't panic — track progress via `tail` of the build log; 500+ "Compiling X.cpp" lines is normal mid-build. **Plan for it**: don't kick a worktree dev build at the start of a 30-min smoke window; budget 15 min purely for the build first.
+- **Expo Go vs dev build sandbox isolation**: when a slice introduces native modules (or you switch a slice to dev build for any reason), the Expo Go app and the dev build app each have their own sandbox + their own SQLite DB. **Symptom**: user says "I logged a set but achievements show 0/255" → check which app variant they used. Their last app's data is in `Documents/ExponentExperienceData/@anonymous/TrainingLog-*/SQLite/` (Expo Go) vs `Documents/SQLite/traininglog.db` (dev build). Use `xcrun simctl get_app_container booted com.anonymous.TrainingLog data` to find the dev build's data dir authoritatively. Migration from Expo Go → dev build = fresh DB; the user must redo any data-dependent smoke steps.
+- **`expo prebuild` modifies app.json + package.json — commit explicitly**: when a worktree first runs `expo run:ios`, prebuild adds `ios.bundleIdentifier` to `app.json` and rewrites `npm run ios` from `expo start --ios` to `expo run:ios` in `package.json`. These show as **uncommitted modifications** in `git status`. They are **legitimate dev-build switch artifacts** — commit them with a chore message explaining the workflow shift, do NOT revert. Slice 9 hit this when switching from Expo Go to Simulator dev build mid-smoke.
 
 ## 9. Merge — from main repo, NOT worktree
 
