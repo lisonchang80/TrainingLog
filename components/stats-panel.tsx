@@ -163,8 +163,8 @@ export function StatsPanel() {
     () => capacityHistogramByMg(records, period, anchorDate),
     [records, period, anchorDate]
   );
-  // Order MGs by total 6-period capacity desc, but ALWAYS show all 11 (zero
-  // MGs render flat — user wants a visual catalogue of what's missing too).
+  // Order MGs by total 6-period capacity desc; hide MGs with no training in
+  // the 6-period window so the grid focuses on what the user actually trained.
   // Average is computed over BUCKETS WITH DATA only (smoke feedback: zero
   // buckets shouldn't drag the avg line down).
   const mgRows = useMemo(() => {
@@ -180,7 +180,9 @@ export function StatsPanel() {
       const nonZeroCount = buckets.reduce((n, b) => n + (b.capacity > 0 ? 1 : 0), 0);
       const avg = nonZeroCount > 0 ? total / nonZeroCount : 0;
       return { mg_id: mg.id, mg_name: mg.name, buckets, total, avg };
-    }).sort((a, b) => b.total - a.total);
+    })
+      .filter((row) => row.total > 0)
+      .sort((a, b) => b.total - a.total);
   }, [capacityByMg, boundaries]);
 
   // ---- Duration histogram (-5..0) ------------------------------------------
@@ -269,28 +271,32 @@ export function StatsPanel() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>各部位容量 · 近 6 期</Text>
         <Text style={styles.cardSubtitle}>
-          每格一個部位 · 紅虛線 = 6 期平均
+          顯示有訓練的部位 · 紅虛線 = 6 期平均
         </Text>
-        <View style={styles.mgGrid}>
-          {mgRows.map((row) => (
-            <View key={row.mg_id} style={styles.mgCell}>
-              <View style={styles.mgCellHeader}>
-                <Text style={styles.mgCellName}>{row.mg_name}</Text>
-                <Text style={styles.mgCellTotal}>
-                  {formatCapacityShort(row.total) || '—'}
-                </Text>
+        {mgRows.length === 0 ? (
+          <Text style={styles.emptyText}>近 6 期尚無訓練容量</Text>
+        ) : (
+          <View style={styles.mgGrid}>
+            {mgRows.map((row) => (
+              <View key={row.mg_id} style={styles.mgCell}>
+                <View style={styles.mgCellHeader}>
+                  <Text style={styles.mgCellName}>{row.mg_name}</Text>
+                  <Text style={styles.mgCellTotal}>
+                    {formatCapacityShort(row.total) || '—'}
+                  </Text>
+                </View>
+                <MiniBarChart
+                  data={row.buckets.map((b) => ({ label: b.label, value: b.capacity }))}
+                  avgLine={row.avg}
+                  width={150}
+                  height={70}
+                  barColor="#6366F1"
+                  formatAvg={formatCapacityShort}
+                />
               </View>
-              <MiniBarChart
-                data={row.buckets.map((b) => ({ label: b.label, value: b.capacity }))}
-                avgLine={row.avg}
-                width={150}
-                height={70}
-                barColor="#6366F1"
-                formatAvg={formatCapacityShort}
-              />
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Duration histogram */}
