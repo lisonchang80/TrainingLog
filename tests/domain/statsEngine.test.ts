@@ -1,4 +1,6 @@
 import {
+  capacityHistogramByMg,
+  durationHistogram,
   durationStatsOverPeriod,
   mgCapacityOverPeriod,
   mgFrequencyOverPeriod,
@@ -146,5 +148,88 @@ describe('percentileBucketize', () => {
     //   r=1 → 0, r=2 → 1 (floor(5/3)), r=3 → 3 (floor(10/3))
     // original [50, 10, 30] → [3, 0, 1].
     expect(out).toEqual([3, 0, 1]);
+  });
+
+  it('all-equal values get rank by index (stable sort)', () => {
+    const out = percentileBucketize([100, 100, 100, 100]);
+    // Stable sort → ranks 1,2,3,4 in original order. n=4:
+    //   r=1 → floor(0/4)=0, r=2 → floor(5/4)=1, r=3 → floor(10/4)=2,
+    //   r=4 → floor(15/4)=3. Caps at 4.
+    expect(out).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('durationStatsOverPeriod — clock skew', () => {
+  it('excludes sessions with non-positive duration', () => {
+    const records: StatsSetRecord[] = [
+      // ended_at < started_at → negative duration (clock skew)
+      {
+        session_id: 's-bad',
+        set_id: 'a',
+        session_started_at: 100_000,
+        session_ended_at: 50_000,
+        exercise_id: 'ex-1',
+        mg_id: 'mg-chest',
+        volume: 100,
+        is_logged: true,
+      },
+      // duration = 0 → also excluded
+      {
+        session_id: 's-zero',
+        set_id: 'b',
+        session_started_at: 100_000,
+        session_ended_at: 100_000,
+        exercise_id: 'ex-1',
+        mg_id: 'mg-chest',
+        volume: 100,
+        is_logged: true,
+      },
+      // valid
+      {
+        session_id: 's-ok',
+        set_id: 'c',
+        session_started_at: 0,
+        session_ended_at: 60_000,
+        exercise_id: 'ex-1',
+        mg_id: 'mg-chest',
+        volume: 100,
+        is_logged: true,
+      },
+    ];
+    const out = durationStatsOverPeriod(records);
+    expect(out.session_count).toBe(1);
+    expect(out.total_ms).toBe(60_000);
+  });
+});
+
+describe('histogram functions on empty / single inputs', () => {
+  const now = new Date(2026, 4, 8);
+
+  it('durationHistogram returns 6 zero buckets for empty records', () => {
+    const out = durationHistogram([], 'month', now);
+    expect(out).toHaveLength(6);
+    expect(out.every((b) => b.total_ms === 0 && b.session_count === 0)).toBe(true);
+  });
+
+  it('capacityHistogramByMg returns empty map for empty records', () => {
+    const out = capacityHistogramByMg([], 'month', now);
+    expect(out.size).toBe(0);
+  });
+
+  it('capacityHistogramByMg skips is_logged=false records', () => {
+    const records: StatsSetRecord[] = [
+      {
+        session_id: 's1',
+        set_id: 'a',
+        session_started_at: new Date(2026, 4, 5).getTime(),
+        session_ended_at: new Date(2026, 4, 5).getTime() + 60_000,
+        exercise_id: 'ex-1',
+        mg_id: 'mg-chest',
+        volume: 500,
+        is_logged: false,
+      },
+    ];
+    const out = capacityHistogramByMg(records, 'month', now);
+    expect(out.size).toBe(0);
   });
 });

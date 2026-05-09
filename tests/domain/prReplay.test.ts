@@ -90,3 +90,74 @@ describe('replayPRs', () => {
     expect(r.flagsBySetId.get('b')!.weight_pr_broken).toBe(true);
   });
 });
+
+describe('replayPRs — qualification edge cases', () => {
+  it('assisted with null bw_snapshot is skipped cleanly (no PR, no cumulative)', () => {
+    const r = replayPRs([
+      rec({
+        set_id: 'a',
+        load_type: 'assisted',
+        weight_kg: 20,
+        reps: 8,
+        bw_snapshot_kg: null,
+      }),
+    ]);
+    const f = r.flagsBySetId.get('a')!;
+    expect(f.qualified).toBe(false);
+    expect(f.weight_pr_broken).toBe(false);
+    expect(f.volume_pr_broken).toBe(false);
+    expect(r.cumulative.per_mg.size).toBe(0);
+    expect(r.cumulative.per_bucket.size).toBe(0);
+  });
+
+  it('bodyweight with weight_kg=0 is skipped', () => {
+    const r = replayPRs([
+      rec({ set_id: 'a', load_type: 'bodyweight', weight_kg: 0, reps: 8 }),
+    ]);
+    expect(r.flagsBySetId.get('a')!.qualified).toBe(false);
+    expect(r.cumulative.per_mg.size).toBe(0);
+  });
+
+  it.each([
+    [null],
+    [0],
+    [-1],
+  ])('invalid reps (%p) yields unqualified', (reps) => {
+    const r = replayPRs([rec({ set_id: 'a', weight_kg: 50, reps })]);
+    expect(r.flagsBySetId.get('a')!.qualified).toBe(false);
+    expect(r.flagsBySetId.get('a')!.bucket).toBeNull();
+  });
+});
+
+describe('replayPRs — bucket boundary transitions', () => {
+  // Boundaries (per src/domain/pr/buckets.ts):
+  //   max_strength 1-3, strength 4-6, hypertrophy 7-10,
+  //   muscle_endurance 11-15, endurance 16+
+  it.each([
+    ['3 vs 4', 3, 4, 'max_strength', 'strength'],
+    ['6 vs 7', 6, 7, 'strength', 'hypertrophy'],
+    ['10 vs 11', 10, 11, 'hypertrophy', 'muscle_endurance'],
+    ['15 vs 16', 15, 16, 'muscle_endurance', 'endurance'],
+  ])(
+    'reps boundary %s falls in different buckets (each is first PR in its bucket)',
+    (_label, lowReps, highReps, lowBucket, highBucket) => {
+      const r = replayPRs([
+        rec({ set_id: 'lo', weight_kg: 50, reps: lowReps, created_at: 1000 }),
+        rec({ set_id: 'hi', weight_kg: 50, reps: highReps, created_at: 2000 }),
+      ]);
+      expect(r.flagsBySetId.get('lo')!.bucket).toBe(lowBucket);
+      expect(r.flagsBySetId.get('hi')!.bucket).toBe(highBucket);
+      // Each is first qualified set in its own (exercise, bucket) → both PR
+      expect(r.flagsBySetId.get('lo')!.weight_pr_broken).toBe(true);
+      expect(r.flagsBySetId.get('hi')!.weight_pr_broken).toBe(true);
+      expect(r.cumulative.per_bucket.get(lowBucket as never)).toEqual({
+        weight: 1,
+        volume: 1,
+      });
+      expect(r.cumulative.per_bucket.get(highBucket as never)).toEqual({
+        weight: 1,
+        volume: 1,
+      });
+    }
+  );
+});
