@@ -126,6 +126,16 @@ If user does the steps themselves, just monitor + ask for screenshots at key sta
 
 For slice 9+, sub-agent `simulator-smoke-db` (Haiku) can verify post-flow DB state automatically via `xcrun simctl get_app_container` — invoke for deterministic state checks; UI judgement still goes to the user.
 
+**If the parent harness can't see the sub-agent** (Agent tool returns `Agent type 'simulator-smoke-db' not found`), fall through to read-only `sqlite3` SELECT calls from the main agent. Locate the dev-build DB the same way the sub-agent does:
+
+```bash
+APP_DATA=$(xcrun simctl get_app_container booted com.anonymous.TrainingLog data)
+DB="$APP_DATA/Documents/SQLite/traininglog.db"
+sqlite3 "$DB" "SELECT key, value FROM app_settings;"
+```
+
+This is acknowledged in the overnight playbook rule set ("read-only ad-hoc sqlite3 is OK for spot-checks") — burns Opus tokens instead of Haiku, but unblocks verification. The harness limitation surfaced 2026-05-09 overnight when project-level `.claude/agents/` files weren't exposed via the parent's Agent tool.
+
 ### Smoke-test gotchas to mention upfront
 
 - **iOS Simulator software keyboard hidden by default**: the simulator pipes the Mac keyboard in as a "hardware keyboard", so tapping a `TextInput` shows a cursor but no on-screen keyboard. Tell the user to **type with the Mac keyboard directly** (cursor is in the field — it just works), or press **⌘K** in the Simulator to toggle software keyboard. Otherwise they'll think the input is broken.
@@ -145,6 +155,15 @@ For slice 9+, sub-agent `simulator-smoke-db` (Haiku) can verify post-flow DB sta
 - **Rotated SvgText with `textAnchor="end"` → asymmetric padding for the first label**: when SvgText anchored at `(cx, cy)` rotates `-30°` upward-left, its bounding box extends ~22px to the left of `cx`. The first bar's `cx` is at `PAD_X + barSlot/2` ≈ 16px from SVG left edge — so the leftmost glyph clips at the SVG boundary ("2021" → "021"). **Fix**: split `PAD_X` into `PAD_LEFT` (≥ 22 for fontSize 10) and `PAD_RIGHT` (≥ 4); recalculate `usableWidth = width - PAD_LEFT - PAD_RIGHT` and shift bar / baseline / avg-line geometry by `PAD_LEFT`. Slice 9 round-4 caught this AFTER switching to SvgText fixed the truncation but introduced this clipping at x=0.
 
 ## 9. Merge — from main repo, NOT worktree
+
+**Re-check `mergeable` right before merging.** GitHub recomputes mergeability asynchronously: a PR that was MERGEABLE when smoke started can flip to CONFLICTING by merge time if `main` advanced during your smoke window with overlapping file edits. Run:
+
+```bash
+gh pr view N --json state,mergeable,mergeStateStatus -q '{state, mergeable, mergeStateStatus}'
+# UNKNOWN = GitHub is still computing; wait ~10s and retry. CLEAN = safe to merge. CONFLICTING = merge main into the branch first, resolve, push, re-check.
+```
+
+Slice 9 hit this — overnight ran 5 units, pushed 3 commits, then on the morning final check found `main` had advanced via a doc-only commit that touched the same lessons file. Resolution = `git merge origin/main` in the worktree, hand-merge the markdown, `npm test` (must stay green), push, re-check mergeable.
 
 Critical: `gh pr merge ... --delete-branch` fails inside a worktree because deleting the branch requires checking out main, but main is already checked out by the parent worktree.
 
