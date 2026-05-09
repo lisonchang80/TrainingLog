@@ -197,6 +197,13 @@ git branch -a       # should show only main + remotes/origin/main (NO slice/* an
 git log --oneline -3   # newest commit = the squashed slice merge
 ```
 
+**Re-run `npm install` in the main repo before relaunching Metro from there.** When a slice ships new deps (the typical case — most slices add at least one `npx expo install <pkg>`), the squash-merge updates `package-lock.json` but the main repo's local `node_modules` still mirrors the pre-merge lockfile. `npx expo start` then crashes with `PluginError: Failed to resolve plugin for module "<new-pkg>" relative to "/Users/.../TrainingLog". Do you have node modules installed?` even though `node_modules/` exists. Slice 9 cleanup hit this — `expo-sqlite` config plugin wasn't in main's old node_modules until `npm install` re-aligned. Bake into cleanup checklist:
+
+```bash
+cd ~/code/TrainingLog
+npm install --no-audit --no-fund   # re-align node_modules with newly-pulled lockfile
+```
+
 ## 10. Update memory in /cp
 
 After ship, run `/cp` to:
