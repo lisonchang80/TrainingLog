@@ -9,6 +9,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import type { Database } from '@/src/db/types';
 import { openDatabase } from '@/src/adapters/sqlite/expoDatabase';
+import { backfillAchievementsIfNeeded } from '@/src/adapters/sqlite/achievementRepository';
 
 /**
  * React glue for the Database singleton. Opens the production SQLite database
@@ -28,7 +29,10 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     openDatabase()
-      .then((d) => {
+      .then(async (d) => {
+        // First-launch retroactive achievement unlocks for sessions logged
+        // before slice 9 deployed. No-op when the sentinel is already set.
+        await backfillAchievementsIfNeeded(d);
         if (!cancelled) setDb(d);
       })
       .catch((e: unknown) => {

@@ -63,6 +63,7 @@ import {
 } from '@/src/domain/session/sessionManager';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { evaluateAndPersistAchievements } from '@/src/adapters/sqlite/achievementRepository';
 import { detectPRBreaks } from '@/src/domain/pr/prEngine';
 import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
 import type { BucketKey, PRDelta } from '@/src/domain/pr/types';
@@ -335,6 +336,17 @@ export default function TodayScreen() {
     try {
       const ended_at = Date.now();
       await endSession(db, { id: session_id, ended_at });
+      // Slice 9: evaluate achievements on Session end (iPhone-only batch eval).
+      // We swallow errors — failure here must not block the user from leaving
+      // the session, but we surface a non-fatal alert so it doesn't go silent.
+      try {
+        await evaluateAndPersistAchievements(db, {
+          ended_session_id: session_id,
+          unlocked_at: ended_at,
+        });
+      } catch (e) {
+        console.warn('[achievements] evaluate failed:', e);
+      }
       // Clear PR banner so it doesn't bleed into the next session.
       setLastPRDelta(null);
       setLastPRExerciseName('');
