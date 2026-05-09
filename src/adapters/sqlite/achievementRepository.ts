@@ -32,6 +32,7 @@ import {
   replayPRs,
   type ReplaySetRecord,
 } from '../../domain/achievement/prReplay';
+import { getSetting, setSetting } from './settingsRepository';
 
 // ---- Definitions ----
 
@@ -223,6 +224,65 @@ export async function evaluateAndPersistAchievements(
     .filter((d): d is AchievementDefinitionRow => d != null);
 
   return { newUnlocks, newDefinitions };
+}
+
+// ---- Retroactive backfill ----
+
+const BACKFILL_SETTING_KEY = 'achievements_backfilled_at';
+
+export interface BackfillOutcome {
+  ranBackfill: boolean;
+  sessionsReplayed: number;
+  newUnlocks: number;
+}
+
+/**
+ * Walk every previously-ended session in chronological order and call
+ * `evaluateAndPersistAchievements` for each, so users who logged sessions
+ * before slice 9 deployed still get their retroactive unlocks. A sentinel
+ * timestamp in `app_settings` short-circuits subsequent calls.
+ *
+ * Idempotent two ways:
+ *   - Sentinel present → return immediately (the cheap path on every launch
+ *     after the first).
+ *   - Even without the sentinel, `insertUnlocks` uses INSERT OR IGNORE on a
+ *     UNIQUE definition_id index, so repeat runs would not double-write.
+ *
+ * Each session's unlocks are timestamped to that session's `ended_at` so the
+ * historical achievement timeline stays sensible.
+ */
+export async function backfillAchievementsIfNeeded(
+  db: Database,
+  opts: { now?: () => number } = {}
+): Promise<BackfillOutcome> {
+  const existing = await getSetting<number>(db, BACKFILL_SETTING_KEY);
+  if (existing != null) {
+    return { ranBackfill: false, sessionsReplayed: 0, newUnlocks: 0 };
+  }
+
+  const sessions = await db.getAllAsync<{ id: string; ended_at: number }>(
+    `SELECT id, ended_at FROM session
+      WHERE ended_at IS NOT NULL
+      ORDER BY started_at ASC, id ASC`
+  );
+
+  let totalNew = 0;
+  for (const s of sessions) {
+    const outcome = await evaluateAndPersistAchievements(db, {
+      ended_session_id: s.id,
+      unlocked_at: s.ended_at,
+    });
+    totalNew += outcome.newUnlocks.length;
+  }
+
+  const now = opts.now ?? (() => Date.now());
+  await setSetting<number>(db, BACKFILL_SETTING_KEY, now());
+
+  return {
+    ranBackfill: true,
+    sessionsReplayed: sessions.length,
+    newUnlocks: totalNew,
+  };
 }
 
 /**
