@@ -484,6 +484,30 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
   - ✅ **Schema 影響**：新增 `app_settings(key TEXT PK, value TEXT)` 表 + `session.last_watch_sync_at TIMESTAMP NULL` 欄位 + backup metadata（`backup_log` 表或 `app_settings` key）；不需要 row-level `last_modified` / `soft_delete`（c 排除）
   - ✅ **拒絕的替代方案**：CloudKit row-level / 純 manual export / iOS 系統 iCloud Backup / A1 等 Watch confirm / A2 立即不管 Watch / A4 觸發兩次 / Settings 留 AsyncStorage / JSON v1 雙向 import / Backup encryption / 三段式 mode (auto / manual / disabled) / 多版本保留 (b3 / b4) / 只保留 1 份 (b1) / Force 登 iCloud / Restore 自動執行不問
   - ✅ **ADR-0011**：Backup and Sync Strategy for v1 — 已寫入 `docs/adr/0011-backup-and-sync-strategy.md`
+- **Q15 Set logger UI redesign**（grill 進行中，預估 ADR-0012）：
+  - ✅ **Q15.1** Set 編輯 flow = **inline edit + ✓ 不退**：點 kg / 次 方格 → 方格變可編輯狀態（outline / 變色）+ 鍵盤滑上來；Done 直接寫回，方格收回非編輯狀態；已 ✓ 的 set 改數字時 ✓ 維持，語意 = 「✓ = 這組存在 / 完成」（修正 typo / 微調，非反悔）。破壞性動作（刪除、跳過、複製）走 ⋯ menu。需要 keyboardAvoidingView 把被改的 row scroll 到上半屏避免被軟鍵盤蓋住。**拒絕**：modal sheet（每組多 2 tap + 動畫，set edit 沒 cancel/discard 語意）；點方格自動取消 ✓（95% 是微調而非反悔，每次都重 tap 過勞）
+  - ✅ **Q15.2** Set 三態 + 預建 row：`set.is_logged BOOLEAN` 新增（v008 migration），與既有 `set.is_skipped` 共構出 set 的三種狀態 — `◯` 未完成 (`is_logged=F, is_skipped=F`，預填 Template snapshot 值) / `✓` 已完成 (`is_logged=T, is_skipped=F`) / `⊘` 已跳過 (`is_logged=F, is_skipped=T`)；Session 開始時依 Template snapshot **預先 batch insert** N 組 `◯` row，使用者點 ✓ 改 update 而不是新 insert（reference UI「session 開始看到 4 組空格等你填」是預期 flow）。PR / 容量計算規則更新：**只算 `is_logged=T AND is_skipped=F`** 的 set；既有 PR engine「忽略 `is_skipped`」邏輯擴成此條。進度 chip `已完成/計劃` 兩維度都能直接 query 同表算出（分子 `SUM(reps×weight) WHERE is_logged=T`、分母 `SUM(planned_reps×planned_weight)`）。**拒絕**：A 二態（失去「未完成佔位」狀態，進度 chip 0/4 沒法算）；B-2 lazy 建 row（reference UI 強烈暗示預建，inline edit 第 2 組要先 +新增 多一步）；C 無 is_logged（reps/weight NULL 雙用 — 「未建」vs「已跳過」語義重疊）
+  - ✅ **Q15.3** 熱身組 + 動作記憶機制：
+    - **熱身組進 schema** (`set.is_warmup BOOLEAN`, v008)，PR engine 過濾、容量計算過濾、UI 標「熱」label、正式組從 1 起編號；徒手動作 (`load_type='bodyweight'`) 預設 `warmup_set_count=0`，其他預設 `warmup_set_count=1`，使用者可從 ⋯ menu 切換熱身/正式
+    - **動作記憶 = derived，不存 Exercise 級欄位**：定義為「該 Exercise 跨**所有 `template_exercise` row**，依 `updated_at` 排序最新的那筆」的 (warmup_set_count, working_set_count, planned_reps, planned_weight)。記憶不是另開冗餘狀態 — 記憶就是「最近被使用者調整過的某 template_exercise row 內容」
+    - **Schema 變動 (v008)**：
+      - `template_exercise.planned_sets` RENAME → `working_set_count INTEGER NOT NULL`
+      - 新增 `template_exercise.warmup_set_count INTEGER NOT NULL DEFAULT 1`
+      - 新增 `template_exercise.updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')*1000)`（unix ms）
+    - **讀記憶情境**：(1) Template 編輯新增動作 row → query 該 exercise 跨表 updated_at 最新的 template_exercise → 帶 (warmup, working, reps, weight) 預填；(2) Session 內現場加動作（plan 外） → 同上 query；(3) **從 Template start Session 不查記憶** — Set 預填來自該 Template 自身 template_exercise 的當前值（語意：Template 是當前 Session 的計劃，不是「跨 Template 推論」）
+    - **寫記憶情境**（更新 template_exercise.updated_at = now()）：(a) **Template 編輯 save**（直接編） / (b) **儲存到原 Template** Save-back Apply (既有 slice 4 流程) / (c) **另存新 Template** — 在 Session 結束 summary 加新動作；從 Session 實打結果建一組新 template + template_exercise rows；**這條是 freestyle Session 唯一的記憶寫入路徑**（freestyle 沒對應 Template 故 a/b 不適用）
+    - **Edge cases**：
+      - 首次接觸 Exercise（無 template_exercise row）→ fallback 空白 placeholder (warmup=1, working=1, reps=10, weight=0)
+      - 「最新」基準 = **`template_exercise.updated_at` 單 row 級時戳**，不是 `template.updated_at`（整 Template 級），不是 `template.created_at`
+      - 同 Exercise 跨 N 個 Template 的 row 都納入排序，沒「主 Template」權重；排序純粹比 updated_at 大小
+      - Freestyle Session 不走 (c) → 進步永遠不寫進記憶（與 freestyle「臨場 / 不算進度」哲學一致）
+    - **拒絕的替代方案**：
+      - Exercise 級全域記憶欄位 `exercise.last_*`（冗餘狀態，跟 template_exercise 本身內容重疊）
+      - 每 ✓ 打勾即時寫記憶（backoff set 會被當記憶，下次 Session 預填 20kg）
+      - Session 結束 mode group aggregateActuals 寫回（雖然複用 slice 4 邏輯，但跟「使用者明示授權更新 (Save-back)」哲學打架）
+      - Template snapshot 永遠勝（α 案，把記憶限縮在「新增動作」場景，但 (c) 另存路徑不存在時 freestyle 永遠寫不到記憶 — 此修正版透過 (c) 已解決）
+      - 動作記憶永遠勝（β 案，覆蓋掉 Template 既有的「per Template 計劃目標」設計，影響面太大，違反 ADR-0003 三元組身份）
+    - **影響的既有 slice**：slice 3 (templateManager) 要更新 `TemplateExerciseSpec`(planned_sets → working_set_count + warmup_set_count + updated_at)；slice 4 (saveBackDiff) 要在 Apply 時 bump updated_at；新動作（c）「另存新 Template」是新功能，排到 set logger redesign slice 內
 
 ## Flagged ambiguities
 
