@@ -82,6 +82,7 @@ Then surface "下一步" candidates (typically `/cp`, `/to-issues`, or continue 
 - **Don't push memory files** — they're at `~/.claude/projects/...`, not in the repo. `git add ~/.claude/...` would fail anyway.
 - **ADR numbering**: always `ls docs/adr/` first to confirm next number; collisions are nasty.
 - **Rebumping module numbers** when adding pure logic modules: PRD has Pure Domain Logic (#1-#N) then Platform Adapters (starting from #N+1). Adding a new pure logic module shifts the adapter numbering. Update both sections + the Cross-cutting / Schema 影響 references.
+- **Verify story numbering integrity BEFORE appending new stories**: run `grep -c "^[0-9]\+\. As a 使用者" /tmp/prd_body.md` and compare with the highest existing number. If they don't match, the PRD has duplicate-numbered sections (例：TrainingLog issue #1 的 Body data section 用 #66-72 跟 Exercise / 詳情頁 #66-72 重複 — 152 nominal stories 對應 159 actual rows). **Don't try to fix the duplicate inside a sweep** — renumbering ripples through every cross-reference in 核心 ADR 對照 + may affect already-published implementation issues that cite story numbers. Instead: continue numbering from the nominal max（本次 sweep 補入時用 nominal max + 1），flag the bug explicitly in the memory update entry, leave the fix as a separate task.
 
 ## Why this skill exists
 
