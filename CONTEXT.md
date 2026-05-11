@@ -498,7 +498,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       - `template_exercise.planned_sets` RENAME → `working_set_count INTEGER NOT NULL`
       - 新增 `template_exercise.warmup_set_count INTEGER NOT NULL DEFAULT 1`
       - 新增 `template_exercise.updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')*1000)`（unix ms）
-    - **讀記憶情境**：(1) Template 編輯新增動作 row → query 該 exercise 跨表 updated_at 最新的 template_exercise → 帶 (warmup, working, reps, weight) 預填；(2) Session 內現場加動作（plan 外） → 同上 query；(3) **從 Template start Session 不查記憶** — Set 預填來自該 Template 自身 template_exercise 的當前值（語意：Template 是當前 Session 的計劃，不是「跨 Template 推論」）
+    - **讀記憶情境**（**ADR-0016 amendment**：read pattern 從 summary 4 值改為 **per-set list**）：(1) Template 編輯新增動作 row → query 該 exercise 跨表 updated_at 最新的 template_exercise → 帶**對應 template_set list** (per-set kind + reps + weight) 預填；(2) Session 內現場加動作（plan 外） → 同上 query；(3) **從 Template start Session 不查記憶** — Set 預填來自該 Template 自身 template_exercise 的當前 template_set rows（語意：Template 是當前 Session 的計劃，不是「跨 Template 推論」）
     - **寫記憶情境**（更新 template_exercise.updated_at = now()）：(a) **Template 編輯 save**（直接編） / (b) **儲存到原 Template** Save-back Apply (既有 slice 4 流程) / (c) **另存新 Template** — 在 Session 結束 summary 加新動作；從 Session 實打結果建一組新 template + template_exercise rows；**這條是 freestyle Session 唯一的記憶寫入路徑**（freestyle 沒對應 Template 故 a/b 不適用）
     - **Edge cases**：
       - 首次接觸 Exercise（無 template_exercise row）→ fallback 空白 placeholder (warmup=1, working=1, reps=10, weight=0)
@@ -602,13 +602,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       - **G.1 進度條 → β（文字 + bar）**：chip 數字 `0.0/3080.0` 下方一條**系統主色細 bar** 填充 0-100%；**不顯百分比數字**（chip 數字已能心算 78%）；bar 純色不 by set_kind 著色
       - **G.2 超 100% → N/A**：schema model 下分子 ≤ 分母恆成立（同欄位 + 過濾條件 superset），chip 範圍恆 0-100%；**無「超 100% 視覺處理」需求**
       - **G.3 精度 → α（統一 1 位小數）**：`0.0/3080.0`、`2400.5/3080.0`；對齊 reference UI 風格 + inline edit reactive 變動平滑（避免「0 位 ↔ 1 位」視覺跳動）
-    - **下次 grill 接續**：Q15 set logger redesign 主結構**全拍板完**；Q5 per-exercise notes 持久化已拍板（見 Q5 close-out 段，ADR-0013）；剩 **Backlog 6-11**（每條獨立 grill 題、可分次處理）：
-      - **6.** session 計時暫停 / 繼續（vs Watch v1 #10）
-      - **7.** session title 編輯（覆蓋 vs 另存 `session.title`）
-      - **8.** 獎章 sub-tab 去哪（頂層 tab? Profile? 剔除?）
-      - **9.** 歷史 = 月曆視圖（重設 slice 9 三 sub-tab 範圍）— Q5.4 已部分鎖（collapsed 卡 = Template + Program + 容量 + 動作數），日格彈出可沿用
-      - **10.** 訓練類型 label 系統（胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)） source + 顏色 mapping
-      - **11.** **Template 編輯流程 UI redesign**（與「模版配色」+ 動作卡 collapsed/expanded + per-exercise ⚙ menu + 底部 4-action bar 等子題；可能拆獨立 ADR 或併入 ADR-0012）
+    - **下次 grill 接續**：✅ **Backlog 5-11 全完拍板**（Q15 set logger redesign 主結構全完 ADR-0012 / Q5 per-exercise notes 持久化 ADR-0013 / Q6 session 計時暫停 no-op / Q7 session title 模型 + 歷史頁三按鈕 ADR-0014 / Q8 獎章 sub-tab status quo / Q9 歷史月曆視圖 ADR-0015 / Q10 訓練類型 label = Template name 本身 deflationary close / Q11 Template 編輯流程 UI redesign + per-set 預設值 schema ADR-0016）；**Grill 階段全部結束、進 v1 ship 階段**
     - **ADR-0012 已寫入** ✅（2026-05-11，`docs/adr/0012-set-logger-redesign-schema-and-affordances.md`）：整併 Q15.1–Q15.5b 全拍板（schema model + per-row 5 gesture + cluster 3 gesture + 計算規則矩陣 + 37 條拒絕替代方案 + slice 影響清單 + v1 時程 +5 週可吸收）
 
 - **Q5 per-exercise notes 持久化**（ADR-0013 已寫入 2026-05-11；雙欄 schema + freestyle hidden-template pattern + UI bottom sheet）：
@@ -629,6 +623,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
     - **Q5.3d** 內容格式 = **d-1 多行純文字無上限**（不支援 markdown；訓練中時間壓力使失控風險低）
   - ✅ **Q5.4** 歷史顯示：
     - **Q5.4-A Collapsed list = 極簡版**：只顯示 Template name + Program 主+副標 + 容量總和(動作數)；無動作明細、無 PR chip、無 notes preview；與 Backlog #9 月曆視圖日格彈出共用此結構
+      - **微 amendment（ADR-0014）**：title 來源從 **Template name** 改為 **`session.title`**（eager copy from Template name on session create；Template-based 未改時視覺等效；freestyle 或手動改過時顯示 `session.title`，空時 UI fallback「自由訓練」）
     - **Q5.4-B 詳情頁 = b-2 變體**：本場 session 各動作的 `notes_snapshot` 直接展開顯示（在 sets 下方一行 💬 chip + 文字）；不是時間線、不是最近 N 次
     - **Q5.4-B' 動作時間線**（從詳情頁某動作再點進去看歷次 snapshot）= **B'-2 v1 不做**，併入 v1.5（「怕太亂、訊息層級不清」）
     - **Q5.4-C 全文搜尋 notes** = **c-1 v1 不做** + **c-3 v1.5 候選**
@@ -637,9 +632,89 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
   - ✅ **跨 Backlog 影響**：#9 (月曆) 沿用 collapsed 卡結構；#11 (Template 編輯流程 redesign) 共用「移動動作」列表元件
   - ✅ **v1 slice 影響**：slice 9 歷史 sub-tab 顯著重設（collapsed 卡 + 詳情頁 notes 顯示）；其他 slice 不受影響；v009 migration 純加 3 欄位無 transform
 
+- **Q6 session 計時暫停 / 繼續**（無 ADR — 純 no-op 決策；2026-05-11 拍板；既有 Q12.6「pause 不算結束」已足夠定義 iPhone 行為）：
+  - ✅ **Q6.1** iPhone 端 pause 概念 = **A 不引入**：iPhone v1 維持 pre-session ↔ in-session 兩態狀態機，不引入 paused 第三態；Watch v1 #10 / story #92 仍走 `HKWorkoutSession.pause()` 做 HealthKit lifecycle；iPhone 端無 pause 按鈕、無 pause UI 狀態
+  - ✅ **Q6.2** Watch pause 時 iPhone indicator = **a 完全無感**：timer 照走、UI 一切如常；不顯示 ⏸ icon / 不變灰；理由：indicator + 無按鈕 = 困惑來源；Watch 用戶想看 pause 狀態自然會看 Watch
+  - ✅ **一致性錨**：Q12.6 已鎖「in-session pause 不算結束（pause 期間仍累計時長）」，公式 `運動時長 = ended_at - started_at`，pause 不中斷 — iPhone 透明化與此一致
+  - ✅ **拒絕的替代方案**：Q6.1=B（iPhone 也有 pause 按鈕，引入第三態 + WatchConnectivity 同步太複雜）/ Q6.1=C（iPhone 顯示但不操作 → 無按鈕反而困惑）/ Q6.1=D（連 Watch 也不 pause → 倒退 story #92 + 失去 HealthKit 扣休息能力）/ Q6.2=b（小 ⏸ icon）/ Q6.2=c（timer 變灰）
+  - ✅ **v1 slice 影響**：無 — 純 no-op，不改 schema、不改 UI、不改 Watch 邏輯、不需 migration、不需新 story
+  - ✅ **留尾**：iPhone 端「結束 session」按鈕原子操作對稱性已記入 Flagged ambiguities，留 Watch v1 / iPhone lifecycle grill 時補
+
+- **Q7 Session title 模型 + 歷史頁三按鈕 + Save-back 共存 + Freestyle 升級流程**（ADR-0014 已寫入 2026-05-11）：
+  - ✅ **Q7.1** Save-back 關係 = **B 正交共存**：既有 Save-back dialog（session 結束 + sets/reps/weight 差異 trigger，ADR-0002）負責**內容維度**；新歷史頁三按鈕負責**身份維度**（title rename + freestyle 升級 + delete）；兩 trigger 點不互相觸發
+  - ✅ **Q7.2** session.title 模型 = **α eager copy**：`session.title TEXT NOT NULL DEFAULT ''`；Template-based session create 時複製 `template.name` → `session.title`；Freestyle 起始 ''；之後 Template 改名**不回溯**改歷史 session.title；跟 Q5.1c-α (notes_snapshot eager) 同哲學
+  - ✅ **Q7.3** 「儲存模板 + rename」對 sibling 範圍 = **A 連動所有同 name sibling**：改 name 時整組 sibling 重貼（不改內容）；保「name = group identity」invariant + 常設動作目標 per name 共享不破
+  - ✅ **Q7.4** Freestyle session.title 預設 = **e 空字串 DB + UI fallback「自由訓練」+ 升級時強制填**：開 freestyle 零 friction；歷史頁顯示 fallback 字串；按「儲存/另存模板」前若空 → 跳輸入框強制填
+  - ✅ **Q7.5** 「另存模板」衝突偵測 = **α UI 即時偵測 + hard block + escape**：補齊三元組 UI reactive query，命中既有三元組 → hard block + 提示 + escape button「改用『儲存模板』覆蓋既有」；跟 Program 起始日期 overlap 風格一致
+  - ✅ **Q7.6** 「刪除本訓練」= **a Hard delete + 確認 dialog**：跳「確定刪除？無法復原」dialog → DELETE session + CASCADE (session_exercise + set + notes_snapshot)；PR/統計/月曆 reactive 重算；**不做** soft delete / 垃圾桶（v1 不過度設計）；HKWorkout 不主動刪 → 記入 Flagged
+  - ✅ **Q7.7** In-session 編輯入口 = **b Header tap-to-edit**：timer header 顯示 session.title（空時 UI fallback），tap → 編輯框 → 即時 UPDATE；無 draft、無 commit dialog；跟 ADR-0013 notes in-place 編輯同 pattern
+  - ✅ **Q7.8** v010 migration backfill = **a 對稱 eager copy 邏輯**：`UPDATE session SET title = COALESCE((SELECT name FROM template WHERE id = session.template_id), '')`；Template-based 取 template.name、Freestyle 取 ''；既有歷史 session 顯示行為**不變**
+  - ✅ **三按鈕語意整理**：
+    - **儲存模板**：Template-based + title 未改 → 改 sets；Template-based + title 改過 → 改 sets + rename + sibling 連動；Freestyle → 引導選三元組 + rename group；Freestyle + title='' → 強制填先
+    - **另存模板**：補齊三元組 (Program, 副標) → 建新 entity，name = session.title；reactive 衝突偵測
+    - **刪除本訓練**：hard delete + dialog + PR/統計 reactive
+  - ✅ **拒絕的替代方案** ~24 條（見 ADR-0014 § 拒絕的替代方案）
+  - ✅ **跨 Backlog 影響**：#9 月曆 (freestyle 未升級 session 在 Program 日曆非 Template 打勾) / #11 Template 編輯流程 (補齊三元組 UI 可共用)
+  - ✅ **v1 slice 影響**：slice 9 範圍擴大（collapsed 卡 title 來源 + 詳情頁三按鈕 + delete dialog）；slice 3 templateManager 多 entry point；slice 4 (Save-back) 不變；slice 8 (PR) 不變；v010 migration +1 欄位無 transform；估 +0.5-1 週工作量落在 slice 9 範圍內不延期
+  - ✅ **既有 stories refine**：#184 freestyle 存為 template (細化為三按鈕路徑) / #191 collapsed 卡 title 來源 (Template name → session.title)
+  - ✅ **留尾**：HKWorkout 刪除一致性（iPhone hard delete session 但 HealthKit 那筆保留）→ Flagged；Freestyle session 在 Program 日曆顯示行為 → defer Backlog #9
+
+- **Q8 獎章 sub-tab 去哪**（無 ADR — 純 status quo 維持決定；2026-05-11 拍板）：
+  - ✅ **Q8.1** 獎章 sub-tab 家 = **A 維持歷史頁第三 sub-tab**（ADR-0009 status quo）：不升頂層 tab、不移 Profile、不剔除；歷史頁三 sub-tab 結構維持「歷史 / 統計 / 獎章」
+  - ✅ **設計沿用**：ADR-0009 + Q12.7-Q12.10 全保留 — 255 seed 不動 / achievement_definition + achievement_unlock 表不動 / session 結束 summary 統一檢查不動 / Watch v1 不顯示獎章不動
+  - ✅ **跟 Backlog #9 的關係**：歷史頁 sub-tab 結構維持三層；Q9「歷史 = 月曆視圖」grill 時要在三 sub-tab 框架內 redesign（不能假設只有兩 sub-tab）
+  - ✅ **拒絕的替代方案**：Q8.1=B（升頂層 tab：底部 tab 4 格擠 + 訪問頻率低 first-class 浪費 affordance） / Q8.1=C（移 Profile：要新建 Profile 頁 UI scope +1 + BW history 搬遷成本） / Q8.1=D（剔除：reverse ADR-0009 + 失去 motivation 元素）
+  - ✅ **v1 slice 影響**：無 — 純 no-op，不改 schema、不改 UI、不改 engine
+
+- **Q9 歷史月曆視圖 + 共用 CalendarGrid 元件 + Freestyle Program 日曆顯示**（ADR-0015 已寫入 2026-05-12）：
+  - ✅ **Q9.1** 主視圖型態 = **C 月曆為主、list 為輔**（segmented control `[月曆 | List]`，月曆預設；list 作為「連續 timeline」escape hatch）
+  - ✅ **Q9.2** 時間粒度 = **a 月粒度傳統 grid**（7 cols × 4-6 rows，跟 iOS Calendar + Program 日曆 ADR-0004 視覺一致）
+  - ✅ **Q9.3** 日格內容 = **三行 chip stack**（第一行容量合計 systemGreen 統一色 / 第二行主場 session.title 色塊 per Template name / 第三行主場 Program 副標）+ **右上「+N」微標記**（多場同日；單場時隱藏；字級 ~9-10pt secondary，不干擾日期 17pt）
+    - **Q9.3a** 顏色 source = **β palette 預設 + 使用者可改**（12-color iOS 系統 palette：red/orange/yellow/green/mint/teal/cyan/blue/indigo/purple/pink/brown）；**綁定層級 = per Template name**（group-level；sibling 共享色；schema 採 `template.color_hex` per entity + group-wide write 跟 Q7.3-A sibling rename 連動哲學一致）
+    - **Q9.3b** Freestyle 視覺 = **a + e**：升級前灰塊 + 「自由訓練」UI fallback；升級後 (`session.template_id` UPDATE 為新 id) **reactive 切換**為新 Template 色 + Program 副標；session.title 仍 frozen（不回溯）、色 + 副標 reactive 看 template_id
+    - **Q9.3c** 多場同日 = **d 主場 + 右上 +N**：主場規則 **b1 容量最高**；第一行容量合計、第二三行顯示主場資訊；右上「+N」(N = 額外場數)；單場時 +N 隱藏
+  - ✅ **Q9.4** 元件共用策略 = **b 共用 CalendarGrid (calendar-month) + cell renderer plugin**：HistoryCalendarView 用共用 grid + HistoryCellRenderer；ProgramCalendarView 維持 cycle-based 獨立 grid（ADR-0004 不動）；兩 view 共用 cell style atoms (chip / palette / 字型)
+  - ✅ **Q9.6** 月份切換 = **e 全功能**：← → 按鈕 + 月份 label tap → wheel picker (跨年快跳) + 左右 swipe gesture 三入口並存
+  - ✅ **Q9.7** tap 日格 = **b' 永遠直進詳情頁**（多場進主場 b1）+ 詳情頁 header `← N/M →` 顯示「本日第 N 場/共 M 場」（單場時隱藏）+ ← → 按鈕 + 水平 swipe gesture 並行切場；**切換範圍 = A 僅同日 N 場**（跨日場景返回月曆 tap）
+  - ✅ **Q9.8** Freestyle 在 Program 日曆顯示 (close ADR-0014 留尾) = **β** ⚠️ planned Template name + 小註「(自由訓練)」；升級後 reactive 變 ✅ (若新 Template = plan) 或顯示新 Template name「⚠️ 胸日 → 跑日」；跟既有 Q6.2.C「不匹配 ⚠️」flow 一致純擴展
+  - ✅ **Q9.9** redesign 範圍 = **a 僅歷史 sub-tab**；統計 + 獎章 sub-tab 內容維持 ADR-0009 原規劃（不撞 ADR-0010 anatomical / 獎章 grid 已對齊）
+  - ✅ **拒絕的替代方案 ~25 條**（見 ADR-0015 § 拒絕的替代方案）
+  - ✅ **跨 Backlog 影響**：#10 訓練類型 label 系統（顏色獨立於大類 label，#10 grill 後決定整合）/ #11 Template 編輯流程（改色 UI entry 在 Template 編輯頁）
+  - ✅ **v1 slice 影響**：slice 9 範圍進一步擴大（月曆 + segmented + 三行 chip + Freestyle reactive + ←/→ 切場 + 月份 picker）；slice 3 templateManager 加 colorHex 管理（recolor = group-wide UPDATE WHERE name = ?）；slice 4 Program 日曆 cell renderer 補 freestyle ⚠️；v011 migration +1 欄位 (`template.color_hex`) + hash backfill 無 transform；估 +1-1.5 週工作量
+  - ✅ **既有 story refine**：#106（歷史頁 sub-tab 加內層 `[月曆 | List]` segmented）/ #191（collapsed 卡直接展開為日格三行 chip）/ #207（Freestyle 升級後 Program 日曆 reactive）
+  - ✅ **ADR-0014 留尾 close**：Freestyle session 在 Program 日曆顯示行為 ⇒ Q9.8-β 已明文（從 Flagged ambiguities 移除）
+
+- **Q10 訓練類型 label 系統**（deflationary close-out，無 ADR；2026-05-12 拍板）：
+  - ✅ **Q10.0** 訓練類型 label = **Template name 本身**，**不另立 label system**
+  - ✅ 「胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)」這些字串就是 Template name 的具體例子
+  - ✅ 既有 Template name (CONTEXT.md L55 字串 label) 已 cover；ADR-0015 per Template name 顏色已 cover 顏色 mapping；三元組唯一性允許同 name sibling，自然支援「不同 Program/副標下的同類訓練」
+  - ✅ 邏輯閉環：Q7.3-A sibling rename 連動 + ADR-0015 group-wide color UPDATE + 月曆色 reactive lookup template_id → 同 name sibling 在月曆自動同色
+  - ✅ **v1 slice 影響**：無 — 純 status quo / deflationary
+  - ✅ **拒絕的替代方案**：另立 `training_type_label` 表 + Template FK（schema 冗餘）、另立大類 label 顏色 source（撞 ADR-0015）、Hybrid（過設計）
+
+- **Q11 Template 編輯流程 UI redesign + per-set 預設值 schema**（ADR-0016 已寫入 2026-05-12）：
+  - ✅ **Q11.1** 整體 layout = **A 三段式**：top metadata fixed (取消/儲存 + Template name + Program/副標/色) + 中間動作列表 scroll + 底部 action bar fixed
+  - ✅ **Q11.2** 底部 4-action bar = **X 動作管理導向**：`[+ 新增動作] [↕ 移動動作] [配色] [⋯ 更多]`；「⋯ 更多」收容次要 actions
+  - ✅ **Q11.3** 動作卡 collapsed/expanded = **α**：collapsed (動作名 + 圖 + N 暖身 + N 工作組 summary，**不顯示 reps × weight** 因每組可變)；expanded (每組獨立 reps/weight inputs)；**multi-expand 允許** (非 accordion)
+  - ✅ **Q11.4** per-exercise ⚙ menu = **A 4 項**：`[新增/編輯備註] [移動動作] [設為常設/一般] [刪除]`
+  - ✅ **Q11.5** 模版配色 picker = **β Bottom sheet 12-color grid (3×4)**：跟 ADR-0013 notes bottom sheet idiom 一致；live preview；group-wide UPDATE WHERE name=? sibling 連動（ADR-0015）
+  - ✅ **Q11.6** ⋯ 更多 menu = **A 3 項**：`[開始訓練] [另存模板] [刪除模板]`；剔除預覽 / 分享 / export / 編輯資訊 (top header inline 已 cover)
+  - ✅ **Q11.7** 儲存哲學 = **β 顯式 commit (儲存/取消雙 button)**：right-top「儲存」(disabled when no changes) + left-top「取消」(有 changes 跳 confirm dialog「捨棄變更？」)；in-memory draft state；跟 set logger / notes / session.title「即時 UPDATE 無 draft」哲學**分流**（理由：Template = plan 性質、可反覆試錯；set logger = audit log 性質、不可 undo）
+  - ✅ **Q11.8** 一般/常設動作分區 = **a Section header pattern**：一個 list 兩個 section；跨區拖動可改類型（跟 ⚙ menu「設為常設/一般」二重入口）
+  - ✅ **Q11.9** per-set 預設值 schema = **β 新增 `template_set` 表**：per-template_exercise per-set 預設值；schema +1 表；動作記憶 read pattern 改（從 summary 4 值改為 per-set list）；v012 migration **transform-heavy**（template_exercise summary 攤平成 template_set rows）；template_exercise.warmup_set_count / working_set_count 保留 cache、廢除既有 warmup_reps/warmup_weight/working_reps/working_weight summary 欄位
+  - ✅ **例外：⚙ menu「新增/編輯備註」即時 UPDATE 保留**（ADR-0013 哲學保留；notes 跟 sets 數據分流走，前者是「累積 cue 庫」性質不適用 draft commit）
+  - ✅ **拒絕的替代方案 ~22 條**（見 ADR-0016 § 拒絕的替代方案）
+  - ✅ **跨 ADR 影響**：ADR-0012 動作記憶 read pattern 微 amendment (summary → list)；ADR-0013 ⚙ menu 即時 UPDATE 哲學保留 + 「移動動作」重排列表元件沿用；ADR-0014「另存模板」進 ⋯ menu + 補齊三元組 UI 沿用；ADR-0015 模版配色 bottom sheet 沿用 + group-wide sibling 連動沿用
+  - ✅ **v1 slice 影響**：slice 3 templateManager **大改**（per-set CRUD + 動作記憶 list read + sibling 連動 + draft state 管理 + bulk save diff）；slice 4 saveBackDiff 改寫 (per-set list 比對)；slice 5 Save-back Engine actuals 寫回 template_set list；slice 6 Session Lifecycle from template 啟動改 (從 template_set rows 創 session set rows)；v012 migration transform-heavy；估 **+2-3 週工作量**，v1 ship 26 週時程壓力大但可吸收（可能需重評 slice 10+ 範圍）
+  - ✅ **既有 story refine**：#18 Template 編輯頁基本架構 (本 ADR 全面 redesign) / 動作記憶 read pattern (CONTEXT.md L501-502 微 amendment)
+
 ## Flagged ambiguities
 
 - 「課表」一詞口語上有時指 Program、有時指 Template — 已固定為 **Template**。Program 改稱「計畫」。
 - 「Program」口語可同時指：(1)「訓練計畫 entity」（=「Program 主標籤」，帶日曆）；(2)「Program 副標籤」（per-cell rep range tag）。schema 拆為 **Program** + **Program 副標籤** 兩個 entity；UI 上分別在「Program 分頁」（管理計畫）與「日曆 cell 的副標籤按鈕」呈現。
 - 「腹部」與「核心」常被當同義詞使用 — 已決定 **不設「腹部」MG**，所有腹直肌/腹斜/腹橫的直接訓練（卷腹、側棒、leg raise）以及抗旋/抗伸穩定訓練（Pallof press, dead bug, bird-dog）都歸入 **核心**。注意：核心 MG 內仍可拆 muscle (側腹 / 腹肌)，這發生在 muscle layer，不違反「11 MG 不設腹部」原則。
 - 「二頭 → 內側頭 / 外側頭」原為口語命名，**ADR-0010 已反轉為解剖學標準「二頭長頭 / 二頭短頭」**（外側頭 = 長頭、內側頭 = 短頭）。schema / UI 一律用長/短頭。
+- **iPhone 端「結束 session」按鈕原子操作對稱性未明文** — story #75 寫了「開始」三步原子（`HKWorkoutSession.start()` + Session row 創建 + 計時開跑），但對稱的「結束」是否同樣為三步原子（`HKWorkoutSession.end()` + `ended_at` 寫入 + 計時停止），以及 iPhone vs Watch 誰是 master、Watch 不在身上時 iPhone 端是否可獨立 end（不走 HealthKit）— Backlog #6 grill (2026-05-11) 收口時順手記下；留 Watch v1 lifecycle 或 iPhone session lifecycle grill 補。
+- **HKWorkout 與 iPhone session 刪除一致性未明文**（ADR-0014 留尾，2026-05-11）— Q7.6=a 鎖了 hard delete iPhone session，但對應的 HKWorkout 那筆 v1 不主動刪（HealthKit 那邊保留）。已知不一致：iPhone DB 看不到該場，HealthKit Activity ring / Workout 仍有；長期影響「運動時長」HKWorkout fallback 公式不對齊（ADR-0009 Q12.6 公式有 fallback 但 source mismatch）。處理方式（同步刪 HKWorkout / 加 audit log / 保留並提示）留 Watch v1 / HealthKit lifecycle grill 補。
+<!-- ✅ Closed by ADR-0015 (2026-05-12, Q9.8-β): Freestyle session 在 Program 日曆顯示 = ⚠️ planned Template name + 小註「(自由訓練)」；升級後 reactive 變 ✅ 或顯示新 Template name -->
+
