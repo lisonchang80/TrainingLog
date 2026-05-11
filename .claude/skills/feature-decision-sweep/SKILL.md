@@ -16,6 +16,31 @@ Use this skill when **all** of the below are true:
 
 If any of the above is false → don't use this skill, just edit the relevant subset.
 
+## Deflationary close-out variant (no ADR written)
+
+Some grill rounds end with **"no new ADR needed"** because:
+- The decision is **pure status quo** (e.g., Q8「獎章 sub-tab 維持 ADR-0009」)
+- The decision is **pure no-op** (e.g., Q6「iPhone 不引入 paused 第三態」 — locks "don't do this")
+- The decision is **deflationary collapse** (e.g., Q10「訓練類型 label = Template name 本身」 — turns out the proposed feature is already covered by existing entity)
+
+In all 3 cases:
+- ❌ Skip Step 1 (no ADR file written)
+- ✅ Still do Step 2 (CONTEXT.md `Q<N>` close-out block with `無 ADR — 純 status quo / no-op / deflationary` annotation; remove the bullet from `下次 grill 接續` list)
+- ✅ Still do Step 3 (PRD Update log entry: `Q<N> grill close-out — **無新 ADR**（純 status quo / no-op / deflationary）` — usually no new stories)
+- ✅ Still do Step 4 (memory overview close-out bullet)
+
+The skill's name still applies — sweep is about syncing locations, not about ADR writing per se. A deflationary close-out without sweep would leave PRD's `下次 grill 接續` line stale (still listing the closed backlog item).
+
+## Batched sweep (multiple grills in one sweep)
+
+If grill phase produces multiple close-outs back-to-back (e.g., 3 deflationary Q6/Q8/Q10 + 3 ADR-writing Q7/Q9/Q11), it's fine to batch them:
+- Write all ADRs (Step 1 once per ADR)
+- One CONTEXT.md edit pass covering all `Q<N>` close-out blocks
+- One PRD body edit pass (single `gh issue edit --body-file` push)
+- One memory update pass
+
+But the「`下次 grill 接續`」line in memory + CONTEXT.md should reflect **only the final state** — don't write intermediate states that get overwritten.
+
 ## The 4 locations (do in this order)
 
 ### 1. Write or update ADR — `docs/adr/000X-<kebab-name>.md`
