@@ -484,7 +484,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
   - ✅ **Schema 影響**：新增 `app_settings(key TEXT PK, value TEXT)` 表 + `session.last_watch_sync_at TIMESTAMP NULL` 欄位 + backup metadata（`backup_log` 表或 `app_settings` key）；不需要 row-level `last_modified` / `soft_delete`（c 排除）
   - ✅ **拒絕的替代方案**：CloudKit row-level / 純 manual export / iOS 系統 iCloud Backup / A1 等 Watch confirm / A2 立即不管 Watch / A4 觸發兩次 / Settings 留 AsyncStorage / JSON v1 雙向 import / Backup encryption / 三段式 mode (auto / manual / disabled) / 多版本保留 (b3 / b4) / 只保留 1 份 (b1) / Force 登 iCloud / Restore 自動執行不問
   - ✅ **ADR-0011**：Backup and Sync Strategy for v1 — 已寫入 `docs/adr/0011-backup-and-sync-strategy.md`
-- **Q15 Set logger UI redesign**（grill 進行中，預估 ADR-0012）：
+- **Q15 Set logger UI redesign**（grill 主結構完，已寫入 `docs/adr/0012-set-logger-redesign-schema-and-affordances.md`）：
   - ✅ **Q15.1** Set 編輯 flow = **inline edit + ✓ 不退**：點 kg / 次 方格 → 方格變可編輯狀態（outline / 變色）+ 鍵盤滑上來；Done 直接寫回，方格收回非編輯狀態；已 ✓ 的 set 改數字時 ✓ 維持，語意 = 「✓ = 這組存在 / 完成」（修正 typo / 微調，非反悔）。破壞性動作（刪除、跳過、複製）走 ⋯ menu。需要 keyboardAvoidingView 把被改的 row scroll 到上半屏避免被軟鍵盤蓋住。**拒絕**：modal sheet（每組多 2 tap + 動畫，set edit 沒 cancel/discard 語意）；點方格自動取消 ✓（95% 是微調而非反悔，每次都重 tap 過勞）
   - ✅ **Q15.2** Set 兩態 + 刪除動作（**Q15.4 修訂**：原三態 ⊘ 跳過剔除）（**Q15.5 修訂**：is_warmup → set_kind enum / 「⋯ menu」字眼全砍改 gesture 群，見 Q15.5 段）：`set.is_logged BOOLEAN` 新增（v008 migration），與「刪除整 row」動作共構出三種使用者意圖 — `◯` 空白 (`is_logged=F`，預填 Template snapshot 值) / `✓` 已完成 (`is_logged=T`) / **刪除 row**（從預建 row 列表整個 DELETE，分子分母都退）；`set.is_skipped` 欄位**不再使用**（v008 不新增；既有 v00x schema 若有則 deprecate，PR / 容量 engine 改成只看 is_logged + is_warmup）。Session 開始時依 Template snapshot **預先 batch insert** N 組 `◯` row，使用者點 ✓ 直接 toggle `is_logged`（E1-α，Q15.4 拍板）而不是新 insert（reference UI「session 開始看到 4 組空格等你填」是預期 flow）。PR / 容量計算規則：**只算 `is_logged=T AND is_warmup=F`** 的 set；既有 PR engine「忽略 `is_skipped`」邏輯改成「忽略 `is_logged=F` OR `is_warmup=T`」。進度 chip `已完成/計劃` 兩維度都能直接 query 同表算出（分子 `SUM(reps×weight) WHERE is_logged=T AND is_warmup=F`、分母 `SUM(reps×weight) WHERE is_warmup=F` — set 表只有一組 reps/weight 欄位，分子分母同欄位用過濾條件區分，見 Q15.5 段 schema model 澄清）。**拒絕**：A 二態（失去「未完成佔位」狀態，進度 chip 0/4 沒法算）；B-2 lazy 建 row（reference UI 強烈暗示預建，inline edit 第 2 組要先 +新增 多一步）；C 無 is_logged（reps/weight NULL 雙用 — 「未建」vs「已跳過」語義重疊）；原 ⊘ 跳過態（保留 row 標記 audit trail — Q15.4 拍板「Session 在運動中編輯，要快速、即時」哲學下 ⊘ 摩擦過大，使用者要撤就直接刪）
   - ✅ **Q15.3** 熱身組 + 動作記憶機制（**Q15.5 修訂**：`set.is_warmup BOOLEAN` → `set.set_kind` enum / 「⋯ menu 切熱身/正式」→ tap label cycle 單向三態，見 Q15.5 段）：
@@ -606,7 +606,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       - **9.** 歷史 = 月曆視圖（重設 slice 9 三 sub-tab 範圍）
       - **10.** 訓練類型 label 系統（胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)） source + 顏色 mapping
       - **11.** **Template 編輯流程 UI redesign**（與「模版配色」+ 動作卡 collapsed/expanded + per-exercise ⚙ menu + 底部 4-action bar 等子題；可能拆獨立 ADR 或併入 ADR-0012）
-    - **或：先動手寫 ADR-0012**，整理 Q15.1-Q15.5b 全部拍板收成正式拍板文件（含 schema model 澄清、affordance gesture map、cluster 結構、計算規則矩陣）後再 backlog 5-11
+    - **ADR-0012 已寫入** ✅（2026-05-11，`docs/adr/0012-set-logger-redesign-schema-and-affordances.md`）：整併 Q15.1–Q15.5b 全拍板（schema model + per-row 5 gesture + cluster 3 gesture + 計算規則矩陣 + 37 條拒絕替代方案 + slice 影響清單 + v1 時程 +5 週可吸收）
 
 ## Flagged ambiguities
 
