@@ -75,6 +75,25 @@ When a term is resolved, update `CONTEXT.md` right there. Don't batch these up �
 
 Don't couple `CONTEXT.md` to implementation details. Only include terms that are meaningful to domain experts.
 
+### Ground schema notation in actual fields, not concepts
+
+When writing a decision involving schema (e.g., progress chip formula, query predicates), use field names that **actually exist** in the schema. Don't use convenient placeholder notation like `planned_X × planned_Y` if the table only has one set of `X` + `Y` columns — even if "planned" reads conceptually clearer.
+
+Sloppy notation looks fine at write time but **lies dormant** until a later grill round trips on it. Example (TrainingLog Q15): Q15.2 / Q15.4 wrote `Σ (planned_reps × planned_weight)` for the chip denominator while the `set` table only has one `reps`/`weight` pair. Two rounds later in Q15.5 the user asked "how would the chip ever exceed 100%?" and the whole grammar broke — the implicit "planned vs actual two-column model" was never the real schema. Cost: retroactive patch across multiple sub-questions + a schema-model clarification block.
+
+**Rule:** before pasting a formula into a decision, scan the schema. If your formula references columns that don't exist, rewrite using real columns + filter predicates. The grill is the right time to catch this — later rounds will assume the formula is ground truth.
+
+### Mark revisions explicitly when later rounds overturn earlier decisions
+
+A long grill (Q15 was ~6 sub-rounds) will routinely revisit and reverse earlier decisions. When this happens, **don't silently delete the old wording** — readers of the doc need to see what changed.
+
+Pattern:
+- On the **old** decision: add an inline marker `（**Q15.X 修訂**：<summary>，見 Q15.X 段）` right in its bullet
+- In the **new** decision section: add an explicit "翻盤的既有拍板" / "Reversed decisions" sub-bullet that lists each prior decision being overturned with `❌` / `⚠️` markers
+- Don't try to keep old bullets pristine — they need to point forward to the revision
+
+This protects against the reader picking up the doc mid-stream, reading an early `✅` decision, and not realising it's been superseded. Example pattern (TrainingLog): Q15.5 段 has a "翻盤的既有拍板" list with 4 ❌ items pointing back at Q15.1 / Q15.3 / Q15.4; meanwhile each of those original bullets has inline `（Q15.5 修訂：...）` marker.
+
 ### Offer ADRs sparingly
 
 Only offer to create an ADR when all three are true:
