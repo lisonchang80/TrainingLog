@@ -486,7 +486,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
   - ✅ **ADR-0011**：Backup and Sync Strategy for v1 — 已寫入 `docs/adr/0011-backup-and-sync-strategy.md`
 - **Q15 Set logger UI redesign**（grill 進行中，預估 ADR-0012）：
   - ✅ **Q15.1** Set 編輯 flow = **inline edit + ✓ 不退**：點 kg / 次 方格 → 方格變可編輯狀態（outline / 變色）+ 鍵盤滑上來；Done 直接寫回，方格收回非編輯狀態；已 ✓ 的 set 改數字時 ✓ 維持，語意 = 「✓ = 這組存在 / 完成」（修正 typo / 微調，非反悔）。破壞性動作（刪除、跳過、複製）走 ⋯ menu。需要 keyboardAvoidingView 把被改的 row scroll 到上半屏避免被軟鍵盤蓋住。**拒絕**：modal sheet（每組多 2 tap + 動畫，set edit 沒 cancel/discard 語意）；點方格自動取消 ✓（95% 是微調而非反悔，每次都重 tap 過勞）
-  - ✅ **Q15.2** Set 兩態 + 刪除動作（**Q15.4 修訂**：原三態 ⊘ 跳過剔除）（**Q15.5 修訂**：is_warmup → set_kind enum / 「⋯ menu」字眼全砍改 gesture 群，見 Q15.5 段）：`set.is_logged BOOLEAN` 新增（v008 migration），與「刪除整 row」動作共構出三種使用者意圖 — `◯` 空白 (`is_logged=F`，預填 Template snapshot 值) / `✓` 已完成 (`is_logged=T`) / **刪除 row**（從預建 row 列表整個 DELETE，分子分母都退）；`set.is_skipped` 欄位**不再使用**（v008 不新增；既有 v00x schema 若有則 deprecate，PR / 容量 engine 改成只看 is_logged + is_warmup）。Session 開始時依 Template snapshot **預先 batch insert** N 組 `◯` row，使用者點 ✓ 直接 toggle `is_logged`（E1-α，Q15.4 拍板）而不是新 insert（reference UI「session 開始看到 4 組空格等你填」是預期 flow）。PR / 容量計算規則：**只算 `is_logged=T AND is_warmup=F`** 的 set；既有 PR engine「忽略 `is_skipped`」邏輯改成「忽略 `is_logged=F` OR `is_warmup=T`」。進度 chip `已完成/計劃` 兩維度都能直接 query 同表算出（分子 `SUM(reps×weight) WHERE is_logged=T AND is_warmup=F`、分母 `SUM(planned_reps×planned_weight) WHERE is_warmup=F`）。**拒絕**：A 二態（失去「未完成佔位」狀態，進度 chip 0/4 沒法算）；B-2 lazy 建 row（reference UI 強烈暗示預建，inline edit 第 2 組要先 +新增 多一步）；C 無 is_logged（reps/weight NULL 雙用 — 「未建」vs「已跳過」語義重疊）；原 ⊘ 跳過態（保留 row 標記 audit trail — Q15.4 拍板「Session 在運動中編輯，要快速、即時」哲學下 ⊘ 摩擦過大，使用者要撤就直接刪）
+  - ✅ **Q15.2** Set 兩態 + 刪除動作（**Q15.4 修訂**：原三態 ⊘ 跳過剔除）（**Q15.5 修訂**：is_warmup → set_kind enum / 「⋯ menu」字眼全砍改 gesture 群，見 Q15.5 段）：`set.is_logged BOOLEAN` 新增（v008 migration），與「刪除整 row」動作共構出三種使用者意圖 — `◯` 空白 (`is_logged=F`，預填 Template snapshot 值) / `✓` 已完成 (`is_logged=T`) / **刪除 row**（從預建 row 列表整個 DELETE，分子分母都退）；`set.is_skipped` 欄位**不再使用**（v008 不新增；既有 v00x schema 若有則 deprecate，PR / 容量 engine 改成只看 is_logged + is_warmup）。Session 開始時依 Template snapshot **預先 batch insert** N 組 `◯` row，使用者點 ✓ 直接 toggle `is_logged`（E1-α，Q15.4 拍板）而不是新 insert（reference UI「session 開始看到 4 組空格等你填」是預期 flow）。PR / 容量計算規則：**只算 `is_logged=T AND is_warmup=F`** 的 set；既有 PR engine「忽略 `is_skipped`」邏輯改成「忽略 `is_logged=F` OR `is_warmup=T`」。進度 chip `已完成/計劃` 兩維度都能直接 query 同表算出（分子 `SUM(reps×weight) WHERE is_logged=T AND is_warmup=F`、分母 `SUM(reps×weight) WHERE is_warmup=F` — set 表只有一組 reps/weight 欄位，分子分母同欄位用過濾條件區分，見 Q15.5 段 schema model 澄清）。**拒絕**：A 二態（失去「未完成佔位」狀態，進度 chip 0/4 沒法算）；B-2 lazy 建 row（reference UI 強烈暗示預建，inline edit 第 2 組要先 +新增 多一步）；C 無 is_logged（reps/weight NULL 雙用 — 「未建」vs「已跳過」語義重疊）；原 ⊘ 跳過態（保留 row 標記 audit trail — Q15.4 拍板「Session 在運動中編輯，要快速、即時」哲學下 ⊘ 摩擦過大，使用者要撤就直接刪）
   - ✅ **Q15.3** 熱身組 + 動作記憶機制（**Q15.5 修訂**：`set.is_warmup BOOLEAN` → `set.set_kind` enum / 「⋯ menu 切熱身/正式」→ tap label cycle 單向三態，見 Q15.5 段）：
     - **熱身組進 schema** (`set.is_warmup BOOLEAN`, v008)，PR engine 過濾、容量計算過濾、UI 標「熱」label、正式組從 1 起編號；徒手動作 (`load_type='bodyweight'`) 預設 `warmup_set_count=0`，其他預設 `warmup_set_count=1`，使用者可從 ⋯ menu 切換熱身/正式
     - **動作記憶 = derived，不存 Exercise 級欄位**：定義為「該 Exercise 跨**所有 `template_exercise` row**，依 `updated_at` 排序最新的那筆」的 (warmup_set_count, working_set_count, planned_reps, planned_weight)。記憶不是另開冗餘狀態 — 記憶就是「最近被使用者調整過的某 template_exercise row 內容」
@@ -512,8 +512,8 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
     - **底層哲學 anchor**：**「Session 在運動中編輯，要快速、即時」** — 任何摩擦（二次確認、多 tap、autosave 之外的明示存檔）都要極力消除。所有 set logger 設計遇到「要不要加確認 / 加步驟」一律對齊這條
     - **B 案：Session 頂層無 chip**（容量 / 組數 / 動作數三條 stats 全剔除，AI 按鈕一併剔除），目標 chip **純存在於 per-exercise card 右上**（reference UI `0.0/3080.0` 形式：`已完成 / 計劃` 容量）
     - **A1 案：目標 source = Template snapshot 預建 row 加總**（不用額外欄位）：
-      - 分母 = `Σ (planned_reps × planned_weight) WHERE session_set rows in this exercise AND is_warmup = F`
-      - 分子 = `Σ (reps × weight) WHERE is_logged = T AND is_warmup = F`
+      - 分母 = `Σ (reps × weight) WHERE session_set rows in this exercise AND is_warmup = F`（row 上**當下** reps/weight，不分 planned vs actual）
+      - 分子 = `Σ (reps × weight) WHERE is_logged = T AND is_warmup = F`（同欄位加 is_logged 過濾 → 恆 ≤ 分母）
       - 驗算：reference UI 六角杆硬拉 5 row (1 熱 65×12 + 4 working 65×12+65×10+65×10+100×10) → 分母排除熱身 = 780+650+650+1000 = **3080** ✅ 對齊
     - **A1.a-α 新增一組從上一組複製**：使用者按動作卡內「新增一組」action 時，新 row planned 從**上一組（最後一個 working row）**複製 reps/weight，分母即時 +planned。**拒絕** β 新 row planned=NULL（chip 可超 100% 顯示 `4080/3080` 不直觀）/ γ 純 bonus（分子分母都不動，違反「新增一組就是計劃延伸」的直覺）
     - **A1.b N/A**：B 案 collapse 掉 session aggregate 後，「plan 外加新動作」對總分母的問題消失；新動作卡自有 chip
@@ -527,7 +527,7 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
     - **per-exercise 備註位置**：動作圖正下方、第一 set 上方，placeholder「點擊輸入備註」（Q15.5 grill 持久化機制）
     - **list view 卡片下方圓點**：`5組` 對應 5 個 row 含熱身（β 規則：list view 顯示總 set 數 = warmup + working）；圓點視覺後續決定（已 ✓ → 實心）
     - **拒絕的替代方案**：A2 Live Template (chip 跟 row 來源不一致)/ A3 每次手填（多餘摩擦）/ A4 歷史推（跟 Template planned 衝突，類設置遞增規則 Q15 已剔除）/ session 頂層 chip（reference UI 明確叉掉）
-    - **下次 grill 接續**：C3.1 已拍板（α 顯 0/0，見 Q15.5）；剩 C3.2 / F / G / Q15.5b cluster 級 affordance
+    - **下次 grill 接續**：C3.1 已拍板（α 顯 0/0，見 Q15.5）；C3.2 / F / G / Q15.5b 全拍板（見 Q15.5b 段）；Q15 主結構完，剩 Backlog 5-11
   - ✅ **Q15.5 Per-row 結構 + Affordance + Dropset Cluster + C3.1 拍板**（2026-05-11；本輪 grill 修訂 Q15.1 / Q15.2 / Q15.3 / Q15.4 多處，整合 reference UI 競品 dropset 模塊）：
     - **底層哲學延伸**：拿掉 per-set ⋯ menu icon — 視覺降噪 + 全 gesture-driven；訓練學語意優先（dropset 重新建模為 cluster 不是 individual rows）
     - **Row 結構**（從左到右）：`[熱/#N/D#] reps weight 📝(備註預覽) ★(破PR) ✓`
@@ -557,7 +557,12 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       | 分母 A1 chip | ✗ | ✓ | ✓ (Σ planned all steps) |
       | PR engine (slice 8) | ✗ | ✓ | ✗ (整 cluster 跳過) |
       | e1RM 顯示 | ✗ | (動作歷史 modal) | ✗ |
-    - **Q15.4 A1 分母解讀澄清（重要）**：分母不是 Template snapshot freeze，而是 **row 級 reactive sum** — 每 row 的 `planned_reps × planned_weight` 是 row 上**當下**的數字，inline edit / 加 row / 刪 row 即時 + / − 分母；Template 只負責初始預填，預填完就脫鉤
+    - **Q15.4 A1 分母解讀澄清（重要）— schema model**：set 表只有一組 `reps INTEGER` + `weight REAL` 欄位（**不分 planned vs actual**）。預建 `◯` row 時欄位填 Template snapshot / 動作記憶 / fallback 值；user inline edit 改的就是同一組欄位
+      - 分母 = `Σ (reps × weight) WHERE set_kind != 'warmup'`（row 上當下值，不過濾 is_logged）
+      - 分子 = `Σ (reps × weight) WHERE is_logged=T AND set_kind != 'warmup'`
+      - 同欄位 + 過濾條件 superset → **分子 ≤ 分母恆成立、chip 範圍恆 0-100%，無「超 100%」場景**
+      - 之前 Q15.2 / Q15.4 草拍寫的 `planned_reps × planned_weight` 是 sloppy notation；不是兩組獨立欄位
+      - inline edit 為何 reactive：user 改數字直接動分子（若 logged）+ 分母（永遠動），同步前進；分子永不超過分母
     - **C3.1 freestyle 首次接觸 chip → α (顯 0/0)**：因分母 reactive 規則，首次接觸 fallback (warmup=1, working=1, reps=10, weight=0) 的 `0/0` 只在 add exercise → user 動 planned 前的瞬態存在；user 一動 planned (例如 inline edit weight=12.5) 立刻變 `0/125` → 正常。**拒絕** β (分母=0 隱藏 chip → 動 planned 後 chip 突現的視覺跳動) / γ (純累積 — freestyle 不再「無目標」此案已 N/A)
     - **PR ★ on row（d-A）**：破 PR row 標 ★（slice 8 engine 已能偵測）；e1RM **不進 row**（slice 8 動作歷史 modal 已有 e1RM 趨勢圖，row 上再放冗餘）；多重 PR 顯示細節（一顆 vs 多顆 / 顏色分桶）leftover
     - **競品 reference UI 剔除清單**（2026-05-11 圖中紅 X）：⋯ icon / + − 加減重量按鈕 / 「記錄左右」toggle / 「每組計時」toggle / 「喵喵 AI」按鈕 / cluster 內 step 的「遞 N」label
@@ -571,12 +576,37 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       - slice 8 volumeEngine 過濾：`is_warmup=T` 排除 → `set_kind = 'warmup'` 排除（working + dropset 算容量）
       - slice 8 動作歷史 modal：cluster 渲染要 group by `parent_set_id`，UI 把 cluster step folded under root
       - slice 4 saveBackDiff：cluster aggregate 計算改成 cluster 級（不是 step 級）
-    - **leftover 待 grill**：
-      - **Q15.5b** Cluster 級 affordance：左滑 cluster 首 step = 刪整 cluster 嗎？需要二次確認嗎？長按首 step = 移整 cluster？右滑 = 新增 cluster 還是新增 step？
-      - **C3.2** freestyle 加動作要不要預建 row（vs lazy 建 — Q15.2 預建邏輯只在 Template-based session 拍板，freestyle 路徑沒定義）
-      - **F** 歷史頁查看舊 Session 容量 chip 仍顯示嗎
-      - **G** 視覺細節（進度條 / 超 100% / 精度）
-      - **Backlog 5-11**：per-exercise notes 持久化 / session 計時暫停 / session title 編輯 / 獎章 sub-tab 去哪 / 月曆視圖 / 訓練類型 label / Template 編輯流程 redesign
+    - **leftover 待 grill**：見 Q15.5b 段（Q15.5b / C3.2 / F / G 已拍板）；剩 Backlog 5-11
+  - ✅ **Q15.5b Cluster 級 affordance + C3.2 + F + G 拍板**（2026-05-11；Q15.5 leftover 一次清掉，Q15 set logger redesign 主結構全完）：
+    - **Q15.5b Cluster 首 step row 三 gesture（全 α）**：
+      - **左滑** → [刪除整 cluster] 紅 button：一鍵砍掉首 step + 所有 children；**無二次確認**（哲學一致 — 左滑本身已是刻意 affordance）
+      - **長按** → 整 cluster 浮起拖移：children 跟 root 一起移動，cluster 是 reorder 單位（schema 上 parent_set_id 不變、只 position 重編）
+      - **右滑** → [新增 + 📝 備註] 兩 button：「新增」= 在當前 cluster 後 append **新 cluster**（D# 編號 derived；planned 從當前 cluster 首 step 複製）；「備註」= 編 `root.notes`（cluster 級備註存 root row）；子 step 雖 schema 允許 notes 但 UI 不暴露編輯入口（dead field for cluster steps）
+      - **拒絕**：β 左滑只刪首 step（children parent_set_id dangling 不可行）/ β 長按只移首 step（schema 衝突）/ β 右滑新增 step（重複現有 cluster 內 [+] button）/ γ 不可長按 / γ 右滑隱藏新增（user 無法 append 新 cluster）
+    - **C3.2 Freestyle 加動作預建 row → α（預建）**：
+      - 加動作後**立刻**依 Q15.3 動作記憶 / fallback batch insert `(warmup_set_count + working_set_count)` 組 ◯ row
+      - 有記憶（臥推 1+4×10@60）→ 預建 5 row；首次接觸 fallback (warmup=1, working=1) → 預建 2 row；徒手 fallback (warmup=0, working=1) → 預建 1 row
+      - 跟 Template-based session 預建邏輯**同 code path**（Q15.2 既拍）— freestyle 不另開分支
+      - 兩種 freestyle 情境共用：(i) Today 直接 Start Session 沒選 Template / (ii) Template-based session 中底部 ➕「加動作」plan 外加
+      - **拒絕** β Lazy 建 row（多 tap + code path 分叉 + 分母 0/0 場景擴大）/ γ 混合（記憶帶 warmup + 1 working：無強理由折衷）
+    - **F 歷史頁查看舊 Session chip → α（顯示，同 session 進行中 format）**：
+      - chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（row 上當下 reps/weight）
+      - 用途：訓練復盤（看哪些 session 沒做完）+ 跨 session 進步對比
+      - 適用：slice 9 歷史 sub-tab → session detail view + slice 8 動作歷史 modal（cluster 內 step 仍 fold under root）
+      - **拒絕** β 隱藏（失去完成度資訊 + UI 不一致）/ γ 只顯 actual 無分母（失去計劃對比）
+    - **G 視覺細節**：
+      - **G.1 進度條 → β（文字 + bar）**：chip 數字 `0.0/3080.0` 下方一條**系統主色細 bar** 填充 0-100%；**不顯百分比數字**（chip 數字已能心算 78%）；bar 純色不 by set_kind 著色
+      - **G.2 超 100% → N/A**：schema model 下分子 ≤ 分母恆成立（同欄位 + 過濾條件 superset），chip 範圍恆 0-100%；**無「超 100% 視覺處理」需求**
+      - **G.3 精度 → α（統一 1 位小數）**：`0.0/3080.0`、`2400.5/3080.0`；對齊 reference UI 風格 + inline edit reactive 變動平滑（避免「0 位 ↔ 1 位」視覺跳動）
+    - **下次 grill 接續**：Q15 set logger redesign 主結構**全拍板完**；剩 **Backlog 5-11**（每條獨立 grill 題、可分次處理）：
+      - **5.** per-exercise notes 持久化（`session_exercise.notes`？save-back 帶回 Template？）
+      - **6.** session 計時暫停 / 繼續（vs Watch v1 #10）
+      - **7.** session title 編輯（覆蓋 vs 另存 `session.title`）
+      - **8.** 獎章 sub-tab 去哪（頂層 tab? Profile? 剔除?）
+      - **9.** 歷史 = 月曆視圖（重設 slice 9 三 sub-tab 範圍）
+      - **10.** 訓練類型 label 系統（胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)） source + 顏色 mapping
+      - **11.** **Template 編輯流程 UI redesign**（與「模版配色」+ 動作卡 collapsed/expanded + per-exercise ⚙ menu + 底部 4-action bar 等子題；可能拆獨立 ADR 或併入 ADR-0012）
+    - **或：先動手寫 ADR-0012**，整理 Q15.1-Q15.5b 全部拍板收成正式拍板文件（含 schema model 澄清、affordance gesture map、cluster 結構、計算規則矩陣）後再 backlog 5-11
 
 ## Flagged ambiguities
 
