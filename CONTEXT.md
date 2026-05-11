@@ -161,8 +161,12 @@ _Avoid_: Rep（rep 是 set 內的次數，不是同義詞）；**weight ≠ body
 其他進階組型（rest-pause、AMRAP、cluster、giant set）v1 暫不建模，使用者用備註欄記。
 _Avoid_: Set Block, Cluster（cluster 是另一種特定組型）
 
-**Exercise 備註** (UI: per-Exercise 備註):
-Session 中每個 Exercise 的自由文字 textarea。獨立於 Set-level 備註。例：「左肩有點緊」「換到 squat rack #3」。
+**Exercise 備註** (UI: per-Exercise 備註) (ADR-0013):
+Per-exercise notes 持久化採**雙欄 schema**：
+- `template_exercise.notes TEXT NULL`：**可編輯、主來源**，per-template entity 獨立（同 name 不同三元組各自一份）；in-session 編輯立即寫回 template（無 draft、無 commit dialog）
+- `session_exercise.notes_snapshot TEXT NULL`：**不可變、歷史保鮮**，template-based session 在 create 時冷凍、freestyle session 在 complete 時冷凍
+- Freestyle session 走 hidden template_exercise pattern：`template_exercise.hidden BOOLEAN NOT NULL DEFAULT 0`；存為 template 時 `hidden=0` 並綁新 template_id，否則保留為 orphan
+獨立於 Set-level 備註（`set.notes` 由 ADR-0012 管）。例：「左肩有點緊」「下背貼椅、肘略前推、頂端不鎖死」。
 
 **容量** (UI: 容量):
 **容量 = weight × reps**（per-set 級單位）。per-Exercise 容量 = sum(每組 weight × reps for `is_done` sets)；Session 容量 = sum(該 Session 全部 Exercises 的容量)。
@@ -598,15 +602,40 @@ _Avoid_: CloudKit row-level sync（c 已排除即 overkill）；純 manual expor
       - **G.1 進度條 → β（文字 + bar）**：chip 數字 `0.0/3080.0` 下方一條**系統主色細 bar** 填充 0-100%；**不顯百分比數字**（chip 數字已能心算 78%）；bar 純色不 by set_kind 著色
       - **G.2 超 100% → N/A**：schema model 下分子 ≤ 分母恆成立（同欄位 + 過濾條件 superset），chip 範圍恆 0-100%；**無「超 100% 視覺處理」需求**
       - **G.3 精度 → α（統一 1 位小數）**：`0.0/3080.0`、`2400.5/3080.0`；對齊 reference UI 風格 + inline edit reactive 變動平滑（避免「0 位 ↔ 1 位」視覺跳動）
-    - **下次 grill 接續**：Q15 set logger redesign 主結構**全拍板完**；剩 **Backlog 5-11**（每條獨立 grill 題、可分次處理）：
-      - **5.** per-exercise notes 持久化（`session_exercise.notes`？save-back 帶回 Template？）
+    - **下次 grill 接續**：Q15 set logger redesign 主結構**全拍板完**；Q5 per-exercise notes 持久化已拍板（見 Q5 close-out 段，ADR-0013）；剩 **Backlog 6-11**（每條獨立 grill 題、可分次處理）：
       - **6.** session 計時暫停 / 繼續（vs Watch v1 #10）
       - **7.** session title 編輯（覆蓋 vs 另存 `session.title`）
       - **8.** 獎章 sub-tab 去哪（頂層 tab? Profile? 剔除?）
-      - **9.** 歷史 = 月曆視圖（重設 slice 9 三 sub-tab 範圍）
+      - **9.** 歷史 = 月曆視圖（重設 slice 9 三 sub-tab 範圍）— Q5.4 已部分鎖（collapsed 卡 = Template + Program + 容量 + 動作數），日格彈出可沿用
       - **10.** 訓練類型 label 系統（胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)） source + 顏色 mapping
       - **11.** **Template 編輯流程 UI redesign**（與「模版配色」+ 動作卡 collapsed/expanded + per-exercise ⚙ menu + 底部 4-action bar 等子題；可能拆獨立 ADR 或併入 ADR-0012）
     - **ADR-0012 已寫入** ✅（2026-05-11，`docs/adr/0012-set-logger-redesign-schema-and-affordances.md`）：整併 Q15.1–Q15.5b 全拍板（schema model + per-row 5 gesture + cluster 3 gesture + 計算規則矩陣 + 37 條拒絕替代方案 + slice 影響清單 + v1 時程 +5 週可吸收）
+
+- **Q5 per-exercise notes 持久化**（ADR-0013 已寫入 2026-05-11；雙欄 schema + freestyle hidden-template pattern + UI bottom sheet）：
+  - ✅ **Q5.1** Schema layer = **B + 補 snapshot**：`template_exercise.notes TEXT NULL`（可編輯主來源）+ `session_exercise.notes_snapshot TEXT NULL`（不可變歷史保鮮）；**雙欄 schema**，非單層
+  - ✅ **Q5.1a** Edit timing = **A** 編輯立即寫回 template（無 draft、無 commit dialog；點「完成」UPDATE template_exercise.notes）
+  - ✅ **Q5.1b** History accuracy = **B** 加 immutable `session_exercise.notes_snapshot`（給歷史一個 immutable reference，避免 template 編輯後歷史失真）
+  - ✅ **Q5.1c** Template-based session snapshot 寫入時機 = **α**（session create 時複製 template.notes → notes_snapshot）；對應「我帶著什麼 cue 進場」
+  - ✅ **Q5.1d** Freestyle 怎麼辦 = **2 + 補充規則**：silent-create hidden template_exercise（`template_exercise.hidden BOOLEAN NOT NULL DEFAULT 0`，加動作時 INSERT hidden=1）；session 存為 template → 升級 hidden=0 + 綁新 template_id；否則保留為 orphan（hidden=1 永遠，FK 不破，notes_snapshot 在 session_exercise 上保留供歷史頁讀）
+    - **Q5.1d-i** Freestyle snapshot 寫入時機 = **a** session complete 時冷凍（α 在 freestyle 不適用，因 session create 時無 template_exercise）
+    - **Q5.1d-ii** 不存 template 時 hidden row 怎麼辦 = **a** 保留為 orphan + hidden=true（FK 完整、歷史穩定；orphan 累積由 v1.5+ GC routine 處理）
+  - ✅ **框架修正**：原先「Q5.1=B 單層 schema、session 不留 notes」是錯誤敘述。**雙欄 schema** + **每場 session 都會留 snapshot**（NULL 或實值）是準確說法；session 留的是不可變的歷史 snapshot，不是可編輯的 notes
+  - ✅ **Q5.3** UI 視覺：
+    - **icon = 1a SF Symbol `text.bubble`** 僅 notes 非空才顯示（不佔垂直空間）；非 emoji 一致 iconography
+    - **顯示 = 2a expanded** 直行純文字無標題、secondary 字色；位於動作圖正下方、Set rows 上方
+    - **Q5.3a** ⚙ menu 文案 = **a 動態切換**：notes 空 → 「新增備註」/ notes 非空 → 「編輯備註」（i18n 多 2 key 是合理代價）
+    - **Q5.3b** Edit sheet = **4a Bottom sheet**（iOS 原生 `.sheet(presentationDetents:)` 多 detent；上滑放大、下滑取消；動作卡仍可見保留上下文；單手友善）
+    - **Q5.3c** 模板層級警告 = **5c 無警告**（UI 最乾淨；可逆操作不必攔截教學）
+    - **Q5.3d** 內容格式 = **d-1 多行純文字無上限**（不支援 markdown；訓練中時間壓力使失控風險低）
+  - ✅ **Q5.4** 歷史顯示：
+    - **Q5.4-A Collapsed list = 極簡版**：只顯示 Template name + Program 主+副標 + 容量總和(動作數)；無動作明細、無 PR chip、無 notes preview；與 Backlog #9 月曆視圖日格彈出共用此結構
+    - **Q5.4-B 詳情頁 = b-2 變體**：本場 session 各動作的 `notes_snapshot` 直接展開顯示（在 sets 下方一行 💬 chip + 文字）；不是時間線、不是最近 N 次
+    - **Q5.4-B' 動作時間線**（從詳情頁某動作再點進去看歷次 snapshot）= **B'-2 v1 不做**，併入 v1.5（「怕太亂、訊息層級不清」）
+    - **Q5.4-C 全文搜尋 notes** = **c-1 v1 不做** + **c-3 v1.5 候選**
+  - ✅ **ADR-0012 補充（旁邊收）**：⚙ menu「移動動作」entry = **進專屬重排列表畫面**（簡化 icon + 動作名、保存/取消按鈕、長按拖拽提示）；**動作卡標題長按 = 等價入口**（兩個 gesture 進同一模式）；修訂 ADR-0012「per-row 長按 = drag-reorder」— 後者仍是 set 內 reorder，**exercise 級 reorder 走獨立模式**
+  - ✅ **拒絕的替代方案** ~22 條：Q5.1=A (session mutable) / Q5.1=A+B (雙層 mutable) / Q5.1b=A (無 snapshot 歷史失真) / Q5.1c=β (lazy 隱性副作用) / Q5.1c=γ (complete 衝突) / Q5.1d=1 (freestyle 不能寫 UX 不一致) / Q5.1d=3 (global exercise.notes) / Q5.1d=4 (兩層 override 過設計) / Q5.1d-i=b / Q5.1d-ii=b/c / Q5.3a=b (靜態文案差 affordance) / Q5.3b=4b (full-screen 失上下文) / Q5.3c=5a/5b (警告冗餘) / Q5.3d=d-2/d-3/d-4 (單行/上限/markdown) / Q5.4-A a-2/a-3 (list noise) / Q5.4-B b-1/b-3 (詳情頁無 notes / 全歷史) / Q5.4-B'=B'-1 (v1 時間線)
+  - ✅ **跨 Backlog 影響**：#9 (月曆) 沿用 collapsed 卡結構；#11 (Template 編輯流程 redesign) 共用「移動動作」列表元件
+  - ✅ **v1 slice 影響**：slice 9 歷史 sub-tab 顯著重設（collapsed 卡 + 詳情頁 notes 顯示）；其他 slice 不受影響；v009 migration 純加 3 欄位無 transform
 
 ## Flagged ambiguities
 
