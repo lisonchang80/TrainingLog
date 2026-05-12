@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CalendarMonthView } from './CalendarMonthView';
@@ -35,9 +36,11 @@ const HISTORY_VIEWS: readonly { key: HistoryView; label: string }[] = [
 
 export default function PrototypeRoot() {
   return (
-    <MockTrainingStoreProvider>
-      <PrototypeShell />
-    </MockTrainingStoreProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <MockTrainingStoreProvider>
+        <PrototypeShell />
+      </MockTrainingStoreProvider>
+    </GestureHandlerRootView>
   );
 }
 
