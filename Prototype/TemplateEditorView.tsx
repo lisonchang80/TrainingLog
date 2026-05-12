@@ -18,6 +18,7 @@ import {
   type TemplateExercise,
   type TemplateSet,
 } from './MockTrainingStore';
+import { SwipeableSetRow, type SwipeAction } from './SwipeableSetRow';
 
 type TemplateEditorViewProps = {
   template_id: string;
@@ -275,13 +276,125 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
         const clusterSize = ex.sets.filter(
           (x) => x.id === headId || x.parent_set_id === headId,
         ).length;
-        if (clusterSize <= 2) return ex;
+        if (clusterSize <= 2) {
+          Alert.alert(
+            '無法刪除',
+            'Dropset cluster 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 cluster head。',
+          );
+          return ex;
+        }
         const filtered = ex.sets
           .filter((s) => s.id !== set_id)
           .map((s, idx) => ({ ...s, position: idx }));
         return { ...ex, sets: filtered };
       }),
     });
+  };
+
+  const deleteSet = (ex_id: string, set_id: string) => {
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (ex.id !== ex_id) return ex;
+        const filtered = ex.sets
+          .filter((s) => s.id !== set_id)
+          .map((s, idx) => ({ ...s, position: idx }));
+        return { ...ex, sets: filtered };
+      }),
+    });
+  };
+
+  const deleteCluster = (ex_id: string, head_set_id: string) => {
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (ex.id !== ex_id) return ex;
+        const filtered = ex.sets
+          .filter(
+            (s) =>
+              s.id !== head_set_id && (s.parent_set_id ?? null) !== head_set_id,
+          )
+          .map((s, idx) => ({ ...s, position: idx }));
+        return { ...ex, sets: filtered };
+      }),
+    });
+  };
+
+  const cloneSetAfter = (ex_id: string, set_id: string) => {
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (ex.id !== ex_id) return ex;
+        const idx = ex.sets.findIndex((s) => s.id === set_id);
+        if (idx === -1) return ex;
+        const src = ex.sets[idx];
+        const newSet: TemplateSet = {
+          id: `${ex.id}-s-${Date.now()}`,
+          position: 0,
+          kind: src.kind,
+          reps: src.reps,
+          weight: src.weight,
+          parent_set_id: null,
+        };
+        const inserted = [
+          ...ex.sets.slice(0, idx + 1),
+          newSet,
+          ...ex.sets.slice(idx + 1),
+        ].map((s, i) => ({ ...s, position: i }));
+        return { ...ex, sets: inserted };
+      }),
+    });
+  };
+
+  const addClusterAfter = (ex_id: string, head_set_id: string) => {
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (ex.id !== ex_id) return ex;
+        // Find the last index belonging to the cluster anchored on head_set_id.
+        let clusterEndIdx = -1;
+        ex.sets.forEach((s, i) => {
+          if (s.id === head_set_id || s.parent_set_id === head_set_id) {
+            clusterEndIdx = i;
+          }
+        });
+        if (clusterEndIdx === -1) return ex;
+        const headRef = ex.sets.find((s) => s.id === head_set_id);
+        if (!headRef) return ex;
+        const baseTs = Date.now();
+        const newHeadId = `${ex.id}-c-${baseTs}-0`;
+        const newHead: TemplateSet = {
+          id: newHeadId,
+          position: 0,
+          kind: 'dropset',
+          reps: headRef.reps,
+          weight: headRef.weight,
+          parent_set_id: null,
+        };
+        const newFollower: TemplateSet = {
+          id: `${ex.id}-c-${baseTs}-1`,
+          position: 0,
+          kind: 'dropset',
+          reps: headRef.reps,
+          weight: headRef.weight,
+          parent_set_id: newHeadId,
+        };
+        const inserted = [
+          ...ex.sets.slice(0, clusterEndIdx + 1),
+          newHead,
+          newFollower,
+          ...ex.sets.slice(clusterEndIdx + 1),
+        ].map((s, i) => ({ ...s, position: i }));
+        return { ...ex, sets: inserted };
+      }),
+    });
+  };
+
+  const showReorderPlaceholder = () => {
+    Alert.alert(
+      '待實作 reorder',
+      '長按拖排序尚未實作（沒裝 reorder library），v1 ship 階段補。',
+    );
   };
 
   const showExerciseHistory = (ex: TemplateExercise) => {
@@ -503,6 +616,11 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
               onAddSet={() => addSet(parent.id)}
               onAddDropsetRow={(set_id) => addDropsetRow(parent.id, set_id)}
               onRemoveDropsetRow={(set_id) => removeDropsetRow(parent.id, set_id)}
+              onDeleteSet={(set_id) => deleteSet(parent.id, set_id)}
+              onCloneSetAfter={(set_id) => cloneSetAfter(parent.id, set_id)}
+              onDeleteCluster={(head_id) => deleteCluster(parent.id, head_id)}
+              onAddClusterAfter={(head_id) => addClusterAfter(parent.id, head_id)}
+              onLongPressRow={showReorderPlaceholder}
               onShowHistory={() => showExerciseHistory(parent)}
               onGearTap={() => openGearMenu(parent)}
               onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
@@ -547,6 +665,11 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
                     onAddSet={() => addSet(parent.id)}
                     onAddDropsetRow={(set_id) => addDropsetRow(parent.id, set_id)}
                     onRemoveDropsetRow={(set_id) => removeDropsetRow(parent.id, set_id)}
+                    onDeleteSet={(set_id) => deleteSet(parent.id, set_id)}
+                    onCloneSetAfter={(set_id) => cloneSetAfter(parent.id, set_id)}
+                    onDeleteCluster={(head_id) => deleteCluster(parent.id, head_id)}
+                    onAddClusterAfter={(head_id) => addClusterAfter(parent.id, head_id)}
+                    onLongPressRow={showReorderPlaceholder}
                     onShowHistory={() => showExerciseHistory(parent)}
                     onGearTap={() => openGearMenu(parent)}
                     onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
@@ -570,6 +693,11 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
                         onAddSet={() => addSet(child.id)}
                         onAddDropsetRow={(set_id) => addDropsetRow(child.id, set_id)}
                         onRemoveDropsetRow={(set_id) => removeDropsetRow(child.id, set_id)}
+                        onDeleteSet={(set_id) => deleteSet(child.id, set_id)}
+                        onCloneSetAfter={(set_id) => cloneSetAfter(child.id, set_id)}
+                        onDeleteCluster={(head_id) => deleteCluster(child.id, head_id)}
+                        onAddClusterAfter={(head_id) => addClusterAfter(child.id, head_id)}
+                        onLongPressRow={showReorderPlaceholder}
                         onShowHistory={() => showExerciseHistory(child)}
                         onGearTap={() => openGearMenu(child)}
                         onShowSetNote={(set) => openSetNoteEditor(child.id, set)}
@@ -828,6 +956,11 @@ function ExerciseBody({
   onAddSet,
   onAddDropsetRow,
   onRemoveDropsetRow,
+  onDeleteSet,
+  onCloneSetAfter,
+  onDeleteCluster,
+  onAddClusterAfter,
+  onLongPressRow,
   onShowHistory,
   onGearTap,
   onShowSetNote,
@@ -842,6 +975,11 @@ function ExerciseBody({
   onAddSet: () => void;
   onAddDropsetRow: (after_set_id: string) => void;
   onRemoveDropsetRow: (set_id: string) => void;
+  onDeleteSet: (set_id: string) => void;
+  onCloneSetAfter: (set_id: string) => void;
+  onDeleteCluster: (head_set_id: string) => void;
+  onAddClusterAfter: (head_set_id: string) => void;
+  onLongPressRow: () => void;
   onShowHistory: () => void;
   onGearTap: () => void;
   onShowSetNote: (set: TemplateSet) => void;
@@ -917,62 +1055,144 @@ function ExerciseBody({
       {expanded ? (
         <View style={[styles.setsBox, compact && styles.setsBoxCompact]}>
           {exercise.sets.map((s, i) => {
+            const isDropset = s.kind === 'dropset';
             const isDropsetFollower =
-              s.kind === 'dropset' && (s.parent_set_id ?? null) !== null;
+              isDropset && (s.parent_set_id ?? null) !== null;
+            const isDropsetHead = isDropset && !isDropsetFollower;
             const isClusterLast = clusterInfo[i].isClusterLast;
             const minusDisabled = clusterInfo[i].clusterSize <= 2;
+
+            let leftActions: SwipeAction[];
+            let rightActions: SwipeAction[];
+            if (isDropsetHead) {
+              leftActions = [
+                {
+                  key: 'delete-cluster',
+                  label: '刪',
+                  color: '#FF3B30',
+                  onPress: () => onDeleteCluster(s.id),
+                },
+              ];
+              rightActions = [
+                {
+                  key: 'add-cluster',
+                  label: '加',
+                  color: '#34C759',
+                  onPress: () => onAddClusterAfter(s.id),
+                },
+                {
+                  key: 'note',
+                  label: '備註',
+                  color: '#007AFF',
+                  onPress: () => onShowSetNote(s),
+                },
+              ];
+            } else if (isDropsetFollower) {
+              leftActions = [
+                {
+                  key: 'delete-follower',
+                  label: '刪',
+                  color: '#FF3B30',
+                  onPress: () => onRemoveDropsetRow(s.id),
+                },
+              ];
+              rightActions = [
+                {
+                  key: 'add-follower',
+                  label: '加',
+                  color: '#34C759',
+                  onPress: () => onAddDropsetRow(s.id),
+                },
+                {
+                  key: 'note',
+                  label: '備註',
+                  color: '#007AFF',
+                  onPress: () => onShowSetNote(s),
+                },
+              ];
+            } else {
+              leftActions = [
+                {
+                  key: 'delete-set',
+                  label: '刪',
+                  color: '#FF3B30',
+                  onPress: () => onDeleteSet(s.id),
+                },
+              ];
+              rightActions = [
+                {
+                  key: 'clone-set',
+                  label: '加',
+                  color: '#34C759',
+                  onPress: () => onCloneSetAfter(s.id),
+                },
+                {
+                  key: 'note',
+                  label: '備註',
+                  color: '#007AFF',
+                  onPress: () => onShowSetNote(s),
+                },
+              ];
+            }
+
             return (
-              <View key={s.id} style={styles.setRow}>
-                <Text style={[styles.setLabel, compact && styles.setLabelCompact]}>
-                  {setLabels[i]}
-                </Text>
-                <TextInput
-                  style={[styles.setInput, compact && styles.setInputCompact]}
-                  value={String(s.reps)}
-                  onChangeText={(t) =>
-                    onUpdateSet(s.id, { reps: Number(t.replace(/[^0-9]/g, '')) || 0 })
-                  }
-                  keyboardType="numeric"
-                />
-                <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
-                <TextInput
-                  style={[styles.setInput, compact && styles.setInputCompact]}
-                  value={String(s.weight)}
-                  onChangeText={(t) =>
-                    onUpdateSet(s.id, {
-                      weight: Number(t.replace(/[^0-9.]/g, '')) || 0,
-                    })
-                  }
-                  keyboardType="numeric"
-                />
-                <Text style={styles.setUnit}>kg</Text>
-                {isDropsetFollower ? (
-                  <Pressable
-                    onPress={() => onRemoveDropsetRow(s.id)}
-                    disabled={minusDisabled}
-                    style={[
-                      styles.dropsetInlineBtn,
-                      minusDisabled && styles.dropsetTailBtnDisabled,
-                    ]}
-                    hitSlop={6}>
-                    <Text
+              <SwipeableSetRow
+                key={s.id}
+                leftActions={leftActions}
+                rightActions={rightActions}
+                onLongPress={onLongPressRow}>
+                <View style={styles.setRow}>
+                  <Text style={[styles.setLabel, compact && styles.setLabelCompact]}>
+                    {setLabels[i]}
+                  </Text>
+                  <TextInput
+                    style={[styles.setInput, compact && styles.setInputCompact]}
+                    value={String(s.reps)}
+                    onChangeText={(t) =>
+                      onUpdateSet(s.id, { reps: Number(t.replace(/[^0-9]/g, '')) || 0 })
+                    }
+                    keyboardType="numeric"
+                  />
+                  <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
+                  <TextInput
+                    style={[styles.setInput, compact && styles.setInputCompact]}
+                    value={String(s.weight)}
+                    onChangeText={(t) =>
+                      onUpdateSet(s.id, {
+                        weight: Number(t.replace(/[^0-9.]/g, '')) || 0,
+                      })
+                    }
+                    keyboardType="numeric"
+                  />
+                  <Text style={styles.setUnit}>kg</Text>
+                  {isDropsetFollower ? (
+                    <Pressable
+                      onPress={() => onRemoveDropsetRow(s.id)}
+                      disabled={minusDisabled}
                       style={[
-                        styles.dropsetInlineBtnText,
-                        minusDisabled && styles.dropsetTailBtnTextDisabled,
-                      ]}>
-                      −
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {isDropsetFollower && isClusterLast ? (
-                  <Pressable
-                    onPress={() => onAddDropsetRow(s.id)}
-                    style={styles.dropsetInlineBtn}
-                    hitSlop={6}>
-                    <Text style={styles.dropsetInlineBtnText}>+</Text>
-                  </Pressable>
-                ) : null}
-              </View>
+                        styles.dropsetInlineBtn,
+                        minusDisabled && styles.dropsetTailBtnDisabled,
+                      ]}
+                      hitSlop={6}>
+                      <Text
+                        style={[
+                          styles.dropsetInlineBtnText,
+                          minusDisabled && styles.dropsetTailBtnTextDisabled,
+                        ]}>
+                        −
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {isDropsetFollower && isClusterLast ? (
+                    <Pressable
+                      onPress={() => onAddDropsetRow(s.id)}
+                      style={styles.dropsetInlineBtn}
+                      hitSlop={6}>
+                      <Text style={styles.dropsetInlineBtnText}>+</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </SwipeableSetRow>
             );
           })}
           {!hideFooterBtns ? (
