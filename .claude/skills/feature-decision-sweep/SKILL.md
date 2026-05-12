@@ -53,8 +53,8 @@ Workflow:
 - ✅ **Append a `## YYYY-MM-DD Amendment — <reason>` block at the bottom of the existing ADR** documenting what changed + why (mention "prototype review" or similar trigger)
 - ✅ Sync the **`How to apply:`** line in memory's domain_decisions section if the amendment changes downstream behavior; otherwise just add a bullet in the same section noting the amendment date + content
 - ✅ **Update prototype code in lockstep** so the prototype always reflects the locked spec (one source of truth, two views: ADR = words, Prototype = pixels)
-- ❌ Skip PRD edit unless the amendment actually changes a user story (most prototype refinements don't add stories, they refine existing ones — leave PRD alone)
-- ❌ Skip overview memory update unless「下一步」changed
+- ❌ Skip PRD edit unless the amendment actually changes a user story (most prototype refinements don't add stories, they refine existing ones — leave PRD alone). **Sub-rule for substantial amendments**: if prototype review evolves into cross-page spec alignment (e.g., Template editor → also locking Session set logger behaviors) and adds **5+ new stories**, PRD sweep can be **split as a separate follow-up task** to avoid scope creep within one sweep cycle — but **must record the deferred PRD sweep in overview memory「下一步候選」or「留尾」** with explicit list of pending new stories so it's not forgotten. Example: TrainingLog 2026-05-12 ADR-0016 amendment added stories for Session 4-action bar / 休息時間 / per-set notes / superset 合併標題 / accordion override — PRD deferred to next sweep, flagged in overview.
+- ❌ Skip overview memory update unless「下一步」changed (or the amendment is large enough to warrant a new milestone bullet — large cross-page spec amendments DO trigger overview entry even if 下一步 unchanged, since the milestone marks completion of the prototype review iteration)
 
 This variant tends to **batch multiple small amendments into one ADR section** (e.g., a single「2026-05-12 Amendment」block covering 5-10 visual refinements from one prototype review session), rather than scattering them across the ADR body. Cleaner diff history + easier to read.
 
