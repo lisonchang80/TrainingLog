@@ -277,3 +277,131 @@ v1 ship 26 週時程：壓力大但仍可吸收；可能需重新評估 slice 10
 - v012 migration transform (template_exercise summary → template_set rows)
 - 動作記憶 read pattern 改: 從 template_set list (不是 summary)
 - Template 編輯 in-memory draft + ⚙ menu「新增/編輯備註」例外保留 ADR-0013 即時 UPDATE
+
+## 2026-05-12 Amendment — Prototype-driven UX 收口 (Template + Session 跨頁對齊)
+
+接著 ADR-0014/0015 prototype 模式，跑完 Template 編輯器原型迭代 + Session set logger 規格對齊。視覺 / 互動 / schema 多處與本 ADR 原始決定有偏差，且**跨頁影響 ADR-0012 set logger** — 全收進此 amendment（不另立 ADR，因屬同一 entity「Template + Session 編輯」family 內的 prototype-driven 收口）。
+
+### 1. 動作卡 multi-expand → **accordion** (推翻 Q11.3-α)
+
+原 Q11.3-α 鎖定「多 expand 允許（accordion ❌、可同時多卡 expand 對比）」。實作 prototype 後使用者改判：accordion 單卡展開更乾淨（list 太長、滑很遠、視覺干擾）。
+
+**新規則**: state 改 `expanded_ex_id: string | null` (單一)；點未展開動作 → 該卡展開、其他展開的自動收合；超級組 parent + children 共用 `parent.id` 為 accordion key。
+
+### 2. ⚙ menu 擴張 4 → 5 項（+「休息時間」）
+
+新增「休息時間」per-exercise default rest seconds，bottom sheet stepper 編輯（−15s / 大數字 / +15s），預設 90s。
+
+**新 schema 欄位**: `template_exercise.rest_seconds INTEGER NULL`（v012 累加；NULL = fall back 系統預設）。
+
+**Session 端串接**: Set 被 ✓ (is_logged = true) 時，自動跳計時器分頁，倒數使用該動作的 `rest_seconds`。
+
+### 3. ⚙ menu「設為常設/一般」cascade
+
+原規範 sibling 連動 v1 釘但未具體。本次明定：
+- ⚙ menu「設為常設/一般」on superset parent → cascade flip `section` 給 parent + 所有 children（superset 視為一個 section unit）
+- ⚙ menu 在 session 也存在 → 寫回 underlying template（per Q11.4 sibling 連動哲學 group-wide UPDATE WHERE name=?）
+
+### 4. 4-action bar 重組 + ⋯ menu 縮減
+
+**Template 4-action bar 新**: `[+ 新增動作] [開始訓練] [配色] [⋯ 更多]`
+- 拿掉「+ 常設」(改為從 ⚙ menu「設為常設」)
+- 「開始訓練」從 ⋯ menu 提升至 first-class slot 2
+
+**Template ⋯ menu 縮減 3 → 2 項**: `[另存模板] [刪除模板]`
+
+**Session 4-action bar**: `[+ 動作] [儲存模板] [另存模板] [⌚ Watch sync]`
+- 「儲存模板」freestyle session 虛化
+- 無 ⋯ menu（4 slot 已覆蓋）
+
+**Session top corners**: `[結束]` 右上 + `[刪除]` 左上（兩者都先跳 confirm dialog）。
+
+### 5. Notes scope: per-set + per-exercise 雙層
+
+原規範 notes 僅 `template_exercise.notes` (per-exercise)。本次擴張：
+
+**新 schema 欄位**: `template_set.notes TEXT NULL`（v012 累加）
+
+**雙層分工**:
+- ⚙ menu「備註」 = exercise level → 寫 `template_exercise.notes`
+- 右滑「📝 備註」 = set level → 寫 `template_set.notes`
+- **Bottom sheet UI 一模一樣**，差別只在 target
+
+**Dropset cluster「cluster head 級 visible」規則**: schema 允許每 set row 都有 notes（含 cluster followers），但 UI 只在 cluster head (parent_set_id = null) 暴露 📝 affordance；followers 是 dead field（保留欄位無 schema migration cost）。
+
+跟 ADR-0012 set logger 對齊 — 該 ADR 早有此設計，本 amendment 把 template editor 也納入同一規則。
+
+### 6. Section grouping 跨頁（一般 / 常設動作）
+
+原 A 類「本質不同」中曾把 section 列為 template-only。本次更正：**Session 也有 section grouping** — 從 template snapshot 取 section 顯示分組 header。Freestyle session edge case 留待 grill。
+
+### 7. Superset 視覺重構（兩頁對齊）
+
+**新規則** (取代原 `⚭ 超級組` badge + 各自 ⚙):
+
+```
+┌─────────────────────────────────────┐
+│ [超級組] 動作A + 動作B    ▼      ⚙  │  ← 合併標題 + 單一 ⚙ (整 superset 共用)
+├─────────────────────────────────────┤
+│ 動作A             │ 動作B             │  ← col 名 label
+│ 1  reps × kg      │ 1  reps × kg      │  ← side-by-side set rows
+│ 2  reps × kg      │ 2  reps × kg      │
+├─────────────────────────────────────┤
+│ [新增 1 組]    [動作歷史]              │  ← 共用 footer (整 superset 一輪)
+└─────────────────────────────────────┘
+```
+
+- 單一 ⚙ targets parent，cascade 對 children（section flip、delete、notes/rest 都以 parent 為主）
+- 「新增 1 組」 = 每邊各加 1 set（一輪）；若某邊最末是 dropset cluster 則 clone 該 cluster
+- 「動作歷史」 = 顯合併名「動作A + 動作B · 動作歷史」
+- Children notes / rest_seconds 為 dead field（superset 的 notes/rest 統一存 parent）
+- **創建路徑**: superset 在動作庫 (exercise library) 製作 — 任選 2 個動作 cross-link，落 template 時整對拉入。動作庫 UI 流程留待後續 grill。
+
+### 8. Dropset cluster rules
+
+原 ADR-0016 schema 鎖定 `parent_set_id` cluster B3 連結（沿用 ADR-0012），但 UI 行為未具體。本次明定：
+
+- **Cluster 最小 size = 2**（D1 head + ≥1 unlabeled follower）— 不得砍到剩 D1 alone（否則跟正式組無異）
+- **編號**: 每個 cluster head 獨立 `D1` / `D2` / `D3`...（per-cluster head numbering，不是 row-level cumulative）；followers 無 label
+- **Per-cluster `+/−` buttons**: 每 cluster 的 last follower inline trailing `[− +]`；中間 followers 只 `[−]`；`−` 在 cluster size ≤ 2 時 disabled（opacity 0.35 + grey 字）
+- **新增 1 組**:
+  - 最末是 working / warmup → clone 該 row（kind / reps / weight 完全照搬，**無** −2kg 自動調整）
+  - 最末是 dropset → clone 整 trailing cluster（new head + new followers，parent_set_id 重 link 到 new head）
+
+### 9. Set row gesture 規格（C2 拍板，prototype 未實作）
+
+跨 Template / Session 兩頁的 set row 全 gesture-driven（Template 走 draft、Session 即時 UPDATE，input mechanism 一致）：
+
+| Gesture | 行為 |
+|---|---|
+| tap label | cycle kind 熱 → #N → D# → 熱 |
+| 右滑 | reveal `[新增]` + `[📝 備註]` 兩 button |
+| 左滑 | reveal `[刪除]` 紅 button |
+| 長按 | drag-reorder mode |
+
+**Cluster head 3 gesture (cluster 級)**:
+| Gesture | 行為 |
+|---|---|
+| 左滑 | `[刪除整 cluster]` + DELETE CASCADE |
+| 長按 | 整 cluster reorder unit |
+| 右滑 | `[新增]` 在當前 cluster 後 append 新 cluster + `[📝 備註]` 編 root.notes |
+
+**Cluster follower 不接受 gesture** — 純 button-driven（trailing `[−]` / `[− +]`）。
+
+⚠️ **Prototype 未實作 gesture**（need react-native-gesture-handler 接 Swipeable）— 視覺鎖定，行為層 v1 ship 階段補。
+
+### 10. 「熱」/「暖」用字統一
+
+Set row label 跟 collapsed summary 用字統一為「熱」（單字、空間經濟）。原本 collapsed summary `1暖+3組` → `1熱+3組`。
+
+### 跨 ADR cross-amendment
+
+- **ADR-0012 set logger** 影響面已就位（per-set notes cluster head 級 visible、cluster B3、編號規則、gesture set）；session 端 4-action bar / top corners / timer trigger 為**新增**規格、ADR-0012 本身不需另寫 amendment（本 amendment 同時 cover）
+- **ADR-0013 in-session ⚙ menu** 不動
+
+### Prototype 落點
+
+對應 commit（與本 amendment 合併 push）:
+- `Prototype/TemplateEditorView.tsx` — accordion + ⚙ 5 項 + 4-action bar + ⋯ ActionSheet + dropset cluster +/- + superset 合併 header / col 名 / 共用 footer + notes 雙層 sheet
+- `Prototype/HistoryDetailView.tsx` — superset 視覺對齊（合併標題 + col 名 + hideHeader）+ per-cluster head 編號
+- `Prototype/MockTrainingStore.tsx` — TemplateSet.parent_set_id / TemplateSet.notes / TemplateExercise.rest_seconds + demo data 帶 cluster linkage
