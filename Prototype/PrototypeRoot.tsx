@@ -4,19 +4,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CalendarMonthView } from './CalendarMonthView';
 import { HistoryDetailView } from './HistoryDetailView';
+import { TemplateEditorView } from './TemplateEditorView';
 import {
   displaySessionTitle,
   formatCapacity,
   MockTrainingStoreProvider,
   useMockStore,
   type Session,
+  type Template,
 } from './MockTrainingStore';
 
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryView = 'calendar' | 'list';
 type Screen =
   | { kind: 'view'; view: HistoryView }
-  | { kind: 'detail'; from: HistoryView; date: string; index: number };
+  | { kind: 'detail'; from: HistoryView; date: string; index: number }
+  | { kind: 'templateList' }
+  | { kind: 'templateEditor'; template_id: string };
 
 const SUB_TABS: readonly { key: SubTab; label: string }[] = [
   { key: 'history', label: '歷史' },
@@ -64,7 +68,11 @@ function PrototypeShell() {
   };
 
   const currentView: HistoryView =
-    screen.kind === 'view' ? screen.view : screen.from;
+    screen.kind === 'view'
+      ? screen.view
+      : screen.kind === 'detail'
+        ? screen.from
+        : 'calendar';
 
   const switchView = (next: HistoryView) => {
     setScreen({ kind: 'view', view: next });
@@ -73,14 +81,43 @@ function PrototypeShell() {
   const openDetail = (from: HistoryView, date: string) =>
     setScreen({ kind: 'detail', from, date, index: 0 });
 
+  if (screen.kind === 'templateEditor') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <TemplateEditorView
+          template_id={screen.template_id}
+          onExit={() => setScreen({ kind: 'templateList' })}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (screen.kind === 'templateList') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <TemplateListScreen
+          onBack={() => setScreen({ kind: 'view', view: 'calendar' })}
+          onOpen={(id) => setScreen({ kind: 'templateEditor', template_id: id })}
+        />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.heading}>History</Text>
-          <Pressable style={styles.resetBtn} onPress={onReset}>
-            <Text style={styles.resetBtnText}>↺</Text>
-          </Pressable>
+          <View style={styles.headerRightBtns}>
+            <Pressable
+              style={styles.tplBtn}
+              onPress={() => setScreen({ kind: 'templateList' })}>
+              <Text style={styles.tplBtnText}>模版</Text>
+            </Pressable>
+            <Pressable style={styles.resetBtn} onPress={onReset}>
+              <Text style={styles.resetBtnText}>↺</Text>
+            </Pressable>
+          </View>
         </View>
         <View style={styles.subTabRow}>
           {SUB_TABS.map((t) => (
@@ -251,6 +288,52 @@ function HistoryListView({ onOpenDay }: { onOpenDay: (date: string) => void }) {
   );
 }
 
+function TemplateListScreen({
+  onBack,
+  onOpen,
+}: {
+  onBack: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const store = useMockStore();
+  const templates: Template[] = store.state.templates;
+  return (
+    <View style={styles.tplWrap}>
+      <View style={styles.tplHeader}>
+        <Pressable onPress={onBack} style={styles.tplBack} hitSlop={8}>
+          <Text style={styles.tplBackText}>‹ 返回</Text>
+        </Pressable>
+        <Text style={styles.tplHeaderTitle}>模版</Text>
+        <View style={styles.tplBack} />
+      </View>
+      <FlatList
+        data={templates}
+        keyExtractor={(t) => t.id}
+        contentContainerStyle={styles.tplListContent}
+        ItemSeparatorComponent={() => <View style={styles.listSep} />}
+        renderItem={({ item }) => {
+          const exCount = item.exercises.length;
+          const setCount = item.exercises.reduce((a, e) => a + e.sets.length, 0);
+          return (
+            <Pressable style={styles.tplRow} onPress={() => onOpen(item.id)}>
+              <View style={[styles.tplColorBar, { backgroundColor: item.color_hex }]} />
+              <View style={styles.tplRowMid}>
+                <Text style={styles.tplRowName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={styles.tplRowSub} numberOfLines={1}>
+                  {exCount} 動作 · {setCount} 組
+                </Text>
+              </View>
+              <Text style={styles.tplChevron}>›</Text>
+            </Pressable>
+          );
+        }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   header: { paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8, gap: 12 },
@@ -259,6 +342,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerRightBtns: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tplBtn: {
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,122,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tplBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
   heading: { fontSize: 28, fontWeight: '700' },
   subTabRow: {
     flexDirection: 'row',
@@ -351,4 +444,30 @@ const styles = StyleSheet.create({
   listCapWrap: { alignItems: 'flex-end' },
   listCap: { fontSize: 15, fontWeight: '700', color: '#34C759' },
   listCapLabel: { fontSize: 9, color: '#9CA3AF', marginTop: -2 },
+  tplWrap: { flex: 1 },
+  tplHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 24,
+    paddingBottom: 12,
+    paddingHorizontal: 24,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(127,127,127,0.2)',
+  },
+  tplBack: { minWidth: 64 },
+  tplBackText: { fontSize: 15, color: '#007AFF', fontWeight: '500' },
+  tplHeaderTitle: { fontSize: 17, fontWeight: '700' },
+  tplListContent: { paddingHorizontal: 24, paddingBottom: 24 },
+  tplRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  tplColorBar: { width: 4, height: 36, borderRadius: 2 },
+  tplRowMid: { flex: 1, gap: 3 },
+  tplRowName: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  tplRowSub: { fontSize: 12, color: '#6B7280' },
+  tplChevron: { fontSize: 22, color: '#C7C7CC', fontWeight: '300' },
 });

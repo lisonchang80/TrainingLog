@@ -50,6 +50,8 @@ export type TemplateSet = {
   kind: 'warmup' | 'working' | 'dropset';
   reps: number;
   weight: number;
+  parent_set_id?: string | null;
+  notes?: string;
 };
 
 export type TemplateExercise = {
@@ -59,6 +61,8 @@ export type TemplateExercise = {
   section: '一般' | '常設動作';
   parent_id: string | null;
   sets: TemplateSet[];
+  notes?: string;
+  rest_seconds?: number;
 };
 
 export type Template = {
@@ -116,7 +120,7 @@ const INITIAL_TEMPLATES: Template[] = [
       },
       {
         id: 'ex-push-a-2',
-        name: '上斜啞鈴推',
+        name: '上斜啞鈴握推',
         position: 1,
         section: '一般',
         parent_id: null,
@@ -128,7 +132,7 @@ const INITIAL_TEMPLATES: Template[] = [
       },
       {
         id: 'ex-push-a-3',
-        name: '雙槓撐體',
+        name: '雙槓臂屈伸',
         position: 2,
         section: '一般',
         parent_id: null,
@@ -161,6 +165,14 @@ const INITIAL_TEMPLATES: Template[] = [
           { id: 'ts-pa-5-2', position: 1, kind: 'working', reps: 12, weight: 10 },
           { id: 'ts-pa-5-3', position: 2, kind: 'working', reps: 10, weight: 12 },
           { id: 'ts-pa-5-4', position: 3, kind: 'dropset', reps: 8, weight: 8 },
+          {
+            id: 'ts-pa-5-5',
+            position: 4,
+            kind: 'dropset',
+            reps: 6,
+            weight: 6,
+            parent_set_id: 'ts-pa-5-4',
+          },
         ],
       },
       {

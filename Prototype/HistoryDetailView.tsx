@@ -289,21 +289,35 @@ export function HistoryDetailView({
             .map((parent) => {
               const children = tplExercises.filter((c) => c.parent_id === parent.id);
               const isSuper = children.length > 0;
+              const allNames = isSuper
+                ? [parent.name, ...children.map((c) => c.name)].join(' + ')
+                : parent.name;
               return (
                 <View key={parent.id} style={styles.exCard}>
                   {isSuper ? (
-                    <Text style={styles.supersetBadge}>⚭ 超級組</Text>
+                    <View style={styles.supersetHeaderRow}>
+                      <Text style={styles.supersetTag}>超級組</Text>
+                      <Text style={styles.supersetNames} numberOfLines={1}>
+                        {allNames}
+                      </Text>
+                    </View>
                   ) : null}
                   {isSuper ? (
                     <View style={styles.exSuperRow}>
                       <View style={styles.exSuperCol}>
-                        <ExerciseBlock ex={parent} />
+                        <Text style={styles.supersetColName} numberOfLines={1}>
+                          {parent.name}
+                        </Text>
+                        <ExerciseBlock ex={parent} hideHeader />
                       </View>
                       {children.map((child) => (
                         <Fragment key={child.id}>
                           <View style={styles.exSuperDivider} />
                           <View style={[styles.exSuperCol, styles.exSuperColWithLeftPad]}>
-                            <ExerciseBlock ex={child} />
+                            <Text style={styles.supersetColName} numberOfLines={1}>
+                              {child.name}
+                            </Text>
+                            <ExerciseBlock ex={child} hideHeader />
                           </View>
                         </Fragment>
                       ))}
@@ -340,24 +354,38 @@ export function HistoryDetailView({
 
 function ExerciseBlock({
   ex,
+  hideHeader,
 }: {
   ex: NonNullable<ReturnType<typeof useMockStore>['state']['templates'][number]['exercises'][number]>;
+  hideHeader?: boolean;
 }) {
+  let workIdx = 0;
+  let clusterIdx = 0;
+  const setLabels = ex.sets.map((s) => {
+    if (s.kind === 'warmup') return '熱';
+    if (s.kind === 'dropset') {
+      if ((s.parent_set_id ?? null) === null) {
+        clusterIdx += 1;
+        return `D${clusterIdx}`;
+      }
+      return '';
+    }
+    workIdx += 1;
+    return String(workIdx);
+  });
   return (
     <View>
-      <Text style={styles.exName}>{ex.name}</Text>
-      <Text style={styles.exMeta}>
-        {ex.section} · {ex.sets.length} 組
-      </Text>
+      {!hideHeader ? (
+        <>
+          <Text style={styles.exName}>{ex.name}</Text>
+          <Text style={styles.exMeta}>
+            {ex.section} · {ex.sets.length} 組
+          </Text>
+        </>
+      ) : null}
       {ex.sets.map((s, i) => (
         <View key={s.id} style={styles.setRow}>
-          <Text style={styles.setLabel}>
-            {s.kind === 'warmup'
-              ? '熱'
-              : s.kind === 'dropset'
-                ? `D${i + 1}`
-                : `${i + 1}`}
-          </Text>
+          <Text style={styles.setLabel}>{setLabels[i]}</Text>
           <Text style={styles.setVal}>{s.reps} reps</Text>
           <Text style={styles.setVal}>{s.weight} kg</Text>
         </View>
@@ -626,6 +654,31 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 2,
+  },
+  supersetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  supersetTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+    backgroundColor: '#5856D6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600' },
+  supersetColName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+    paddingHorizontal: 4,
+    paddingTop: 4,
+    paddingBottom: 2,
   },
   exChild: {
     marginTop: 6,
