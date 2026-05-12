@@ -41,6 +41,23 @@ If grill phase produces multiple close-outs back-to-back (e.g., 3 deflationary Q
 
 But the「`下次 grill 接續`」line in memory + CONTEXT.md should reflect **only the final state** — don't write intermediate states that get overwritten.
 
+## Prototype-driven amendment variant (post-grill, pre-ship)
+
+After a Backlog has been grilled + ADR written + PRD synced, **prototype review** (running the UI mock in Simulator) frequently reveals spec gaps the grill didn't surface:
+- UX details that only become obvious when you *see* the screen (e.g., "stats panel 大字 1 行不換行 / chip 字級壓 6 字 / 下方分頁欄要露出 / sticky header 滑過標題後顯示 session.title")
+- Schema implications hidden during text-only grill (e.g., "Watch HR 5 區段閾值來源 = HealthKit user settings, 不是 hardcode")
+- Cross-cutting label rename or rewording (e.g., "List → 表列")
+
+Workflow:
+- ❌ **Don't write a new ADR** (the amendment is downstream of an already-locked decision; new ADR would split the source of truth)
+- ✅ **Append a `## YYYY-MM-DD Amendment — <reason>` block at the bottom of the existing ADR** documenting what changed + why (mention "prototype review" or similar trigger)
+- ✅ Sync the **`How to apply:`** line in memory's domain_decisions section if the amendment changes downstream behavior; otherwise just add a bullet in the same section noting the amendment date + content
+- ✅ **Update prototype code in lockstep** so the prototype always reflects the locked spec (one source of truth, two views: ADR = words, Prototype = pixels)
+- ❌ Skip PRD edit unless the amendment actually changes a user story (most prototype refinements don't add stories, they refine existing ones — leave PRD alone)
+- ❌ Skip overview memory update unless「下一步」changed
+
+This variant tends to **batch multiple small amendments into one ADR section** (e.g., a single「2026-05-12 Amendment」block covering 5-10 visual refinements from one prototype review session), rather than scattering them across the ADR body. Cleaner diff history + easier to read.
+
 ## The 4 locations (do in this order)
 
 ### 1. Write or update ADR — `docs/adr/000X-<kebab-name>.md`
