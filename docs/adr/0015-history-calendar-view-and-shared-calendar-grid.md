@@ -20,9 +20,15 @@
 
 ### Sub-tab toggle
 
-歷史 sub-tab 內加 segmented control `[月曆 | List]`：
+歷史 sub-tab 內加 segmented control `[月曆 | 表列]`：
 - **月曆**（預設）：本 ADR 主要內容
-- **List**：原 ADR-0009 list view 設計，作為 escape hatch 給「連續 timeline 瀏覽」場景
+- **表列**（escape hatch）：原 ADR-0009 list view 設計擴展。空間限制少於月曆 chip stack，每列可顯示更多欄位：
+  - 日期 (M-DD) + 年（小）
+  - 12 色 side bar (per Template name)
+  - session.title（freestyle 加 ⚠️）+ 多場同日 inline `+N`
+  - Program **主標題 + 副標**（合併一行）
+  - 動作數量 + 訓練時間（分鐘）+ Watch 標記 ⌚（如有）
+  - 容量 (kg 整數) 右對齊
 
 ADR-0009 三 sub-tab 結構（歷史 / 統計 / 獎章）不動（Q8.1 鎖定）；統計 + 獎章 sub-tab 內容不動（Q9.9 鎖定）。
 
@@ -40,8 +46,8 @@ ADR-0009 三 sub-tab 結構（歷史 / 統計 / 獎章）不動（Q8.1 鎖定）
 ┌─────────────────┐
 │   日期  +N      │  ← top row: 日期數字 (17pt) + 右上 +N (9-10pt secondary)
 │ ┌─────────────┐ │     +N: 多場時顯示 (N = 額外場數)，單場時隱藏
-│ │   12126.5   │ │  ← 第一行: 容量合計 (systemGreen chip)
-│ └─────────────┘ │     所有日格同色，量化單位 kg
+│ │    12127    │ │  ← 第一行: 容量合計 (systemGreen chip)
+│ └─────────────┘ │     所有日格同色，量化單位 kg、四捨五入到整數（不顯示小數）
 │ ┌─────────────┐ │  ← 第二行: 主場 session.title (per Template name 色)
 │ │    胸/肩     │ │     主場規則 = 容量最高那場 (b1)
 │ └─────────────┘ │     freestyle 灰塊 + UI fallback「自由訓練」
