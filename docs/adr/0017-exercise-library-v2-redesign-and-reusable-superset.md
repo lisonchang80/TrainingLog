@@ -280,10 +280,13 @@ UPDATE exercise SET notes = (
   ORDER BY te.updated_at DESC
   LIMIT 1
 );
-ALTER TABLE template_exercise DROP COLUMN notes;
+-- PHASED: ALTER TABLE template_exercise DROP COLUMN notes 延後到後續 migration
+--         （需先 migrate production templateRepository 與 Template editor UI
+--           讀寫 exercise.notes — v010 一口氣 DROP 會 cascade 打掉 templateRepository
+--           + 8 個 templateRepositoryV2 tests，不適合單一 commit 收尾）。
 
--- Equipment backfill: 65 built-in seeds 人工 map
--- (撰寫在 src/db/seed/v010ExerciseLibraryEquipment.ts)
+-- Equipment backfill: 66 built-in seeds 人工 map
+-- (撰寫在 src/db/seed/v010ExerciseLibraryEquipment.ts；ADR 原文寫 65，實際 v006 seed 66 個)
 ```
 
 ### v011 — Reusable Superset entity

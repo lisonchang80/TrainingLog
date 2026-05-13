@@ -8,6 +8,8 @@ import { v006_muscle_layer } from './schema/v006_muscle_layer';
 import { v007_body_metric } from './schema/v007_body_metric';
 import { v008_achievements } from './schema/v008_achievements';
 import { v009_template_set } from './schema/v009_template_set';
+import { v010_exercise_library_v2 } from './schema/v010_exercise_library_v2';
+import { v011_reusable_superset } from './schema/v011_reusable_superset';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -31,6 +33,8 @@ const migrations: Record<number, MigrationFn> = {
   7: v007_body_metric,
   8: v008_achievements,
   9: v009_template_set,
+  10: v010_exercise_library_v2,
+  11: v011_reusable_superset,
 };
 
 export async function migrate(db: Database): Promise<void> {

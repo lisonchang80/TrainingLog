@@ -39,7 +39,8 @@ export async function listMuscles(db: Database): Promise<Muscle[]> {
 export async function listExercises(db: Database): Promise<Exercise[]> {
   return db.getAllAsync<Exercise>(
     `SELECT id, name, load_type, is_builtin, is_archived,
-            muscle_group_id, is_custom
+            muscle_group_id, is_custom,
+            equipment, notes, media_path, cues_text
        FROM exercise
       WHERE is_archived = 0
       ORDER BY name ASC`
@@ -75,7 +76,8 @@ export async function getExerciseWithMuscles(
 ): Promise<ExerciseWithMuscles | null> {
   const exercise = await db.getFirstAsync<Exercise>(
     `SELECT id, name, load_type, is_builtin, is_archived,
-            muscle_group_id, is_custom
+            muscle_group_id, is_custom,
+            equipment, notes, media_path, cues_text
        FROM exercise WHERE id = ?`,
     id
   );

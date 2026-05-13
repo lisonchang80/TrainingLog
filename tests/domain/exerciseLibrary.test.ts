@@ -32,6 +32,10 @@ const buildExercise = (over: Partial<Exercise> = {}): Exercise => ({
   is_archived: 0,
   muscle_group_id: MG_CHEST,
   is_custom: 0,
+  equipment: '其他',
+  notes: null,
+  media_path: null,
+  cues_text: null,
   ...over,
 });
 
