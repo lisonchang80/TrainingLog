@@ -29,6 +29,14 @@ npm install --no-audit --no-fund
 
 The worktree starts with no `node_modules` — installing is mandatory before anything else (otherwise `expo install`, `npx tsc`, jest all fail).
 
+**No-new-dep slice → symlink shortcut**: when a slice adds zero new packages (e.g., pure-backend phases: schema + repo + pure-logic tests), `npm install` is wasted work. Symlink main worktree's `node_modules` instead — jest + ts-jest + better-sqlite3 native binding all share fine on macOS:
+
+```bash
+ln -s /Users/hao800922/code/TrainingLog/node_modules ./node_modules
+```
+
+Slice 9.6 Phase 1 used this — `node_modules` symlink + `npx jest` ran 439 tests in 2.7 s with zero install. **Caveat**: any time you `npx expo install <pkg>` or `npm install <new-dep>`, you MUST break the symlink first (`rm node_modules && npm install`) — otherwise the new package writes through into main worktree's `node_modules` and contaminates the parent's lockfile state. Also matches the user's "embedded-terminal `npm install` is annoying" preference (feedback_claude_code_embedded_terminal.md).
+
 **Adding a new native module mid-slice**: use `npx expo install <pkg>` (NOT `npm install <pkg>`). `expo install` picks the version compatible with the current Expo SDK; raw `npm install` will pull `latest` and silently break iOS bundling. Slice 6 hit this — `react-native-svg` is the canonical example. The user-level "不要幫忙裝工具" preference is about system-level tools (brew / xcode-select), NOT project npm deps tracked in package.json — but still ask the user before adding a new dep, since it changes the lockfile and adds attack surface.
 
 ## 3. Read the issue spec
@@ -45,6 +53,11 @@ Layer separation per ADR-0001:
 
 - **Pure logic** — `src/domain/<area>/` — no DB, no React, no platform APIs. Unit-tested with plain jest in `tests/domain/`.
 - **Schema** — new migration in `src/db/schema/vNNN_<name>.ts` registered in `src/db/migrate.ts`. Always `INSERT OR IGNORE` for seeds (idempotency). Bump `vNNN`. **`ALTER TABLE ADD COLUMN` for a NOT NULL column must include `DEFAULT <value>`** — SQLite refuses to add a NOT NULL column without a default because existing rows have no value for it. Slice 4 (`is_evergreen INTEGER NOT NULL DEFAULT 0`) is the canonical example. **Migration version = `ls src/db/schema/` HEAD + 1, NOT the ADR's planning name** — ADRs often pre-allocate version numbers assuming earlier ADRs would ship first (e.g., ADR-0016 wrote "v012 累加" assuming ADR-0014/0015 had landed as v009/v010/v011), but in practice schema HEAD can be far behind. Slice 9.5 hit this: ADR-0016 said "v012" but actual schema HEAD was v008 → migration shipped as v009. **Always check `ls src/db/schema/`** before writing migration filename + `migrate.ts` registry number, and add a comment in the migration explaining the gap if there is one.
+- **PHASE the DROP COLUMN — don't bundle it with the replacement ADD COLUMN**: when a migration ADDs a new column that supersedes an old one (e.g., per-Exercise `exercise.notes` replacing per-template `template_exercise.notes`), the temptation is to also `ALTER TABLE … DROP COLUMN` the legacy column in the same migration. **Resist it.** Slice 9.6 v010 tried this — DROP'd `template_exercise.notes` and instantly cascade-broke `templateRepository.getTemplateFull` + `commitTemplateDraft` (which still SELECT/INSERT the column) + 8 `templateRepositoryV2` tests + the v009 schema test that asserted `notes` exists. Recovery cost a same-session revert. **Phased pattern**:
+  1. Phase A migration: ADD new column + best-effort merge of old data → new column (data preserved, both columns coexist)
+  2. Production code: switch repository + UI reads/writes from old column to new column
+  3. Phase B migration (separate, later): `DROP COLUMN` the legacy column
+  Document the phasing in the migration file comments + ADR § migration plan + a issue comment (so the post-grill acceptance-criteria checkbox audit trail is preserved).
 - **Repository** — `src/adapters/sqlite/<area>Repository.ts` — pure functions taking `Database` (from `src/db/types.ts`). DB-integration tested in `tests/db/`.
 - **UI** — `app/(tabs)/*` for tabs, `app/<route>/[id].tsx` for detail screens. Uses `useDatabase()` from `components/database-provider.tsx`.
 
