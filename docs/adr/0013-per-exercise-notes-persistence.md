@@ -328,7 +328,7 @@ ADR-0017 Q5 grill 結果，per-exercise notes 模型從**雙欄 per-template-exe
 - 任一處改 = 全局立刻反映（無 propagation 邏輯，因為只有一份）
 - session_exercise.notes_snapshot 在 session create / freestyle complete 時冷凍 exercise.notes 當下值
 
-### Migration v013（best-effort merge）
+### Migration v010（best-effort merge）
 
 ```sql
 ALTER TABLE exercise ADD COLUMN notes TEXT NULL;

@@ -178,7 +178,7 @@ ADR-0017 Q9 grill 結果，二頭與前臂命名 revise。理由：對齊本 ADR
 
 ### 影響
 
-- v013 migration 4 筆 UPDATE（見 ADR-0017 § Schema migration plan v013）
+- v010 migration 4 筆 UPDATE（見 ADR-0017 § Schema migration plan v010）
 - `src/db/seed/v006ExerciseLibrary.ts` L90,115,116,122 同步改 name (const 名保留)
 - `components/body-heatmap.tsx` L59「前臂」label → 「小臂」
 - `components/body-diagram.tsx` SVG label text 同步
