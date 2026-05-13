@@ -373,6 +373,119 @@ describe('templateRepository v2 — commitTemplateDraft', () => {
   });
 });
 
+describe('templateRepository v2 — per-Exercise global notes (ADR-0017 amendment)', () => {
+  let db: BetterSqliteDatabase;
+  let benchId: string;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const exercises = await listExercises(db);
+    benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
+  });
+
+  afterEach(() => db.close());
+
+  it('commit writes notes to exercise.notes (not template_exercise.notes)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    const committed: Template = {
+      id: 't1',
+      name: 'Push',
+      color_hex: '',
+      exercises: [],
+    };
+    const draft: Template = {
+      ...committed,
+      exercises: [
+        makeEx({
+          id: 'te-1',
+          template_id: 't1',
+          exercise_id: benchId,
+          notes: '胸貼槓',
+        }),
+      ],
+    };
+    await commitTemplateDraft(db, { committed, draft, now: frozenNow(1000) });
+    const exRow = await db.getFirstAsync<{ notes: string | null }>(
+      `SELECT notes FROM exercise WHERE id = ?`,
+      benchId
+    );
+    expect(exRow!.notes).toBe('胸貼槓');
+    // Legacy template_exercise.notes is NOT used as the write target;
+    // commit deliberately writes NULL there (column will be DROPped in v012).
+    const teRow = await db.getFirstAsync<{ notes: string | null }>(
+      `SELECT notes FROM template_exercise WHERE id = 'te-1'`
+    );
+    expect(teRow!.notes).toBeNull();
+  });
+
+  it('reads notes from exercise.notes via getTemplateFull', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    // Seed: notes live on exercise.notes, NOT template_exercise.notes
+    await db.runAsync(
+      `UPDATE exercise SET notes = ? WHERE id = ?`,
+      'global cue',
+      benchId
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, notes, rest_seconds, updated_at)
+       VALUES ('te-1', 't1', ?, 0, 0, 0, NULL, NULL, NULL, ?)`,
+      benchId,
+      NOW
+    );
+    const got = await getTemplateFull(db, 't1');
+    expect(got!.exercises[0].notes).toBe('global cue');
+  });
+
+  it('editing notes in Template A propagates to Template B that uses the same exercise', async () => {
+    await createTemplate(db, { id: 'tA', name: 'A', now: frozenNow() });
+    await createTemplate(db, { id: 'tB', name: 'B', now: frozenNow() });
+    // Both templates contain the same exercise
+    await db.runAsync(
+      `INSERT INTO template_exercise (id, template_id, exercise_id, ordering, default_sets, is_evergreen, updated_at)
+       VALUES ('teA', 'tA', ?, 0, 0, 0, ?), ('teB', 'tB', ?, 0, 0, 0, ?)`,
+      benchId,
+      NOW,
+      benchId,
+      NOW
+    );
+    // Edit notes via Template A's commit path
+    const committedA = (await getTemplateFull(db, 'tA'))!;
+    const draftA: Template = {
+      ...committedA,
+      exercises: [{ ...committedA.exercises[0], notes: 'A 的筆記' }],
+    };
+    await commitTemplateDraft(db, { committed: committedA, draft: draftA, now: frozenNow(1000) });
+    // Template B sees the same notes (per-Exercise global)
+    const gotB = await getTemplateFull(db, 'tB');
+    expect(gotB!.exercises[0].notes).toBe('A 的筆記');
+  });
+
+  it('notes-only edit triggers anyChange (not a no-op)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    await db.runAsync(
+      `INSERT INTO template_exercise (id, template_id, exercise_id, ordering, default_sets, is_evergreen, updated_at)
+       VALUES ('te-1', 't1', ?, 0, 0, 0, ?)`,
+      benchId,
+      NOW
+    );
+    const committed = (await getTemplateFull(db, 't1'))!;
+    // Same draft except notes is touched
+    const draft: Template = {
+      ...committed,
+      exercises: [{ ...committed.exercises[0], notes: 'new note' }],
+    };
+    await commitTemplateDraft(db, { committed, draft, now: frozenNow(1000) });
+    const exRow = await db.getFirstAsync<{ notes: string | null }>(
+      `SELECT notes FROM exercise WHERE id = ?`,
+      benchId
+    );
+    expect(exRow!.notes).toBe('new note');
+  });
+});
+
 describe('templateRepository v2 — sibling group-wide ops', () => {
   let db: BetterSqliteDatabase;
 
