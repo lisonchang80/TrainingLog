@@ -7,6 +7,7 @@ import { v005_program } from './schema/v005_program';
 import { v006_muscle_layer } from './schema/v006_muscle_layer';
 import { v007_body_metric } from './schema/v007_body_metric';
 import { v008_achievements } from './schema/v008_achievements';
+import { v009_template_set } from './schema/v009_template_set';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -29,6 +30,7 @@ const migrations: Record<number, MigrationFn> = {
   6: v006_muscle_layer,
   7: v007_body_metric,
   8: v008_achievements,
+  9: v009_template_set,
 };
 
 export async function migrate(db: Database): Promise<void> {
