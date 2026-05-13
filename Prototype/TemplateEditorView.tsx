@@ -1184,8 +1184,18 @@ function SetRowContent({
           if (!isDropsetFollower) onCycleLabel(set);
         }}
         disabled={isDropsetFollower}
-        hitSlop={6}>
-        <Text style={[styles.setLabel, compact && styles.setLabelCompact]}>
+        hitSlop={6}
+        style={({ pressed }) => [
+          compact ? styles.setLabelBtnCompact : styles.setLabelBtn,
+          isDropsetFollower && styles.setLabelBtnDisabled,
+          pressed && !isDropsetFollower && styles.setLabelBtnPressed,
+        ]}>
+        <Text
+          style={[
+            styles.setLabelText,
+            compact && styles.setLabelTextCompact,
+            isDropsetFollower && styles.setLabelTextDisabled,
+          ]}>
           {setLabel}
         </Text>
       </Pressable>
@@ -1702,6 +1712,80 @@ const styles = StyleSheet.create({
   },
   setLabel: { width: 26, fontSize: 13, fontWeight: '600', color: '#374151' },
   setLabelCompact: { width: 18, fontSize: 11 },
+  setLabelBtn: {
+    width: 32,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#f3f4f6',
+    borderLeftColor: '#d1d5db',
+    borderRightColor: '#9ca3af',
+    borderBottomColor: '#6b7280',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  setLabelBtnCompact: {
+    width: 26,
+    height: 20,
+    borderRadius: 5,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#f3f4f6',
+    borderLeftColor: '#d1d5db',
+    borderRightColor: '#9ca3af',
+    borderBottomColor: '#6b7280',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  setLabelBtnDisabled: {
+    backgroundColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  setLabelBtnPressed: {
+    backgroundColor: '#e5e7eb',
+    borderTopWidth: 2,
+    borderBottomWidth: 1,
+    borderTopColor: '#6b7280',
+    borderLeftColor: '#9ca3af',
+    borderRightColor: '#d1d5db',
+    borderBottomColor: '#f3f4f6',
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 1 }],
+  },
+  setLabelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  setLabelTextCompact: {
+    fontSize: 11,
+  },
+  setLabelTextDisabled: {
+    color: '#9ca3af',
+  },
   setInput: {
     minWidth: 48,
     paddingHorizontal: 8,
