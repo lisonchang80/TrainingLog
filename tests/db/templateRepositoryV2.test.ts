@@ -94,8 +94,8 @@ describe('templateRepository v2 — getTemplateFull', () => {
     await db.runAsync(
       `INSERT INTO template_exercise
          (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
-          parent_id, notes, rest_seconds, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 90, ?)`,
+          parent_id, rest_seconds, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, NULL, 90, ?)`,
       'te-1',
       'tpl-1',
       benchId,
@@ -386,7 +386,7 @@ describe('templateRepository v2 — per-Exercise global notes (ADR-0017 amendmen
 
   afterEach(() => db.close());
 
-  it('commit writes notes to exercise.notes (not template_exercise.notes)', async () => {
+  it('commit writes notes to exercise.notes (write-through target)', async () => {
     await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
     const committed: Template = {
       id: 't1',
@@ -411,17 +411,17 @@ describe('templateRepository v2 — per-Exercise global notes (ADR-0017 amendmen
       benchId
     );
     expect(exRow!.notes).toBe('胸貼槓');
-    // Legacy template_exercise.notes is NOT used as the write target;
-    // commit deliberately writes NULL there (column will be DROPped in v012).
-    const teRow = await db.getFirstAsync<{ notes: string | null }>(
-      `SELECT notes FROM template_exercise WHERE id = 'te-1'`
+    // Sanity: the template_exercise row exists post-commit (the legacy
+    // notes column was DROPped in v012; existence is enough).
+    const teRow = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM template_exercise WHERE id = 'te-1'`
     );
-    expect(teRow!.notes).toBeNull();
+    expect(teRow).not.toBeNull();
   });
 
   it('reads notes from exercise.notes via getTemplateFull', async () => {
     await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
-    // Seed: notes live on exercise.notes, NOT template_exercise.notes
+    // Seed: notes live on exercise.notes
     await db.runAsync(
       `UPDATE exercise SET notes = ? WHERE id = ?`,
       'global cue',
@@ -430,8 +430,8 @@ describe('templateRepository v2 — per-Exercise global notes (ADR-0017 amendmen
     await db.runAsync(
       `INSERT INTO template_exercise
          (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
-          parent_id, notes, rest_seconds, updated_at)
-       VALUES ('te-1', 't1', ?, 0, 0, 0, NULL, NULL, NULL, ?)`,
+          parent_id, rest_seconds, updated_at)
+       VALUES ('te-1', 't1', ?, 0, 0, 0, NULL, NULL, ?)`,
       benchId,
       NOW
     );

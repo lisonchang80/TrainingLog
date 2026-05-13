@@ -603,9 +603,9 @@ export async function commitTemplateDraft(
       }
     }
 
-    // 5. INSERT new exercises + their sets. `template_exercise.notes` is
-    // written as NULL — the column is legacy (v012 drops it); per-Exercise
-    // notes is owned by `exercise.notes` (step 6).
+    // 5. INSERT new exercises + their sets. `template_exercise.notes` no
+    // longer in the column list — v012 DROPped it; per-Exercise notes is
+    // owned by `exercise.notes` (step 6).
     for (const dex of plan.inserts) {
       // default_sets/default_reps/default_weight_kg are deprecated since v009
       // (template_set list is the source of truth) but the column is NOT NULL
@@ -614,8 +614,8 @@ export async function commitTemplateDraft(
         `INSERT INTO template_exercise
            (id, template_id, exercise_id, ordering, default_sets,
             default_reps, default_weight_kg, is_evergreen,
-            parent_id, notes, rest_seconds, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, ?, ?)`,
+            parent_id, rest_seconds, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
         dex.id,
         dex.template_id,
         dex.exercise_id,

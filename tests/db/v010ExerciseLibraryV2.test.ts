@@ -224,15 +224,39 @@ describe('v010 exercise library v2 migration', () => {
       expect(rows).toHaveLength(0);
     });
 
-    it('keeps template_exercise.notes column (phased — drops in later migration)', async () => {
-      await migrate(db);
+    it('keeps template_exercise.notes column at v010 (DROPped later in v012)', async () => {
+      // Manual replay: stop at v010 to verify v010 itself does NOT drop the
+      // column. v012 finishes the phased migration.
+      const { v001_initial } = await import('../../src/db/schema/v001_initial');
+      const { v002_more_exercises } = await import('../../src/db/schema/v002_more_exercises');
+      const { v003_templates } = await import('../../src/db/schema/v003_templates');
+      const { v004_evergreen_zone } = await import('../../src/db/schema/v004_evergreen_zone');
+      const { v005_program } = await import('../../src/db/schema/v005_program');
+      const { v006_muscle_layer } = await import('../../src/db/schema/v006_muscle_layer');
+      const { v007_body_metric } = await import('../../src/db/schema/v007_body_metric');
+      const { v008_achievements } = await import('../../src/db/schema/v008_achievements');
+      const { v009_template_set } = await import('../../src/db/schema/v009_template_set');
+      const { v010_exercise_library_v2 } = await import(
+        '../../src/db/schema/v010_exercise_library_v2'
+      );
+      await v001_initial(db);
+      await v002_more_exercises(db);
+      await v003_templates(db);
+      await v004_evergreen_zone(db);
+      await v005_program(db);
+      await v006_muscle_layer(db);
+      await v007_body_metric(db);
+      await v008_achievements(db);
+      await v009_template_set(db);
+      await v010_exercise_library_v2(db);
+
       const cols = await db.getAllAsync<{ name: string }>(
         `PRAGMA table_info(template_exercise)`
       );
       const colNames = cols.map((c) => c.name);
-      // v010 deliberately keeps the column so production templateRepository
-      // (which still reads/writes it) doesn't crash. A later migration will
-      // DROP COLUMN after the repo + UI migrate to exercise.notes.
+      // v010 ADD COLUMN-only — phased so the live production templateRepository
+      // and templateRepositoryV2 tests didn't crash mid-cutover. v012 finishes
+      // the migration.
       expect(colNames).toContain('notes');
     });
   });

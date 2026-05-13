@@ -56,8 +56,29 @@ describe('v009 template_set migration', () => {
     expect(rest!.notnull).toBe(0);
   });
 
-  it('adds template_exercise.parent_id / notes / updated_at columns', async () => {
-    await migrate(db);
+  it('adds template_exercise.parent_id / notes / updated_at columns (manual replay to v009)', async () => {
+    // Manual replay: stop at v009 so we can verify the notes column was
+    // added there. v012 drops it later, so full `migrate(db)` would mask
+    // the v009 contract being honored.
+    const { v001_initial } = await import('../../src/db/schema/v001_initial');
+    const { v002_more_exercises } = await import('../../src/db/schema/v002_more_exercises');
+    const { v003_templates } = await import('../../src/db/schema/v003_templates');
+    const { v004_evergreen_zone } = await import('../../src/db/schema/v004_evergreen_zone');
+    const { v005_program } = await import('../../src/db/schema/v005_program');
+    const { v006_muscle_layer } = await import('../../src/db/schema/v006_muscle_layer');
+    const { v007_body_metric } = await import('../../src/db/schema/v007_body_metric');
+    const { v008_achievements } = await import('../../src/db/schema/v008_achievements');
+    const { v009_template_set } = await import('../../src/db/schema/v009_template_set');
+    await v001_initial(db);
+    await v002_more_exercises(db);
+    await v003_templates(db);
+    await v004_evergreen_zone(db);
+    await v005_program(db);
+    await v006_muscle_layer(db);
+    await v007_body_metric(db);
+    await v008_achievements(db);
+    await v009_template_set(db);
+
     const cols = await db.getAllAsync<{ name: string; notnull: number; dflt_value: string | null }>(
       `PRAGMA table_info(template_exercise)`
     );
