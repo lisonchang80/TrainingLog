@@ -30,6 +30,7 @@
 import { randomUUID } from 'expo-crypto';
 import {
   Stack,
+  useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
@@ -61,6 +62,7 @@ import {
 } from '@/src/adapters/sqlite/templateRepository';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
+import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
 import type {
   ExerciseSection,
@@ -856,6 +858,78 @@ export default function TemplateEditorView() {
     setExpandedExId(newExerciseRow.id);
   };
 
+  const hydrateExercisesByIds = useCallback(
+    async (exerciseIds: readonly string[]) => {
+      if (!id || exerciseIds.length === 0) return;
+
+      const newRows: TemplateExercise[] = [];
+      for (const exId of exerciseIds) {
+        const exercise = exerciseLibrary.find((x) => x.id === exId);
+        if (!exercise) continue;
+
+        let prefilled: TemplateSet[] | null = null;
+        try {
+          const candidates = await queryMemoryCandidates(db, { exercise_id: exId });
+          prefilled = deriveLatestSetsForExercise({
+            exercise_id: exId,
+            candidates,
+            uuid: () => newId('set'),
+          });
+        } catch {
+          prefilled = null;
+        }
+
+        const seedSets: TemplateSet[] =
+          prefilled && prefilled.length > 0
+            ? prefilled
+            : [
+                {
+                  id: newId('set'),
+                  position: 0,
+                  kind: 'working',
+                  reps: 8,
+                  weight: 20,
+                  parent_set_id: null,
+                  notes: null,
+                },
+              ];
+
+        newRows.push({
+          id: newId('te'),
+          template_id: id,
+          exercise_id: exId,
+          name: exercise.name,
+          ordering: 0, // re-assigned below relative to draft.exercises.length
+          section: 'general',
+          parent_id: null,
+          notes: null,
+          rest_seconds: null,
+          sets: seedSets,
+        });
+      }
+
+      if (newRows.length === 0) return;
+
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const base = prev.exercises.length;
+        const stamped = newRows.map((r, i) => ({ ...r, ordering: base + i }));
+        return { ...prev, exercises: [...prev.exercises, ...stamped] };
+      });
+      setExpandedExId(newRows[newRows.length - 1].id);
+    },
+    [id, db, exerciseLibrary],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const payload = consumePick();
+      if (payload && payload.exerciseIds.length > 0) {
+        void hydrateExercisesByIds(payload.exerciseIds);
+      }
+    }, [hydrateExercisesByIds]),
+  );
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
@@ -1169,7 +1243,7 @@ export default function TemplateEditorView() {
         <View style={styles.actionBar}>
           <Pressable
             style={styles.actionBtn}
-            onPress={() => setShowExercisePicker(true)}>
+            onPress={() => router.push('/library?mode=picker')}>
             <Text style={styles.actionBtnText}>+ 動作</Text>
           </Pressable>
           <Pressable
