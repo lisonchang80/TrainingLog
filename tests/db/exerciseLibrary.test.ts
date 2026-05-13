@@ -2,6 +2,8 @@ import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteData
 import {
   createCustomExercise,
   getExerciseMuscleLinks,
+  getExerciseSessionCount,
+  getExerciseSessionCounts,
   getExerciseWithMuscles,
   listExerciseMuscleLinks,
   listExercises,
@@ -164,5 +166,86 @@ describe('exerciseLibraryRepository', () => {
     expect(exercises.length).toBe(EXERCISE_LIBRARY_SEEDS.length);
     expect(muscles).toHaveLength(19);
     expect(mgs).toHaveLength(11);
+  });
+
+  // ---------- ADR-0017 Q7「N 次」derived count ----------
+
+  describe('getExerciseSessionCount / getExerciseSessionCounts (ADR-0017 Q7)', () => {
+    const BENCH = '00000000-0000-4000-8000-000000000001';
+    const ROW = '00000000-0000-4000-8000-000000000005';
+
+    const insertSession = async (id: string, started_at: number) => {
+      await db.runAsync(
+        `INSERT INTO session (id, started_at, ended_at) VALUES (?, ?, ?)`,
+        id,
+        started_at,
+        started_at + 1
+      );
+    };
+
+    const insertSet = async (
+      id: string,
+      session_id: string,
+      exercise_id: string,
+      ordering: number,
+      is_skipped: number
+    ) => {
+      await db.runAsync(
+        `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering, created_at)
+         VALUES (?, ?, ?, 50, 5, ?, ?, ?)`,
+        id,
+        session_id,
+        exercise_id,
+        is_skipped,
+        ordering,
+        Date.now()
+      );
+    };
+
+    it('returns 0 when exercise has never been done', async () => {
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(0);
+    });
+
+    it('counts distinct sessions with at least one done set', async () => {
+      await insertSession('s1', 1000);
+      await insertSession('s2', 2000);
+      await insertSet('set-1', 's1', BENCH, 0, 0);
+      await insertSet('set-2', 's1', BENCH, 1, 0); // 2 sets, same session → 1 session
+      await insertSet('set-3', 's2', BENCH, 0, 0);
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(2);
+    });
+
+    it('ignores skipped sets — session with ONLY skipped sets does not count', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 1); // skipped
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(0);
+    });
+
+    it('counts session when at least one set is done and others skipped', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 1); // skipped
+      await insertSet('set-2', 's1', BENCH, 1, 0); // done
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(1);
+    });
+
+    it('getExerciseSessionCounts returns map of all exercises with done sets', async () => {
+      await insertSession('s1', 1000);
+      await insertSession('s2', 2000);
+      await insertSet('set-1', 's1', BENCH, 0, 0);
+      await insertSet('set-2', 's1', ROW, 1, 0);
+      await insertSet('set-3', 's2', BENCH, 0, 0);
+      const counts = await getExerciseSessionCounts(db);
+      expect(counts.get(BENCH)).toBe(2);
+      expect(counts.get(ROW)).toBe(1);
+      // exercises with no done sets are absent from the map (UI hides 0)
+      expect(counts.has('00000000-0000-4000-8000-000000000099')).toBe(false);
+    });
+
+    it('getExerciseSessionCounts excludes exercises with only skipped sets', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 1);
+      const counts = await getExerciseSessionCounts(db);
+      expect(counts.has(BENCH)).toBe(false);
+    });
   });
 });

@@ -114,6 +114,44 @@ export async function getExerciseMuscleLinks(
 }
 
 /**
+ * ADR-0017 Q7 「N 次」徽章 — number of distinct Sessions where this exercise
+ * had at least one **done** (`is_skipped = 0`) set.
+ *
+ * Derived (no cached column on `exercise`). Library grid calls
+ * `getExerciseSessionCounts` once, detail page calls
+ * `getExerciseSessionCount` for a single id; 0 returns from the map mean
+ * "no done sets ever" — UI hides the badge per ADR-0017 「0 次時不顯示」.
+ *
+ * Note: the spec text in ADR says `is_done = 1`; the v001 schema actually
+ * uses `is_skipped` (inverse), so the predicate here is `is_skipped = 0`.
+ * Semantically identical.
+ */
+export async function getExerciseSessionCount(
+  db: Database,
+  exerciseId: string
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(DISTINCT session_id) AS n
+       FROM "set"
+      WHERE exercise_id = ? AND is_skipped = 0`,
+    exerciseId
+  );
+  return row?.n ?? 0;
+}
+
+export async function getExerciseSessionCounts(
+  db: Database
+): Promise<Map<string, number>> {
+  const rows = await db.getAllAsync<{ exercise_id: string; n: number }>(
+    `SELECT exercise_id, COUNT(DISTINCT session_id) AS n
+       FROM "set"
+      WHERE is_skipped = 0
+      GROUP BY exercise_id`
+  );
+  return new Map(rows.map((r) => [r.exercise_id, r.n]));
+}
+
+/**
  * Insert a Custom Exercise + its muscle mapping rows in one transaction.
  *
  * @param uuid — UUID generator. REQUIRED, no default — Hermes lacks
