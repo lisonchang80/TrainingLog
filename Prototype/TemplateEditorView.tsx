@@ -442,6 +442,116 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
     });
   };
 
+  const cycleSetKind = (ex_id: string, set_id: string) => {
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (ex.id !== ex_id) return ex;
+        const idx = ex.sets.findIndex((s) => s.id === set_id);
+        if (idx === -1) return ex;
+        const s = ex.sets[idx];
+        const isFollower =
+          s.kind === 'dropset' && (s.parent_set_id ?? null) !== null;
+        if (isFollower) return ex;
+
+        if (s.kind === 'working') {
+          return {
+            ...ex,
+            sets: ex.sets.map((x) =>
+              x.id === set_id ? { ...x, kind: 'warmup' as const } : x,
+            ),
+          };
+        }
+        if (s.kind === 'warmup') {
+          const baseTs = Date.now();
+          const newFollower: TemplateSet = {
+            id: `${ex.id}-cyclefollower-${baseTs}`,
+            position: s.position + 0.5,
+            kind: 'dropset',
+            reps: s.reps,
+            weight: s.weight,
+            parent_set_id: s.id,
+          };
+          const updated = ex.sets.map((x) =>
+            x.id === set_id
+              ? { ...x, kind: 'dropset' as const, parent_set_id: null }
+              : x,
+          );
+          return {
+            ...ex,
+            sets: [
+              ...updated.slice(0, idx + 1),
+              newFollower,
+              ...updated.slice(idx + 1),
+            ],
+          };
+        }
+        if (s.kind === 'dropset' && (s.parent_set_id ?? null) === null) {
+          const headId = s.id;
+          return {
+            ...ex,
+            sets: ex.sets
+              .filter((x) => x.id === headId || x.parent_set_id !== headId)
+              .map((x) =>
+                x.id === set_id
+                  ? {
+                      ...x,
+                      kind: 'working' as const,
+                      parent_set_id: null,
+                    }
+                  : x,
+              ),
+          };
+        }
+        return ex;
+      }),
+    });
+  };
+
+  const deleteSupersetRowAt = (
+    parent_id: string,
+    child_ids: string[],
+    index: number,
+  ) => {
+    const ids = new Set([parent_id, ...child_ids]);
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (!ids.has(ex.id)) return ex;
+        if (index < 0 || index >= ex.sets.length) return ex;
+        return { ...ex, sets: ex.sets.filter((_, i) => i !== index) };
+      }),
+    });
+  };
+
+  const cloneSupersetRowAt = (
+    parent_id: string,
+    child_ids: string[],
+    index: number,
+  ) => {
+    const ids = new Set([parent_id, ...child_ids]);
+    const baseTs = Date.now();
+    setDraft({
+      ...draft,
+      exercises: draft.exercises.map((ex) => {
+        if (!ids.has(ex.id)) return ex;
+        if (index < 0 || index >= ex.sets.length) return ex;
+        const src = ex.sets[index];
+        const cloned: TemplateSet = {
+          id: `${ex.id}-srclone-${baseTs}`,
+          position: src.position + 0.5,
+          kind: src.kind,
+          reps: src.reps,
+          weight: src.weight,
+          parent_set_id: null,
+        };
+        const before = ex.sets.slice(0, index + 1);
+        const after = ex.sets.slice(index + 1);
+        return { ...ex, sets: [...before, cloned, ...after] };
+      }),
+    });
+  };
+
   const showSupersetHistory = (
     parent: TemplateExercise,
     children: TemplateExercise[],
@@ -624,6 +734,8 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
               onShowHistory={() => showExerciseHistory(parent)}
               onGearTap={() => openGearMenu(parent)}
               onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
+              onShowExerciseNote={() => openExerciseNoteEditor(parent)}
+              onCycleLabel={(s) => cycleSetKind(parent.id, s.id)}
             />
           </View>
         );
@@ -641,8 +753,17 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
               <Text style={styles.supersetNames} numberOfLines={1}>
                 {allNames}
               </Text>
+              <View style={{ flex: 1 }} />
               {isExpanded ? <Text style={styles.exChevron}>▼</Text> : null}
             </Pressable>
+            {parent.notes && parent.notes.trim().length > 0 ? (
+              <Pressable
+                onPress={() => openExerciseNoteEditor(parent)}
+                style={styles.exNoteIndicator}
+                hitSlop={8}>
+                <Text style={styles.exNoteIndicatorText}>📝</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() => openGearMenu(parent)}
               style={styles.exGearBtn}
@@ -657,26 +778,6 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
                   <Text style={styles.supersetColName} numberOfLines={1}>
                     {parent.name}
                   </Text>
-                  <ExerciseBody
-                    exercise={parent}
-                    expanded
-                    onToggle={() => toggleExpanded(parent.id)}
-                    onUpdateSet={(set_id, patch) => updateSet(parent.id, set_id, patch)}
-                    onAddSet={() => addSet(parent.id)}
-                    onAddDropsetRow={(set_id) => addDropsetRow(parent.id, set_id)}
-                    onRemoveDropsetRow={(set_id) => removeDropsetRow(parent.id, set_id)}
-                    onDeleteSet={(set_id) => deleteSet(parent.id, set_id)}
-                    onCloneSetAfter={(set_id) => cloneSetAfter(parent.id, set_id)}
-                    onDeleteCluster={(head_id) => deleteCluster(parent.id, head_id)}
-                    onAddClusterAfter={(head_id) => addClusterAfter(parent.id, head_id)}
-                    onLongPressRow={showReorderPlaceholder}
-                    onShowHistory={() => showExerciseHistory(parent)}
-                    onGearTap={() => openGearMenu(parent)}
-                    onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
-                    compact
-                    hideHeader
-                    hideFooterBtns
-                  />
                 </View>
                 {children.map((child) => (
                   <Fragment key={child.id}>
@@ -685,29 +786,128 @@ export function TemplateEditorView({ template_id, onExit }: TemplateEditorViewPr
                       <Text style={styles.supersetColName} numberOfLines={1}>
                         {child.name}
                       </Text>
-                      <ExerciseBody
-                        exercise={child}
-                        expanded
-                        onToggle={() => toggleExpanded(parent.id)}
-                        onUpdateSet={(set_id, patch) => updateSet(child.id, set_id, patch)}
-                        onAddSet={() => addSet(child.id)}
-                        onAddDropsetRow={(set_id) => addDropsetRow(child.id, set_id)}
-                        onRemoveDropsetRow={(set_id) => removeDropsetRow(child.id, set_id)}
-                        onDeleteSet={(set_id) => deleteSet(child.id, set_id)}
-                        onCloneSetAfter={(set_id) => cloneSetAfter(child.id, set_id)}
-                        onDeleteCluster={(head_id) => deleteCluster(child.id, head_id)}
-                        onAddClusterAfter={(head_id) => addClusterAfter(child.id, head_id)}
-                        onLongPressRow={showReorderPlaceholder}
-                        onShowHistory={() => showExerciseHistory(child)}
-                        onGearTap={() => openGearMenu(child)}
-                        onShowSetNote={(set) => openSetNoteEditor(child.id, set)}
-                        compact
-                        hideHeader
-                        hideFooterBtns
-                      />
                     </View>
                   </Fragment>
                 ))}
+                <View style={styles.supersetRowNoteSlot} />
+              </View>
+              <View style={[styles.setsBox, styles.setsBoxCompact]}>
+                {(() => {
+                  const parentMeta = computeExMeta(parent);
+                  const childMetas = children.map((c) => computeExMeta(c));
+                  const maxSets = Math.max(
+                    parent.sets.length,
+                    ...children.map((c) => c.sets.length),
+                  );
+                  const childIds = children.map((c) => c.id);
+                  const renderCell = (
+                    ex: TemplateExercise,
+                    meta: ReturnType<typeof computeExMeta>,
+                    i: number,
+                  ) => {
+                    const s = ex.sets[i];
+                    if (!s) return <View style={styles.setRowPlaceholder} />;
+                    const isDropset = s.kind === 'dropset';
+                    const isDropsetFollower =
+                      isDropset && (s.parent_set_id ?? null) !== null;
+                    const isClusterLast = meta.clusterInfo[i].isClusterLast;
+                    const minusDisabled = meta.clusterInfo[i].clusterSize <= 2;
+                    return (
+                      <SetRowContent
+                        set={s}
+                        setLabel={meta.setLabels[i]}
+                        compact
+                        isDropsetFollower={isDropsetFollower}
+                        isClusterLast={isClusterLast}
+                        minusDisabled={minusDisabled}
+                        hideNoteIndicator
+                        onUpdateSet={(set_id, patch) =>
+                          updateSet(ex.id, set_id, patch)
+                        }
+                        onShowSetNote={(setObj) =>
+                          openSetNoteEditor(ex.id, setObj)
+                        }
+                        onRemoveDropsetRow={(set_id) =>
+                          removeDropsetRow(ex.id, set_id)
+                        }
+                        onAddDropsetRow={(set_id) =>
+                          addDropsetRow(ex.id, set_id)
+                        }
+                        onCycleLabel={(setObj) => cycleSetKind(ex.id, setObj.id)}
+                      />
+                    );
+                  };
+                  return Array.from({ length: maxSets }, (_, i) => {
+                    const parentSet = parent.sets[i];
+                    const rowHasNote = !!(
+                      parentSet?.notes && parentSet.notes.trim().length > 0
+                    );
+                    return (
+                      <SwipeableSetRow
+                        key={i}
+                        swipeLeftActions={[
+                          {
+                            key: 'del-superset-row',
+                            label: '刪',
+                            color: '#FF3B30',
+                            onPress: () =>
+                              deleteSupersetRowAt(parent.id, childIds, i),
+                          },
+                        ]}
+                        swipeRightActions={[
+                          {
+                            key: 'clone-superset-row',
+                            label: '加',
+                            color: '#34C759',
+                            onPress: () =>
+                              cloneSupersetRowAt(parent.id, childIds, i),
+                          },
+                          {
+                            key: 'note-superset-row',
+                            label: '備註',
+                            color: '#007AFF',
+                            onPress: () => {
+                              if (parentSet)
+                                openSetNoteEditor(parent.id, parentSet);
+                            },
+                          },
+                        ]}
+                        onLongPress={showReorderPlaceholder}>
+                        <View style={styles.exSuperRow}>
+                          <View style={styles.exSuperCol}>
+                            {renderCell(parent, parentMeta, i)}
+                          </View>
+                          {children.map((child, ci) => (
+                            <Fragment key={child.id}>
+                              <View style={styles.exSuperDivider} />
+                              <View
+                                style={[
+                                  styles.exSuperCol,
+                                  styles.exSuperColWithLeftPad,
+                                ]}>
+                                {renderCell(child, childMetas[ci], i)}
+                              </View>
+                            </Fragment>
+                          ))}
+                          <View style={styles.supersetRowNoteSlot}>
+                            {rowHasNote ? (
+                              <Pressable
+                                onPress={() => {
+                                  if (parentSet)
+                                    openSetNoteEditor(parent.id, parentSet);
+                                }}
+                                hitSlop={6}>
+                                <Text style={styles.setNoteIndicatorText}>
+                                  📝
+                                </Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        </View>
+                      </SwipeableSetRow>
+                    );
+                  });
+                })()}
               </View>
               <View style={styles.supersetFooter}>
                 <Pressable
@@ -948,6 +1148,140 @@ function SectionHeader({ label }: { label: string }) {
   );
 }
 
+function SetRowContent({
+  set,
+  setLabel,
+  compact,
+  isDropsetFollower,
+  isClusterLast,
+  minusDisabled,
+  hideNoteIndicator,
+  onUpdateSet,
+  onShowSetNote,
+  onRemoveDropsetRow,
+  onAddDropsetRow,
+  onCycleLabel,
+}: {
+  set: TemplateSet;
+  setLabel: string;
+  compact?: boolean;
+  isDropsetFollower: boolean;
+  isClusterLast: boolean;
+  minusDisabled: boolean;
+  hideNoteIndicator?: boolean;
+  onUpdateSet: (set_id: string, patch: Partial<TemplateSet>) => void;
+  onShowSetNote: (set: TemplateSet) => void;
+  onRemoveDropsetRow: (set_id: string) => void;
+  onAddDropsetRow: (set_id: string) => void;
+  onCycleLabel: (set: TemplateSet) => void;
+}) {
+  const hasNote =
+    !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
+  return (
+    <View style={styles.setRow}>
+      <Pressable
+        onPress={() => {
+          if (!isDropsetFollower) onCycleLabel(set);
+        }}
+        disabled={isDropsetFollower}
+        hitSlop={6}>
+        <Text style={[styles.setLabel, compact && styles.setLabelCompact]}>
+          {setLabel}
+        </Text>
+      </Pressable>
+      <TextInput
+        style={[styles.setInput, compact && styles.setInputCompact]}
+        value={String(set.reps)}
+        onChangeText={(t) =>
+          onUpdateSet(set.id, { reps: Number(t.replace(/[^0-9]/g, '')) || 0 })
+        }
+        keyboardType="numeric"
+      />
+      <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
+      <TextInput
+        style={[styles.setInput, compact && styles.setInputCompact]}
+        value={String(set.weight)}
+        onChangeText={(t) =>
+          onUpdateSet(set.id, {
+            weight: Number(t.replace(/[^0-9.]/g, '')) || 0,
+          })
+        }
+        keyboardType="numeric"
+      />
+      <Text style={styles.setUnit}>kg</Text>
+      {hasNote ? (
+        <Pressable
+          onPress={() => onShowSetNote(set)}
+          style={styles.setNoteIndicator}
+          hitSlop={6}>
+          <Text style={styles.setNoteIndicatorText}>📝</Text>
+        </Pressable>
+      ) : null}
+      {isDropsetFollower ? (
+        <Pressable
+          onPress={() => onRemoveDropsetRow(set.id)}
+          disabled={minusDisabled}
+          style={[
+            styles.dropsetInlineBtn,
+            minusDisabled && styles.dropsetTailBtnDisabled,
+          ]}
+          hitSlop={6}>
+          <Text
+            style={[
+              styles.dropsetInlineBtnText,
+              minusDisabled && styles.dropsetTailBtnTextDisabled,
+            ]}>
+            −
+          </Text>
+        </Pressable>
+      ) : null}
+      {isDropsetFollower && isClusterLast ? (
+        <Pressable
+          onPress={() => onAddDropsetRow(set.id)}
+          style={styles.dropsetInlineBtn}
+          hitSlop={6}>
+          <Text style={styles.dropsetInlineBtnText}>+</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function computeExMeta(ex: TemplateExercise) {
+  const clusterInfo = ex.sets.map((s, i) => {
+    if (s.kind !== 'dropset') return { clusterSize: 0, isClusterLast: false };
+    const headId =
+      (s.parent_set_id ?? null) === null
+        ? s.id
+        : (s.parent_set_id as string);
+    const members = ex.sets.filter(
+      (x) =>
+        x.kind === 'dropset' &&
+        (x.id === headId || x.parent_set_id === headId),
+    );
+    const lastMember = members[members.length - 1];
+    return {
+      clusterSize: members.length,
+      isClusterLast: lastMember?.id === s.id,
+    };
+  });
+  let workIdx = 0;
+  let clusterIdx = 0;
+  const setLabels = ex.sets.map((s) => {
+    if (s.kind === 'warmup') return '熱';
+    if (s.kind === 'dropset') {
+      if ((s.parent_set_id ?? null) === null) {
+        clusterIdx += 1;
+        return `D${clusterIdx}`;
+      }
+      return '';
+    }
+    workIdx += 1;
+    return String(workIdx);
+  });
+  return { clusterInfo, setLabels };
+}
+
 function ExerciseBody({
   exercise,
   expanded,
@@ -964,6 +1298,8 @@ function ExerciseBody({
   onShowHistory,
   onGearTap,
   onShowSetNote,
+  onShowExerciseNote,
+  onCycleLabel,
   compact,
   hideHeader,
   hideFooterBtns,
@@ -983,6 +1319,8 @@ function ExerciseBody({
   onShowHistory: () => void;
   onGearTap: () => void;
   onShowSetNote: (set: TemplateSet) => void;
+  onShowExerciseNote: () => void;
+  onCycleLabel: (set: TemplateSet) => void;
   compact?: boolean;
   hideHeader?: boolean;
   hideFooterBtns?: boolean;
@@ -990,44 +1328,7 @@ function ExerciseBody({
   const warmups = exercise.sets.filter((s) => s.kind === 'warmup').length;
   const workings = exercise.sets.filter((s) => s.kind !== 'warmup').length;
 
-  const clusterInfo = exercise.sets.map((s, i) => {
-    if (s.kind !== 'dropset') return { clusterSize: 0, isClusterLast: false };
-    const headId =
-      (s.parent_set_id ?? null) === null
-        ? s.id
-        : (s.parent_set_id as string);
-    const members = exercise.sets.filter(
-      (x) =>
-        x.kind === 'dropset' && (x.id === headId || x.parent_set_id === headId),
-    );
-    let isClusterLast = true;
-    for (let j = i + 1; j < exercise.sets.length; j++) {
-      const next = exercise.sets[j];
-      if (
-        next.kind === 'dropset' &&
-        (next.id === headId || next.parent_set_id === headId)
-      ) {
-        isClusterLast = false;
-        break;
-      }
-    }
-    return { clusterSize: members.length, isClusterLast };
-  });
-
-  let workIdx = 0;
-  let clusterIdx = 0;
-  const setLabels = exercise.sets.map((s) => {
-    if (s.kind === 'warmup') return '熱';
-    if (s.kind === 'dropset') {
-      if ((s.parent_set_id ?? null) === null) {
-        clusterIdx += 1;
-        return `D${clusterIdx}`;
-      }
-      return '';
-    }
-    workIdx += 1;
-    return String(workIdx);
-  });
+  const { clusterInfo, setLabels } = computeExMeta(exercise);
 
   return (
     <>
@@ -1042,6 +1343,15 @@ function ExerciseBody({
               numberOfLines={1}>
               {exercise.name}
             </Text>
+            {exercise.notes && exercise.notes.trim().length > 0 ? (
+              <Pressable
+                onPress={onShowExerciseNote}
+                style={styles.exNoteIndicator}
+                hitSlop={8}>
+                <Text style={styles.exNoteIndicatorText}>📝</Text>
+              </Pressable>
+            ) : null}
+            <View style={{ flex: 1 }} />
             <Text style={styles.exSummary}>
               {warmups}熱+{workings}組
             </Text>
@@ -1054,147 +1364,167 @@ function ExerciseBody({
       ) : null}
       {expanded ? (
         <View style={[styles.setsBox, compact && styles.setsBoxCompact]}>
-          {exercise.sets.map((s, i) => {
-            const isDropset = s.kind === 'dropset';
-            const isDropsetFollower =
-              isDropset && (s.parent_set_id ?? null) !== null;
-            const isDropsetHead = isDropset && !isDropsetFollower;
-            const isClusterLast = clusterInfo[i].isClusterLast;
-            const minusDisabled = clusterInfo[i].clusterSize <= 2;
+          {(() => {
+            const items: React.ReactNode[] = [];
+            let i = 0;
+            while (i < exercise.sets.length) {
+              const s = exercise.sets[i];
+              const isDropset = s.kind === 'dropset';
+              const isFollower =
+                isDropset && (s.parent_set_id ?? null) !== null;
+              const isHead = isDropset && !isFollower;
 
-            let leftActions: SwipeAction[];
-            let rightActions: SwipeAction[];
-            if (isDropsetHead) {
-              leftActions = [
-                {
-                  key: 'delete-cluster',
-                  label: '刪',
-                  color: '#FF3B30',
-                  onPress: () => onDeleteCluster(s.id),
-                },
-              ];
-              rightActions = [
-                {
-                  key: 'add-cluster',
-                  label: '加',
-                  color: '#34C759',
-                  onPress: () => onAddClusterAfter(s.id),
-                },
-                {
-                  key: 'note',
-                  label: '備註',
-                  color: '#007AFF',
-                  onPress: () => onShowSetNote(s),
-                },
-              ];
-            } else if (isDropsetFollower) {
-              leftActions = [
-                {
-                  key: 'delete-follower',
-                  label: '刪',
-                  color: '#FF3B30',
-                  onPress: () => onRemoveDropsetRow(s.id),
-                },
-              ];
-              rightActions = [
-                {
-                  key: 'add-follower',
-                  label: '加',
-                  color: '#34C759',
-                  onPress: () => onAddDropsetRow(s.id),
-                },
-                {
-                  key: 'note',
-                  label: '備註',
-                  color: '#007AFF',
-                  onPress: () => onShowSetNote(s),
-                },
-              ];
-            } else {
-              leftActions = [
-                {
-                  key: 'delete-set',
-                  label: '刪',
-                  color: '#FF3B30',
-                  onPress: () => onDeleteSet(s.id),
-                },
-              ];
-              rightActions = [
-                {
-                  key: 'clone-set',
-                  label: '加',
-                  color: '#34C759',
-                  onPress: () => onCloneSetAfter(s.id),
-                },
-                {
-                  key: 'note',
-                  label: '備註',
-                  color: '#007AFF',
-                  onPress: () => onShowSetNote(s),
-                },
-              ];
+              if (isHead) {
+                const headIdx = i;
+                const followerIndices: number[] = [];
+                let j = i + 1;
+                while (j < exercise.sets.length) {
+                  const next = exercise.sets[j];
+                  if (
+                    next.kind === 'dropset' &&
+                    next.parent_set_id === s.id
+                  ) {
+                    followerIndices.push(j);
+                    j++;
+                  } else {
+                    break;
+                  }
+                }
+                const clusterSize = 1 + followerIndices.length;
+                const swipeLeftActions: SwipeAction[] = [
+                  {
+                    key: 'delete-cluster',
+                    label: '刪',
+                    color: '#FF3B30',
+                    onPress: () => onDeleteCluster(s.id),
+                  },
+                ];
+                const swipeRightActions: SwipeAction[] = [
+                  {
+                    key: 'add-cluster',
+                    label: '加',
+                    color: '#34C759',
+                    onPress: () => onAddClusterAfter(s.id),
+                  },
+                  {
+                    key: 'note-cluster',
+                    label: '備註',
+                    color: '#007AFF',
+                    onPress: () => onShowSetNote(s),
+                  },
+                ];
+                items.push(
+                  <SwipeableSetRow
+                    key={s.id}
+                    swipeLeftActions={swipeLeftActions}
+                    swipeRightActions={swipeRightActions}
+                    onLongPress={onLongPressRow}>
+                    <View style={styles.clusterStack}>
+                      <SetRowContent
+                        set={s}
+                        setLabel={setLabels[headIdx]}
+                        compact={compact}
+                        isDropsetFollower={false}
+                        isClusterLast={false}
+                        minusDisabled={false}
+                        onUpdateSet={onUpdateSet}
+                        onShowSetNote={onShowSetNote}
+                        onRemoveDropsetRow={onRemoveDropsetRow}
+                        onAddDropsetRow={onAddDropsetRow}
+                        onCycleLabel={onCycleLabel}
+                      />
+                      {followerIndices.map((fi, fIdx) => {
+                        const fset = exercise.sets[fi];
+                        return (
+                          <SetRowContent
+                            key={fset.id}
+                            set={fset}
+                            setLabel={setLabels[fi]}
+                            compact={compact}
+                            isDropsetFollower
+                            isClusterLast={
+                              fIdx === followerIndices.length - 1
+                            }
+                            minusDisabled={clusterSize <= 2}
+                            onUpdateSet={onUpdateSet}
+                            onShowSetNote={onShowSetNote}
+                            onRemoveDropsetRow={onRemoveDropsetRow}
+                            onAddDropsetRow={onAddDropsetRow}
+                            onCycleLabel={onCycleLabel}
+                          />
+                        );
+                      })}
+                    </View>
+                  </SwipeableSetRow>,
+                );
+                i = j;
+              } else if (isFollower) {
+                items.push(
+                  <SetRowContent
+                    key={s.id}
+                    set={s}
+                    setLabel={setLabels[i]}
+                    compact={compact}
+                    isDropsetFollower
+                    isClusterLast
+                    minusDisabled
+                    onUpdateSet={onUpdateSet}
+                    onShowSetNote={onShowSetNote}
+                    onRemoveDropsetRow={onRemoveDropsetRow}
+                    onAddDropsetRow={onAddDropsetRow}
+                    onCycleLabel={onCycleLabel}
+                  />,
+                );
+                i++;
+              } else {
+                const swipeLeftActions: SwipeAction[] = [
+                  {
+                    key: 'delete-set',
+                    label: '刪',
+                    color: '#FF3B30',
+                    onPress: () => onDeleteSet(s.id),
+                  },
+                ];
+                const swipeRightActions: SwipeAction[] = [
+                  {
+                    key: 'clone-set',
+                    label: '加',
+                    color: '#34C759',
+                    onPress: () => onCloneSetAfter(s.id),
+                  },
+                  {
+                    key: 'note',
+                    label: '備註',
+                    color: '#007AFF',
+                    onPress: () => onShowSetNote(s),
+                  },
+                ];
+                items.push(
+                  <SwipeableSetRow
+                    key={s.id}
+                    swipeLeftActions={swipeLeftActions}
+                    swipeRightActions={swipeRightActions}
+                    onLongPress={onLongPressRow}>
+                    <SetRowContent
+                      set={s}
+                      setLabel={setLabels[i]}
+                      compact={compact}
+                      isDropsetFollower={false}
+                      isClusterLast={false}
+                      minusDisabled={false}
+                      onUpdateSet={onUpdateSet}
+                      onShowSetNote={onShowSetNote}
+                      onRemoveDropsetRow={onRemoveDropsetRow}
+                      onAddDropsetRow={onAddDropsetRow}
+                      onCycleLabel={onCycleLabel}
+                    />
+                  </SwipeableSetRow>,
+                );
+                i++;
+              }
             }
-
-            return (
-              <SwipeableSetRow
-                key={s.id}
-                leftActions={leftActions}
-                rightActions={rightActions}
-                onLongPress={onLongPressRow}>
-                <View style={styles.setRow}>
-                  <Text style={[styles.setLabel, compact && styles.setLabelCompact]}>
-                    {setLabels[i]}
-                  </Text>
-                  <TextInput
-                    style={[styles.setInput, compact && styles.setInputCompact]}
-                    value={String(s.reps)}
-                    onChangeText={(t) =>
-                      onUpdateSet(s.id, { reps: Number(t.replace(/[^0-9]/g, '')) || 0 })
-                    }
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
-                  <TextInput
-                    style={[styles.setInput, compact && styles.setInputCompact]}
-                    value={String(s.weight)}
-                    onChangeText={(t) =>
-                      onUpdateSet(s.id, {
-                        weight: Number(t.replace(/[^0-9.]/g, '')) || 0,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-                  <Text style={styles.setUnit}>kg</Text>
-                  {isDropsetFollower ? (
-                    <Pressable
-                      onPress={() => onRemoveDropsetRow(s.id)}
-                      disabled={minusDisabled}
-                      style={[
-                        styles.dropsetInlineBtn,
-                        minusDisabled && styles.dropsetTailBtnDisabled,
-                      ]}
-                      hitSlop={6}>
-                      <Text
-                        style={[
-                          styles.dropsetInlineBtnText,
-                          minusDisabled && styles.dropsetTailBtnTextDisabled,
-                        ]}>
-                        −
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  {isDropsetFollower && isClusterLast ? (
-                    <Pressable
-                      onPress={() => onAddDropsetRow(s.id)}
-                      style={styles.dropsetInlineBtn}
-                      hitSlop={6}>
-                      <Text style={styles.dropsetInlineBtnText}>+</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </SwipeableSetRow>
-            );
-          })}
+            return items;
+          })()}
           {!hideFooterBtns ? (
             <View style={[styles.exFooterBtns, compact && styles.exFooterBtnsCompact]}>
               <Pressable
@@ -1343,7 +1673,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  exName: { flex: 1, fontSize: 15, fontWeight: '600' },
+  exName: { flexShrink: 1, fontSize: 15, fontWeight: '600' },
   exNameCompact: { fontSize: 13 },
   exSummary: { fontSize: 12, color: '#6B7280' },
   exChevron: { fontSize: 11, color: '#9CA3AF' },
@@ -1363,6 +1693,13 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  setRowPlaceholder: { height: 32 },
+  clusterStack: { gap: 4 },
+  supersetRowNoteSlot: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   setLabel: { width: 26, fontSize: 13, fontWeight: '600', color: '#374151' },
   setLabelCompact: { width: 18, fontSize: 11 },
   setInput: {
@@ -1381,6 +1718,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   setUnit: { fontSize: 12, color: '#6B7280' },
+  setNoteIndicator: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  setNoteIndicatorText: { fontSize: 14 },
+  exNoteIndicator: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    marginRight: 4,
+  },
+  exNoteIndicatorText: { fontSize: 16 },
   noteBtn: {
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -1505,13 +1854,14 @@ const styles = StyleSheet.create({
   paletteGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
     justifyContent: 'center',
+    paddingVertical: 4,
   },
   paletteSwatch: {
-    width: '22%',
-    aspectRatio: 1,
-    borderRadius: 12,
+    width: 64,
+    height: 64,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
