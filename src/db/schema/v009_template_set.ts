@@ -13,10 +13,20 @@ import type { Database } from '../types';
  * Changes:
  *   1. ALTER template ADD color_hex TEXT NOT NULL DEFAULT '' (ADR-0015)
  *   2. ALTER template_exercise ADD rest_seconds INTEGER NULL (ADR-0016)
- *   3. CREATE TABLE template_set: per-template_exercise per-set 預設值
+ *   3. ALTER template_exercise ADD parent_id TEXT NULL — superset linkage
+ *      (ADR-0016 amendment §7). NULL = plain row or superset parent;
+ *      non-NULL = child pointing at parent's id.
+ *   4. ALTER template_exercise ADD notes TEXT NULL — per-exercise notes
+ *      (ADR-0013). UI 即時 UPDATE pattern; not draft state.
+ *   5. ALTER template_exercise ADD updated_at INTEGER NOT NULL DEFAULT 0 —
+ *      bumped on every write so 動作記憶 read pattern (ADR-0016 §動作記憶)
+ *      can pick the most recently edited row for a given exercise_id.
+ *      DEFAULT 0 lets ALTER apply to existing rows; repo writes bump on
+ *      every INSERT/UPDATE.
+ *   6. CREATE TABLE template_set: per-template_exercise per-set 預設值
  *      (含 cluster B3 `parent_set_id` 自參照 + per-set `notes`)
- *   4. CREATE INDEX idx_template_set_by_exercise
- *   5. Transform: 把既有 template_exercise summary (default_sets / default_reps /
+ *   7. CREATE INDEX idx_template_set_by_exercise
+ *   8. Transform: 把既有 template_exercise summary (default_sets / default_reps /
  *      default_weight_kg) 攤平成 N 個 working template_set rows，per ADR-0016
  *      §migration transform。原 summary 欄位**保留** (SQLite 不易 DROP COLUMN)
  *      但 production code 後續一律走 template_set，原欄位視為 deprecated。
@@ -30,6 +40,9 @@ export async function v009_template_set(db: Database): Promise<void> {
     ALTER TABLE template ADD COLUMN color_hex TEXT NOT NULL DEFAULT '';
 
     ALTER TABLE template_exercise ADD COLUMN rest_seconds INTEGER;
+    ALTER TABLE template_exercise ADD COLUMN parent_id TEXT;
+    ALTER TABLE template_exercise ADD COLUMN notes TEXT;
+    ALTER TABLE template_exercise ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE template_set (
       id TEXT PRIMARY KEY NOT NULL,

@@ -56,6 +56,21 @@ describe('v009 template_set migration', () => {
     expect(rest!.notnull).toBe(0);
   });
 
+  it('adds template_exercise.parent_id / notes / updated_at columns', async () => {
+    await migrate(db);
+    const cols = await db.getAllAsync<{ name: string; notnull: number; dflt_value: string | null }>(
+      `PRAGMA table_info(template_exercise)`
+    );
+    const byName = Object.fromEntries(cols.map((c) => [c.name, c]));
+    expect(byName.parent_id).toBeDefined();
+    expect(byName.parent_id.notnull).toBe(0);
+    expect(byName.notes).toBeDefined();
+    expect(byName.notes.notnull).toBe(0);
+    expect(byName.updated_at).toBeDefined();
+    expect(byName.updated_at.notnull).toBe(1);
+    expect(byName.updated_at.dflt_value).toBe('0');
+  });
+
   it('transforms existing template_exercise rows into template_set rows', async () => {
     // 先停在 v008，手動 INSERT 一些 template_exercise rows，再 bump 到 v009
     // 因為 migrate runner 是一氣呵成跑到最新，我們改成：第一次 migrate 跑到 v008，
