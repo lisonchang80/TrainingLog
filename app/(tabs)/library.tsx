@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -47,6 +48,11 @@ import {
 export default function LibraryScreen() {
   const db = useDatabase();
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+  const cardWidth = Math.floor(
+    (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
+  );
+  const cardHeight = Math.floor(cardWidth / 0.92);
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [links, setLinks] = useState<ExerciseMuscleLink[]>([]);
@@ -168,6 +174,8 @@ export default function LibraryScreen() {
               <ExerciseGrid
                 exercises={visible}
                 sessionCounts={sessionCounts}
+                cardWidth={cardWidth}
+                cardHeight={cardHeight}
                 onTap={(ex) => router.push(`/exercise/${ex.id}`)}
               />
             </>
@@ -203,6 +211,7 @@ function Sidebar(props: SidebarProps) {
     onSelectMuscle,
   } = props;
   return (
+    <View style={styles.sidebarWrap}>
     <ScrollView
       style={styles.sidebar}
       contentContainerStyle={styles.sidebarContent}
@@ -259,6 +268,7 @@ function Sidebar(props: SidebarProps) {
         </Text>
       </Pressable>
     </ScrollView>
+    </View>
   );
 }
 
@@ -272,24 +282,26 @@ function EquipmentChipRow({
   onChange: (eq: Equipment | null) => void;
 }) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.equipRow}>
-      <EquipmentChip
-        label="全部"
-        active={value === null}
-        onPress={() => onChange(null)}
-      />
-      {EQUIPMENT_VALUES.map((eq) => (
+    <View style={styles.equipRowOuter}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.equipRow}>
         <EquipmentChip
-          key={eq}
-          label={eq}
-          active={value === eq}
-          onPress={() => onChange(value === eq ? null : eq)}
+          label="全部"
+          active={value === null}
+          onPress={() => onChange(null)}
         />
-      ))}
-    </ScrollView>
+        {EQUIPMENT_VALUES.map((eq) => (
+          <EquipmentChip
+            key={eq}
+            label={eq}
+            active={value === eq}
+            onPress={() => onChange(value === eq ? null : eq)}
+          />
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -323,10 +335,14 @@ function EquipmentChip({
 function ExerciseGrid({
   exercises,
   sessionCounts,
+  cardWidth,
+  cardHeight,
   onTap,
 }: {
   exercises: Exercise[];
   sessionCounts: Map<string, number>;
+  cardWidth: number;
+  cardHeight: number;
   onTap: (ex: Exercise) => void;
 }) {
   if (exercises.length === 0) {
@@ -336,17 +352,39 @@ function ExerciseGrid({
       </View>
     );
   }
+  // Manual row-pair rendering with explicit pixel sizing — sidesteps
+  // FlatList numColumns + aspectRatio + flex measurement quirks in
+  // RN 0.74+ on iPhone 17 simulator.
+  const rows: Exercise[][] = [];
+  for (let i = 0; i < exercises.length; i += 2) {
+    rows.push(exercises.slice(i, i + 2));
+  }
   return (
     <ScrollView
-      contentContainerStyle={styles.grid}
+      style={styles.gridList}
+      contentContainerStyle={styles.gridContent}
       showsVerticalScrollIndicator={false}>
-      {exercises.map((ex) => (
-        <ExerciseCard
-          key={ex.id}
-          exercise={ex}
-          sessionCount={sessionCounts.get(ex.id) ?? 0}
-          onPress={() => onTap(ex)}
-        />
+      {rows.map((pair, i) => (
+        <View key={i} style={styles.gridRow}>
+          <ExerciseCard
+            exercise={pair[0]}
+            sessionCount={sessionCounts.get(pair[0].id) ?? 0}
+            width={cardWidth}
+            height={cardHeight}
+            onPress={() => onTap(pair[0])}
+          />
+          {pair[1] ? (
+            <ExerciseCard
+              exercise={pair[1]}
+              sessionCount={sessionCounts.get(pair[1].id) ?? 0}
+              width={cardWidth}
+              height={cardHeight}
+              onPress={() => onTap(pair[1])}
+            />
+          ) : (
+            <View style={{ width: cardWidth, height: cardHeight }} />
+          )}
+        </View>
       ))}
     </ScrollView>
   );
@@ -355,10 +393,14 @@ function ExerciseGrid({
 function ExerciseCard({
   exercise,
   sessionCount,
+  width,
+  height,
   onPress,
 }: {
   exercise: Exercise;
   sessionCount: number;
+  width: number;
+  height: number;
   onPress: () => void;
 }) {
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
@@ -367,7 +409,11 @@ function ExerciseCard({
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+      style={({ pressed }) => [
+        styles.card,
+        { width, height },
+        pressed && styles.pressed,
+      ]}>
       {hasCues && (
         <View style={styles.cuesPill}>
           <Text style={styles.cuesPillText}>講解</Text>
@@ -417,6 +463,7 @@ function SupersetTabPlaceholder() {
 
 const SIDEBAR_WIDTH = 92;
 const CARD_GAP = 10;
+const CONTENT_H_PADDING = 12;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
@@ -455,7 +502,8 @@ const styles = StyleSheet.create({
 
   body: { flex: 1, flexDirection: 'row' },
 
-  sidebar: { width: SIDEBAR_WIDTH },
+  sidebarWrap: { width: SIDEBAR_WIDTH, overflow: 'hidden' },
+  sidebar: { flex: 1 },
   sidebarContent: { paddingVertical: 12 },
   sidebarRow: {
     flexDirection: 'row',
@@ -482,9 +530,11 @@ const styles = StyleSheet.create({
   sidebarSubText: { color: 'rgba(255,255,255,0.45)', fontSize: 15 },
   sidebarSubTextActive: { color: '#34C759', fontWeight: '600' },
 
-  content: { flex: 1 },
+  content: { flex: 1, flexDirection: 'column', minWidth: 0 },
+  equipRowOuter: { height: 56 },
   equipRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -501,16 +551,20 @@ const styles = StyleSheet.create({
   equipText: { color: 'rgba(255,255,255,0.75)', fontSize: 14 },
   equipTextActive: { color: '#34C759', fontWeight: '600' },
 
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
+  gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
+  gridContent: {
+    paddingHorizontal: CONTENT_H_PADDING,
     paddingBottom: 24,
+    gap: CARD_GAP,
+    alignItems: 'stretch',
+  },
+  gridRow: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
     gap: CARD_GAP,
   },
   card: {
-    width: '48%',
-    aspectRatio: 0.92,
+    flexShrink: 0,
     backgroundColor: 'rgba(127,127,127,0.15)',
     borderRadius: 14,
     padding: 10,
