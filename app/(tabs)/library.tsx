@@ -1,5 +1,5 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -32,6 +32,13 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { clearPick, submitPick } from '@/src/domain/exercise/pickerBridge';
+import {
+  EMPTY_SELECTION,
+  isSelected,
+  selectionRank,
+  toggleSelection,
+} from '@/src/domain/exercise/pickerSelection';
 
 /**
  * Library screen (slice 9.6 / ADR-0017 Q1, Q6, Q7, Q15).
@@ -48,6 +55,8 @@ import {
 export default function LibraryScreen() {
   const db = useDatabase();
   const router = useRouter();
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const isPickerMode = params.mode === 'picker';
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
@@ -69,6 +78,13 @@ export default function LibraryScreen() {
     null
   );
   const [search, setSearch] = useState('');
+  const [selection, setSelection] = useState<readonly string[]>(EMPTY_SELECTION);
+
+  // Drop any stale picker-mode mailbox on mount so a prior abandoned pick
+  // does not leak into a fresh picker session.
+  useEffect(() => {
+    if (isPickerMode) clearPick();
+  }, [isPickerMode]);
 
   const refresh = useCallback(async () => {
     const [{ exercises, links }, mgs, ms, counts] = await Promise.all([
@@ -127,9 +143,36 @@ export default function LibraryScreen() {
     setSelectedMuscleId(null);
   };
 
+  const onCardTap = (ex: Exercise) => {
+    if (isPickerMode) {
+      setSelection((prev) => toggleSelection(prev, ex.id));
+    } else {
+      router.push(`/exercise/${ex.id}`);
+    }
+  };
+
+  const onPickerDone = () => {
+    submitPick({ exerciseIds: [...selection] });
+    router.back();
+  };
+
+  const onPickerCancel = () => {
+    setSelection(EMPTY_SELECTION);
+    router.back();
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
+        {isPickerMode && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="取消"
+            onPress={onPickerCancel}
+            style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
+            <Text style={styles.cancelBtnText}>✕</Text>
+          </Pressable>
+        )}
         <View style={styles.searchWrap}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
@@ -142,13 +185,15 @@ export default function LibraryScreen() {
             autoCorrect={false}
           />
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="新增動作"
-          onPress={() => router.push('/exercise/new')}
-          style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
-          <Text style={styles.addBtnText}>+</Text>
-        </Pressable>
+        {!isPickerMode && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="新增動作"
+            onPress={() => router.push('/exercise/new')}
+            style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
+            <Text style={styles.addBtnText}>+</Text>
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.body}>
@@ -176,12 +221,31 @@ export default function LibraryScreen() {
                 sessionCounts={sessionCounts}
                 cardWidth={cardWidth}
                 cardHeight={cardHeight}
-                onTap={(ex) => router.push(`/exercise/${ex.id}`)}
+                onTap={onCardTap}
+                selection={isPickerMode ? selection : null}
               />
             </>
           )}
         </View>
       </View>
+      {isPickerMode && (
+        <View style={styles.pickerFooter}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="完成"
+            onPress={onPickerDone}
+            disabled={selection.length === 0}
+            style={({ pressed }) => [
+              styles.pickerDoneBtn,
+              selection.length === 0 && styles.pickerDoneBtnDisabled,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={styles.pickerDoneBtnText}>
+              完成{selection.length > 0 ? ` (${selection.length})` : ''}
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -338,12 +402,14 @@ function ExerciseGrid({
   cardWidth,
   cardHeight,
   onTap,
+  selection,
 }: {
   exercises: Exercise[];
   sessionCounts: Map<string, number>;
   cardWidth: number;
   cardHeight: number;
   onTap: (ex: Exercise) => void;
+  selection: readonly string[] | null;
 }) {
   if (exercises.length === 0) {
     return (
@@ -372,6 +438,8 @@ function ExerciseGrid({
             width={cardWidth}
             height={cardHeight}
             onPress={() => onTap(pair[0])}
+            selected={selection ? isSelected(selection, pair[0].id) : false}
+            rank={selection ? selectionRank(selection, pair[0].id) : -1}
           />
           {pair[1] ? (
             <ExerciseCard
@@ -380,6 +448,8 @@ function ExerciseGrid({
               width={cardWidth}
               height={cardHeight}
               onPress={() => onTap(pair[1])}
+              selected={selection ? isSelected(selection, pair[1].id) : false}
+              rank={selection ? selectionRank(selection, pair[1].id) : -1}
             />
           ) : (
             <View style={{ width: cardWidth, height: cardHeight }} />
@@ -396,12 +466,16 @@ function ExerciseCard({
   width,
   height,
   onPress,
+  selected,
+  rank,
 }: {
   exercise: Exercise;
   sessionCount: number;
   width: number;
   height: number;
   onPress: () => void;
+  selected: boolean;
+  rank: number;
 }) {
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
   const thumbnail = exercise.media_path;
@@ -412,6 +486,7 @@ function ExerciseCard({
       style={({ pressed }) => [
         styles.card,
         { width, height },
+        selected && styles.cardSelected,
         pressed && styles.pressed,
       ]}>
       {hasCues && (
@@ -421,6 +496,11 @@ function ExerciseCard({
       )}
       {sessionCount > 0 && (
         <Text style={styles.countBadge}>{sessionCount} 次</Text>
+      )}
+      {selected && rank >= 0 && (
+        <View style={styles.selectedBadge}>
+          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
+        </View>
       )}
       <View style={styles.thumbWrap}>
         {thumbnail ? (
@@ -499,6 +579,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { color: '#fff', fontSize: 24, fontWeight: '600', lineHeight: 26 },
+  cancelBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnText: { color: '#fff', fontSize: 20, fontWeight: '600', lineHeight: 22 },
 
   body: { flex: 1, flexDirection: 'row' },
 
@@ -570,7 +659,25 @@ const styles = StyleSheet.create({
     padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
+  cardSelected: {
+    borderColor: '#34C759',
+    backgroundColor: 'rgba(52,199,89,0.15)',
+  },
+  selectedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#34C759',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   cuesPill: {
     position: 'absolute',
     top: 8,
@@ -628,4 +735,22 @@ const styles = StyleSheet.create({
   },
 
   pressed: { opacity: 0.7 },
+
+  pickerFooter: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.15)',
+  },
+  pickerDoneBtn: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#34C759',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerDoneBtnDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  pickerDoneBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
