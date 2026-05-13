@@ -150,3 +150,37 @@ PRD 既有 10 個 pure logic 模組**不變**（不新增模組）。muscle laye
 - 統計頁 heatmap 改用同一 SVG（既有 11 MG 顯示邏輯升級為 muscle-grouped fill）= 0.5 天
 
 可吃 v1 26 週原預留 polish buffer 吸收。
+
+---
+
+## 2026-05-13 amendment（ADR-0017 觸發 — muscle naming revise）
+
+ADR-0017 Q9 grill 結果，二頭與前臂命名 revise。理由：對齊本 ADR 既訂「**單字優先標準、多字優先口語**」原則 — 既有命名違反自己原則。
+
+### 改動清單
+
+| muscle | 既有 | 新 | 理由 |
+|---|---|---|---|
+| 二頭 (m-bicep-long) | 二頭長頭 | **外側二頭** | 對齊訓練圈口語；多字採口語 |
+| 二頭 (m-bicep-short) | 二頭短頭 | **內側二頭** | 對齊訓練圈口語；多字採口語 |
+| 前臂 (m-forearm) | 前臂 | **小臂** | 對齊訓練圈口語 |
+| MG 前臂 (mg-forearm) | 前臂 | **小臂** | MG 名同步 muscle 名 |
+
+### 翻盤的既有拍板
+
+- ❌ **拒絕方案 #8（保留長/短頭命名）翻盤**：原 reasoning「lifter 進階使用者熟悉度更高」現在認為錯了 — 多數中文 lifter 圈用「內外側」非「長/短頭」（後者解剖學界用法）
+- ❌ **TL;DR L10「二頭 muscle 命名修正：內側頭/外側頭 → 二頭長頭/二頭短頭」** — 反向翻盤回「內側/外側」（但前綴改「外側二頭/內側二頭」對齊兩字後置 pattern）
+
+### 不動
+
+- **ID 不動**：`M_BICEP_LONG` / `M_BICEP_SHORT` / `M_FOREARM` / `MG_FOREARM` const 名 + DB ID value (`'m-bicep-long'` 等) 保留為 internal alias
+- **anatomical 對應不變**：二頭短頭 = 內側、長頭 = 外側（兩種命名指同一肌肉）
+
+### 影響
+
+- v013 migration 4 筆 UPDATE（見 ADR-0017 § Schema migration plan v013）
+- `src/db/seed/v006ExerciseLibrary.ts` L90,115,116,122 同步改 name (const 名保留)
+- `components/body-heatmap.tsx` L59「前臂」label → 「小臂」
+- `components/body-diagram.tsx` SVG label text 同步
+- CONTEXT.md L116-128 muscle 表更新
+

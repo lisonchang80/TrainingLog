@@ -105,8 +105,8 @@ _Avoid_: Movement, Lift, 招式
 
 **Muscle Group** (UI: 部位):
 Exercise 的主要訓練部位，第一層分類。共 11 類：
-胸、背、腿、臀、肩、斜方肌、二頭、三頭、小腿、前臂、核心。
-_Avoid_: Body part, 肌群（口語可，schema 用 MuscleGroup）
+胸、背、腿、臀、肩、斜方肌、二頭、三頭、小腿、小臂、核心。
+_Avoid_: Body part, 肌群（口語可，schema 用 MuscleGroup）；「前臂」（ADR-0017 Q9 改名「小臂」）
 
 **Muscle** (UI: 部位細分) (ADR-0010 — 取代既有「Sub-Group」)：
 Muscle Group 下的解剖學細分，**19 個 muscle**，每個 muscle 屬於 exactly 1 MG。Exercise 透過 `exercise_muscle` m:n 表關聯多個 muscle 並標 role（primary / secondary），給 Exercise 詳情頁人體圖與部位活化視覺化使用。
@@ -119,13 +119,13 @@ Muscle Group 下的解剖學細分，**19 個 muscle**，每個 muscle 屬於 ex
 | 臀 (2) | 上臀部 / 下臀部 |
 | 肩 (3) | 前束 / 中束 / 後束 |
 | 斜方肌 (1) | 斜方肌 |
-| 二頭 (2) | 二頭長頭 / 二頭短頭 |
+| 二頭 (2) | 外側二頭 / 內側二頭 |
 | 三頭 (1) | 三頭 |
 | 小腿 (1) | 小腿 |
-| 前臂 (1) | 前臂 |
+| 小臂 (1) | 小臂 |
 | 核心 (2) | 側腹 / 腹肌 |
 
-合計 **19 muscle**。命名採解剖學標準（二頭長頭/短頭）+ 訓練圈口語（上下胸、上下臀、股四/膕繩、側腹/腹肌）混搭：單字優先標準、多字優先口語。
+合計 **19 muscle**。命名採訓練圈口語為主（上下胸、上下臀、股四/膕繩、側腹/腹肌、**外側/內側二頭、小臂**）+ 單字保留標準（斜方肌、三頭、小腿）。ADR-0017 Q9 revise — 二頭從「長頭/短頭」改「外側/內側」、前臂改「小臂」，對齊 ADR-0010「多字優先口語」原則。
 
 **Exercise → muscle mapping**（透過 `exercise_muscle` 表）：
 - **primary** = 1-3 個 muscle（核心活化、訓練動量主要承擔）
@@ -134,18 +134,72 @@ Muscle Group 下的解剖學細分，**19 個 muscle**，每個 muscle 屬於 ex
 - `exercise.muscle_group_id` 仍保留為「主要 MG 分類」單一 FK（filter / 統計頁各部位容量 / 獎章 first_combo / pr_per_mg 用），v1 手動指定不自動推算
 
 例：
-- 平板槓鈴臥推 → primary: 中下胸 / 三頭 / 前束；secondary: 上胸 / 前臂 / 核心
-- T-bar row → primary: 背部 / 下背 / 二頭長頭 / 二頭短頭；secondary: 後束 / 前臂 / 核心
+- 平板槓鈴臥推 → primary: 中下胸 / 三頭 / 前束；secondary: 上胸 / 小臂 / 核心
+- T-bar row → primary: 背部 / 下背 / 外側二頭 / 內側二頭；secondary: 後束 / 小臂 / 核心
 - 深蹲 → primary: 股四 / 上臀部 / 下臀部；secondary: 膕繩 / 下背 / 核心 / 小腿
 
 ADR-0010 局部 reverse ADR-0002：**僅**反轉「背的 SG = 水平/垂直」這一條（改為 背部 / 下背 解剖切）；其他 ADR-0002 結論（11 MG 列表、腹歸核心、臀獨立、腿前/後切分精神）全部保留。
 
 **體圖 asset**：前後身兩張 SVG（CC0 / Wikimedia Commons 解剖圖作參考、自製）；19 muscle 各自獨立 path with unique id；統計頁 heatmap (by 11 MG aggregate) + Exercise 詳情頁 (by 19 muscle individual highlight) **共用同一個 SVG**，省一張資產。男女不分（v1.5+ 加切換）。
 
-**Equipment** (UI: 器材):
+**Equipment** (UI: 用具) (ADR-0017 Q6 — 升 schema 欄位):
 Exercise 使用的器械類型，第二層分類。共 8 類：
-槓鈴、啞鈴、史密斯機、滑輪、固定機械、徒手、壺鈴、其他。
-_Avoid_: Gear, 器械（口語可）
+槓鈴、啞鈴、史密斯機、滑輪、固定機械、自重、壺鈴、其他。
+Schema: `exercise.equipment TEXT NOT NULL DEFAULT '其他' CHECK(equipment IN (...))` 對齊既有 `load_type` enum-style；per-Exercise 單一 FK（per ADR-0001 器械變體即獨立 Exercise）。
+_Avoid_: Gear, 器械（口語可）；「徒手」（ADR-0017 改名「自重」，對齊 lifting 圈口語 + load_type bodyweight 直觀對應）
+
+**Exercise Library** (UI: 動作庫) (ADR-0017):
+所有可被紀錄 Exercise 的瀏覽 + 多選 + 創建 + 詳情頁的根 tab。**iOS 風格 layout**：
+- **左 vertical sidebar** = 11 MG + 「超級組」獨立 tab（per Q1）；點 MG 展開 muscle 縮排（hierarchical reveal）；選中 MG 後右上 (N) badge 顯示該 MG 已選數（picker mode）
+- **頂 horizontal Equipment sub-tab** = 8 類（per Q6）+「全部」first chip
+- **主區動作 grid** = 圓圖 + 動作名 + 「N 次」徽章（COUNT(DISTINCT session_id) FROM "set" WHERE exercise_id=? AND is_done=1，per Q7，0 次不顯示）
+
+**兩種進入模式**（per Q15）：
+- `/library?mode=browse`（tab bar 進）— tap 卡片進**動作詳情頁**
+- `/library?mode=picker&targetTemplateId=xxx`（Template editor「+ 動作」進）— tap 卡片 toggle 選取；底部 sticky「完成 (N)」回填到 Template；右上 ✕ 取消；多選順序 = user tap 序
+
+**動作卡媒體**（per Q8）：mp4 loop autoplay muted 模擬 GIF；grid 顯示第 1 frame poster（不 autoplay 省效能），點進詳情頁才 autoplay；fallback placeholder（首字 + hashColor，對齊 ADR-0015 12-color palette）；built-in 也可被 user 上傳影片覆蓋（local override，v1.5+ 美術 rollout 時若 user 有 override 則保留）。
+
+_Avoid_: 「動作庫」當「Exercise」同義詞（前者是 UI，後者是 entity）
+
+**Reusable Superset** (UI: 超級組) (ADR-0017 Q10):
+**固定 2 動作的命名組合 entity**，跟 in-session SetGroup superset 是**不同層級**的概念。
+
+| 維度 | Reusable Superset | SetGroup Superset (ADR-CONTEXT L157-159) |
+|---|---|---|
+| 性質 | reusable entity | execution pattern |
+| 存在 | 獨立表 (`superset`) | in-session set 連動配對 |
+| 動作數 | 固定 2 | 任意 ≥ 2 |
+| 編輯 | 動作組合鎖死、name + color 可改 | per-row-index pairing 可調 |
+| 重用 | 跨 Template / Session 重用 | 單 Session 內存在 |
+
+**Schema**：
+- `superset(id, name, color_hex, use_count, created_at, updated_at)`
+- `superset_exercise(superset_id, position, exercise_id)` — position 0/1 = parent/child
+- `use_count` cached column（每次 add 進 Template/Session +1）
+
+**創建 path**（per Q10 + B-2 截圖）：動作庫 sidebar「超級組」tab → 「+ 添加自定義動作」→ 多選 2 個動作 → 「組合」button → INSERT entity
+
+**加進 Template 行為 — Explode model**（per Q10）：clone 成 2 個 `template_exercise` rows + parent_id linkage（per ADR-0016），**不存** `template_exercise.reusable_superset_id` FK（單向、不雙向同步）；砍 reusable superset 不影響 Template 內已 explode rows。
+
+**詳情頁**（per Q17）：主頁（標題 + 2 動作縮圖 + 配色，無動圖、無訓練部位） + 歷史頁（2 動作 sets 上下疊放） + 圖表頁（3 張圖 × 2 條線，per Q16）；footer `[歷史][圖表][編輯][關閉]`，「編輯」改 name + color；「刪除」放編輯頁內。
+
+_Avoid_: 「超級組 entity」字眼跟 SetGroup superset 混淆；「臨時超級組」（A 圖紅 X，本 ADR 不做，要組只能先建 reusable）
+
+**動作詳情頁** (UI: 動作詳情) (ADR-0017 Q4/Q17):
+Per-Exercise 三層 view：
+
+**主頁**：
+- 標題 + 圖片 / 動圖（per Q8）
+- 訓練部位區（人體解剖圖 highlight primary/secondary）
+- 備註欄（`exercise.notes`，per Q5）
+- 底部 sticky 4-action: `[歷史] [圖表] [編輯動作] [關閉]`
+
+**歷史頁**（左上「< 返回」）：對齊既有「動作歷史頁」段 — header + rep bucket chip + 時間軸；ADR-0009 既有 spec。
+
+**圖表頁**（左上「< 返回」）：3 條折線（容量/最大重量/1RM 預測，per Q14）+ rep bucket chip filter（1RM 線不受 filter）+ 切年 button；無頂部 stats。
+
+**Reusable Superset 詳情頁同樣三層**（per Q17），但歷史 / 圖表頁的 metric 走疊圖（2 動作各 1 條線）。
 
 **Set** (UI: 組):
 紀錄的最小單位 — 一次完整的舉起/放下動作序列。必填：**weight + reps**。
@@ -161,12 +215,13 @@ _Avoid_: Rep（rep 是 set 內的次數，不是同義詞）；**weight ≠ body
 其他進階組型（rest-pause、AMRAP、cluster、giant set）v1 暫不建模，使用者用備註欄記。
 _Avoid_: Set Block, Cluster（cluster 是另一種特定組型）
 
-**Exercise 備註** (UI: per-Exercise 備註) (ADR-0013):
-Per-exercise notes 持久化採**雙欄 schema**：
-- `template_exercise.notes TEXT NULL`：**可編輯、主來源**，per-template entity 獨立（同 name 不同三元組各自一份）；in-session 編輯立即寫回 template（無 draft、無 commit dialog）
-- `session_exercise.notes_snapshot TEXT NULL`：**不可變、歷史保鮮**，template-based session 在 create 時冷凍、freestyle session 在 complete 時冷凍
-- Freestyle session 走 hidden template_exercise pattern：`template_exercise.hidden BOOLEAN NOT NULL DEFAULT 0`；存為 template 時 `hidden=0` 並綁新 template_id，否則保留為 orphan
+**Exercise 備註** (UI: 備註) (ADR-0013 + ADR-0017 Q5 amendment):
+Per-exercise notes 採**單欄 per-Exercise 全局 schema**：
+- `exercise.notes TEXT NULL`：**可編輯、主來源、per-Exercise 全局一份**。動作詳情主頁 / Template editor 內動作備註 / in-session 編輯三處 → 同一份 notes，任一處改 = 全局立刻反映
+- `session_exercise.notes_snapshot TEXT NULL`：**不可變、歷史保鮮**，session create / freestyle complete 時冷凍 exercise.notes 當下值
+- Freestyle session 走 hidden template_exercise pattern：`template_exercise.hidden BOOLEAN NOT NULL DEFAULT 0`（保留 ADR-0013 既有設計，不影響 notes 模型）
 獨立於 Set-level 備註（`set.notes` 由 ADR-0012 管）。例：「左肩有點緊」「下背貼椅、肘略前推、頂端不鎖死」。
+_Avoid_: 「per-template-exercise notes 雙欄」（ADR-0017 Q5 撤銷雙欄模型，改全局單欄）
 
 **容量** (UI: 容量):
 **容量 = weight × reps**（per-set 級單位）。per-Exercise 容量 = sum(每組 weight × reps for `is_done` sets)；Session 容量 = sum(該 Session 全部 Exercises 的容量)。
@@ -266,7 +321,7 @@ per-Exercise「動作歷史」按鈕開啟完整列表頁。
 理由：使用者點進這頁就是要做**跨 rep range 比對**以決定當前重量（例：「我這次 6-8RM 要設多重？看一下上週期 10-12RM 做到哪」）。inline 已負責「同 scope 的快速答案」，這頁負責「跨 scope 的深度查詢」。
 **結構**：
 - **頂部 header**（一行統計）：`動作名 · 共 N 次 Session` + **全時 PR：重量 X×Y** + **容量 X×Y** + 最近 7 天次數。用「PR」字眼明示這是 (Exercise, bucket) cross-Template scope 的概念，與 inline chip 的 slot-bound「容量峰 / 重量峰」區隔
-- **Filter chip 列**：`[全部] [10-12RM] [8-10RM] [6-8RM] ...`，預設全部開啟，可 toggle 收斂到單一副標籤
+- **Filter chip 列**：`[全部] [1-3] [4-6] [7-10] [11-15] [16+]`（**rep bucket**，per ADR-0009 PR identity 段；ADR-0017 Q14 amendment 修正既有寫錯的「副標籤」），預設全部開啟，可 toggle 收斂到單一 rep bucket（filter set by reps count 落點）
 - **時間軸**（日期倒序）：每筆 row = 日期 + rep range chip + top set (容量最大組) + 組數 + 總容量。tap 切換展開全 sets + 「目標 vs 實績」對照
 - **展開區塊底部**：`↩ 套用此次設定到當前 Session` 按鈕。啟用條件：有進行中 Session 且該 Session 含此 Exercise；否則灰掉
 **進入路徑**：(1) Session 內 per-Exercise「動作歷史」按鈕、(2) 歷史分頁某 Session 內 per-Exercise、(3) Exercise library / 動作管理頁（後者 v1 尚未 spec）。三入口共用同一頁

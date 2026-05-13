@@ -252,3 +252,39 @@ PRD 原本 8 個 pure domain logic modules → 升級為 **10 個**：
 - bucket 改名 = 1 天
 - `session.ended_at` schema 加欄位 = 0.5 天
 - 共增 ~5 週工作量；v1 26 週原預留 polish buffer 可吸收
+
+---
+
+## 2026-05-13 amendment（ADR-0017 觸發 — 動作歷史頁 / 圖表頁 filter chip 改 rep bucket）
+
+ADR-0017 Q14 grill 期間發現本 ADR 既訂「動作歷史頁 Filter chip 列 = Program 副標籤」是**寫錯**，應為 **rep bucket**（CONTEXT L269 同步寫錯）。
+
+### 翻盤的既有拍板
+
+- ❌ **動作歷史頁 Filter chip = Program 副標籤**（CONTEXT L269「toggle 收斂到單一副標籤」）— 撤銷
+- ✅ **動作歷史頁 Filter chip = rep bucket**（5 桶：1-3 / 4-6 / 7-10 / 11-15 / 16+，per 本 ADR PR identity 段）
+
+### 新規則
+
+**動作歷史頁** + **動作詳情頁的圖表頁**（ADR-0017 新增）兩處共用同一 chip 設計：
+
+- chip 列：`[全部] [1-3] [4-6] [7-10] [11-15] [16+]`（**或可顯示 bucket label 名「最大力量 / 力量 / 增肌 / 肌耐力 / 耐力」— UI label 待 spec**）
+- 預設「全部」on
+- toggle 後 filter set by reps count 落點
+
+**圖表頁特殊規則**（per ADR-0017 Q14）：
+- 容量線 / 最大重量線 → 受 chip filter
+- **1RM 預測線 → 不受 chip filter**（跨 rep range 比對才有意義）
+
+### 理由
+
+- rep bucket 是 PR identity 維度，跟「跨 rep range 比對」mental model 對齊
+- Program 副標籤是 user free-form text，作為 filter 維度 chip 列會動態變化（user 改副標籤名 → chip 名也變）— 不穩定
+- rep bucket 5 桶固定、來自 set reps 直接推算、跟 Program 副標籤命名解耦
+
+### 影響
+
+- CONTEXT.md L269「toggle 收斂到單一副標籤」改「toggle 收斂到單一 rep bucket」
+- 動作歷史頁實作（若已 ship）chip query 邏輯改 reps-based filter
+- ADR-0017 圖表頁 inherit 本規則
+

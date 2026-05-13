@@ -302,3 +302,59 @@ v1 ship 26 週時程不變（notes UI + freestyle hidden pattern 工作量小，
 - **PRD #31** (per-Exercise 自由文字備註 textarea) — 持久化機制由本 ADR 釘定（從原先模糊的「session-level textarea」演進為雙欄 schema）
 - **PRD #175** (per-exercise 備註欄 placeholder「點擊輸入備註」) — 本 ADR 改用 ⚙ menu「新增備註 / 編輯備註」entry + bottom sheet 編輯；空時不顯示 placeholder（動作卡乾淨）
 - **PRD #32** (per-Set 選填欄位折疊機制) — 本 ADR 不影響（per-set notes 由 ADR-0012 走右滑 [📝 備註] 入口；per-exercise 與 per-set 是兩個獨立 notes 層）
+
+---
+
+## 2026-05-13 amendment（ADR-0017 觸發 — per-exercise notes 升 per-Exercise 全局）
+
+ADR-0017 Q5 grill 結果，per-exercise notes 模型從**雙欄 per-template-exercise 獨立** revise 為**單欄 per-Exercise 全局**。
+
+### 翻盤的既有拍板
+
+- ❌ **`template_exercise.notes` per-template-exercise 獨立**（本 ADR 原核心決策）— 撤銷
+- ❌ **「同 name 不同三元組各自一份 notes」彈性**（CONTEXT 原例「胸日 (10-12RM)」vs「胸日 (6-8RM)」蝴蝶機可有不同 cue）— 撤銷
+- ✅ **`session_exercise.notes_snapshot` 不可變歷史保鮮**（保留，本 ADR 哲學不動）
+
+### 新模型
+
+| 表 | 既有 | 新 |
+|---|---|---|
+| `exercise.notes TEXT NULL` | 無 | **新增，per-Exercise 全局一份** |
+| `template_exercise.notes` | 存在、per-template-exercise 獨立 | **DROP COLUMN** |
+| `session_exercise.notes_snapshot` | 不可變歷史保鮮 | **不動** |
+
+**編輯 UX**：
+- 動作詳情主頁「備註」欄、Template editor 內動作備註、in-session 編輯三處 → **同一份全局 notes**
+- 任一處改 = 全局立刻反映（無 propagation 邏輯，因為只有一份）
+- session_exercise.notes_snapshot 在 session create / freestyle complete 時冷凍 exercise.notes 當下值
+
+### Migration v013（best-effort merge）
+
+```sql
+ALTER TABLE exercise ADD COLUMN notes TEXT NULL;
+
+-- 對每 exercise 取最近 updated_at 的 template_exercise.notes 寫進
+UPDATE exercise SET notes = (
+  SELECT te.notes
+  FROM template_exercise te
+  WHERE te.exercise_id = exercise.id
+    AND te.notes IS NOT NULL
+  ORDER BY te.updated_at DESC
+  LIMIT 1
+);
+
+ALTER TABLE template_exercise DROP COLUMN notes;
+```
+
+### 理由
+
+- 個人 user 使用 pattern：「動作有一份 cue 就好」（cross-Template 個性化 cue 對個人是 overkill）
+- 雙層 UX（per-template override + 全局）對個人是 over-engineering
+- 簡化模型、消除 propagation 邏輯
+- 動作詳情主頁的「備註」欄是 natural single-source-of-truth
+
+### 不動
+
+- session_exercise.notes_snapshot 不可變歷史 — 保留 ADR 既有「歷史保鮮」哲學
+- Freestyle hidden template_exercise pattern — 不影響（只 notes 欄位改動）
+
