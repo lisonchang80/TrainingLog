@@ -1354,9 +1354,19 @@ export default function TemplateEditorView() {
                   <Text style={styles.restStepBtnText}>−15s</Text>
                 </Pressable>
                 <View style={styles.restValueWrap}>
-                  <Text style={styles.restValue}>
-                    {restEditing?.draft ?? 0}
-                  </Text>
+                  <TextInput
+                    value={String(restEditing?.draft ?? 0)}
+                    onChangeText={(t) => {
+                      const cleaned = t.replace(/[^0-9]/g, '');
+                      const parsed = cleaned === '' ? 0 : Number(cleaned);
+                      setRestEditing(
+                        restEditing ? { ...restEditing, draft: parsed } : null,
+                      );
+                    }}
+                    keyboardType="number-pad"
+                    selectTextOnFocus
+                    style={styles.restValueInput}
+                  />
                   <Text style={styles.restValueUnit}>秒</Text>
                 </View>
                 <Pressable
@@ -2191,6 +2201,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   restValue: { fontSize: 40, fontWeight: '700', color: '#111827' },
+  restValueInput: {
+    fontSize: 40,
+    fontWeight: '700',
+    color: '#111827',
+    minWidth: 80,
+    textAlign: 'center',
+    paddingVertical: 0,
+  },
   restValueUnit: { fontSize: 16, color: '#6B7280' },
   paletteGrid: {
     flexDirection: 'row',
