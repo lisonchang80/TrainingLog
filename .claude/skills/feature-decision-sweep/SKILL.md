@@ -60,6 +60,16 @@ This variant tends to **batch multiple small amendments into one ADR section** (
 
 **Multiple amendment blocks on the same ADR are fine.** When a *second* prototype iteration (different day, different session) surfaces more refinements on the same ADR, append a **second** `## YYYY-MM-DD Amendment — <reason>` block — do NOT edit the first block. Each block is a frozen snapshot of one iteration's outcome; readers should be able to scan the ADR top-to-bottom and follow the timeline. TrainingLog ADR-0016 example: `2026-05-12 Amendment — Prototype-driven UX 收口` (10 sub-sections from initial prototype build) + `2026-05-13 Amendment — Gesture 行為層落地 + 視覺收口` (10 sub-sections from second iteration adding gesture wiring + visual polish, including spec reversals like label cycle order). The second block explicitly notes which earlier amendment items it overrides.
 
+### Downstream ADR-triggered amendment variant
+
+A second case for amendment blocks: **when a downstream ADR explicitly amends the current ADR's decisions**. Use header format `## YYYY-MM-DD amendment（ADR-XXXX 觸發 — <reason>）` to distinguish from prototype-driven amendments. The amendment block should:
+- State which downstream ADR triggered it (e.g., "ADR-0017 Q5 grill 結果")
+- List **翻盤的既有拍板 / Reversed decisions** section with `❌` markers pointing at specific bullets in the current ADR being overturned (per ADR-FORMAT.md「Mark revisions explicitly」rule)
+- List the new model / decision replacing it
+- Cross-reference to the triggering ADR's section number (e.g., "見 ADR-0017 § Schema migration plan v013")
+
+Example (TrainingLog ADR-0010 / 0013 / 0009 / 0016 all got `2026-05-13 amendment（ADR-0017 觸發 — ...）` blocks in one sweep): 4 ADRs each got a single dated block referencing ADR-0017 Q9 / Q5 / Q14 / Q15 respectively. Each block self-contained + auditable + traceable to the trigger.
+
 ## The 4 locations (do in this order)
 
 ### 1. Write or update ADR — `docs/adr/000X-<kebab-name>.md`
@@ -127,6 +137,8 @@ Then surface "下一步" candidates (typically `/cp`, `/to-issues`, or continue 
 - **ADR numbering**: always `ls docs/adr/` first to confirm next number; collisions are nasty.
 - **Rebumping module numbers** when adding pure logic modules: PRD has Pure Domain Logic (#1-#N) then Platform Adapters (starting from #N+1). Adding a new pure logic module shifts the adapter numbering. Update both sections + the Cross-cutting / Schema 影響 references.
 - **Verify story numbering integrity BEFORE appending new stories**: run `grep -c "^[0-9]\+\. As a 使用者" /tmp/prd_body.md` and compare with the highest existing number. If they don't match, the PRD has duplicate-numbered sections (例：TrainingLog issue #1 的 Body data section 用 #66-72 跟 Exercise / 詳情頁 #66-72 重複 — 152 nominal stories 對應 159 actual rows). **Don't try to fix the duplicate inside a sweep** — renumbering ripples through every cross-reference in 核心 ADR 對照 + may affect already-published implementation issues that cite story numbers. Instead: continue numbering from the nominal max（本次 sweep 補入時用 nominal max + 1），flag the bug explicitly in the memory update entry, leave the fix as a separate task.
+- **Edit 既有 ADR 必須先 Read**: Claude Code's Edit tool refuses to edit a file that hasn't been Read in the current session — even if the file was implicitly inspected via Bash `tail`/`grep`. When batch-amending multiple ADRs (e.g., 4 downstream amendments triggered by a new ADR), the first parallel Edit attempts will ALL fail with `tool_use_error: File has not been read yet`. **Workaround**: send a parallel batch of `Read` calls (offset=1, limit=10 is enough to register) for each ADR file first, then send the parallel batch of `Edit` calls. Don't try `tail -1 | unique-anchor` heuristics as substitute — Read tool tracking is what Edit checks, not whether *you* know the file content.
+- **PRD body too large to rewrite (114 KB) → use issue comment instead**: When PRD body exceeds reasonable in-place edit size, post an ADR-NNNN supplement as a `gh issue comment 1 --body-file /tmp/prd_addendum.md` instead of editing body. The supplement should include full 17-question rundown table + schema migration plan + 4 amendment summary + Out of Scope + slice estimate. **Trade-off**: harder to find in issue history (vs. body Update log), but avoids re-fetching + rewriting 114 KB. Verify integrity with `gh issue view 1 --json body --jq '.body' | wc -l` first — if line count > ~600 or KB > ~50, prefer comment approach. TrainingLog ADR-0017 sweep used this (comment 4442616662).
 
 ## Why this skill exists
 
