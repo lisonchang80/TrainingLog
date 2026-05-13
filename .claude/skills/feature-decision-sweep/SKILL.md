@@ -58,6 +58,8 @@ Workflow:
 
 This variant tends to **batch multiple small amendments into one ADR section** (e.g., a single「2026-05-12 Amendment」block covering 5-10 visual refinements from one prototype review session), rather than scattering them across the ADR body. Cleaner diff history + easier to read.
 
+**Multiple amendment blocks on the same ADR are fine.** When a *second* prototype iteration (different day, different session) surfaces more refinements on the same ADR, append a **second** `## YYYY-MM-DD Amendment — <reason>` block — do NOT edit the first block. Each block is a frozen snapshot of one iteration's outcome; readers should be able to scan the ADR top-to-bottom and follow the timeline. TrainingLog ADR-0016 example: `2026-05-12 Amendment — Prototype-driven UX 收口` (10 sub-sections from initial prototype build) + `2026-05-13 Amendment — Gesture 行為層落地 + 視覺收口` (10 sub-sections from second iteration adding gesture wiring + visual polish, including spec reversals like label cycle order). The second block explicitly notes which earlier amendment items it overrides.
+
 ## The 4 locations (do in this order)
 
 ### 1. Write or update ADR — `docs/adr/000X-<kebab-name>.md`
