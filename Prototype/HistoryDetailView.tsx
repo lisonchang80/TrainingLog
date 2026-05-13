@@ -412,7 +412,9 @@ function StatTile({ big, small }: { big: string; small: string }) {
 }
 
 const HR_ZONE_THRESHOLDS = [140, 152, 162, 173];
-const HR_ZONE_COLORS = ['#A7F0BA', '#34C759', '#FFCC00', '#FF9500', '#FF3B30'];
+// Apple Watch 官方 5 區段心率區間配色 (Z1-Z5 對應 <60% / 70% / 80% / 90% / 100% 最大心率)。
+// 後續 Watch slice 共用同一 palette 維持 cross-device 視覺一致。
+const HR_ZONE_COLORS = ['#1AA3FF', '#1ED6C5', '#A1EE00', '#FF8A1A', '#FF2D8F'];
 const HR_ZONE_LABELS = ['<140', '141–151', '152–161', '162–172', '173+'];
 
 function zoneColor(bpm: number): string {
