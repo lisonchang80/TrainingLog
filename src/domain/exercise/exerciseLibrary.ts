@@ -10,6 +10,7 @@
  */
 
 import type {
+  Equipment,
   Exercise,
   ExerciseMuscleLink,
   LoadType,
@@ -24,6 +25,8 @@ export interface ExerciseFilter {
   muscleId?: string | null;
   /** Filter by load_type; null/undefined = no load_type filter. */
   loadType?: LoadType | null;
+  /** Filter by equipment (ADR-0017 Q6); null/undefined = no equipment filter. */
+  equipment?: Equipment | null;
   /** Free-text name match (case-insensitive substring). Empty/undefined = no search. */
   search?: string | null;
   /** When true, hide rows whose `is_archived = 1`. Defaults to true. */
@@ -62,6 +65,7 @@ export function filterExercises(
       return false;
     }
     if (filter.loadType && ex.load_type !== filter.loadType) return false;
+    if (filter.equipment && ex.equipment !== filter.equipment) return false;
     if (muscleHits && !muscleHits.has(ex.id)) return false;
     if (search && !ex.name.toLowerCase().includes(search)) return false;
     return true;

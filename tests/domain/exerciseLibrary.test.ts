@@ -79,6 +79,16 @@ describe('exerciseLibrary — filterExercises', () => {
     expect(got.map((e) => e.id)).toEqual(['e6']);
   });
 
+  it('filters by equipment (ADR-0017 Q6)', () => {
+    const withEquipment: Exercise[] = [
+      buildExercise({ id: 'e10', name: 'Barbell Row', equipment: '槓鈴' }),
+      buildExercise({ id: 'e11', name: 'Dumbbell Row', equipment: '啞鈴' }),
+      buildExercise({ id: 'e12', name: 'Cable Row', equipment: '滑輪' }),
+    ];
+    const got = filterExercises(withEquipment, [], { equipment: '槓鈴' });
+    expect(got.map((e) => e.id)).toEqual(['e10']);
+  });
+
   it('filters by muscle (any role)', () => {
     const got = filterExercises(exercises, links, { muscleId: M_BACK });
     expect(got.map((e) => e.id).sort()).toEqual(['e3', 'e6']);
