@@ -1423,6 +1423,54 @@ function SetRowContent({
 }: SetRowContentProps) {
   const hasNote =
     !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
+
+  // Local string buffers so the user can type partial values like "12."
+  // without the controlled <TextInput> immediately re-rendering the
+  // numeric round-trip (`Number("12.") === 12 → "12"` would eat the dot).
+  // Sync from prop when the *parsed* local value diverges from set.* — so
+  // external changes (cycleSetKind, cluster clone) refresh the field but a
+  // mid-typed "12." (which parses to set.weight = 12) is left alone.
+  const [repsText, setRepsText] = useState(() => String(set.reps));
+  const [weightText, setWeightText] = useState(() => String(set.weight));
+  useEffect(() => {
+    const local = Number(repsText);
+    if (Number.isFinite(local) && local === set.reps) return;
+    setRepsText(String(set.reps));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set.reps]);
+  useEffect(() => {
+    const local = Number(weightText);
+    if (Number.isFinite(local) && local === set.weight) return;
+    setWeightText(String(set.weight));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set.weight]);
+
+  const handleRepsChange = (t: string) => {
+    const cleaned = t.replace(/[^0-9]/g, '');
+    setRepsText(cleaned);
+    onUpdateSet(set.id, { reps: cleaned === '' ? 0 : Number(cleaned) });
+  };
+
+  const handleWeightChange = (t: string) => {
+    // Allow digits + at most one decimal point; strip everything else.
+    let cleaned = t.replace(/[^0-9.]/g, '');
+    const firstDot = cleaned.indexOf('.');
+    if (firstDot !== -1) {
+      cleaned =
+        cleaned.slice(0, firstDot + 1) +
+        cleaned.slice(firstDot + 1).replace(/\./g, '');
+    }
+    setWeightText(cleaned);
+    if (cleaned === '' || cleaned === '.') {
+      onUpdateSet(set.id, { weight: 0 });
+      return;
+    }
+    const parsed = Number(cleaned);
+    if (Number.isFinite(parsed)) {
+      onUpdateSet(set.id, { weight: parsed });
+    }
+  };
+
   return (
     <View style={styles.setRow}>
       <Pressable
@@ -1447,24 +1495,16 @@ function SetRowContent({
       </Pressable>
       <TextInput
         style={[styles.setInput, compact && styles.setInputCompact]}
-        value={String(set.reps)}
-        onChangeText={(t) =>
-          onUpdateSet(set.id, {
-            reps: Number(t.replace(/[^0-9]/g, '')) || 0,
-          })
-        }
-        keyboardType="numeric"
+        value={repsText}
+        onChangeText={handleRepsChange}
+        keyboardType="number-pad"
       />
       <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
       <TextInput
         style={[styles.setInput, compact && styles.setInputCompact]}
-        value={String(set.weight)}
-        onChangeText={(t) =>
-          onUpdateSet(set.id, {
-            weight: Number(t.replace(/[^0-9.]/g, '')) || 0,
-          })
-        }
-        keyboardType="numeric"
+        value={weightText}
+        onChangeText={handleWeightChange}
+        keyboardType="decimal-pad"
       />
       <Text style={styles.setUnit}>kg</Text>
       {hasNote ? (
