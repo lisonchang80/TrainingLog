@@ -921,14 +921,28 @@ export default function TemplateEditorView() {
     [id, db, exerciseLibrary],
   );
 
+  // Two-stage drain: useFocusEffect captures the picker payload as soon as
+  // the editor re-focuses, but hydration is deferred until the exercise
+  // library has finished loading. Without the stage gap, a cold remount
+  // (e.g. user navigates back through Today instead of the back stack) sees
+  // empty exerciseLibrary and silently drops every picked id.
+  const [pendingPick, setPendingPick] = useState<readonly string[] | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       const payload = consumePick();
       if (payload && payload.exerciseIds.length > 0) {
-        void hydrateExercisesByIds(payload.exerciseIds);
+        setPendingPick(payload.exerciseIds);
       }
-    }, [hydrateExercisesByIds]),
+    }, []),
   );
+
+  useEffect(() => {
+    if (!pendingPick || pendingPick.length === 0) return;
+    if (exerciseLibrary.length === 0 || !draft || !id) return;
+    void hydrateExercisesByIds(pendingPick);
+    setPendingPick(null);
+  }, [pendingPick, exerciseLibrary, draft, id, hydrateExercisesByIds]);
 
   // -----------------------------------------------------------------------
   // Render
@@ -1243,7 +1257,7 @@ export default function TemplateEditorView() {
         <View style={styles.actionBar}>
           <Pressable
             style={styles.actionBtn}
-            onPress={() => router.push('/library?mode=picker')}>
+            onPress={() => router.push('/exercise-picker?mode=picker')}>
             <Text style={styles.actionBtnText}>+ 動作</Text>
           </Pressable>
           <Pressable

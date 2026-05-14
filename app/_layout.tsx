@@ -38,6 +38,10 @@ export default function RootLayout() {
             name="exercise-history/[id]"
             options={{ presentation: 'modal', title: '動作歷史' }}
           />
+          <Stack.Screen
+            name="exercise-picker"
+            options={{ headerShown: false }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
