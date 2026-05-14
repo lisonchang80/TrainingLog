@@ -134,6 +134,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#374151',
     fontWeight: '500',
+    textAlign: 'center',
+    width: '100%',
   },
   cellTextActive: {
     color: '#fff',
