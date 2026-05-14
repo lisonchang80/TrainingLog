@@ -8,7 +8,13 @@
  * `router.back()` follows tab history — it would land on Today, not the
  * editor.)
  *
- * Renders the same component as `(tabs)/library.tsx`; the screen reads
- * `mode=picker` from URL params and branches its UI accordingly.
+ * Wraps the LibraryScreen component so expo-router sees a distinct screen
+ * identity from `(tabs)/library` (re-exporting the default conflated them
+ * and `router.back()` still followed tab history). The wrapped LibraryScreen
+ * reads `mode=picker` from URL params the same way.
  */
-export { default } from './(tabs)/library';
+import LibraryScreen from './(tabs)/library';
+
+export default function ExercisePickerScreen() {
+  return <LibraryScreen />;
+}
