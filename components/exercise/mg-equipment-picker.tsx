@@ -132,10 +132,13 @@ const styles = StyleSheet.create({
   },
   cellText: {
     fontSize: 14,
+    lineHeight: 18,
     color: '#374151',
     fontWeight: '500',
     textAlign: 'center',
+    textAlignVertical: 'center',
     width: '100%',
+    includeFontPadding: false,
   },
   cellTextActive: {
     color: '#fff',
