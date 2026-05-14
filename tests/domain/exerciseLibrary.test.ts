@@ -178,6 +178,64 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
       expect(validateCustomExerciseDraft({ ...baseDraft, equipment: eq })).toEqual([]);
     }
   });
+
+  describe('existingNames option (no-dup rule)', () => {
+    it('rejects exact-match name', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'Bench Press' },
+        { existingNames: ['Bench Press', 'Pull-up'] }
+      );
+      expect(errs.some((e) => e.field === 'name' && e.message.includes('同名'))).toBe(true);
+    });
+
+    it('rejects case-insensitive match', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'BENCH PRESS' },
+        { existingNames: ['bench press'] }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('rejects after trim — leading/trailing space ignored on both sides', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: '  Squat  ' },
+        { existingNames: ['Squat'] }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('accepts a unique name', () => {
+      expect(
+        validateCustomExerciseDraft(
+          { ...baseDraft, name: '我的新動作' },
+          { existingNames: ['Bench Press', 'Pull-up'] }
+        )
+      ).toEqual([]);
+    });
+
+    it('accepts Set as existingNames', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'Bench Press' },
+        { existingNames: new Set(['Bench Press']) }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('does nothing when existingNames not provided (backwards-compat)', () => {
+      expect(validateCustomExerciseDraft({ ...baseDraft, name: 'Anything' })).toEqual([]);
+    });
+
+    it('does not report dup error when name is already empty (avoid noise)', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: '   ' },
+        { existingNames: ['something'] }
+      );
+      // Empty-name error fires; duplicate check is skipped (else-if chain)
+      const nameErrs = errs.filter((e) => e.field === 'name');
+      expect(nameErrs).toHaveLength(1);
+      expect(nameErrs[0].message).toBe('請輸入動作名稱');
+    });
+  });
 });
 
 describe('exerciseLibrary — partitionMuscleLinksByRole', () => {

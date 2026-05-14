@@ -92,9 +92,22 @@ export interface ValidationError {
   message: string;
 }
 
+export interface ValidateOptions {
+  /**
+   * Names of non-archived exercises that already exist. Names compared
+   * case-insensitively after trim — "Bench Press" collides with "bench press".
+   * Caller passes Set or array; we treat them the same.
+   *
+   * Note: pass the FULL list (both built-in + custom). Pure validator stays
+   * DB-agnostic; the form loads the list once on mount.
+   */
+  existingNames?: readonly string[] | Set<string>;
+}
+
 /**
  * Validate a Custom Exercise draft per ADR-0010 acceptance:
- *   - name required, ≤ 60 chars after trim
+ *   - name required, ≤ 60 chars after trim, AND case-insensitively unique
+ *     against `options.existingNames` (when provided)
  *   - load_type ∈ {loaded, bodyweight, assisted}
  *   - muscle_group_id may be null (Custom Exercise allowed without MG per
  *     ADR-0010 #9), but if provided must be a non-empty string
@@ -104,7 +117,8 @@ export interface ValidationError {
  *     dedupe before calling, but we don't reject on duplicates)
  */
 export function validateCustomExerciseDraft(
-  draft: CustomExerciseDraft
+  draft: CustomExerciseDraft,
+  options: ValidateOptions = {}
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
@@ -113,6 +127,19 @@ export function validateCustomExerciseDraft(
     errors.push({ field: 'name', message: '請輸入動作名稱' });
   } else if (name.length > 60) {
     errors.push({ field: 'name', message: '動作名稱請少於 60 字元' });
+  } else if (options.existingNames) {
+    const needle = name.toLowerCase();
+    const set =
+      options.existingNames instanceof Set
+        ? options.existingNames
+        : new Set(options.existingNames);
+    // Normalise comparison: trimmed + lowercased on both sides
+    for (const n of set) {
+      if (n.trim().toLowerCase() === needle) {
+        errors.push({ field: 'name', message: '已有同名動作，請改個名字' });
+        break;
+      }
+    }
   }
 
   const validLoad: LoadType[] = ['loaded', 'bodyweight', 'assisted'];

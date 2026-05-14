@@ -33,6 +33,7 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 
 const LOAD_TYPES: LoadType[] = ['loaded', 'bodyweight', 'assisted'];
 const LOAD_TYPE_LABEL: Record<LoadType, string> = {
@@ -63,13 +64,17 @@ export default function NewExerciseScreen() {
   const [secondary, setSecondary] = useState<Set<string>>(new Set());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
   const [muscles, setMuscles] = useState<Muscle[]>([]);
+  const [existingNames, setExistingNames] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    Promise.all([listMuscleGroups(db), listMuscles(db)]).then(([mgs, ms]) => {
-      setMuscleGroups(mgs);
-      setMuscles(ms);
-    });
+    Promise.all([listMuscleGroups(db), listMuscles(db), listExercises(db)]).then(
+      ([mgs, ms, exs]) => {
+        setMuscleGroups(mgs);
+        setMuscles(ms);
+        setExistingNames(exs.filter((e) => e.is_archived !== 1).map((e) => e.name));
+      }
+    );
   }, [db]);
 
   const draft: CustomExerciseDraft = useMemo(
@@ -84,7 +89,10 @@ export default function NewExerciseScreen() {
     [name, loadType, mgId, equipment, primary, secondary]
   );
 
-  const errors = useMemo(() => validateCustomExerciseDraft(draft), [draft]);
+  const errors = useMemo(
+    () => validateCustomExerciseDraft(draft, { existingNames }),
+    [draft, existingNames]
+  );
   const canSubmit = errors.length === 0;
 
   // Cycle a muscle through unselected → primary → secondary → unselected.
