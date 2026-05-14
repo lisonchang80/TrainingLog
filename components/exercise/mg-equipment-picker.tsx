@@ -111,10 +111,11 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: 12,
   },
   cell: {
-    width: '23%',
+    width: '22%',
     aspectRatio: 1.5,
     borderRadius: 12,
     backgroundColor: 'rgba(127,127,127,0.15)',
