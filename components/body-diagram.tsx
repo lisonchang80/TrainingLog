@@ -85,10 +85,10 @@ function FrontBody({ highlight, onMusclePress }: BodyDiagramProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
-      {/* Mid delt L/R (outer cap) */}
+      {/* Mid delt L/R (outer cap — lateral to front-delt, at shoulder top) */}
       <Path
         id="m-mid-delt"
-        d="M48 118 C44 130 46 142 56 144 L62 130 L52 120 Z M152 118 C156 130 154 142 144 144 L138 130 L148 120 Z"
+        d="M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
         fill={f('m-mid-delt')}
         onPress={mp('m-mid-delt')}
         stroke={COLOR_OUTLINE}
@@ -240,6 +240,15 @@ function BackBody({ highlight, onMusclePress }: BodyDiagramProps) {
         d="M58 90 C50 92 46 105 50 118 L72 108 L74 92 Z M142 90 C150 92 154 105 150 118 L128 108 L126 92 Z"
         fill={f('m-rear-delt')}
         onPress={mp('m-rear-delt')}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+      {/* Mid delt L/R (back view — outer cap, lateral to rear-delt) */}
+      <Path
+        id="m-mid-delt"
+        d="M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
+        fill={f('m-mid-delt')}
+        onPress={mp('m-mid-delt')}
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
