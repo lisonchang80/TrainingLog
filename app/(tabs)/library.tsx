@@ -32,9 +32,14 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
-import { clearPick, submitPick } from '@/src/domain/exercise/pickerBridge';
+import {
+  clearPick,
+  consumeNewlyCreated,
+  submitPick,
+} from '@/src/domain/exercise/pickerBridge';
 import {
   EMPTY_SELECTION,
+  addSelection,
   isSelected,
   selectionRank,
   toggleSelection,
@@ -107,7 +112,14 @@ export default function LibraryScreen() {
   useFocusEffect(
     useCallback(() => {
       refresh();
-    }, [refresh])
+      // Drain the newly-created mailbox on every focus. In picker mode we
+      // auto-select the new exercise; in browse mode we just clear it so a
+      // stale id never leaks into a later picker session.
+      const newId = consumeNewlyCreated();
+      if (newId && isPickerMode) {
+        setSelection((prev) => addSelection(prev, newId));
+      }
+    }, [refresh, isPickerMode])
   );
 
   const subMuscles = useMemo(() => {
@@ -221,6 +233,11 @@ export default function LibraryScreen() {
                 cardHeight={cardHeight}
                 onTap={onCardTap}
                 selection={isPickerMode ? selection : null}
+                onInfoPress={
+                  isPickerMode
+                    ? (ex) => router.push(`/exercise/${ex.id}`)
+                    : null
+                }
               />
             </>
           )}
@@ -401,6 +418,7 @@ function ExerciseGrid({
   cardHeight,
   onTap,
   selection,
+  onInfoPress,
 }: {
   exercises: Exercise[];
   sessionCounts: Map<string, number>;
@@ -408,6 +426,9 @@ function ExerciseGrid({
   cardHeight: number;
   onTap: (ex: Exercise) => void;
   selection: readonly string[] | null;
+  /** When set, each card renders a small ⓘ button (bottom-right) that
+   *  navigates to the exercise's detail page without affecting selection. */
+  onInfoPress: ((ex: Exercise) => void) | null;
 }) {
   if (exercises.length === 0) {
     return (
@@ -438,6 +459,7 @@ function ExerciseGrid({
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].id) : false}
             rank={selection ? selectionRank(selection, pair[0].id) : -1}
+            onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
             <ExerciseCard
@@ -448,6 +470,7 @@ function ExerciseGrid({
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].id) : false}
               rank={selection ? selectionRank(selection, pair[1].id) : -1}
+              onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
             <View style={{ width: cardWidth, height: cardHeight }} />
@@ -466,6 +489,7 @@ function ExerciseCard({
   onPress,
   selected,
   rank,
+  onInfoPress,
 }: {
   exercise: Exercise;
   sessionCount: number;
@@ -474,6 +498,7 @@ function ExerciseCard({
   onPress: () => void;
   selected: boolean;
   rank: number;
+  onInfoPress: (() => void) | null;
 }) {
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
   const thumbnail = exercise.media_path;
@@ -511,6 +536,19 @@ function ExerciseCard({
         {exercise.name}
       </Text>
       {hasCues && <Text style={styles.cardCueLink}>查看動作要點</Text>}
+      {onInfoPress && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="查看動作詳情"
+          onPress={onInfoPress}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.infoBtn,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.infoBtnText}>ⓘ</Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 }
@@ -676,6 +714,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  infoBtn: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  infoBtnText: { color: '#fff', fontSize: 18, lineHeight: 20 },
   cuesPill: {
     position: 'absolute',
     top: 8,
