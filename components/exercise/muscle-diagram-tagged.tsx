@@ -44,11 +44,16 @@ const BTN = {
   secondary: { fill: '#BFDBFE', stroke: '#7CB6E0', text: '#1E40AF' },
 };
 
-const BUTTON_WIDTH = 95;
+const BUTTON_WIDTH = 115; // wider to fit 4-char labels (外側二頭/內側二頭/斜方肌)
 const BUTTON_HEIGHT = 40;
 const FONT_SIZE = 28;
-const SVG_HEIGHT = 290; // viewBox y=500 / aspect ratio matched
-const VIEWBOX_HEIGHT = 500;
+const SHADOW_DX = 2;
+const SHADOW_DY = 2.5;
+const SHADOW_FILL = 'rgba(0,0,0,0.18)';
+const SVG_WIDTH = 174;
+const VIEWBOX_WIDTH = 325; // extended to fit BUTTON_WIDTH 115 + 5pt padding
+const VIEWBOX_HEIGHT = 540;
+const SVG_HEIGHT = Math.round((SVG_WIDTH * VIEWBOX_HEIGHT) / VIEWBOX_WIDTH); // 289
 
 interface MuscleAnchor {
   muscle_id: string;
@@ -85,9 +90,9 @@ const BACK_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 472 },
 ];
 
-const FRONT_LABEL_X = -95;
+const FRONT_LABEL_X = -118; // button right edge at -3 (rail at x=5)
 const FRONT_RAIL_X = 5;
-const BACK_LABEL_X = 213;
+const BACK_LABEL_X = 205; // button right edge at 320 (viewBox ends at 325)
 const BACK_RAIL_X = 195;
 
 const fillFor = (highlight: Map<string, MuscleRole>, muscleId: string): string => {
@@ -149,7 +154,7 @@ interface ViewSubProps {
 
 function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox={`-100 0 300 ${VIEWBOX_HEIGHT}`} width={174} height={SVG_HEIGHT}>
+    <Svg viewBox={`-120 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} width={SVG_WIDTH} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -171,6 +176,7 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
         const role = highlight.get(m.muscle_id);
         const btn = btnStyleFor(role);
         const buttonRightEdge = FRONT_LABEL_X + BUTTON_WIDTH;
+        const buttonTop = m.labelY - BUTTON_HEIGHT / 2;
         return (
           <React.Fragment key={m.muscle_id}>
             <Polyline
@@ -179,9 +185,19 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
               strokeWidth={0.7}
               fill="none"
             />
+            {/* drop shadow (offset darker rect behind the button) */}
+            <Rect
+              x={FRONT_LABEL_X + SHADOW_DX}
+              y={buttonTop + SHADOW_DY}
+              width={BUTTON_WIDTH}
+              height={BUTTON_HEIGHT}
+              rx={6}
+              ry={6}
+              fill={SHADOW_FILL}
+            />
             <Rect
               x={FRONT_LABEL_X}
-              y={m.labelY - BUTTON_HEIGHT / 2}
+              y={buttonTop}
               width={BUTTON_WIDTH}
               height={BUTTON_HEIGHT}
               rx={6}
@@ -210,7 +226,7 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
 
 function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox={`0 0 305 ${VIEWBOX_HEIGHT}`} width={174} height={SVG_HEIGHT}>
+    <Svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} width={SVG_WIDTH} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -232,6 +248,7 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
         const role = highlight.get(m.muscle_id);
         const btn = btnStyleFor(role);
         const buttonLeftEdge = BACK_LABEL_X;
+        const buttonTop = m.labelY - BUTTON_HEIGHT / 2;
         return (
           <React.Fragment key={m.muscle_id}>
             <Polyline
@@ -240,9 +257,19 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
               strokeWidth={0.7}
               fill="none"
             />
+            {/* drop shadow */}
+            <Rect
+              x={BACK_LABEL_X + SHADOW_DX}
+              y={buttonTop + SHADOW_DY}
+              width={BUTTON_WIDTH}
+              height={BUTTON_HEIGHT}
+              rx={6}
+              ry={6}
+              fill={SHADOW_FILL}
+            />
             <Rect
               x={BACK_LABEL_X}
-              y={m.labelY - BUTTON_HEIGHT / 2}
+              y={buttonTop}
               width={BUTTON_WIDTH}
               height={BUTTON_HEIGHT}
               rx={6}
