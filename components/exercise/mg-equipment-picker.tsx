@@ -121,18 +121,19 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: '22%',
-    aspectRatio: 1.5,
+    height: 56,
     borderRadius: 12,
     backgroundColor: 'rgba(127,127,127,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 0,
   },
   cellActive: {
     backgroundColor: '#34C759',
   },
   cellText: {
     fontSize: 14,
-    lineHeight: 18,
+    lineHeight: 16,
     color: '#374151',
     fontWeight: '500',
     textAlign: 'center',
