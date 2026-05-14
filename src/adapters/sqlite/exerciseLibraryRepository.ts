@@ -6,6 +6,7 @@ import type {
   Muscle,
   MuscleGroup,
 } from '../../domain/exercise/types';
+import { inferLoadType } from '../../domain/exercise/exerciseLibrary';
 import type { CustomExerciseDraft } from '../../domain/exercise/exerciseLibrary';
 
 /**
@@ -165,6 +166,7 @@ export async function createCustomExercise(
   uuid: () => string
 ): Promise<string> {
   const id = uuid();
+  const loadType = inferLoadType(draft.equipment);
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
@@ -173,7 +175,7 @@ export async function createCustomExercise(
        VALUES (?, ?, ?, 0, 0, ?, 1, ?)`,
       id,
       draft.name.trim(),
-      draft.load_type,
+      loadType,
       draft.muscle_group_id,
       draft.equipment
     );
@@ -215,13 +217,15 @@ export async function updateCustomExercise(
   id: string,
   draft: CustomExerciseDraft
 ): Promise<void> {
+  const loadType = inferLoadType(draft.equipment);
+
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `UPDATE exercise
        SET name = ?, load_type = ?, muscle_group_id = ?, equipment = ?
        WHERE id = ? AND is_custom = 1`,
       draft.name.trim(),
-      draft.load_type,
+      loadType,
       draft.muscle_group_id,
       draft.equipment,
       id

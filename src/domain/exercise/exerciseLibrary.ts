@@ -77,14 +77,30 @@ export function filterExercises(
 
 export interface CustomExerciseDraft {
   name: string;
-  load_type: LoadType;
-  muscle_group_id: string | null;
+  /**
+   * Required since Slice 9.7 (ADR-0017 Q11 amendment). The form picker
+   * forbids "未指定". `load_type` is no longer in the draft — adapters derive
+   * it from `equipment` via {@link inferLoadType}.
+   */
+  muscle_group_id: string;
   /** ADR-0017 Q6 — 8-enum equipment classification (default '其他' if unset). */
   equipment: Equipment;
-  /** Muscle IDs assigned the `primary` role. */
+  /** Muscle IDs assigned the `primary` role. May be empty (ADR-0017 Q11 amendment — 訓練部位選填). */
   primaryMuscleIds: string[];
-  /** Muscle IDs assigned the `secondary` role. */
+  /** Muscle IDs assigned the `secondary` role. May be empty. */
   secondaryMuscleIds: string[];
+}
+
+/**
+ * Derive load_type from equipment per ADR-0017 Q11 amendment (Slice 9.7):
+ * '自重' → 'bodyweight'; everything else → 'loaded'.
+ *
+ * `assisted` is not produced from the Custom Exercise form — those exercises
+ * (Assisted Dip / Assisted Pull-up) are seeded built-in by v006 and can't be
+ * created by users in v1.
+ */
+export function inferLoadType(equipment: Equipment): LoadType {
+  return equipment === '自重' ? 'bodyweight' : 'loaded';
 }
 
 export interface ValidationError {
@@ -105,16 +121,16 @@ export interface ValidateOptions {
 }
 
 /**
- * Validate a Custom Exercise draft per ADR-0010 acceptance:
+ * Validate a Custom Exercise draft (Slice 9.7 ADR-0017 Q11 amendment):
  *   - name required, ≤ 60 chars after trim, AND case-insensitively unique
  *     against `options.existingNames` (when provided)
- *   - load_type ∈ {loaded, bodyweight, assisted}
- *   - muscle_group_id may be null (Custom Exercise allowed without MG per
- *     ADR-0010 #9), but if provided must be a non-empty string
+ *   - muscle_group_id required (non-empty string) — form picker forbids 未指定
+ *   - equipment must be one of the 8-enum values
+ *   - primary + secondary lists may both be empty (訓練部位選填)
  *   - a muscle id may not appear in BOTH primary and secondary lists
  *     (single role per muscle per exercise — matches PRIMARY KEY constraint)
- *   - duplicate muscle ids within either list collapse to one (caller may
- *     dedupe before calling, but we don't reject on duplicates)
+ *
+ * `load_type` is no longer validated here — adapters derive it from `equipment`.
  */
 export function validateCustomExerciseDraft(
   draft: CustomExerciseDraft,
@@ -142,22 +158,17 @@ export function validateCustomExerciseDraft(
     }
   }
 
-  const validLoad: LoadType[] = ['loaded', 'bodyweight', 'assisted'];
-  if (!validLoad.includes(draft.load_type)) {
-    errors.push({ field: 'load_type', message: 'load_type 必須是 loaded / bodyweight / assisted' });
-  }
-
-  if (draft.muscle_group_id !== null && draft.muscle_group_id.trim() === '') {
+  if (!draft.muscle_group_id || draft.muscle_group_id.trim() === '') {
     errors.push({
       field: 'muscle_group_id',
-      message: 'muscle_group_id 不可為空字串（傳 null 或合法 id）',
+      message: '請選擇大分類',
     });
   }
 
   if (!EQUIPMENT_VALUES.includes(draft.equipment)) {
     errors.push({
       field: 'equipment',
-      message: 'equipment 必須是合法的 8 種分類之一',
+      message: '請選擇用具分類',
     });
   }
 

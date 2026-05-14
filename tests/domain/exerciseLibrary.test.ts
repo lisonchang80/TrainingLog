@@ -1,5 +1,6 @@
 import {
   filterExercises,
+  inferLoadType,
   muscleHighlightMap,
   partitionMuscleLinksByRole,
   validateCustomExerciseDraft,
@@ -117,7 +118,6 @@ describe('exerciseLibrary — filterExercises', () => {
 describe('exerciseLibrary — validateCustomExerciseDraft', () => {
   const baseDraft = {
     name: '我的自訂動作',
-    load_type: 'loaded' as const,
     muscle_group_id: MG_CHEST,
     equipment: '槓鈴' as const,
     primaryMuscleIds: [M_UPPER_CHEST],
@@ -138,10 +138,19 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
     expect(errs.some((e) => e.field === 'name')).toBe(true);
   });
 
-  it('accepts null muscle_group_id', () => {
-    expect(
-      validateCustomExerciseDraft({ ...baseDraft, muscle_group_id: null })
-    ).toEqual([]);
+  it('rejects null/empty muscle_group_id (Slice 9.7 ADR-0017 Q11 amendment — 大分類必填)', () => {
+    const errsEmpty = validateCustomExerciseDraft({
+      ...baseDraft,
+      muscle_group_id: '',
+    });
+    expect(errsEmpty.some((e) => e.field === 'muscle_group_id')).toBe(true);
+
+    const errsNull = validateCustomExerciseDraft({
+      ...baseDraft,
+      // @ts-expect-error — null forbidden by type, but validator must still catch it
+      muscle_group_id: null,
+    });
+    expect(errsNull.some((e) => e.field === 'muscle_group_id')).toBe(true);
   });
 
   it('rejects muscle in both primary AND secondary', () => {
@@ -235,6 +244,19 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
       expect(nameErrs).toHaveLength(1);
       expect(nameErrs[0].message).toBe('請輸入動作名稱');
     });
+  });
+});
+
+describe('exerciseLibrary — inferLoadType (Slice 9.7 ADR-0017 Q11 amendment)', () => {
+  it("'自重' equipment → 'bodyweight' load_type", () => {
+    expect(inferLoadType('自重')).toBe('bodyweight');
+  });
+
+  it("every other equipment → 'loaded' load_type", () => {
+    const loadedEquipments = ['槓鈴', '啞鈴', '史密斯機', '滑輪', '固定機械', '壺鈴', '其他'] as const;
+    for (const eq of loadedEquipments) {
+      expect(inferLoadType(eq)).toBe('loaded');
+    }
   });
 });
 
