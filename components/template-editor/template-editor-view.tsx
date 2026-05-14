@@ -862,9 +862,15 @@ export default function TemplateEditorView() {
     async (exerciseIds: readonly string[]) => {
       if (!id || exerciseIds.length === 0) return;
 
+      // Refetch the library here. The cached `exerciseLibrary` state was
+      // captured at editor mount and does NOT include exercises created
+      // mid-session via the picker's "+ 新動作" flow — relying on the cache
+      // silently dropped them on hydrate.
+      const freshLibrary = await listExercises(db);
+
       const newRows: TemplateExercise[] = [];
       for (const exId of exerciseIds) {
-        const exercise = exerciseLibrary.find((x) => x.id === exId);
+        const exercise = freshLibrary.find((x) => x.id === exId);
         if (!exercise) continue;
 
         let prefilled: TemplateSet[] | null = null;
@@ -918,7 +924,7 @@ export default function TemplateEditorView() {
       });
       setExpandedExId(newRows[newRows.length - 1].id);
     },
-    [id, db, exerciseLibrary],
+    [id, db],
   );
 
   // Two-stage drain: useFocusEffect captures the picker payload as soon as
@@ -939,10 +945,12 @@ export default function TemplateEditorView() {
 
   useEffect(() => {
     if (!pendingPick || pendingPick.length === 0) return;
-    if (exerciseLibrary.length === 0 || !draft || !id) return;
+    if (!draft || !id) return;
+    // No more `exerciseLibrary.length === 0` gate — hydrate refetches the
+    // library itself so a mid-session newly-created exercise is included.
     void hydrateExercisesByIds(pendingPick);
     setPendingPick(null);
-  }, [pendingPick, exerciseLibrary, draft, id, hydrateExercisesByIds]);
+  }, [pendingPick, draft, id, hydrateExercisesByIds]);
 
   // -----------------------------------------------------------------------
   // Render
