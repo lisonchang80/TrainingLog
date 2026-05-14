@@ -538,6 +538,40 @@ export default function TemplateEditorView() {
 
   const cycleSetKind = (ex_id: string, set_id: string) => {
     if (!draft) return;
+
+    // Reusable cluster (rs_id NOT NULL) — slice 9.8b grill Q5 sub-(iii):
+    // only warmup ↔ working (no dropset, which would break sets-length
+    // parallel invariant), and the sibling row's same-position set MUST
+    // mirror the change so "一列 = 一組" reads coherently.
+    const targetEx = draft.exercises.find((e) => e.id === ex_id);
+    if (targetEx && targetEx.reusable_superset_id !== null) {
+      const idx = targetEx.sets.findIndex((s) => s.id === set_id);
+      if (idx === -1) return;
+      const currentKind = targetEx.sets[idx].kind;
+      // Only warmup ↔ working; ignore dropset state (shouldn't exist in a
+      // reusable cluster, but defensive: if encountered, normalize to working).
+      const newKind: TemplateSet['kind'] =
+        currentKind === 'warmup' ? 'working' : 'warmup';
+      // Cluster head = parent_id ?? own id. All cluster members share that
+      // anchor; flip the set at `idx` on each member.
+      const clusterHead = targetEx.parent_id ?? targetEx.id;
+      setDraft({
+        ...draft,
+        exercises: draft.exercises.map((ex) => {
+          const inCluster = ex.id === clusterHead || ex.parent_id === clusterHead;
+          if (!inCluster) return ex;
+          if (idx >= ex.sets.length) return ex;
+          return {
+            ...ex,
+            sets: ex.sets.map((s, i) =>
+              i === idx ? { ...s, kind: newKind } : s,
+            ),
+          };
+        }),
+      });
+      return;
+    }
+
     setDraft({
       ...draft,
       exercises: draft.exercises.map((ex) => {
