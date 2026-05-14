@@ -88,6 +88,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    width: '100%',
+    alignSelf: 'stretch',
     backgroundColor: '#fff',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
