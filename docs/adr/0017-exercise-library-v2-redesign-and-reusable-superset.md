@@ -151,10 +151,41 @@ CREATE TABLE superset_exercise (
 
 **加進 Template 行為 — Explode model**：
 - Add 一個 reusable superset → clone 成 2 個 `template_exercise` rows + parent_id linkage（per ADR-0016）
-- **不存 `template_exercise.reusable_superset_id` FK**（單向、不雙向同步）
+- ~~**不存 `template_exercise.reusable_superset_id` FK**（單向、不雙向同步）~~（**Slice 9.8b grill Q4 修訂**，見下方 amendment block）
 - 砍 reusable superset 不影響 Template 內已 explode 的 rows
 - Template 內這 2 rows 走既有 ADR-0016 superset pair 行為（per-row-index pairing / 整對左右滑 / cluster B3 規則）
 - 不能單獨 delete / 換 exercise（由 ADR-0016 既有 superset UX 限制天然處理）
+
+**Slice 9.8b grill amendment (2026-05-14)** — L154 翻盤 + 動作記憶分流 + 鎖死規則細化：
+
+- ✅ **存 `template_exercise.reusable_superset_id` FK**（v013 migration，`REFERENCES superset(id) ON DELETE SET NULL`，nullable）
+- 翻盤的理由：每個 reusable superset 應有**獨立動作記憶**（不污染 solo per-exercise memory，也不跨不同 reusable superset 互相覆蓋）。沒有 FK 無法做 per-(rs_id, position) memory partition
+- FK 僅作 memory lookup 用，**非 sync FK**：
+  - 砍 reusable superset → ON DELETE SET NULL（rows 留著，FK 清 NULL），cluster 仍存活但「memory identity」丟失
+  - explode 寫 rows 時 stamp `reusable_superset_id = S`；user 在 Template 編輯期內不能改這欄
+- **動作記憶查詢分流（ADR-0016 動作記憶 read pattern amendment）**：
+  - row.reusable_superset_id IS NULL → 走原有 solo per-exercise lookup（但 WHERE 子句加 `AND reusable_superset_id IS NULL` 隔離）
+  - row.reusable_superset_id = S → 走新的 `queryReusableSupersetMemory(S)`：找最新 cluster (parent_id IS NULL, rs_id = S, max updated_at) 配對 child，返回 2 個 MemoryCandidate
+  - **首次 explode** (無歷史 cluster) → fallback 系統 default (1 working set @ 8 reps × 20 kg，跟 solo-without-memory 一致)
+- **Template 內 cluster lock rules（reusable cluster 不可解體）**：
+  - ❌ 拖 child 拖出 cluster / 拖 parent 改變結構
+  - ❌ 個別 row 單獨刪除（拆散 cluster）
+  - ❌ 個別 set 單獨增刪（造成 parent.sets.length ≠ child.sets.length）
+  - ❌ Cluster 內換動作（exercise_id 不可改）
+  - ❌ 個別 row 改 rest_seconds / notes（⚙ menu 隱藏這兩項）
+  - ❌ Reusable cluster 拼接成 superset 巢狀
+  - ✅ 改個別 set 的 reps/weight（per-cell 自由編輯）
+  - ✅ 「新增 1 組」（parent + child 各 +1 set 同步）
+  - ✅ 整個 cluster 刪除（⚙ menu「刪除」一次刪 2 row）
+  - ✅ 跨 section 拖整個 cluster（一般 ↔ 常設，兩 row 同搬，via 既有 groupHeadId 邏輯）
+  - ✅ per-set kind 切換（warmup ↔ working，**row-pair 同步**；不含 dropset — dropset 會破壞 sets 列同步規則）
+  - ⚙ menu 對 reusable cluster 只顯示「設為常設/一般」+「刪除」（其他 4 項隱藏）
+- **`use_count` bump 時機**（grill Q6）：Template 編輯**儲存 commit** 那刻 bump，不是 picker submit 或 hydrate-into-draft。算法：commit 時 diff committed↔draft，新增的 parent rows (parent_id IS NULL, rs_id NOT NULL) 各觸發 incrementUseCount(rs_id) 一次。加進 draft 又刪除的 cluster 不算用過。
+- **PickerPayload schema**（grill Q1）：`{ exerciseIds: string[], reusableSupersetIds: string[] }` 雙 array；Template editor `hydrateReusableSupersets` 先 explode，再 `hydrateExercisesByIds` append 一般動作。
+- **Picker mode superset 創建 round-trip**（grill Q7）：新增 `newlyCreatedSupersetId` mailbox + 3 API（submit/consume/clear），picker mode 從 `/superset/new` 回來自動加入 `supersetSelection`，跟既有 exercise round-trip 對稱。
+- **Picker mode superset 視覺**（grill Q2）：SupersetGrid 在 picker mode 下 SupersetCard 加 selectedBadge 顯示 rank（鏡像 ExerciseCard，獨立計號）；不加 ⓘ 進詳情按鈕（avoid stack 深度遞增）；無 max 限制（picker 是 explode-to-Template 場景，不複用 /superset/new 的 max 2 規則）。
+
+砍 reusable superset 後 Template 上的 cluster：rs_id 自動 SET NULL，cluster 變成「失主」狀態 — 跟既有 manual cluster 行為一致（unlocked），記憶歸入 solo per-exercise memory。砍前已創的 Template clusters 視覺上**仍能識別**為一個 cluster（parent_id linkage 不變），但 ⚙ menu 解鎖回完整 4 項。
 
 **「N 次」徽章**：cached `superset.use_count` column；每次 add 進 Template/Session 時 +1。
 
