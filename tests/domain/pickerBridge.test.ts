@@ -1,7 +1,11 @@
 import {
+  clearNewlyCreated,
   clearPick,
+  consumeNewlyCreated,
   consumePick,
+  peekNewlyCreatedForTest,
   peekPickForTest,
+  submitNewlyCreated,
   submitPick,
 } from '../../src/domain/exercise/pickerBridge';
 
@@ -62,5 +66,49 @@ describe('pickerBridge', () => {
   it('preserves order across submits', () => {
     submitPick({ exerciseIds: ['c', 'a', 'b'] });
     expect(consumePick()?.exerciseIds).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('pickerBridge — newlyCreated mailbox', () => {
+  beforeEach(() => clearNewlyCreated());
+
+  it('returns null when empty', () => {
+    expect(consumeNewlyCreated()).toBeNull();
+  });
+
+  it('round-trips a single id', () => {
+    submitNewlyCreated('ex-123');
+    expect(consumeNewlyCreated()).toBe('ex-123');
+  });
+
+  it('clears after consume', () => {
+    submitNewlyCreated('ex-1');
+    consumeNewlyCreated();
+    expect(consumeNewlyCreated()).toBeNull();
+  });
+
+  it('submit overwrites prior unread value', () => {
+    submitNewlyCreated('old');
+    submitNewlyCreated('new');
+    expect(consumeNewlyCreated()).toBe('new');
+  });
+
+  it('clearNewlyCreated discards pending value', () => {
+    submitNewlyCreated('ex-1');
+    clearNewlyCreated();
+    expect(consumeNewlyCreated()).toBeNull();
+  });
+
+  it('peekNewlyCreatedForTest returns value without clearing', () => {
+    submitNewlyCreated('ex-1');
+    expect(peekNewlyCreatedForTest()).toBe('ex-1');
+    expect(consumeNewlyCreated()).toBe('ex-1'); // still consumable
+  });
+
+  it('is independent of pick mailbox', () => {
+    submitPick({ exerciseIds: ['p1', 'p2'] });
+    submitNewlyCreated('nc1');
+    expect(consumeNewlyCreated()).toBe('nc1');
+    expect(consumePick()?.exerciseIds).toEqual(['p1', 'p2']);
   });
 });

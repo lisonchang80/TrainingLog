@@ -19,6 +19,7 @@ import {
   type CustomExerciseDraft,
   type ValidationError,
 } from '@/src/domain/exercise/exerciseLibrary';
+import { submitNewlyCreated } from '@/src/domain/exercise/pickerBridge';
 import {
   EQUIPMENT_VALUES,
   type Equipment,
@@ -126,10 +127,12 @@ export default function NewExerciseScreen() {
     }
     setBusy(true);
     try {
-      await createCustomExercise(db, draft, () => Crypto.randomUUID());
+      const id = await createCustomExercise(db, draft, () => Crypto.randomUUID());
+      // Hand the new id off to the caller (picker auto-selects it; browse
+      // mode silently drains the mailbox on focus).
+      submitNewlyCreated(id);
       // Dismiss the modal — caller's useFocusEffect (Library / picker) will
-      // refresh and the new exercise appears in the grid. Avoids stranding
-      // the user on a detail page from which back-arrow is the only exit.
+      // refresh and the new exercise appears in the grid.
       router.back();
     } catch (err) {
       Alert.alert('儲存失敗', err instanceof Error ? err.message : String(err));

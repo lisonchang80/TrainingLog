@@ -42,3 +42,39 @@ export function clearPick(): void {
 export function peekPickForTest(): PickerPayload | null {
   return mailbox == null ? null : { exerciseIds: [...mailbox.exerciseIds] };
 }
+
+// ---------------------------------------------------------------------------
+// Newly-created-exercise mailbox — opposite direction from `submitPick`.
+//
+// When the user creates a Custom Exercise from inside picker mode, the
+// /exercise/new form writes the new exercise's id here, then router.back()
+// returns to the picker. The picker's useFocusEffect drains the mailbox and
+// auto-selects the id so the user doesn't have to find it in the grid.
+//
+// Browse mode also drains the mailbox (no-op effect) so a stale id never
+// leaks into a later picker session.
+// ---------------------------------------------------------------------------
+
+let newlyCreatedId: string | null = null;
+
+/** /exercise/new calls this on save before router.back(). */
+export function submitNewlyCreated(exerciseId: string): void {
+  newlyCreatedId = exerciseId;
+}
+
+/** Picker / library tab reads + clears on focus. Returns null if empty. */
+export function consumeNewlyCreated(): string | null {
+  const id = newlyCreatedId;
+  newlyCreatedId = null;
+  return id;
+}
+
+/** Drop any pending value (e.g. on picker mount to flush stale state). */
+export function clearNewlyCreated(): void {
+  newlyCreatedId = null;
+}
+
+/** Test helper — inspect without clearing. */
+export function peekNewlyCreatedForTest(): string | null {
+  return newlyCreatedId;
+}
