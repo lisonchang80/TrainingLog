@@ -188,10 +188,11 @@ CREATE TABLE superset_exercise (
 - 用具：必填 — default '其他' 當逃生口（既有，不變）
 - 訓練部位：**選填**（primary + secondary 都可空）
 
-**解剖圖 conditional render**：
-- primary.size === 0 AND secondary.size === 0 → 整個 `<BodyDiagram>` 不 render（chip section 仍顯示，section label 加「（選填）」）
-- 任一 ≥ 1 → render 既有 `<BodyDiagram>` + `<BodyDiagramLegend>` 並排在 chip section 上方
-- 避免 user 跳過訓練部位 row 後看到全灰人體圖的視覺尷尬
+**解剖圖 conditional render**（修訂 2026-05-14 — 套在動作詳情頁，不是表單）：
+- **表單**：解剖圖**一直 render**（即使全灰）— user 在編輯時看到視覺即時 feedback；section label 加「（選填）」
+- **動作詳情頁 (`app/exercise/[id].tsx`)**：primary.length === 0 AND secondary.length === 0 → `<View style={styles.diagramCard}>`（含 `<BodyDiagram>` + `<BodyDiagramLegend>`）整塊不 render
+- 兩個 `MuscleSection`（主要 / 次要）仍顯示「無」標籤，讓 user 看到「沒設訓練部位」的事實
+- 避免 user 跳過訓練部位後在動作詳情頁看到全灰人體圖的視覺尷尬
 
 **muscle section 排版（Slice 9.7 grill Q4 拍板）**：
 - 解剖圖 inline 頂端（既有 140×280 並排 layout）

@@ -152,7 +152,6 @@ export function CustomExerciseForm({
     return m;
   }, [primary, secondary]);
 
-  const showDiagram = primary.size > 0 || secondary.size > 0;
   const nameError = errors.find((e) => e.field === 'name');
 
   const mgPickerCells: PickerCell[] = useMemo(
@@ -248,15 +247,13 @@ export function CustomExerciseForm({
         {/* Row 4: 訓練部位 */}
         <Text style={styles.label}>訓練部位（選填）</Text>
         <Text style={styles.helper}>
-          點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK，儲存後解剖圖不顯示。
+          點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK；空白時動作詳情頁不顯示解剖圖。
         </Text>
 
-        {showDiagram && (
-          <View style={styles.diagramWrap}>
-            <BodyDiagram highlight={highlight} />
-            <BodyDiagramLegend />
-          </View>
-        )}
+        <View style={styles.diagramWrap}>
+          <BodyDiagram highlight={highlight} />
+          <BodyDiagramLegend />
+        </View>
 
         <View style={styles.muscleScrollWrap}>
           <ScrollView

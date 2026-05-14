@@ -110,10 +110,12 @@ export default function ExerciseDetailScreen() {
           {data.exercise.is_custom === 1 ? ' · 自訂' : ''}
         </Text>
 
-        <View style={styles.diagramCard}>
-          <BodyDiagram highlight={highlight} />
-          <BodyDiagramLegend />
-        </View>
+        {(data.primary.length > 0 || data.secondary.length > 0) && (
+          <View style={styles.diagramCard}>
+            <BodyDiagram highlight={highlight} />
+            <BodyDiagramLegend />
+          </View>
+        )}
 
         <MuscleSection title="主要" color="#F26B3A" muscles={data.primary} />
         <MuscleSection title="次要" color="#7CB6E0" muscles={data.secondary} />
