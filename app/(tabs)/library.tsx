@@ -513,7 +513,7 @@ function ExerciseCard({
         pressed && styles.pressed,
       ]}>
       {hasCues && (
-        <View style={styles.cuesPill}>
+        <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
           <Text style={styles.cuesPillText}>講解</Text>
         </View>
       )}
@@ -716,8 +716,8 @@ const styles = StyleSheet.create({
   selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   infoBtn: {
     position: 'absolute',
-    bottom: 6,
-    right: 6,
+    top: 6,
+    left: 6,
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -735,6 +735,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
+  /** Shift right when ⓘ button occupies top-left (picker mode). */
+  cuesPillWithInfo: { left: 40 },
   cuesPillText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   countBadge: {
     position: 'absolute',
