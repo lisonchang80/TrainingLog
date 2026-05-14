@@ -63,12 +63,16 @@ interface MuscleAnchor {
   labelY: number; // labelX derived per-side constant
 }
 
-// FRONT — sorted by anchorY ASC; labelY spaced 44 units (button h 40 + gap 4).
+// FRONT — labelY spaced 44 units (button h 40 + gap 4).
+// Mostly sorted by anchorY for fan layout no-crossings, but 中下胸 manually
+// promoted right under 上胸 (per user — same chest group should cluster).
+// Verified the swap doesn't introduce crossings; only a single touch at 前束's
+// endpoint, which is geometrically harmless.
 const FRONT_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelY: 40 },
-  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 84 },
-  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 128 },
-  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 172 },
+  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 84 },
+  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 128 },
+  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 172 },
   { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 216 },
   { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 260 },
   { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 304 },
