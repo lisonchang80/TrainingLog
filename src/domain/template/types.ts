@@ -70,6 +70,23 @@ export interface TemplateExercise {
   notes: string | null;
   /** Default rest seconds (ADR-0016 2026-05-12 amendment §2). NULL = system default. */
   rest_seconds: number | null;
+  /**
+   * Reusable-superset linkage (ADR-0017 L154 amendment, slice 9.8b grill Q4).
+   *
+   * NULL → row is a solo exercise OR a hand-crafted superset (ADR-0016 manual
+   * cluster); memory lookup falls back to per-exercise solo derive.
+   *
+   * `S` → row was exploded from reusable superset `S`. Both parent and child
+   * of a reusable-exploded cluster are stamped the same `S`. Memory derive
+   * scopes to "latest cluster where rs_id = S" (per-(rs_id, position) memory
+   * partition — solo and per-superset memories do not bleed).
+   *
+   * FK `ON DELETE SET NULL`: deleting the reusable superset in the library
+   * clears this column on existing template rows but does not delete them
+   * (preserves the explode model 解耦 intent of ADR-0017 L155). Cluster lock
+   * rules (ADR-0016 amendment) also dissolve once `rs_id` is NULL.
+   */
+  reusable_superset_id: string | null;
   sets: TemplateSet[];
 }
 

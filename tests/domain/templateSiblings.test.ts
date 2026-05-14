@@ -70,6 +70,7 @@ describe('templateSiblings — flipExerciseSectionInTemplate', () => {
           parent_id: null,
           notes: null,
           rest_seconds: null,
+          reusable_superset_id: null,
           sets: [],
         },
         {
@@ -81,6 +82,7 @@ describe('templateSiblings — flipExerciseSectionInTemplate', () => {
           parent_id: null,
           notes: null,
           rest_seconds: null,
+          reusable_superset_id: null,
           sets: [],
         },
         {
@@ -92,6 +94,7 @@ describe('templateSiblings — flipExerciseSectionInTemplate', () => {
           parent_id: 'ss-parent',
           notes: null,
           rest_seconds: null,
+          reusable_superset_id: null,
           sets: [],
         },
         {
@@ -103,6 +106,7 @@ describe('templateSiblings — flipExerciseSectionInTemplate', () => {
           parent_id: 'ss-parent',
           notes: null,
           rest_seconds: null,
+          reusable_superset_id: null,
           sets: [],
         },
       ],

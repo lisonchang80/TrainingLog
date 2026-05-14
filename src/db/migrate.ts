@@ -11,6 +11,7 @@ import { v009_template_set } from './schema/v009_template_set';
 import { v010_exercise_library_v2 } from './schema/v010_exercise_library_v2';
 import { v011_reusable_superset } from './schema/v011_reusable_superset';
 import { v012_drop_template_exercise_notes } from './schema/v012_drop_template_exercise_notes';
+import { v013_template_exercise_reusable_superset_fk } from './schema/v013_template_exercise_reusable_superset_fk';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -37,6 +38,7 @@ const migrations: Record<number, MigrationFn> = {
   10: v010_exercise_library_v2,
   11: v011_reusable_superset,
   12: v012_drop_template_exercise_notes,
+  13: v013_template_exercise_reusable_superset_fk,
 };
 
 export async function migrate(db: Database): Promise<void> {

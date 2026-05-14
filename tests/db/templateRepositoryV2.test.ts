@@ -8,6 +8,7 @@ import {
   createTemplate,
   getTemplateFull,
   queryMemoryCandidates,
+  queryReusableSupersetMemory,
 } from '../../src/adapters/sqlite/templateRepository';
 import { deriveLatestSetsForExercise } from '../../src/domain/template/templateMemory';
 import type {
@@ -50,6 +51,7 @@ function makeEx(
     parent_id: null,
     notes: null,
     rest_seconds: null,
+    reusable_superset_id: null,
     sets: [],
     ...over,
   };
@@ -589,6 +591,48 @@ describe('templateRepository v2 — queryMemoryCandidates', () => {
     expect(candidates[1].sets).toHaveLength(1);
   });
 
+  it('isolates solo memory from reusable-superset clusters (slice 9.8b grill Q4)', async () => {
+    // ADR-0016 amendment / slice 9.8b: solo memory must not see rows that
+    // were exploded from a reusable superset (rs_id NOT NULL).
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    // Seed a reusable superset so the FK is valid
+    await db.runAsync(
+      `INSERT INTO superset (id, name, color_hex, use_count, created_at, updated_at)
+       VALUES ('s1', '胸+輔', NULL, 1, ?, ?)`,
+      NOW,
+      NOW
+    );
+    // Solo Bench row (older)
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen, updated_at)
+       VALUES ('te-solo', 't1', ?, 0, 0, 0, ?)`,
+      benchId,
+      NOW
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('solo-1', 'te-solo', 0, 'working', 10, 60)`
+    );
+    // In-cluster Bench row (newer, but should be excluded from solo lookup)
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('te-cluster', 't1', ?, 1, 0, 0, NULL, 's1', ?)`,
+      benchId,
+      NOW + 5000
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('cluster-1', 'te-cluster', 0, 'working', 5, 90)`
+    );
+
+    const candidates = await queryMemoryCandidates(db, { exercise_id: benchId });
+    // Only the solo row should be returned even though the cluster row is newer.
+    expect(candidates.map((c) => c.template_exercise_id)).toEqual(['te-solo']);
+  });
+
   it('feeds deriveLatestSetsForExercise end-to-end (memory read pattern integration)', async () => {
     await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
     await db.runAsync(
@@ -613,5 +657,142 @@ describe('templateRepository v2 — queryMemoryCandidates', () => {
     expect(sets).toHaveLength(2);
     expect(sets![0]).toMatchObject({ id: 'new-1', reps: 8, weight: 80, notes: null });
     expect(sets![1]).toMatchObject({ id: 'new-2', reps: 6, weight: 85, notes: null });
+  });
+});
+
+describe('templateRepository v2 — queryReusableSupersetMemory (slice 9.8b grill Q4)', () => {
+  let db: BetterSqliteDatabase;
+  let benchId: string;
+  let ohpId: string;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const exercises = await listExercises(db);
+    benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
+    ohpId = exercises.find((e) => e.name === 'Overhead Press')!.id;
+    // Seed reusable supersets so FK is valid
+    await db.runAsync(
+      `INSERT INTO superset (id, name, color_hex, use_count, created_at, updated_at)
+       VALUES ('s-A', '胸+肩', NULL, 0, ?, ?)`,
+      NOW,
+      NOW
+    );
+  });
+  afterEach(() => db.close());
+
+  it('returns empty when no prior cluster exists for the rs_id', async () => {
+    expect(
+      await queryReusableSupersetMemory(db, { reusable_superset_id: 's-A' })
+    ).toEqual([]);
+  });
+
+  it('returns parent + child of the latest cluster (by updated_at)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    // Older cluster
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('p-old', 't1', ?, 0, 0, 0, NULL, 's-A', ?)`,
+      benchId,
+      NOW
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('p-old-1', 'p-old', 0, 'working', 8, 60)`
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('c-old', 't1', ?, 1, 0, 0, 'p-old', 's-A', ?)`,
+      ohpId,
+      NOW
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('c-old-1', 'c-old', 0, 'working', 8, 30)`
+    );
+    // Newer cluster (same rs_id, different template later)
+    await createTemplate(db, { id: 't2', name: 'Push 2', now: frozenNow(2000) });
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('p-new', 't2', ?, 0, 0, 0, NULL, 's-A', ?)`,
+      benchId,
+      NOW + 5000
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('p-new-1', 'p-new', 0, 'working', 5, 90)`
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('c-new', 't2', ?, 1, 0, 0, 'p-new', 's-A', ?)`,
+      ohpId,
+      NOW + 5000
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+       VALUES ('c-new-1', 'c-new', 0, 'working', 5, 40)`
+    );
+
+    const candidates = await queryReusableSupersetMemory(db, {
+      reusable_superset_id: 's-A',
+    });
+    expect(candidates).toHaveLength(2);
+    // [0] = parent of latest cluster, [1] = child
+    expect(candidates[0].template_exercise_id).toBe('p-new');
+    expect(candidates[0].exercise_id).toBe(benchId);
+    expect(candidates[0].sets.map((s) => s.reps)).toEqual([5]);
+    expect(candidates[1].template_exercise_id).toBe('c-new');
+    expect(candidates[1].exercise_id).toBe(ohpId);
+    expect(candidates[1].sets.map((s) => s.weight)).toEqual([40]);
+  });
+
+  it('returns empty when only a parent exists without a paired child (corruption guard)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('p-lonely', 't1', ?, 0, 0, 0, NULL, 's-A', ?)`,
+      benchId,
+      NOW
+    );
+    expect(
+      await queryReusableSupersetMemory(db, { reusable_superset_id: 's-A' })
+    ).toEqual([]);
+  });
+
+  it('does not bleed into solo memory (cross-check with queryMemoryCandidates)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('p1', 't1', ?, 0, 0, 0, NULL, 's-A', ?)`,
+      benchId,
+      NOW + 1000
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, is_evergreen,
+          parent_id, reusable_superset_id, updated_at)
+       VALUES ('c1', 't1', ?, 1, 0, 0, 'p1', 's-A', ?)`,
+      ohpId,
+      NOW + 1000
+    );
+    // Solo lookup for benchId must return nothing — the only Bench row is
+    // inside a reusable cluster.
+    const solo = await queryMemoryCandidates(db, { exercise_id: benchId });
+    expect(solo).toEqual([]);
+    // Reusable lookup returns the cluster pair.
+    const rs = await queryReusableSupersetMemory(db, { reusable_superset_id: 's-A' });
+    expect(rs).toHaveLength(2);
   });
 });

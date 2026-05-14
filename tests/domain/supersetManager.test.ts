@@ -216,6 +216,9 @@ describe('supersetManager — explodeSupersetForTemplate', () => {
       expect(r.sets).toEqual([]);
       expect(r.notes).toBeNull();
       expect(r.rest_seconds).toBeNull();
+      // slice 9.8b grill Q4 — both rows stamp the superset id for memory
+      // partitioning + cluster lock gating.
+      expect(r.reusable_superset_id).toBe('s-1');
     }
   });
 

@@ -191,10 +191,14 @@ export interface ExplodeSupersetArgs {
 export function explodeSupersetForTemplate(
   args: ExplodeSupersetArgs
 ): TemplateExercise[] {
-  const { exercises, template_id, ordering_start, idGen } = args;
+  const { superset, exercises, template_id, ordering_start, idGen } = args;
   const [parentEx, childEx] = exercises;
   const parentId = idGen();
   const childId = idGen();
+  // Both rows stamp `reusable_superset_id = superset.id` (ADR-0017 L154
+  // amendment / slice 9.8b grill Q4). This drives per-(rs_id, position)
+  // memory partitioning on subsequent explodes and gates the cluster lock
+  // rules (ADR-0016 amendment) in the editor.
   const parent: TemplateExercise = {
     id: parentId,
     template_id,
@@ -205,6 +209,7 @@ export function explodeSupersetForTemplate(
     parent_id: null,
     notes: null,
     rest_seconds: null,
+    reusable_superset_id: superset.id,
     sets: [],
   };
   const child: TemplateExercise = {
@@ -217,6 +222,7 @@ export function explodeSupersetForTemplate(
     parent_id: parentId,
     notes: null,
     rest_seconds: null,
+    reusable_superset_id: superset.id,
     sets: [],
   };
   return [parent, child];

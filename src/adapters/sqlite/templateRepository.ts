@@ -332,11 +332,13 @@ export async function getTemplateFull(
     parent_id: string | null;
     notes: string | null;
     rest_seconds: number | null;
+    reusable_superset_id: string | null;
   }>(
     `SELECT te.id, te.template_id, te.exercise_id, e.name,
             te.ordering, te.is_evergreen, te.parent_id,
             e.notes AS notes,
-            te.rest_seconds
+            te.rest_seconds,
+            te.reusable_superset_id
        FROM template_exercise te
        LEFT JOIN exercise e ON e.id = te.exercise_id
       WHERE te.template_id = ?
@@ -392,6 +394,7 @@ export async function getTemplateFull(
     parent_id: r.parent_id,
     notes: r.notes,
     rest_seconds: r.rest_seconds,
+    reusable_superset_id: r.reusable_superset_id,
     sets: setsByEx.get(r.id) ?? [],
   }));
 
@@ -550,18 +553,22 @@ export async function commitTemplateDraft(
     }
 
     // 3. metadata-only UPDATEs (no set changes). `notes` removed — see step 6.
+    // reusable_superset_id propagated for defensive coverage even though the
+    // normal flow keeps rs_id stable post-explode (ADR-0016 cluster lock
+    // rules + ADR-0017 explode model).
     const setRewriteIds = new Set(plan.setRewrites.map((e) => e.id));
     for (const dex of plan.metaUpdates) {
       if (setRewriteIds.has(dex.id)) continue; // handled by set rewrite block
       await db.runAsync(
         `UPDATE template_exercise
             SET ordering = ?, is_evergreen = ?, parent_id = ?,
-                rest_seconds = ?, updated_at = ?
+                rest_seconds = ?, reusable_superset_id = ?, updated_at = ?
           WHERE id = ?`,
         dex.ordering,
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
         dex.rest_seconds,
+        dex.reusable_superset_id,
         ts,
         dex.id
       );
@@ -572,12 +579,13 @@ export async function commitTemplateDraft(
       await db.runAsync(
         `UPDATE template_exercise
             SET ordering = ?, is_evergreen = ?, parent_id = ?,
-                rest_seconds = ?, updated_at = ?
+                rest_seconds = ?, reusable_superset_id = ?, updated_at = ?
           WHERE id = ?`,
         dex.ordering,
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
         dex.rest_seconds,
+        dex.reusable_superset_id,
         ts,
         dex.id
       );
@@ -614,8 +622,8 @@ export async function commitTemplateDraft(
         `INSERT INTO template_exercise
            (id, template_id, exercise_id, ordering, default_sets,
             default_reps, default_weight_kg, is_evergreen,
-            parent_id, rest_seconds, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
         dex.id,
         dex.template_id,
         dex.exercise_id,
@@ -624,6 +632,7 @@ export async function commitTemplateDraft(
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
         dex.rest_seconds,
+        dex.reusable_superset_id,
         ts
       );
       for (let i = 0; i < dex.sets.length; i++) {
@@ -694,33 +703,12 @@ export async function applyRecolorSiblings(
   );
 }
 
-/**
- * 動作記憶 (ADR-0012/0016): query candidates for `exercise_id` across all
- * templates, ordered by `template_exercise.updated_at DESC`. The pure-logic
- * `deriveLatestSetsForExercise` picks the winner + remaps ids.
- *
- * Limits to the top `limit` (default 8) candidates to bound the join cost.
- */
-export async function queryMemoryCandidates(
+/** Internal helper — hydrate a list of template_exercise rows into MemoryCandidates. */
+async function hydrateMemoryCandidates(
   db: Database,
-  args: { exercise_id: string; limit?: number }
+  exRows: Array<{ id: string; exercise_id: string; updated_at: number }>
 ): Promise<MemoryCandidate[]> {
-  const limit = args.limit ?? 8;
-  const exRows = await db.getAllAsync<{
-    id: string;
-    exercise_id: string;
-    updated_at: number;
-  }>(
-    `SELECT id, exercise_id, updated_at
-       FROM template_exercise
-      WHERE exercise_id = ?
-      ORDER BY updated_at DESC
-      LIMIT ?`,
-    args.exercise_id,
-    limit
-  );
   if (exRows.length === 0) return [];
-
   const placeholders = exRows.map(() => '?').join(',');
   const setRows = await db.getAllAsync<{
     id: string;
@@ -760,4 +748,91 @@ export async function queryMemoryCandidates(
     updated_at: r.updated_at,
     sets: setsByEx.get(r.id) ?? [],
   }));
+}
+
+/**
+ * 動作記憶 (ADR-0012/0016): query candidates for `exercise_id` across all
+ * templates, ordered by `template_exercise.updated_at DESC`. The pure-logic
+ * `deriveLatestSetsForExercise` picks the winner + remaps ids.
+ *
+ * **Solo memory isolation (ADR-0016 amendment / slice 9.8b grill Q4)**:
+ * filters to rows with `reusable_superset_id IS NULL` so reusable-superset
+ * clusters don't bleed into solo per-exercise memory. Reusable-superset
+ * memory is fetched separately via `queryReusableSupersetMemory`.
+ *
+ * Limits to the top `limit` (default 8) candidates to bound the join cost.
+ */
+export async function queryMemoryCandidates(
+  db: Database,
+  args: { exercise_id: string; limit?: number }
+): Promise<MemoryCandidate[]> {
+  const limit = args.limit ?? 8;
+  const exRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    updated_at: number;
+  }>(
+    `SELECT id, exercise_id, updated_at
+       FROM template_exercise
+      WHERE exercise_id = ? AND reusable_superset_id IS NULL
+      ORDER BY updated_at DESC
+      LIMIT ?`,
+    args.exercise_id,
+    limit
+  );
+  return hydrateMemoryCandidates(db, exRows);
+}
+
+/**
+ * Reusable-superset 動作記憶 (ADR-0017 L154 amendment / slice 9.8b grill Q4).
+ *
+ * Looks up the most-recently-edited cluster where both rows are stamped
+ * `reusable_superset_id = S` and returns 2 `MemoryCandidate`s — one for the
+ * parent row's exercise, one for the child row's. Callers feed each into
+ * `deriveLatestSetsForExercise(exercise_id = <parent or child ex_id>, …)`
+ * to hydrate fresh `TemplateSet` lists for the new explode.
+ *
+ * Returns `[]` when no prior cluster exists (first-ever explode of `S`) —
+ * caller falls back to system default seed (1 working set @ 8 reps × 20 kg,
+ * matching the solo-without-memory branch).
+ *
+ * "Latest cluster" = the parent row (parent_id IS NULL, rs_id = S) with the
+ * highest `updated_at`, paired with whichever child row points at it.
+ */
+export async function queryReusableSupersetMemory(
+  db: Database,
+  args: { reusable_superset_id: string }
+): Promise<MemoryCandidate[]> {
+  // 1. Find the latest parent row for this rs_id.
+  const parentRow = await db.getFirstAsync<{
+    id: string;
+    exercise_id: string;
+    updated_at: number;
+  }>(
+    `SELECT id, exercise_id, updated_at
+       FROM template_exercise
+      WHERE reusable_superset_id = ? AND parent_id IS NULL
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    args.reusable_superset_id
+  );
+  if (!parentRow) return [];
+
+  // 2. Find the child row of THIS parent (not just any child with same rs_id —
+  //    user might have multiple clusters in different templates).
+  const childRow = await db.getFirstAsync<{
+    id: string;
+    exercise_id: string;
+    updated_at: number;
+  }>(
+    `SELECT id, exercise_id, updated_at
+       FROM template_exercise
+      WHERE parent_id = ? AND reusable_superset_id = ?
+      LIMIT 1`,
+    parentRow.id,
+    args.reusable_superset_id
+  );
+  if (!childRow) return [];
+
+  return hydrateMemoryCandidates(db, [parentRow, childRow]);
 }
