@@ -10,6 +10,9 @@
 
 import type { Database } from '../../db/types';
 import type { LoadType } from '../../domain/exercise/types';
+import type { BucketKey } from '../../domain/pr/types';
+import { BUCKETS, classifyBucket } from '../../domain/pr/buckets';
+import type { RepBucketChip } from '../../domain/exercise/repBucketFilter';
 
 /** One row per set; fields needed by PR / Volume engines + UI display. */
 export interface ExerciseHistorySet {
@@ -214,6 +217,407 @@ export async function getExerciseHistoryHeader(
     total_sessions: totalRow?.n ?? 0,
     sessions_last_7_days: recentRow?.n ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Slice 9.8c — data layer for the per-Exercise / per-Reusable-Superset
+// 詳情頁 歷史頁 (Exercise + Reusable Superset detail page 「歷史」 sub-tab).
+//
+// Function A: queryExerciseHistory(db, exerciseId, options?)
+// Function B: queryReusableSupersetHistory(db, rsId, options?)
+//
+// SCHEMA CONTEXT (load-bearing — see overnight report for full breakdown):
+//   - Session-side tables (`set`, `session_exercise`) DO NOT carry
+//     `reusable_superset_id`, `set_kind`, or `parent_set_id`. Only the
+//     planning-side template tables do.
+//   - Therefore, Function B associates session sets with a reusable superset
+//     INDIRECTLY: `set` → `session_exercise` → `template_exercise` (joined on
+//     `template_id + exercise_id`) and selects rows whose template_exercise has
+//     `reusable_superset_id = ?`. This covers all templated sessions that came
+//     from a template containing the exploded cluster. Freestyle sessions and
+//     blank/no-template sessions can never be scoped to a reusable superset.
+//   - `set_kind` is unavailable on session side; the warmup/working/dropset
+//     distinction in spec L23 does not apply at the data layer in v1. The
+//     return rows expose `set_kind: null` to leave room for a future v014
+//     migration to add it. Bucket filtering does NOT exclude any sets by kind.
+// ---------------------------------------------------------------------------
+
+/** Filter chip values matching `RepBucketChip`. `'all'` widens to every set. */
+export type ExerciseHistoryBucketFilter = RepBucketChip;
+
+export interface QueryExerciseHistoryOptions {
+  /** `'all'` (default) or one of the 5 `BucketKey`s. */
+  repBucket?: ExerciseHistoryBucketFilter;
+  /** Max rows to return; defaults to 200. Use `Number.POSITIVE_INFINITY` for unbounded (NOT recommended). */
+  limit?: number;
+  /** Offset for pagination; defaults to 0. */
+  offset?: number;
+}
+
+/**
+ * One row in the per-exercise history view. Newest first.
+ *
+ * `set_kind` is always `null` in v1 (the session-side `set` table has no
+ * set_kind column; only template_set does). Reserved for a future migration.
+ *
+ * `rep_bucket` is derived from `reps` via the same provider used by PR
+ * engine (`classifyBucket`). May be `null` for invalid / null reps.
+ */
+export interface ExerciseHistoryRow {
+  session_id: string;
+  /** session.started_at — unix ms; the "date" the work was performed. */
+  session_started_at: number;
+  set_id: string;
+  reps: number | null;
+  weight_kg: number | null;
+  /** Always null in v1 — placeholder for warmup/working/dropset on session side. */
+  set_kind: null;
+  /** Domain-bucket key — `'max_strength' | 'strength' | 'hypertrophy' | 'muscle_endurance' | 'endurance' | null`. */
+  rep_bucket: BucketKey | null;
+  /** ordering within the session (1-based for ASC display, but caller is free to ignore). */
+  ordering: number;
+  /** Convenience: load_type joined from exercise row, for downstream volume / e1rm math. */
+  load_type: LoadType;
+  /** session.bodyweight_snapshot_kg — null when unset. */
+  bw_snapshot_kg: number | null;
+}
+
+const DEFAULT_LIMIT = 200;
+
+/**
+ * Compose the WHERE/AND `reps BETWEEN` clause for a bucket filter.
+ * Returns `{ sql: '', params: [] }` when filter is `'all'`.
+ *
+ * Inclusive both ends; top bucket (`endurance`, min=16, max=null) becomes
+ * `reps >= 16`.
+ */
+function bucketWhereFragment(
+  filter: ExerciseHistoryBucketFilter
+): { sql: string; params: number[] } {
+  if (filter === 'all') return { sql: '', params: [] };
+  const b = BUCKETS.find((x) => x.key === filter);
+  if (!b) return { sql: '', params: [] };
+  if (b.max == null) {
+    return { sql: ' AND s.reps >= ?', params: [b.min] };
+  }
+  return { sql: ' AND s.reps BETWEEN ? AND ?', params: [b.min, b.max] };
+}
+
+/**
+ * Function A — per-exercise completed-set history, newest first, paginated.
+ *
+ * Spec (Slice 9.8c overnight, derived from ADR-0017 Q14 + CONTEXT L324):
+ *   - JOIN `set` + `session` + `exercise` (need load_type + bw snapshot)
+ *   - Exclude `is_skipped = 1` rows (matches every other history query in
+ *     this file)
+ *   - Newest first: ORDER BY session.started_at DESC, set.ordering ASC
+ *   - rep_bucket derived from reps using BUCKETS provider
+ *   - Bucket filter narrows in-SQL (no client-side post-filter) so LIMIT/OFFSET
+ *     pagination is correct
+ *
+ * @example
+ *   const recent = await queryExerciseHistory(db, benchId);          // all, newest 200
+ *   const power  = await queryExerciseHistory(db, benchId, {         // 1-3 rep sets only
+ *     repBucket: 'max_strength',
+ *     limit: 50,
+ *   });
+ */
+export async function queryExerciseHistory(
+  db: Database,
+  exerciseId: string,
+  options: QueryExerciseHistoryOptions = {}
+): Promise<ExerciseHistoryRow[]> {
+  const filter: ExerciseHistoryBucketFilter = options.repBucket ?? 'all';
+  const limit = options.limit ?? DEFAULT_LIMIT;
+  const offset = options.offset ?? 0;
+  const bucket = bucketWhereFragment(filter);
+
+  type Row = {
+    set_id: string;
+    session_id: string;
+    session_started_at: number;
+    reps: number | null;
+    weight_kg: number | null;
+    ordering: number;
+    load_type: LoadType;
+    bw_snapshot_kg: number | null;
+  };
+
+  const rows = await db.getAllAsync<Row>(
+    `SELECT s.id           AS set_id,
+            s.session_id   AS session_id,
+            ss.started_at  AS session_started_at,
+            s.reps         AS reps,
+            s.weight_kg    AS weight_kg,
+            s.ordering     AS ordering,
+            e.load_type    AS load_type,
+            ss.bodyweight_snapshot_kg AS bw_snapshot_kg
+       FROM "set" s
+       JOIN session ss ON ss.id = s.session_id
+       JOIN exercise e ON e.id = s.exercise_id
+      WHERE s.exercise_id = ?
+        AND s.is_skipped = 0${bucket.sql}
+      ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC
+      LIMIT ? OFFSET ?`,
+    exerciseId,
+    ...bucket.params,
+    limit,
+    offset
+  );
+
+  return rows.map((r) => ({
+    session_id: r.session_id,
+    session_started_at: r.session_started_at,
+    set_id: r.set_id,
+    reps: r.reps,
+    weight_kg: r.weight_kg,
+    set_kind: null,
+    rep_bucket: classifyBucket(r.reps),
+    ordering: r.ordering,
+    load_type: r.load_type,
+    bw_snapshot_kg: r.bw_snapshot_kg,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Function B — Reusable Superset cluster history
+//
+// SCHEMA GAP (see overnight report 02-9.8c-data-layer.md):
+//   v013 added `template_exercise.reusable_superset_id` (planning side) but
+//   the session-side `set` / `session_exercise` tables were NOT touched. To
+//   associate a recorded set with the reusable superset it was performed
+//   under, we must JOIN through the template snapshot:
+//
+//       set
+//        └─ session_exercise (session_id + exercise_id → template_id)
+//             └─ template_exercise (template_id + exercise_id
+//                                    + reusable_superset_id = ?)
+//
+//   This works for sessions started from a Template that contained the
+//   exploded cluster. It does NOT cover:
+//     - freestyle sessions (session_exercise.template_id IS NULL)
+//     - sessions started from a template that didn't contain the cluster
+//     - data corruption (template_exercise deleted but session_exercise stale)
+//
+//   A future v014 migration could ADD `session_exercise.reusable_superset_id`
+//   (and `parent_id`) to remove this indirection — flagged in the report.
+//
+// CLUSTER PAIRING:
+//   A reusable superset always explodes into exactly 2 template_exercise
+//   rows in its source template (one with parent_id IS NULL = position 0,
+//   one with parent_id = parentRow.id = position 1). We look up which two
+//   exercise_ids belong to the superset via `superset_exercise` (position
+//   0 = "A", position 1 = "B"), then for each session that recorded sets
+//   for BOTH exercises, emit a paired row.
+//
+// REP BUCKET FILTER on Reusable Superset (genuine ambiguity — see report):
+//   Spec L36 was open: "filter when EITHER side falls in the bucket".
+//   Decision adopted: **at least one of the two sides has at least one set
+//   in the bucket** → keep the pairing. Rationale: a cluster's identity is
+//   "both done in the same session"; if filter wipes one side entirely but
+//   leaves the other, dropping the pair forces the user to clear the chip
+//   to see the asymmetric session — losing data.
+// ---------------------------------------------------------------------------
+
+/**
+ * Same shape as {@link QueryExerciseHistoryOptions} today — kept as its own
+ * type alias so Function B's signature can evolve independently if v014
+ * adds rs-id-specific filters (e.g. "cluster intent only").
+ */
+export type QueryReusableSupersetHistoryOptions = QueryExerciseHistoryOptions;
+
+/** One side of a reusable-superset cluster pairing within a single session. */
+export interface ReusableSupersetSide {
+  /** position in the reusable superset's slot table — 0 = "A", 1 = "B". */
+  position: 0 | 1;
+  exercise_id: string;
+  exercise_name: string;
+  load_type: LoadType;
+  /** All non-skipped sets for this side in the session, ordering ASC. */
+  sets: ExerciseHistoryRow[];
+}
+
+/** One session's pairing — both A and B sides if both were performed. */
+export interface ReusableSupersetHistoryRow {
+  session_id: string;
+  /** session.started_at — unix ms. */
+  session_started_at: number;
+  bw_snapshot_kg: number | null;
+  /** Exactly 2 entries, position 0 then position 1. */
+  sides: [ReusableSupersetSide, ReusableSupersetSide];
+}
+
+/**
+ * Function B — Reusable Superset cluster history, newest first, paginated.
+ *
+ * Returns one entry per Session that recorded sets for BOTH sides of the
+ * superset (via the template-snapshot indirection — see schema gap note
+ * above). Sessions where only one side was performed are dropped — they
+ * are not "cluster instances" by definition.
+ *
+ * The `repBucket` filter applies on a per-side basis: a session is kept
+ * if AT LEAST ONE side has at least one set falling in the bucket.
+ * (Spec ambiguity resolved — see header note.)
+ *
+ * @example
+ *   const all = await queryReusableSupersetHistory(db, rsId);
+ *   // all[0].sides[0] = A-side history within most recent paired session
+ *   // all[0].sides[1] = B-side history within the same session
+ */
+export async function queryReusableSupersetHistory(
+  db: Database,
+  reusableSupersetId: string,
+  options: QueryReusableSupersetHistoryOptions = {}
+): Promise<ReusableSupersetHistoryRow[]> {
+  const filter: ExerciseHistoryBucketFilter = options.repBucket ?? 'all';
+  const limit = options.limit ?? DEFAULT_LIMIT;
+  const offset = options.offset ?? 0;
+
+  // Step 1: resolve which 2 exercise_ids the superset comprises (position-ordered).
+  const slots = await db.getAllAsync<{
+    position: number;
+    exercise_id: string;
+    name: string;
+    load_type: LoadType;
+  }>(
+    `SELECT se.position, se.exercise_id, e.name, e.load_type
+       FROM superset_exercise se
+       JOIN exercise e ON e.id = se.exercise_id
+      WHERE se.superset_id = ?
+      ORDER BY se.position ASC`,
+    reusableSupersetId
+  );
+
+  // Defensive: if not exactly 2 slots, the superset is corrupted (UI prevents
+  // creation outside size=2). Treat as empty history rather than throwing —
+  // matches the "data quality" tolerance noted in supersetRepository.ts L91.
+  if (slots.length !== 2) return [];
+  const [slotA, slotB] = slots;
+
+  // Step 2: pull every (non-skipped) set whose session was started from a
+  //         template containing this reusable superset's exploded cluster.
+  //         Joining via session_exercise.template_id → template_exercise.
+  //         reusable_superset_id is the only path until v014.
+  type RawRow = {
+    set_id: string;
+    session_id: string;
+    session_started_at: number;
+    bw_snapshot_kg: number | null;
+    reps: number | null;
+    weight_kg: number | null;
+    ordering: number;
+    exercise_id: string;
+    load_type: LoadType;
+  };
+
+  const rawRows = await db.getAllAsync<RawRow>(
+    `SELECT DISTINCT
+            s.id           AS set_id,
+            s.session_id   AS session_id,
+            ss.started_at  AS session_started_at,
+            ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
+            s.reps         AS reps,
+            s.weight_kg    AS weight_kg,
+            s.ordering     AS ordering,
+            s.exercise_id  AS exercise_id,
+            e.load_type    AS load_type
+       FROM "set" s
+       JOIN session ss          ON ss.id = s.session_id
+       JOIN exercise e          ON e.id  = s.exercise_id
+       JOIN session_exercise se ON se.session_id  = s.session_id
+                               AND se.exercise_id = s.exercise_id
+       JOIN template_exercise te ON te.template_id = se.template_id
+                                AND te.exercise_id = s.exercise_id
+      WHERE te.reusable_superset_id = ?
+        AND s.is_skipped = 0
+        AND s.exercise_id IN (?, ?)
+      ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC`,
+    reusableSupersetId,
+    slotA.exercise_id,
+    slotB.exercise_id
+  );
+
+  // Step 3: group by session_id, partition by exercise_id, keep only sessions
+  //         where BOTH sides had at least one set.
+  interface Bucket {
+    session_id: string;
+    session_started_at: number;
+    bw_snapshot_kg: number | null;
+    sideA: ExerciseHistoryRow[];
+    sideB: ExerciseHistoryRow[];
+  }
+  const bySession = new Map<string, Bucket>();
+  const order: string[] = [];
+
+  for (const r of rawRows) {
+    let b = bySession.get(r.session_id);
+    if (!b) {
+      b = {
+        session_id: r.session_id,
+        session_started_at: r.session_started_at,
+        bw_snapshot_kg: r.bw_snapshot_kg,
+        sideA: [],
+        sideB: [],
+      };
+      bySession.set(r.session_id, b);
+      order.push(r.session_id);
+    }
+    const setRow: ExerciseHistoryRow = {
+      session_id: r.session_id,
+      session_started_at: r.session_started_at,
+      set_id: r.set_id,
+      reps: r.reps,
+      weight_kg: r.weight_kg,
+      set_kind: null,
+      rep_bucket: classifyBucket(r.reps),
+      ordering: r.ordering,
+      load_type: r.load_type,
+      bw_snapshot_kg: r.bw_snapshot_kg,
+    };
+    if (r.exercise_id === slotA.exercise_id) b.sideA.push(setRow);
+    else if (r.exercise_id === slotB.exercise_id) b.sideB.push(setRow);
+  }
+
+  const pairedSessions = order
+    .map((id) => bySession.get(id)!)
+    .filter((b) => b.sideA.length > 0 && b.sideB.length > 0);
+
+  // Step 4: apply rep bucket filter — keep the pair if EITHER side has at
+  //         least one matching set.
+  const bucketMatches = (rows: ExerciseHistoryRow[]): boolean => {
+    if (filter === 'all') return true;
+    return rows.some((r) => r.rep_bucket === filter);
+  };
+
+  const filtered = pairedSessions.filter(
+    (b) => bucketMatches(b.sideA) || bucketMatches(b.sideB)
+  );
+
+  // Step 5: pagination — already newest first (rawRows ORDER BY).
+  const page = filtered.slice(offset, offset + limit);
+
+  // Step 6: shape output.
+  return page.map((b) => ({
+    session_id: b.session_id,
+    session_started_at: b.session_started_at,
+    bw_snapshot_kg: b.bw_snapshot_kg,
+    sides: [
+      {
+        position: 0,
+        exercise_id: slotA.exercise_id,
+        exercise_name: slotA.name,
+        load_type: slotA.load_type,
+        sets: b.sideA,
+      },
+      {
+        position: 1,
+        exercise_id: slotB.exercise_id,
+        exercise_name: slotB.name,
+        load_type: slotB.load_type,
+        sets: b.sideB,
+      },
+    ],
+  }));
 }
 
 /**
