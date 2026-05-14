@@ -175,6 +175,33 @@ CREATE TABLE superset_exercise (
 
 ❌「動作類型」row（既有 v006 seed `exercise.load_type` 已 cover，UI 不顯示 type 選擇）
 
+**Slice 9.7 grill amendment (2026-05-14)** — Q11 原拍板沒寫 default / 必填 / 解剖圖 conditional render 規則，本 slice 實作前補拍板：
+
+**Default 規則**：
+- `load_type` 根據 equipment 推導：'自重' → 'bodyweight'；其他 → 'loaded'
+- INSERT 與 UPDATE 都 watch equipment 自動推；user 看不到也不需要懂 load_type 概念
+- `assisted` 不從表單建立（罕見，v006 seed 已 cover「Assisted Dip / Assisted Pull-up」）
+
+**必填規則**：
+- 名稱：必填（既有 dup-name + 空字串檢查）
+- 大分類：必填 — 砍既有 chip row 的「未指定」option（避免 ghost exercise；ADR Q13 4×3 grid 第 12 空格不互動）
+- 用具：必填 — default '其他' 當逃生口（既有，不變）
+- 訓練部位：**選填**（primary + secondary 都可空）
+
+**解剖圖 conditional render**：
+- primary.size === 0 AND secondary.size === 0 → 整個 `<BodyDiagram>` 不 render（chip section 仍顯示，section label 加「（選填）」）
+- 任一 ≥ 1 → render 既有 `<BodyDiagram>` + `<BodyDiagramLegend>` 並排在 chip section 上方
+- 避免 user 跳過訓練部位 row 後看到全灰人體圖的視覺尷尬
+
+**muscle section 排版（Slice 9.7 grill Q4 拍板）**：
+- 解剖圖 inline 頂端（既有 140×280 並排 layout）
+- chip section 限高 ScrollView（約 6 muscle 高 ~200px），內部 scroll；MG header 保留以維持心智模型
+- 整 muscle section 在 form outer ScrollView 內 ~480px 高度
+
+**互動模型（Slice 9.7 grill Q3 拍板）**：
+- chip row 為主要控制（既有 primary → secondary → off 三態 tap 切換保留）
+- 解剖圖 read-only sync — 不接 `onMusclePress` callback（避免 200×400 viewBox 小 muscle path 誤觸；既有 `<BodyDiagram>` 已支援但本 slice 不啟用）
+
 ### Q12：多選回填 Template 順序 (a)
 
 **拍板**：**選取順序**（user tap sequence）
@@ -184,10 +211,25 @@ CREATE TABLE superset_exercise (
 ### Q13：兩個 picker = bottom-sheet grid (b)
 
 **拍板**：
-- 大分類 picker：4×3 grid（11 MG 占 11 格、最後一格空）+ 底部「保存」button
-- 用具分類 picker：4×2 grid（8 Equipment 占滿 8 格）+ 底部「保存」button
+- 大分類 picker：4×3 grid（11 MG 占 11 格、最後一格空）+ 底部「保存」button（**Slice 9.7 修訂**：砍底部「保存」button，tap 即選即 commit；見下方修訂段）
+- 用具分類 picker：4×2 grid（8 Equipment 占滿 8 格）+ 底部「保存」button（**Slice 9.7 修訂**：同上，砍「保存」button）
 - 視覺：圓角矩形 radius 12 / 深灰底 rgba(127,127,127,0.15) / active 填綠 #34C759 / grid gap 12 (對齊 ADR-0016 12-color picker)
-- Drag handle + 頂部標題 + 右上 ✕
+- Drag handle + 頂部標題 + 右上 ✕（**Slice 9.7 修訂**：對齊既有 12-color picker idiom — 砍 drag handle，右上 ✕ 改為「完成」button；見下方修訂段）
+
+**Slice 9.7 grill amendment (2026-05-14)** — chrome 對齊既有 12-color picker idiom：
+
+ADR Q13 line 189 自己寫「對齊 ADR-0016 12-color picker」，但拍板的 chrome（drag handle + 保存 button + 右上 ✕）跟既有 12-color picker (`components/template-editor/template-editor-view.tsx:1310`) 對不上。實作以既有 idiom 為準：
+
+- Sheet 頂部：title「選擇大分類 / 選擇用具」+ 右上「完成」button
+- ❌ 無 drag handle
+- ❌ 無底部「保存」button — tap 格子立即 setState + 視覺 active；視覺對齊既有「色塊 tap 即選」UX
+- tap「完成」或 backdrop 外點 → close sheet（已選值保留，tap 即 commit 語義）
+- 既有 styles 可直接複用：`sheetBackdrop` / `sheet` / `sheetHeader` / `sheetTitle` / `sheetDone` — 只需新增 `mgGrid` / `mgCell` / `equipmentGrid` / `equipmentCell`
+
+**翻盤的既有拍板**：
+- ❌ Q13 line 187/188「+ 底部「保存」button」— 砍掉
+- ❌ Q13 line 190「Drag handle」— 砍掉
+- ⚠️ Q13 line 190「右上 ✕」→ 改「右上完成」(close + commit 語義一致)
 
 ### Q14：圖表頁 metrics + rep bucket filter
 
