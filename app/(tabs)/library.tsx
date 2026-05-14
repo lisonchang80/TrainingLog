@@ -266,6 +266,11 @@ export default function LibraryScreen() {
               cardHeight={cardHeight}
               onTap={onSupersetCardTap}
               selection={isPickerMode ? supersetSelection : null}
+              onInfoPress={
+                isPickerMode
+                  ? (s) => router.push(`/superset/${s.superset.id}`)
+                  : null
+              }
             />
           ) : (
             <>
@@ -619,6 +624,7 @@ function SupersetGrid({
   cardHeight,
   onTap,
   selection,
+  onInfoPress,
 }: {
   supersets: ReusableSupersetWithExercises[];
   cardWidth: number;
@@ -626,6 +632,8 @@ function SupersetGrid({
   onTap: (s: ReusableSupersetWithExercises) => void;
   /** Non-null = picker mode (toggle on tap, render badge); null = browse mode. */
   selection: readonly string[] | null;
+  /** Non-null = picker mode (render ⓘ for detail preview); null = browse mode. */
+  onInfoPress: ((s: ReusableSupersetWithExercises) => void) | null;
 }) {
   if (supersets.length === 0) {
     return (
@@ -655,6 +663,7 @@ function SupersetGrid({
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].superset.id) : false}
             rank={rankOf(pair[0])}
+            onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
             <SupersetCard
@@ -664,6 +673,7 @@ function SupersetGrid({
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].superset.id) : false}
               rank={rankOf(pair[1])}
+              onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
             <View style={{ width: cardWidth, height: cardHeight }} />
@@ -681,6 +691,7 @@ function SupersetCard({
   onPress,
   selected,
   rank,
+  onInfoPress,
 }: {
   item: ReusableSupersetWithExercises;
   width: number;
@@ -688,6 +699,7 @@ function SupersetCard({
   onPress: () => void;
   selected: boolean;
   rank: number;
+  onInfoPress: (() => void) | null;
 }) {
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
@@ -720,6 +732,19 @@ function SupersetCard({
       <Text style={styles.cardName} numberOfLines={2}>
         {superset.name}
       </Text>
+      {onInfoPress && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="查看超級組詳情"
+          onPress={onInfoPress}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.infoBtn,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.infoBtnText}>ⓘ</Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 }
