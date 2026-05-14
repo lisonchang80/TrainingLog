@@ -26,7 +26,7 @@
  *   4. Diagonals fan out from rail; preserve order → no two cross
  *   5. Horizontal segments all at distinct labelY → no horizontal crosses
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
@@ -115,23 +115,67 @@ const btnStyleFor = (role: MuscleRole | undefined) => {
 
 interface MuscleDiagramTaggedProps {
   highlight: Map<string, MuscleRole>;
-  onTap: (muscleId: string) => void;
+  onTap?: (muscleId: string) => void;
+  /**
+   * 'edit' (default) — all 19 muscle buttons rendered, tappable, with shadow.
+   * 'readonly' — only selected (primary or secondary) muscles get labels;
+   * labelY redistributed evenly within the lane; no button background or
+   * shadow; smaller text. Used on the exercise detail page.
+   */
+  mode?: 'edit' | 'readonly';
 }
 
-export function MuscleDiagramTagged({ highlight, onTap }: MuscleDiagramTaggedProps) {
+function repackLabels(source: readonly MuscleAnchor[], highlight: Map<string, MuscleRole>): MuscleAnchor[] {
+  const selected = source.filter((m) => highlight.has(m.muscle_id));
+  if (selected.length === 0) return [];
+  const yMin = 60;
+  const yMax = 480;
+  if (selected.length === 1) {
+    return [{ ...selected[0], labelY: (yMin + yMax) / 2 }];
+  }
+  const step = (yMax - yMin) / (selected.length - 1);
+  return selected.map((m, i) => ({ ...m, labelY: yMin + i * step }));
+}
+
+export function MuscleDiagramTagged({
+  highlight,
+  onTap,
+  mode = 'edit',
+}: MuscleDiagramTaggedProps) {
   const f = (id: string) => fillFor(highlight, id);
-  const tapBoundFor = (id: string) => () => onTap(id);
+  const tapBoundFor = (id: string) => onTap ? () => onTap(id) : undefined;
+
+  const frontMuscles = useMemo(
+    () => (mode === 'readonly' ? repackLabels(FRONT_MUSCLES, highlight) : [...FRONT_MUSCLES]),
+    [mode, highlight]
+  );
+  const backMuscles = useMemo(
+    () => (mode === 'readonly' ? repackLabels(BACK_MUSCLES, highlight) : [...BACK_MUSCLES]),
+    [mode, highlight]
+  );
 
   return (
     <View>
       <View style={styles.row}>
-        <FrontView highlight={highlight} fillFor={f} onTap={tapBoundFor} />
-        <BackView highlight={highlight} fillFor={f} onTap={tapBoundFor} />
+        <FrontView
+          muscles={frontMuscles}
+          highlight={highlight}
+          fillFor={f}
+          onTap={tapBoundFor}
+          mode={mode}
+        />
+        <BackView
+          muscles={backMuscles}
+          highlight={highlight}
+          fillFor={f}
+          onTap={tapBoundFor}
+          mode={mode}
+        />
       </View>
       <View style={styles.legendRow}>
         <LegendItem color={COLOR_PRIMARY} label="主要" />
         <LegendItem color={COLOR_SECONDARY} label="次要" />
-        <LegendItem color={COLOR_INACTIVE} label="未活化" />
+        {mode === 'edit' && <LegendItem color={COLOR_INACTIVE} label="未活化" />}
       </View>
     </View>
   );
@@ -152,12 +196,14 @@ function LegendItem({ color, label }: { color: string; label: string }) {
 }
 
 interface ViewSubProps {
+  muscles: MuscleAnchor[];
   highlight: Map<string, MuscleRole>;
   fillFor: (id: string) => string;
-  onTap: (id: string) => () => void;
+  onTap: (id: string) => (() => void) | undefined;
+  mode: 'edit' | 'readonly';
 }
 
-function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
+function FrontView({ muscles, highlight, fillFor, onTap, mode }: ViewSubProps) {
   return (
     <Svg viewBox={`-120 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} width={SVG_WIDTH} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -177,59 +223,103 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
       <Path d="M70 318 L94 318 L92 326 L72 326 Z M106 318 L130 318 L128 326 L108 326 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z" fill={fillFor('m-calf')} stroke={COLOR_OUTLINE} strokeWidth={0.5} />
 
-      {FRONT_MUSCLES.map((m) => {
-        const role = highlight.get(m.muscle_id);
-        const btn = btnStyleFor(role);
-        const buttonRightEdge = FRONT_LABEL_X + BUTTON_WIDTH;
-        const buttonTop = m.labelY - BUTTON_HEIGHT / 2;
-        return (
-          <React.Fragment key={m.muscle_id}>
-            <Polyline
-              points={`${buttonRightEdge},${m.labelY} ${FRONT_RAIL_X},${m.labelY} ${m.anchorX},${m.anchorY}`}
-              stroke={COLOR_LEADER}
-              strokeWidth={0.7}
-              fill="none"
-            />
-            {/* drop shadow (offset darker rect behind the button) */}
-            <Rect
-              x={FRONT_LABEL_X + SHADOW_DX}
-              y={buttonTop + SHADOW_DY}
-              width={BUTTON_WIDTH}
-              height={BUTTON_HEIGHT}
-              rx={6}
-              ry={6}
-              fill={SHADOW_FILL}
-            />
-            <Rect
-              x={FRONT_LABEL_X}
-              y={buttonTop}
-              width={BUTTON_WIDTH}
-              height={BUTTON_HEIGHT}
-              rx={6}
-              ry={6}
-              fill={btn.fill}
-              stroke={btn.stroke}
-              strokeWidth={1.2}
-              onPress={onTap(m.muscle_id)}
-            />
-            <SvgText
-              x={FRONT_LABEL_X + BUTTON_WIDTH / 2}
-              y={m.labelY + FONT_SIZE / 3}
-              fontSize={FONT_SIZE}
-              fontWeight="600"
-              fill={btn.text}
-              textAnchor="middle"
-              onPress={onTap(m.muscle_id)}>
-              {m.short}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
+      {muscles.map((m) => (
+        <LabelGroup
+          key={m.muscle_id}
+          muscle={m}
+          role={highlight.get(m.muscle_id)}
+          side="left"
+          mode={mode}
+          onTap={onTap(m.muscle_id)}
+        />
+      ))}
     </Svg>
   );
 }
 
-function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
+interface LabelGroupProps {
+  muscle: MuscleAnchor;
+  role: MuscleRole | undefined;
+  side: 'left' | 'right';
+  mode: 'edit' | 'readonly';
+  onTap: (() => void) | undefined;
+}
+
+function LabelGroup({ muscle, role, side, mode, onTap }: LabelGroupProps) {
+  const btn = btnStyleFor(role);
+  const labelX = side === 'left' ? FRONT_LABEL_X : BACK_LABEL_X;
+  const railX = side === 'left' ? FRONT_RAIL_X : BACK_RAIL_X;
+  const polylineStart = side === 'left' ? labelX + BUTTON_WIDTH : labelX;
+
+  if (mode === 'readonly') {
+    // Read-only: just leader line + text, no button background/shadow.
+    const fs = 22; // smaller than edit mode (28)
+    return (
+      <>
+        <Polyline
+          points={`${polylineStart},${muscle.labelY} ${railX},${muscle.labelY} ${muscle.anchorX},${muscle.anchorY}`}
+          stroke={COLOR_LEADER}
+          strokeWidth={0.7}
+          fill="none"
+        />
+        <SvgText
+          x={labelX + BUTTON_WIDTH / 2}
+          y={muscle.labelY + fs / 3}
+          fontSize={fs}
+          fontWeight="600"
+          fill={btn.text}
+          textAnchor="middle">
+          {muscle.short}
+        </SvgText>
+      </>
+    );
+  }
+
+  const buttonTop = muscle.labelY - BUTTON_HEIGHT / 2;
+  return (
+    <>
+      <Polyline
+        points={`${polylineStart},${muscle.labelY} ${railX},${muscle.labelY} ${muscle.anchorX},${muscle.anchorY}`}
+        stroke={COLOR_LEADER}
+        strokeWidth={0.7}
+        fill="none"
+      />
+      <Rect
+        x={labelX + SHADOW_DX}
+        y={buttonTop + SHADOW_DY}
+        width={BUTTON_WIDTH}
+        height={BUTTON_HEIGHT}
+        rx={6}
+        ry={6}
+        fill={SHADOW_FILL}
+      />
+      <Rect
+        x={labelX}
+        y={buttonTop}
+        width={BUTTON_WIDTH}
+        height={BUTTON_HEIGHT}
+        rx={6}
+        ry={6}
+        fill={btn.fill}
+        stroke={btn.stroke}
+        strokeWidth={1.2}
+        onPress={onTap}
+      />
+      <SvgText
+        x={labelX + BUTTON_WIDTH / 2}
+        y={muscle.labelY + FONT_SIZE / 3}
+        fontSize={FONT_SIZE}
+        fontWeight="600"
+        fill={btn.text}
+        textAnchor="middle"
+        onPress={onTap}>
+        {muscle.short}
+      </SvgText>
+    </>
+  );
+}
+
+function BackView({ muscles, highlight, fillFor, onTap, mode }: ViewSubProps) {
   return (
     <Svg viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} width={SVG_WIDTH} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -250,54 +340,16 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
       {/* Calf — highlights on back view too (label promoted to back per UX rebalance) */}
       <Path d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z" fill={fillFor('m-calf')} stroke={COLOR_OUTLINE} strokeWidth={0.5} />
 
-      {BACK_MUSCLES.map((m) => {
-        const role = highlight.get(m.muscle_id);
-        const btn = btnStyleFor(role);
-        const buttonLeftEdge = BACK_LABEL_X;
-        const buttonTop = m.labelY - BUTTON_HEIGHT / 2;
-        return (
-          <React.Fragment key={m.muscle_id}>
-            <Polyline
-              points={`${buttonLeftEdge},${m.labelY} ${BACK_RAIL_X},${m.labelY} ${m.anchorX},${m.anchorY}`}
-              stroke={COLOR_LEADER}
-              strokeWidth={0.7}
-              fill="none"
-            />
-            {/* drop shadow */}
-            <Rect
-              x={BACK_LABEL_X + SHADOW_DX}
-              y={buttonTop + SHADOW_DY}
-              width={BUTTON_WIDTH}
-              height={BUTTON_HEIGHT}
-              rx={6}
-              ry={6}
-              fill={SHADOW_FILL}
-            />
-            <Rect
-              x={BACK_LABEL_X}
-              y={buttonTop}
-              width={BUTTON_WIDTH}
-              height={BUTTON_HEIGHT}
-              rx={6}
-              ry={6}
-              fill={btn.fill}
-              stroke={btn.stroke}
-              strokeWidth={1.2}
-              onPress={onTap(m.muscle_id)}
-            />
-            <SvgText
-              x={BACK_LABEL_X + BUTTON_WIDTH / 2}
-              y={m.labelY + FONT_SIZE / 3}
-              fontSize={FONT_SIZE}
-              fontWeight="600"
-              fill={btn.text}
-              textAnchor="middle"
-              onPress={onTap(m.muscle_id)}>
-              {m.short}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
+      {muscles.map((m) => (
+        <LabelGroup
+          key={m.muscle_id}
+          muscle={m}
+          role={highlight.get(m.muscle_id)}
+          side="right"
+          mode={mode}
+          onTap={onTap(m.muscle_id)}
+        />
+      ))}
     </Svg>
   );
 }
