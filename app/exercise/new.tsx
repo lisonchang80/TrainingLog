@@ -1,5 +1,5 @@
 import * as Crypto from 'expo-crypto';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -126,6 +126,19 @@ export default function NewExerciseScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen
+        options={{
+          title: '新增自訂動作',
+          headerLeft: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="取消"
+              onPress={() => router.back()}>
+              <Text style={styles.headerCancel}>取消</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>新增自訂動作</Text>
 
@@ -267,6 +280,11 @@ export default function NewExerciseScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  headerCancel: {
+    color: '#0a7ea4',
+    fontSize: 17,
+    paddingHorizontal: 8,
+  },
   body: { padding: 20, gap: 8 },
   heading: { fontSize: 24, fontWeight: '700', marginBottom: 12 },
   label: {
