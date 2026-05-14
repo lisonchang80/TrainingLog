@@ -43,8 +43,21 @@ export default function EditSupersetScreen() {
   const [saving, setSaving] = useState(false);
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: '編輯超級組' });
-  }, [navigation]);
+    navigation.setOptions({
+      title: '編輯超級組',
+      // Modal presentation has no native back arrow on iOS — surface an
+      // explicit「取消」on the left so user can dismiss without learning
+      // the swipe-down gesture.
+      headerLeft: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="取消"
+          onPress={() => router.back()}>
+          <Text style={styles.headerCancel}>取消</Text>
+        </Pressable>
+      ),
+    });
+  }, [navigation, router]);
 
   useEffect(() => {
     if (!id) return;
@@ -150,4 +163,5 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { backgroundColor: 'rgba(127,127,127,0.3)' },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   pressed: { opacity: 0.7 },
+  headerCancel: { fontSize: 16, color: '#007AFF', paddingHorizontal: 12 },
 });
