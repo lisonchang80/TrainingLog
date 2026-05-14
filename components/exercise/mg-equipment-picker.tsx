@@ -48,7 +48,7 @@ export function MgEquipmentPicker({
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
-              <Text style={styles.done}>完成</Text>
+              <Text style={styles.done}>取消</Text>
             </Pressable>
           </View>
           <View style={styles.grid}>
@@ -57,7 +57,10 @@ export function MgEquipmentPicker({
               return (
                 <Pressable
                   key={cell.id}
-                  onPress={() => onSelect(cell.id)}
+                  onPress={() => {
+                    onSelect(cell.id);
+                    onClose();
+                  }}
                   style={[styles.cell, isSelected && styles.cellActive]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: isSelected }}>
