@@ -50,6 +50,18 @@ export default function RootLayout() {
             name="exercise-picker"
             options={{ headerShown: false }}
           />
+          <Stack.Screen
+            name="superset/new"
+            options={{ presentation: 'modal', headerShown: false }}
+          />
+          <Stack.Screen
+            name="superset/[id]"
+            options={{ title: '超級組' }}
+          />
+          <Stack.Screen
+            name="superset/edit/[id]"
+            options={{ presentation: 'modal', title: '編輯超級組' }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
