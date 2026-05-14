@@ -44,9 +44,11 @@ const BTN = {
   secondary: { fill: '#BFDBFE', stroke: '#7CB6E0', text: '#1E40AF' },
 };
 
-const BUTTON_WIDTH = 85;
-const BUTTON_HEIGHT = 28;
-const FONT_SIZE = 22;
+const BUTTON_WIDTH = 95;
+const BUTTON_HEIGHT = 40;
+const FONT_SIZE = 28;
+const SVG_HEIGHT = 290; // viewBox y=500 / aspect ratio matched
+const VIEWBOX_HEIGHT = 500;
 
 interface MuscleAnchor {
   muscle_id: string;
@@ -56,31 +58,31 @@ interface MuscleAnchor {
   labelY: number; // labelX derived per-side constant
 }
 
-// FRONT — sorted by anchorY ASC; labelY distributed at 30-unit intervals (y 80–380).
+// FRONT — sorted by anchorY ASC; labelY spaced 44 units (button h 40 + gap 4).
 const FRONT_MUSCLES: readonly MuscleAnchor[] = [
-  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelY: 80 },
-  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 110 },
-  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 140 },
-  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 170 },
-  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 200 },
-  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 230 },
-  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 260 },
-  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelY: 290 },
-  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelY: 320 },
-  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelY: 350 },
-  { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelY: 380 },
+  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelY: 40 },
+  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 84 },
+  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 128 },
+  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 172 },
+  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 216 },
+  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 260 },
+  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 304 },
+  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelY: 348 },
+  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelY: 392 },
+  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelY: 436 },
+  { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelY: 480 },
 ];
 
-// BACK — sorted by anchorY ASC; labelY at 40-unit intervals (more room, 8 labels).
+// BACK — 8 labels with more breathing room, spaced 56 units (button h 40 + gap 16).
 const BACK_MUSCLES: readonly MuscleAnchor[] = [
-  { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelY: 90 },
-  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 130 },
-  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 170 },
-  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 210 },
-  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 250 },
-  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 290 },
-  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 330 },
-  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 370 },
+  { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelY: 80 },
+  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 136 },
+  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 192 },
+  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 248 },
+  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 304 },
+  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 360 },
+  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 416 },
+  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 472 },
 ];
 
 const FRONT_LABEL_X = -95;
@@ -147,7 +149,7 @@ interface ViewSubProps {
 
 function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox="-100 0 300 400" width={174} height={232}>
+    <Svg viewBox={`-100 0 300 ${VIEWBOX_HEIGHT}`} width={174} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -208,7 +210,7 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
 
 function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox="0 0 305 400" width={174} height={232}>
+    <Svg viewBox={`0 0 305 ${VIEWBOX_HEIGHT}`} width={174} height={SVG_HEIGHT}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
