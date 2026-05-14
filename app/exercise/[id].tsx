@@ -90,6 +90,7 @@ export default function ExerciseDetailScreen() {
         <Text style={styles.subheading}>
           {mg ? `${mg.name} · ` : ''}
           {LOAD_TYPE_LABEL[data.exercise.load_type] ?? data.exercise.load_type}
+          {` · ${data.exercise.equipment}`}
           {data.exercise.is_custom === 1 ? ' · 自訂' : ''}
         </Text>
 
