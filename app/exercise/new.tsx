@@ -126,8 +126,11 @@ export default function NewExerciseScreen() {
     }
     setBusy(true);
     try {
-      const id = await createCustomExercise(db, draft, () => Crypto.randomUUID());
-      router.replace(`/exercise/${id}`);
+      await createCustomExercise(db, draft, () => Crypto.randomUUID());
+      // Dismiss the modal — caller's useFocusEffect (Library / picker) will
+      // refresh and the new exercise appears in the grid. Avoids stranding
+      // the user on a detail page from which back-arrow is the only exit.
+      router.back();
     } catch (err) {
       Alert.alert('儲存失敗', err instanceof Error ? err.message : String(err));
     } finally {
