@@ -1194,7 +1194,7 @@ export default function TemplateEditorView() {
               style={styles.exHeaderTapZone}
               hitSlop={4}>
               <Text style={styles.supersetTag}>超級組</Text>
-              <Text style={styles.supersetNames} numberOfLines={1}>
+              <Text style={styles.supersetNames} numberOfLines={2}>
                 {allNames}
               </Text>
               <View style={styles.flexFill} />
