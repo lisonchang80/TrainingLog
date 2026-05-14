@@ -83,11 +83,14 @@ const FRONT_MUSCLES: readonly MuscleAnchor[] = [
 ];
 
 // BACK — 8 labels with more breathing room, spaced 56 units (button h 40 + gap 16).
+// Cluster ordering: 下背 right under 背部 (back-group cluster, per user).
+// 三頭 also promoted above 背部 to keep the back-cluster contiguous without
+// introducing line crossings. Verified all 28 pairs are crossing-free.
 const BACK_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelY: 80 },
   { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 136 },
-  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 192 },
-  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 248 },
+  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 192 },
+  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 248 },
   { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 304 },
   { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 360 },
   { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 416 },
