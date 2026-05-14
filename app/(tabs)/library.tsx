@@ -203,12 +203,35 @@ export default function LibraryScreen() {
   };
 
   const onSupersetCardTap = (s: ReusableSupersetWithExercises) => {
+    // eslint-disable-next-line no-console
+    console.log(
+      '[9.8b debug] onSupersetCardTap',
+      'isPickerMode=',
+      isPickerMode,
+      'isSupersetTab=',
+      isSupersetTab,
+      'params=',
+      params,
+      'supersetId=',
+      s.superset.id
+    );
     if (isPickerMode) {
       setSupersetSelection((prev) => toggleSelection(prev, s.superset.id));
     } else {
       router.push(`/superset/${s.superset.id}`);
     }
   };
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '[9.8b debug] LibraryScreen render',
+    'isPickerMode=',
+    isPickerMode,
+    'isSupersetTab=',
+    isSupersetTab,
+    'paramsMode=',
+    params.mode
+  );
 
   const pickerTotal = selection.length + supersetSelection.length;
 
