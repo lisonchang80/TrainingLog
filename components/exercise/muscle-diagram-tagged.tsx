@@ -20,7 +20,7 @@
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Line as SvgLine, Path, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import type { MuscleRole } from '@/src/domain/exercise/types';
 
@@ -42,31 +42,31 @@ interface MuscleAnchor {
   labelY: number;
 }
 
-// Front view labels — 11 chips on the LEFT lane (x range -90 to 0 in viewBox).
+// Front view labels — 11 chips on the LEFT lane. labelY spacing 24 to fit fontSize 16.
 const FRONT_MUSCLES: readonly MuscleAnchor[] = [
-  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelX: -88, labelY: 100 },
-  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelX: -88, labelY: 120 },
-  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelX: -88, labelY: 140 },
-  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelX: -88, labelY: 160 },
-  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelX: -88, labelY: 180 },
-  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelX: -88, labelY: 200 },
-  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelX: -88, labelY: 220 },
-  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelX: -88, labelY: 240 },
-  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelX: -88, labelY: 260 },
-  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelX: -88, labelY: 300 },
+  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelX: -88, labelY: 95 },
+  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelX: -88, labelY: 119 },
+  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelX: -88, labelY: 143 },
+  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelX: -88, labelY: 167 },
+  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelX: -88, labelY: 191 },
+  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelX: -88, labelY: 215 },
+  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelX: -88, labelY: 239 },
+  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelX: -88, labelY: 263 },
+  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelX: -88, labelY: 287 },
+  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelX: -88, labelY: 318 },
   { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelX: -88, labelY: 360 },
 ];
 
-// Back view labels — 8 chips on the RIGHT lane (x range 200 to 290 in viewBox).
+// Back view labels — 8 chips on the RIGHT lane. More vertical breathing room than front.
 const BACK_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelX: 212, labelY: 100 },
-  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelX: 212, labelY: 122 },
-  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelX: 212, labelY: 144 },
-  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelX: 212, labelY: 180 },
-  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelX: 212, labelY: 210 },
-  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelX: 212, labelY: 240 },
-  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelX: 212, labelY: 270 },
-  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelX: 212, labelY: 310 },
+  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelX: 212, labelY: 130 },
+  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelX: 212, labelY: 160 },
+  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelX: 212, labelY: 190 },
+  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelX: 212, labelY: 220 },
+  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelX: 212, labelY: 255 },
+  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelX: 212, labelY: 285 },
+  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelX: 212, labelY: 320 },
 ];
 
 const fillFor = (highlight: Map<string, MuscleRole>, muscleId: string): string => {
@@ -148,20 +148,20 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
 
       {FRONT_MUSCLES.map((m) => {
         const role = highlight.get(m.muscle_id);
+        // L-shape leader: label right edge → horizontal to above anchor → vertical down/up to anchor
+        const labelRightEdge = m.labelX + 70;
         return (
           <React.Fragment key={m.muscle_id}>
-            <SvgLine
-              x1={m.anchorX}
-              y1={m.anchorY}
-              x2={m.labelX + 60}
-              y2={m.labelY}
+            <Polyline
+              points={`${labelRightEdge},${m.labelY} ${m.anchorX},${m.labelY} ${m.anchorX},${m.anchorY}`}
               stroke={COLOR_LEADER}
               strokeWidth={0.6}
+              fill="none"
             />
             <SvgText
               x={m.labelX}
-              y={m.labelY + 4}
-              fontSize={11}
+              y={m.labelY + 6}
+              fontSize={16}
               fontWeight="600"
               fill={labelColorFor(role)}
               textAnchor="start">
@@ -169,9 +169,9 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
             </SvgText>
             <Rect
               x={m.labelX - 2}
-              y={m.labelY - 10}
-              width={62}
-              height={20}
+              y={m.labelY - 12}
+              width={72}
+              height={26}
               fill="transparent"
               onPress={onTap(m.muscle_id)}
             />
@@ -204,20 +204,20 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
 
       {BACK_MUSCLES.map((m) => {
         const role = highlight.get(m.muscle_id);
+        // L-shape leader: label left edge → horizontal to above anchor → vertical down/up to anchor
+        const labelLeftEdge = m.labelX - 4;
         return (
           <React.Fragment key={m.muscle_id}>
-            <SvgLine
-              x1={m.anchorX}
-              y1={m.anchorY}
-              x2={m.labelX - 4}
-              y2={m.labelY}
+            <Polyline
+              points={`${labelLeftEdge},${m.labelY} ${m.anchorX},${m.labelY} ${m.anchorX},${m.anchorY}`}
               stroke={COLOR_LEADER}
               strokeWidth={0.6}
+              fill="none"
             />
             <SvgText
               x={m.labelX}
-              y={m.labelY + 4}
-              fontSize={11}
+              y={m.labelY + 6}
+              fontSize={16}
               fontWeight="600"
               fill={labelColorFor(role)}
               textAnchor="start">
@@ -225,9 +225,9 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
             </SvgText>
             <Rect
               x={m.labelX - 2}
-              y={m.labelY - 10}
-              width={62}
-              height={20}
+              y={m.labelY - 12}
+              width={72}
+              height={26}
               fill="transparent"
               onPress={onTap(m.muscle_id)}
             />
