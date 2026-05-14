@@ -1,6 +1,6 @@
-import { useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BodyDiagram, BodyDiagramLegend } from '@/components/body-diagram';
@@ -33,6 +33,7 @@ const LOAD_TYPE_LABEL: Record<string, string> = {
 export default function ExerciseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
+  const router = useRouter();
   const [data, setData] = useState<ExerciseWithMuscles | null>(null);
   const [highlight, setHighlight] = useState<Map<string, MuscleRole>>(new Map());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -53,9 +54,23 @@ export default function ExerciseDetailScreen() {
     refresh();
   }, [refresh]);
 
+  const screenOptions = {
+    title: '動作詳情',
+    headerBackTitle: '返回',
+    headerRight: () => (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="完成"
+        onPress={() => router.back()}>
+        <Text style={styles.headerDone}>完成</Text>
+      </Pressable>
+    ),
+  };
+
   if (!data) {
     return (
       <SafeAreaView style={styles.container}>
+        <Stack.Screen options={screenOptions} />
         <View style={styles.body}>
           <Text style={styles.placeholder}>動作不存在或已封存。</Text>
         </View>
@@ -69,6 +84,7 @@ export default function ExerciseDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen options={screenOptions} />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>{data.exercise.name}</Text>
         <Text style={styles.subheading}>
@@ -145,4 +161,10 @@ const styles = StyleSheet.create({
   },
   muscleChipText: { fontSize: 13 },
   empty: { fontSize: 13, opacity: 0.5, fontStyle: 'italic' },
+  headerDone: {
+    color: '#0a7ea4',
+    fontSize: 17,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+  },
 });
