@@ -1,22 +1,30 @@
 /**
- * MuscleDiagramTagged — Slice 9.7 (ADR-0017 Q11 amendment, layout iteration).
+ * MuscleDiagramTagged — Slice 9.7 (ADR-0017 Q11 amendment, layout iteration v2).
  *
- * Combines body paths + 19 muscle labels arranged around the diagram with
- * leader lines (anatomical-textbook style). Replaces the prior
- * "BodyDiagram + chip ScrollView" pair in the Custom Exercise form so the
- * user can tap muscle labels next to where they live on the body, with both
- * front + back visible at once.
+ * Front + back bodies side-by-side with **button-style** muscle labels
+ * connected to anatomical anchors via two-segment leader lines (horizontal
+ * from button → diagonal to anchor). Fan layout — labels sorted by anchorY
+ * + rail-then-diagonal guarantees no leader line crossings.
  *
  * Layout:
- *   - Two Svgs side-by-side
- *   - Front view (left): viewBox extended LEFT for 11 chips on the left lane
- *   - Back view (right): viewBox extended RIGHT for 8 chips on the right lane
- *   - Each chip = SvgText + invisible Rect (larger tap target) + SvgLine to anchor
- *   - Tap chip → onTap(muscle_id) — caller cycles unselected → primary → secondary → off
+ *   - SVG width 174 each + 2pt gap = 350pt total (fits iPhone 14 content width)
+ *   - viewBox width 300 → fontSize 22 in viewBox ≈ 13pt rendered (comfortable)
+ *   - Front: labels on LEFT lane (viewBox -100 to 0), rail at x=5
+ *   - Back: labels on RIGHT lane (viewBox 200 to 305), rail at x=195
+ *   - Each label = filled Rect button with rounded corners + Text overlay
+ *   - Tap Rect entire button (no separate transparent overlay)
  *
- * Body path data inline-copied from body-diagram.tsx FrontBody / BackBody
- * (~80 lines each). Future refactor: extract paths into a shared "BodyPaths"
- * sub-component that both diagrams render inside their own Svg wrapper.
+ * Active state visual:
+ *   primary  → orange fill + orange border + dark-orange text
+ *   secondary → blue fill + blue border + dark-blue text
+ *   inactive → grey fill + grey border + grey text
+ *
+ * Fan layout (no crossings, proven):
+ *   1. Labels sorted by anchorY ASC so top label connects to topmost anchor
+ *   2. labelY distributed evenly within available y range
+ *   3. Polyline: (labelEdge, labelY) → (rail, labelY) → (anchorX, anchorY)
+ *   4. Diagonals fan out from rail; preserve order → no two cross
+ *   5. Horizontal segments all at distinct labelY → no horizontal crosses
  */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -28,46 +36,57 @@ const COLOR_PRIMARY = '#F26B3A';
 const COLOR_SECONDARY = '#7CB6E0';
 const COLOR_INACTIVE = '#E5E5EA';
 const COLOR_OUTLINE = '#9CA3AF';
-const COLOR_LABEL_INACTIVE = '#374151';
-const COLOR_LABEL_PRIMARY = '#C2410C';
-const COLOR_LABEL_SECONDARY = '#1E40AF';
 const COLOR_LEADER = '#9CA3AF';
+
+const BTN = {
+  inactive: { fill: '#F3F4F6', stroke: '#D1D5DB', text: '#374151' },
+  primary: { fill: '#FED7AA', stroke: '#F26B3A', text: '#C2410C' },
+  secondary: { fill: '#BFDBFE', stroke: '#7CB6E0', text: '#1E40AF' },
+};
+
+const BUTTON_WIDTH = 85;
+const BUTTON_HEIGHT = 28;
+const FONT_SIZE = 22;
 
 interface MuscleAnchor {
   muscle_id: string;
   short: string;
   anchorX: number;
   anchorY: number;
-  labelX: number;
-  labelY: number;
+  labelY: number; // labelX derived per-side constant
 }
 
-// Front view labels — 11 chips on the LEFT lane. labelY spacing 24 to fit fontSize 16.
+// FRONT — sorted by anchorY ASC; labelY distributed at 30-unit intervals (y 80–380).
 const FRONT_MUSCLES: readonly MuscleAnchor[] = [
-  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelX: -88, labelY: 95 },
-  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelX: -88, labelY: 119 },
-  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelX: -88, labelY: 143 },
-  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelX: -88, labelY: 167 },
-  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelX: -88, labelY: 191 },
-  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelX: -88, labelY: 215 },
-  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelX: -88, labelY: 239 },
-  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelX: -88, labelY: 263 },
-  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelX: -88, labelY: 287 },
-  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelX: -88, labelY: 318 },
-  { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelX: -88, labelY: 360 },
+  { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelY: 80 },
+  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 110 },
+  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 140 },
+  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 170 },
+  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 200 },
+  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 230 },
+  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 260 },
+  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelY: 290 },
+  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelY: 320 },
+  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelY: 350 },
+  { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelY: 380 },
 ];
 
-// Back view labels — 8 chips on the RIGHT lane. More vertical breathing room than front.
+// BACK — sorted by anchorY ASC; labelY at 40-unit intervals (more room, 8 labels).
 const BACK_MUSCLES: readonly MuscleAnchor[] = [
-  { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelX: 212, labelY: 100 },
-  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelX: 212, labelY: 130 },
-  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelX: 212, labelY: 160 },
-  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelX: 212, labelY: 190 },
-  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelX: 212, labelY: 220 },
-  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelX: 212, labelY: 255 },
-  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelX: 212, labelY: 285 },
-  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelX: 212, labelY: 320 },
+  { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelY: 90 },
+  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 130 },
+  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 170 },
+  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 210 },
+  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 250 },
+  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 290 },
+  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 330 },
+  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 370 },
 ];
+
+const FRONT_LABEL_X = -95;
+const FRONT_RAIL_X = 5;
+const BACK_LABEL_X = 213;
+const BACK_RAIL_X = 195;
 
 const fillFor = (highlight: Map<string, MuscleRole>, muscleId: string): string => {
   const role = highlight.get(muscleId);
@@ -76,10 +95,10 @@ const fillFor = (highlight: Map<string, MuscleRole>, muscleId: string): string =
   return COLOR_INACTIVE;
 };
 
-const labelColorFor = (role: MuscleRole | undefined): string => {
-  if (role === 'primary') return COLOR_LABEL_PRIMARY;
-  if (role === 'secondary') return COLOR_LABEL_SECONDARY;
-  return COLOR_LABEL_INACTIVE;
+const btnStyleFor = (role: MuscleRole | undefined) => {
+  if (role === 'primary') return BTN.primary;
+  if (role === 'secondary') return BTN.secondary;
+  return BTN.inactive;
 };
 
 interface MuscleDiagramTaggedProps {
@@ -98,24 +117,24 @@ export function MuscleDiagramTagged({ highlight, onTap }: MuscleDiagramTaggedPro
         <BackView highlight={highlight} fillFor={f} onTap={tapBoundFor} />
       </View>
       <View style={styles.legendRow}>
-        <View style={styles.legendItem}>
-          <View style={[styles.swatch, { backgroundColor: COLOR_PRIMARY }]} />
-          <Text style={styles.legendText}>主要</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.swatch, { backgroundColor: COLOR_SECONDARY }]} />
-          <Text style={styles.legendText}>次要</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View
-            style={[
-              styles.swatch,
-              { backgroundColor: COLOR_INACTIVE, borderWidth: 1, borderColor: COLOR_OUTLINE },
-            ]}
-          />
-          <Text style={styles.legendText}>未活化</Text>
-        </View>
+        <LegendItem color={COLOR_PRIMARY} label="主要" />
+        <LegendItem color={COLOR_SECONDARY} label="次要" />
+        <LegendItem color={COLOR_INACTIVE} label="未活化" />
       </View>
+    </View>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendItem}>
+      <View
+        style={[
+          styles.swatch,
+          { backgroundColor: color, borderWidth: color === COLOR_INACTIVE ? 1 : 0, borderColor: COLOR_OUTLINE },
+        ]}
+      />
+      <Text style={styles.legendText}>{label}</Text>
     </View>
   );
 }
@@ -128,7 +147,7 @@ interface ViewSubProps {
 
 function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox="-100 0 300 400" width={170} height={227}>
+    <Svg viewBox="-100 0 300 400" width={174} height={232}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -148,33 +167,38 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
 
       {FRONT_MUSCLES.map((m) => {
         const role = highlight.get(m.muscle_id);
-        // L-shape leader: label right edge → horizontal to above anchor → vertical down/up to anchor
-        const labelRightEdge = m.labelX + 70;
+        const btn = btnStyleFor(role);
+        const buttonRightEdge = FRONT_LABEL_X + BUTTON_WIDTH;
         return (
           <React.Fragment key={m.muscle_id}>
             <Polyline
-              points={`${labelRightEdge},${m.labelY} ${m.anchorX},${m.labelY} ${m.anchorX},${m.anchorY}`}
+              points={`${buttonRightEdge},${m.labelY} ${FRONT_RAIL_X},${m.labelY} ${m.anchorX},${m.anchorY}`}
               stroke={COLOR_LEADER}
-              strokeWidth={0.6}
+              strokeWidth={0.7}
               fill="none"
             />
-            <SvgText
-              x={m.labelX}
-              y={m.labelY + 6}
-              fontSize={16}
-              fontWeight="600"
-              fill={labelColorFor(role)}
-              textAnchor="start">
-              {m.short}
-            </SvgText>
             <Rect
-              x={m.labelX - 2}
-              y={m.labelY - 12}
-              width={72}
-              height={26}
-              fill="transparent"
+              x={FRONT_LABEL_X}
+              y={m.labelY - BUTTON_HEIGHT / 2}
+              width={BUTTON_WIDTH}
+              height={BUTTON_HEIGHT}
+              rx={6}
+              ry={6}
+              fill={btn.fill}
+              stroke={btn.stroke}
+              strokeWidth={1.2}
               onPress={onTap(m.muscle_id)}
             />
+            <SvgText
+              x={FRONT_LABEL_X + BUTTON_WIDTH / 2}
+              y={m.labelY + FONT_SIZE / 3}
+              fontSize={FONT_SIZE}
+              fontWeight="600"
+              fill={btn.text}
+              textAnchor="middle"
+              onPress={onTap(m.muscle_id)}>
+              {m.short}
+            </SvgText>
           </React.Fragment>
         );
       })}
@@ -184,7 +208,7 @@ function FrontView({ highlight, fillFor, onTap }: ViewSubProps) {
 
 function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
   return (
-    <Svg viewBox="0 0 300 400" width={170} height={227}>
+    <Svg viewBox="0 0 305 400" width={174} height={232}>
       <Path d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
       <Path d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z" fill="#FAFAFA" stroke={COLOR_OUTLINE} strokeWidth={1} />
@@ -204,33 +228,38 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
 
       {BACK_MUSCLES.map((m) => {
         const role = highlight.get(m.muscle_id);
-        // L-shape leader: label left edge → horizontal to above anchor → vertical down/up to anchor
-        const labelLeftEdge = m.labelX - 4;
+        const btn = btnStyleFor(role);
+        const buttonLeftEdge = BACK_LABEL_X;
         return (
           <React.Fragment key={m.muscle_id}>
             <Polyline
-              points={`${labelLeftEdge},${m.labelY} ${m.anchorX},${m.labelY} ${m.anchorX},${m.anchorY}`}
+              points={`${buttonLeftEdge},${m.labelY} ${BACK_RAIL_X},${m.labelY} ${m.anchorX},${m.anchorY}`}
               stroke={COLOR_LEADER}
-              strokeWidth={0.6}
+              strokeWidth={0.7}
               fill="none"
             />
-            <SvgText
-              x={m.labelX}
-              y={m.labelY + 6}
-              fontSize={16}
-              fontWeight="600"
-              fill={labelColorFor(role)}
-              textAnchor="start">
-              {m.short}
-            </SvgText>
             <Rect
-              x={m.labelX - 2}
-              y={m.labelY - 12}
-              width={72}
-              height={26}
-              fill="transparent"
+              x={BACK_LABEL_X}
+              y={m.labelY - BUTTON_HEIGHT / 2}
+              width={BUTTON_WIDTH}
+              height={BUTTON_HEIGHT}
+              rx={6}
+              ry={6}
+              fill={btn.fill}
+              stroke={btn.stroke}
+              strokeWidth={1.2}
               onPress={onTap(m.muscle_id)}
             />
+            <SvgText
+              x={BACK_LABEL_X + BUTTON_WIDTH / 2}
+              y={m.labelY + FONT_SIZE / 3}
+              fontSize={FONT_SIZE}
+              fontWeight="600"
+              fill={btn.text}
+              textAnchor="middle"
+              onPress={onTap(m.muscle_id)}>
+              {m.short}
+            </SvgText>
           </React.Fragment>
         );
       })}
@@ -242,13 +271,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 4,
+    gap: 2,
   },
   legendRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 12,
-    marginTop: 6,
+    marginTop: 8,
   },
   legendItem: {
     flexDirection: 'row',
