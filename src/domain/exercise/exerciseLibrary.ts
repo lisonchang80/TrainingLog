@@ -9,6 +9,7 @@
  * Pure functions only. Tested in `tests/domain/exerciseLibrary.test.ts`.
  */
 
+import { EQUIPMENT_VALUES } from './types';
 import type {
   Equipment,
   Exercise,
@@ -78,6 +79,8 @@ export interface CustomExerciseDraft {
   name: string;
   load_type: LoadType;
   muscle_group_id: string | null;
+  /** ADR-0017 Q6 — 8-enum equipment classification (default '其他' if unset). */
+  equipment: Equipment;
   /** Muscle IDs assigned the `primary` role. */
   primaryMuscleIds: string[];
   /** Muscle IDs assigned the `secondary` role. */
@@ -121,6 +124,13 @@ export function validateCustomExerciseDraft(
     errors.push({
       field: 'muscle_group_id',
       message: 'muscle_group_id 不可為空字串（傳 null 或合法 id）',
+    });
+  }
+
+  if (!EQUIPMENT_VALUES.includes(draft.equipment)) {
+    errors.push({
+      field: 'equipment',
+      message: 'equipment 必須是合法的 8 種分類之一',
     });
   }
 

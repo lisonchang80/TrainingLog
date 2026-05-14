@@ -119,6 +119,7 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
     name: '我的自訂動作',
     load_type: 'loaded' as const,
     muscle_group_id: MG_CHEST,
+    equipment: '槓鈴' as const,
     primaryMuscleIds: [M_UPPER_CHEST],
     secondaryMuscleIds: [M_TRICEP],
   };
@@ -160,6 +161,22 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
         secondaryMuscleIds: [],
       })
     ).toEqual([]);
+  });
+
+  it('rejects invalid equipment (ADR-0017 Q6)', () => {
+    const errs = validateCustomExerciseDraft({
+      ...baseDraft,
+      // @ts-expect-error — deliberately bogus to exercise the validator
+      equipment: '不存在的器械',
+    });
+    expect(errs.some((e) => e.field === 'equipment')).toBe(true);
+  });
+
+  it('accepts every Equipment enum value', () => {
+    const allEq = ['槓鈴', '啞鈴', '史密斯機', '滑輪', '固定機械', '自重', '壺鈴', '其他'] as const;
+    for (const eq of allEq) {
+      expect(validateCustomExerciseDraft({ ...baseDraft, equipment: eq })).toEqual([]);
+    }
   });
 });
 

@@ -169,12 +169,13 @@ export async function createCustomExercise(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `INSERT INTO exercise (id, name, load_type, is_builtin, is_archived,
-                             muscle_group_id, is_custom)
-       VALUES (?, ?, ?, 0, 0, ?, 1)`,
+                             muscle_group_id, is_custom, equipment)
+       VALUES (?, ?, ?, 0, 0, ?, 1, ?)`,
       id,
       draft.name.trim(),
       draft.load_type,
-      draft.muscle_group_id
+      draft.muscle_group_id,
+      draft.equipment
     );
     for (const mid of draft.primaryMuscleIds) {
       await db.runAsync(
