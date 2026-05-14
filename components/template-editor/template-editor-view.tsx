@@ -59,7 +59,13 @@ import {
   commitTemplateDraft,
   getTemplateFull,
   queryMemoryCandidates,
+  queryReusableSupersetMemory,
 } from '@/src/adapters/sqlite/templateRepository';
+import {
+  getReusableSupersetWithExercises,
+  incrementUseCount,
+} from '@/src/adapters/sqlite/supersetRepository';
+import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManager';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
@@ -198,6 +204,23 @@ export default function TemplateEditorView() {
       });
     }
     await commitTemplateDraft(db, { committed, draft, now });
+
+    // Commit-time `use_count` bump (slice 9.8b grill Q6): count newly-added
+    // parent rows of reusable clusters in the diff. Each cluster contributes
+    // exactly +1 bump (counting parents only avoids double-counting since
+    // each explode produces one parent + one child both stamped with the
+    // same rs_id). Adding-then-removing a cluster within the same editor
+    // session is a no-op — the row never lands in the committed diff.
+    const committedIds = new Set(committed.exercises.map((e) => e.id));
+    const bumps = draft.exercises.filter(
+      (e) =>
+        !committedIds.has(e.id) &&
+        e.parent_id === null &&
+        e.reusable_superset_id !== null
+    );
+    for (const row of bumps) {
+      await incrementUseCount(db, row.reusable_superset_id as string, now);
+    }
     return true;
   }, [committed, draft, db]);
 
@@ -784,6 +807,33 @@ export default function TemplateEditorView() {
   };
 
   const openGearMenu = (ex: TemplateExercise) => {
+    // Reusable cluster lock (ADR-0016 amendment / slice 9.8b grill Q5):
+    // rs_id NOT NULL → 動作組合鎖死, the only ⚙-menu actions are toggling
+    // the section (cluster moves as a pair via existing groupHeadId logic)
+    // and deleting the whole cluster. Notes / rest_seconds / 移動 are
+    // intentionally hidden because they imply per-row mutation that breaks
+    // the locked-pair invariant.
+    if (ex.reusable_superset_id !== null) {
+      const options = [
+        ex.section === 'general' ? '設為常設運動' : '設為一般運動',
+        '刪除',
+        '取消',
+      ];
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: ex.name ?? undefined,
+          options,
+          destructiveButtonIndex: 1,
+          cancelButtonIndex: 2,
+        },
+        (idx) => {
+          if (idx === 0) toggleSection(ex.id);
+          else if (idx === 1) deleteExercise(ex);
+        },
+      );
+      return;
+    }
+
     const hasNotes = (ex.notes ?? '').trim().length > 0;
     const restLabel = `休息時間（${ex.rest_seconds ?? 90}s）`;
     const options = [
@@ -852,6 +902,7 @@ export default function TemplateEditorView() {
       parent_id: null,
       notes: null,
       rest_seconds: null,
+      reusable_superset_id: null,
       sets: seedSets,
     };
     setDraft({ ...draft, exercises: [...draft.exercises, newExerciseRow] });
@@ -910,6 +961,7 @@ export default function TemplateEditorView() {
           parent_id: null,
           notes: null,
           rest_seconds: null,
+          reusable_superset_id: null,
           sets: seedSets,
         });
       }
@@ -927,30 +979,143 @@ export default function TemplateEditorView() {
     [id, db],
   );
 
+  /**
+   * Explode each reusable-superset id into a parent + child `TemplateExercise`
+   * pair and append to the draft (slice 9.8b grill Q3/Q4/Q5/Q8).
+   *
+   * Per-(rs_id, position) memory: try `queryReusableSupersetMemory(rs_id)` —
+   * if a prior cluster exists, both rows derive sets from that cluster's
+   * parent + child via `deriveLatestSetsForExercise`. First-ever explode
+   * falls back to system default (1 working set @ 8 reps × 20 kg), matching
+   * the solo-without-memory branch.
+   *
+   * Both rows stamp `reusable_superset_id = sId` (handled inside
+   * `explodeSupersetForTemplate`) so future explodes route correctly and
+   * the ADR-0016 cluster lock rules can gate destructive operations.
+   *
+   * `use_count` is NOT bumped here — bump happens at draft commit time
+   * (slice 9.8b grill Q6) so adding-then-removing a cluster in the same
+   * editor session does not inflate the count.
+   */
+  const hydrateReusableSupersets = useCallback(
+    async (supersetIds: readonly string[]) => {
+      if (!id || supersetIds.length === 0) return;
+
+      const newClusters: TemplateExercise[] = [];
+      for (const sId of supersetIds) {
+        const data = await getReusableSupersetWithExercises(db, sId);
+        if (!data || data.exercises.length !== 2) continue;
+        const [exA, exB] = data.exercises;
+
+        let parentSeed: TemplateSet[] | null = null;
+        let childSeed: TemplateSet[] | null = null;
+        try {
+          const candidates = await queryReusableSupersetMemory(db, {
+            reusable_superset_id: sId,
+          });
+          if (candidates.length === 2) {
+            parentSeed = deriveLatestSetsForExercise({
+              exercise_id: exA.id,
+              candidates,
+              uuid: () => newId('set'),
+            });
+            childSeed = deriveLatestSetsForExercise({
+              exercise_id: exB.id,
+              candidates,
+              uuid: () => newId('set'),
+            });
+          }
+        } catch {
+          parentSeed = null;
+          childSeed = null;
+        }
+
+        const defaultSeed = (): TemplateSet[] => [
+          {
+            id: newId('set'),
+            position: 0,
+            kind: 'working',
+            reps: 8,
+            weight: 20,
+            parent_set_id: null,
+            notes: null,
+          },
+        ];
+
+        const [parent, child] = explodeSupersetForTemplate({
+          superset: data.superset,
+          exercises: [exA, exB],
+          template_id: id,
+          ordering_start: 0, // re-assigned below relative to draft.exercises.length
+          idGen: () => newId('te'),
+        });
+        parent.sets =
+          parentSeed && parentSeed.length > 0 ? parentSeed : defaultSeed();
+        child.sets =
+          childSeed && childSeed.length > 0 ? childSeed : defaultSeed();
+
+        newClusters.push(parent, child);
+      }
+
+      if (newClusters.length === 0) return;
+
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const base = prev.exercises.length;
+        const stamped = newClusters.map((r, i) => ({
+          ...r,
+          ordering: base + i,
+        }));
+        return { ...prev, exercises: [...prev.exercises, ...stamped] };
+      });
+      setExpandedExId(newClusters[newClusters.length - 1].id);
+    },
+    [id, db],
+  );
+
   // Two-stage drain: useFocusEffect captures the picker payload as soon as
   // the editor re-focuses, but hydration is deferred until the exercise
   // library has finished loading. Without the stage gap, a cold remount
   // (e.g. user navigates back through Today instead of the back stack) sees
   // empty exerciseLibrary and silently drops every picked id.
-  const [pendingPick, setPendingPick] = useState<readonly string[] | null>(null);
+  const [pendingPick, setPendingPick] = useState<{
+    exerciseIds: readonly string[];
+    reusableSupersetIds: readonly string[];
+  } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       const payload = consumePick();
-      if (payload && payload.exerciseIds.length > 0) {
-        setPendingPick(payload.exerciseIds);
+      if (
+        payload &&
+        (payload.exerciseIds.length > 0 ||
+          payload.reusableSupersetIds.length > 0)
+      ) {
+        setPendingPick({
+          exerciseIds: payload.exerciseIds,
+          reusableSupersetIds: payload.reusableSupersetIds,
+        });
       }
     }, []),
   );
 
   useEffect(() => {
-    if (!pendingPick || pendingPick.length === 0) return;
+    if (!pendingPick) return;
     if (!draft || !id) return;
-    // No more `exerciseLibrary.length === 0` gate — hydrate refetches the
-    // library itself so a mid-session newly-created exercise is included.
-    void hydrateExercisesByIds(pendingPick);
+    // Reusable supersets explode FIRST, then solo exercises append after —
+    // slice 9.8b grill Q1 dual-array convention.
+    void (async () => {
+      await hydrateReusableSupersets(pendingPick.reusableSupersetIds);
+      await hydrateExercisesByIds(pendingPick.exerciseIds);
+    })();
     setPendingPick(null);
-  }, [pendingPick, draft, id, hydrateExercisesByIds]);
+  }, [
+    pendingPick,
+    draft,
+    id,
+    hydrateExercisesByIds,
+    hydrateReusableSupersets,
+  ]);
 
   // -----------------------------------------------------------------------
   // Render
