@@ -185,15 +185,13 @@ export default function LibraryScreen() {
             autoCorrect={false}
           />
         </View>
-        {!isPickerMode && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="新增動作"
-            onPress={() => router.push('/exercise/new')}
-            style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
-            <Text style={styles.addBtnText}>+</Text>
-          </Pressable>
-        )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="新增動作"
+          onPress={() => router.push('/exercise/new')}
+          style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
+          <Text style={styles.addBtnText}>+</Text>
+        </Pressable>
       </View>
 
       <View style={styles.body}>
