@@ -25,9 +25,9 @@ import {
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 
 const LOAD_TYPE_LABEL: Record<string, string> = {
-  loaded: '加重 (loaded)',
-  bodyweight: '徒手 (bodyweight)',
-  assisted: '助力 (assisted)',
+  loaded: '加重',
+  bodyweight: '徒手',
+  assisted: '助力',
 };
 
 /**
@@ -111,14 +111,15 @@ export default function ExerciseDetailScreen() {
         </Text>
 
         {(data.primary.length > 0 || data.secondary.length > 0) && (
-          <View style={styles.diagramCard}>
-            <BodyDiagram highlight={highlight} />
-            <BodyDiagramLegend />
-          </View>
+          <>
+            <View style={styles.diagramCard}>
+              <BodyDiagram highlight={highlight} />
+              <BodyDiagramLegend />
+            </View>
+            <MuscleSection title="主要" color="#F26B3A" muscles={data.primary} />
+            <MuscleSection title="次要" color="#7CB6E0" muscles={data.secondary} />
+          </>
         )}
-
-        <MuscleSection title="主要" color="#F26B3A" muscles={data.primary} />
-        <MuscleSection title="次要" color="#7CB6E0" muscles={data.secondary} />
       </ScrollView>
 
       <View style={styles.footer}>
