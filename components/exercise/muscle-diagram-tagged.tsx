@@ -63,38 +63,36 @@ interface MuscleAnchor {
   labelY: number; // labelX derived per-side constant
 }
 
-// FRONT — labelY spaced 44 units (button h 40 + gap 4).
-// Mostly sorted by anchorY for fan layout no-crossings, but 中下胸 manually
-// promoted right under 上胸 (per user — same chest group should cluster).
-// Verified the swap doesn't introduce crossings; only a single touch at 前束's
-// endpoint, which is geometrically harmless.
+// FRONT — 10 labels (小腿 moved to BACK side to relieve crowding).
+// labelY spaced 50 units (button h 40 + gap 10).
+// 中下胸 manually promoted right under 上胸 (chest-group cluster).
 const FRONT_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-upper-chest', short: '上胸', anchorX: 100, anchorY: 100, labelY: 40 },
-  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 84 },
-  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 128 },
-  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 172 },
-  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 216 },
-  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 260 },
-  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 304 },
-  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelY: 348 },
-  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelY: 392 },
-  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelY: 436 },
-  { muscle_id: 'm-calf', short: '小腿', anchorX: 84, anchorY: 357, labelY: 480 },
+  { muscle_id: 'm-lower-chest', short: '中下胸', anchorX: 100, anchorY: 124, labelY: 90 },
+  { muscle_id: 'm-mid-delt', short: '中束', anchorX: 35, anchorY: 105, labelY: 140 },
+  { muscle_id: 'm-front-delt', short: '前束', anchorX: 55, anchorY: 105, labelY: 190 },
+  { muscle_id: 'm-bicep-long', short: '外側二頭', anchorX: 50, anchorY: 150, labelY: 240 },
+  { muscle_id: 'm-bicep-short', short: '內側二頭', anchorX: 62, anchorY: 150, labelY: 290 },
+  { muscle_id: 'm-oblique', short: '側腹', anchorX: 75, anchorY: 170, labelY: 340 },
+  { muscle_id: 'm-abs', short: '腹肌', anchorX: 100, anchorY: 172, labelY: 390 },
+  { muscle_id: 'm-forearm', short: '小臂', anchorX: 55, anchorY: 190, labelY: 440 },
+  { muscle_id: 'm-quad', short: '股四', anchorX: 80, anchorY: 275, labelY: 490 },
 ];
 
-// BACK — 8 labels with more breathing room, spaced 56 units (button h 40 + gap 16).
-// Cluster ordering: 下背 right under 背部 (back-group cluster, per user).
-// 三頭 also promoted above 背部 to keep the back-cluster contiguous without
-// introducing line crossings. Verified all 28 pairs are crossing-free.
+// BACK — 9 labels (小腿 moved here from front to balance density).
+// Spacing 52 units (button h 40 + gap 12).
+// Cluster ordering: 下背 right under 背部; 三頭 promoted above 背部 to keep the
+// back-cluster contiguous without line crossings (verified).
 const BACK_MUSCLES: readonly MuscleAnchor[] = [
   { muscle_id: 'm-trap', short: '斜方肌', anchorX: 100, anchorY: 100, labelY: 80 },
-  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 136 },
-  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 192 },
-  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 248 },
-  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 304 },
-  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 360 },
-  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 416 },
-  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 472 },
+  { muscle_id: 'm-rear-delt', short: '後束', anchorX: 140, anchorY: 105, labelY: 132 },
+  { muscle_id: 'm-tricep', short: '三頭', anchorX: 148, anchorY: 150, labelY: 184 },
+  { muscle_id: 'm-back', short: '背部', anchorX: 100, anchorY: 135, labelY: 236 },
+  { muscle_id: 'm-lower-back', short: '下背', anchorX: 100, anchorY: 183, labelY: 288 },
+  { muscle_id: 'm-upper-glute', short: '上臀部', anchorX: 100, anchorY: 220, labelY: 340 },
+  { muscle_id: 'm-lower-glute', short: '下臀部', anchorX: 100, anchorY: 240, labelY: 392 },
+  { muscle_id: 'm-hamstring', short: '膕繩', anchorX: 80, anchorY: 285, labelY: 444 },
+  { muscle_id: 'm-calf', short: '小腿', anchorX: 100, anchorY: 357, labelY: 496 },
 ];
 
 const FRONT_LABEL_X = -118; // button right edge at -3 (rail at x=5)
@@ -249,7 +247,8 @@ function BackView({ highlight, fillFor, onTap }: ViewSubProps) {
       <Path d="M72 230 L128 230 L126 250 L74 250 Z" fill={fillFor('m-lower-glute')} stroke={COLOR_OUTLINE} strokeWidth={0.5} />
       <Path d="M64 252 L96 252 L94 318 L70 318 Z M136 252 L104 252 L106 318 L130 318 Z" fill={fillFor('m-hamstring')} stroke={COLOR_OUTLINE} strokeWidth={0.5} />
       <Path d="M70 318 L94 318 L92 326 L72 326 Z M106 318 L130 318 L128 326 L108 326 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
-      <Path d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={0.5} />
+      {/* Calf — highlights on back view too (label promoted to back per UX rebalance) */}
+      <Path d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z" fill={fillFor('m-calf')} stroke={COLOR_OUTLINE} strokeWidth={0.5} />
 
       {BACK_MUSCLES.map((m) => {
         const role = highlight.get(m.muscle_id);
