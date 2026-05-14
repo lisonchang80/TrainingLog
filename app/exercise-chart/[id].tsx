@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { useDatabase } from '@/components/database-provider';
 import {
@@ -22,47 +23,12 @@ import {
   listProgramsForExercise,
   type ExerciseHistoryHeader,
   type ExerciseHistorySession,
-  type ExerciseHistorySet,
 } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import { formatWeight, kgToDisplay } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
-import { bucketLabel, classifyBucket } from '@/src/domain/pr/buckets';
-import type { BucketKey } from '@/src/domain/pr/types';
-import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
+import { effectiveLoad, estimateE1RM } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
-import type { LoadType } from '@/src/domain/exercise/types';
-
-type PRKey = 'all' | BucketKey;
-
-const PR_ORDER: PRKey[] = [
-  'all',
-  'max_strength',
-  'strength',
-  'hypertrophy',
-  'muscle_endurance',
-  'endurance',
-];
-
-const PR_LABEL: Record<PRKey, string> = {
-  all: '全部',
-  max_strength: '最大力量',
-  strength: '力量',
-  hypertrophy: '增肌',
-  muscle_endurance: '肌耐力',
-  endurance: '耐力',
-};
-
-interface PRSnapshotWithDate {
-  key: PRKey;
-  weight_best: number | null;
-  weight_best_reps: number | null;
-  weight_best_at: number | null;
-  volume_best: number | null;
-  volume_best_weight: number | null;
-  volume_best_reps: number | null;
-  volume_best_at: number | null;
-}
 import {
   REP_BUCKET_CHIPS,
   bucketDomainLabel,
@@ -77,26 +43,41 @@ import {
   submitFilter,
 } from '@/src/domain/exercise/historyFilterMailbox';
 
+type ChartMetric = 'weight' | 'volume' | 'e1rm';
+type ChartToggle = ChartMetric | 'parallel';
+
+const CHART_TITLE: Record<ChartMetric, string> = {
+  weight: '最大重量',
+  volume: '訓練容量',
+  e1rm: '1RM',
+};
+
+const CHART_DESC: Record<ChartMetric, string> = {
+  weight: '（每次 Session 最重一組）',
+  volume: '（每次 Session 容量最大一組）',
+  e1rm: '（每次 Session 預估 1RM 最大值）',
+};
+
+const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
+  weight: '重量',
+  volume: '容量',
+  e1rm: '1RM',
+  parallel: '並排',
+};
+
 /**
- * Exercise History — cross-Template, cross-Program aggregate (ADR-0006).
- *
- * Filter surface (shared with /exercise-chart/[id] via historyFilterMailbox):
- *   - rep bucket multi-select (top-level chip row)
- *   - Program 主 + Program 副標籤 multi-select (collapsible 進階篩選 section)
- *
- * Bucket + Program/sub_tag combine with AND.
- *
- * Default state: no filter (= 全部). User toggles chips; 全部 is mutually
- * exclusive with bucket chips per ADR-0017 Q14 second amendment.
+ * Exercise Chart page (ADR-0017 Q14). Shares filter surface with history page
+ * via historyFilterMailbox: rep bucket multi-select + Program 主 / 副標籤.
+ * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
  */
-export default function ExerciseHistoryScreen() {
+export default function ExerciseChartScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const screenOptions = useMemo(
     () => ({
-      title: '動作歷史',
+      title: '動作圖表',
       headerBackVisible: false,
       headerLeft: () => (
         <Pressable
@@ -113,9 +94,8 @@ export default function ExerciseHistoryScreen() {
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // Filter state (mirrored to mailbox on every change)
+  // Filter state (mirrors mailbox)
   const [bucketFilters, setBucketFilters] = useState<Set<RepBucketChip>>(
     new Set()
   );
@@ -123,6 +103,11 @@ export default function ExerciseHistoryScreen() {
   const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [programPickerOpen, setProgramPickerOpen] = useState(false);
+
+  const [chartToggle, setChartToggle] = useState<ChartToggle>('weight');
+  const [yearFilter, setYearFilter] = useState<number | null>(
+    new Date().getFullYear()
+  );
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -138,7 +123,6 @@ export default function ExerciseHistoryScreen() {
     setUnit(u);
   }, [db, id]);
 
-  // Hydrate filter from mailbox on focus + refresh data
   useFocusEffect(
     useCallback(() => {
       refresh();
@@ -147,18 +131,13 @@ export default function ExerciseHistoryScreen() {
         setBucketFilters(new Set(f.buckets));
         setProgramId(f.programId);
         setSubTagFilters(new Set(f.subTags));
-        if (
-          f.buckets.size > 0 ||
-          f.programId != null ||
-          f.subTags.size > 0
-        ) {
+        if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
           setAdvancedOpen(true);
         }
       }
     }, [refresh])
   );
 
-  // Persist filter changes back to mailbox
   const persistFilter = useCallback(
     (
       buckets: Set<RepBucketChip>,
@@ -174,14 +153,6 @@ export default function ExerciseHistoryScreen() {
     []
   );
 
-  const prs = useMemo<PRSnapshotWithDate[]>(() => {
-    if (!header) return [];
-    return computePRs(sessions, header.load_type);
-  }, [sessions, header]);
-
-  const [prSectionOpen, setPrSectionOpen] = useState(false);
-
-  // Distinct sub_tags for the currently selected program
   const subTagOptions = useMemo<string[]>(() => {
     if (programId == null) return [];
     const tags = new Set<string>();
@@ -196,9 +167,7 @@ export default function ExerciseHistoryScreen() {
   const filteredSessions = useMemo(() => {
     return sessions
       .filter((s) => {
-        // Program filter
         if (programId != null && s.program_id !== programId) return false;
-        // Sub_tag filter (only if any selected)
         if (subTagFilters.size > 0) {
           if (s.sub_tag == null || !subTagFilters.has(s.sub_tag)) return false;
         }
@@ -217,15 +186,6 @@ export default function ExerciseHistoryScreen() {
   }, [sessions, bucketFilters, programId, subTagFilters]);
 
   if (!id) return null;
-
-  const toggleExpand = (sid: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(sid)) next.delete(sid);
-      else next.add(sid);
-      return next;
-    });
-  };
 
   const onBucketChipTap = (chip: RepBucketChip) => {
     setBucketFilters((prev) => {
@@ -254,18 +214,17 @@ export default function ExerciseHistoryScreen() {
 
   const onPickProgram = (newPid: string | null) => {
     setProgramId(newPid);
-    // Reset sub_tag when program changes
     const newSubTags = new Set<string>();
     setSubTagFilters(newSubTags);
     persistFilter(bucketFilters, newPid, newSubTags);
     setProgramPickerOpen(false);
   };
 
-  const onJumpToChart = () => {
+  const onJumpToHistory = () => {
     persistFilter(bucketFilters, programId, subTagFilters);
     // replace (not push) to avoid stacking two modal screens — see ADR-0017
     // Q14 amendment notes; two stacked modals crash on Metro R reload.
-    router.replace(`/exercise-chart/${id}`);
+    router.replace(`/exercise-history/${id}`);
   };
 
   const onClearAllFilters = () => {
@@ -287,28 +246,11 @@ export default function ExerciseHistoryScreen() {
         {!header ? (
           <Text style={styles.empty}>找不到此動作。</Text>
         ) : sessions.length === 0 ? (
-          <View>
-            <HeaderCard
-              header={header}
-              prs={[]}
-              unit={unit}
-              prSectionOpen={prSectionOpen}
-              togglePrSection={() => setPrSectionOpen((v) => !v)}
-            />
-            <Text style={styles.empty}>
-              還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
-            </Text>
-          </View>
+          <Text style={styles.empty}>
+            還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
+          </Text>
         ) : (
           <View style={{ gap: 12 }}>
-            <HeaderCard
-              header={header}
-              prs={prs}
-              unit={unit}
-              prSectionOpen={prSectionOpen}
-              togglePrSection={() => setPrSectionOpen((v) => !v)}
-            />
-
             {/* Bucket multi-select chips */}
             <View style={styles.filterRow}>
               {REP_BUCKET_CHIPS.map((chip) => {
@@ -338,7 +280,10 @@ export default function ExerciseHistoryScreen() {
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
-                    {[programId ? '1 Program' : null, subTagFilters.size > 0 ? `${subTagFilters.size} 副` : null]
+                    {[
+                      programId ? '1 Program' : null,
+                      subTagFilters.size > 0 ? `${subTagFilters.size} 副` : null,
+                    ]
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
@@ -346,7 +291,6 @@ export default function ExerciseHistoryScreen() {
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  {/* Program dropdown */}
                   <Text style={styles.advancedLabel}>Program 主</Text>
                   <Pressable
                     style={styles.dropdown}
@@ -357,7 +301,6 @@ export default function ExerciseHistoryScreen() {
                     <Text style={styles.dropdownChevron}>▾</Text>
                   </Pressable>
 
-                  {/* Sub_tag buttons */}
                   {programId != null && (
                     <View>
                       <Text style={styles.advancedLabel}>Program 副標籤</Text>
@@ -378,7 +321,6 @@ export default function ExerciseHistoryScreen() {
                     </View>
                   )}
 
-                  {/* Bottom 2 buttons */}
                   <View style={styles.actionRow}>
                     <Pressable
                       style={({ pressed }) => [
@@ -386,8 +328,8 @@ export default function ExerciseHistoryScreen() {
                         styles.actionBtnPrimary,
                         pressed && styles.btnPressed,
                       ]}
-                      onPress={onJumpToChart}>
-                      <Text style={styles.actionBtnTextPrimary}>轉圖表</Text>
+                      onPress={onJumpToHistory}>
+                      <Text style={styles.actionBtnTextPrimary}>看歷史</Text>
                     </Pressable>
                     <Pressable
                       style={({ pressed }) => [
@@ -403,29 +345,63 @@ export default function ExerciseHistoryScreen() {
               ) : null}
             </View>
 
-            {/* Timeline */}
-            <View style={{ gap: 8 }}>
-              {filteredSessions.length === 0 ? (
-                <Text style={styles.empty}>篩選條件下沒有紀錄。</Text>
-              ) : (
-                filteredSessions.map((sess) => (
-                  <SessionRow
-                    key={sess.session_id}
-                    session={sess}
-                    expanded={expanded.has(sess.session_id)}
-                    onToggle={() => toggleExpand(sess.session_id)}
-                    loadType={header.load_type}
+            {/* Period stats */}
+            <PeriodStatsCard
+              sessions={filteredSessions}
+              header={header}
+              unit={unit}
+              yearFilter={yearFilter}
+            />
+
+            {/* Metric toggle */}
+            <View style={styles.metricToggle}>
+              {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((t) => (
+                <Pressable
+                  key={t}
+                  onPress={() => setChartToggle(t)}
+                  style={[
+                    styles.metricToggleBtn,
+                    chartToggle === t && styles.metricToggleBtnActive,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.metricToggleText,
+                      chartToggle === t && styles.metricToggleTextActive,
+                    ]}>
+                    {CHART_TOGGLE_LABEL[t]}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* Chart card(s) */}
+            {chartToggle === 'parallel'
+              ? (['weight', 'volume', 'e1rm'] as const).map((m) => (
+                  <ChartCard
+                    key={m}
+                    metric={m}
+                    sessions={filteredSessions}
+                    header={header}
                     unit={unit}
+                    yearFilter={yearFilter}
                   />
                 ))
+              : (
+                <ChartCard
+                  metric={chartToggle}
+                  sessions={filteredSessions}
+                  header={header}
+                  unit={unit}
+                  yearFilter={yearFilter}
+                />
               )}
-            </View>
+
+            <YearFilterRow value={yearFilter} onChange={setYearFilter} />
           </View>
         )}
 
       </ScrollView>
 
-      {/* Program picker modal */}
       <Modal
         visible={programPickerOpen}
         animationType="fade"
@@ -464,135 +440,6 @@ export default function ExerciseHistoryScreen() {
       </Modal>
     </SafeAreaView>
   );
-}
-
-function HeaderCard({
-  header,
-  prs,
-  unit,
-  prSectionOpen,
-  togglePrSection,
-}: {
-  header: ExerciseHistoryHeader;
-  prs: PRSnapshotWithDate[];
-  unit: UnitPreference;
-  prSectionOpen: boolean;
-  togglePrSection: () => void;
-}) {
-  // Collapsed: only render 'all'. Expanded: render all (全部 + 5 buckets).
-  const visiblePRs = prSectionOpen
-    ? prs
-    : prs.filter((p) => p.key === 'all');
-
-  return (
-    <View style={styles.headerCard}>
-      <Text style={styles.headerName}>{header.exercise_name}</Text>
-      <Text style={styles.headerSubline}>
-        共 {header.total_sessions} 次 Session · 最近 7 天 {header.sessions_last_7_days} 次
-      </Text>
-      <Text style={styles.headerLoadType}>
-        類型：{LOAD_TYPE_LABEL[header.load_type]}
-      </Text>
-      {prs.length === 0 ? null : (
-        <View style={styles.prList}>
-          <Pressable onPress={togglePrSection} style={styles.prHeadingRow}>
-            <Text style={styles.prHeading}>
-              PR {prSectionOpen ? '▼' : '▶'}
-            </Text>
-          </Pressable>
-          {visiblePRs.map((pr) => (
-            <View key={pr.key} style={styles.prRow}>
-              <Text style={styles.prBucket}>{PR_LABEL[pr.key]}</Text>
-              <Text style={styles.prValue}>
-                重量 {formatPRWeight(pr.weight_best, unit)}
-                {pr.weight_best_reps != null ? ` × ${pr.weight_best_reps}` : ''}
-                {pr.weight_best_at != null ? `（${formatDate(pr.weight_best_at)}）` : ''}
-              </Text>
-              <Text style={styles.prValue}>
-                容量 {formatVolume(pr.volume_best, unit)}
-                {pr.volume_best_weight != null && pr.volume_best_reps != null
-                  ? ` (${formatPRWeight(pr.volume_best_weight, unit)} × ${pr.volume_best_reps})`
-                  : ''}
-                {pr.volume_best_at != null ? `（${formatDate(pr.volume_best_at)}）` : ''}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function computePRs(
-  sessions: ExerciseHistorySession[],
-  loadType: LoadType
-): PRSnapshotWithDate[] {
-  const empty = (key: PRKey): PRSnapshotWithDate => ({
-    key,
-    weight_best: null,
-    weight_best_reps: null,
-    weight_best_at: null,
-    volume_best: null,
-    volume_best_weight: null,
-    volume_best_reps: null,
-    volume_best_at: null,
-  });
-  const acc: Record<PRKey, PRSnapshotWithDate> = {
-    all: empty('all'),
-    max_strength: empty('max_strength'),
-    strength: empty('strength'),
-    hypertrophy: empty('hypertrophy'),
-    muscle_endurance: empty('muscle_endurance'),
-    endurance: empty('endurance'),
-  };
-
-  const update = (key: PRKey, eff: number, reps: number, v: number, at: number) => {
-    const snap = acc[key];
-    if (snap.weight_best == null || eff > snap.weight_best) {
-      snap.weight_best = eff;
-      snap.weight_best_reps = reps;
-      snap.weight_best_at = at;
-    }
-    if (snap.volume_best == null || v > snap.volume_best) {
-      snap.volume_best = v;
-      snap.volume_best_weight = eff;
-      snap.volume_best_reps = reps;
-      snap.volume_best_at = at;
-    }
-  };
-
-  for (const sess of sessions) {
-    for (const s of sess.sets) {
-      if (s.weight_kg == null || s.reps == null) continue;
-      if (loadType === 'bodyweight' && s.weight_kg === 0) continue;
-      if (loadType === 'assisted' && s.bw_snapshot_kg == null) continue;
-
-      const eff = effectiveLoad(s.weight_kg, loadType, s.bw_snapshot_kg);
-      if (eff == null) continue;
-      if (loadType === 'assisted' && eff <= 0) continue;
-
-      const v = setVolume({
-        weight_kg: s.weight_kg,
-        reps: s.reps,
-        load_type: loadType,
-        bw_snapshot_kg: s.bw_snapshot_kg,
-      });
-      if (v == null) continue;
-
-      const bucket = classifyBucket(s.reps);
-      const at = sess.session_started_at;
-
-      update('all', eff, s.reps, v, at);
-      if (bucket) update(bucket, eff, s.reps, v, at);
-    }
-  }
-
-  return PR_ORDER.map((k) => acc[k]).filter((snap) => snap.weight_best != null);
-}
-
-function formatDate(at: number): string {
-  const d = new Date(at);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function FilterChip({
@@ -654,87 +501,292 @@ function SubTagChip({
   );
 }
 
-function SessionRow({
-  session,
-  expanded,
-  onToggle,
-  loadType,
+function PeriodStatsCard({
+  sessions,
+  header,
   unit,
+  yearFilter,
 }: {
-  session: ExerciseHistorySession;
-  expanded: boolean;
-  onToggle: () => void;
-  loadType: 'loaded' | 'bodyweight' | 'assisted';
+  sessions: ExerciseHistorySession[];
+  header: ExerciseHistoryHeader;
   unit: UnitPreference;
+  yearFilter: number | null;
 }) {
-  const topSet = session.sets
-    .map((s) => ({
-      set: s,
-      eff:
-        s.weight_kg == null
-          ? null
-          : effectiveLoad(s.weight_kg, loadType, s.bw_snapshot_kg),
-    }))
-    .filter((x) => x.eff != null)
-    .sort((a, b) => (b.eff ?? 0) - (a.eff ?? 0))[0];
+  const scopedSessions = useMemo(() => {
+    if (yearFilter == null) return sessions;
+    return sessions.filter(
+      (s) => new Date(s.session_started_at).getFullYear() === yearFilter
+    );
+  }, [sessions, yearFilter]);
 
-  const totalVolume = session.sets.reduce((sum, s) => {
-    const v = setVolume({
-      weight_kg: s.weight_kg,
-      reps: s.reps,
-      load_type: loadType,
-      bw_snapshot_kg: s.bw_snapshot_kg,
-    });
-    return sum + (v ?? 0);
-  }, 0);
+  const maxFor = (metric: ChartMetric): number | null => {
+    const pts = buildTrendPoints(scopedSessions, header, metric);
+    if (pts.length === 0) return null;
+    return pts.reduce((m, p) => (p.value > m ? p.value : m), -Infinity);
+  };
 
-  const date = new Date(session.session_started_at);
-  const dateLabel = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const items: { label: string; metric: ChartMetric }[] = [
+    { label: '最大重量', metric: 'weight' },
+    { label: '最大容量', metric: 'volume' },
+    { label: '1RM 預測', metric: 'e1rm' },
+  ];
 
   return (
-    <Pressable onPress={onToggle} style={styles.sessionCard}>
-      <View style={styles.sessionRowHeader}>
-        <Text style={styles.sessionDate}>{dateLabel}</Text>
-        <Text style={styles.sessionMeta}>
-          {session.sets.length} 組 · 容量 {formatVolume(totalVolume, unit)}
-        </Text>
-      </View>
-      {topSet ? (
-        <Text style={styles.topSetLine}>
-          頂組：{formatPRWeight(topSet.eff, unit)} × {topSet.set.reps}
-          {topSet.set.reps != null ? `（${bucketLabel(classifyBucket(topSet.set.reps) ?? 'endurance')}）` : ''}
-        </Text>
-      ) : null}
-
-      {expanded ? (
-        <View style={styles.expandedBox}>
-          {session.bw_snapshot_kg != null ? (
-            <Text style={styles.bwLine}>
-              當天體重：{formatPRWeight(session.bw_snapshot_kg, unit)}
-            </Text>
-          ) : null}
-          {session.sets.map((set) => {
-            const bucket = classifyBucket(set.reps);
-            const eff =
-              set.weight_kg != null
-                ? effectiveLoad(set.weight_kg, loadType, set.bw_snapshot_kg)
-                : null;
-            return (
-              <View key={set.set_id} style={styles.setLine}>
-                <Text style={styles.setOrdering}>#{set.ordering}</Text>
-                <Text style={styles.setText}>
-                  {formatPRWeight(eff, unit)} × {set.reps ?? '—'}
-                </Text>
-                <Text style={styles.setBucket}>
-                  {bucket ? bucketLabel(bucket) : '—'}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-    </Pressable>
+    <View style={styles.statsCard}>
+      {items.map((it) => {
+        const v = maxFor(it.metric);
+        const fmt = it.metric === 'volume' ? formatVolume : formatPRWeight;
+        return (
+          <View key={it.metric} style={styles.statsCell}>
+            <Text style={styles.statsLabel}>{it.label}</Text>
+            <Text style={styles.statsValue}>{v != null ? fmt(v, unit) : '—'}</Text>
+          </View>
+        );
+      })}
+    </View>
   );
+}
+
+function ChartCard({
+  metric,
+  sessions,
+  header,
+  unit,
+  yearFilter,
+}: {
+  metric: ChartMetric;
+  sessions: ExerciseHistorySession[];
+  header: ExerciseHistoryHeader;
+  unit: UnitPreference;
+  yearFilter: number | null;
+}) {
+  const scopedSessions = useMemo(() => {
+    if (yearFilter == null) return sessions;
+    return sessions.filter(
+      (s) => new Date(s.session_started_at).getFullYear() === yearFilter
+    );
+  }, [sessions, yearFilter]);
+
+  const points = useMemo(
+    () => buildTrendPoints(scopedSessions, header, metric),
+    [scopedSessions, header, metric]
+  );
+
+  const yearBadge = yearFilter == null ? '全部' : `${yearFilter}`;
+
+  return (
+    <View style={styles.chartCard}>
+      <View style={styles.chartTitleRow}>
+        <View style={styles.chartTitleBlock}>
+          <Text style={styles.cardTitle}>{CHART_TITLE[metric]}</Text>
+          <Text style={styles.cardSubtitle}>{CHART_DESC[metric]}</Text>
+        </View>
+        <Text style={styles.yearBadge}>{yearBadge}</Text>
+      </View>
+      {points.length >= 2 ? (
+        <TrendChart points={points} unit={unit} metric={metric} />
+      ) : (
+        <Text style={styles.empty}>此時段資料點不足，至少需 2 次 Session。</Text>
+      )}
+    </View>
+  );
+}
+
+function YearFilterRow({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (next: number | null) => void;
+}) {
+  const thisYear = new Date().getFullYear();
+  const options: { key: string; label: string; year: number | null }[] = [
+    { key: 'prev', label: '上一年', year: thisYear - 1 },
+    { key: 'cur', label: '今年', year: thisYear },
+    { key: 'next', label: '下一年', year: thisYear + 1 },
+    { key: 'all', label: '全部', year: null },
+  ];
+  return (
+    <View style={styles.yearRow}>
+      {options.map((o) => {
+        const active = value === o.year;
+        return (
+          <Pressable
+            key={o.key}
+            onPress={() => onChange(o.year)}
+            style={[styles.yearBtn, active && styles.yearBtnActive]}>
+            <Text style={[styles.yearBtnText, active && styles.yearBtnTextActive]}>
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function TrendChart({
+  points,
+  unit,
+  metric,
+}: {
+  points: TrendPoint[];
+  unit: UnitPreference;
+  metric: ChartMetric;
+}) {
+  const W = 320;
+  const H = 196;
+  const PT = 28;
+  const PB = 36;
+  const PL = 48;
+  const PR = 12;
+
+  const xs = points.map((p) => p.t);
+  const ys = points.map((p) => p.value);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const xSpan = xMax - xMin || 1;
+  const ySpan = yMax - yMin || 1;
+  const scaleX = (t: number) => PL + ((t - xMin) / xSpan) * (W - PL - PR);
+  const scaleY = (v: number) =>
+    H - PB - ((v - yMin) / ySpan) * (H - PT - PB);
+
+  const polyline = points
+    .map((p) => `${scaleX(p.t).toFixed(1)},${scaleY(p.value).toFixed(1)}`)
+    .join(' ');
+
+  const yTicks = [yMin, yMin + ySpan / 2, yMax];
+  const xTicks =
+    points.length <= 2 ? [xMin, xMax] : [xMin, xMin + xSpan / 2, xMax];
+
+  const yLabel = formatYTickLabel(metric, unit);
+  const yAxisUnit = unitLabel(metric, unit);
+
+  return (
+    <View>
+      <Svg width={W} height={H}>
+        <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke="#aaa" strokeWidth={1} />
+        <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke="#aaa" strokeWidth={1} />
+        {yTicks.map((v, idx) => {
+          const y = scaleY(v);
+          return (
+            <SvgText
+              key={`y${idx}`}
+              x={PL - 4}
+              y={y + 4}
+              fontSize={10}
+              fill="#666"
+              textAnchor="end">
+              {yLabel(v)}
+            </SvgText>
+          );
+        })}
+        <SvgText x={PL - 4} y={12} fontSize={10} fill="#666" textAnchor="end">
+          {yAxisUnit}
+        </SvgText>
+        {xTicks.map((t, idx) => (
+          <SvgText
+            key={`x${idx}`}
+            x={scaleX(t)}
+            y={H - PB + 14}
+            fontSize={10}
+            fill="#666"
+            textAnchor={
+              idx === 0 ? 'start' : idx === xTicks.length - 1 ? 'end' : 'middle'
+            }>
+            {formatDateTick(t)}
+          </SvgText>
+        ))}
+        <Polyline points={polyline} fill="none" stroke="#0a7ea4" strokeWidth={2} />
+        {points.map((p, idx) => (
+          <Circle
+            key={idx}
+            cx={scaleX(p.t)}
+            cy={scaleY(p.value)}
+            r={3.5}
+            fill="#0a7ea4"
+          />
+        ))}
+      </Svg>
+    </View>
+  );
+}
+
+interface TrendPoint {
+  t: number;
+  value: number;
+}
+
+function buildTrendPoints(
+  sessions: ExerciseHistorySession[],
+  header: ExerciseHistoryHeader | null,
+  metric: ChartMetric
+): TrendPoint[] {
+  if (!header) return [];
+  const points: TrendPoint[] = [];
+  const ordered = [...sessions].reverse();
+  for (const sess of ordered) {
+    let top: number | null = null;
+    for (const set of sess.sets) {
+      let v: number | null = null;
+      if (metric === 'weight') {
+        if (set.weight_kg == null || set.reps == null) continue;
+        const eff = effectiveLoad(set.weight_kg, header.load_type, set.bw_snapshot_kg);
+        if (eff == null) continue;
+        if (header.load_type === 'assisted' && eff <= 0) continue;
+        v = eff;
+      } else if (metric === 'volume') {
+        v = setVolume({
+          weight_kg: set.weight_kg,
+          reps: set.reps,
+          load_type: header.load_type,
+          bw_snapshot_kg: set.bw_snapshot_kg,
+        });
+      } else {
+        v = estimateE1RM({
+          weight_kg: set.weight_kg,
+          reps: set.reps,
+          load_type: header.load_type,
+          bw_snapshot_kg: set.bw_snapshot_kg,
+        });
+      }
+      if (v == null) continue;
+      if (top == null || v > top) top = v;
+    }
+    if (top != null) {
+      points.push({ t: sess.session_started_at, value: top });
+    }
+  }
+  return points;
+}
+
+function unitLabel(metric: ChartMetric, unit: UnitPreference): string {
+  return metric === 'volume' ? `${unit}-reps` : unit;
+}
+
+function formatYTickLabel(
+  metric: ChartMetric,
+  unit: UnitPreference
+): (v: number) => string {
+  if (metric === 'volume') {
+    return (v) => {
+      const display = kgToDisplay(v, unit);
+      return display >= 1000
+        ? `${(display / 1000).toFixed(1)}k`
+        : display.toFixed(0);
+    };
+  }
+  return (v) => {
+    const display = kgToDisplay(v, unit);
+    return display.toFixed(display < 10 ? 1 : 0);
+  };
+}
+
+function formatDateTick(t: number): string {
+  const d = new Date(t);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function formatPRWeight(kgValue: number | null, unit: UnitPreference): string {
@@ -748,36 +800,10 @@ function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
   return `${display.toFixed(0)} ${unit}-reps`;
 }
 
-const LOAD_TYPE_LABEL: Record<string, string> = {
-  loaded: '加重',
-  bodyweight: '徒手',
-  assisted: '助力',
-};
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { padding: 16, paddingBottom: 36, gap: 12 },
   empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic', paddingVertical: 12 },
-  headerCard: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    gap: 4,
-  },
-  headerName: { fontSize: 22, fontWeight: '700' },
-  headerSubline: { fontSize: 13, opacity: 0.75 },
-  headerLoadType: { fontSize: 12, opacity: 0.65, marginBottom: 4 },
-  prList: { marginTop: 8, gap: 6 },
-  prHeadingRow: { paddingVertical: 4 },
-  prHeading: { fontSize: 12, fontWeight: '700', opacity: 0.7 },
-  prRow: {
-    gap: 2,
-    paddingVertical: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  prBucket: { fontSize: 13, fontWeight: '700', color: '#0a7ea4' },
-  prValue: { fontSize: 13 },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   filterChip: {
     flex: 1,
@@ -862,28 +888,59 @@ const styles = StyleSheet.create({
   },
   actionBtnTextPrimary: { fontSize: 14, color: 'white', fontWeight: '600' },
   actionBtnTextSecondary: { fontSize: 14, color: '#333', fontWeight: '500' },
-  sessionCard: {
+  statsCard: {
+    flexDirection: 'row',
     padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    gap: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(10,126,164,0.08)',
+    gap: 8,
   },
-  sessionRowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
-  sessionDate: { fontSize: 14, fontWeight: '600' },
-  sessionMeta: { fontSize: 12, opacity: 0.7 },
-  topSetLine: { fontSize: 13 },
-  expandedBox: {
-    marginTop: 6,
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-    gap: 4,
+  statsCell: { flex: 1, alignItems: 'center', gap: 4 },
+  statsLabel: { fontSize: 12, opacity: 0.7, fontWeight: '500' },
+  statsValue: { fontSize: 15, fontWeight: '700', color: '#0a7ea4' },
+  chartCard: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(127,127,127,0.06)',
+    gap: 8,
   },
-  bwLine: { fontSize: 12, opacity: 0.7 },
-  setLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  setOrdering: { fontSize: 12, opacity: 0.6, width: 28 },
-  setText: { fontSize: 13, flex: 1 },
-  setBucket: { fontSize: 11, opacity: 0.7 },
+  cardTitle: { fontSize: 16, fontWeight: '700' },
+  cardSubtitle: { fontSize: 11, opacity: 0.6, marginTop: 1 },
+  chartTitleBlock: { gap: 0, flex: 1 },
+  chartTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  yearBadge: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0a7ea4',
+    paddingLeft: 8,
+  },
+  metricToggle: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    padding: 2,
+  },
+  metricToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  metricToggleBtnActive: { backgroundColor: '#0a7ea4' },
+  metricToggleText: { fontSize: 13, fontWeight: '500' },
+  metricToggleTextActive: { color: 'white' },
+  yearRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
+  yearBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    alignItems: 'center',
+  },
+  yearBtnActive: { backgroundColor: '#0a7ea4' },
+  yearBtnText: { fontSize: 13, fontWeight: '500' },
+  yearBtnTextActive: { color: 'white' },
   headerBack: {
     color: '#0a7ea4',
     fontSize: 17,
@@ -906,11 +963,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 4,
   },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
+  modalTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   modalRow: {
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,

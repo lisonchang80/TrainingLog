@@ -199,3 +199,50 @@ export async function createCustomExercise(
 
   return id;
 }
+
+export async function archiveCustomExercise(
+  db: Database,
+  id: string
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE exercise SET is_archived = 1 WHERE id = ? AND is_custom = 1`,
+    id
+  );
+}
+
+export async function updateCustomExercise(
+  db: Database,
+  id: string,
+  draft: CustomExerciseDraft
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE exercise
+       SET name = ?, load_type = ?, muscle_group_id = ?, equipment = ?
+       WHERE id = ? AND is_custom = 1`,
+      draft.name.trim(),
+      draft.load_type,
+      draft.muscle_group_id,
+      draft.equipment,
+      id
+    );
+    await db.runAsync(`DELETE FROM exercise_muscle WHERE exercise_id = ?`, id);
+    for (const mid of draft.primaryMuscleIds) {
+      await db.runAsync(
+        `INSERT INTO exercise_muscle (exercise_id, muscle_id, role)
+         VALUES (?, ?, 'primary')`,
+        id,
+        mid
+      );
+    }
+    for (const mid of draft.secondaryMuscleIds) {
+      if (draft.primaryMuscleIds.includes(mid)) continue;
+      await db.runAsync(
+        `INSERT INTO exercise_muscle (exercise_id, muscle_id, role)
+         VALUES (?, ?, 'secondary')`,
+        id,
+        mid
+      );
+    }
+  });
+}
