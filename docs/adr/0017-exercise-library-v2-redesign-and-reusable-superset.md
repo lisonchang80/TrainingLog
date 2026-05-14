@@ -287,8 +287,28 @@ ADR Q13 line 189 自己寫「對齊 ADR-0016 12-color picker」，但拍板的 c
 
 **圖表頁**（左上「< 返回」）：見 Q16
 
-**Footer**：`[歷史] [圖表] [編輯] [關閉]`
-- 「編輯」改 name + color；動作組合鎖死（per Q10）；「刪除」放編輯頁內
+**Footer**：`[歷史] [圖表] [編輯] [刪除]`（**slice 9.8a 修訂**：對齊 slice 9.7 普通 Exercise 詳情頁實作 idiom，把 `[關閉]` 改成 `[刪除]`；push-stack 的「< 返回」已涵蓋關閉語意，destructive action 直接擺 footer 比 hidden 在編輯頁內更發現得到）
+- 「編輯」**只改 name**；動作組合鎖死（per Q10）；color picker 不暴露（**slice 9.8a 增訂**：對齊 Custom Exercise idiom — color stays NULL，grid card 用 hashColor fallback；user 不必當下決定配色）
+- 「刪除」一鍵到 destructive confirm Alert → DELETE → router.back()
+- 9.8a scope 內「歷史」「圖表」disable（無 explode 整合 = 永遠無 session 資料 cluster 上 superset）；9.8c 啟用
+
+**翻盤的既有拍板**：
+- ❌ Q17 line 291「『刪除』放編輯頁內」— 改放 footer
+- ❌ Q17 line 291「改 name + color」— color picker 砍掉，只改 name
+
+## Slice 9.8 — 切分為 9.8a / 9.8b / 9.8c
+
+ADR-0017 整包 3-4 週估時超過單 slice 風險閾值，slice 開工前再 grill 一輪切成三個獨立可 ship 的子 slice：
+
+| Slice | Scope | Risk |
+|---|---|---|
+| **9.8a** | 純 Reusable Superset entity UI：超級組 tab list + grid、創建 flow（`/superset/new`）、詳情頁主頁 footer 4-action（歷史/圖表 disabled）、編輯頁（rename only）、刪除。不碰 Template editor。 | Low（純加法） |
+| **9.8b** | explode-to-Template 整合 + Template editor「+ 動作」改 navigate `/library?mode=picker`（ADR-0017 Q15 / ADR-0016 amendment 落地）、use_count 自增、cross-route flow | High（改既有 Template editor swipe / cluster B3 行為） |
+| **9.8c** | 詳情頁歷史頁 + 圖表頁（Q16 + Q17 完整）— 前提：9.8b 後有真實 session 資料 | Medium（純加法但依賴 9.8b 資料） |
+
+理由：9.8a 不碰 Template editor，blast radius 小；9.8b 是改既有行為（風險集中於此）；9.8c 依賴實戰資料、不能跟 9.8b 平行。
+
+**ADR-0016「+ 動作」inline picker 砍掉**（Q15 amendment）延後到 9.8b 處理（slice 9.8a 不影響 Template editor 既有 inline picker）。
 
 ## Schema migration plan
 
