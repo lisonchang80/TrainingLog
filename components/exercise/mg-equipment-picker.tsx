@@ -121,8 +121,8 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: '22%',
-    height: 56,
-    borderRadius: 12,
+    height: 44,
+    borderRadius: 10,
     backgroundColor: 'rgba(127,127,127,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
