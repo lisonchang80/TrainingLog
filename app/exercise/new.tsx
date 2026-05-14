@@ -12,12 +12,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BodyDiagram, BodyDiagramLegend } from '@/components/body-diagram';
 import { useDatabase } from '@/components/database-provider';
 import {
   validateCustomExerciseDraft,
   type CustomExerciseDraft,
+  type ValidationError,
 } from '@/src/domain/exercise/exerciseLibrary';
-import type { LoadType, Muscle, MuscleGroup } from '@/src/domain/exercise/types';
+import {
+  EQUIPMENT_VALUES,
+  type Equipment,
+  type LoadType,
+  type Muscle,
+  type MuscleGroup,
+  type MuscleRole,
+} from '@/src/domain/exercise/types';
 import {
   createCustomExercise,
   listMuscleGroups,
@@ -34,7 +43,13 @@ const LOAD_TYPE_LABEL: Record<LoadType, string> = {
 /**
  * Custom Exercise creation form. Per ADR-0010 #9 v1 allows muscle mapping
  * to be empty so the user isn't forced to fill it out at creation time —
- * they can edit later (in a future slice).
+ * they can edit later.
+ *
+ * UX:
+ *   - Modal header: 取消 (left) / 儲存 (right)
+ *   - Inline error under name field; general errors → Alert
+ *   - Body diagram is tappable: cycle 未選 → 主要 → 次要 → 取消;
+ *     muscle chips stay as a parallel input surface
  */
 export default function NewExerciseScreen() {
   const db = useDatabase();
@@ -42,6 +57,7 @@ export default function NewExerciseScreen() {
   const [name, setName] = useState('');
   const [loadType, setLoadType] = useState<LoadType>('loaded');
   const [mgId, setMgId] = useState<string | null>(null);
+  const [equipment, setEquipment] = useState<Equipment>('其他');
   const [primary, setPrimary] = useState<Set<string>>(new Set());
   const [secondary, setSecondary] = useState<Set<string>>(new Set());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -60,50 +76,54 @@ export default function NewExerciseScreen() {
       name,
       load_type: loadType,
       muscle_group_id: mgId,
+      equipment,
       primaryMuscleIds: Array.from(primary),
       secondaryMuscleIds: Array.from(secondary),
     }),
-    [name, loadType, mgId, primary, secondary]
+    [name, loadType, mgId, equipment, primary, secondary]
   );
 
   const errors = useMemo(() => validateCustomExerciseDraft(draft), [draft]);
   const canSubmit = errors.length === 0;
 
-  const togglePrimary = useCallback((id: string) => {
-    setPrimary((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else {
-        next.add(id);
-        // ensure exclusive: clear from secondary
-        setSecondary((s) => {
-          const ns = new Set(s);
-          ns.delete(id);
-          return ns;
-        });
+  // Cycle a muscle through unselected → primary → secondary → unselected.
+  // Used by both muscle chips and body-diagram tap so the two surfaces
+  // stay in sync.
+  const cycleMuscleRole = useCallback(
+    (id: string) => {
+      const wasPrimary = primary.has(id);
+      const wasSecondary = secondary.has(id);
+      if (!wasPrimary && !wasSecondary) {
+        setPrimary((p) => new Set(p).add(id));
+        return;
       }
-      return next;
-    });
-  }, []);
-
-  const toggleSecondary = useCallback((id: string) => {
-    setSecondary((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else {
-        next.add(id);
+      if (wasPrimary) {
         setPrimary((p) => {
-          const np = new Set(p);
-          np.delete(id);
-          return np;
+          const next = new Set(p);
+          next.delete(id);
+          return next;
         });
+        setSecondary((s) => new Set(s).add(id));
+        return;
       }
-      return next;
-    });
-  }, []);
+      // wasSecondary → unselected
+      setSecondary((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+    },
+    [primary, secondary]
+  );
 
-  const onSubmit = async () => {
+  const onSubmit = useCallback(async () => {
     if (!canSubmit || busy) return;
+    // Surface general (non-field) errors via Alert; field errors render inline
+    const generalErrs = errors.filter((e) => e.field === 'general');
+    if (generalErrs.length > 0) {
+      Alert.alert('無法儲存', generalErrs.map((e) => e.message).join('\n'));
+      return;
+    }
     setBusy(true);
     try {
       const id = await createCustomExercise(db, draft, () => Crypto.randomUUID());
@@ -113,7 +133,7 @@ export default function NewExerciseScreen() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [canSubmit, busy, errors, db, draft, router]);
 
   const musclesByMg = useMemo(() => {
     const map = new Map<string, Muscle[]>();
@@ -123,6 +143,16 @@ export default function NewExerciseScreen() {
     }
     return map;
   }, [muscles]);
+
+  // Build the role-highlight map fed into the body diagram.
+  const highlight = useMemo<Map<string, MuscleRole>>(() => {
+    const m = new Map<string, MuscleRole>();
+    for (const id of secondary) m.set(id, 'secondary');
+    for (const id of primary) m.set(id, 'primary'); // primary wins on overlap
+    return m;
+  }, [primary, secondary]);
+
+  const nameError = errors.find((e) => e.field === 'name');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -137,22 +167,38 @@ export default function NewExerciseScreen() {
               <Text style={styles.headerCancel}>取消</Text>
             </Pressable>
           ),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="儲存"
+              onPress={onSubmit}
+              disabled={!canSubmit || busy}>
+              <Text
+                style={[
+                  styles.headerSave,
+                  (!canSubmit || busy) && styles.headerSaveDisabled,
+                ]}>
+                {busy ? '儲存中…' : '儲存'}
+              </Text>
+            </Pressable>
+          ),
         }}
       />
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.heading}>新增自訂動作</Text>
-
         <Text style={styles.label}>名稱</Text>
         <TextInput
           accessibilityLabel="動作名稱"
           placeholder="例：吊環划船"
           value={name}
           onChangeText={setName}
-          style={styles.input}
+          style={[styles.input, nameError && styles.inputError]}
           autoCapitalize="none"
           autoCorrect={false}
           maxLength={60}
         />
+        {nameError && (
+          <Text style={styles.fieldError}>{nameError.message}</Text>
+        )}
 
         <Text style={styles.label}>Load type</Text>
         <View style={styles.chipRow}>
@@ -167,6 +213,24 @@ export default function NewExerciseScreen() {
               ]}>
               <Text style={[styles.chipText, loadType === lt && styles.chipTextActive]}>
                 {LOAD_TYPE_LABEL[lt]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.label}>器械（ADR-0017 Q6）</Text>
+        <View style={styles.chipRow}>
+          {EQUIPMENT_VALUES.map((eq) => (
+            <Pressable
+              key={eq}
+              onPress={() => setEquipment(eq)}
+              style={({ pressed }) => [
+                styles.chip,
+                equipment === eq && styles.chipActive,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={[styles.chipText, equipment === eq && styles.chipTextActive]}>
+                {eq}
               </Text>
             </Pressable>
           ))}
@@ -204,6 +268,11 @@ export default function NewExerciseScreen() {
           點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK（可日後補）。
         </Text>
 
+        <View style={styles.diagramWrap}>
+          <BodyDiagram highlight={highlight} onMusclePress={cycleMuscleRole} />
+          <BodyDiagramLegend />
+        </View>
+
         {muscleGroups.map((mg) => {
           const list = musclesByMg.get(mg.id) ?? [];
           if (list.length === 0) return null;
@@ -217,22 +286,7 @@ export default function NewExerciseScreen() {
                   return (
                     <Pressable
                       key={m.id}
-                      onPress={() => {
-                        if (!isPrimary && !isSecondary) {
-                          togglePrimary(m.id);
-                        } else if (isPrimary) {
-                          // primary → secondary
-                          setPrimary((p) => {
-                            const np = new Set(p);
-                            np.delete(m.id);
-                            return np;
-                          });
-                          setSecondary((s) => new Set(s).add(m.id));
-                        } else {
-                          // secondary → off
-                          toggleSecondary(m.id);
-                        }
-                      }}
+                      onPress={() => cycleMuscleRole(m.id)}
                       style={({ pressed }) => [
                         styles.muscleChip,
                         isPrimary && styles.muscleChipPrimary,
@@ -253,30 +307,14 @@ export default function NewExerciseScreen() {
             </View>
           );
         })}
-
-        {errors.length > 0 && (
-          <View style={styles.errors}>
-            {errors.map((e, i) => (
-              <Text key={i} style={styles.errorText}>• {e.message}</Text>
-            ))}
-          </View>
-        )}
-
-        <Pressable
-          accessibilityRole="button"
-          disabled={!canSubmit || busy}
-          onPress={onSubmit}
-          style={({ pressed }) => [
-            styles.submitBtn,
-            (!canSubmit || busy) && styles.submitBtnDisabled,
-            pressed && styles.btnPressed,
-          ]}>
-          <Text style={styles.submitBtnText}>{busy ? '儲存中…' : '儲存'}</Text>
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+// Discard the unused ValidationError import warning at module level if linter
+// strips it; the type re-export keeps it referenced.
+export type { ValidationError };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -285,8 +323,14 @@ const styles = StyleSheet.create({
     fontSize: 17,
     paddingHorizontal: 8,
   },
-  body: { padding: 20, gap: 8 },
-  heading: { fontSize: 24, fontWeight: '700', marginBottom: 12 },
+  headerSave: {
+    color: '#0a7ea4',
+    fontSize: 17,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+  },
+  headerSaveDisabled: { color: '#9CA3AF' },
+  body: { padding: 20, gap: 8, paddingBottom: 40 },
   label: {
     fontSize: 13,
     fontWeight: '600',
@@ -301,6 +345,8 @@ const styles = StyleSheet.create({
     padding: 10,
     fontSize: 15,
   },
+  inputError: { borderColor: '#B91C1C' },
+  fieldError: { fontSize: 12, color: '#B91C1C', marginTop: 2 },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -315,6 +361,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#0a7ea4' },
   chipText: { fontSize: 13, color: '#374151' },
   chipTextActive: { color: 'white', fontWeight: '600' },
+  diagramWrap: { alignItems: 'center', marginVertical: 8 },
   muscleGroupBlock: { marginTop: 4 },
   muscleGroupTitle: {
     fontSize: 13,
@@ -340,21 +387,5 @@ const styles = StyleSheet.create({
   },
   muscleChipText: { fontSize: 13, color: '#374151' },
   muscleChipTextActive: { fontWeight: '600' },
-  errors: {
-    backgroundColor: 'rgba(220,38,38,0.10)',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  errorText: { fontSize: 13, color: '#B91C1C' },
-  submitBtn: {
-    marginTop: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-  },
-  submitBtnDisabled: { opacity: 0.5 },
-  submitBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
   btnPressed: { opacity: 0.85 },
 });
