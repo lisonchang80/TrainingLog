@@ -11,7 +11,6 @@ import { useDatabase } from '@/components/database-provider';
 import {
   getExerciseWithMuscles,
   listMuscleGroups,
-  listMuscles,
   updateCustomExercise,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
@@ -19,7 +18,6 @@ import type { CustomExerciseDraft } from '@/src/domain/exercise/exerciseLibrary'
 import type {
   Equipment,
   ExerciseWithMuscles,
-  Muscle,
   MuscleGroup,
 } from '@/src/domain/exercise/types';
 
@@ -36,7 +34,6 @@ export default function EditExerciseScreen() {
   const [original, setOriginal] = useState<ExerciseWithMuscles | null>(null);
   const [initial, setInitial] = useState<CustomExerciseInitial | null>(null);
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
-  const [muscles, setMuscles] = useState<Muscle[]>([]);
   const [existingNames, setExistingNames] = useState<readonly string[]>([]);
 
   useEffect(() => {
@@ -44,11 +41,9 @@ export default function EditExerciseScreen() {
     Promise.all([
       getExerciseWithMuscles(db, id),
       listMuscleGroups(db),
-      listMuscles(db),
       listExercises(db),
-    ]).then(([d, mgs, ms, exs]) => {
+    ]).then(([d, mgs, exs]) => {
       setMuscleGroups(mgs);
-      setMuscles(ms);
       if (d) {
         setOriginal(d);
         setInitial({
@@ -120,7 +115,6 @@ export default function EditExerciseScreen() {
       initial={initial}
       existingNames={existingNames}
       muscleGroups={muscleGroups}
-      muscles={muscles}
       onSubmit={handleSubmit}
       onCancel={() => router.back()}
     />

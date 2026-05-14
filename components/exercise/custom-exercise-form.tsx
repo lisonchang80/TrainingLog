@@ -1,5 +1,5 @@
 /**
- * CustomExerciseForm — Slice 9.7 (ADR-0017 Q11 amendment).
+ * CustomExerciseForm — Slice 9.7 (ADR-0017 Q11 amendment, layout iteration).
  *
  * Shared form for new + edit Custom Exercise flows. Controlled component:
  * caller passes `initial` and `onSubmit`; the form owns its internal state
@@ -9,10 +9,9 @@
  *   1. 名稱 — text input (required, dedup, ≤ 60 chars)
  *   2. 大分類 — picker row → MgEquipmentPicker 4×3 (required)
  *   3. 用具 — picker row → MgEquipmentPicker 4×2 (required, default '其他')
- *   4. 訓練部位 — chip section (optional); 解剖圖 conditional render
+ *   4. 訓練部位 — MuscleDiagramTagged (front + back 並列 with labeled leader
+ *      lines around each body). Optional — chip count = 19 muscle.
  *
- * Q3: 解剖圖 read-only (no onMusclePress); chip row is the only control surface.
- * Q4: muscle section = 解剖圖 inline + chip section 限高 ScrollView (內捲)
  * load_type is derived from equipment in the adapter (inferLoadType).
  */
 import { Stack } from 'expo-router';
@@ -28,7 +27,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BodyDiagram, BodyDiagramLegend } from '@/components/body-diagram';
 import {
   validateCustomExerciseDraft,
   type CustomExerciseDraft,
@@ -36,12 +34,12 @@ import {
 import {
   EQUIPMENT_VALUES,
   type Equipment,
-  type Muscle,
   type MuscleGroup,
   type MuscleRole,
 } from '@/src/domain/exercise/types';
 
 import { MgEquipmentPicker, type PickerCell } from './mg-equipment-picker';
+import { MuscleDiagramTagged } from './muscle-diagram-tagged';
 
 export interface CustomExerciseInitial {
   name: string;
@@ -56,7 +54,6 @@ interface CustomExerciseFormProps {
   initial: CustomExerciseInitial;
   existingNames: readonly string[];
   muscleGroups: MuscleGroup[];
-  muscles: Muscle[];
   onSubmit: (draft: CustomExerciseDraft) => Promise<void>;
   onCancel: () => void;
 }
@@ -66,7 +63,6 @@ export function CustomExerciseForm({
   initial,
   existingNames,
   muscleGroups,
-  muscles,
   onSubmit,
   onCancel,
 }: CustomExerciseFormProps) {
@@ -135,15 +131,6 @@ export function CustomExerciseForm({
       setBusy(false);
     }
   }, [canSubmit, busy, errors, draft, onSubmit]);
-
-  const musclesByMg = useMemo(() => {
-    const map = new Map<string, Muscle[]>();
-    for (const m of muscles) {
-      if (!map.has(m.mg_id)) map.set(m.mg_id, []);
-      map.get(m.mg_id)!.push(m);
-    }
-    return map;
-  }, [muscles]);
 
   const highlight = useMemo<Map<string, MuscleRole>>(() => {
     const m = new Map<string, MuscleRole>();
@@ -244,57 +231,14 @@ export function CustomExerciseForm({
           <Text style={styles.pickerRowChevron}>▾</Text>
         </Pressable>
 
-        {/* Row 4: 訓練部位 */}
+        {/* Row 4: 訓練部位 — 解剖圖 + 標籤同畫面（正面 / 背面並列） */}
         <Text style={styles.label}>訓練部位（選填）</Text>
         <Text style={styles.helper}>
-          點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK；空白時動作詳情頁不顯示解剖圖。
+          點標籤切換：未選 → 主要(橘) → 次要(藍) → 取消。空白時動作詳情頁不顯示解剖圖。
         </Text>
 
         <View style={styles.diagramWrap}>
-          <BodyDiagram highlight={highlight} />
-          <BodyDiagramLegend />
-        </View>
-
-        <View style={styles.muscleScrollWrap}>
-          <ScrollView
-            style={styles.muscleScroll}
-            contentContainerStyle={styles.muscleScrollContent}
-            nestedScrollEnabled>
-            {muscleGroups.map((mg) => {
-              const list = musclesByMg.get(mg.id) ?? [];
-              if (list.length === 0) return null;
-              return (
-                <View key={mg.id} style={styles.muscleGroupBlock}>
-                  <Text style={styles.muscleGroupTitle}>{mg.name}</Text>
-                  <View style={styles.chipRow}>
-                    {list.map((m) => {
-                      const isPrimary = primary.has(m.id);
-                      const isSecondary = secondary.has(m.id);
-                      return (
-                        <Pressable
-                          key={m.id}
-                          onPress={() => cycleMuscleRole(m.id)}
-                          style={({ pressed }) => [
-                            styles.muscleChip,
-                            isPrimary && styles.muscleChipPrimary,
-                            isSecondary && styles.muscleChipSecondary,
-                            pressed && styles.btnPressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.muscleChipText,
-                              (isPrimary || isSecondary) && styles.muscleChipTextActive,
-                            ]}>
-                            {m.name}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-              );
-            })}
-          </ScrollView>
+          <MuscleDiagramTagged highlight={highlight} onTap={cycleMuscleRole} />
         </View>
       </ScrollView>
 
@@ -367,48 +311,5 @@ const styles = StyleSheet.create({
   pickerRowChevron: { fontSize: 14, color: '#9CA3AF' },
 
   diagramWrap: { alignItems: 'center', marginVertical: 8 },
-
-  muscleScrollWrap: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    backgroundColor: '#FAFAFA',
-    marginTop: 4,
-    height: 220,
-  },
-  muscleScroll: { flex: 1 },
-  muscleScrollContent: { padding: 10 },
-
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  muscleGroupBlock: { marginTop: 4 },
-  muscleGroupTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  muscleChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: '#D1D5DB',
-    backgroundColor: 'rgba(127,127,127,0.05)',
-  },
-  muscleChipPrimary: {
-    borderColor: '#F26B3A',
-    backgroundColor: 'rgba(242,107,58,0.18)',
-  },
-  muscleChipSecondary: {
-    borderColor: '#7CB6E0',
-    backgroundColor: 'rgba(124,182,224,0.18)',
-  },
-  muscleChipText: { fontSize: 13, color: '#374151' },
-  muscleChipTextActive: { fontWeight: '600' },
   btnPressed: { opacity: 0.85 },
 });

@@ -10,11 +10,10 @@ import { useDatabase } from '@/components/database-provider';
 import {
   createCustomExercise,
   listMuscleGroups,
-  listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import type { CustomExerciseDraft } from '@/src/domain/exercise/exerciseLibrary';
-import type { Muscle, MuscleGroup } from '@/src/domain/exercise/types';
+import type { MuscleGroup } from '@/src/domain/exercise/types';
 import { submitNewlyCreated } from '@/src/domain/exercise/pickerBridge';
 
 const INITIAL_DRAFT: CustomExerciseInitial = {
@@ -29,17 +28,13 @@ export default function NewExerciseScreen() {
   const db = useDatabase();
   const router = useRouter();
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
-  const [muscles, setMuscles] = useState<Muscle[]>([]);
   const [existingNames, setExistingNames] = useState<readonly string[]>([]);
 
   useEffect(() => {
-    Promise.all([listMuscleGroups(db), listMuscles(db), listExercises(db)]).then(
-      ([mgs, ms, exs]) => {
-        setMuscleGroups(mgs);
-        setMuscles(ms);
-        setExistingNames(exs.filter((e) => e.is_archived !== 1).map((e) => e.name));
-      }
-    );
+    Promise.all([listMuscleGroups(db), listExercises(db)]).then(([mgs, exs]) => {
+      setMuscleGroups(mgs);
+      setExistingNames(exs.filter((e) => e.is_archived !== 1).map((e) => e.name));
+    });
   }, [db]);
 
   const handleSubmit = async (draft: CustomExerciseDraft) => {
@@ -55,7 +50,6 @@ export default function NewExerciseScreen() {
       initial={INITIAL_DRAFT}
       existingNames={existingNames}
       muscleGroups={muscleGroups}
-      muscles={muscles}
       onSubmit={handleSubmit}
       onCancel={() => router.back()}
     />
