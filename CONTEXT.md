@@ -180,11 +180,25 @@ _Avoid_: 「動作庫」當「Exercise」同義詞（前者是 UI，後者是 en
 
 **創建 path**（per Q10 + B-2 截圖）：動作庫 sidebar「超級組」tab → 「+ 添加自定義動作」→ 多選 2 個動作 → 「組合」button → INSERT entity
 
-**加進 Template 行為 — Explode model**（per Q10）：clone 成 2 個 `template_exercise` rows + parent_id linkage（per ADR-0016），**不存** `template_exercise.reusable_superset_id` FK（單向、不雙向同步）；砍 reusable superset 不影響 Template 內已 explode rows。
+**加進 Template 行為 — Explode model**（per Q10）：clone 成 2 個 `template_exercise` rows + parent_id linkage（per ADR-0016）。（**Slice 9.8b 修訂**：「不存 `template_exercise.reusable_superset_id` FK」翻盤 — v013 ADD COLUMN，per-(rs_id, position) 動作記憶分流，見 ADR-0017 Q10 9.8b amendment。**v014 修訂**：snapshot 時連 `parent_id` + `reusable_superset_id` 都複製進 `session_exercise`，見 ADR-0018。）砍 reusable superset 不影響 Template 內已 explode rows。
 
 **詳情頁**（per Q17）：主頁（標題 + 2 動作縮圖 + 配色，無動圖、無訓練部位） + 歷史頁（2 動作 sets 上下疊放） + 圖表頁（3 張圖 × 2 條線，per Q16）；footer `[歷史][圖表][編輯][關閉]`，「編輯」改 name + color；「刪除」放編輯頁內。
 
-_Avoid_: 「超級組 entity」字眼跟 SetGroup superset 混淆；「臨時超級組」（A 圖紅 X，本 ADR 不做，要組只能先建 reusable）
+**Session 側 cluster grouping** (ADR-0018, v014): 為了讓 session 詳情頁能還原 cluster 結構（templated + ad-hoc），`session_exercise` 加兩個 column：
+- `parent_id TEXT NULL` — 同 session 內指向另一 `session_exercise.id`；NULL = solo
+- `reusable_superset_id TEXT NULL` — FK to `superset(id) ON DELETE SET NULL`；NULL = manual/ad-hoc cluster；NOT NULL = templated explode 路徑來的 cluster
+
+**Cluster 詞彙地圖**（避免混淆 — repo 用「cluster」4 種意思）：
+
+| 詞 | 指什麼 | Schema 載體 | ADR |
+|---|---|---|---|
+| **dropset cluster** | 同 exercise 的 rep cluster（一組做完降重續做） | `set.parent_set_id` | ADR-0012 |
+| **manual cluster** / **hand-crafted superset** | Template 內手動 group 的 superset（無 RS identity） | `template_exercise.parent_id`（rs_id NULL） | ADR-0016 |
+| **templated cluster** | Template 內 explode 自 RS、有 rs_id 的 cluster | `template_exercise.parent_id` + `reusable_superset_id` | ADR-0017 Q10 |
+| **session-side cluster** | Session 內任何配對 cluster（templated + ad-hoc 共用 schema） | `session_exercise.parent_id` (+ optional `reusable_superset_id`) | ADR-0018 |
+| **ad-hoc cluster** / **freestyle cluster** | session-side cluster 但 `reusable_superset_id IS NULL` — 臨場配對、不對應任何 saved RS | session_exercise.parent_id only | ADR-0018 |
+
+_Avoid_: 「超級組 entity」字眼跟 SetGroup superset 混淆；「臨時超級組」（A 圖紅 X，本 ADR 不做，要組只能先建 reusable）；混用「dropset cluster」與「session-side cluster」（前者 rep-level、後者 exercise-level，schema 完全不同）
 
 **動作詳情頁** (UI: 動作詳情) (ADR-0017 Q4/Q17):
 Per-Exercise 三層 view：

@@ -185,6 +185,10 @@ CREATE TABLE superset_exercise (
 - **Picker mode superset 創建 round-trip**（grill Q7）：新增 `newlyCreatedSupersetId` mailbox + 3 API（submit/consume/clear），picker mode 從 `/superset/new` 回來自動加入 `supersetSelection`，跟既有 exercise round-trip 對稱。
 - **Picker mode superset 視覺**（grill Q2）：SupersetGrid 在 picker mode 下 SupersetCard 加 selectedBadge 顯示 rank（鏡像 ExerciseCard，獨立計號）；不加 ⓘ 進詳情按鈕（avoid stack 深度遞增）；無 max 限制（picker 是 explode-to-Template 場景，不複用 /superset/new 的 max 2 規則）。
 
+**v014 grill amendment (2026-05-15)** — session 側 cluster identity 補課，見 [ADR-0018](./0018-session-side-cluster-grouping-schema.md)：
+- 9.8b L161 拍板的 `template_exercise.reusable_superset_id` 走 snapshot 進 session 側 → 新增 `session_exercise.reusable_superset_id`（v014）一起搬，session 詳情頁與 RS 歷史頁不再依賴 template_exercise 反查 indirection
+- 同時補 `session_exercise.parent_id`，讓 templated cluster 在 session 詳情頁能還原 cluster 結構（之前 `snapshotForSession` 丟失 parent_id）
+
 砍 reusable superset 後 Template 上的 cluster：rs_id 自動 SET NULL，cluster 變成「失主」狀態 — 跟既有 manual cluster 行為一致（unlocked），記憶歸入 solo per-exercise memory。砍前已創的 Template clusters 視覺上**仍能識別**為一個 cluster（parent_id linkage 不變），但 ⚙ menu 解鎖回完整 4 項。
 
 **「N 次」徽章**：cached `superset.use_count` column；每次 add 進 Template/Session 時 +1。
@@ -296,6 +300,8 @@ ADR Q13 line 189 自己寫「對齊 ADR-0016 12-color picker」，但拍板的 c
 - 3 張圖（容量 / 最大重量 / 1RM 預測）× **2 條線（動作 A / B）**
 - 動作 A、B 用 reusable superset color + 對比色區分（legend 標 exercise name）
 - rep bucket filter chip 套用同 Q14 邏輯（容量/最大重量 受 filter；1RM 不受）
+
+**v014 grill amendment (2026-05-15)** — Q16 圖表頁 + Q17 歷史頁的「session_exercise → template_exercise WHERE rs_id=?」indirection path 在 v014 後被 `session_exercise.reusable_superset_id` 直查取代（[ADR-0018](./0018-session-side-cluster-grouping-schema.md)）。indirection 保留為 fallback path 覆蓋 backfill skip 的 ambiguous template 歷史 session。
 
 ### Q17：Reusable Superset 詳情頁 full spec
 
