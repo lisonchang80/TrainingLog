@@ -62,6 +62,14 @@ export default function RootLayout() {
             name="superset/edit/[id]"
             options={{ presentation: 'modal', title: '編輯超級組' }}
           />
+          <Stack.Screen
+            name="superset-history/[id]"
+            options={{ presentation: 'modal', title: '超級組歷史' }}
+          />
+          <Stack.Screen
+            name="superset-chart/[id]"
+            options={{ presentation: 'modal', title: '超級組圖表' }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
