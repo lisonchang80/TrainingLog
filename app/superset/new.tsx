@@ -35,6 +35,7 @@ import {
   validateReusableSupersetDraft,
 } from '@/src/domain/superset/supersetManager';
 import { insertReusableSuperset } from '@/src/adapters/sqlite/supersetRepository';
+import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
 
 /**
  * Reusable Superset creation page (ADR-0017 Q10 / slice 9.8a).
@@ -138,12 +139,17 @@ export default function NewSupersetScreen() {
     if (errors.length > 0) return;
     setSubmitting(true);
     try {
-      await insertReusableSuperset(
+      const newId = await insertReusableSuperset(
         db,
         draft,
         () => Crypto.randomUUID(),
         () => Date.now()
       );
+      // Mailbox round-trip for picker mode (slice 9.8b grill Q7) — library
+      // useFocusEffect drains this and auto-selects the new superset when in
+      // picker mode. Browse mode also drains (no-op) so a stale id never
+      // leaks into a later picker session.
+      submitNewlyCreatedSuperset(newId);
       router.back();
     } finally {
       setSubmitting(false);

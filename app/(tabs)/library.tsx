@@ -35,8 +35,10 @@ import {
 import { listReusableSupersetsWithExercises } from '@/src/adapters/sqlite/supersetRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
+  clearNewlyCreatedSuperset,
   clearPick,
   consumeNewlyCreated,
+  consumeNewlyCreatedSuperset,
   submitPick,
 } from '@/src/domain/exercise/pickerBridge';
 import {
@@ -89,11 +91,20 @@ export default function LibraryScreen() {
   );
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<readonly string[]>(EMPTY_SELECTION);
+  // Parallel selection array for reusable supersets (slice 9.8b grill Q1 — dual
+  // array `PickerPayload`). Independent rank-within-kind: user sees ex#1 / rs#1
+  // numbering rather than a global order.
+  const [supersetSelection, setSupersetSelection] = useState<readonly string[]>(
+    EMPTY_SELECTION
+  );
 
   // Drop any stale picker-mode mailbox on mount so a prior abandoned pick
   // does not leak into a fresh picker session.
   useEffect(() => {
-    if (isPickerMode) clearPick();
+    if (isPickerMode) {
+      clearPick();
+      clearNewlyCreatedSuperset();
+    }
   }, [isPickerMode]);
 
   const refresh = useCallback(async () => {
@@ -125,6 +136,13 @@ export default function LibraryScreen() {
       const newId = consumeNewlyCreated();
       if (newId && isPickerMode) {
         setSelection((prev) => addSelection(prev, newId));
+      }
+      // Same round-trip for newly-created reusable supersets (slice 9.8b
+      // grill Q7) — picker auto-selects the new superset on return from
+      // /superset/new; browse mode drains to prevent stale leak.
+      const newSupId = consumeNewlyCreatedSuperset();
+      if (newSupId && isPickerMode) {
+        setSupersetSelection((prev) => addSelection(prev, newSupId));
       }
     }, [refresh, isPickerMode])
   );
@@ -171,14 +189,28 @@ export default function LibraryScreen() {
   };
 
   const onPickerDone = () => {
-    submitPick({ exerciseIds: [...selection] });
+    submitPick({
+      exerciseIds: [...selection],
+      reusableSupersetIds: [...supersetSelection],
+    });
     router.back();
   };
 
   const onPickerCancel = () => {
     setSelection(EMPTY_SELECTION);
+    setSupersetSelection(EMPTY_SELECTION);
     router.back();
   };
+
+  const onSupersetCardTap = (s: ReusableSupersetWithExercises) => {
+    if (isPickerMode) {
+      setSupersetSelection((prev) => toggleSelection(prev, s.superset.id));
+    } else {
+      router.push(`/superset/${s.superset.id}`);
+    }
+  };
+
+  const pickerTotal = selection.length + supersetSelection.length;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -232,7 +264,13 @@ export default function LibraryScreen() {
               supersets={supersets}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
-              onTap={(s) => router.push(`/superset/${s.superset.id}`)}
+              onTap={onSupersetCardTap}
+              selection={isPickerMode ? supersetSelection : null}
+              onInfoPress={
+                isPickerMode
+                  ? (s) => router.push(`/superset/${s.superset.id}`)
+                  : null
+              }
             />
           ) : (
             <>
@@ -263,14 +301,14 @@ export default function LibraryScreen() {
             accessibilityRole="button"
             accessibilityLabel="完成"
             onPress={onPickerDone}
-            disabled={selection.length === 0}
+            disabled={pickerTotal === 0}
             style={({ pressed }) => [
               styles.pickerDoneBtn,
-              selection.length === 0 && styles.pickerDoneBtnDisabled,
+              pickerTotal === 0 && styles.pickerDoneBtnDisabled,
               pressed && styles.pressed,
             ]}>
             <Text style={styles.pickerDoneBtnText}>
-              完成{selection.length > 0 ? ` (${selection.length})` : ''}
+              完成{pickerTotal > 0 ? ` (${pickerTotal})` : ''}
             </Text>
           </Pressable>
         </View>
@@ -585,11 +623,17 @@ function SupersetGrid({
   cardWidth,
   cardHeight,
   onTap,
+  selection,
+  onInfoPress,
 }: {
   supersets: ReusableSupersetWithExercises[];
   cardWidth: number;
   cardHeight: number;
   onTap: (s: ReusableSupersetWithExercises) => void;
+  /** Non-null = picker mode (toggle on tap, render badge); null = browse mode. */
+  selection: readonly string[] | null;
+  /** Non-null = picker mode (render ⓘ for detail preview); null = browse mode. */
+  onInfoPress: ((s: ReusableSupersetWithExercises) => void) | null;
 }) {
   if (supersets.length === 0) {
     return (
@@ -603,6 +647,8 @@ function SupersetGrid({
   for (let i = 0; i < supersets.length; i += 2) {
     rows.push(supersets.slice(i, i + 2));
   }
+  const rankOf = (s: ReusableSupersetWithExercises): number =>
+    selection ? selectionRank(selection, s.superset.id) : -1;
   return (
     <ScrollView
       style={styles.gridList}
@@ -615,6 +661,9 @@ function SupersetGrid({
             width={cardWidth}
             height={cardHeight}
             onPress={() => onTap(pair[0])}
+            selected={selection ? isSelected(selection, pair[0].superset.id) : false}
+            rank={rankOf(pair[0])}
+            onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
             <SupersetCard
@@ -622,6 +671,9 @@ function SupersetGrid({
               width={cardWidth}
               height={cardHeight}
               onPress={() => onTap(pair[1])}
+              selected={selection ? isSelected(selection, pair[1].superset.id) : false}
+              rank={rankOf(pair[1])}
+              onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
             <View style={{ width: cardWidth, height: cardHeight }} />
@@ -637,18 +689,22 @@ function SupersetCard({
   width,
   height,
   onPress,
+  selected,
+  rank,
+  onInfoPress,
 }: {
   item: ReusableSupersetWithExercises;
   width: number;
   height: number;
   onPress: () => void;
+  selected: boolean;
+  rank: number;
+  onInfoPress: (() => void) | null;
 }) {
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
   const exA = exercises[0];
   const exB = exercises[1];
-  // Smaller thumb size for the dual-thumbnail layout. 64 keeps both circles
-  // visible side-by-side within the card width without crowding the name.
   return (
     <Pressable
       accessibilityRole="button"
@@ -657,11 +713,17 @@ function SupersetCard({
         styles.card,
         styles.supersetCard,
         { width, height },
+        selected && styles.cardSelected,
         pressed && styles.pressed,
       ]}>
       <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
       {superset.use_count > 0 && (
         <Text style={styles.countBadge}>{superset.use_count} 次</Text>
+      )}
+      {selected && rank >= 0 && (
+        <View style={styles.selectedBadge}>
+          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
+        </View>
       )}
       <View style={styles.supersetThumbRow}>
         <SupersetMiniThumb exercise={exA} />
@@ -670,6 +732,19 @@ function SupersetCard({
       <Text style={styles.cardName} numberOfLines={2}>
         {superset.name}
       </Text>
+      {onInfoPress && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="查看超級組詳情"
+          onPress={onInfoPress}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.infoBtn,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.infoBtnText}>ⓘ</Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 }

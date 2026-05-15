@@ -21,6 +21,7 @@ function buildTemplate(): Template {
         parent_id: null,
         notes: null,
         rest_seconds: 90,
+        reusable_superset_id: null,
         sets: [
           {
             id: 's1',
@@ -61,6 +62,7 @@ describe('templateDraft — cloneTemplate', () => {
       parent_id: null,
       notes: null,
       rest_seconds: null,
+      reusable_superset_id: null,
       sets: [],
     });
     expect(src.name).toBe('Push');
@@ -214,6 +216,7 @@ describe('templateDraft — computeTemplateDiff', () => {
       parent_id: null,
       notes: null,
       rest_seconds: null,
+      reusable_superset_id: null,
       sets: [
         {
           id: 'sN',
@@ -237,6 +240,7 @@ describe('templateDraft — computeTemplateDiff', () => {
         parent_id: null,
         notes: null,
         rest_seconds: null,
+        reusable_superset_id: null,
       },
     ]);
     expect(diff.setInserts).toEqual([

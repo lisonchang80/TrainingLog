@@ -15,15 +15,25 @@
  */
 
 export interface PickerPayload {
-  /** Selected exercise IDs in insertion order (matches picker's selection-order rule). */
+  /** Selected exercise IDs in selection order. */
   exerciseIds: string[];
+  /**
+   * Selected reusable superset IDs in selection order (ADR-0017 L154
+   * amendment / slice 9.8b grill Q1). Independent of `exerciseIds` —
+   * Template editor processes reusable supersets first (explode into
+   * cluster pair + memory derive) then appends solo exercises after.
+   */
+  reusableSupersetIds: string[];
 }
 
 let mailbox: PickerPayload | null = null;
 
 /** Picker calls this on 完成 before `router.back()`. Replaces any prior unread payload. */
 export function submitPick(payload: PickerPayload): void {
-  mailbox = { exerciseIds: [...payload.exerciseIds] };
+  mailbox = {
+    exerciseIds: [...payload.exerciseIds],
+    reusableSupersetIds: [...payload.reusableSupersetIds],
+  };
 }
 
 /** Caller (Template editor) reads + clears in one operation. Returns null if empty. */
@@ -40,7 +50,12 @@ export function clearPick(): void {
 
 /** Test helper — inspect without clearing. */
 export function peekPickForTest(): PickerPayload | null {
-  return mailbox == null ? null : { exerciseIds: [...mailbox.exerciseIds] };
+  return mailbox == null
+    ? null
+    : {
+        exerciseIds: [...mailbox.exerciseIds],
+        reusableSupersetIds: [...mailbox.reusableSupersetIds],
+      };
 }
 
 // ---------------------------------------------------------------------------
@@ -77,4 +92,37 @@ export function clearNewlyCreated(): void {
 /** Test helper — inspect without clearing. */
 export function peekNewlyCreatedForTest(): string | null {
   return newlyCreatedId;
+}
+
+// ---------------------------------------------------------------------------
+// Newly-created reusable-superset mailbox — mirrors the exercise mailbox for
+// the picker mode's superset tab "+" button round-trip (slice 9.8b grill Q7).
+//
+// When the user taps "+" in the superset tab while in picker mode, they go to
+// /superset/new, create a reusable superset, and on save we want them auto-
+// selected on return — same UX as /exercise/new.
+// ---------------------------------------------------------------------------
+
+let newlyCreatedSupersetId: string | null = null;
+
+/** /superset/new calls this on save before router.back(). */
+export function submitNewlyCreatedSuperset(supersetId: string): void {
+  newlyCreatedSupersetId = supersetId;
+}
+
+/** Picker / library tab reads + clears on focus. Returns null if empty. */
+export function consumeNewlyCreatedSuperset(): string | null {
+  const id = newlyCreatedSupersetId;
+  newlyCreatedSupersetId = null;
+  return id;
+}
+
+/** Drop any pending value (e.g. on picker mount to flush stale state). */
+export function clearNewlyCreatedSuperset(): void {
+  newlyCreatedSupersetId = null;
+}
+
+/** Test helper — inspect without clearing. */
+export function peekNewlyCreatedSupersetForTest(): string | null {
+  return newlyCreatedSupersetId;
 }

@@ -45,6 +45,7 @@ function makeEx(over: Partial<TemplateExercise> & { id: string }): TemplateExerc
     parent_id: null,
     notes: null,
     rest_seconds: null,
+    reusable_superset_id: null,
     sets: [],
     ...over,
   };

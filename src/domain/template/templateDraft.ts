@@ -109,6 +109,8 @@ export interface TemplateExerciseInsert {
   parent_id: string | null;
   notes: string | null;
   rest_seconds: number | null;
+  /** Reusable-superset FK (ADR-0017 L154 amendment / slice 9.8b). NULL = solo / manual cluster. */
+  reusable_superset_id: string | null;
 }
 
 export interface TemplateExerciseUpdate {
@@ -118,6 +120,8 @@ export interface TemplateExerciseUpdate {
   parent_id?: string | null;
   notes?: string | null;
   rest_seconds?: number | null;
+  /** Reusable-superset FK (defensive — normal flow keeps this stable post-explode). */
+  reusable_superset_id?: string | null;
 }
 
 export interface TemplateSetInsert {
@@ -176,6 +180,13 @@ function diffExerciseFields(
   }
   if ((committed.rest_seconds ?? null) !== (draft.rest_seconds ?? null)) {
     patch.rest_seconds = draft.rest_seconds;
+    dirty = true;
+  }
+  if (
+    (committed.reusable_superset_id ?? null) !==
+    (draft.reusable_superset_id ?? null)
+  ) {
+    patch.reusable_superset_id = draft.reusable_superset_id;
     dirty = true;
   }
   return dirty ? patch : null;
@@ -263,6 +274,7 @@ export function computeTemplateDiff(args: {
         parent_id: dex.parent_id,
         notes: dex.notes,
         rest_seconds: dex.rest_seconds,
+        reusable_superset_id: dex.reusable_superset_id,
       });
     } else {
       const upd = diffExerciseFields(cex, dex);
