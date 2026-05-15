@@ -102,7 +102,6 @@ describe('exerciseLibraryRepository', () => {
       db,
       {
         name: '我的 Custom 推',
-        load_type: 'loaded',
         muscle_group_id: MG_CHEST,
         equipment: '槓鈴',
         primaryMuscleIds: [M_UPPER_CHEST, M_TRICEP],
@@ -119,13 +118,12 @@ describe('exerciseLibraryRepository', () => {
     expect(got!.secondary.map((m) => m.id)).toEqual([M_LOWER_CHEST]);
   });
 
-  it('createCustomExercise allows null muscle_group_id (per ADR-0010 #9)', async () => {
+  it('createCustomExercise allows empty primary/secondary (訓練部位選填 — ADR-0017 Q11 Slice 9.7 amendment)', async () => {
     const id = await createCustomExercise(
       db,
       {
-        name: '無 MG 自訂動作',
-        load_type: 'bodyweight',
-        muscle_group_id: null,
+        name: '無部位自訂動作',
+        muscle_group_id: MG_CHEST,
         equipment: '自重',
         primaryMuscleIds: [],
         secondaryMuscleIds: [],
@@ -133,7 +131,9 @@ describe('exerciseLibraryRepository', () => {
       uuid
     );
     const got = await getExerciseWithMuscles(db, id);
-    expect(got!.exercise.muscle_group_id).toBeNull();
+    expect(got!.exercise.muscle_group_id).toBe(MG_CHEST);
+    // equipment=自重 → load_type auto-derived to 'bodyweight'
+    expect(got!.exercise.load_type).toBe('bodyweight');
     expect(got!.primary).toEqual([]);
     expect(got!.secondary).toEqual([]);
   });
@@ -144,7 +144,6 @@ describe('exerciseLibraryRepository', () => {
       db,
       {
         name: '有重疊',
-        load_type: 'loaded',
         muscle_group_id: MG_BACK,
         equipment: '其他',
         primaryMuscleIds: [M_BACK],
@@ -170,7 +169,6 @@ describe('exerciseLibraryRepository', () => {
       db,
       {
         name: '舊名',
-        load_type: 'loaded',
         muscle_group_id: MG_CHEST,
         equipment: '槓鈴',
         primaryMuscleIds: [M_UPPER_CHEST],
@@ -180,7 +178,6 @@ describe('exerciseLibraryRepository', () => {
     );
     await updateCustomExercise(db, id, {
       name: '新名',
-      load_type: 'bodyweight',
       muscle_group_id: MG_BACK,
       equipment: '自重',
       primaryMuscleIds: [M_BACK],
@@ -188,6 +185,7 @@ describe('exerciseLibraryRepository', () => {
     });
     const got = await getExerciseWithMuscles(db, id);
     expect(got!.exercise.name).toBe('新名');
+    // load_type auto-derived from equipment='自重' → 'bodyweight'
     expect(got!.exercise.load_type).toBe('bodyweight');
     expect(got!.exercise.muscle_group_id).toBe(MG_BACK);
     expect(got!.exercise.equipment).toBe('自重');
@@ -200,7 +198,6 @@ describe('exerciseLibraryRepository', () => {
       db,
       {
         name: 'X',
-        load_type: 'loaded',
         muscle_group_id: MG_BACK,
         equipment: '其他',
         primaryMuscleIds: [M_BACK],
@@ -210,7 +207,6 @@ describe('exerciseLibraryRepository', () => {
     );
     await updateCustomExercise(db, id, {
       name: 'X',
-      load_type: 'loaded',
       muscle_group_id: MG_BACK,
       equipment: '其他',
       primaryMuscleIds: [M_BACK],
@@ -227,7 +223,6 @@ describe('exerciseLibraryRepository', () => {
       db,
       {
         name: 'soon-deleted',
-        load_type: 'loaded',
         muscle_group_id: MG_CHEST,
         equipment: '槓鈴',
         primaryMuscleIds: [M_UPPER_CHEST],
@@ -255,8 +250,7 @@ describe('exerciseLibraryRepository', () => {
     const before = await getExerciseWithMuscles(db, benchPressId);
     await updateCustomExercise(db, benchPressId, {
       name: 'HIJACKED',
-      load_type: 'bodyweight',
-      muscle_group_id: null,
+      muscle_group_id: MG_CHEST,
       equipment: '其他',
       primaryMuscleIds: [],
       secondaryMuscleIds: [],

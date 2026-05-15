@@ -56,7 +56,7 @@ const FRONT_LABELS: readonly MgLabel[] = [
   { mg_id: MG_CHEST, short: '胸', anchorX: 100, anchorY: 122, labelX: -8, labelY: 135 },
   { mg_id: MG_BICEP, short: '二頭', anchorX: 50, anchorY: 150, labelX: -8, labelY: 165 },
   { mg_id: MG_CORE, short: '核心', anchorX: 100, anchorY: 175, labelX: -8, labelY: 195 },
-  { mg_id: MG_FOREARM, short: '前臂', anchorX: 55, anchorY: 195, labelX: -8, labelY: 225 },
+  { mg_id: MG_FOREARM, short: '小臂', anchorX: 55, anchorY: 195, labelX: -8, labelY: 225 },
   { mg_id: MG_LEG, short: '腿', anchorX: 82, anchorY: 280, labelX: -8, labelY: 280 },
   { mg_id: MG_CALF, short: '小腿', anchorX: 82, anchorY: 360, labelX: -8, labelY: 360 },
 ];
