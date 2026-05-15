@@ -461,6 +461,8 @@ async function seedClusterSession(
     planned_weight_kg: null,
     template_id: args.seed.template_id,
     is_evergreen: 0,
+    parent_id: null,
+    reusable_superset_id: null,
   });
   await insertSessionExercise(db, {
     id: `${args.session_id}-seB`,
@@ -472,6 +474,8 @@ async function seedClusterSession(
     planned_weight_kg: null,
     template_id: args.seed.template_id,
     is_evergreen: 0,
+    parent_id: null,
+    reusable_superset_id: null,
   });
 
   for (const s of args.a_sets) {
@@ -750,6 +754,8 @@ describe('queryReusableSupersetHistory (Function B)', () => {
       planned_weight_kg: null,
       template_id: 'tpl-solo',
       is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: null,
     });
     await seedSet(db, {
       set_id: 'solo-1',
@@ -792,6 +798,8 @@ describe('queryReusableSupersetHistory (Function B)', () => {
       planned_weight_kg: null,
       template_id: seed.template_id,
       is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: null,
     });
     await insertSessionExercise(db, {
       id: 'sess-skip-B',
@@ -803,6 +811,8 @@ describe('queryReusableSupersetHistory (Function B)', () => {
       planned_weight_kg: null,
       template_id: seed.template_id,
       is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: null,
     });
     await seedSet(db, {
       set_id: 'a-real',
@@ -847,5 +857,157 @@ describe('queryReusableSupersetHistory (Function B)', () => {
     await db.runAsync(`DELETE FROM superset WHERE id = 'rs-1'`);
     const rows = await queryReusableSupersetHistory(db, 'rs-1');
     expect(rows).toEqual([]);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // ADR-0018 v014 — queryReusableSupersetHistory augment with fallback
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('PRIMARY path: matches sessions with session_exercise.reusable_superset_id directly', async () => {
+    // Seed the superset slots + template (the indirection path needs it
+    // because we want to verify the PRIMARY path bypasses it).
+    const seed = await seedReusableSupersetTemplate(db, {
+      exA_id: ex.bench,
+      exB_id: ex.squat,
+    });
+    // Session with rs_id stamped on session_exercise rows directly (post-v014
+    // backfill, or new templated session via snapshotForSession).
+    await createSession(db, { id: 's-primary', started_at: NOW_MS });
+    await insertSessionExercise(db, {
+      id: 's-primary-A',
+      session_id: 's-primary',
+      exercise_id: ex.bench,
+      ordering: 0,
+      planned_sets: 3,
+      planned_reps: null,
+      planned_weight_kg: null,
+      template_id: seed.template_id,
+      is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: 'rs-1',
+    });
+    await insertSessionExercise(db, {
+      id: 's-primary-B',
+      session_id: 's-primary',
+      exercise_id: ex.squat,
+      ordering: 1,
+      planned_sets: 3,
+      planned_reps: null,
+      planned_weight_kg: null,
+      template_id: seed.template_id,
+      is_evergreen: 0,
+      parent_id: 's-primary-A',
+      reusable_superset_id: 'rs-1',
+    });
+    await seedSet(db, {
+      set_id: 'set-pri-a',
+      session_id: 's-primary',
+      exercise_id: ex.bench,
+      reps: 8,
+      weight_kg: 80,
+      ordering: 1,
+    });
+    await seedSet(db, {
+      set_id: 'set-pri-b',
+      session_id: 's-primary',
+      exercise_id: ex.squat,
+      reps: 10,
+      weight_kg: 100,
+      ordering: 2,
+    });
+
+    const rows = await queryReusableSupersetHistory(db, 'rs-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].session_id).toBe('s-primary');
+    expect(rows[0].sides[0].sets[0].set_id).toBe('set-pri-a');
+    expect(rows[0].sides[1].sets[0].set_id).toBe('set-pri-b');
+  });
+
+  it('FALLBACK path: matches sessions whose se.rs_id IS NULL via template_exercise indirection', async () => {
+    // This is exactly what seedClusterSession does (rs_id NULL on se rows) —
+    // confirms the fallback path stays alive for β'-skipped + pre-v014 data.
+    const seed = await seedReusableSupersetTemplate(db, {
+      exA_id: ex.bench,
+      exB_id: ex.squat,
+    });
+    await seedClusterSession(db, {
+      seed,
+      session_id: 's-fallback',
+      started_at: NOW_MS,
+      a_sets: [{ reps: 8, weight_kg: 80, ordering: 1 }],
+      b_sets: [{ reps: 10, weight_kg: 100, ordering: 2 }],
+    });
+
+    const rows = await queryReusableSupersetHistory(db, 'rs-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].session_id).toBe('s-fallback');
+  });
+
+  it('UNION: returns sessions from BOTH paths without duplication', async () => {
+    const seed = await seedReusableSupersetTemplate(db, {
+      exA_id: ex.bench,
+      exB_id: ex.squat,
+    });
+
+    // Session A — primary path (rs_id stamped on session_exercise)
+    await createSession(db, { id: 's-new', started_at: NOW_MS + 1000 });
+    await insertSessionExercise(db, {
+      id: 's-new-A',
+      session_id: 's-new',
+      exercise_id: ex.bench,
+      ordering: 0,
+      planned_sets: 3,
+      planned_reps: null,
+      planned_weight_kg: null,
+      template_id: seed.template_id,
+      is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: 'rs-1',
+    });
+    await insertSessionExercise(db, {
+      id: 's-new-B',
+      session_id: 's-new',
+      exercise_id: ex.squat,
+      ordering: 1,
+      planned_sets: 3,
+      planned_reps: null,
+      planned_weight_kg: null,
+      template_id: seed.template_id,
+      is_evergreen: 0,
+      parent_id: 's-new-A',
+      reusable_superset_id: 'rs-1',
+    });
+    await seedSet(db, {
+      set_id: 'set-new-a',
+      session_id: 's-new',
+      exercise_id: ex.bench,
+      reps: 6,
+      weight_kg: 85,
+      ordering: 1,
+    });
+    await seedSet(db, {
+      set_id: 'set-new-b',
+      session_id: 's-new',
+      exercise_id: ex.squat,
+      reps: 8,
+      weight_kg: 105,
+      ordering: 2,
+    });
+
+    // Session B — fallback path (rs_id NULL, indirection via template_exercise)
+    await seedClusterSession(db, {
+      seed,
+      session_id: 's-old',
+      started_at: NOW_MS,
+      a_sets: [{ reps: 8, weight_kg: 80, ordering: 1 }],
+      b_sets: [{ reps: 10, weight_kg: 100, ordering: 2 }],
+    });
+
+    const rows = await queryReusableSupersetHistory(db, 'rs-1');
+    // Both sessions present, newest first
+    expect(rows.map((r) => r.session_id)).toEqual(['s-new', 's-old']);
+    // No duplicate sets within either side
+    expect(rows[0].sides[0].sets).toHaveLength(1);
+    expect(rows[1].sides[0].sets).toHaveLength(1);
   });
 });

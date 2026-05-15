@@ -494,10 +494,23 @@ export async function queryReusableSupersetHistory(
   if (slots.length !== 2) return [];
   const [slotA, slotB] = slots;
 
-  // Step 2: pull every (non-skipped) set whose session was started from a
-  //         template containing this reusable superset's exploded cluster.
-  //         Joining via session_exercise.template_id → template_exercise.
-  //         reusable_superset_id is the only path until v014.
+  // Step 2: pull every (non-skipped) set whose session is associated with this
+  //         reusable superset via TWO paths (ADR-0018 v014 augment with fallback):
+  //
+  //         Primary (post-v014 + β' backfilled):
+  //           session_exercise.reusable_superset_id = ?  (direct query)
+  //
+  //         Fallback (β'-skipped ambiguous template sessions, or pre-v014
+  //         data that wasn't backfilled):
+  //           session_exercise.reusable_superset_id IS NULL
+  //             AND session_exercise.template_id IS NOT NULL
+  //             JOIN template_exercise WHERE reusable_superset_id = ?
+  //
+  //         The two paths are mutually exclusive on `se.reusable_superset_id`
+  //         (NOT NULL vs IS NULL), so UNION ALL cannot duplicate. The fallback
+  //         survives in one read function only; new sessions never produce
+  //         NULL rs_id with non-NULL template_id (snapshotForSession copies
+  //         rs_id through), so the fallback path naturally decays.
   type RawRow = {
     set_id: string;
     session_id: string;
@@ -511,27 +524,61 @@ export async function queryReusableSupersetHistory(
   };
 
   const rawRows = await db.getAllAsync<RawRow>(
-    `SELECT DISTINCT
-            s.id           AS set_id,
-            s.session_id   AS session_id,
-            ss.started_at  AS session_started_at,
-            ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
-            s.reps         AS reps,
-            s.weight_kg    AS weight_kg,
-            s.ordering     AS ordering,
-            s.exercise_id  AS exercise_id,
-            e.load_type    AS load_type
-       FROM "set" s
-       JOIN session ss          ON ss.id = s.session_id
-       JOIN exercise e          ON e.id  = s.exercise_id
-       JOIN session_exercise se ON se.session_id  = s.session_id
-                               AND se.exercise_id = s.exercise_id
-       JOIN template_exercise te ON te.template_id = se.template_id
-                                AND te.exercise_id = s.exercise_id
-      WHERE te.reusable_superset_id = ?
-        AND s.is_skipped = 0
-        AND s.exercise_id IN (?, ?)
-      ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC`,
+    `SELECT set_id, session_id, session_started_at, bw_snapshot_kg,
+            reps, weight_kg, ordering, exercise_id, load_type
+       FROM (
+         -- Primary path: session_exercise.reusable_superset_id direct query
+         SELECT DISTINCT
+                s.id           AS set_id,
+                s.session_id   AS session_id,
+                ss.started_at  AS session_started_at,
+                ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
+                s.reps         AS reps,
+                s.weight_kg    AS weight_kg,
+                s.ordering     AS ordering,
+                s.exercise_id  AS exercise_id,
+                e.load_type    AS load_type
+           FROM "set" s
+           JOIN session ss          ON ss.id = s.session_id
+           JOIN exercise e          ON e.id  = s.exercise_id
+           JOIN session_exercise se ON se.session_id  = s.session_id
+                                   AND se.exercise_id = s.exercise_id
+          WHERE se.reusable_superset_id = ?
+            AND s.is_skipped = 0
+            AND s.exercise_id IN (?, ?)
+
+         UNION ALL
+
+         -- Fallback path: indirection through template_exercise for sessions
+         -- where backfill was skipped (β' ambiguous templates) or pre-v014
+         -- data that didn't run backfill.
+         SELECT DISTINCT
+                s.id           AS set_id,
+                s.session_id   AS session_id,
+                ss.started_at  AS session_started_at,
+                ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
+                s.reps         AS reps,
+                s.weight_kg    AS weight_kg,
+                s.ordering     AS ordering,
+                s.exercise_id  AS exercise_id,
+                e.load_type    AS load_type
+           FROM "set" s
+           JOIN session ss          ON ss.id = s.session_id
+           JOIN exercise e          ON e.id  = s.exercise_id
+           JOIN session_exercise se ON se.session_id  = s.session_id
+                                   AND se.exercise_id = s.exercise_id
+           JOIN template_exercise te ON te.template_id = se.template_id
+                                    AND te.exercise_id = s.exercise_id
+          WHERE se.reusable_superset_id IS NULL
+            AND se.template_id IS NOT NULL
+            AND te.reusable_superset_id = ?
+            AND s.is_skipped = 0
+            AND s.exercise_id IN (?, ?)
+       )
+      ORDER BY session_started_at DESC, ordering ASC, set_id ASC`,
+    reusableSupersetId,
+    slotA.exercise_id,
+    slotB.exercise_id,
     reusableSupersetId,
     slotA.exercise_id,
     slotB.exercise_id

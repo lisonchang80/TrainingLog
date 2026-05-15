@@ -120,7 +120,8 @@ export async function getTemplate(
   );
   if (!tpl) return null;
   const exercises = await db.getAllAsync<TemplateExerciseSpec>(
-    `SELECT exercise_id, ordering, default_sets, default_reps, default_weight_kg, is_evergreen
+    `SELECT id, exercise_id, ordering, default_sets, default_reps, default_weight_kg,
+            is_evergreen, parent_id, reusable_superset_id
        FROM template_exercise
       WHERE template_id = ?
       ORDER BY ordering ASC`,

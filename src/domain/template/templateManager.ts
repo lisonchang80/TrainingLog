@@ -27,6 +27,26 @@ export interface TemplateExerciseSpec {
    * lands with Program / 副標籤 in a later slice (per ADR-0005).
    */
   is_evergreen: 0 | 1;
+  /**
+   * template_exercise.id — required when the spec carries cluster identity
+   * (`parent_id` references this id on the cluster child). Optional so older
+   * test fixtures that don't model cluster structure stay valid.
+   */
+  id?: string;
+  /**
+   * Cluster linkage (ADR-0016 manual cluster + ADR-0017 Q10 RS-explode). Points
+   * to another `TemplateExerciseSpec.id` in the same template. NULL = solo /
+   * cluster parent. Must be remapped to session-side se.id by
+   * `snapshotForSession`.
+   */
+  parent_id?: string | null;
+  /**
+   * Reusable Superset identity (ADR-0017 Q10 v013 amendment). NULL = solo or
+   * manual cluster; NOT NULL = exploded from this reusable_superset_id. Passed
+   * through verbatim into the session snapshot — not remapped (foreign id
+   * pointing to superset.id).
+   */
+  reusable_superset_id?: string | null;
 }
 
 export interface TemplateData {
@@ -75,6 +95,21 @@ export interface SessionExerciseSnapshot {
   template_id: string;
   /** Frozen copy of the source TemplateExerciseSpec.is_evergreen at snapshot time. */
   is_evergreen: 0 | 1;
+  /**
+   * Cluster linkage on the session side (ADR-0018, v014). Points to another
+   * session_exercise.id IN THE SAME SESSION. NULL = solo / cluster parent.
+   * `snapshotForSession` remaps `TemplateExerciseSpec.parent_id` (which points
+   * to a template_exercise.id) onto the new session-side id via a 2-pass
+   * idMap.
+   */
+  parent_id: string | null;
+  /**
+   * Reusable Superset identity on the session side (ADR-0018, v014). NULL =
+   * solo / manual cluster / ad-hoc cluster (no RS); NOT NULL = templated
+   * RS-explode cluster. Copied verbatim from `TemplateExerciseSpec.reusable_
+   * superset_id` (foreign id pointing to superset.id — no remap).
+   */
+  reusable_superset_id: string | null;
 }
 
 /**
@@ -88,6 +123,18 @@ export interface SessionExerciseSnapshot {
  *
  * Caller injects `uuid: () => string` (Hermes lacks global crypto; production
  * passes `randomUUID` from `expo-crypto`, tests pass deterministic stubs).
+ *
+ * ADR-0018, v014 — Cluster identity propagation:
+ *   - `reusable_superset_id` is copied verbatim (no remap — foreign id).
+ *   - `parent_id` references another template_exercise.id; it is remapped to
+ *     the session-side session_exercise.id via a 2-pass idMap so cluster
+ *     structure survives the snapshot.
+ *   - Dangling `parent_id` (refers to an id not in the same template's
+ *     exercise list) throws — data integrity violation rather than silent
+ *     fallback. If specs do not carry `id`, parent_id refs cannot be resolved
+ *     and are treated as missing-id refs (also throw); if no spec has any
+ *     `parent_id` (older test fixtures, solo-only templates), nothing to
+ *     remap and all snapshots get parent_id = null.
  */
 export function snapshotForSession(args: {
   template: TemplateData;
@@ -97,15 +144,39 @@ export function snapshotForSession(args: {
   const sorted = [...args.template.exercises].sort(
     (a, b) => a.ordering - b.ordering
   );
-  return sorted.map((ex, i) => ({
-    id: args.uuid(),
-    session_id: args.session_id,
-    exercise_id: ex.exercise_id,
-    ordering: i + 1,
-    planned_sets: ex.default_sets,
-    planned_reps: ex.default_reps,
-    planned_weight_kg: ex.default_weight_kg,
-    template_id: args.template.id,
-    is_evergreen: ex.is_evergreen,
-  }));
+
+  // Pass 1: allocate new ids, build oldId → newId map, copy non-self-referencing fields.
+  const idMap = new Map<string, string>();
+  const out: SessionExerciseSnapshot[] = sorted.map((ex, i) => {
+    const newId = args.uuid();
+    if (ex.id) idMap.set(ex.id, newId);
+    return {
+      id: newId,
+      session_id: args.session_id,
+      exercise_id: ex.exercise_id,
+      ordering: i + 1,
+      planned_sets: ex.default_sets,
+      planned_reps: ex.default_reps,
+      planned_weight_kg: ex.default_weight_kg,
+      template_id: args.template.id,
+      is_evergreen: ex.is_evergreen,
+      parent_id: null,
+      reusable_superset_id: ex.reusable_superset_id ?? null,
+    };
+  });
+
+  // Pass 2: resolve parent_id refs against the new id space.
+  for (let i = 0; i < sorted.length; i++) {
+    const oldParent = sorted[i].parent_id;
+    if (oldParent === undefined || oldParent === null) continue;
+    const newParent = idMap.get(oldParent);
+    if (!newParent) {
+      throw new Error(
+        `snapshotForSession: dangling parent_id ${oldParent} in template ${args.template.id}`
+      );
+    }
+    out[i].parent_id = newParent;
+  }
+
+  return out;
 }
