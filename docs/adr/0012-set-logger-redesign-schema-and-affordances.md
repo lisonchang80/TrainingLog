@@ -217,7 +217,7 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 22. **A2: Live Template chip**：chip 跟 row 來源不一致
 23. **A3: 每次手填 chip 目標**：多餘摩擦
 24. **A4: 歷史推目標**：跟 Template planned 衝突，類設置遞增規則 Q15 已剔除
-25. **session 頂層 chip**：reference UI 明確叉掉
+25. **session 頂層 chip**：reference UI 明確叉掉（**2026-05-16 Q6 修訂**：「chip / AI」維持叉掉；但 4-tile/5-tile **stats panel**（容量 / 動作數 / 訓練時間 ± 心率 / 大卡）翻盤為加入。stats panel ≠ chip — 後者是嚴格目標進度，前者是 session-level aggregate。見 ADR-0019 § Q6 + 本文末 amendment）
 26. **新增一組 planned=NULL**（A1.a-β）：chip 可超 100% 顯示 `4080/3080` 不直觀
 27. **新增一組純 bonus**（A1.a-γ）：分子分母都不動，違反「新增一組就是計劃延伸」的直覺
 

@@ -2,7 +2,7 @@
 
 引入 `session.title TEXT NOT NULL DEFAULT ''` 欄位：Template-based session create 時 eager copy Template name，Freestyle session 起始為空字串、UI fallback「自由訓練」。session.title 是 session 的「身份 snapshot」，凍結後不隨 Template 改名動態變動（跟 ADR-0013 notes_snapshot 同 eager-copy 哲學）。
 
-歷史詳情頁頂部加三按鈕 [儲存模板] [另存模板] [刪除本訓練]，作為「身份維度」編輯入口；既有 ADR-0002 Save-back dialog 維持，負責「內容維度」（sets/reps/weight 差異）。兩維度**正交共存**。
+歷史詳情頁頂部加三按鈕 [儲存模板] [另存模板] [刪除本訓練]，作為「身份維度」編輯入口；既有 ADR-0002 Save-back dialog 維持，負責「內容維度」（sets/reps/weight 差異）。兩維度**正交共存**。（**2026-05-16 Q9/Q10 修訂**：Save-back 範圍由「僅 sets/reps/weight 差異」**擴展為任何 in-session 修改 vs snapshot**（diff scope 涵蓋 set count / set_kind / set_position / 加刪換動作 / cluster 加刪 / rest_sec；不含 exercise.notes / session.title）。見 ADR-0019 § Q9 + 本文末 amendment）
 
 本 ADR 整併 Q7.1–Q7.8 全鎖定（CONTEXT.md Q7 close-out 段）；對 ADR-0013 Q5.4-A 有一處微補充（collapsed 卡 title 來源 Template name → session.title），一併固化於本 ADR。
 
@@ -10,7 +10,7 @@
 
 **「內容是 sets，身份是 title；內容靠 Save-back，身份靠歷史頁三按鈕」**——兩個維度正交，分別處理：
 
-- **內容維度** (Save-back, ADR-0002)：session 結束時若 sets/reps/weight ≠ snapshot 目標 → 跳 dialog 問「同意修改模板？」；focus on 數據差異
+- **內容維度** (Save-back, ADR-0002)：session 結束時若 sets/reps/weight ≠ snapshot 目標 → 跳 dialog 問「同意修改模板？」；focus on 數據差異（**2026-05-16 Q9 修訂**：「sets/reps/weight ≠ snapshot」**改為**「任何 in-session 修改 vs snapshot」；Template-based 有 diff → 3-option dialog（儲存/另存/否）/ 無 diff → 直接 finish 無 dialog。見 ADR-0019 § Q9d）
 - **身份維度** (本 ADR)：session.title 隨時可改 (in-session header tap-to-edit / 歷史頁編輯)；歷史詳情頁三按鈕負責 rename Template name / 新建 Template / 刪除本場
 
 session.title 是「我這場叫什麼」的字串身份，跟 sets 數值正交。混在一起會破壞單一職責；分開後 trigger 點清晰、語意單一。
@@ -93,7 +93,7 @@ UPDATE session
 | Save-back dialog | session 結束 summary | 內容差異（sets/reps/weight ≠ snapshot 目標）（**2026-05-16 Q9 修訂**：範圍擴展到任何 in-session 修改 vs snapshot，含 set count / set_kind / set_position / 加刪 / 換 / cluster / rest_sec；exercise.notes + session.title 不算 diff。見 ADR-0019 § Q9） | ADR-0002 既有 |
 | 歷史頁三按鈕 | 歷史詳情頁手動 | 身份操作（rename / 升級 freestyle / 刪除） | 本 ADR |
 
-兩者**不互相觸發**；按了 Save-back 同意 ≠ 按了「儲存模板」（前者改 sets、後者改 name）。
+兩者**不互相觸發**；按了 Save-back 同意 ≠ 按了「儲存模板」（前者改 sets、後者改 name）。（**2026-05-16 Q9 修訂**：「前者改 sets、後者改 name」描述失準 — Save-back 範圍擴展為任何 in-session 修改（含 cluster 加刪 / rest_sec 等），不只 sets；「身份維度」三按鈕仍只改 title / template_id linkage。差異化以「session-end 自動 prompt」vs「歷史頁手動編輯」為界、不以欄位類別為界。見 ADR-0019 § Q9）
 
 使用者若同時想改內容 + 身份：session-end 走 Save-back (改 sets) → 進歷史詳情頁按「儲存模板」(rename + sibling 連動)。
 
