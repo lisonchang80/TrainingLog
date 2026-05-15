@@ -32,6 +32,8 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { listReusableSupersetsWithExercises } from '@/src/adapters/sqlite/supersetRepository';
+import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
   clearPick,
   consumeNewlyCreated,
@@ -75,6 +77,9 @@ export default function LibraryScreen() {
   const [sessionCounts, setSessionCounts] = useState<Map<string, number>>(
     new Map()
   );
+  const [supersets, setSupersets] = useState<ReusableSupersetWithExercises[]>(
+    []
+  );
 
   const [selectedMgId, setSelectedMgId] = useState<string | null>(null);
   const [isSupersetTab, setIsSupersetTab] = useState(false);
@@ -92,17 +97,19 @@ export default function LibraryScreen() {
   }, [isPickerMode]);
 
   const refresh = useCallback(async () => {
-    const [{ exercises, links }, mgs, ms, counts] = await Promise.all([
+    const [{ exercises, links }, mgs, ms, counts, ss] = await Promise.all([
       listExercisesWithLinks(db),
       listMuscleGroups(db),
       listMuscles(db),
       getExerciseSessionCounts(db),
+      listReusableSupersetsWithExercises(db),
     ]);
     setExercises(exercises);
     setLinks(links);
     setMuscleGroups(mgs);
     setMuscles(ms);
     setSessionCounts(counts);
+    setSupersets(ss);
     // Default to first MG on first load if none selected yet.
     if (selectedMgId === null && !isSupersetTab && mgs.length > 0) {
       setSelectedMgId(mgs[0].id);
@@ -199,8 +206,10 @@ export default function LibraryScreen() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="新增動作"
-          onPress={() => router.push('/exercise/new')}
+          accessibilityLabel={isSupersetTab ? '建立超級組' : '新增動作'}
+          onPress={() =>
+            router.push(isSupersetTab ? '/superset/new' : '/exercise/new')
+          }
           style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
           <Text style={styles.addBtnText}>+</Text>
         </Pressable>
@@ -219,7 +228,12 @@ export default function LibraryScreen() {
         />
         <View style={styles.content}>
           {isSupersetTab ? (
-            <SupersetTabPlaceholder />
+            <SupersetGrid
+              supersets={supersets}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              onTap={(s) => router.push(`/superset/${s.superset.id}`)}
+            />
           ) : (
             <>
               <EquipmentChipRow
@@ -564,13 +578,119 @@ function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
   );
 }
 
-// ---------- 超級組 placeholder (real content lands in S1) ----------
+// ---------- 超級組 grid ----------
 
-function SupersetTabPlaceholder() {
+function SupersetGrid({
+  supersets,
+  cardWidth,
+  cardHeight,
+  onTap,
+}: {
+  supersets: ReusableSupersetWithExercises[];
+  cardWidth: number;
+  cardHeight: number;
+  onTap: (s: ReusableSupersetWithExercises) => void;
+}) {
+  if (supersets.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>尚未建立超級組</Text>
+        <Text style={styles.emptySubText}>點右上角「+」建立新的超級組</Text>
+      </View>
+    );
+  }
+  const rows: ReusableSupersetWithExercises[][] = [];
+  for (let i = 0; i < supersets.length; i += 2) {
+    rows.push(supersets.slice(i, i + 2));
+  }
   return (
-    <View style={styles.empty}>
-      <Text style={styles.emptyText}>尚未建立超級組</Text>
-      <Text style={styles.emptySubText}>S1 階段會接：creation flow + flat list</Text>
+    <ScrollView
+      style={styles.gridList}
+      contentContainerStyle={styles.gridContent}
+      showsVerticalScrollIndicator={false}>
+      {rows.map((pair, i) => (
+        <View key={i} style={styles.gridRow}>
+          <SupersetCard
+            item={pair[0]}
+            width={cardWidth}
+            height={cardHeight}
+            onPress={() => onTap(pair[0])}
+          />
+          {pair[1] ? (
+            <SupersetCard
+              item={pair[1]}
+              width={cardWidth}
+              height={cardHeight}
+              onPress={() => onTap(pair[1])}
+            />
+          ) : (
+            <View style={{ width: cardWidth, height: cardHeight }} />
+          )}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
+function SupersetCard({
+  item,
+  width,
+  height,
+  onPress,
+}: {
+  item: ReusableSupersetWithExercises;
+  width: number;
+  height: number;
+  onPress: () => void;
+}) {
+  const { superset, exercises } = item;
+  const barColor = superset.color_hex ?? hashColor(superset.name);
+  const exA = exercises[0];
+  const exB = exercises[1];
+  // Smaller thumb size for the dual-thumbnail layout. 64 keeps both circles
+  // visible side-by-side within the card width without crowding the name.
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        styles.supersetCard,
+        { width, height },
+        pressed && styles.pressed,
+      ]}>
+      <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
+      {superset.use_count > 0 && (
+        <Text style={styles.countBadge}>{superset.use_count} 次</Text>
+      )}
+      <View style={styles.supersetThumbRow}>
+        <SupersetMiniThumb exercise={exA} />
+        <SupersetMiniThumb exercise={exB} />
+      </View>
+      <Text style={styles.cardName} numberOfLines={2}>
+        {superset.name}
+      </Text>
+    </Pressable>
+  );
+}
+
+function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
+  if (!exercise) {
+    return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
+  }
+  const thumbnail = exercise.media_path;
+  if (thumbnail) {
+    return (
+      <View style={styles.supersetMiniThumb}>
+        <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
+      </View>
+    );
+  }
+  const bg = hashColor(exercise.name || exercise.id);
+  const ch = exercise.name?.charAt(0) ?? '?';
+  return (
+    <View style={[styles.supersetMiniThumb, { backgroundColor: bg }]}>
+      <Text style={styles.supersetMiniThumbInitial}>{ch}</Text>
     </View>
   );
 }
@@ -768,6 +888,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  supersetCard: {
+    // Override `card`'s justifyContent:'center' so paddingTop directly
+    // controls the gap below the color bar — `justifyContent:'center'`
+    // folds marginTop into the centering calculation and only shifts
+    // content by half the margin (centered block grows, recentered).
+    justifyContent: 'flex-start',
+    paddingTop: 22,
+  },
+  supersetColorBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  supersetThumbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  supersetMiniThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  supersetMiniThumbEmpty: {
+    backgroundColor: 'rgba(127,127,127,0.3)',
+  },
+  supersetMiniThumbInitial: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
   },
   cardCueLink: {
     color: 'rgba(255,255,255,0.55)',
