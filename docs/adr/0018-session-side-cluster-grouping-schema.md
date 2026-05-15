@@ -27,7 +27,7 @@ ALTER TABLE session_exercise ADD COLUMN reusable_superset_id TEXT
 ```
 
 - `parent_id TEXT NULL` — no FK constraint, matching `template_exercise.parent_id` (v009) convention. Points to another `session_exercise.id` within the same session.
-- `reusable_superset_id TEXT NULL` — FK to `superset(id)` with `ON DELETE SET NULL`, matching the v013 pattern on `template_exercise`. NULL = manual / ad-hoc cluster (no RS identity); NOT NULL = cluster sourced from a Reusable Superset (templated explode path).
+- `reusable_superset_id TEXT NULL` — FK to `superset(id)` with `ON DELETE SET NULL`, matching the v013 pattern on `template_exercise`. NULL = manual / ad-hoc cluster (no RS identity); NOT NULL = cluster sourced from a Reusable Superset (templated explode path). （**2026-05-16 Q7 修訂**：NULL 語意只剩 backfill β'-skipped 場景；ad-hoc cluster 模型撤銷（session 中沒有手動標記 cluster 的 affordance）。見 ADR-0019 § Q7）
 - **No index initially**. Read pattern is `listSetsBySession` (bounded N per session) followed by in-memory grouping. Add `idx_session_exercise_rs` only if the `queryReusableSupersetHistory` augment path becomes slow.
 - **Idempotency**: `PRAGMA table_info(session_exercise)` introspection before each `ADD COLUMN`, matching the v013 pattern.
 
@@ -153,14 +153,16 @@ This ADR does **not** specify pixel-level UI — that is deferred to the upcomin
 
 ### Out of scope (deferred to session UI/UX grill — Q6 DEFERRED)
 
-- Session logger affordance to mark an ad-hoc cluster mid-session (gesture / picker / multi-select)
-- Cluster block tap target / interaction inside the logger
-- Cluster header position (banner / vertical label)
-- Affordance to promote an ad-hoc cluster into a saved RS
-- Asymmetric set-count visual highlight (I4 says as-is; UI grill can decide if a highlight is helpful)
-- Cluster un-marking (user cancels superset intent)
+> **2026-05-16 Q7 修訂**：6 條 deferred 在 ADR-0019 § Q7 拍板後從 6 → 3 條。每條翻盤後狀態 marker 如下。詳見 ADR-0019 § Q7。
 
-These items are tracked in the post-grill handoff list and must be addressed before v014's session-logger write path lands. Until then, the **read path** (session detail + RS history) is fully functional; the **write path** for ad-hoc clusters has no UI entry yet, so ad-hoc clusters cannot be produced (only consumed if any pre-existed via developer testing).
+- ✗ Session logger affordance to mark an ad-hoc cluster mid-session (gesture / picker / multi-select) — **移除**（cluster 來源唯一性：只能從動作庫 RS picker 來，沒有 mid-session 把兩 solo 標 cluster 的 affordance）
+- Cluster block tap target / interaction inside the logger — **仍需設計**（per ADR-0019 § Q3 collapsed/expanded 模型，整 cluster block 視為單一卡）
+- Cluster header position (banner / vertical label) — **仍需設計**（ADR-0019 § Q8 H1：縱條 RS 色 + 上方 banner「動作 A · 動作 B」）
+- ✗ Affordance to promote an ad-hoc cluster into a saved RS — **移除**（沒有 ad-hoc cluster 存在可 promote）
+- Asymmetric set-count visual highlight (I4 says as-is; UI grill can decide if a highlight is helpful) — **仍需設計**（ADR-0019 § Q8 AS1：B 側「—」灰字 placeholder，不加 highlight）
+- ✗ Cluster un-marking (user cancels superset intent) — **移除**（取消 cluster = ⚙️「🗑️ 刪除動作」整卡砍，無獨立「拆」操作）
+
+These items are tracked in the post-grill handoff list and must be addressed before v014's session-logger write path lands. Until then, the **read path** (session detail + RS history) is fully functional; the **write path** for ad-hoc clusters has no UI entry yet, so ad-hoc clusters cannot be produced (only consumed if any pre-existed via developer testing). （**2026-05-16 Q7 修訂**：ad-hoc cluster write path 撤銷後永遠不需要實作；session 內想配對只能從 RS picker，沒有 ad-hoc 產生路徑。見 ADR-0019 § Q7）
 
 ## Considered alternatives (rejected)
 
@@ -193,3 +195,47 @@ These items are tracked in the post-grill handoff list and must be addressed bef
 - ADR-0013 (per-exercise notes — not directly related but shares the v013 snapshot fix pattern)
 - `src/adapters/sqlite/exerciseHistoryRepository.ts:382-403` — self-documented indirection fragility
 - `src/domain/template/templateManager.ts:92-111` — `snapshotForSession` to be patched
+
+---
+
+## 2026-05-16 Amendment — ad-hoc cluster 撤銷、cluster 來源唯一性 (ADR-0019 § Q7)
+
+Session UI/UX integral redesign grill 拍板 cluster 來源唯一性 — session 內 cluster 化**只能**透過：(1) Template snapshot 路徑（既有 v014 schema），或 (2) `[⊕ 加動作]` → 動作庫 picker → 挑 RS（含 B1 即時新建 RS）。**Ad-hoc cluster 模型撤銷**。
+
+### 翻盤的既有拍板
+
+- ❌ **§ v014 schema 「NULL = manual / ad-hoc cluster (no RS identity)」語意 retract** — NULL 只剩 backfill β'-skipped 場景（template 有重複 exercise_id 導致 ambiguous mapping 被跳過的歷史 session），不作為 ad-hoc cluster 入口
+- ❌ **§ Session detail render invariants I6（line 152）「`reusable_superset_id IS NULL` → neutral 『Superset』label + default color (ad-hoc)」部分翻盤** — backfill β'-skipped 場景下仍用此 fallback；session 新建路徑不再產生此狀態（write path 沒入口）
+- ❌ **§ Out of scope 「Session logger affordance to mark an ad-hoc cluster mid-session」retract** — 沒有此 affordance
+- ❌ **§ Out of scope 「Affordance to promote an ad-hoc cluster into a saved RS」retract** — 沒有 ad-hoc 存在可 promote
+- ❌ **§ Out of scope 「Cluster un-marking」retract** — 沒有獨立「拆 cluster」操作，取消 cluster = ⚙️「🗑️ 刪除動作」整卡砍
+
+### Q6 deferred 6 → 3
+
+ADR-0019 § Q7 拍板後剩 3 條仍需 UI 設計（已在 ADR-0019 § Q3 + § Q8 解答）：
+
+| 原 deferred | 翻盤後狀態 | ADR-0019 解答 |
+|---|---|---|
+| C-1 cluster 標記入口 | ✗ 移除 | — |
+| C-2 cluster block tap target | 仍需設計 | § Q3 動作卡 collapsed/expanded |
+| C-3 cluster header 位置 | 仍需設計 | § Q8 H1 縱條色 + banner |
+| C-4 promote ad-hoc to RS | ✗ 移除 | — |
+| C-5 asymmetric highlight | 仍需設計 | § Q8 AS1 灰字 placeholder |
+| C-6 un-cluster | ✗ 移除 | — |
+
+### 不動
+
+- v014 schema 兩欄 (`session_exercise.parent_id` + `reusable_superset_id`) 維持
+- `snapshotForSession` 兩 pass remap 維持
+- β' backfill skip-on-ambiguity 維持
+- `queryReusableSupersetHistory` UNION fallback 維持
+- I1-I6 render invariants 維持（I6 fallback 語意僅縮窄到 backfill 場景）
+
+### 新增 cluster 來源唯一性 (ADR-0019 § Q7)
+
+Session 內 cluster 來源**只剩兩條**：
+
+1. **Template snapshot 路徑**（既有）：Template-based session create 時 `snapshotForSession` 複製 cluster 結構（含 `parent_id` + `reusable_superset_id`）
+2. **In-session 動作庫 RS picker 路徑**（ADR-0019 新增）：`[⊕ 加動作]` → `/library?mode=picker&targetSessionId=xxx` → 動作庫 K1 Tab 「超級組」→ tap RS card → 整 RS explode 成 2 個 `session_exercise` row 加進當前 session
+
+詳細決策邏輯與拒絕的替代方案見 ADR-0019 § Q7。

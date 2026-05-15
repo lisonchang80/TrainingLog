@@ -139,7 +139,7 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 
 ## per-exercise card 結構
 
-- **頂部右上**：容量目標 chip `已完成 / 計劃`（A1 案，純存在於 per-exercise card；session 頂層**無 chip / 無 stats / 無 AI**）
+- **頂部右上**：容量目標 chip `已完成 / 計劃`（A1 案，純存在於 per-exercise card；session 頂層**無 chip / 無 stats / 無 AI**）（**2026-05-16 Q6 修訂**：in-session 加 4-tile/5-tile stats panel（3-tile 非 Watch / 5-tile Watch-tracked）；「無 chip / 無 AI」維持。見 ADR-0019 § Q6）
 - **動作圖正下方、第一 set 上方**：per-exercise 備註欄，placeholder「點擊輸入備註」（持久化機制 = backlog #5，待 grill）
 - **set rows**：依 position ASC
 - **card 底部 action 列**：`新增一組` + `動作歷史`（slice 8 既有 modal）
@@ -255,3 +255,31 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 - chip + bar 視覺 = 0.5 週
 
 共 ~5 週工作量，落在原 slice 10+ 範圍內；slice 11–15 (Watch / HealthKit / iCloud Backup) 不受影響。
+
+---
+
+## 2026-05-16 Amendment — in-session stats panel 翻盤 (ADR-0019 § Q6)
+
+Session UI/UX integral redesign grill 拍板把「session 頂層**無 stats**」這條 retract — in-session 加回 stats panel，但仍維持「無 chip / 無 AI」原意。
+
+### 翻盤的既有拍板
+
+- ❌ **§ per-exercise card 結構（line 142）「session 頂層無 chip / 無 stats / 無 AI」中的「無 stats」部分** retract
+- ❌ **§ session 底部 bar（line 150）「原 reference UI 上的 stats / 容量 / AI 按鈕全砍」中的 stats 部分** retract（chip / 容量 / AI 仍砍；只翻 stats panel）
+
+### 新模型 — in-session stats panel
+
+- **位置 P1**：timer header 正下方、動作卡列表正上方（跟 ADR-0014 歷史詳情頁同位置）
+- **非 Watch-tracked session** = **3-tile 1 row**（容量 / 動作數 / 訓練時間）
+- **Watch-tracked session** = **5-tile 2 row**：
+  - Row 1: 容量 / 動作數 / 訓練時間
+  - Row 2: 心率（當前 BPM 大字 + Z1-Z5 區間 color border）/ 大卡
+- **歷史詳情頁** 維持 ADR-0014 既拍 4-tile + 心率 vs 時間折線圖（in-session 跟歷史頁 layout **內容不對稱**——歷史頁有獨立 chart）
+
+### 不動
+
+- **「無 chip / 無 AI」維持** — chip / 容量 / 喵喵 AI 仍不引回 session 頂層
+- **per-exercise card 內** 的 chip + bar（A1 chip 0.0/3080.0 + 系統主色細 bar）維持 ADR-0012 G.1 既設計
+- **session 底部 bar** 仍只剩 `[⊕ 加動作]`
+
+詳細決策邏輯與拒絕的替代方案見 ADR-0019 § Q6。

@@ -90,7 +90,7 @@ UPDATE session
 
 | 機制 | trigger 點 | 處理 | 來源 |
 |---|---|---|---|
-| Save-back dialog | session 結束 summary | 內容差異（sets/reps/weight ≠ snapshot 目標） | ADR-0002 既有 |
+| Save-back dialog | session 結束 summary | 內容差異（sets/reps/weight ≠ snapshot 目標）（**2026-05-16 Q9 修訂**：範圍擴展到任何 in-session 修改 vs snapshot，含 set count / set_kind / set_position / 加刪 / 換 / cluster / rest_sec；exercise.notes + session.title 不算 diff。見 ADR-0019 § Q9） | ADR-0002 既有 |
 | 歷史頁三按鈕 | 歷史詳情頁手動 | 身份操作（rename / 升級 freestyle / 刪除） | 本 ADR |
 
 兩者**不互相觸發**；按了 Save-back 同意 ≠ 按了「儲存模板」（前者改 sets、後者改 name）。
@@ -103,7 +103,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 
 1. Session create (freestyle)：`session.template_id IS NULL`、`session.title = ''`
 2. In-session：tap header 填 session.title（或不填，等結束）
-3. Session 結束 → Save-back dialog **不會觸發**（無 template_id 無 snapshot 目標可比）
+3. Session 結束 → Save-back dialog **不會觸發**（無 template_id 無 snapshot 目標可比）（**2026-05-16 Q9 修訂**：Freestyle session 結束改為跳 **2-option dialog（儲存 / 否）**，「儲存」走「另存模板」same flow 即時升級為 Template entity；歷史詳情頁三按鈕路徑仍保留作為補升級入口。見 ADR-0019 § Q9）
 4. 進歷史詳情頁：
    - 按「另存模板」：補齊三元組 (Program, 副標) → 建新 Template entity → `session.template_id` UPDATE 為新 id（建立關聯）
    - 按「儲存模板」：引導選要覆蓋的三元組 → 同 group rename (Q7.3-A) + 內容覆蓋
@@ -257,3 +257,37 @@ stats panel 之下、動作卡之上條件式顯示：
 ### Program 主標題顯示
 
 標題附近顯示 `Program 主標題 · Program 副標` 合併一行（如 `5x5 強度週 · 10-12RM`）。Freestyle session 無 Program 時不顯示這一行。
+
+---
+
+## 2026-05-16 Amendment — Save-back 範圍擴展 + Freestyle finish dialog + 歷史頁 layout (ADR-0019 § Q9/Q10)
+
+Session UI/UX integral redesign grill 拍板 Save-back 範圍擴展、Freestyle finish dialog 新增、歷史詳情頁 layout 砍 3 段統一動作清單。
+
+### 翻盤的既有拍板
+
+- ❌ **§ Save-back 共存 line 92-93「內容差異（sets/reps/weight ≠ snapshot 目標）」範圍擴展** — 改為「任何 in-session 修改 vs snapshot」，涵蓋 set count / reps / weight / is_logged / set_kind / set_position / 加動作 / 刪動作 / 換動作 / cluster 加入 / cluster 刪除 / rest_sec；**例外**：`exercise.notes`（全局，編輯 = 即時 UPDATE 跟 session 沒掛勾，不算 diff）/ `session.title`（身份維度，由歷史頁三按鈕處理，不算 diff）
+- ❌ **§ Freestyle 升級流程 line 106「Session 結束 → Save-back dialog 不會觸發」retract** — Freestyle session 結束改為跳 **2-option dialog（儲存 / 否）**，「儲存」走 ADR-0014「另存模板」same flow 即時升級為 Template entity（補齊三元組 + reactive 衝突偵測 + hard block + escape）
+- ❌ **歷史詳情頁既有「3 段 collapsed 結構」（Per exercise / 超級組 / All sets）retract** — 改為 HU1 統一動作清單：依 `ordering ASC` solo + cluster inline 混排（ADR-0018 v014 schema 已能直接還原 cluster 結構）
+
+### 新增 — Finish 路徑差異化
+
+| Session 來源 | Finish 行為 |
+|---|---|
+| **Template-based**（`template_id NOT NULL`）| **無 diff** → 直接 finish 無 dialog；**有 diff** → 跳 **3-option dialog**：(a) 儲存（覆寫 template，本 ADR 既有 flow + sibling rename 連動）/ (b) 另存（新建 Template entity，本 ADR 既有 flow）/ (c) 否（本場保留實際數據、template 目標不動）|
+| **Freestyle**（`template_id IS NULL`）| 永遠跳 **2-option dialog**：(a) 儲存 = 新建 Template entity（同本 ADR「另存模板」flow）/ (b) 否（session 留為 freestyle，可由歷史頁三按鈕補升級）|
+
+### 新增 — 歷史詳情頁 layout 細節
+
+- **HU1** — 砍 3 段統一「動作清單」（依 `ordering ASC` solo + cluster inline 混排）
+- **HV1** — 動作清單**全 expanded default**（歷史頁是 read mode；不沿用 in-session only-one-expanded 模型）
+- **HE1** — `[編輯訓練]` btn = 整頁進編輯模式（卡片 inline edit + header `[✓ 完成編輯]` exit btn + in-session 同款 row gesture 生效）
+
+### 不動
+
+- 4-button action bar `[編輯訓練][儲存模板][另存模板][刪除]` 維持（per 2026-05-12 Amendment）
+- 4-tile stats panel + 心率 vs 時間折線圖維持（per 2026-05-12 Amendment）
+- session.title eager copy 哲學維持
+- 「儲存模板 / 另存模板 / 刪除本訓練」三按鈕語意維持（per Q7.3 / Q7.5 / Q7.6）
+
+詳細決策邏輯與拒絕的替代方案見 ADR-0019 § Q9 / § Q10。
