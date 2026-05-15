@@ -151,8 +151,14 @@ export default function SupersetDetailScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <FooterButton label="歷史" disabled onPress={() => {}} />
-        <FooterButton label="圖表" disabled onPress={() => {}} />
+        <FooterButton
+          label="歷史"
+          onPress={() => router.push(`/superset-history/${superset.id}`)}
+        />
+        <FooterButton
+          label="圖表"
+          onPress={() => router.push(`/superset-chart/${superset.id}`)}
+        />
         <FooterButton
           label="編輯"
           onPress={() => router.push(`/superset/edit/${superset.id}`)}
