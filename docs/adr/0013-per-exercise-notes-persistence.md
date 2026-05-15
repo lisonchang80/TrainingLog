@@ -161,8 +161,8 @@ iOS 原生 `.sheet(presentationDetents:)` **bottom sheet**，多 detent（medium
 歷史頁 / 月曆日格彈出卡：
 ┌─────────────────────────────────┐
 │ 2026-05-09                      │
-│ 推日                            │  ← Template name (主標)
-│ PPL Week 3 · Day 1 (Push)      │  ← Program 主+副標
+│ 推日                            │  ← Template name
+│ PPL Week 3 · Day 1 (Push)      │  ← 週期 · 強度（原 Program 主+副標）
 │ 12,340 kg · 5 動作              │  ← 容量總和 + 動作數量
 └─────────────────────────────────┘
 ```

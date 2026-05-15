@@ -269,6 +269,8 @@ ADR Q13 line 189 自己寫「對齊 ADR-0016 12-color picker」，但拍板的 c
 
 ### Q14：圖表頁 metrics + rep bucket filter
 
+> **Terminology note (2026-05-16, ADR-0019 § Q9.2)**：本 Q14 段內所有「Program 副標籤」字眼 = UI label「**強度**」（schema 欄位名不動）。為保留 amendment trail 描述原寫錯字眼，本段不替換原字串。
+
 **拍板**：
 - **3 條折線**（全 v1 做）：容量（紅）/ 最大重量（綠）/ 1RM 預測（藍）
 - **1RM 公式**：Epley `weight × (1 + reps/30)`（對齊 CONTEXT 「E1RM」字眼）

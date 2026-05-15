@@ -55,7 +55,7 @@ UPDATE session
 | Session 來源 | title 狀態 | 行為 |
 |---|---|---|
 | Template-based | 未改（= template.name） | 改 Template sets/reps/weight 內容；不改 name |
-| Template-based | 手動改過（≠ template.name） | 改 sets + rename Template name = session.title + **連動所有同 name sibling 一起 rename**（不改內容）+ 繼承 Program 主副標籤；更新 Program 頁面 |
+| Template-based | 手動改過（≠ template.name） | 改 sets + rename Template name = session.title + **連動所有同 name sibling 一起 rename**（不改內容）+ 繼承週期 · 強度（原 Program 主副標籤）；更新 Program 頁面 |
 | Freestyle | session.title 已填 | 引導使用者選要覆蓋的三元組 → 改 sets + rename group（同上連動規則） |
 | Freestyle | session.title = '' | 強制跳輸入框先填 session.title，再走上一條 |
 
@@ -63,9 +63,9 @@ UPDATE session
 
 ### 按鈕 2：「另存模板」（新建 Template entity）
 
-引導補齊三元組 (Program, 副標籤) → 建新 Template entity，name = session.title。
+引導補齊三元組 (週期, 強度)（原 (Program, 副標籤)） → 建新 Template entity，name = session.title。
 
-**衝突偵測（Q7.5-α）**：UI 即時偵測（reactive query），若 (session.title, Program, 副標籤) 命中既有 entity → **hard block** + 提示「該組合已存在於 T_existing」+ escape button「改用『儲存模板』覆蓋既有」。
+**衝突偵測（Q7.5-α）**：UI 即時偵測（reactive query），若 (session.title, 週期, 強度)（原 (session.title, Program, 副標籤)） 命中既有 entity → **hard block** + 提示「該組合已存在於 T_existing」+ escape button「改用『儲存模板』覆蓋既有」。
 
 跟 Program 起始日期 overlap 的「hard block + smart suggest」（ADR-0002）一致 UX 風格。
 
@@ -105,7 +105,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 2. In-session：tap header 填 session.title（或不填，等結束）
 3. Session 結束 → Save-back dialog **不會觸發**（無 template_id 無 snapshot 目標可比）（**2026-05-16 Q9 修訂**：Freestyle session 結束改為跳 **2-option dialog（儲存 / 否）**，「儲存」走「另存模板」same flow 即時升級為 Template entity；歷史詳情頁三按鈕路徑仍保留作為補升級入口。見 ADR-0019 § Q9）
 4. 進歷史詳情頁：
-   - 按「另存模板」：補齊三元組 (Program, 副標) → 建新 Template entity → `session.template_id` UPDATE 為新 id（建立關聯）
+   - 按「另存模板」：補齊三元組 (週期, 強度)（原 (Program, 副標)） → 建新 Template entity → `session.template_id` UPDATE 為新 id（建立關聯）
    - 按「儲存模板」：引導選要覆蓋的三元組 → 同 group rename (Q7.3-A) + 內容覆蓋
 
 **Program 日曆顯示**：
@@ -126,7 +126,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 
 ## 歷史頁顯示（ADR-0013 Q5.4-A 微補充）
 
-ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + Program 主+副標 + 容量總和 + 動作數)。本 ADR 微補充：
+ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + 週期 · 強度（原 Program 主+副標） + 容量總和 + 動作數)。本 ADR 微補充：
 
 > Collapsed 卡 title 來源從 **Template name** 改為 **session.title**。Template-based 未改時 session.title = template.name (eager copy)，視覺上等效；手動改過或 freestyle 時顯示 session.title（空 → UI fallback「自由訓練」）。
 
@@ -135,7 +135,7 @@ ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + Program 主+副標 + 容
 ## 跨 Backlog 影響
 
 - **Backlog #9 月曆視圖**：Freestyle session 在 Program 日曆顯示行為（未升級 freestyle → 非 Template 打勾）；升級流程 trigger 重新標記
-- **Backlog #11 Template 編輯流程**：「另存模板補齊三元組」UI 可共用 Template 建立的 UI 元件 (Program + 副標 selector)
+- **Backlog #11 Template 編輯流程**：「另存模板補齊三元組」UI 可共用 Template 建立的 UI 元件 (週期 + 強度 selector)（原 Program + 副標 selector）
 - **ADR-0013 Q5.4-A**：collapsed 卡 title 來源微 amendment（本 ADR cross-link）
 
 ## 拒絕的替代方案
@@ -254,9 +254,9 @@ stats panel 之下、動作卡之上條件式顯示：
 
 「‹ 回月曆」→ 「**‹ 返回**」（不寫死目的地語意，因為 user 可能從表列 view 進入）。
 
-### Program 主標題顯示
+### 週期 · 強度 標題顯示（原「Program 主標題顯示」）
 
-標題附近顯示 `Program 主標題 · Program 副標` 合併一行（如 `5x5 強度週 · 10-12RM`）。Freestyle session 無 Program 時不顯示這一行。
+標題附近顯示 **`週期 · 強度`** 合併一行（原 `Program 主標題 · Program 副標`；如 `5x5 強度週 · 10-12RM`）。Freestyle session 無週期時不顯示這一行。（**2026-05-16 Q9.2 rename**：Program 主標 → 週期 / Program 副標 → 強度 / 無 Program → 無。見 ADR-0003 amendment + ADR-0019 § Q9.2）
 
 ---
 

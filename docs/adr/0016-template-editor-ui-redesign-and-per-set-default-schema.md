@@ -1,6 +1,8 @@
 # 0016 — Template 編輯流程 UI redesign + per-set 預設值 schema
 
-Template 編輯頁從既有 PRD story #18「分區 + 動作右上設為常設按鈕 + Set ordering」基本架構 redesign 為**三段式 layout**：top metadata header (含 Template name / Program / 副標 / 模版配色) + 中間動作列表 (collapsed/expanded 卡 + per-exercise ⚙ menu) + 底部 **4-action bar** ([+ 新增動作] [↕ 移動動作] [配色] [⋯ 更多])。模版配色透過 bottom sheet 12-color iOS palette grid 選擇（跟 ADR-0015 per Template name 顏色 group-wide write 一致）。
+> **2026-05-16 Terminology rename note** (ADR-0019 § Q9.2 / ADR-0003 amendment)：本 ADR 內「Program / 副標」UI label rename 為「**週期** / **強度**」；schema 欄位名不動。下文沿用既有「Program / 副標」描述以保留 amendment trail 流暢，讀者應理解為「週期 / 強度」；canonical 對照表見 CONTEXT.md § Terminology rename 對照表。
+
+Template 編輯頁從既有 PRD story #18「分區 + 動作右上設為常設按鈕 + Set ordering」基本架構 redesign 為**三段式 layout**：top metadata header (含 Template name / **週期** / **強度** / 模版配色)（原 Program / 副標） + 中間動作列表 (collapsed/expanded 卡 + per-exercise ⚙ menu) + 底部 **4-action bar** ([+ 新增動作] [↕ 移動動作] [配色] [⋯ 更多])。模版配色透過 bottom sheet 12-color iOS palette grid 選擇（跟 ADR-0015 per Template name 顏色 group-wide write 一致）。
 
 引入新 `template_set` 表（per-template_exercise per-set 預設值），動作記憶 read pattern 從「summary 4 值」改為「per-set list」。Template 編輯走**「儲存/取消」雙 button** 顯式 commit pattern（跟 set logger / notes / session.title 的「即時 UPDATE」哲學分流，因為 Template 性質是 plan 而非 audit log）。
 
@@ -245,7 +247,7 @@ Reusable Superset (ADR-0017) 進 Template 後爆開成 2 個 `template_exercise`
 使用者 grill 時釐清「胸/肩 / 腿(蹲) / 腿(垂直)/肩 / 胸/背(水平) / 腿(拉)」**就是 Template name 本身**，不是新獨立 label layer。
 - ✅ 既有 Template name (字串 label) 已 cover
 - ✅ ADR-0015 per Template name 顏色已 cover「顏色 mapping」
-- ✅ 三元組唯一性允許同 name sibling，自然支援「不同 Program/副標下的同類訓練」
+- ✅ 三元組唯一性允許同 name sibling，自然支援「不同 週期/強度 下的同類訓練」（原 Program/副標）
 - ✅ Q7.3-A sibling rename 連動哲學自然 align
 
 **結論**：無新 schema / 無新 module / 無新 ADR for Backlog #10；純 deflationary close-out。

@@ -1,6 +1,8 @@
 # 0015 — 歷史月曆視圖 + 共用 CalendarGrid 元件 + Freestyle 在 Program 日曆顯示
 
-歷史 sub-tab 從 list view 改為「月曆為主、list 為輔」（segmented control 切換，月曆預設）；月曆為傳統 calendar-month grid（跟 iOS Calendar / Program 日曆 ADR-0004 視覺一致），日格 = 三行 chip stack（容量 / `session.title` / Program 副標）+ 右上「+N」微標記表多場同日。日格色 = per Template name palette 顏色（12-color iOS 系統色，建立 Template 時系統預設、使用者可改）；freestyle session 灰塊 + 「自由訓練」fallback，升級後 reactive 切換為新 Template 色。
+> **2026-05-16 Terminology rename note** (ADR-0019 § Q9.2 / ADR-0003 amendment)：本 ADR 內所有「Program 副標」/「Program 主標 / 主標題」字眼皆 rename 為「**強度**」/「**週期**」；schema 欄位名不動，UI / 文案層改字串。為保留閱讀流暢，下文沿用既有「Program 副標」描述但讀者應理解為「強度」；canonical 對照表見 CONTEXT.md § Terminology rename 對照表。
+
+歷史 sub-tab 從 list view 改為「月曆為主、list 為輔」（segmented control 切換，月曆預設）；月曆為傳統 calendar-month grid（跟 iOS Calendar / Program 日曆 ADR-0004 視覺一致），日格 = 三行 chip stack（容量 / `session.title` / **強度**（原 Program 副標））+ 右上「+N」微標記表多場同日。日格色 = per Template name palette 顏色（12-color iOS 系統色，建立 Template 時系統預設、使用者可改）；freestyle session 灰塊 + 「自由訓練」fallback，升級後 reactive 切換為新 Template 色。
 
 新增共用 `CalendarGrid` 元件（calendar-month grid skeleton + 月份 navigation），供歷史月曆使用；Program 日曆維持 cycle-based 獨立 grid（ADR-0004 不動）；兩 view 共用 cell style atoms (chip / palette / 字型)。
 
@@ -26,7 +28,7 @@
   - 日期 (M-DD) + 年（小）
   - 12 色 side bar (per Template name)
   - session.title（freestyle 加 ⚠️）+ 多場同日 inline `+N`
-  - Program **主標題 + 副標**（合併一行）
+  - **週期 + 強度**（原 Program 主標題 + 副標；合併一行）
   - 動作數量 + 訓練時間（分鐘）+ Watch 標記 ⌚（如有）
   - 容量 (kg 整數) 右對齊
 
