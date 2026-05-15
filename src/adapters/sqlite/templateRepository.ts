@@ -317,6 +317,11 @@ export async function getTemplateFull(
   }>(`SELECT id, name, color_hex FROM template WHERE id = ?`, id);
   if (!tpl) return null;
 
+  // Notes is sourced from `exercise.notes` (per-Exercise global) per
+  // ADR-0017 amendment to ADR-0013. The legacy `template_exercise.notes`
+  // column is dead — v010 merged the most-recent per-template note into
+  // exercise.notes, and v012 drops the column. Reads JOIN exercise.notes
+  // directly so the editor sees the latest global value.
   const exRows = await db.getAllAsync<{
     id: string;
     template_id: string;
@@ -329,7 +334,9 @@ export async function getTemplateFull(
     rest_seconds: number | null;
   }>(
     `SELECT te.id, te.template_id, te.exercise_id, e.name,
-            te.ordering, te.is_evergreen, te.parent_id, te.notes, te.rest_seconds
+            te.ordering, te.is_evergreen, te.parent_id,
+            e.notes AS notes,
+            te.rest_seconds
        FROM template_exercise te
        LEFT JOIN exercise e ON e.id = te.exercise_id
       WHERE te.template_id = ?
@@ -417,11 +424,14 @@ function setsArraysEqual(a: TemplateSet[], b: TemplateSet[]): boolean {
 }
 
 function exMetadataChanged(a: TemplateExercise, b: TemplateExercise): boolean {
+  // `notes` is per-Exercise global now (ADR-0017 amendment to ADR-0013):
+  // it lives on `exercise.notes` and is written via a separate UPDATE in
+  // commitTemplateDraft. Template-exercise metadata diff therefore EXCLUDES
+  // notes — a notes-only edit doesn't dirty the template_exercise row.
   return (
     a.ordering !== b.ordering ||
     a.section !== b.section ||
     (a.parent_id ?? null) !== (b.parent_id ?? null) ||
-    (a.notes ?? null) !== (b.notes ?? null) ||
     (a.rest_seconds ?? null) !== (b.rest_seconds ?? null)
   );
 }
@@ -487,6 +497,33 @@ export async function commitTemplateDraft(
       anyChange = true;
     }
   }
+
+  // ADR-0017 amendment to ADR-0013: notes is per-Exercise global. Compare
+  // each draft.exercise.notes to the current DB value on `exercise.notes`
+  // (one SELECT IN-list); UPDATE per unique exercise_id where different.
+  // If two draft rows share the same exercise_id with different notes
+  // values, the LAST iteration wins (last-write-wins; UI should prevent).
+  const draftExerciseIds = Array.from(
+    new Set(draft.exercises.map((e) => e.exercise_id))
+  );
+  const exerciseNotesUpdates = new Map<string, string | null>();
+  if (draftExerciseIds.length > 0) {
+    const placeholders = draftExerciseIds.map(() => '?').join(',');
+    const currentRows = await db.getAllAsync<{ id: string; notes: string | null }>(
+      `SELECT id, notes FROM exercise WHERE id IN (${placeholders})`,
+      ...draftExerciseIds
+    );
+    const currentNotes = new Map(currentRows.map((r) => [r.id, r.notes ?? null]));
+    for (const dex of draft.exercises) {
+      const cur = currentNotes.get(dex.exercise_id) ?? null;
+      const desired = dex.notes ?? null;
+      if (cur !== desired) {
+        exerciseNotesUpdates.set(dex.exercise_id, desired);
+      }
+    }
+    if (exerciseNotesUpdates.size > 0) anyChange = true;
+  }
+
   if (!anyChange) return;
 
   await db.withTransactionAsync(async () => {
@@ -512,19 +549,18 @@ export async function commitTemplateDraft(
       await db.runAsync(`DELETE FROM template_exercise WHERE id = ?`, exId);
     }
 
-    // 3. metadata-only UPDATEs (no set changes)
+    // 3. metadata-only UPDATEs (no set changes). `notes` removed — see step 6.
     const setRewriteIds = new Set(plan.setRewrites.map((e) => e.id));
     for (const dex of plan.metaUpdates) {
       if (setRewriteIds.has(dex.id)) continue; // handled by set rewrite block
       await db.runAsync(
         `UPDATE template_exercise
             SET ordering = ?, is_evergreen = ?, parent_id = ?,
-                notes = ?, rest_seconds = ?, updated_at = ?
+                rest_seconds = ?, updated_at = ?
           WHERE id = ?`,
         dex.ordering,
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
-        dex.notes,
         dex.rest_seconds,
         ts,
         dex.id
@@ -536,12 +572,11 @@ export async function commitTemplateDraft(
       await db.runAsync(
         `UPDATE template_exercise
             SET ordering = ?, is_evergreen = ?, parent_id = ?,
-                notes = ?, rest_seconds = ?, updated_at = ?
+                rest_seconds = ?, updated_at = ?
           WHERE id = ?`,
         dex.ordering,
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
-        dex.notes,
         dex.rest_seconds,
         ts,
         dex.id
@@ -568,7 +603,9 @@ export async function commitTemplateDraft(
       }
     }
 
-    // 5. INSERT new exercises + their sets
+    // 5. INSERT new exercises + their sets. `template_exercise.notes` no
+    // longer in the column list — v012 DROPped it; per-Exercise notes is
+    // owned by `exercise.notes` (step 6).
     for (const dex of plan.inserts) {
       // default_sets/default_reps/default_weight_kg are deprecated since v009
       // (template_set list is the source of truth) but the column is NOT NULL
@@ -577,8 +614,8 @@ export async function commitTemplateDraft(
         `INSERT INTO template_exercise
            (id, template_id, exercise_id, ordering, default_sets,
             default_reps, default_weight_kg, is_evergreen,
-            parent_id, notes, rest_seconds, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+            parent_id, rest_seconds, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
         dex.id,
         dex.template_id,
         dex.exercise_id,
@@ -586,7 +623,6 @@ export async function commitTemplateDraft(
         dex.sets.length,
         dex.section === 'evergreen' ? 1 : 0,
         dex.parent_id,
-        dex.notes,
         dex.rest_seconds,
         ts
       );
@@ -606,6 +642,17 @@ export async function commitTemplateDraft(
           s.notes
         );
       }
+    }
+
+    // 6. Per-Exercise global notes — write through to exercise.notes for any
+    // exercise_id whose draft value differs from the current DB value.
+    // Deduped earlier (one UPDATE per exercise_id, last-write-wins).
+    for (const [exerciseId, notesValue] of exerciseNotesUpdates) {
+      await db.runAsync(
+        `UPDATE exercise SET notes = ? WHERE id = ?`,
+        notesValue,
+        exerciseId
+      );
     }
   });
 }

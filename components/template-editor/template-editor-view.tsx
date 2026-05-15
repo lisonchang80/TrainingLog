@@ -30,6 +30,7 @@
 import { randomUUID } from 'expo-crypto';
 import {
   Stack,
+  useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
@@ -61,6 +62,7 @@ import {
 } from '@/src/adapters/sqlite/templateRepository';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
+import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
 import type {
   ExerciseSection,
@@ -856,6 +858,100 @@ export default function TemplateEditorView() {
     setExpandedExId(newExerciseRow.id);
   };
 
+  const hydrateExercisesByIds = useCallback(
+    async (exerciseIds: readonly string[]) => {
+      if (!id || exerciseIds.length === 0) return;
+
+      // Refetch the library here. The cached `exerciseLibrary` state was
+      // captured at editor mount and does NOT include exercises created
+      // mid-session via the picker's "+ 新動作" flow — relying on the cache
+      // silently dropped them on hydrate.
+      const freshLibrary = await listExercises(db);
+
+      const newRows: TemplateExercise[] = [];
+      for (const exId of exerciseIds) {
+        const exercise = freshLibrary.find((x) => x.id === exId);
+        if (!exercise) continue;
+
+        let prefilled: TemplateSet[] | null = null;
+        try {
+          const candidates = await queryMemoryCandidates(db, { exercise_id: exId });
+          prefilled = deriveLatestSetsForExercise({
+            exercise_id: exId,
+            candidates,
+            uuid: () => newId('set'),
+          });
+        } catch {
+          prefilled = null;
+        }
+
+        const seedSets: TemplateSet[] =
+          prefilled && prefilled.length > 0
+            ? prefilled
+            : [
+                {
+                  id: newId('set'),
+                  position: 0,
+                  kind: 'working',
+                  reps: 8,
+                  weight: 20,
+                  parent_set_id: null,
+                  notes: null,
+                },
+              ];
+
+        newRows.push({
+          id: newId('te'),
+          template_id: id,
+          exercise_id: exId,
+          name: exercise.name,
+          ordering: 0, // re-assigned below relative to draft.exercises.length
+          section: 'general',
+          parent_id: null,
+          notes: null,
+          rest_seconds: null,
+          sets: seedSets,
+        });
+      }
+
+      if (newRows.length === 0) return;
+
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const base = prev.exercises.length;
+        const stamped = newRows.map((r, i) => ({ ...r, ordering: base + i }));
+        return { ...prev, exercises: [...prev.exercises, ...stamped] };
+      });
+      setExpandedExId(newRows[newRows.length - 1].id);
+    },
+    [id, db],
+  );
+
+  // Two-stage drain: useFocusEffect captures the picker payload as soon as
+  // the editor re-focuses, but hydration is deferred until the exercise
+  // library has finished loading. Without the stage gap, a cold remount
+  // (e.g. user navigates back through Today instead of the back stack) sees
+  // empty exerciseLibrary and silently drops every picked id.
+  const [pendingPick, setPendingPick] = useState<readonly string[] | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const payload = consumePick();
+      if (payload && payload.exerciseIds.length > 0) {
+        setPendingPick(payload.exerciseIds);
+      }
+    }, []),
+  );
+
+  useEffect(() => {
+    if (!pendingPick || pendingPick.length === 0) return;
+    if (!draft || !id) return;
+    // No more `exerciseLibrary.length === 0` gate — hydrate refetches the
+    // library itself so a mid-session newly-created exercise is included.
+    void hydrateExercisesByIds(pendingPick);
+    setPendingPick(null);
+  }, [pendingPick, draft, id, hydrateExercisesByIds]);
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
@@ -1169,7 +1265,7 @@ export default function TemplateEditorView() {
         <View style={styles.actionBar}>
           <Pressable
             style={styles.actionBtn}
-            onPress={() => setShowExercisePicker(true)}>
+            onPress={() => router.push('/exercise-picker?mode=picker')}>
             <Text style={styles.actionBtnText}>+ 動作</Text>
           </Pressable>
           <Pressable

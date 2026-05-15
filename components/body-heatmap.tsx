@@ -162,7 +162,7 @@ function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
       />
       {/* Shoulders (front + mid delts combined as a single MG fill) */}
       <Path
-        d="M58 90 C50 92 46 105 50 118 L70 110 L72 92 Z M142 90 C150 92 154 105 150 118 L130 110 L128 92 Z M48 118 C44 130 46 142 56 144 L62 130 L52 120 Z M152 118 C156 130 154 142 144 144 L138 130 L148 120 Z"
+        d="M58 90 C50 92 46 105 50 118 L70 110 L72 92 Z M142 90 C150 92 154 105 150 118 L130 110 L128 92 Z M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
         fill={f(MG_SHOULDER)}
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
@@ -255,9 +255,9 @@ function BackBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}
       />
-      {/* Rear delts (shared MG_SHOULDER fill so back/front both glow) */}
+      {/* Rear delts + mid delts (shared MG_SHOULDER fill so back/front both glow) */}
       <Path
-        d="M58 90 C50 92 46 105 50 118 L72 108 L74 92 Z M142 90 C150 92 154 105 150 118 L128 108 L126 92 Z"
+        d="M58 90 C50 92 46 105 50 118 L72 108 L74 92 Z M142 90 C150 92 154 105 150 118 L128 108 L126 92 Z M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
         fill={f(MG_SHOULDER)}
         stroke={COLOR_OUTLINE}
         strokeWidth={0.5}

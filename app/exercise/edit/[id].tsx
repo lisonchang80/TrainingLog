@@ -1,5 +1,4 @@
-import * as Crypto from 'expo-crypto';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -17,21 +16,21 @@ import { useDatabase } from '@/components/database-provider';
 import {
   validateCustomExerciseDraft,
   type CustomExerciseDraft,
-  type ValidationError,
 } from '@/src/domain/exercise/exerciseLibrary';
-import { submitNewlyCreated } from '@/src/domain/exercise/pickerBridge';
 import {
   EQUIPMENT_VALUES,
   type Equipment,
+  type ExerciseWithMuscles,
   type LoadType,
   type Muscle,
   type MuscleGroup,
   type MuscleRole,
 } from '@/src/domain/exercise/types';
 import {
-  createCustomExercise,
+  getExerciseWithMuscles,
   listMuscleGroups,
   listMuscles,
+  updateCustomExercise,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 
@@ -43,19 +42,17 @@ const LOAD_TYPE_LABEL: Record<LoadType, string> = {
 };
 
 /**
- * Custom Exercise creation form. Per ADR-0010 #9 v1 allows muscle mapping
- * to be empty so the user isn't forced to fill it out at creation time —
- * they can edit later.
- *
- * UX:
- *   - Modal header: 取消 (left) / 儲存 (right)
- *   - Inline error under name field; general errors → Alert
- *   - Body diagram is tappable: cycle 未選 → 主要 → 次要 → 取消;
- *     muscle chips stay as a parallel input surface
+ * Custom Exercise edit form. Mirrors `exercise/new.tsx` shape but pre-fills
+ * from DB and calls updateCustomExercise on save. Built-in exercises are
+ * blocked at the entry point (detail page [編輯] button is disabled when
+ * is_custom === 0), and the SQL UPDATE itself also guards with
+ * `WHERE is_custom = 1`.
  */
-export default function NewExerciseScreen() {
+export default function EditExerciseScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
+  const [original, setOriginal] = useState<ExerciseWithMuscles | null>(null);
   const [name, setName] = useState('');
   const [loadType, setLoadType] = useState<LoadType>('loaded');
   const [mgId, setMgId] = useState<string | null>(null);
@@ -68,14 +65,35 @@ export default function NewExerciseScreen() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    Promise.all([listMuscleGroups(db), listMuscles(db), listExercises(db)]).then(
-      ([mgs, ms, exs]) => {
-        setMuscleGroups(mgs);
-        setMuscles(ms);
-        setExistingNames(exs.filter((e) => e.is_archived !== 1).map((e) => e.name));
+    if (!id) return;
+    Promise.all([
+      getExerciseWithMuscles(db, id),
+      listMuscleGroups(db),
+      listMuscles(db),
+      listExercises(db),
+    ]).then(([d, mgs, ms, exs]) => {
+      setMuscleGroups(mgs);
+      setMuscles(ms);
+      if (d) {
+        setOriginal(d);
+        setName(d.exercise.name);
+        setLoadType(d.exercise.load_type as LoadType);
+        setMgId(d.exercise.muscle_group_id);
+        setEquipment(d.exercise.equipment as Equipment);
+        setPrimary(new Set(d.primary.map((m) => m.id)));
+        setSecondary(new Set(d.secondary.map((m) => m.id)));
       }
-    );
-  }, [db]);
+      // Exclude own name from dup-check (case-insensitive, trimmed) so
+      // saving without renaming doesn't trigger the dup error.
+      const ownName = d ? d.exercise.name.trim().toLowerCase() : null;
+      setExistingNames(
+        exs
+          .filter((e) => e.is_archived !== 1)
+          .map((e) => e.name)
+          .filter((n) => n.trim().toLowerCase() !== ownName)
+      );
+    });
+  }, [db, id]);
 
   const draft: CustomExerciseDraft = useMemo(
     () => ({
@@ -93,32 +111,28 @@ export default function NewExerciseScreen() {
     () => validateCustomExerciseDraft(draft, { existingNames }),
     [draft, existingNames]
   );
-  const canSubmit = errors.length === 0;
+  const canSubmit = errors.length === 0 && original !== null;
 
-  // Cycle a muscle through unselected → primary → secondary → unselected.
-  // Used by both muscle chips and body-diagram tap so the two surfaces
-  // stay in sync.
   const cycleMuscleRole = useCallback(
-    (id: string) => {
-      const wasPrimary = primary.has(id);
-      const wasSecondary = secondary.has(id);
+    (mid: string) => {
+      const wasPrimary = primary.has(mid);
+      const wasSecondary = secondary.has(mid);
       if (!wasPrimary && !wasSecondary) {
-        setPrimary((p) => new Set(p).add(id));
+        setPrimary((p) => new Set(p).add(mid));
         return;
       }
       if (wasPrimary) {
         setPrimary((p) => {
           const next = new Set(p);
-          next.delete(id);
+          next.delete(mid);
           return next;
         });
-        setSecondary((s) => new Set(s).add(id));
+        setSecondary((s) => new Set(s).add(mid));
         return;
       }
-      // wasSecondary → unselected
       setSecondary((s) => {
         const next = new Set(s);
-        next.delete(id);
+        next.delete(mid);
         return next;
       });
     },
@@ -126,8 +140,7 @@ export default function NewExerciseScreen() {
   );
 
   const onSubmit = useCallback(async () => {
-    if (!canSubmit || busy) return;
-    // Surface general (non-field) errors via Alert; field errors render inline
+    if (!canSubmit || busy || !id) return;
     const generalErrs = errors.filter((e) => e.field === 'general');
     if (generalErrs.length > 0) {
       Alert.alert('無法儲存', generalErrs.map((e) => e.message).join('\n'));
@@ -135,19 +148,14 @@ export default function NewExerciseScreen() {
     }
     setBusy(true);
     try {
-      const id = await createCustomExercise(db, draft, () => Crypto.randomUUID());
-      // Hand the new id off to the caller (picker auto-selects it; browse
-      // mode silently drains the mailbox on focus).
-      submitNewlyCreated(id);
-      // Dismiss the modal — caller's useFocusEffect (Library / picker) will
-      // refresh and the new exercise appears in the grid.
+      await updateCustomExercise(db, id, draft);
       router.back();
     } catch (err) {
       Alert.alert('儲存失敗', err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [canSubmit, busy, errors, db, draft, router]);
+  }, [canSubmit, busy, errors, db, draft, router, id]);
 
   const musclesByMg = useMemo(() => {
     const map = new Map<string, Muscle[]>();
@@ -158,21 +166,43 @@ export default function NewExerciseScreen() {
     return map;
   }, [muscles]);
 
-  // Build the role-highlight map fed into the body diagram.
   const highlight = useMemo<Map<string, MuscleRole>>(() => {
     const m = new Map<string, MuscleRole>();
-    for (const id of secondary) m.set(id, 'secondary');
-    for (const id of primary) m.set(id, 'primary'); // primary wins on overlap
+    for (const mid of secondary) m.set(mid, 'secondary');
+    for (const mid of primary) m.set(mid, 'primary');
     return m;
   }, [primary, secondary]);
 
   const nameError = errors.find((e) => e.field === 'name');
 
+  if (original && original.exercise.is_custom !== 1) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Stack.Screen
+          options={{
+            title: '編輯動作',
+            headerLeft: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="取消"
+                onPress={() => router.back()}>
+                <Text style={styles.headerCancel}>取消</Text>
+              </Pressable>
+            ),
+          }}
+        />
+        <View style={styles.body}>
+          <Text style={styles.placeholder}>內建動作目前無可編輯內容。</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <Stack.Screen
         options={{
-          title: '新增自訂動作',
+          title: '編輯動作',
           headerLeft: () => (
             <Pressable
               accessibilityRole="button"
@@ -279,7 +309,7 @@ export default function NewExerciseScreen() {
 
         <Text style={styles.label}>主要 / 次要 muscle</Text>
         <Text style={styles.helper}>
-          點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK（可日後補）。
+          點兩下切換：未選 → 主要 → 次要 → 取消。空白也 OK。
         </Text>
 
         <View style={styles.diagramWrap}>
@@ -326,10 +356,6 @@ export default function NewExerciseScreen() {
   );
 }
 
-// Discard the unused ValidationError import warning at module level if linter
-// strips it; the type re-export keeps it referenced.
-export type { ValidationError };
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   headerCancel: {
@@ -345,6 +371,7 @@ const styles = StyleSheet.create({
   },
   headerSaveDisabled: { color: '#9CA3AF' },
   body: { padding: 20, gap: 8, paddingBottom: 40 },
+  placeholder: { fontSize: 14, opacity: 0.6, padding: 24 },
   label: {
     fontSize: 13,
     fontWeight: '600',

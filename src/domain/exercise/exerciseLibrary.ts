@@ -9,7 +9,9 @@
  * Pure functions only. Tested in `tests/domain/exerciseLibrary.test.ts`.
  */
 
+import { EQUIPMENT_VALUES } from './types';
 import type {
+  Equipment,
   Exercise,
   ExerciseMuscleLink,
   LoadType,
@@ -24,6 +26,8 @@ export interface ExerciseFilter {
   muscleId?: string | null;
   /** Filter by load_type; null/undefined = no load_type filter. */
   loadType?: LoadType | null;
+  /** Filter by equipment (ADR-0017 Q6); null/undefined = no equipment filter. */
+  equipment?: Equipment | null;
   /** Free-text name match (case-insensitive substring). Empty/undefined = no search. */
   search?: string | null;
   /** When true, hide rows whose `is_archived = 1`. Defaults to true. */
@@ -62,6 +66,7 @@ export function filterExercises(
       return false;
     }
     if (filter.loadType && ex.load_type !== filter.loadType) return false;
+    if (filter.equipment && ex.equipment !== filter.equipment) return false;
     if (muscleHits && !muscleHits.has(ex.id)) return false;
     if (search && !ex.name.toLowerCase().includes(search)) return false;
     return true;
@@ -74,6 +79,8 @@ export interface CustomExerciseDraft {
   name: string;
   load_type: LoadType;
   muscle_group_id: string | null;
+  /** ADR-0017 Q6 — 8-enum equipment classification (default '其他' if unset). */
+  equipment: Equipment;
   /** Muscle IDs assigned the `primary` role. */
   primaryMuscleIds: string[];
   /** Muscle IDs assigned the `secondary` role. */
@@ -85,9 +92,22 @@ export interface ValidationError {
   message: string;
 }
 
+export interface ValidateOptions {
+  /**
+   * Names of non-archived exercises that already exist. Names compared
+   * case-insensitively after trim — "Bench Press" collides with "bench press".
+   * Caller passes Set or array; we treat them the same.
+   *
+   * Note: pass the FULL list (both built-in + custom). Pure validator stays
+   * DB-agnostic; the form loads the list once on mount.
+   */
+  existingNames?: readonly string[] | Set<string>;
+}
+
 /**
  * Validate a Custom Exercise draft per ADR-0010 acceptance:
- *   - name required, ≤ 60 chars after trim
+ *   - name required, ≤ 60 chars after trim, AND case-insensitively unique
+ *     against `options.existingNames` (when provided)
  *   - load_type ∈ {loaded, bodyweight, assisted}
  *   - muscle_group_id may be null (Custom Exercise allowed without MG per
  *     ADR-0010 #9), but if provided must be a non-empty string
@@ -97,7 +117,8 @@ export interface ValidationError {
  *     dedupe before calling, but we don't reject on duplicates)
  */
 export function validateCustomExerciseDraft(
-  draft: CustomExerciseDraft
+  draft: CustomExerciseDraft,
+  options: ValidateOptions = {}
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
@@ -106,6 +127,19 @@ export function validateCustomExerciseDraft(
     errors.push({ field: 'name', message: '請輸入動作名稱' });
   } else if (name.length > 60) {
     errors.push({ field: 'name', message: '動作名稱請少於 60 字元' });
+  } else if (options.existingNames) {
+    const needle = name.toLowerCase();
+    const set =
+      options.existingNames instanceof Set
+        ? options.existingNames
+        : new Set(options.existingNames);
+    // Normalise comparison: trimmed + lowercased on both sides
+    for (const n of set) {
+      if (n.trim().toLowerCase() === needle) {
+        errors.push({ field: 'name', message: '已有同名動作，請改個名字' });
+        break;
+      }
+    }
   }
 
   const validLoad: LoadType[] = ['loaded', 'bodyweight', 'assisted'];
@@ -117,6 +151,13 @@ export function validateCustomExerciseDraft(
     errors.push({
       field: 'muscle_group_id',
       message: 'muscle_group_id 不可為空字串（傳 null 或合法 id）',
+    });
+  }
+
+  if (!EQUIPMENT_VALUES.includes(draft.equipment)) {
+    errors.push({
+      field: 'equipment',
+      message: 'equipment 必須是合法的 8 種分類之一',
     });
   }
 

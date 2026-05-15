@@ -35,8 +35,20 @@ export default function RootLayout() {
             options={{ presentation: 'modal', title: 'New Exercise' }}
           />
           <Stack.Screen
+            name="exercise/edit/[id]"
+            options={{ presentation: 'modal', title: 'Edit Exercise' }}
+          />
+          <Stack.Screen
             name="exercise-history/[id]"
             options={{ presentation: 'modal', title: '動作歷史' }}
+          />
+          <Stack.Screen
+            name="exercise-chart/[id]"
+            options={{ presentation: 'modal', title: '動作圖表' }}
+          />
+          <Stack.Screen
+            name="exercise-picker"
+            options={{ headerShown: false }}
           />
         </Stack>
         <StatusBar style="auto" />

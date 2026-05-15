@@ -32,6 +32,10 @@ const buildExercise = (over: Partial<Exercise> = {}): Exercise => ({
   is_archived: 0,
   muscle_group_id: MG_CHEST,
   is_custom: 0,
+  equipment: '其他',
+  notes: null,
+  media_path: null,
+  cues_text: null,
   ...over,
 });
 
@@ -75,6 +79,16 @@ describe('exerciseLibrary — filterExercises', () => {
     expect(got.map((e) => e.id)).toEqual(['e6']);
   });
 
+  it('filters by equipment (ADR-0017 Q6)', () => {
+    const withEquipment: Exercise[] = [
+      buildExercise({ id: 'e10', name: 'Barbell Row', equipment: '槓鈴' }),
+      buildExercise({ id: 'e11', name: 'Dumbbell Row', equipment: '啞鈴' }),
+      buildExercise({ id: 'e12', name: 'Cable Row', equipment: '滑輪' }),
+    ];
+    const got = filterExercises(withEquipment, [], { equipment: '槓鈴' });
+    expect(got.map((e) => e.id)).toEqual(['e10']);
+  });
+
   it('filters by muscle (any role)', () => {
     const got = filterExercises(exercises, links, { muscleId: M_BACK });
     expect(got.map((e) => e.id).sort()).toEqual(['e3', 'e6']);
@@ -105,6 +119,7 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
     name: '我的自訂動作',
     load_type: 'loaded' as const,
     muscle_group_id: MG_CHEST,
+    equipment: '槓鈴' as const,
     primaryMuscleIds: [M_UPPER_CHEST],
     secondaryMuscleIds: [M_TRICEP],
   };
@@ -146,6 +161,80 @@ describe('exerciseLibrary — validateCustomExerciseDraft', () => {
         secondaryMuscleIds: [],
       })
     ).toEqual([]);
+  });
+
+  it('rejects invalid equipment (ADR-0017 Q6)', () => {
+    const errs = validateCustomExerciseDraft({
+      ...baseDraft,
+      // @ts-expect-error — deliberately bogus to exercise the validator
+      equipment: '不存在的器械',
+    });
+    expect(errs.some((e) => e.field === 'equipment')).toBe(true);
+  });
+
+  it('accepts every Equipment enum value', () => {
+    const allEq = ['槓鈴', '啞鈴', '史密斯機', '滑輪', '固定機械', '自重', '壺鈴', '其他'] as const;
+    for (const eq of allEq) {
+      expect(validateCustomExerciseDraft({ ...baseDraft, equipment: eq })).toEqual([]);
+    }
+  });
+
+  describe('existingNames option (no-dup rule)', () => {
+    it('rejects exact-match name', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'Bench Press' },
+        { existingNames: ['Bench Press', 'Pull-up'] }
+      );
+      expect(errs.some((e) => e.field === 'name' && e.message.includes('同名'))).toBe(true);
+    });
+
+    it('rejects case-insensitive match', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'BENCH PRESS' },
+        { existingNames: ['bench press'] }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('rejects after trim — leading/trailing space ignored on both sides', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: '  Squat  ' },
+        { existingNames: ['Squat'] }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('accepts a unique name', () => {
+      expect(
+        validateCustomExerciseDraft(
+          { ...baseDraft, name: '我的新動作' },
+          { existingNames: ['Bench Press', 'Pull-up'] }
+        )
+      ).toEqual([]);
+    });
+
+    it('accepts Set as existingNames', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: 'Bench Press' },
+        { existingNames: new Set(['Bench Press']) }
+      );
+      expect(errs.some((e) => e.field === 'name')).toBe(true);
+    });
+
+    it('does nothing when existingNames not provided (backwards-compat)', () => {
+      expect(validateCustomExerciseDraft({ ...baseDraft, name: 'Anything' })).toEqual([]);
+    });
+
+    it('does not report dup error when name is already empty (avoid noise)', () => {
+      const errs = validateCustomExerciseDraft(
+        { ...baseDraft, name: '   ' },
+        { existingNames: ['something'] }
+      );
+      // Empty-name error fires; duplicate check is skipped (else-if chain)
+      const nameErrs = errs.filter((e) => e.field === 'name');
+      expect(nameErrs).toHaveLength(1);
+      expect(nameErrs[0].message).toBe('請輸入動作名稱');
+    });
   });
 });
 

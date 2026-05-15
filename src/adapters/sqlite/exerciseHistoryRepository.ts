@@ -34,6 +34,12 @@ export interface ExerciseHistorySession {
   session_started_at: number;
   session_ended_at: number | null;
   bw_snapshot_kg: number | null;
+  /** session.template_id may be NULL (自由 session). */
+  template_id: string | null;
+  /** template.program_id may be NULL (自由 template or no template). */
+  program_id: string | null;
+  /** template.sub_tag may be NULL. */
+  sub_tag: string | null;
   sets: ExerciseHistorySet[];
 }
 
@@ -79,11 +85,17 @@ export async function listExerciseHistorySets(
  * Same data, regrouped per Session (session DESC, sets within session ASC).
  * Each session row carries its bw snapshot once for assisted-class display.
  */
+type HistorySetWithSessionMeta = ExerciseHistorySet & {
+  template_id: string | null;
+  program_id: string | null;
+  sub_tag: string | null;
+};
+
 export async function listExerciseHistoryBySession(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySession[]> {
-  const rows = await db.getAllAsync<ExerciseHistorySet>(
+  const rows = await db.getAllAsync<HistorySetWithSessionMeta>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -93,10 +105,17 @@ export async function listExerciseHistoryBySession(
             s.reps         AS reps,
             s.ordering     AS ordering,
             s.created_at   AS created_at,
-            e.load_type    AS load_type
+            e.load_type    AS load_type,
+            se.template_id AS template_id,
+            t.program_id   AS program_id,
+            t.sub_tag      AS sub_tag
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON se.session_id = s.session_id
+        AND se.exercise_id = s.exercise_id
+       LEFT JOIN template t ON t.id = se.template_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
       ORDER BY ss.started_at DESC, s.ordering ASC`,
@@ -114,15 +133,43 @@ export async function listExerciseHistoryBySession(
         session_started_at: r.session_started_at,
         session_ended_at: r.session_ended_at,
         bw_snapshot_kg: r.bw_snapshot_kg,
+        template_id: r.template_id,
+        program_id: r.program_id,
+        sub_tag: r.sub_tag,
         sets: [],
       };
       grouped.set(r.session_id, sess);
       order.push(r.session_id);
     }
-    sess.sets.push(r);
+    // Strip JOIN columns from the set row before pushing
+    const { template_id, program_id, sub_tag, ...setRow } = r;
+    sess.sets.push(setRow);
   }
 
   return order.map((id) => grouped.get(id)!);
+}
+
+/**
+ * List Programs that have at least one done set of `exercise_id`. Used to
+ * populate the 進階篩選 Program dropdown (ADR-0017 Q14 amendment).
+ */
+export async function listProgramsForExercise(
+  db: Database,
+  exercise_id: string
+): Promise<{ id: string; name: string }[]> {
+  return db.getAllAsync<{ id: string; name: string }>(
+    `SELECT DISTINCT p.id AS id, p.name AS name
+       FROM "set" s
+       JOIN session_exercise se
+         ON se.session_id = s.session_id
+        AND se.exercise_id = s.exercise_id
+       JOIN template t ON t.id = se.template_id
+       JOIN program p  ON p.id = t.program_id
+      WHERE s.exercise_id = ?
+        AND s.is_skipped = 0
+      ORDER BY p.name ASC`,
+    exercise_id
+  );
 }
 
 /**
