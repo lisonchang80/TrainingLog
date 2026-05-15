@@ -87,13 +87,15 @@ describe('Template + snapshot isolation (slice 3)', () => {
     expect(tpl!.name).toBe('Push day');
     expect(tpl!.exercises).toHaveLength(3);
     expect(tpl!.exercises.map((e) => e.ordering)).toEqual([1, 2, 3]);
-    expect(tpl!.exercises[0]).toEqual({
+    expect(tpl!.exercises[0]).toMatchObject({
       exercise_id: bench.id,
       ordering: 1,
       default_sets: 3,
       default_reps: 10,
       default_weight_kg: 60,
       is_evergreen: 0,
+      parent_id: null,
+      reusable_superset_id: null,
     });
 
     // List view shows the count.

@@ -91,6 +91,17 @@ export interface SessionExerciseRow {
   template_id: string | null;
   /** Frozen copy of the source template_exercise.is_evergreen at snapshot time. */
   is_evergreen: 0 | 1;
+  /**
+   * Cluster linkage on the session side (ADR-0018, v014). Points to another
+   * session_exercise.id in the same session. NULL = solo / cluster parent.
+   */
+  parent_id: string | null;
+  /**
+   * Reusable Superset identity on the session side (ADR-0018, v014). NULL =
+   * solo / manual cluster / ad-hoc; NOT NULL = templated RS-explode cluster.
+   * FK to superset(id) ON DELETE SET NULL.
+   */
+  reusable_superset_id: string | null;
 }
 
 export async function insertSessionExercise(
@@ -100,8 +111,9 @@ export async function insertSessionExercise(
   await db.runAsync(
     `INSERT INTO session_exercise
        (id, session_id, exercise_id, ordering,
-        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.session_id,
     row.exercise_id,
@@ -110,7 +122,9 @@ export async function insertSessionExercise(
     row.planned_reps,
     row.planned_weight_kg,
     row.template_id,
-    row.is_evergreen
+    row.is_evergreen,
+    row.parent_id,
+    row.reusable_superset_id
   );
 }
 
@@ -120,7 +134,8 @@ export async function listSessionExercises(
 ): Promise<SessionExerciseRow[]> {
   return db.getAllAsync<SessionExerciseRow>(
     `SELECT id, session_id, exercise_id, ordering,
-            planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen
+            planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+            parent_id, reusable_superset_id
        FROM session_exercise
       WHERE session_id = ?
       ORDER BY ordering ASC`,
@@ -130,9 +145,15 @@ export async function listSessionExercises(
 
 export interface SessionExerciseRowWithName extends SessionExerciseRow {
   exercise_name: string;
+  /**
+   * exercise.load_type — needed for session detail cluster render (I5) to
+   * choose per-side cell formatting (loaded shows kg×reps, bodyweight hides
+   * kg, assisted subtracts kg from BW).
+   */
+  exercise_load_type: 'loaded' | 'bodyweight' | 'assisted';
 }
 
-/** Same as `listSessionExercises` but joins exercise.name for UI display. */
+/** Same as `listSessionExercises` but joins exercise.name + load_type for UI display. */
 export async function listSessionExercisesWithName(
   db: Database,
   session_id: string
@@ -140,7 +161,9 @@ export async function listSessionExercisesWithName(
   return db.getAllAsync<SessionExerciseRowWithName>(
     `SELECT se.id, se.session_id, se.exercise_id, se.ordering,
             se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id, se.is_evergreen,
-            e.name AS exercise_name
+            se.parent_id, se.reusable_superset_id,
+            e.name      AS exercise_name,
+            e.load_type AS exercise_load_type
        FROM session_exercise se
        JOIN exercise e ON e.id = se.exercise_id
       WHERE se.session_id = ?
