@@ -258,5 +258,144 @@ describe('Template Manager — pure logic', () => {
       });
       expect(rows).toEqual([]);
     });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ADR-0018 v014 — cluster identity propagation (parent_id + rs_id)
+    // ─────────────────────────────────────────────────────────────────────
+
+    it('copies reusable_superset_id verbatim from each TemplateExerciseSpec (no remap)', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-1',
+        name: 'Push',
+        exercises: [
+          {
+            id: 'te-bench',
+            exercise_id: 'bench',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 8,
+            default_weight_kg: 80,
+            is_evergreen: 0,
+            parent_id: null,
+            reusable_superset_id: 's1',
+          },
+          {
+            id: 'te-row',
+            exercise_id: 'row',
+            ordering: 2,
+            default_sets: 3,
+            default_reps: 8,
+            default_weight_kg: 40,
+            is_evergreen: 0,
+            parent_id: 'te-bench',
+            reusable_superset_id: 's1',
+          },
+          {
+            id: 'te-solo',
+            exercise_id: 'lateral',
+            ordering: 3,
+            default_sets: 3,
+            default_reps: 12,
+            default_weight_kg: 10,
+            is_evergreen: 0,
+            parent_id: null,
+            reusable_superset_id: null,
+          },
+        ],
+      };
+      let n = 0;
+      const rows = snapshotForSession({
+        template: tpl,
+        session_id: 'ses-1',
+        uuid: () => `se-${++n}`,
+      });
+      expect(rows.map((r) => r.reusable_superset_id)).toEqual([
+        's1',
+        's1',
+        null,
+      ]);
+    });
+
+    it('remaps parent_id from template_exercise.id to the new session_exercise.id (2-pass)', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-1',
+        name: 'Push',
+        exercises: [
+          {
+            id: 'te-bench',
+            exercise_id: 'bench',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 8,
+            default_weight_kg: 80,
+            is_evergreen: 0,
+            parent_id: null,
+            reusable_superset_id: 's1',
+          },
+          {
+            id: 'te-row',
+            exercise_id: 'row',
+            ordering: 2,
+            default_sets: 3,
+            default_reps: 8,
+            default_weight_kg: 40,
+            is_evergreen: 0,
+            parent_id: 'te-bench',
+            reusable_superset_id: 's1',
+          },
+        ],
+      };
+      let n = 0;
+      const rows = snapshotForSession({
+        template: tpl,
+        session_id: 'ses-1',
+        uuid: () => `se-${++n}`,
+      });
+      // First row is the cluster parent — its own id is 'se-1'; parent_id stays null
+      expect(rows[0].id).toBe('se-1');
+      expect(rows[0].parent_id).toBeNull();
+      // Second row is the child — parent_id remapped from 'te-bench' to 'se-1'
+      expect(rows[1].id).toBe('se-2');
+      expect(rows[1].parent_id).toBe('se-1');
+    });
+
+    it('throws on dangling parent_id (refers to an id not in the template)', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-broken',
+        name: 'Broken',
+        exercises: [
+          {
+            id: 'te-row',
+            exercise_id: 'row',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 8,
+            default_weight_kg: 40,
+            is_evergreen: 0,
+            parent_id: 'te-bench-missing',
+            reusable_superset_id: 's1',
+          },
+        ],
+      };
+      expect(() =>
+        snapshotForSession({
+          template: tpl,
+          session_id: 'ses-1',
+          uuid: () => 'se-1',
+        })
+      ).toThrow(/dangling parent_id/);
+    });
+
+    it('preserves the solo-only test fixture behavior (no cluster fields → parent_id stays null, rs_id stays null)', () => {
+      // Older test fixtures that don't carry id / parent_id / rs_id must still
+      // produce snapshots with parent_id = null + rs_id = null (no throw).
+      const rows = snapshotForSession({
+        template: buildTemplate(),
+        session_id: 's',
+        uuid: () => 'x',
+      });
+      expect(rows.every((r) => r.parent_id === null)).toBe(true);
+      expect(rows.every((r) => r.reusable_superset_id === null)).toBe(true);
+    });
   });
 });
