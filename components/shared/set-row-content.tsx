@@ -51,6 +51,18 @@ type SetRowContentProps<S extends SetRowItem> = {
   minusDisabled: boolean;
   /** Suppress 📝 note indicator (e.g., when caller renders it elsewhere). */
   hideNoteIndicator?: boolean;
+  /**
+   * Slice 10c Phase 2 commit 8 (ADR-0019 Q6) — session set logger swap:
+   * if provided, the reps/weight cells render as tap-targets that open the
+   * caller's NumericKeypad modal instead of inline TextInput (so the system
+   * keyboard never covers the card being edited). Template editor omits
+   * this prop and keeps its inline TextInput behavior unchanged.
+   */
+  onTapNumber?: (
+    set: S,
+    field: 'reps' | 'weight',
+    currentValue: number,
+  ) => void;
   onUpdateSet: (set_id: string, patch: { reps?: number; weight?: number }) => void;
   onShowSetNote: (set: S) => void;
   onRemoveDropsetRow: (set_id: string) => void;
@@ -66,6 +78,7 @@ export function SetRowContent<S extends SetRowItem>({
   isClusterLast,
   minusDisabled,
   hideNoteIndicator,
+  onTapNumber,
   onUpdateSet,
   onShowSetNote,
   onRemoveDropsetRow,
@@ -137,19 +150,39 @@ export function SetRowContent<S extends SetRowItem>({
           {setLabel}
         </Text>
       </Pressable>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={repsText}
-        onChangeText={handleRepsChange}
-        keyboardType="number-pad"
-      />
+      {onTapNumber ? (
+        <Pressable
+          onPress={() => onTapNumber(set, 'reps', set.reps)}
+          hitSlop={4}
+          style={[styles.setInput, compact && styles.setInputCompact]}
+        >
+          <Text style={styles.setInputText}>{String(set.reps)}</Text>
+        </Pressable>
+      ) : (
+        <TextInput
+          style={[styles.setInput, compact && styles.setInputCompact]}
+          value={repsText}
+          onChangeText={handleRepsChange}
+          keyboardType="number-pad"
+        />
+      )}
       <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={weightText}
-        onChangeText={handleWeightChange}
-        keyboardType="decimal-pad"
-      />
+      {onTapNumber ? (
+        <Pressable
+          onPress={() => onTapNumber(set, 'weight', set.weight)}
+          hitSlop={4}
+          style={[styles.setInput, compact && styles.setInputCompact]}
+        >
+          <Text style={styles.setInputText}>{String(set.weight)}</Text>
+        </Pressable>
+      ) : (
+        <TextInput
+          style={[styles.setInput, compact && styles.setInputCompact]}
+          value={weightText}
+          onChangeText={handleWeightChange}
+          keyboardType="decimal-pad"
+        />
+      )}
       <Text style={styles.setUnit}>kg</Text>
       {hasNote ? (
         <Pressable
@@ -265,12 +298,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     fontSize: 13,
     textAlign: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   setInputCompact: {
     minWidth: 34,
     paddingHorizontal: 4,
     paddingVertical: 3,
     fontSize: 11,
+  },
+  setInputText: {
+    fontSize: 13,
+    color: '#111827',
+    textAlign: 'center',
   },
   setUnit: { fontSize: 12, color: '#6B7280' },
   setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },

@@ -43,6 +43,7 @@ import {
 } from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
+import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
@@ -122,6 +123,12 @@ export default function TodayScreen() {
   /** Per-set notes editor sheet — `null` means closed. */
   const [noteSheetTarget, setNoteSheetTarget] =
     useState<{ set_id: string; initial: string | null } | null>(null);
+  /** Numeric keypad modal — `null` means closed (ADR-0019 Q6). */
+  const [keypadTarget, setKeypadTarget] = useState<{
+    set_id: string;
+    field: 'reps' | 'weight';
+    current: number;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms] = await Promise.all([
@@ -866,6 +873,9 @@ export default function TodayScreen() {
                       onShowSetNote={(set_id, current) =>
                         setNoteSheetTarget({ set_id, initial: current })
                       }
+                      onTapNumber={(set_id, field, current) =>
+                        setKeypadTarget({ set_id, field, current })
+                      }
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -947,6 +957,23 @@ export default function TodayScreen() {
         }}
         onCancel={() => setNoteSheetTarget(null)}
       />
+      <NumericKeypad
+        visible={keypadTarget !== null}
+        initialValue={keypadTarget?.current ?? 0}
+        label={keypadTarget?.field === 'weight' ? '重量 (kg)' : '次數'}
+        mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
+        onConfirm={(value) => {
+          if (keypadTarget) {
+            const patch =
+              keypadTarget.field === 'weight'
+                ? { weight: value }
+                : { reps: value };
+            onUpdateSet(keypadTarget.set_id, patch);
+          }
+          setKeypadTarget(null);
+        }}
+        onCancel={() => setKeypadTarget(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1014,6 +1041,7 @@ function ExerciseCard({
   onAddSetAfter,
   onToggleLogged,
   onShowSetNote,
+  onTapNumber,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -1034,6 +1062,11 @@ function ExerciseCard({
   onAddSetAfter: (set_id: string) => void;
   onToggleLogged: (set_id: string, currentlyLogged: boolean) => void;
   onShowSetNote: (set_id: string, currentNotes: string | null) => void;
+  onTapNumber: (
+    set_id: string,
+    field: 'reps' | 'weight',
+    current: number,
+  ) => void;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
@@ -1176,6 +1209,9 @@ function ExerciseCard({
                         }
                         onShowSetNote={(target) =>
                           onShowSetNote(target.id, target.notes)
+                        }
+                        onTapNumber={(target, field, current) =>
+                          onTapNumber(target.id, field, current)
                         }
                         onRemoveDropsetRow={() =>
                           notImplementedAlert('− 移除 dropset 一列')
