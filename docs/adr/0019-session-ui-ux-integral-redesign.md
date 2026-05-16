@@ -603,4 +603,56 @@ PRD #1（GitHub issue）原本已 drift 5 個 ADR（0014/15/16/17/18）— 本 A
 - Freestyle finish 2-option dialog
 - 歷史詳情頁 layout 整合（4-tile + chart + 動作清單）
 - HealthKit 真實寫入（slice 13）
-- `snapshotForSession` 把 `template_exercise.rest_sec` 複製到 `session_exercise.rest_sec`
+- ✅ ~~`snapshotForSession` 把 `template_exercise.rest_sec` 複製到 `session_exercise.rest_sec`~~（slice 10b 落地，見下方 § Slice 10b 段）
+
+## Slice 10b session card layout + rest_sec bridge（2026-05-16 ultra-late ship）
+
+Slice 10b 落地 ADR-0019 Q3 動作卡互動模型 + Q2.2 § (B) snapshotForSession rest_sec copy + 「無」program label resolution，並修正 slice 10a v016 漏看 schema 命名衝突。PR pending。
+
+### ⚠️ Schema 命名不一致 — slice 10a 漏看修正
+
+Slice 10a v016 加 `template_exercise.rest_sec INTEGER NULL`，但 **v009 早已有 `template_exercise.rest_seconds INTEGER NULL`**（ADR-0016 落地，template editor 既有用）。Grill 拍板時沒查 v009，照著本 ADR line 54 的 `rest_sec` 名字加，造成 `template_exercise` 多了一個 orphan 重複欄。
+
+**Slice 10b 採取的並存 bridge 策略**：
+- `template_exercise.rest_seconds` (v009) — **canonical 來源欄**，template editor 讀寫不變
+- `template_exercise.rest_sec` (v016) — **orphan**，永遠 NULL，無 reader（將來 v018 migration 可 DROP，slice 10b 不做）
+- `session_exercise.rest_sec` (v016) — **canonical session 邊欄**，由 snapshotForSession 從 `rest_seconds` 抄入；slice 10c+ rest timer / ⚙️ menu 直接讀寫此欄
+- Domain 層：`TemplateExerciseSpec.rest_sec` + `SessionExerciseSnapshot.rest_sec` 統一用「rest_sec」字段名稱（per 本 ADR 的命名選擇）；`templateRepository.getTemplate` 在 read time 把 `rest_seconds` 列映射成 `rest_sec` 欄位
+
+**為什麼不在 slice 10b 直接 DROP `rest_sec` orphan**：DROP COLUMN 需 SQLite 3.35+ 或 12-step rebuild，破壞性 + 額外 migration v018，跟 slice 10b「無新 schema migration」原則衝突。留待後續 cleanup slice。
+
+### Q2.2 § (B) snapshotForSession rest_sec copy ✅ 落地
+- `TemplateExerciseSpec` + `SessionExerciseSnapshot` 加 `rest_sec` 欄位（NULL = inherit hardcoded 60s）
+- snapshotForSession 在 Pass 1 複製 `ex.rest_sec ?? null`（NULL 也照抄，不在 snapshot 階段 coalesce — Save-back 區分「user set NULL」vs「user set 60」）
+- `templateRepository.getTemplate` 從 `rest_seconds` (legacy) 列映射到 `rest_sec` 欄位
+- `sessionRepository.insertSessionExercise` + `listSessionExercisesWithName` 持久化/讀取 `session_exercise.rest_sec`
+- Tests: 4 snapshot unit cases + 1 full-pipeline integration case (`templates.test.ts`)
+
+### Q3 動作卡互動模型 ✅ 落地（minimal scope）
+- a-1: 動作卡 collapsed default — `expandedExerciseId` state 起始 NULL
+- b-1: tap collapsed → expand；tap expanded header → collapse self
+- c-2: only-one-expanded — single-id state 自動 collapse 別張
+- d-1: vertical scroll — 沿用 parent ScrollView
+- e-3: expanded 隱含 active — 用更大背景 opacity，不畫 active border / ring
+- 狀態持久化：memory only（per 本 ADR Q3 § 副作用拍板）— 重開 session 全 collapsed reset
+- ⚙️ icon 加在卡 header 右側（min 44×44 hit area），tap → Alert placeholder「Coming in slice 10c」+ documentation of 4 sheets
+- Expanded body 含 rest_sec 顯示（NULL fallback「60s default」）+ set logger gesture coming-soon hint
+
+### Q5 ⚙️ menu — placeholder only（slice 10c 完整 sheet 落地）
+本 slice 只落 affordance（icon + Alert），4 個 sheet 內容（📝編輯備註 / ⏱️休息秒數 / 🔄換動作 / 🗑️刪除動作）以及 DB write paths 在 slice 10c。
+
+### 「無」 program label resolution（ADR-0019 § (N1) 配套）
+- 新增 `resolveProgramLabel(program | null | undefined): string` 在 `src/domain/program/programManager.ts`
+- 行為：real program → its name；sentinel program (name='無') → '無'（forwards verbatim，無 special-case）；null/undefined → '無' fallback
+- Today tab `programBanner` 改用此 helper；3 unit tests
+- Future UI surfaces 一律走此 helper，避免散落 `?? '無'` fallback
+
+### Out of scope for slice 10b（slice 10c-10g 接手）
+- ⚙️ menu 4 項 bottom sheets（slice 10c）
+- Set logger 5-gesture（slice 10c）
+- Rest timer chip + modal + auto-popup（slice 10d）
+- Cluster ✓ 一 cycle 一 ✓ semantic（slice 10d）
+- Freestyle finish 2-option dialog（slice 10e）
+- 歷史詳情頁 layout 整合（slice 10f）
+- HealthKit 真實寫入（slice 13）
+- v018 migration DROP `template_exercise.rest_sec` orphan column
