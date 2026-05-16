@@ -48,6 +48,7 @@ import {
 } from '@/src/domain/body/unitConversion';
 import type { Exercise } from '@/src/domain/exercise/types';
 import {
+  resolveProgramLabel,
   todayCell,
   utcMsToIsoDate,
 } from '@/src/domain/program/programManager';
@@ -85,6 +86,15 @@ export default function TodayScreen() {
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SetWithExercise[]>([]);
   const [plan, setPlan] = useState<SessionExerciseRowWithName[]>([]);
+  /**
+   * ADR-0019 Q3 動作卡互動模型 — only-one-expanded state. NULL = all cards
+   * collapsed (default per a-1). Setting to a plan row id expands that card
+   * and implicitly collapses any other (c-2 single-expansion). Tapping the
+   * already-expanded card's header toggles back to NULL (b-1 collapse on
+   * second tap). State is in-memory only — re-opening session resets all
+   * cards to collapsed (per ADR-0019 Q3 § 副作用拍板「狀態持久化」).
+   */
+  const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
   const [busy, setBusy] = useState(false);
@@ -375,7 +385,7 @@ export default function TodayScreen() {
   const programBanner = activeProgram ? (
     <View style={styles.programBanner}>
       <Text style={styles.programBannerName} numberOfLines={1}>
-        {activeProgram.program.name}
+        {resolveProgramLabel(activeProgram.program)}
         {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
       </Text>
       {programCellToday ? (
@@ -581,18 +591,24 @@ export default function TodayScreen() {
                     (s) => s.exercise_id === p.exercise_id
                   ).length;
                   const complete = done >= p.planned_sets;
+                  const isExpanded = expandedExerciseId === p.id;
                   return (
-                    <View key={p.id} style={styles.planRow}>
-                      <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
-                      <View style={styles.planText}>
-                        <Text style={styles.planName}>{p.exercise_name}</Text>
-                        <Text style={styles.planDetails}>
-                          {done}/{p.planned_sets} sets
-                          {p.planned_reps != null ? ` · target ${p.planned_reps} reps` : ''}
-                          {p.planned_weight_kg != null ? ` @ ${p.planned_weight_kg} kg` : ''}
-                        </Text>
-                      </View>
-                    </View>
+                    <ExerciseCard
+                      key={p.id}
+                      planRow={p}
+                      done={done}
+                      complete={complete}
+                      isExpanded={isExpanded}
+                      onToggleExpand={() =>
+                        setExpandedExerciseId(isExpanded ? null : p.id)
+                      }
+                      onSettingsPress={() =>
+                        Alert.alert(
+                          '⚙️ menu',
+                          'Coming in slice 10c — 編輯備註 / 休息秒數 / 刪除動作（換動作 = 刪 + ⊕ 動作庫勾選）',
+                        )
+                      }
+                    />
                   );
                 })}
               </View>
@@ -765,6 +781,100 @@ function formatPRDeltaValue(
   return `${display.toFixed(0)} ${unit}-reps`;
 }
 
+/**
+ * Today tab session exercise card (ADR-0019 Q3 動作卡互動模型).
+ *
+ * Affordances:
+ *   - a-1: collapsed by default (parent state starts at expandedExerciseId=null)
+ *   - b-1: tap collapsed card → expand; tap expanded header → collapse self
+ *   - c-2: parent state is single id → setting it auto-collapses any other
+ *   - d-1: vertical scroll for the card list (the parent ScrollView)
+ *   - e-3: expanded card uses bigger padding + same border (no active ring)
+ *
+ * The ⚙️ icon on the right opens the settings menu (slice 10c). For slice 10b
+ * it's a placeholder Alert documenting the three sheets coming next
+ * (📝 編輯備註 / ⏱️ 休息秒數 / 🗑️ 刪除動作). The original ADR-0019 Q5 4-item
+ * design was reduced to 3 on 2026-05-16 — 「🔄 換動作」 was removed in favour
+ * of the 刪 + [⊕ 加動作] 動作庫勾選 flow (cluster + solo unified).
+ *
+ * Set logger gestures (left-swipe delete / right-swipe add+notes / tap-label
+ * cycle / long-press reorder / tap-✓ complete) land in slice 10c — the
+ * expanded body for slice 10b just shows planned details with a note that
+ * the full set logger is pending.
+ */
+function ExerciseCard({
+  planRow,
+  done,
+  complete,
+  isExpanded,
+  onToggleExpand,
+  onSettingsPress,
+}: {
+  planRow: SessionExerciseRowWithName;
+  done: number;
+  complete: boolean;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onSettingsPress: () => void;
+}): React.ReactElement {
+  return (
+    <View style={[styles.exerciseCard, isExpanded && styles.exerciseCardExpanded]}>
+      <View style={styles.exerciseCardHeader}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onToggleExpand}
+          style={({ pressed }) => [
+            styles.exerciseCardHeaderMain,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
+          <View style={styles.planText}>
+            <Text style={styles.planName}>{planRow.exercise_name}</Text>
+            <Text style={styles.planDetails}>
+              {done}/{planRow.planned_sets} sets
+              {planRow.planned_reps != null
+                ? ` · target ${planRow.planned_reps} reps`
+                : ''}
+              {planRow.planned_weight_kg != null
+                ? ` @ ${planRow.planned_weight_kg} kg`
+                : ''}
+            </Text>
+          </View>
+          <Text style={styles.exerciseCardChevron}>{isExpanded ? '▾' : '▸'}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="動作設定"
+          onPress={onSettingsPress}
+          style={({ pressed }) => [
+            styles.exerciseCardGear,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.exerciseCardGearText}>⚙️</Text>
+        </Pressable>
+      </View>
+      {isExpanded && (
+        <View style={styles.exerciseCardBody}>
+          <Text style={styles.exerciseCardBodyHint}>
+            Set logger gestures (左滑刪 / 右滑加 / tap label / 長按 reorder /
+            tap ✓) — coming in slice 10c.
+          </Text>
+          {planRow.rest_sec != null && (
+            <Text style={styles.exerciseCardRestLine}>
+              ⏱️ Rest: {planRow.rest_sec}s
+            </Text>
+          )}
+          {planRow.rest_sec == null && (
+            <Text style={styles.exerciseCardRestLine}>
+              ⏱️ Rest: 60s (default)
+            </Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   flex: { flex: 1 },
@@ -822,7 +932,7 @@ const styles = StyleSheet.create({
   setRowExercise: { fontSize: 15, fontWeight: '600' },
   setRowDetails: { fontSize: 14 },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.3)' },
-  planList: { gap: 6, paddingVertical: 4 },
+  planList: { gap: 8, paddingVertical: 4 },
   planRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -836,6 +946,56 @@ const styles = StyleSheet.create({
   planText: { flex: 1 },
   planName: { fontSize: 15, fontWeight: '600' },
   planDetails: { fontSize: 12, opacity: 0.7 },
+  // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
+  exerciseCard: {
+    backgroundColor: 'rgba(127,127,127,0.10)',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  exerciseCardExpanded: {
+    backgroundColor: 'rgba(127,127,127,0.14)',
+  },
+  exerciseCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  exerciseCardHeaderMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  exerciseCardChevron: {
+    fontSize: 14,
+    opacity: 0.5,
+    width: 18,
+    textAlign: 'right',
+  },
+  exerciseCardGear: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseCardGearText: { fontSize: 18 },
+  exerciseCardBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 6,
+  },
+  exerciseCardBodyHint: {
+    fontSize: 12,
+    opacity: 0.55,
+    fontStyle: 'italic',
+  },
+  exerciseCardRestLine: {
+    fontSize: 13,
+    opacity: 0.75,
+  },
   programBanner: {
     paddingVertical: 10,
     paddingHorizontal: 14,

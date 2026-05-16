@@ -215,3 +215,25 @@ export function todayCell(args: {
     date: args.today,
   });
 }
+
+/**
+ * Canonical "render this program's name as the user sees it" helper.
+ *
+ * Per ADR-0019 § (N1) + slice 10a v017 seed, the reserved 「無」 program row
+ * (id = RESERVED_NONE_PROGRAM_ID) is the single source of truth for "no
+ * program assigned". Any UI label that needs to display a program name
+ * should resolve via this helper:
+ *
+ *   - real program loaded → its `name`
+ *   - sentinel program loaded (program.name === '無') → '無'
+ *   - program is null/undefined (legacy data with no row joined) → '無'
+ *     fallback so older sessions render consistently with the new model
+ *
+ * Centralising the resolution makes future renames / label tweaks a
+ * one-liner change here instead of hunting through every UI surface.
+ */
+export function resolveProgramLabel(
+  program: { name: string } | null | undefined,
+): string {
+  return program?.name ?? '無';
+}

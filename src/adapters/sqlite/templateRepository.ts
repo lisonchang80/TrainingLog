@@ -119,13 +119,28 @@ export async function getTemplate(
     id
   );
   if (!tpl) return null;
-  const exercises = await db.getAllAsync<TemplateExerciseSpec>(
+  // Slice 10b — schema bridge: read the legacy `rest_seconds` column (v009 /
+  // ADR-0016) and surface it on the spec as the canonical `rest_sec` field
+  // (the name ADR-0019 used). v016 added a separate `template_exercise.
+  // rest_sec` column by mistake — that orphan stays NULL and is NOT read here.
+  // See ADR-0019 § Schema bridge note + templateManager.TemplateExerciseSpec
+  // JSDoc for the full rationale.
+  type TemplateExerciseRow = Omit<TemplateExerciseSpec, 'rest_sec'> & {
+    rest_seconds: number | null;
+  };
+  const rows = await db.getAllAsync<TemplateExerciseRow>(
     `SELECT id, exercise_id, ordering, default_sets, default_reps, default_weight_kg,
-            is_evergreen, parent_id, reusable_superset_id
+            is_evergreen, parent_id, reusable_superset_id, rest_seconds
        FROM template_exercise
       WHERE template_id = ?
       ORDER BY ordering ASC`,
     id
+  );
+  const exercises: TemplateExerciseSpec[] = rows.map(
+    ({ rest_seconds, ...rest }) => ({
+      ...rest,
+      rest_sec: rest_seconds,
+    })
   );
   return { id: tpl.id, name: tpl.name, exercises };
 }

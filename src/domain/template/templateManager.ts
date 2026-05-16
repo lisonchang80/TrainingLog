@@ -47,6 +47,22 @@ export interface TemplateExerciseSpec {
    * pointing to superset.id).
    */
   reusable_superset_id?: string | null;
+  /**
+   * Per-exercise rest seconds between sets (ADR-0019 Q2 + slice 10b bridge).
+   *
+   * NULL = inherit hardcoded 60s system default. Coalesce happens at UI / timer
+   * layer, NOT here — snapshot copies NULL verbatim into the session so a later
+   * Save-back can distinguish "user set NULL" from "user set 60".
+   *
+   * **Schema bridge note**: the DB column on `template_exercise` is
+   * `rest_seconds` (v009 / ADR-0016 — pre-dates ADR-0019 which used the name
+   * `rest_sec`). v016 added a separate `template_exercise.rest_sec` column by
+   * mistake — it stays NULL and is treated as an orphan (future v018 may
+   * DROP). This `rest_sec` field on the domain spec is the canonical name; the
+   * adapter (`templateRepository.getTemplate`) maps the legacy `rest_seconds`
+   * column into this field.
+   */
+  rest_sec?: number | null;
 }
 
 export interface TemplateData {
@@ -110,6 +126,13 @@ export interface SessionExerciseSnapshot {
    * superset_id` (foreign id pointing to superset.id — no remap).
    */
   reusable_superset_id: string | null;
+  /**
+   * Per-exercise rest seconds (ADR-0019 Q2 + slice 10b bridge). Copied
+   * verbatim from `TemplateExerciseSpec.rest_sec` (which in turn was mapped
+   * from the legacy `template_exercise.rest_seconds` column by the adapter).
+   * NULL = inherit hardcoded 60s system default; coalesce at UI layer only.
+   */
+  rest_sec: number | null;
 }
 
 /**
@@ -162,6 +185,7 @@ export function snapshotForSession(args: {
       is_evergreen: ex.is_evergreen,
       parent_id: null,
       reusable_superset_id: ex.reusable_superset_id ?? null,
+      rest_sec: ex.rest_sec ?? null,
     };
   });
 
