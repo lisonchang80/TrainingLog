@@ -222,6 +222,67 @@ export async function swapSessionExercise(
   });
 }
 
+/**
+ * Append one ad-hoc exercise to an in-progress session (per ADR-0019 Q15
+ * bottom sticky bar [+ 動作]). Order goes to MAX(ordering)+1 within the
+ * session. planned_sets defaults to 3 (typical user expectation when
+ * adding mid-session). template_id stays null since this is ad-hoc.
+ *
+ * Slice 10c Phase 5 commit 28.
+ */
+export async function appendSessionExercise(
+  db: Database,
+  args: {
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    planned_sets?: number;
+  }
+): Promise<void> {
+  const row = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM session_exercise
+      WHERE session_id = ?`,
+    args.session_id
+  );
+  const ordering = (row?.max_ordering ?? 0) + 1;
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, NULL, NULL)`,
+    args.id,
+    args.session_id,
+    args.exercise_id,
+    ordering,
+    args.planned_sets ?? 3
+  );
+}
+
+/**
+ * 放棄訓練 — discard an in-progress session entirely (per ADR-0019 Q15
+ * Header [⋯] menu). Removes every set, every session_exercise, then the
+ * session row itself in one transaction. No undo; caller must confirm.
+ *
+ * Slice 10c Phase 5 commit 26.
+ */
+export async function discardSession(
+  db: Database,
+  session_id: string
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_id = ?`,
+      session_id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE session_id = ?`,
+      session_id
+    );
+    await db.runAsync(`DELETE FROM session WHERE id = ?`, session_id);
+  });
+}
+
 export async function updateSessionExerciseRestSec(
   db: Database,
   session_exercise_id: string,

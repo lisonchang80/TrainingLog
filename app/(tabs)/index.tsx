@@ -27,8 +27,10 @@ import {
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
+  appendSessionExercise,
   createSession,
   deleteSessionExerciseAndSets,
+  discardSession,
   endSession,
   getActiveSession,
   listSessionExercisesWithName,
@@ -166,6 +168,8 @@ export default function TodayScreen() {
     session_exercise_id: string;
     old_exercise_id: string;
   } | null>(null);
+  /** [+ 動作] sticky-bar add-exercise sheet open flag. */
+  const [addExerciseSheetOpen, setAddExerciseSheetOpen] = useState(false);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
    * computed once on refresh from listExerciseHistorySets (cross-session).
@@ -746,6 +750,77 @@ export default function TodayScreen() {
     );
   };
 
+  /**
+   * Header [⋯] menu (ADR-0019 Q15). Currently 1 item: 「放棄訓練」 with
+   * confirm Alert + CASCADE delete. More items可以陸續加（如「結束並丟棄
+   * 此次訓練資料」用法）。
+   */
+  const onHeaderMenuPress = () => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: ['取消', '🚫 放棄訓練'],
+        cancelButtonIndex: 0,
+        destructiveButtonIndex: 1,
+      },
+      (idx) => {
+        if (idx !== 1) return;
+        Alert.alert(
+          '放棄此次訓練？',
+          '此操作不可復原 — 將刪除整個 session、所有動作及記錄。',
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '放棄',
+              style: 'destructive',
+              onPress: async () => {
+                const session_id = getSessionId(sessionState);
+                if (!session_id) return;
+                try {
+                  await discardSession(db, session_id);
+                  setSessionState(IDLE);
+                  setSetsInSession([]);
+                  setPlan([]);
+                  setBwSnapshotKg(null);
+                  setLastPRDelta(null);
+                  setLastPRExerciseName('');
+                  setPrSnapshotById({});
+                } catch (e) {
+                  Alert.alert(
+                    'Discard failed',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                }
+              },
+            },
+          ],
+        );
+      },
+    );
+  };
+
+  /**
+   * [+ 動作] sticky-bar action — append an ad-hoc exercise to the running
+   * session. Reuses SwapExerciseSheet's picker UI but treats the selection
+   * as "create new session_exercise" instead of "replace existing".
+   */
+  const onAddExerciseConfirm = async (new_exercise_id: string) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await appendSessionExercise(db, {
+        id: randomUUID(),
+        session_id,
+        exercise_id: new_exercise_id,
+      });
+      await refresh();
+    } catch (e) {
+      Alert.alert(
+        'Add failed',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
@@ -906,8 +981,36 @@ export default function TodayScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
-        <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
+        <View style={styles.sessionHeader}>
           <Text style={styles.heading}>Today</Text>
+          <View style={styles.sessionHeaderActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Session menu"
+              onPress={onHeaderMenuPress}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.headerIconBtn,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.headerIconBtnText}>⋯</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onEndSession}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.headerDoneBtn,
+                busy && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.headerDoneBtnText}>
+                {busy ? '結束中…' : '完成'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
           {programBanner}
           <Text style={styles.subhead}>
             Session in progress · {setsInSession.length} set
@@ -1086,18 +1189,38 @@ export default function TodayScreen() {
             </View>
           ) : null}
 
+        </ScrollView>
+        <View style={styles.bottomStickyBar}>
           <Pressable
             accessibilityRole="button"
-            onPress={onEndSession}
+            onPress={() => setAddExerciseSheetOpen(true)}
             disabled={busy}
             style={({ pressed }) => [
-              styles.endBtn,
+              styles.bottomStickyBtn,
+              styles.bottomStickyBtnPrimary,
               busy && styles.btnDisabled,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.endBtnText}>{busy ? 'Ending…' : 'End Session'}</Text>
+            <Text style={styles.bottomStickyBtnTextPrimary}>+ 動作</Text>
           </Pressable>
-        </ScrollView>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              Alert.alert(
+                '傳至手錶 ⌚',
+                'Coming in slice 13 — WatchConnectivity transferUserInfo + Watch SwiftUI app。',
+              )
+            }
+            style={({ pressed }) => [
+              styles.bottomStickyBtn,
+              styles.bottomStickyBtnSecondary,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.bottomStickyBtnTextSecondary}>
+              傳至手錶 ⌚
+            </Text>
+          </Pressable>
+        </View>
       </KeyboardAvoidingView>
       <SetNoteSheet
         visible={noteSheetTarget !== null}
@@ -1124,6 +1247,16 @@ export default function TodayScreen() {
           setKeypadTarget(null);
         }}
         onCancel={() => setKeypadTarget(null)}
+      />
+      <SwapExerciseSheet
+        visible={addExerciseSheetOpen}
+        currentExerciseId={null}
+        exercises={exercises.map((e) => ({ id: e.id, name: e.name }))}
+        onConfirm={(new_exercise_id) => {
+          setAddExerciseSheetOpen(false);
+          onAddExerciseConfirm(new_exercise_id);
+        }}
+        onCancel={() => setAddExerciseSheetOpen(false)}
       />
       <SwapExerciseSheet
         visible={swapTarget !== null}
@@ -1591,6 +1724,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   endBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  sessionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  sessionHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerIconBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  headerIconBtnText: { fontSize: 22, fontWeight: '700', color: '#6b7280' },
+  headerDoneBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#0a7ea4',
+  },
+  headerDoneBtnText: { color: 'white', fontSize: 14, fontWeight: '700' },
+  bottomStickyBar: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  bottomStickyBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  bottomStickyBtnPrimary: { backgroundColor: '#0a7ea4' },
+  bottomStickyBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
+  bottomStickyBtnTextPrimary: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  bottomStickyBtnTextSecondary: {
+    color: '#0a7ea4',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   btnDisabled: { opacity: 0.5 },
   btnPressed: { opacity: 0.85 },
   planList: { gap: 8, paddingVertical: 4 },
