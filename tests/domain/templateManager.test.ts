@@ -397,5 +397,120 @@ describe('Template Manager — pure logic', () => {
       expect(rows.every((r) => r.parent_id === null)).toBe(true);
       expect(rows.every((r) => r.reusable_superset_id === null)).toBe(true);
     });
+
+    // Slice 10b — rest_sec propagation cases (ADR-0019 Q2.2 § (B) + schema
+    // bridge from legacy template_exercise.rest_seconds column).
+    it('copies rest_sec verbatim from each TemplateExerciseSpec (uniform value)', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-rest',
+        name: 'rest test',
+        exercises: [
+          {
+            exercise_id: 'a',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            rest_sec: 90,
+          },
+          {
+            exercise_id: 'b',
+            ordering: 2,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            rest_sec: 90,
+          },
+        ],
+      };
+      const rows = snapshotForSession({
+        template: tpl,
+        session_id: 's',
+        uuid: () => 'x',
+      });
+      expect(rows.map((r) => r.rest_sec)).toEqual([90, 90]);
+    });
+
+    it('propagates NULL rest_sec verbatim (no coalesce to 60s default)', () => {
+      // NULL = inherit hardcoded 60s default; coalesce happens at UI layer
+      // so Save-back can distinguish "user set NULL" from "user set 60".
+      const tpl: TemplateData = {
+        id: 'tpl-null-rest',
+        name: 'null rest',
+        exercises: [
+          {
+            exercise_id: 'a',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            rest_sec: null,
+          },
+        ],
+      };
+      const rows = snapshotForSession({
+        template: tpl,
+        session_id: 's',
+        uuid: () => 'x',
+      });
+      expect(rows[0]?.rest_sec).toBeNull();
+    });
+
+    it('handles mixed rest_sec — some exercises have it, others null', () => {
+      const tpl: TemplateData = {
+        id: 'tpl-mixed-rest',
+        name: 'mixed',
+        exercises: [
+          {
+            exercise_id: 'short',
+            ordering: 1,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            rest_sec: 45,
+          },
+          {
+            exercise_id: 'default',
+            ordering: 2,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            // rest_sec omitted entirely
+          },
+          {
+            exercise_id: 'long',
+            ordering: 3,
+            default_sets: 3,
+            default_reps: 10,
+            default_weight_kg: 60,
+            is_evergreen: 0,
+            rest_sec: 180,
+          },
+        ],
+      };
+      const rows = snapshotForSession({
+        template: tpl,
+        session_id: 's',
+        uuid: () => 'x',
+      });
+      expect(rows.map((r) => r.rest_sec)).toEqual([45, null, 180]);
+    });
+
+    it('omitting rest_sec on the spec yields rest_sec=null on the snapshot (backwards-compat)', () => {
+      // The buildTemplate factory above doesn't set rest_sec on either exercise
+      // — older fixtures that pre-date slice 10b must still produce valid
+      // snapshots with rest_sec defaulting to null.
+      const rows = snapshotForSession({
+        template: buildTemplate(),
+        session_id: 's',
+        uuid: () => 'x',
+      });
+      expect(rows.every((r) => r.rest_sec === null)).toBe(true);
+    });
   });
 });
