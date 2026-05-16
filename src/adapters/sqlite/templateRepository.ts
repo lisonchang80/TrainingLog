@@ -62,6 +62,21 @@ export async function listTemplates(db: Database): Promise<TemplateSummary[]> {
 }
 
 /**
+ * Distinct non-null `template.sub_tag` values across all templates, sorted
+ * ascending. Feeds the 強度 picker in the start-template bottom sheet
+ * (ADR-0019 §Q9.1a). Empty list when no template has a sub_tag yet — the
+ * caller renders an empty intensity list + 「+ 新增強度」 affordance.
+ */
+export async function listDistinctSubTags(db: Database): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT DISTINCT sub_tag FROM template
+      WHERE sub_tag IS NOT NULL AND sub_tag != ''
+      ORDER BY sub_tag ASC`
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
+/**
  * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
  * (name, program_id, sub_tag) triple becomes the Template's new identity.
  * Caller should ensure (name, program_id, sub_tag) is unique within the DB.
