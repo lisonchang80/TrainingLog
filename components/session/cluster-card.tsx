@@ -191,7 +191,7 @@ export function ClusterCard({
         >
           <View style={styles.clusterText}>
             <View style={styles.clusterNameRow}>
-              <Text style={styles.supersetTag}>[超]</Text>
+              <Text style={styles.supersetTag}>超</Text>
               <Text style={styles.clusterName} numberOfLines={1}>
                 {group.a.exercise.exercise_name}
                 <Text style={styles.clusterPlus}> + </Text>
@@ -597,13 +597,15 @@ const styles = StyleSheet.create({
   },
   clusterName: { fontSize: 15, fontWeight: '600', flex: 1 },
   clusterChip: { fontSize: 13 },
-  // [超] marker — text badge (per ADR-0019 Q8 amendment, 2026-05-17 overnight).
-  // 取代舊版 `○`/`✓` + 「超級組」 chip 兩件：濃縮為一個文字 marker 在動作名旁。
+  // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
+  // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
+  // (`#5856D6` iOS system indigo/purple, white text, 4px corners). 視覺更穩、
+  // 在動作名旁的閱讀節奏比 [...] 包文字更乾淨。
   supersetTag: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#0a7ea4',
-    backgroundColor: 'rgba(10, 126, 164, 0.12)',
+    color: '#fff',
+    backgroundColor: '#5856D6',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
