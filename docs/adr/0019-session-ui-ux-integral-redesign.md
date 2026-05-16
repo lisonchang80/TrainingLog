@@ -710,6 +710,23 @@ ADR-0014 sibling rename propagation 隨 🔀 一起 moot — 不再需要 in-ses
 
 **測試**：main baseline 663/663 → branch 10c 累積 765/765（+102 tests）。
 
+## 翻盤 ledger（greppable）
+
+Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's primary grep target. Add at top, newest first. Each row machine-greppable for `修訂 / 翻盤 / 砍除 / 廢案`.
+
+| 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
+|---|---|---|---|---|---|
+| 2026-05-16 ultra-late | Q11 ⚙️ menu 砍 🔀 | spec L45「重新加 🔀」 | 4 槽 cancel + 3 主項 + 🔃 reorder | user post-spec verbal grill | `18ea66d` (bad impl) + `4b89d63` (revert) |
+| 2026-05-16 ultra-late | [+ 動作] picker UX | initial: SwapExerciseSheet quick-list | router.push('/exercise-picker?mode=picker') 全頁 + consumePick | user post-impl preference | `4b89d63` |
+| 2026-05-16 ultra-late | 「換動作」flow | 砍 🔀 之 ADR-0014 sibling propagation 留尾 | moot — flow 改走 🗑️ 刪除 + [+ 動作] 動作庫勾選 | derivative of 🔀 砍除 | n/a (跟 4b89d63 同) |
+| 2026-05-16 | Q16 cluster atomic ✓ | scoped to slice 10d | pulled forward → slice 10c Phase 7 | spec L14 + visual coherence | n/a (留尾) |
+| 2026-05-16 | Q9 set.notes schema | spec L311「no migration」 | v018 ADD COLUMN required | Q9 right-swipe-备注 sheet 需要 notes 欄 | `4ff79e0` (v018) |
+| 2026-05-15 | Q15.5 容量公式 | planned_X × planned_Y | Σ working/non-warmup (is_logged=1) / Σ all non-warmup | grill Q15.5 schema-grounding | n/a (pre-impl) |
+
+### Slice 10c 落地紀錄（2026-05-16）
+
+Slice 10c Phase 1-6 + Phase 8（含 ADR amend + 本 ledger）落地，**Phase 7 留尾**。
+
 ### Out of scope for slice 10b（slice 10c-10g 接手）
 - ~~⚙️ menu 4 項 bottom sheets（slice 10c）~~ ✅ done in slice 10c Phase 4
 - ~~Set logger 5-gesture（slice 10c）~~ ✅ partially done（4/5 — long-press reorder 留尾）
