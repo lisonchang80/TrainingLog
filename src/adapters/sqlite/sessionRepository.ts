@@ -223,6 +223,32 @@ export async function swapSessionExercise(
 }
 
 /**
+ * Reorder session_exercise rows within one session (per ADR-0019 Q10).
+ * Caller passes the new desired sequence of session_exercise IDs; we
+ * assign ordering = (1, 2, 3, ...) in that order via batch UPDATE.
+ *
+ * Slice 10c Phase 6 commit 30. Within a transaction so partial failure
+ * rolls back cleanly. No constraint on `ordering` so intermediate
+ * duplicates are fine — final state has the correct sequence.
+ */
+export async function reorderSessionExercises(
+  db: Database,
+  args: { session_id: string; orderedIds: string[] }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    for (let i = 0; i < args.orderedIds.length; i++) {
+      await db.runAsync(
+        `UPDATE session_exercise SET ordering = ?
+          WHERE id = ? AND session_id = ?`,
+        i + 1,
+        args.orderedIds[i],
+        args.session_id
+      );
+    }
+  });
+}
+
+/**
  * Append one ad-hoc exercise to an in-progress session (per ADR-0019 Q15
  * bottom sticky bar [+ 動作]). Order goes to MAX(ordering)+1 within the
  * session. planned_sets defaults to 3 (typical user expectation when

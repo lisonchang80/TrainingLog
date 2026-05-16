@@ -34,6 +34,7 @@ import {
   endSession,
   getActiveSession,
   listSessionExercisesWithName,
+  reorderSessionExercises,
   swapSessionExercise,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
@@ -54,6 +55,7 @@ import {
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { SwapExerciseSheet } from '@/components/shared/swap-exercise-sheet';
+import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -170,6 +172,8 @@ export default function TodayScreen() {
   } | null>(null);
   /** [+ 動作] sticky-bar add-exercise sheet open flag. */
   const [addExerciseSheetOpen, setAddExerciseSheetOpen] = useState(false);
+  /** 🔃 reorder-exercises modal open flag. */
+  const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
    * computed once on refresh from listExerciseHistorySets (cross-session).
@@ -670,7 +674,14 @@ export default function TodayScreen() {
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: planRow.exercise_name,
-        options: ['取消', '📝 編輯備註', '⏱️ 休息秒數', '🔀 換動作', '🗑️ 刪除動作'],
+        options: [
+          '取消',
+          '📝 編輯備註',
+          '⏱️ 休息秒數',
+          '🔀 換動作',
+          '🗑️ 刪除動作',
+          '🔃 排序動作',
+        ],
         cancelButtonIndex: 0,
         destructiveButtonIndex: 4,
       },
@@ -704,6 +715,8 @@ export default function TodayScreen() {
             session_exercise_id: planRow.id,
             old_exercise_id: planRow.exercise_id,
           });
+        } else if (idx === 5) {
+          setReorderSheetOpen(true);
         } else if (idx === 4) {
           const setsForExercise = setsInSession.filter(
             (s) => s.exercise_id === planRow.exercise_id,
@@ -1139,6 +1152,7 @@ export default function TodayScreen() {
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
                       onSettingsPress={() => onSettingsPress(p)}
+                      onLongPressHeader={() => setReorderSheetOpen(true)}
                     />
                   );
                 })}
@@ -1247,6 +1261,31 @@ export default function TodayScreen() {
           setKeypadTarget(null);
         }}
         onCancel={() => setKeypadTarget(null)}
+      />
+      <ReorderExercisesSheet
+        visible={reorderSheetOpen}
+        initialItems={plan.map((p) => ({
+          id: p.id,
+          name: p.exercise_name,
+        }))}
+        onConfirm={async (orderedIds) => {
+          setReorderSheetOpen(false);
+          const session_id = getSessionId(sessionState);
+          if (!session_id) return;
+          try {
+            await reorderSessionExercises(db, {
+              session_id,
+              orderedIds,
+            });
+            await refresh();
+          } catch (e) {
+            Alert.alert(
+              '排序失敗',
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        }}
+        onCancel={() => setReorderSheetOpen(false)}
       />
       <SwapExerciseSheet
         visible={addExerciseSheetOpen}
@@ -1406,6 +1445,7 @@ function ExerciseCard({
   prSnapshot,
   onOpenHistory,
   onSettingsPress,
+  onLongPressHeader,
 }: {
   planRow: SessionExerciseRowWithName;
   done: number;
@@ -1432,6 +1472,7 @@ function ExerciseCard({
   prSnapshot: PRSnapshot | null;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
+  onLongPressHeader: () => void;
 }): React.ReactElement {
   // Map session set_kind → kind so the shared computeSetLabels (which uses
   // the template-side `kind` field name) works without a session-specific
@@ -1459,6 +1500,8 @@ function ExerciseCard({
         <Pressable
           accessibilityRole="button"
           onPress={onToggleExpand}
+          onLongPress={onLongPressHeader}
+          delayLongPress={400}
           style={({ pressed }) => [
             styles.exerciseCardHeaderMain,
             pressed && styles.btnPressed,
