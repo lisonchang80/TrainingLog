@@ -202,7 +202,7 @@ export function ClusterCard({
               </Text>
             ) : null}
           </View>
-          <Text style={styles.clusterChevron}>{isExpanded ? '▾' : '▸'}</Text>
+          <Text style={styles.clusterChevron}>{isExpanded ? '▼' : '▶'}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -219,11 +219,14 @@ export function ClusterCard({
 
       {isExpanded ? (
         <View style={styles.clusterBody}>
-          {/* Side labels row */}
+          {/* Side labels row — columns align with cycle row:
+              [sharedLabelBtn 28] [cycleSide A] [divider 1] [cycleSide B] [completeBtn 28]. */}
           <View style={styles.sideLabelRow}>
+            <View style={styles.sideLabelLead} />
             <Text style={styles.sideLabel} numberOfLines={1}>
               A: {group.a.exercise.exercise_name}
             </Text>
+            <View style={styles.sideLabelDivider} />
             <Text style={styles.sideLabel} numberOfLines={1}>
               B: {group.b.exercise.exercise_name}
             </Text>
@@ -481,7 +484,7 @@ export function ClusterCard({
               ]}
             >
               <Text style={styles.clusterFooterBtnTextSecondary}>
-                📖 動作歷史
+                動作歷史
               </Text>
             </Pressable>
           </View>
@@ -613,14 +616,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 4,
     gap: 8,
+    alignItems: 'center',
   },
   sideLabel: {
     flex: 1,
     fontSize: 12,
     fontWeight: '600',
     opacity: 0.6,
+    textAlign: 'center',
   },
-  sideLabelGap: { width: 36 },
+  // Leading spacer matching shared `#` btn column (point 7 alignment).
+  sideLabelLead: { width: 28 },
+  // Divider spacer matching cycleDivider column.
+  sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
+  // Trailing spacer matching completeBtn column (28) + row gap (8).
+  sideLabelGap: { width: 28 },
   clusterEmpty: {
     fontSize: 13,
     opacity: 0.55,
