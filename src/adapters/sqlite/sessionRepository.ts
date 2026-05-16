@@ -1,5 +1,6 @@
 import type { Database } from '../../db/types';
 import type { Session } from '../../domain/session/types';
+import { getReusableSupersetWithExercises } from './supersetRepository';
 
 export async function createSession(
   db: Database,
@@ -246,6 +247,87 @@ export async function appendSessionExercise(
     ordering,
     args.planned_sets ?? 3
   );
+}
+
+/**
+ * Append a Reusable Superset (RS) into an in-progress session as a cluster
+ * pair — 2 session_exercise rows linked via `parent_id` chain, both sharing
+ * `reusable_superset_id`. Mirrors the template editor's RS-explode pattern.
+ *
+ * Layout produced:
+ *   - A row (cluster parent): ordering = MAX+1, parent_id = null,
+ *     reusable_superset_id = rs.id
+ *   - B row (cluster follower): ordering = MAX+2, parent_id = A.id,
+ *     reusable_superset_id = rs.id
+ *
+ * Reads RS via `getReusableSupersetWithExercises(db, rs_id)` — throws if
+ * not found or doesn't have exactly 2 exercises (data-quality bug).
+ *
+ * No transaction here — caller can wrap multiple RS appends in one if
+ * atomicity matters. For [+動作] picker single-shot pick this is fine.
+ *
+ * Slice 10c — fix「超級組出不來」(2026-05-17 ultra-late) — Today consumePick
+ * handler was processing only `exerciseIds`, silently dropping
+ * `reusableSupersetIds`. This func is the missing link.
+ */
+export async function appendReusableSupersetToSession(
+  db: Database,
+  args: {
+    session_id: string;
+    reusable_superset_id: string;
+    uuid: () => string;
+  }
+): Promise<{ a_id: string; b_id: string }> {
+  const rs = await getReusableSupersetWithExercises(db, args.reusable_superset_id);
+  if (!rs) {
+    throw new Error(
+      `appendReusableSupersetToSession: RS "${args.reusable_superset_id}" not found`
+    );
+  }
+  if (rs.exercises.length !== 2) {
+    throw new Error(
+      `appendReusableSupersetToSession: RS "${args.reusable_superset_id}" has ${rs.exercises.length} exercises, expected 2`
+    );
+  }
+
+  const row = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM session_exercise
+      WHERE session_id = ?`,
+    args.session_id
+  );
+  const baseOrdering = row?.max_ordering ?? 0;
+  const a_id = args.uuid();
+  const b_id = args.uuid();
+
+  // A side — cluster parent.
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, 3, NULL, NULL, NULL, 0, NULL, ?, NULL)`,
+    a_id,
+    args.session_id,
+    rs.exercises[0].id,
+    baseOrdering + 1,
+    args.reusable_superset_id
+  );
+  // B side — follower, parent_id = A.
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, 3, NULL, NULL, NULL, 0, ?, ?, NULL)`,
+    b_id,
+    args.session_id,
+    rs.exercises[1].id,
+    baseOrdering + 2,
+    a_id,
+    args.reusable_superset_id
+  );
+
+  return { a_id, b_id };
 }
 
 /**

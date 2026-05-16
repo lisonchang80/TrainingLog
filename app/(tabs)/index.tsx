@@ -39,6 +39,7 @@ import {
   linkSessionToTemplate,
   listSessionExercisesWithName,
   overwriteTemplateFromSession,
+  appendReusableSupersetToSession,
   reorderSessionExercises,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
@@ -273,20 +274,64 @@ export default function TodayScreen() {
     useCallback(() => {
       const payload = consumePick();
       refresh();
-      if (payload && payload.exerciseIds.length > 0) {
+      if (
+        payload &&
+        (payload.exerciseIds.length > 0 ||
+          payload.reusableSupersetIds.length > 0)
+      ) {
         void (async () => {
           const active = await getActiveSession(db);
           if (!active) return;
           try {
+            // Reusable supersets FIRST (per pickerBridge convention) — each
+            // explodes into a cluster pair (A + B session_exercise rows
+            // linked via parent_id + reusable_superset_id).
+            for (const rs_id of payload.reusableSupersetIds) {
+              const { a_id, b_id } = await appendReusableSupersetToSession(
+                db,
+                {
+                  session_id: active.id,
+                  reusable_superset_id: rs_id,
+                  uuid: randomUUID,
+                },
+              );
+              // Pre-fill each side from its own history (independent
+              // per-exercise lookup; cluster pairing on prefill rows is
+              // intentionally null per repo func contract).
+              const exA = (
+                await db.getFirstAsync<{ exercise_id: string }>(
+                  `SELECT exercise_id FROM session_exercise WHERE id = ?`,
+                  a_id,
+                )
+              )?.exercise_id;
+              const exB = (
+                await db.getFirstAsync<{ exercise_id: string }>(
+                  `SELECT exercise_id FROM session_exercise WHERE id = ?`,
+                  b_id,
+                )
+              )?.exercise_id;
+              if (exA) {
+                await prefillSessionExerciseFromLastSession(db, {
+                  session_id: active.id,
+                  exercise_id: exA,
+                  uuid: randomUUID,
+                });
+              }
+              if (exB) {
+                await prefillSessionExerciseFromLastSession(db, {
+                  session_id: active.id,
+                  exercise_id: exB,
+                  uuid: randomUUID,
+                });
+              }
+            }
+            // Solo exercises after.
             for (const exercise_id of payload.exerciseIds) {
               await appendSessionExercise(db, {
                 id: randomUUID(),
                 session_id: active.id,
                 exercise_id,
               });
-              // Pre-fill from last session's set list (per user
-              // 「如果有以前的記錄，會載入最後一次的紀錄」). No-op silently
-              // when no prior history exists — user can still add manually.
               await prefillSessionExerciseFromLastSession(db, {
                 session_id: active.id,
                 exercise_id,
