@@ -76,6 +76,7 @@ import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { BodyDataSheet } from '@/components/session/body-data-sheet';
 import { computeLoggedExerciseCount } from '@/src/domain/session/sessionStats';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import { ClusterCard } from '@/components/session/cluster-card';
@@ -155,7 +156,9 @@ export default function TodayScreen() {
   const [bwSnapshotKg, setBwSnapshotKg] = useState<number | null>(null);
   const [prePromptVisible, setPrePromptVisible] = useState(false);
   const [preBwInput, setPreBwInput] = useState('');
-  const [inlinePanelOpen, setInlinePanelOpen] = useState(false);
+  // Body data editor sheet (slice 10c overnight #4 第 3 點) — replaces the
+  // previous inline panel. Opened from header ⋯ menu「Body data」.
+  const [bodySheetVisible, setBodySheetVisible] = useState(false);
   const [inlineBwInput, setInlineBwInput] = useState('');
   const [inlinePbfInput, setInlinePbfInput] = useState('');
   const [inlineSmmInput, setInlineSmmInput] = useState('');
@@ -415,7 +418,7 @@ export default function TodayScreen() {
       setInlineBwInput('');
       setInlinePbfInput('');
       setInlineSmmInput('');
-      setInlinePanelOpen(false);
+      setBodySheetVisible(false);
       const bms = await listBodyMetrics(db);
       setBodyMetrics(bms);
     } catch (e) {
@@ -1091,19 +1094,24 @@ export default function TodayScreen() {
   };
 
   /**
-   * Header [⋯] menu (ADR-0019 Q15). Currently 1 item: 「放棄訓練」 with
-   * confirm Alert + CASCADE delete. More items可以陸續加（如「結束並丟棄
-   * 此次訓練資料」用法）。
+   * Header [⋯] menu (ADR-0019 Q15). Items:
+   *   1. Body data — open body-data editor sheet (slice 10c overnight #4 第 3 點)
+   *   2. 🚫 放棄訓練 — destructive, CASCADE delete the active session
+   * Cancel is index 0; more items可以陸續加。
    */
   const onHeaderMenuPress = () => {
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        options: ['取消', '🚫 放棄訓練'],
+        options: ['取消', 'Body data', '🚫 放棄訓練'],
         cancelButtonIndex: 0,
-        destructiveButtonIndex: 1,
+        destructiveButtonIndex: 2,
       },
       (idx) => {
-        if (idx !== 1) return;
+        if (idx === 1) {
+          setBodySheetVisible(true);
+          return;
+        }
+        if (idx !== 2) return;
         Alert.alert(
           '放棄此次訓練？',
           '此操作不可復原 — 將刪除整個 session、所有動作及記錄。',
@@ -1528,78 +1536,11 @@ export default function TodayScreen() {
             />
           ) : null}
 
-          {/* Inline body data panel — quick add during session */}
-          <View style={styles.inlineBodyHeader}>
-            <Text style={styles.label}>Body data</Text>
-            <Pressable
-              onPress={() => setInlinePanelOpen((v) => !v)}
-              style={({ pressed }) => [styles.linkBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.linkBtnText}>
-                {inlinePanelOpen ? '收合' : '＋ 新增記錄'}
-              </Text>
-            </Pressable>
-          </View>
-          {bwSnapshotKg != null ? (
-            <View style={styles.snapshotBadge}>
-              <Text style={styles.snapshotBadgeText}>
-                🔒 BW snapshot · {formatWeight(bwSnapshotKg, unit)}
-              </Text>
-            </View>
-          ) : null}
-          {inlinePanelOpen && (
-            <View style={styles.inlineBodyBox}>
-              <View style={styles.inlineBodyRow}>
-                <View style={styles.inlineBodyField}>
-                  <Text style={styles.inlineFieldLabel}>體重 ({unit})</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="decimal-pad"
-                    value={inlineBwInput}
-                    onChangeText={setInlineBwInput}
-                    placeholder="—"
-                    placeholderTextColor="#999"
-                  />
-                </View>
-                <View style={styles.inlineBodyField}>
-                  <Text style={styles.inlineFieldLabel}>PBF (%)</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="decimal-pad"
-                    value={inlinePbfInput}
-                    onChangeText={setInlinePbfInput}
-                    placeholder="—"
-                    placeholderTextColor="#999"
-                  />
-                </View>
-                <View style={styles.inlineBodyField}>
-                  <Text style={styles.inlineFieldLabel}>SMM ({unit})</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="decimal-pad"
-                    value={inlineSmmInput}
-                    onChangeText={setInlineSmmInput}
-                    placeholder="—"
-                    placeholderTextColor="#999"
-                  />
-                </View>
-              </View>
-              <Pressable
-                onPress={onSaveInlineBodyData}
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.saveBtn,
-                  busy && styles.btnDisabled,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.saveBtnText}>
-                  {busy ? '儲存中…' : '儲存 body data'}
-                </Text>
-              </Pressable>
-              <Text style={styles.inlineHint}>
-                此 Session 的 bw_snapshot 不會被改寫。
-              </Text>
-            </View>
-          )}
+          {/*
+            Body data inline panel moved to header ⋯ menu → BodyDataSheet
+            (slice 10c overnight #4 第 3 點). Snapshot badge lives inside
+            the sheet now — no more inline footprint on the Today screen.
+          */}
 
           {/*
             Empty-state placeholder — session 已開但 plan.length === 0
@@ -2049,6 +1990,20 @@ export default function TodayScreen() {
         onSkip={() => setRestTimerTarget(null)}
         onCancel={() => setRestTimerTarget(null)}
       />
+      <BodyDataSheet
+        visible={bodySheetVisible}
+        unit={unit}
+        bwSnapshotKg={bwSnapshotKg}
+        bwInput={inlineBwInput}
+        pbfInput={inlinePbfInput}
+        smmInput={inlineSmmInput}
+        onBwInputChange={setInlineBwInput}
+        onPbfInputChange={setInlinePbfInput}
+        onSmmInputChange={setInlineSmmInput}
+        onSave={onSaveInlineBodyData}
+        onClose={() => setBodySheetVisible(false)}
+        busy={busy}
+      />
     </SafeAreaView>
   );
 }
@@ -2461,14 +2416,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(127,127,127,0.12)',
     fontSize: 18,
   },
-  saveBtn: {
-    marginTop: 12,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-  },
-  saveBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
   startBtn: {
     paddingVertical: 18,
     borderRadius: 12,
@@ -2733,33 +2680,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryBtnText: { fontSize: 14, fontWeight: '600' },
-  snapshotBadge: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,126,164,0.15)',
-    marginVertical: 4,
-  },
-  snapshotBadgeText: { fontSize: 12, fontWeight: '600', color: '#0a7ea4' },
-  inlineBodyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-  },
   linkBtn: { paddingVertical: 4, paddingHorizontal: 8 },
   linkBtnText: { fontSize: 13, color: '#0a7ea4', fontWeight: '600' },
-  inlineBodyBox: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    gap: 8,
-  },
-  inlineBodyRow: { flexDirection: 'row', gap: 8 },
-  inlineBodyField: { flex: 1, gap: 4 },
-  inlineFieldLabel: { fontSize: 11, opacity: 0.7 },
-  inlineHint: { fontSize: 11, opacity: 0.6 },
   exerciseHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
