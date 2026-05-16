@@ -156,6 +156,47 @@ export async function listSessionExercises(
   );
 }
 
+/**
+ * Delete one session_exercise + all of its sets (per ADR-0019 ⚙️ menu's
+ * 🗑️ option). Manual cascade because the v003 FK between set and
+ * session_exercise is via (exercise_id, session_id) not a real CASCADE.
+ *
+ * Slice 10c Phase 4 commit 17. rest_sec / set_kind / parent_set_id state
+ * on the orphaned sets is gone with them — no need to clean up elsewhere.
+ */
+export async function deleteSessionExerciseAndSets(
+  db: Database,
+  args: { session_id: string; exercise_id: string; session_exercise_id: string }
+): Promise<void> {
+  await db.runAsync(
+    `DELETE FROM "set" WHERE session_id = ? AND exercise_id = ?`,
+    args.session_id,
+    args.exercise_id
+  );
+  await db.runAsync(
+    `DELETE FROM session_exercise WHERE id = ?`,
+    args.session_exercise_id
+  );
+}
+
+/**
+ * Update one session_exercise's rest_sec (per ADR-0019 ⚙️ menu's ⏱️
+ * option). NULL means "use default" (60s) at the UI layer.
+ *
+ * Slice 10c Phase 4 commit 18.
+ */
+export async function updateSessionExerciseRestSec(
+  db: Database,
+  session_exercise_id: string,
+  rest_sec: number | null
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session_exercise SET rest_sec = ? WHERE id = ?`,
+    rest_sec,
+    session_exercise_id
+  );
+}
+
 export interface SessionExerciseRowWithName extends SessionExerciseRow {
   exercise_name: string;
   /**

@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -23,9 +24,11 @@ import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   createSession,
+  deleteSessionExerciseAndSets,
   endSession,
   getActiveSession,
   listSessionExercisesWithName,
+  updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
@@ -135,6 +138,12 @@ export default function TodayScreen() {
     set_id: string;
     field: 'reps' | 'weight';
     current: number;
+  } | null>(null);
+  /** Rest-sec keypad target — reuses NumericKeypad with a different field. */
+  const [restSecTarget, setRestSecTarget] = useState<{
+    session_exercise_id: string;
+    current: number;
+    exercise_name: string;
   } | null>(null);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
@@ -621,6 +630,90 @@ export default function TodayScreen() {
     }
   };
 
+  /**
+   * Open the ⚙️ ActionSheetIOS menu for one exercise card. Per ADR-0019 Q11
+   * the menu has 4 paths:
+   *   - 📝 編輯備註 → opens an exercise-level note editor (Exercise.notes,
+   *     v010+) — placeholder Alert this commit, separate sheet wires next
+   *   - ⏱️ 休息秒數 → opens NumericKeypad pre-filled with current rest_sec
+   *   - 🔀 換動作 → placeholder Alert this commit (needs library picker)
+   *   - 🗑️ 刪除動作 → confirm Alert + cascade-delete session_exercise + sets
+   *
+   * Cancel slot is index 0 + cancelButtonIndex per iOS convention.
+   */
+  const onSettingsPress = (planRow: SessionExerciseRowWithName) => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: planRow.exercise_name,
+        options: ['取消', '📝 編輯備註', '⏱️ 休息秒數', '🔀 換動作', '🗑️ 刪除動作'],
+        cancelButtonIndex: 0,
+        destructiveButtonIndex: 4,
+      },
+      (idx) => {
+        if (idx === 0) return;
+        if (idx === 1) {
+          Alert.alert(
+            '📝 編輯備註',
+            'Coming in Phase 4 commit 18 — 編輯該動作的備註 (Exercise.notes，全域)。',
+          );
+        } else if (idx === 2) {
+          // Open keypad pre-filled with current rest_sec (default 60).
+          setRestSecTarget({
+            session_exercise_id: planRow.id,
+            current: planRow.rest_sec ?? 60,
+            exercise_name: planRow.exercise_name,
+          });
+        } else if (idx === 3) {
+          Alert.alert(
+            '🔀 換動作',
+            'Coming in Phase 4 commit 20 — 動作庫勾選 + simple replace session_exercise.exercise_id。',
+          );
+        } else if (idx === 4) {
+          const setsForExercise = setsInSession.filter(
+            (s) => s.exercise_id === planRow.exercise_id,
+          );
+          const loggedCount = setsForExercise.filter(
+            (s) => s.is_logged === 1,
+          ).length;
+          const warningSuffix =
+            loggedCount > 0
+              ? `\n\n⚠️ 將連同此動作的 ${setsForExercise.length} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+              : setsForExercise.length > 0
+                ? `\n\n將連同此動作的 ${setsForExercise.length} 組未完成記錄一起刪除。`
+                : '';
+          Alert.alert(
+            '刪除動作？',
+            `要從這次訓練中移除「${planRow.exercise_name}」？${warningSuffix}`,
+            [
+              { text: '取消', style: 'cancel' },
+              {
+                text: '刪除',
+                style: 'destructive',
+                onPress: async () => {
+                  const session_id = getSessionId(sessionState);
+                  if (!session_id) return;
+                  try {
+                    await deleteSessionExerciseAndSets(db, {
+                      session_id,
+                      exercise_id: planRow.exercise_id,
+                      session_exercise_id: planRow.id,
+                    });
+                    await refresh();
+                  } catch (e) {
+                    Alert.alert(
+                      'Delete failed',
+                      e instanceof Error ? e.message : String(e),
+                    );
+                  }
+                },
+              },
+            ],
+          );
+        }
+      },
+    );
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
@@ -910,12 +1003,7 @@ export default function TodayScreen() {
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
-                      onSettingsPress={() =>
-                        Alert.alert(
-                          '⚙️ menu',
-                          'Coming in slice 10c — 編輯備註 / 休息秒數 / 刪除動作（換動作 = 刪 + ⊕ 動作庫勾選）',
-                        )
-                      }
+                      onSettingsPress={() => onSettingsPress(p)}
                     />
                   );
                 })}
@@ -1004,6 +1092,31 @@ export default function TodayScreen() {
           setKeypadTarget(null);
         }}
         onCancel={() => setKeypadTarget(null)}
+      />
+      <NumericKeypad
+        visible={restSecTarget !== null}
+        initialValue={restSecTarget?.current ?? 60}
+        label={`⏱️ 休息秒數 · ${restSecTarget?.exercise_name ?? ''}`}
+        mode="integer"
+        onConfirm={async (value) => {
+          if (restSecTarget) {
+            try {
+              await updateSessionExerciseRestSec(
+                db,
+                restSecTarget.session_exercise_id,
+                value,
+              );
+              await refresh();
+            } catch (e) {
+              Alert.alert(
+                'Save failed',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }
+          setRestSecTarget(null);
+        }}
+        onCancel={() => setRestSecTarget(null)}
       />
     </SafeAreaView>
   );
