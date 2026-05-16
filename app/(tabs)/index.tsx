@@ -41,6 +41,7 @@ import {
   SetRowContent,
   type SetRowItem,
 } from '@/components/shared/set-row-content';
+import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
@@ -455,6 +456,112 @@ export default function TodayScreen() {
     }
   };
 
+  /**
+   * Hard-delete a set (左滑 delete). Caller-facing confirmation Alert is
+   * presented at the gesture handler in the card. No undo — re-recording
+   * is one tap.
+   */
+  const onDeleteSet = async (set_id: string) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await deleteSet(db, set_id);
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /**
+   * Right-swipe-add: insert one new set right after `source_set_id`, copying
+   * the source set's reps/weight. Used when the user finishes a set and
+   * wants another one just like it. Ordering uses MAX+1 (no reshuffle) —
+   * the per-exercise filter sorts by ordering ASC so the new row shows up
+   * after all current rows.
+   *
+   * Also runs PR detection (same as `onAddSet`) since this IS adding a
+   * new set, just with a different default source.
+   */
+  const onAddSetAfter = async (
+    exercise_id: string,
+    source_set_id: string,
+  ) => {
+    const session_id = getSessionId(sessionState);
+    if (!canRecordSet(sessionState) || !session_id) return;
+    const source = setsInSession.find((s) => s.id === source_set_id);
+    const weight_kg = source?.weight_kg ?? 0;
+    const repsNum = source?.reps ?? 0;
+    setBusy(true);
+    try {
+      const result = await recordSetInSession(db, {
+        session_id,
+        input: { exercise_id, weight_kg, reps: repsNum },
+        uuid: randomUUID,
+      });
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+
+      const exerciseObj = exercises.find((e) => e.id === exercise_id) ?? null;
+      if (exerciseObj) {
+        const priors = await listPriorSetsForExercise(
+          db,
+          exercise_id,
+          result.created_at,
+        );
+        const delta = detectPRBreaks({
+          new_set: {
+            weight_kg,
+            reps: repsNum,
+            load_type: exerciseObj.load_type,
+            bw_snapshot_kg: bwSnapshotKg,
+          },
+          prior_sets: priors.map((p) => ({
+            weight_kg: p.weight_kg,
+            reps: p.reps,
+            load_type: exerciseObj.load_type,
+            bw_snapshot_kg: p.bw_snapshot_kg,
+          })),
+        });
+        if (
+          delta.breaks.length > 0 ||
+          delta.is_all_time_weight_pr ||
+          delta.is_all_time_volume_pr
+        ) {
+          setLastPRDelta(delta);
+          setLastPRExerciseName(exerciseObj.name);
+        }
+      }
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Flip the v015 `is_logged` flag on a set (tap-✓). Source of truth for
+   * Q4's segmented progress bar + the header `done/planned` count.
+   * No alert on failure — toggle is idempotent so retry-on-next-render is
+   * fine; we only catch the failure to avoid a hard crash.
+   */
+  const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await updateSetFields(db, set_id, {
+        is_logged: currentlyLogged ? 0 : 1,
+      });
+      setSetsInSession((curr) =>
+        curr.map((s) =>
+          s.id === set_id ? { ...s, is_logged: currentlyLogged ? 0 : 1 } : s,
+        ),
+      );
+    } catch (e) {
+      console.warn('[toggle is_logged] failed:', e);
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
@@ -704,7 +811,12 @@ export default function TodayScreen() {
                   const setsForExercise = setsInSession.filter(
                     (s) => s.exercise_id === p.exercise_id
                   );
-                  const done = setsForExercise.length;
+                  // Per ADR-0019 Q4: "done" reflects completed sets
+                  // (is_logged=1), not just recorded ones. Warmup
+                  // exclusion is handled in Phase 3's progress bar.
+                  const done = setsForExercise.filter(
+                    (s) => s.is_logged === 1
+                  ).length;
                   const complete = done >= p.planned_sets;
                   const isExpanded = expandedExerciseId === p.id;
                   return (
@@ -724,6 +836,11 @@ export default function TodayScreen() {
                       onCycleSetKind={(set_id) =>
                         onCycleSetKind(p.exercise_id, set_id)
                       }
+                      onDeleteSet={onDeleteSet}
+                      onAddSetAfter={(set_id) =>
+                        onAddSetAfter(p.exercise_id, set_id)
+                      }
+                      onToggleLogged={onToggleLogged}
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -859,6 +976,9 @@ function ExerciseCard({
   onAddSet,
   onUpdateSet,
   onCycleSetKind,
+  onDeleteSet,
+  onAddSetAfter,
+  onToggleLogged,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -875,6 +995,9 @@ function ExerciseCard({
     patch: { reps?: number; weight?: number },
   ) => void;
   onCycleSetKind: (set_id: string) => void;
+  onDeleteSet: (set_id: string) => void;
+  onAddSetAfter: (set_id: string) => void;
+  onToggleLogged: (set_id: string, currentlyLogged: boolean) => void;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
@@ -941,25 +1064,88 @@ function ExerciseCard({
               };
               const isDropsetFollower =
                 s.set_kind === 'dropset' && s.parent_set_id !== null;
+              const logged = s.is_logged === 1;
+              // Followers inherit their head's gesture surface (ADR-0016 §C);
+              // disable swipe on the follower itself.
               return (
-                <SetRowContent
+                <SwipeableSetRow
                   key={s.id}
-                  set={row}
-                  setLabel={setLabels[i]}
-                  isDropsetFollower={isDropsetFollower}
-                  isClusterLast={false}
-                  minusDisabled={true}
-                  hideNoteIndicator={true}
-                  onUpdateSet={(set_id, patch) => onUpdateSet(set_id, patch)}
-                  onShowSetNote={() => notImplementedAlert('📝 set 備註')}
-                  onRemoveDropsetRow={() =>
-                    notImplementedAlert('− 移除 dropset 一列')
-                  }
-                  onAddDropsetRow={() =>
-                    notImplementedAlert('+ 新增 dropset 一列')
-                  }
-                  onCycleLabel={(target) => onCycleSetKind(target.id)}
-                />
+                  enabled={!isDropsetFollower}
+                  swipeLeftActions={[
+                    {
+                      key: 'delete',
+                      label: '刪除',
+                      color: '#dc3545',
+                      onPress: () =>
+                        Alert.alert(
+                          '刪除這組？',
+                          undefined,
+                          [
+                            { text: '取消', style: 'cancel' },
+                            {
+                              text: '刪除',
+                              style: 'destructive',
+                              onPress: () => onDeleteSet(s.id),
+                            },
+                          ],
+                        ),
+                    },
+                  ]}
+                  swipeRightActions={[
+                    {
+                      key: 'add',
+                      label: '+1',
+                      color: '#28a745',
+                      onPress: () => onAddSetAfter(s.id),
+                    },
+                  ]}
+                >
+                  <View style={styles.exerciseCardSetRowWrapper}>
+                    <Pressable
+                      onPress={() => onToggleLogged(s.id, logged)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={logged ? '取消完成' : '標為完成'}
+                      style={({ pressed }) => [
+                        styles.completeBtn,
+                        logged && styles.completeBtnDone,
+                        pressed && styles.btnPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.completeBtnText,
+                          logged && styles.completeBtnTextDone,
+                        ]}
+                      >
+                        {logged ? '✓' : '○'}
+                      </Text>
+                    </Pressable>
+                    <View style={styles.exerciseCardSetRowContent}>
+                      <SetRowContent
+                        set={row}
+                        setLabel={setLabels[i]}
+                        isDropsetFollower={isDropsetFollower}
+                        isClusterLast={false}
+                        minusDisabled={true}
+                        hideNoteIndicator={true}
+                        onUpdateSet={(set_id, patch) =>
+                          onUpdateSet(set_id, patch)
+                        }
+                        onShowSetNote={() =>
+                          notImplementedAlert('📝 set 備註')
+                        }
+                        onRemoveDropsetRow={() =>
+                          notImplementedAlert('− 移除 dropset 一列')
+                        }
+                        onAddDropsetRow={() =>
+                          notImplementedAlert('+ 新增 dropset 一列')
+                        }
+                        onCycleLabel={(target) => onCycleSetKind(target.id)}
+                      />
+                    </View>
+                  </View>
+                </SwipeableSetRow>
               );
             })
           )}
@@ -1099,6 +1285,34 @@ const styles = StyleSheet.create({
     opacity: 0.55,
     fontStyle: 'italic',
     paddingVertical: 8,
+  },
+  exerciseCardSetRowWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  exerciseCardSetRowContent: {
+    flex: 1,
+  },
+  completeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(127,127,127,0.18)',
+  },
+  completeBtnDone: {
+    backgroundColor: '#28a745',
+  },
+  completeBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+  completeBtnTextDone: {
+    color: 'white',
   },
   exerciseCardFooter: {
     flexDirection: 'row',
