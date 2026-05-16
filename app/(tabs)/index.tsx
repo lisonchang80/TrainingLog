@@ -473,49 +473,16 @@ export default function TodayScreen() {
 
     setBusy(true);
     try {
-      const result = await recordSetInSession(db, {
+      await recordSetInSession(db, {
         session_id,
         input: { exercise_id, weight_kg, reps: repsNum },
         uuid: randomUUID,
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
-
-      // PR Engine: fetch prior sets for this exercise (strictly before the
-      // just-inserted set), then detect bucket-level + cross-bucket PR breaks.
-      const exerciseObj = exercises.find((e) => e.id === exercise_id) ?? null;
-      if (exerciseObj) {
-        const priors = await listPriorSetsForExercise(
-          db,
-          exercise_id,
-          result.created_at
-        );
-        const delta = detectPRBreaks({
-          new_set: {
-            weight_kg,
-            reps: repsNum,
-            load_type: exerciseObj.load_type,
-            bw_snapshot_kg: bwSnapshotKg,
-          },
-          prior_sets: priors.map((p) => ({
-            weight_kg: p.weight_kg,
-            reps: p.reps,
-            load_type: exerciseObj.load_type,
-            bw_snapshot_kg: p.bw_snapshot_kg,
-          })),
-        });
-        if (
-          delta.breaks.length > 0 ||
-          delta.is_all_time_weight_pr ||
-          delta.is_all_time_volume_pr
-        ) {
-          setLastPRDelta(delta);
-          setLastPRExerciseName(exerciseObj.name);
-        } else {
-          setLastPRDelta(null);
-          setLastPRExerciseName('');
-        }
-      }
+      // NOTE: PR detection moved to onToggleLogged — new sets start unlogged,
+      // so the PR ceremony should fire only when user marks the set complete.
+      // Per user 「還沒打勾就跳出ＰＲ！」 (smoke 2026-05-17 ultra-late).
     } catch (e) {
       Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     } finally {
@@ -661,57 +628,24 @@ export default function TodayScreen() {
    * new set, just with a different default source.
    */
   const onAddSetAfter = async (
-    exercise_id: string,
+    _exercise_id: string,
     source_set_id: string,
   ) => {
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
-    const source = setsInSession.find((s) => s.id === source_set_id);
-    const weight_kg = source?.weight_kg ?? 0;
-    const repsNum = source?.reps ?? 0;
     setBusy(true);
     try {
       // Use insertSessionSetAfter so the new row lands DIRECTLY below the
       // swiped row (not at end of session). Repo func handles the ordering
       // shift + mirrors source's set_kind / weight / reps automatically.
-      const result = await insertSessionSetAfter(db, {
+      await insertSessionSetAfter(db, {
         session_id,
         source_set_id,
         uuid: randomUUID,
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
-
-      const exerciseObj = exercises.find((e) => e.id === exercise_id) ?? null;
-      if (exerciseObj) {
-        const priors = await listPriorSetsForExercise(
-          db,
-          exercise_id,
-          result.created_at,
-        );
-        const delta = detectPRBreaks({
-          new_set: {
-            weight_kg,
-            reps: repsNum,
-            load_type: exerciseObj.load_type,
-            bw_snapshot_kg: bwSnapshotKg,
-          },
-          prior_sets: priors.map((p) => ({
-            weight_kg: p.weight_kg,
-            reps: p.reps,
-            load_type: exerciseObj.load_type,
-            bw_snapshot_kg: p.bw_snapshot_kg,
-          })),
-        });
-        if (
-          delta.breaks.length > 0 ||
-          delta.is_all_time_weight_pr ||
-          delta.is_all_time_volume_pr
-        ) {
-          setLastPRDelta(delta);
-          setLastPRExerciseName(exerciseObj.name);
-        }
-      }
+      // PR detection moved to onToggleLogged — new rows start unlogged.
     } catch (e) {
       Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     } finally {
@@ -749,6 +683,53 @@ export default function TodayScreen() {
     } catch (e) {
       console.warn('[toggle is_logged] failed:', e);
       return;
+    }
+
+    // PR detection runs only when 0 → 1 transition (user actually logged it).
+    // Moved here from onAddSet/onAddSetAfter (smoke 2026-05-17 ultra-late —
+    // user 「還沒打勾就跳出ＰＲ！」). Setting to 0 cancels any prior PR display
+    // for the same exercise to avoid stale state.
+    if (nextLogged === 1) {
+      const justLogged = setsInSession.find((s) => s.id === set_id);
+      if (justLogged) {
+        const exerciseObj =
+          exercises.find((e) => e.id === justLogged.exercise_id) ?? null;
+        if (exerciseObj) {
+          try {
+            const priors = await listPriorSetsForExercise(
+              db,
+              justLogged.exercise_id,
+              justLogged.created_at,
+            );
+            const delta = detectPRBreaks({
+              new_set: {
+                weight_kg: justLogged.weight_kg ?? 0,
+                reps: justLogged.reps ?? 0,
+                load_type: exerciseObj.load_type,
+                bw_snapshot_kg: bwSnapshotKg,
+              },
+              prior_sets: priors.map((p) => ({
+                weight_kg: p.weight_kg,
+                reps: p.reps,
+                load_type: exerciseObj.load_type,
+                bw_snapshot_kg: p.bw_snapshot_kg,
+              })),
+            });
+            if (
+              delta.breaks.length > 0 ||
+              delta.is_all_time_weight_pr ||
+              delta.is_all_time_volume_pr
+            ) {
+              setLastPRDelta(delta);
+              setLastPRExerciseName(exerciseObj.name);
+            }
+          } catch (e) {
+            // PR detection failure is non-blocking — the toggle already
+            // committed; just log and move on.
+            console.warn('[PR detect on toggle] failed:', e);
+          }
+        }
+      }
     }
 
     if (nextLogged === 1 && autoPopupTimer) {
