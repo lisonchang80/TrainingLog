@@ -1,5 +1,6 @@
 import {
   cycleSessionSetKind,
+  cycleSessionSetKindClusterAware,
   type CycleSessionSetInput,
 } from '../../src/domain/set/cycleSessionSetKind';
 
@@ -169,5 +170,84 @@ describe('cycleSessionSetKind', () => {
       },
       { type: 'delete', set_id: 'new-1' },
     ]);
+  });
+});
+
+/**
+ * Cluster-aware variant — ADR-0019 line 709 (slice 10c Phase 7).
+ * When `is_in_cluster = true`, the cycle is restricted to warmup ↔ working
+ * (dropset branch DISABLED on cluster siblings). When false, behaviour
+ * is identical to the legacy `cycleSessionSetKind`.
+ */
+describe('cycleSessionSetKindClusterAware', () => {
+  it('is_in_cluster=false: solo branch identical to cycleSessionSetKind (warmup → dropset)', () => {
+    const sets = [mk('a', 'warmup', null, 10, 60)];
+    const solo = cycleSessionSetKind(sets, 'a', 'new-1');
+    const aware = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', false);
+    expect(aware).toEqual(solo);
+    // explicit sanity — dropset head + follower emitted
+    expect(aware).toEqual([
+      {
+        type: 'update',
+        set_id: 'a',
+        patch: { set_kind: 'dropset', parent_set_id: null },
+      },
+      {
+        type: 'insertFollower',
+        new_set_id: 'new-1',
+        parent_set_id: 'a',
+        reps: 10,
+        weight_kg: 60,
+      },
+    ]);
+  });
+
+  it('is_in_cluster=true: working → warmup (no dropset jump)', () => {
+    const sets = [mk('a', 'working')];
+    expect(cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true)).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'warmup' } },
+    ]);
+  });
+
+  it('is_in_cluster=true: warmup → working (skips dropset branch entirely)', () => {
+    const sets = [mk('a', 'warmup', null, 10, 60)];
+    // Note: NO insertFollower op — dropset is disabled on cluster siblings.
+    expect(cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true)).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'working' } },
+    ]);
+  });
+
+  it('is_in_cluster=true: defensive fallback when set is somehow dropset', () => {
+    // Shouldn't occur via UI (cluster siblings never enter dropset), but
+    // protect against legacy data: tap should collapse back to working
+    // and strip any dangling follower rows.
+    const sets = [mk('a', 'dropset', null), mk('f1', 'dropset', 'a')];
+    expect(cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true)).toEqual([
+      {
+        type: 'update',
+        set_id: 'a',
+        patch: { set_kind: 'working', parent_set_id: null },
+      },
+      { type: 'delete', set_id: 'f1' },
+    ]);
+  });
+
+  it('is_in_cluster=true: full round-trip working → warmup → working (no dropset state ever)', () => {
+    let sets: CycleSessionSetInput[] = [mk('a', 'working')];
+    let ops = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    expect(ops).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'warmup' } },
+    ]);
+    sets = sets.map((s) => (s.id === 'a' ? { ...s, set_kind: 'warmup' } : s));
+    ops = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    expect(ops).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'working' } },
+    ]);
+  });
+
+  it('is_in_cluster=true: returns [] when target id is missing', () => {
+    expect(
+      cycleSessionSetKindClusterAware([mk('a', 'working')], 'missing', 'new-1', true),
+    ).toEqual([]);
   });
 });
