@@ -384,7 +384,7 @@ export function ClusterCard({
                           isDropsetFollower={false}
                           isClusterLast={false}
                           minusDisabled={true}
-                          hideNoteIndicator={false}
+                          hideNoteIndicator={true}
                           onUpdateSet={(set_id, patch) =>
                             onUpdateClusterSet?.(set_id, patch)
                           }
@@ -416,7 +416,7 @@ export function ClusterCard({
                           isDropsetFollower={false}
                           isClusterLast={false}
                           minusDisabled={true}
-                          hideNoteIndicator={false}
+                          hideNoteIndicator={true}
                           onUpdateSet={(set_id, patch) =>
                             onUpdateClusterSet?.(set_id, patch)
                           }
@@ -436,6 +436,35 @@ export function ClusterCard({
                         <Text style={styles.cycleEmpty}>—</Text>
                       )}
                     </View>
+                    {/*
+                      Shared 📝 note indicator — slot just left of ✓ (per
+                      overnight #3 第 4 點). Visible if EITHER side has a note;
+                      tapping opens A side's note editor first (parent priority,
+                      falls back to B if A is null/empty). Per-side SetRowContent
+                      suppresses its own 📝 via `hideNoteIndicator={true}` so the
+                      row width is reserved for this single shared indicator.
+                    */}
+                    {(() => {
+                      const aHasNote =
+                        !!(c.a_set?.notes && c.a_set.notes.trim().length > 0);
+                      const bHasNote =
+                        !!(c.b_set?.notes && c.b_set.notes.trim().length > 0);
+                      if (!aHasNote && !bHasNote) return null;
+                      const target = aHasNote ? c.a_set! : c.b_set!;
+                      return (
+                        <Pressable
+                          onPress={() =>
+                            onShowClusterSetNote?.(target.id, target.notes)
+                          }
+                          hitSlop={6}
+                          style={styles.cycleNoteBtn}
+                          accessibilityRole="button"
+                          accessibilityLabel="開啟備註"
+                        >
+                          <Text style={styles.cycleNoteBtnText}>📝</Text>
+                        </Pressable>
+                      );
+                    })()}
                     <Pressable
                       onPress={() => {
                         if (!canTap || !c.a_set || !c.b_set) return;
@@ -631,7 +660,7 @@ const styles = StyleSheet.create({
   sideLabelRow: {
     flexDirection: 'row',
     paddingVertical: 4,
-    gap: 8,
+    gap: 4,
     alignItems: 'center',
   },
   sideLabel: {
@@ -642,7 +671,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   // Leading spacer matching shared `#` btn column (point 7 alignment).
-  sideLabelLead: { width: 28 },
+  sideLabelLead: { width: 24 },
   // Divider spacer matching cycleDivider column.
   sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
   // Trailing spacer matching completeBtn column (28) + row gap (8).
@@ -656,9 +685,17 @@ const styles = StyleSheet.create({
   cycleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
     paddingVertical: 6,
   },
+  // Shared note indicator slot — sits between B-side cell and ✓ button
+  // (per overnight #3 第 4 點). Compact width to keep cluster row inside
+  // available space; tap opens A side's note editor (parent priority).
+  cycleNoteBtn: {
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+  },
+  cycleNoteBtnText: { fontSize: 14 },
   // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
   // (overnight 第 5 點, inline drag reorder).
   cycleRowDragActive: {
@@ -674,9 +711,9 @@ const styles = StyleSheet.create({
   // Visual style matches `setLabelBtnCompact` in set-row-content so the
   // affordance reads as "cluster row's set_kind toggle".
   sharedLabelBtn: {
-    width: 28,
-    height: 22,
-    borderRadius: 5,
+    width: 24,
+    height: 20,
+    borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
     borderLeftWidth: 1,
@@ -709,7 +746,7 @@ const styles = StyleSheet.create({
   sharedLabelBtnDisabled: {
     opacity: 0.35,
   },
-  sharedLabelText: { fontSize: 11, fontWeight: '600', color: '#374151' },
+  sharedLabelText: { fontSize: 10, fontWeight: '600', color: '#374151' },
   cycleSide: {
     flex: 1,
     flexDirection: 'row',

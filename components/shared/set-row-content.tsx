@@ -136,7 +136,7 @@ export function SetRowContent<S extends SetRowItem>({
   };
 
   return (
-    <View style={styles.setRow}>
+    <View style={[styles.setRow, compact && styles.setRowCompact]}>
       {hideLabel ? null : (
         <Pressable
           onPress={() => {
@@ -165,7 +165,7 @@ export function SetRowContent<S extends SetRowItem>({
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
         >
-          <Text style={styles.setInputText}>{String(set.reps)}</Text>
+          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(set.reps)}</Text>
         </Pressable>
       ) : (
         <TextInput
@@ -175,14 +175,14 @@ export function SetRowContent<S extends SetRowItem>({
           keyboardType="number-pad"
         />
       )}
-      <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
+      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>{compact ? '×' : 'reps'}</Text>
       {onTapNumber ? (
         <Pressable
           onPress={() => onTapNumber(set, 'weight', set.weight)}
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
         >
-          <Text style={styles.setInputText}>{String(set.weight)}</Text>
+          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(set.weight)}</Text>
         </Pressable>
       ) : (
         <TextInput
@@ -192,7 +192,7 @@ export function SetRowContent<S extends SetRowItem>({
           keyboardType="decimal-pad"
         />
       )}
-      <Text style={styles.setUnit}>kg</Text>
+      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>kg</Text>
       {hasNote ? (
         <Pressable
           onPress={() => onShowSetNote(set)}
@@ -233,6 +233,7 @@ export function SetRowContent<S extends SetRowItem>({
 
 const styles = StyleSheet.create({
   setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  setRowCompact: { gap: 4 },
   setLabelBtn: {
     width: 32,
     height: 24,
@@ -255,9 +256,9 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   setLabelBtnCompact: {
-    width: 26,
-    height: 20,
-    borderRadius: 5,
+    width: 22,
+    height: 18,
+    borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
     borderLeftWidth: 1,
@@ -297,7 +298,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 1 }],
   },
   setLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 11 },
+  setLabelTextCompact: { fontSize: 10 },
   setLabelTextDisabled: { color: '#9ca3af' },
   setInput: {
     minWidth: 48,
@@ -311,9 +312,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   setInputCompact: {
-    minWidth: 34,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
+    minWidth: 28,
+    paddingHorizontal: 3,
+    paddingVertical: 2,
     fontSize: 11,
   },
   setInputText: {
@@ -321,7 +322,11 @@ const styles = StyleSheet.create({
     color: '#111827',
     textAlign: 'center',
   },
+  setInputTextCompact: {
+    fontSize: 11,
+  },
   setUnit: { fontSize: 12, color: '#6B7280' },
+  setUnitCompact: { fontSize: 10 },
   setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
   setNoteIndicatorText: { fontSize: 14 },
   dropsetInlineBtn: {
