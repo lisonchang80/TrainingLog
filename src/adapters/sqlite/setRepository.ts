@@ -1,5 +1,6 @@
 import type { Database } from '../../db/types';
 import type { SetRow, RecordSetInput } from '../../domain/set/types';
+import type { SetKind } from '../../domain/set/setLabels';
 import { validateRecordSet } from '../../domain/set/validateRecordSet';
 import { createSession, endSession } from './sessionRepository';
 
@@ -33,6 +34,24 @@ export interface SetWithExercise extends SetRow {
   exercise_name: string;
 }
 
+/**
+ * Session-side set row including v015 lifecycle columns (set_kind /
+ * parent_set_id / is_logged). Slice 10c Phase 2 commit 6 surfaces these to
+ * the TS layer so the session set logger UI can render label / dropset
+ * cascade / completion ✓ state without re-querying. Joined with the
+ * exercise name for display convenience (same pattern as SetWithExercise).
+ *
+ * Older call sites that don't care about lifecycle (achievements,
+ * exercise-history queries) continue to use `SetWithExercise` and the
+ * underlying `SetRow` — extending those types would force an avalanche of
+ * downstream changes, so this is intentionally a separate shape.
+ */
+export interface SessionSetWithExercise extends SetWithExercise {
+  set_kind: SetKind;
+  parent_set_id: string | null;
+  is_logged: number; // 0/1
+}
+
 export async function listAllSetsWithExercise(
   db: Database
 ): Promise<SetWithExercise[]> {
@@ -54,16 +73,68 @@ export async function listAllSetsWithExercise(
 export async function listSetsBySession(
   db: Database,
   session_id: string
-): Promise<SetWithExercise[]> {
-  return db.getAllAsync<SetWithExercise>(
+): Promise<SessionSetWithExercise[]> {
+  return db.getAllAsync<SessionSetWithExercise>(
     `SELECT s.id, s.session_id, s.exercise_id, s.weight_kg, s.reps,
             s.is_skipped, s.ordering, s.created_at,
+            s.set_kind, s.parent_set_id, s.is_logged,
             e.name AS exercise_name
        FROM "set" s
        JOIN exercise e ON e.id = s.exercise_id
       WHERE s.session_id = ?
       ORDER BY s.ordering ASC`,
     session_id
+  );
+}
+
+/**
+ * Patch fields on an existing set row. Slice 10c Phase 2 commit 6 adds
+ * this so the session card's inline `<SetRowContent>` can persist
+ * weight/reps edits as the user types (debounce is at the UI layer; the
+ * repo just runs the UPDATE). Future commits use the same method for
+ * `set_kind` (tap-label cycle) and `is_logged` (tap-✓ complete).
+ *
+ * Only the keys present on `patch` are written — undefined keys are
+ * skipped so callers can partial-update without re-reading the row first.
+ */
+export async function updateSetFields(
+  db: Database,
+  set_id: string,
+  patch: {
+    weight_kg?: number;
+    reps?: number;
+    set_kind?: SetKind;
+    parent_set_id?: string | null;
+    is_logged?: number;
+  }
+): Promise<void> {
+  const cols: string[] = [];
+  const vals: (string | number | null)[] = [];
+  if (patch.weight_kg !== undefined) {
+    cols.push('weight_kg = ?');
+    vals.push(patch.weight_kg);
+  }
+  if (patch.reps !== undefined) {
+    cols.push('reps = ?');
+    vals.push(patch.reps);
+  }
+  if (patch.set_kind !== undefined) {
+    cols.push('set_kind = ?');
+    vals.push(patch.set_kind);
+  }
+  if (patch.parent_set_id !== undefined) {
+    cols.push('parent_set_id = ?');
+    vals.push(patch.parent_set_id);
+  }
+  if (patch.is_logged !== undefined) {
+    cols.push('is_logged = ?');
+    vals.push(patch.is_logged);
+  }
+  if (cols.length === 0) return; // nothing to update
+  vals.push(set_id);
+  await db.runAsync(
+    `UPDATE "set" SET ${cols.join(', ')} WHERE id = ?`,
+    ...vals
   );
 }
 

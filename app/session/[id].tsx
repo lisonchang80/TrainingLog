@@ -18,7 +18,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
   listSetsBySession,
-  type SetWithExercise,
+  type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
@@ -53,7 +53,7 @@ export default function SessionDetailScreen() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
-  const [sets, setSets] = useState<SetWithExercise[]>([]);
+  const [sets, setSets] = useState<SessionSetWithExercise[]>([]);
   const [sessionExercises, setSessionExercises] = useState<
     SessionExerciseRowWithName[]
   >([]);
@@ -229,14 +229,14 @@ interface ClusterRow {
   parent: SessionExerciseRowWithName;
   child: SessionExerciseRowWithName;
   /** Sets belonging to the parent (A side), ordered by ordering ASC. */
-  setsA: SetWithExercise[];
+  setsA: SessionSetWithExercise[];
   /** Sets belonging to the child (B side), ordered by ordering ASC. */
-  setsB: SetWithExercise[];
+  setsB: SessionSetWithExercise[];
 }
 
 function buildClusters(
   sessionExercises: SessionExerciseRowWithName[],
-  sets: SetWithExercise[]
+  sets: SessionSetWithExercise[]
 ): ClusterRow[] {
   // Identify parents = rows that some other row references via parent_id.
   const parentIds = new Set<string>();
@@ -325,7 +325,7 @@ function ClusterBlock({
 }
 
 function formatSetCell(
-  s: SetWithExercise,
+  s: SessionSetWithExercise,
   load_type: 'loaded' | 'bodyweight' | 'assisted'
 ): string {
   // I5: per-side load_type drives the cell format.

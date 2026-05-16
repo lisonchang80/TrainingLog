@@ -32,8 +32,14 @@ import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
   listSetsBySession,
   recordSetInSession,
-  type SetWithExercise,
+  updateSetFields,
+  type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
+import {
+  SetRowContent,
+  type SetRowItem,
+} from '@/components/shared/set-row-content';
+import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import {
   latestPerMetric,
@@ -82,7 +88,7 @@ export default function TodayScreen() {
   const router = useRouter();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
-  const [setsInSession, setSetsInSession] = useState<SetWithExercise[]>([]);
+  const [setsInSession, setSetsInSession] = useState<SessionSetWithExercise[]>([]);
   const [plan, setPlan] = useState<SessionExerciseRowWithName[]>([]);
   /**
    * ADR-0019 Q3 動作卡互動模型 — only-one-expanded state. NULL = all cards
@@ -333,6 +339,48 @@ export default function TodayScreen() {
       Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Persist a partial update to one set (weight_kg / reps) and refresh
+   * the in-memory `setsInSession`. Wired to `<SetRowContent onUpdateSet>`
+   * — each keystroke produces a patch like `{ weight: 47.5 }` (note the
+   * key is `weight`, the prop name; we translate to DB col `weight_kg`).
+   * The component buffers partial decimal input ("12.") locally so this
+   * handler only sees well-formed numbers.
+   *
+   * No PR re-detection on edit: PR engine fires on add, not update. If
+   * the user edits a set after PR has triggered, the chip stays as-is
+   * until the next add.
+   */
+  const onUpdateSet = async (
+    set_id: string,
+    patch: { reps?: number; weight?: number },
+  ) => {
+    const dbPatch: { weight_kg?: number; reps?: number } = {};
+    if (patch.reps !== undefined) dbPatch.reps = patch.reps;
+    if (patch.weight !== undefined) dbPatch.weight_kg = patch.weight;
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await updateSetFields(db, set_id, dbPatch);
+      // Optimistic in-memory mutation so the row reflects the change
+      // before the listSetsBySession round-trip lands. The persisted UPDATE
+      // is authoritative; we still re-fetch below to stay aligned.
+      setSetsInSession((curr) =>
+        curr.map((s) =>
+          s.id === set_id
+            ? {
+                ...s,
+                weight_kg: patch.weight ?? s.weight_kg,
+                reps: patch.reps ?? s.reps,
+              }
+            : s,
+        ),
+      );
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -601,6 +649,7 @@ export default function TodayScreen() {
                         setExpandedExerciseId(isExpanded ? null : p.id)
                       }
                       onAddSet={() => onAddSet(p.exercise_id)}
+                      onUpdateSet={onUpdateSet}
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -707,17 +756,23 @@ function formatPRDeltaValue(
  * For Phase 2 it's a placeholder Alert documenting the four sheets coming
  * next (📝 編輯備註 / ⏱️ 休息秒數 / 🔀 換動作 / 🗑️ 刪除動作).
  *
- * Expanded body (slice 10c Phase 2 commit 5 — minimum viable set logger):
- *   - Readonly list of sets recorded for this exercise in this session
- *     (one row each, format: "#N · {weight} kg × {reps} reps")
- *   - Footer two-button row [+ 新增 1 組][📖 動作歷史] per ADR-0019 Q3
+ * Expanded body (slice 10c Phase 2 commit 6 — SetRowContent rendering):
+ *   - Each set rendered via the shared `<SetRowContent>` so weight / reps
+ *     are inline-editable (per ADR-0019 Q6/Q7). Numeric edits persist
+ *     keystroke-by-keystroke via `onUpdateSet → updateSetFields`.
+ *   - Tap on set label / dropset add-remove / per-set notes show an alert
+ *     "coming next commit" — those handlers wire in commit 7.
+ *   - Footer two-button row [+ 新增 1 組][📖 動作歷史] per Q3.
  *
- * Subsequent commits replace the readonly list with `SetRowContent` +
- * `SwipeableSetRow` + tap-label cycle + tap-✓ + NumericKeypad (commits 6-8)
- * and the row drag-reorder via draggable-flatlist (commit 9). For now,
- * "新增 1 組" inserts a set with reps/weight defaulting to the most recent
- * set already recorded for this exercise; the user has no UI to edit those
- * numbers yet (commit 6 will add it). PR detection still fires.
+ * Out of scope for this commit:
+ *   - Swipe gestures (左滑刪 / 右滑加 / 右滑備註) — commit 7
+ *   - tap-✓ is_logged completion — commit 7
+ *   - NumericKeypad swap (currently uses inline TextInput) — commit 8
+ *   - Long-press reorder — commit 9
+ *   - Per-set notes (schema doesn't have `set.notes` yet) — separate ticket
+ *
+ * Cluster handling is also deferred to Phase 7 — for now every set is
+ * rendered as solo (no parent_set_id mirror behavior, no cluster atomic ✓).
  */
 function ExerciseCard({
   planRow,
@@ -728,6 +783,7 @@ function ExerciseCard({
   busy,
   onToggleExpand,
   onAddSet,
+  onUpdateSet,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -735,13 +791,28 @@ function ExerciseCard({
   done: number;
   complete: boolean;
   isExpanded: boolean;
-  sets: SetWithExercise[];
+  sets: SessionSetWithExercise[];
   busy: boolean;
   onToggleExpand: () => void;
   onAddSet: () => void;
+  onUpdateSet: (
+    set_id: string,
+    patch: { reps?: number; weight?: number },
+  ) => void;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
+  // Map session set_kind → kind so the shared computeSetLabels (which uses
+  // the template-side `kind` field name) works without a session-specific
+  // copy. Same trick is documented on computeSetLabels' JSDoc.
+  const setLabels = computeSetLabels(
+    sets.map((s) => ({ kind: s.set_kind, parent_set_id: s.parent_set_id })),
+  );
+  const notImplementedAlert = (what: string) =>
+    Alert.alert(
+      what,
+      'Coming in slice 10c Phase 2 commit 7+ (5-gesture / 備註 sheet)。',
+    );
   return (
     <View style={[styles.exerciseCard, isExpanded && styles.exerciseCardExpanded]}>
       <View style={styles.exerciseCardHeader}>
@@ -785,14 +856,38 @@ function ExerciseCard({
               還沒有 set — 按下方「+ 新增 1 組」開始記錄
             </Text>
           ) : (
-            sets.map((s, i) => (
-              <View key={s.id} style={styles.exerciseCardSetRow}>
-                <Text style={styles.exerciseCardSetIndex}>#{i + 1}</Text>
-                <Text style={styles.exerciseCardSetDetails}>
-                  {s.weight_kg} kg × {s.reps} reps
-                </Text>
-              </View>
-            ))
+            sets.map((s, i) => {
+              const row: SetRowItem = {
+                id: s.id,
+                reps: s.reps ?? 0,
+                weight: s.weight_kg ?? 0,
+                notes: null,
+              };
+              const isDropsetFollower =
+                s.set_kind === 'dropset' && s.parent_set_id !== null;
+              return (
+                <SetRowContent
+                  key={s.id}
+                  set={row}
+                  setLabel={setLabels[i]}
+                  isDropsetFollower={isDropsetFollower}
+                  isClusterLast={false}
+                  minusDisabled={true}
+                  hideNoteIndicator={true}
+                  onUpdateSet={(set_id, patch) => onUpdateSet(set_id, patch)}
+                  onShowSetNote={() => notImplementedAlert('📝 set 備註')}
+                  onRemoveDropsetRow={() =>
+                    notImplementedAlert('− 移除 dropset 一列')
+                  }
+                  onAddDropsetRow={() =>
+                    notImplementedAlert('+ 新增 dropset 一列')
+                  }
+                  onCycleLabel={() =>
+                    notImplementedAlert('tap label cycle 熱/N/D')
+                  }
+                />
+              );
+            })
           )}
           <View style={styles.exerciseCardFooter}>
             <Pressable
@@ -930,21 +1025,6 @@ const styles = StyleSheet.create({
     opacity: 0.55,
     fontStyle: 'italic',
     paddingVertical: 8,
-  },
-  exerciseCardSetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  exerciseCardSetIndex: {
-    fontSize: 12,
-    opacity: 0.55,
-    minWidth: 28,
-  },
-  exerciseCardSetDetails: {
-    fontSize: 14,
-    fontWeight: '500',
   },
   exerciseCardFooter: {
     flexDirection: 'row',
