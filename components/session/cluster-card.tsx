@@ -195,12 +195,6 @@ export function ClusterCard({
                 />
               </View>
             ) : null}
-            {volume.denominator > 0 ? (
-              <Text style={styles.clusterVolume}>
-                容量 {Math.round(volume.numerator)} /{' '}
-                {Math.round(volume.denominator)} kg·reps
-              </Text>
-            ) : null}
           </View>
           <Text style={styles.clusterChevron}>{isExpanded ? '▼' : '▶'}</Text>
         </Pressable>
@@ -216,6 +210,27 @@ export function ClusterCard({
           <Text style={styles.clusterGearText}>⚙️</Text>
         </Pressable>
       </View>
+      {/*
+        容量 (volume) row — visible both COLLAPSED and EXPANDED, sitting under
+        the header (mirrors solo card's `exerciseCardPRLine`). Per user
+        overnight 第 8 點: cluster collapsed should keep header + chip +
+        progress bar + 容量/PR row 視覺節奏 — only the cycle list collapses.
+      */}
+      {volume.denominator > 0 ? (
+        <View style={styles.clusterPRLine}>
+          <Text style={styles.clusterPRText}>
+            容量{' '}
+            <Text style={styles.clusterPREmphasis}>
+              {Math.round(volume.numerator)}
+            </Text>
+            {' / '}
+            <Text style={styles.clusterPREmphasis}>
+              {Math.round(volume.denominator)}
+            </Text>
+            {' kg·reps'}
+          </Text>
+        </View>
+      ) : null}
 
       {isExpanded ? (
         <View style={styles.clusterBody}>
@@ -602,10 +617,20 @@ const styles = StyleSheet.create({
     marginTop: 4,
     width: '100%',
   },
-  clusterVolume: {
-    fontSize: 11,
-    opacity: 0.55,
-    marginTop: 2,
+  // 容量 line under header — mirrors solo card's `exerciseCardPRLine` (point 8).
+  clusterPRLine: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 2,
+  },
+  clusterPRText: {
+    fontSize: 12,
+    color: '#b35900',
+  },
+  clusterPREmphasis: {
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+    color: '#b35900',
   },
   clusterBody: {
     paddingHorizontal: 12,
