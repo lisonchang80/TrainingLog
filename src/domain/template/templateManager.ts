@@ -24,7 +24,7 @@ export interface TemplateExerciseSpec {
   /**
    * 1 = 常設 (evergreen, can't be removed via Save-back) / 0 = 一般 (general).
    * Slice 4 only enforces per-Template semantics; sibling-Template propagation
-   * lands with Program / 副標籤 in a later slice (per ADR-0005).
+   * lands with Program / 強度 in a later slice (per ADR-0005).
    */
   is_evergreen: 0 | 1;
   /**

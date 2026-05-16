@@ -82,7 +82,7 @@ import {
  *
  * Filter surface (shared with /exercise-chart/[id] via historyFilterMailbox):
  *   - rep bucket multi-select (top-level chip row)
- *   - Program 主 + Program 副標籤 multi-select (collapsible 進階篩選 section)
+ *   - Program 週期 + 強度 multi-select (collapsible 進階篩選 section)
  *
  * Bucket + Program/sub_tag combine with AND.
  *
@@ -360,7 +360,7 @@ export default function ExerciseHistoryScreen() {
                   {/* Sub_tag buttons */}
                   {programId != null && (
                     <View>
-                      <Text style={styles.advancedLabel}>Program 副標籤</Text>
+                      <Text style={styles.advancedLabel}>強度</Text>
                       {subTagOptions.length === 0 ? (
                         <Text style={styles.empty}>此 Program 無 sub_tag 紀錄。</Text>
                       ) : (

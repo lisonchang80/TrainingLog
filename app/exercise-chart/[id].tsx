@@ -67,7 +67,7 @@ const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
 
 /**
  * Exercise Chart page (ADR-0017 Q14). Shares filter surface with history page
- * via historyFilterMailbox: rep bucket multi-select + Program 主 / 副標籤.
+ * via historyFilterMailbox: rep bucket multi-select + Program 週期 / 強度.
  * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
  */
 export default function ExerciseChartScreen() {
@@ -303,7 +303,7 @@ export default function ExerciseChartScreen() {
 
                   {programId != null && (
                     <View>
-                      <Text style={styles.advancedLabel}>Program 副標籤</Text>
+                      <Text style={styles.advancedLabel}>強度</Text>
                       {subTagOptions.length === 0 ? (
                         <Text style={styles.empty}>此 Program 無 sub_tag 紀錄。</Text>
                       ) : (

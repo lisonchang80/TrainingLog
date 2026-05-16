@@ -25,7 +25,7 @@ export interface TemplateRow {
   updated_at: number;
   /** ADR-0003: nullable. NULL = 自由 (free) template; non-null = attached to a Program. */
   program_id: string | null;
-  /** ADR-0003: nullable per-Template 副標籤; together with `(name, program_id)` forms the identity triple. */
+  /** ADR-0003: nullable per-Template 強度; together with `(name, program_id)` forms the identity triple. */
   sub_tag: string | null;
 }
 

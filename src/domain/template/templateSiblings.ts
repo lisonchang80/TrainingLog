@@ -1,7 +1,7 @@
 /**
  * Slice 9.5 sibling 連動 — pure logic, no DB.
  *
- * 三元組 (name, program, 副標) 允許 sibling Templates 共享 `name`. ADR-0015
+ * 三元組 (name, program, 強度) 允許 sibling Templates 共享 `name`. ADR-0015
  * (per-Template-name 顏色 group-wide write) + ADR-0014 (sibling rename
  * propagation) 已鎖定：改 name / color → 整 sibling group 連動。ADR-0016
  * 2026-05-12 amendment §3 補上 superset parent 的「設為常設/一般」也對所有

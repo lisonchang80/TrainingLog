@@ -236,13 +236,13 @@ function StepHeader({ step }: { step: WizardStep }) {
 function stepTitle(step: WizardStep): string {
   switch (step) {
     case 'NameAndTag':
-      return 'Program 名稱 + 主標籤';
+      return 'Program 名稱 + 週期';
     case 'CycleConfig':
       return 'Cycle 設定';
     case 'DayPattern':
       return 'Cycle 1 每日內容';
     case 'CycleSubTags':
-      return '各 Cycle 副標籤調整';
+      return '各 Cycle 強度調整';
     case 'Preview':
       return '預覽日曆';
     case 'Confirm':
@@ -267,7 +267,7 @@ function NameAndTagPanel({
         placeholder="例：增肌-Q1"
         placeholderTextColor="#999"
       />
-      <Text style={styles.label}>主標籤（可空）</Text>
+      <Text style={styles.label}>週期（可空）</Text>
       <TextInput
         style={styles.input}
         value={state.draft.main_tag ?? ''}
@@ -357,7 +357,7 @@ function DayPatternPanel({
     <View style={styles.panel}>
       <Text style={styles.hint}>
         每天選擇一個 Template（可留白為休息日）。Cycle 1 的選擇會 fan-out 到每個 cycle；
-        若各 cycle 副標籤不同，下一步可逐 cycle 調整。
+        若各 cycle 強度不同，下一步可逐 cycle 調整。
       </Text>
       {days.map((d) => {
         const plan = planByDay.get(d);
@@ -414,7 +414,7 @@ function DayPatternPanel({
                 onChangeText={(v) =>
                   updateDay(d, { sub_tag: v || null })
                 }
-                placeholder="副標籤（例：10-12RM）"
+                placeholder="強度（例：10-12RM）"
                 placeholderTextColor="#999"
               />
             ) : null}
@@ -451,8 +451,8 @@ function CycleSubTagsPanel({
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
-        若各 cycle 副標籤相同，可直接 Skip。否則為每個 cycle 的特定 day
-        覆寫副標籤（留白＝沿用 Day 預設）。
+        若各 cycle 強度相同，可直接 Skip。否則為每個 cycle 的特定 day
+        覆寫強度（留白＝沿用 Day 預設）。
       </Text>
       {Array.from({ length: state.draft.cycle_count }, (_, c) => (
         <View key={c} style={styles.cycleBlock}>
@@ -538,7 +538,7 @@ function ConfirmPanel({ state }: { state: WizardState }) {
           名稱：{state.draft.name || '(未填)'}
         </Text>
         <Text style={styles.summaryLine}>
-          主標籤：{state.draft.main_tag ?? '無'}
+          週期：{state.draft.main_tag ?? '無'}
         </Text>
         <Text style={styles.summaryLine}>
           循環：{state.draft.cycle_count} × {state.draft.cycle_length} 天
@@ -551,7 +551,7 @@ function ConfirmPanel({ state }: { state: WizardState }) {
           {state.draft.dayPlans.filter((dp) => dp.template_id).length} 天
         </Text>
         <Text style={styles.summaryLine}>
-          副標籤覆寫：{state.draft.overrides.length} 項
+          強度覆寫：{state.draft.overrides.length} 項
         </Text>
       </View>
       {err ? <Text style={styles.errorLine}>⚠️ {err}</Text> : null}

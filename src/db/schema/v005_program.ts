@@ -7,7 +7,7 @@ import type { Database } from '../types';
  *   - program          (named training cycle plan; one is "active" at a time)
  *   - program_cell     (one row per (program × cycle_index × day_index) — the
  *                       grid cell linking a date in the cycle to a template +
- *                       per-cell 副標籤)
+ *                       per-cell 強度)
  *
  * Extended:
  *   - template gets `program_id` (nullable; NULL = 自由 free template) and

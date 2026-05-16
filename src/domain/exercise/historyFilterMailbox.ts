@@ -2,7 +2,7 @@
  * Cross-page filter sync for 動作歷史 ↔ 動作圖表 (ADR-0017 Q14 second amendment).
  *
  * The two pages share the same filter surface: rep-bucket multi-select +
- * Program 主 + Program 副標籤. When user taps 「轉圖表」 / 「看歷史」 the
+ * Program 週期 + 強度. When user taps 「轉圖表」 / 「看歷史」 the
  * current filter state hops to the other page via this in-process singleton.
  *
  * Pattern matches `pickerBridge` (singleton + submit/peek/clear); differs in
