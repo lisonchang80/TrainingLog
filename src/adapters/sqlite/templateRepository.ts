@@ -814,6 +814,257 @@ export async function queryMemoryCandidates(
   return hydrateMemoryCandidates(db, exRows);
 }
 
+// ===========================================================================
+// Slice 10c — convertSessionToTemplate (ADR-0019 Q10 儲存模板 / 另存模板)
+// ===========================================================================
+
+/**
+ * Persist a session's current exercise/set structure as a Template
+ * (ADR-0019 Q10「儲存模板」/「另存模板」action bar buttons).
+ *
+ * Two modes:
+ *  - **create** (另存模板) — INSERT a brand new template named `template_name`
+ *    + INSERT one `template_exercise` per session_exercise row + INSERT one
+ *    `template_set` row per `set` row. Does NOT touch any existing
+ *    `session_exercise.template_id` link (the session stays bound to its
+ *    original template, if any).
+ *  - **update** (儲存模板) — overwrite the session's *linked* template with
+ *    the session's current structure. "Linked template" = the most common
+ *    non-null `session_exercise.template_id` among the session's rows; if
+ *    none exists (freestyle session), this falls back to create-mode
+ *    semantics AND links the session's rows to the new template by updating
+ *    every `session_exercise.template_id = <new_id>` so future Save-back
+ *    flows recognize the session as templated.
+ *
+ * Returns the resulting `template_id` either way. Caller is responsible
+ * for prompting the user for `template_name` and for any UI feedback.
+ *
+ * Cluster / rest_sec / set_kind preservation:
+ *  - `session_exercise.parent_id` is REMAPPED to the corresponding new
+ *    `template_exercise.id` (two-pass remap, mirrors `snapshotForSession`).
+ *  - `session_exercise.reusable_superset_id` is copied verbatim.
+ *  - `session_exercise.rest_sec` is written to `template_exercise.rest_seconds`
+ *    (the canonical v009 column; v016's orphan `template_exercise.rest_sec`
+ *    column stays NULL per slice 10b bridge convention).
+ *  - `set.set_kind` / `set.parent_set_id` / `set.notes` map to
+ *    `template_set.set_kind` / `parent_set_id` / `notes`.
+ *  - `set.is_skipped` rows are SKIPPED (an explicit user-skipped set should
+ *    not become part of the template's prescribed structure).
+ *
+ * Ordering: session_exercise rows are taken in their existing `ordering`
+ * sequence; template_exercise `ordering` is reset to a 1..N contiguous
+ * sequence (same as new templates created elsewhere — e.g. the editor).
+ *
+ * `uuid` is REQUIRED — same convention as the rest of this repo (Hermes
+ * lacks crypto.randomUUID). Pass a deterministic stub in tests.
+ *
+ * Single transaction: partial failure rolls back cleanly.
+ *
+ * Slice 10c Phase 7-detail-page commit.
+ */
+export async function convertSessionToTemplate(
+  db: Database,
+  args: {
+    session_id: string;
+    template_name: string;
+    mode: 'update' | 'create';
+    uuid: () => string;
+    now?: () => number;
+  },
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+
+  // Step 1: gather the session's exercise + set state.
+  type SeRow = {
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    planned_sets: number;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+    template_id: string | null;
+  };
+  const seRows = await db.getAllAsync<SeRow>(
+    `SELECT id, exercise_id, ordering, planned_sets, is_evergreen,
+            parent_id, reusable_superset_id, rest_sec, template_id
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id,
+  );
+
+  type SetRow = {
+    id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    ordering: number;
+    is_skipped: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+    notes: string | null;
+  };
+  const setRows = await db.getAllAsync<SetRow>(
+    `SELECT id, exercise_id, weight_kg, reps, ordering, is_skipped,
+            set_kind, parent_set_id, notes
+       FROM "set"
+      WHERE session_id = ? AND is_skipped = 0
+      ORDER BY exercise_id ASC, ordering ASC`,
+    args.session_id,
+  );
+
+  // Step 2: determine target template_id.
+  // "Linked template" = most common non-null template_id across se rows.
+  // Tie-break: first encountered in `ordering` order.
+  let linkedTemplateId: string | null = null;
+  if (args.mode === 'update') {
+    const counts = new Map<string, number>();
+    for (const r of seRows) {
+      if (r.template_id != null) {
+        counts.set(r.template_id, (counts.get(r.template_id) ?? 0) + 1);
+      }
+    }
+    if (counts.size > 0) {
+      let bestId: string | null = null;
+      let bestCount = 0;
+      for (const [id, c] of counts) {
+        if (c > bestCount) {
+          bestCount = c;
+          bestId = id;
+        }
+      }
+      linkedTemplateId = bestId;
+    }
+  }
+
+  const isUpdatingExisting = args.mode === 'update' && linkedTemplateId != null;
+  const newTemplateId = isUpdatingExisting
+    ? (linkedTemplateId as string)
+    : args.uuid();
+
+  // Step 3: pre-compute new template_exercise ids + parent_id remap.
+  const idByOldSe = new Map<string, string>(); // old session_exercise.id → new template_exercise.id
+  for (const se of seRows) {
+    idByOldSe.set(se.id, args.uuid());
+  }
+
+  // Step 4: run the conversion in one transaction.
+  await db.withTransactionAsync(async () => {
+    if (isUpdatingExisting) {
+      // Wipe the old template's exercises (cascades to template_set via v009 FK).
+      await db.runAsync(
+        `DELETE FROM template_exercise WHERE template_id = ?`,
+        newTemplateId,
+      );
+      // Rename + bump updated_at on the existing template row.
+      await db.runAsync(
+        `UPDATE template SET name = ?, updated_at = ? WHERE id = ?`,
+        args.template_name,
+        ts,
+        newTemplateId,
+      );
+    } else {
+      // Create-mode (or update-mode-fallback-to-create when no linked
+      // template existed). INSERT a new template row.
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
+        newTemplateId,
+        args.template_name,
+        ts,
+        ts,
+      );
+    }
+
+    // INSERT one template_exercise row per session_exercise + its sets.
+    let exOrdering = 1;
+    for (const se of seRows) {
+      const newExId = idByOldSe.get(se.id)!;
+      const remappedParentId =
+        se.parent_id != null ? idByOldSe.get(se.parent_id) ?? null : null;
+
+      // Materialise this exercise's sets from set rows. Cluster's sets
+      // are linked to their session_exercise via exercise_id (per ADR-0018
+      // schema — `set` has no direct session_exercise_id FK; we filter by
+      // exercise_id + session_id, which is sufficient because we don't
+      // currently allow the same exercise_id twice in one session).
+      const exSets = setRows.filter((s) => s.exercise_id === se.exercise_id);
+
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+        newExId,
+        newTemplateId,
+        se.exercise_id,
+        exOrdering,
+        Math.max(exSets.length, se.planned_sets),
+        se.is_evergreen,
+        remappedParentId,
+        se.rest_sec,
+        se.reusable_superset_id,
+        ts,
+      );
+
+      // INSERT template_set rows for this exercise's recorded sets.
+      // Two-pass: first pass with parent_set_id = NULL to satisfy the FK
+      // (the row a parent_set_id points to must already exist; in
+      // practice dropset heads are always at position N-1 of their cluster
+      // and followers point UP, but we don't want to rely on that — easier
+      // to map ids and rewrite in a second pass).
+      const setIdRemap = new Map<string, string>(); // old set.id → new template_set.id
+      for (let i = 0; i < exSets.length; i++) {
+        const oldSet = exSets[i];
+        const newSetId = args.uuid();
+        setIdRemap.set(oldSet.id, newSetId);
+        await db.runAsync(
+          `INSERT INTO template_set
+             (id, template_exercise_id, position, set_kind, reps, weight,
+              parent_set_id, notes)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+          newSetId,
+          newExId,
+          i,
+          oldSet.set_kind,
+          oldSet.reps ?? 0,
+          oldSet.weight_kg ?? 0,
+          oldSet.notes,
+        );
+      }
+      // Second pass: rewrite parent_set_id for any dropset followers.
+      for (const oldSet of exSets) {
+        if (oldSet.parent_set_id == null) continue;
+        const newId = setIdRemap.get(oldSet.id);
+        const newParentId = setIdRemap.get(oldSet.parent_set_id);
+        if (!newId || !newParentId) continue;
+        await db.runAsync(
+          `UPDATE template_set SET parent_set_id = ? WHERE id = ?`,
+          newParentId,
+          newId,
+        );
+      }
+
+      exOrdering++;
+    }
+
+    // Update-mode-fallback-to-create: link the session's rows to the new
+    // template so future Save-back flows recognize it as templated.
+    if (args.mode === 'update' && !isUpdatingExisting) {
+      await db.runAsync(
+        `UPDATE session_exercise SET template_id = ? WHERE session_id = ?`,
+        newTemplateId,
+        args.session_id,
+      );
+    }
+  });
+
+  return newTemplateId;
+}
+
 /**
  * Reusable-superset 動作記憶 (ADR-0017 L154 amendment / slice 9.8b grill Q4).
  *
