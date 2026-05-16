@@ -29,17 +29,21 @@ import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
+  computeSessionDiff,
   createSession,
+  createTemplateFromSession,
   deleteSessionExerciseAndSets,
   discardSession,
   endSession,
   getActiveSession,
+  linkSessionToTemplate,
   listSessionExercisesWithName,
+  overwriteTemplateFromSession,
   reorderSessionExercises,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
-import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
+import { getSetting, getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
   deleteSet,
   insertSessionSet,
@@ -58,6 +62,8 @@ import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-she
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
+import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import {
   computePRSnapshot,
   type PRSnapshot,
@@ -175,21 +181,38 @@ export default function TodayScreen() {
   const [prSnapshotById, setPrSnapshotById] = useState<
     Record<string, PRSnapshot>
   >({});
+  /**
+   * Rest timer (ADR-0019 Q2 R1 v1). `autoPopup` mirrors the
+   * `auto_popup_rest_timer` app setting (default ON via v016 seed).
+   * `restTimerTrigger` is bumped each tap-✓ to flag the modal it
+   * should restart with fresh rest_sec; `restTimerTarget` carries the
+   * rest_sec + exercise name to render in the modal.
+   */
+  const [autoPopupTimer, setAutoPopupTimer] = useState<boolean>(true);
+  const [restTimerTarget, setRestTimerTarget] = useState<{
+    rest_sec: number;
+    exercise_name: string;
+  } | null>(null);
+  const [restTimerTrigger, setRestTimerTrigger] = useState<number>(0);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, bms] = await Promise.all([
+    const [exs, active, prog, tpls, u, bms, popup] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
       listTemplates(db),
       getUnitPreference(db),
       listBodyMetrics(db),
+      // v016 seeds auto_popup_rest_timer = '1' (raw string, JSON-parses to 1).
+      // null / 0 / undefined → autoPopup off.
+      getSetting<number | boolean>(db, 'auto_popup_rest_timer'),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
     setBodyMetrics(bms);
+    setAutoPopupTimer(popup === 1 || popup === true);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
@@ -643,21 +666,48 @@ export default function TodayScreen() {
    * Q4's segmented progress bar + the header `done/planned` count.
    * No alert on failure — toggle is idempotent so retry-on-next-render is
    * fine; we only catch the failure to avoid a hard crash.
+   *
+   * Slice 10c rest-timer hookup (ADR-0019 Q2 R1 v1):
+   *   - flip TO 1 + autoPopup ON → launch rest-timer modal with the
+   *     set's owning session_exercise.rest_sec (or 60 default). Per
+   *     Q2.3 (b) M1 the modal restarts with fresh time even if already
+   *     open (we bump `restTimerTrigger`).
+   *   - flip TO 0 → cancel timer (Q2.3 (d) Y2 — un-logging removes the
+   *     set's "complete" side-effect, timer included).
    */
   const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
+    const nextLogged = currentlyLogged ? 0 : 1;
     try {
       await updateSetFields(db, set_id, {
-        is_logged: currentlyLogged ? 0 : 1,
+        is_logged: nextLogged,
       });
       setSetsInSession((curr) =>
         curr.map((s) =>
-          s.id === set_id ? { ...s, is_logged: currentlyLogged ? 0 : 1 } : s,
+          s.id === set_id ? { ...s, is_logged: nextLogged } : s,
         ),
       );
     } catch (e) {
       console.warn('[toggle is_logged] failed:', e);
+      return;
+    }
+
+    if (nextLogged === 1 && autoPopupTimer) {
+      // Resolve the owning session_exercise → rest_sec / exercise name.
+      // Lookup via setsInSession (just-toggled set) → exercise_id →
+      // plan row. NULL rest_sec uses 60s system default.
+      const toggled = setsInSession.find((s) => s.id === set_id);
+      const planRow = toggled
+        ? plan.find((p) => p.exercise_id === toggled.exercise_id) ?? null
+        : null;
+      const rest_sec = planRow?.rest_sec ?? 60;
+      const exercise_name = planRow?.exercise_name ?? '';
+      setRestTimerTarget({ rest_sec, exercise_name });
+      setRestTimerTrigger((n) => n + 1);
+    } else if (nextLogged === 0) {
+      // Cancel timer per Q2.3 (d) Y2.
+      setRestTimerTarget(null);
     }
   };
 
@@ -825,41 +875,223 @@ export default function TodayScreen() {
     );
   };
 
+  /**
+   * Finalise the session and route forward. Per ADR-0019 Q9d the finish
+   * flow is diff-aware:
+   *
+   *   - Template-based session + NO diff vs snapshot → finish silently,
+   *     route to `/session/{id}` (no Save-back dialog).
+   *   - Template-based session + diff → 3-option Alert: 儲存模板 (overwrite)
+   *     / 另存模板 (new sibling Template) / 否 (just finish).
+   *   - Freestyle session → 2-option Alert: 升級成 Template (新建 + link)
+   *     / 否 (stay freestyle).
+   *
+   * In every branch we ALWAYS end the session (UPDATE session.ended_at) +
+   * run achievement eval — the dialog only chooses whether to mutate the
+   * template too. The Save-back review screen `/save-back/{id}` is bypassed
+   * in this flow: this dialog replaces it as the per-spec finish UX.
+   */
+  const finalizeEndAndRoute = async (session_id: string) => {
+    const ended_at = Date.now();
+    await endSession(db, { id: session_id, ended_at });
+    try {
+      await evaluateAndPersistAchievements(db, {
+        ended_session_id: session_id,
+        unlocked_at: ended_at,
+      });
+    } catch (e) {
+      console.warn('[achievements] evaluate failed:', e);
+    }
+    setLastPRDelta(null);
+    setLastPRExerciseName('');
+    endState(sessionState, ended_at);
+    router.push(`/session/${session_id}`);
+  };
+
+  const promptForTemplateName = (
+    title: string,
+    defaultName: string,
+    onConfirm: (name: string) => void,
+  ) => {
+    if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        title,
+        '輸入模板名稱',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '儲存',
+            onPress: (input?: string) => {
+              const name = (input ?? defaultName).trim() || defaultName;
+              onConfirm(name);
+            },
+          },
+        ],
+        'plain-text',
+        defaultName,
+      );
+    } else {
+      // Non-iOS fallback: skip the prompt, use the default name silently.
+      onConfirm(defaultName);
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
+
+    const fromTemplate = plan.some((p) => p.template_id != null);
+    const templateId =
+      plan.find((p) => p.template_id != null)?.template_id ?? null;
+
     setBusy(true);
     try {
-      const ended_at = Date.now();
-      await endSession(db, { id: session_id, ended_at });
-      // Slice 9: evaluate achievements on Session end (iPhone-only batch eval).
-      // We swallow errors — failure here must not block the user from leaving
-      // the session, but we surface a non-fatal alert so it doesn't go silent.
-      try {
-        await evaluateAndPersistAchievements(db, {
-          ended_session_id: session_id,
-          unlocked_at: ended_at,
-        });
-      } catch (e) {
-        console.warn('[achievements] evaluate failed:', e);
-      }
-      // Clear PR banner so it doesn't bleed into the next session.
-      setLastPRDelta(null);
-      setLastPRExerciseName('');
-      // Validate the transition then redirect.
-      endState(sessionState, ended_at);
-      // If this Session was started from a Template (plan rows have a
-      // template_id), intercept with the Save-back review screen first;
-      // otherwise go straight to the summary.
-      const fromTemplate = plan.some((p) => p.template_id != null);
-      if (fromTemplate) {
-        router.push(`/save-back/${session_id}`);
+      if (fromTemplate && templateId) {
+        // Template-based session — diff-aware (Q9d 3-option path).
+        const diff = await computeSessionDiff(db, { session_id });
+        if (!diff.has_diff) {
+          await finalizeEndAndRoute(session_id);
+          return;
+        }
+        // 3-option Alert
+        Alert.alert(
+          '結束訓練？',
+          '此次訓練內容與模板有差異，要把變更存回模板嗎？',
+          [
+            {
+              text: '儲存模板',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await overwriteTemplateFromSession(db, {
+                    session_id,
+                    template_id: templateId,
+                    uuid: randomUUID,
+                  });
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Save failed',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+            {
+              text: '另存模板',
+              onPress: () => {
+                const defaultName = `Session ${new Date().toLocaleDateString()}`;
+                promptForTemplateName(
+                  '另存為新模板',
+                  defaultName,
+                  async (name) => {
+                    setBusy(true);
+                    try {
+                      await createTemplateFromSession(db, {
+                        session_id,
+                        name,
+                        uuid: randomUUID,
+                      });
+                      await finalizeEndAndRoute(session_id);
+                    } catch (e) {
+                      Alert.alert(
+                        'Save failed',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                );
+              },
+            },
+            {
+              text: '否',
+              style: 'cancel',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Could not end session',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+          ],
+        );
       } else {
-        router.push(`/session/${session_id}`);
+        // Freestyle session — 2-option (Q9d Freestyle path).
+        Alert.alert(
+          '結束訓練？',
+          '要把這次的內容升級成可重複使用的模板嗎？',
+          [
+            {
+              text: '升級成 Template',
+              onPress: () => {
+                const defaultName = `Session ${new Date().toLocaleDateString()}`;
+                promptForTemplateName(
+                  '建立新模板',
+                  defaultName,
+                  async (name) => {
+                    setBusy(true);
+                    try {
+                      const newTemplateId = await createTemplateFromSession(
+                        db,
+                        {
+                          session_id,
+                          name,
+                          uuid: randomUUID,
+                        },
+                      );
+                      await linkSessionToTemplate(db, {
+                        session_id,
+                        template_id: newTemplateId,
+                      });
+                      await finalizeEndAndRoute(session_id);
+                    } catch (e) {
+                      Alert.alert(
+                        'Save failed',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                );
+              },
+            },
+            {
+              text: '否',
+              style: 'cancel',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Could not end session',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+          ],
+        );
       }
-      // Local state will reset on next focus via refresh().
     } catch (e) {
-      Alert.alert('Could not end session', e instanceof Error ? e.message : String(e));
+      Alert.alert(
+        'Could not end session',
+        e instanceof Error ? e.message : String(e),
+      );
     } finally {
       setBusy(false);
     }
@@ -1016,6 +1248,19 @@ export default function TodayScreen() {
         </View>
         <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
           {programBanner}
+          {/* ADR-0019 Q6 — in-session 3-tile stats panel (P1 position) */}
+          {sessionState.status === 'in_progress' ? (
+            <SessionStatsPanel
+              sets={setsInSession.map((s) => ({
+                set_kind: s.set_kind,
+                is_logged: s.is_logged,
+                reps: s.reps,
+                weight_kg: s.weight_kg,
+              }))}
+              exercise_count={plan.length}
+              started_at_ms={sessionState.started_at}
+            />
+          ) : null}
           <Text style={styles.subhead}>
             Session in progress · {setsInSession.length} set
             {setsInSession.length === 1 ? '' : 's'}
@@ -1326,6 +1571,14 @@ export default function TodayScreen() {
           setRestSecTarget(null);
         }}
         onCancel={() => setRestSecTarget(null)}
+      />
+      <RestTimerModal
+        visible={restTimerTarget !== null}
+        rest_sec={restTimerTarget?.rest_sec ?? 60}
+        triggerKey={restTimerTrigger}
+        exerciseName={restTimerTarget?.exercise_name}
+        onSkip={() => setRestTimerTarget(null)}
+        onCancel={() => setRestTimerTarget(null)}
       />
     </SafeAreaView>
   );

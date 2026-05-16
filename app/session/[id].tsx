@@ -29,7 +29,7 @@ import { convertSessionToTemplate } from '@/src/adapters/sqlite/templateReposito
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
 import {
-  computeSessionStats,
+  computeDetailPageStats,
   formatDurationHHMM,
 } from '@/src/domain/session/sessionStats';
 
@@ -123,7 +123,7 @@ export default function SessionDetailScreen() {
 
   const stats = useMemo(() => {
     if (!session) return null;
-    return computeSessionStats({
+    return computeDetailPageStats({
       session: {
         started_at: session.started_at,
         ended_at: session.ended_at,

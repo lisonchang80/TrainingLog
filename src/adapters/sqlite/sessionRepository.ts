@@ -312,3 +312,438 @@ export async function listSessionExercisesWithName(
     session_id
   );
 }
+
+/**
+ * Compute the diff between an in-progress session and the template it was
+ * snapshotted from. Used by the Today-tab finish flow (ADR-0019 Q9d) to
+ * decide whether to surface the 3-option Save-back dialog.
+ *
+ * Returns `{ has_diff: false, diff_kinds: [] }` when:
+ *   - The session has no template_id on its plan rows (Freestyle — caller
+ *     should branch to the 2-option dialog instead), OR
+ *   - Every plan row + set matches the template snapshot field-by-field.
+ *
+ * The template's planned set / rep / weight values are read from the
+ * legacy `template_set` table (v009 per-set source of truth) when present
+ * — falling back to `template_exercise.default_sets` /
+ * `default_reps` / `default_weight_kg` when no per-set rows exist (older
+ * templates). The diff compares against the modal rep/weight tuple from
+ * the per-set list so a template with mixed working/warmup rows doesn't
+ * accidentally trip the diff against a session where the user logged the
+ * same plan.
+ *
+ * Slice 10c finish-dialog wire-up.
+ */
+export async function computeSessionDiff(
+  db: Database,
+  args: { session_id: string }
+): Promise<{ has_diff: boolean; diff_kinds: string[] }> {
+  const { computeSessionDiff: computePure } = await import(
+    '../../domain/session/computeSessionDiff'
+  );
+
+  const seRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    template_id: string | null;
+    rest_sec: number | null;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+  }>(
+    `SELECT id, exercise_id, template_id, rest_sec, parent_id, reusable_superset_id
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id
+  );
+
+  // Derive template_id from the plan rows (all rows for a template-based
+  // session share the same template_id; Freestyle rows are NULL).
+  const templateId =
+    seRows.find((r) => r.template_id != null)?.template_id ?? null;
+  if (!templateId) {
+    return { has_diff: false, diff_kinds: [] };
+  }
+
+  // Load template exercise rows + per-set rollup so we can compare.
+  const teRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    default_sets: number;
+    default_reps: number | null;
+    default_weight_kg: number | null;
+    rest_seconds: number | null;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+  }>(
+    `SELECT id, exercise_id, default_sets, default_reps, default_weight_kg,
+            rest_seconds, parent_id, reusable_superset_id
+       FROM template_exercise
+      WHERE template_id = ?
+      ORDER BY ordering ASC`,
+    templateId
+  );
+
+  // Per-set rollup: for each template_exercise, count rows + modal rep/weight.
+  const tsRows = await db.getAllAsync<{
+    template_exercise_id: string;
+    reps: number;
+    weight: number;
+  }>(
+    `SELECT ts.template_exercise_id, ts.reps, ts.weight
+       FROM template_set ts
+       JOIN template_exercise te ON te.id = ts.template_exercise_id
+      WHERE te.template_id = ?`,
+    templateId
+  );
+  const setsByTe = new Map<string, Array<{ reps: number; weight: number }>>();
+  for (const r of tsRows) {
+    const arr = setsByTe.get(r.template_exercise_id) ?? [];
+    arr.push({ reps: r.reps, weight: r.weight });
+    setsByTe.set(r.template_exercise_id, arr);
+  }
+
+  const templateExercises = teRows.map((te) => {
+    const sets = setsByTe.get(te.id) ?? [];
+    if (sets.length > 0) {
+      // Use modal (reps, weight) so a template with mixed warmup rows
+      // doesn't constantly trip diffs against working-only session rows.
+      const counts = new Map<string, { reps: number; weight: number; n: number }>();
+      for (const s of sets) {
+        const key = `${s.reps}|${s.weight}`;
+        const cur = counts.get(key);
+        if (cur) cur.n += 1;
+        else counts.set(key, { reps: s.reps, weight: s.weight, n: 1 });
+      }
+      let best: { reps: number; weight: number; n: number } | null = null;
+      for (const c of counts.values()) {
+        if (!best || c.n > best.n) best = c;
+      }
+      return {
+        exercise_id: te.exercise_id,
+        planned_sets: sets.length,
+        planned_reps: best?.reps ?? null,
+        planned_weight_kg: best?.weight ?? null,
+        rest_sec: te.rest_seconds ?? null,
+        parent_id: te.parent_id,
+        reusable_superset_id: te.reusable_superset_id,
+      };
+    }
+    return {
+      exercise_id: te.exercise_id,
+      planned_sets: te.default_sets,
+      planned_reps: te.default_reps,
+      planned_weight_kg: te.default_weight_kg,
+      rest_sec: te.rest_seconds ?? null,
+      parent_id: te.parent_id,
+      reusable_superset_id: te.reusable_superset_id,
+    };
+  });
+
+  // Session sets — pull is_skipped + reps + weight per exercise.
+  const setRows = await db.getAllAsync<{
+    exercise_id: string;
+    is_skipped: number;
+    reps: number | null;
+    weight_kg: number | null;
+  }>(
+    `SELECT exercise_id, is_skipped, reps, weight_kg
+       FROM "set"
+      WHERE session_id = ?`,
+    args.session_id
+  );
+
+  return computePure({
+    sessionExercises: seRows.map((r) => ({
+      id: r.id,
+      exercise_id: r.exercise_id,
+      rest_sec: r.rest_sec ?? null,
+      parent_id: r.parent_id,
+      reusable_superset_id: r.reusable_superset_id,
+    })),
+    sessionSets: setRows,
+    template: { exercises: templateExercises },
+  });
+}
+
+/**
+ * Write the session's in-progress structure back to the linked template,
+ * overwriting `template_exercise` + `template_set` rows. Used by the
+ * finish dialog's 「儲存模板」 option (ADR-0019 Q9d Template-based path,
+ * (a) Save).
+ *
+ * Strategy: clear the existing template_exercise + template_set rows for
+ * this template_id, then re-insert from the current session_exercise +
+ * non-skipped, non-warmup set rows. Keeps the template_id stable so any
+ * future session created from the same Program cell still hits the same
+ * row. Does NOT propagate to sibling templates (the Save-back review
+ * screen handles that; this is the "blind overwrite" path for users who
+ * already accepted the dialog without reviewing per-set details).
+ *
+ * Slice 10c finish-dialog wire-up.
+ */
+export async function overwriteTemplateFromSession(
+  db: Database,
+  args: { session_id: string; template_id: string; uuid: () => string }
+): Promise<void> {
+  const seRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+  }>(
+    `SELECT id, exercise_id, ordering, is_evergreen,
+            parent_id, reusable_superset_id, rest_sec
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id
+  );
+
+  const setRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    ordering: number;
+    is_skipped: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+    notes: string | null;
+  }>(
+    `SELECT id, exercise_id, weight_kg, reps, ordering, is_skipped,
+            set_kind, parent_set_id, notes
+       FROM "set"
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id
+  );
+
+  await db.withTransactionAsync(async () => {
+    // Wipe the template's existing rows (CASCADE template_set via v009 FK).
+    await db.runAsync(
+      `DELETE FROM template_set WHERE template_exercise_id IN
+         (SELECT id FROM template_exercise WHERE template_id = ?)`,
+      args.template_id
+    );
+    await db.runAsync(
+      `DELETE FROM template_exercise WHERE template_id = ?`,
+      args.template_id
+    );
+
+    // se.id → newly-allocated te.id for parent_id remap.
+    const seIdToTeId = new Map<string, string>();
+    for (const se of seRows) {
+      const teId = args.uuid();
+      seIdToTeId.set(se.id, teId);
+    }
+
+    for (const se of seRows) {
+      const teId = seIdToTeId.get(se.id)!;
+      const remappedParent =
+        se.parent_id != null ? seIdToTeId.get(se.parent_id) ?? null : null;
+      // Compute default_sets from session sets (NOT NULL — count of
+      // non-skipped rows, fallback to 1 if zero so the constraint holds).
+      const sets = setRows.filter(
+        (s) => s.exercise_id === se.exercise_id && s.is_skipped === 0
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+        teId,
+        args.template_id,
+        se.exercise_id,
+        se.ordering,
+        Math.max(1, sets.length),
+        se.is_evergreen,
+        remappedParent,
+        se.rest_sec,
+        se.reusable_superset_id,
+        Date.now()
+      );
+      // Insert template_set rows from session sets (non-skipped).
+      let pos = 0;
+      const setIdMap = new Map<string, string>();
+      for (const s of sets) {
+        const tsId = args.uuid();
+        setIdMap.set(s.id, tsId);
+      }
+      for (const s of sets) {
+        const tsId = setIdMap.get(s.id)!;
+        const remappedParentSet =
+          s.parent_set_id != null
+            ? setIdMap.get(s.parent_set_id) ?? null
+            : null;
+        await db.runAsync(
+          `INSERT INTO template_set
+             (id, template_exercise_id, position, set_kind, reps, weight,
+              parent_set_id, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          tsId,
+          teId,
+          pos,
+          s.set_kind,
+          s.reps ?? 0,
+          s.weight_kg ?? 0,
+          remappedParentSet,
+          s.notes
+        );
+        pos += 1;
+      }
+    }
+
+    // Bump template.updated_at so it lifts in the templates list.
+    await db.runAsync(
+      `UPDATE template SET updated_at = ? WHERE id = ?`,
+      Date.now(),
+      args.template_id
+    );
+  });
+}
+
+/**
+ * Build a brand-new Template from the current session's structure.
+ * Used by:
+ *   - 「另存模板」 (Template-based finish dialog option b) — keeps the
+ *     existing template untouched and snapshots the session into a
+ *     sibling Template
+ *   - 「升級成 Template」 (Freestyle finish dialog option a) — turns a
+ *     Freestyle session into a reusable Template + links session.template_id
+ *     so future history-detail page knows the session is no longer freestyle
+ *
+ * Returns the new template's id. Caller decides whether to link the
+ * session to it (Freestyle path) or not (另存 path).
+ *
+ * Slice 10c finish-dialog wire-up.
+ */
+export async function createTemplateFromSession(
+  db: Database,
+  args: {
+    session_id: string;
+    name: string;
+    uuid: () => string;
+  }
+): Promise<string> {
+  const templateId = args.uuid();
+  const seRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+  }>(
+    `SELECT id, exercise_id, ordering, is_evergreen,
+            parent_id, reusable_superset_id, rest_sec
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id
+  );
+  const setRows = await db.getAllAsync<{
+    id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    ordering: number;
+    is_skipped: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+    notes: string | null;
+  }>(
+    `SELECT id, exercise_id, weight_kg, reps, ordering, is_skipped,
+            set_kind, parent_set_id, notes
+       FROM "set"
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id
+  );
+  const now = Date.now();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
+      templateId,
+      args.name,
+      now,
+      now
+    );
+    const seIdToTeId = new Map<string, string>();
+    for (const se of seRows) seIdToTeId.set(se.id, args.uuid());
+    for (const se of seRows) {
+      const teId = seIdToTeId.get(se.id)!;
+      const remappedParent =
+        se.parent_id != null ? seIdToTeId.get(se.parent_id) ?? null : null;
+      const sets = setRows.filter(
+        (s) => s.exercise_id === se.exercise_id && s.is_skipped === 0
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+        teId,
+        templateId,
+        se.exercise_id,
+        se.ordering,
+        Math.max(1, sets.length),
+        se.is_evergreen,
+        remappedParent,
+        se.rest_sec,
+        se.reusable_superset_id,
+        now
+      );
+      const setIdMap = new Map<string, string>();
+      for (const s of sets) setIdMap.set(s.id, args.uuid());
+      let pos = 0;
+      for (const s of sets) {
+        const tsId = setIdMap.get(s.id)!;
+        const remappedParentSet =
+          s.parent_set_id != null
+            ? setIdMap.get(s.parent_set_id) ?? null
+            : null;
+        await db.runAsync(
+          `INSERT INTO template_set
+             (id, template_exercise_id, position, set_kind, reps, weight,
+              parent_set_id, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          tsId,
+          teId,
+          pos,
+          s.set_kind,
+          s.reps ?? 0,
+          s.weight_kg ?? 0,
+          remappedParentSet,
+          s.notes
+        );
+        pos += 1;
+      }
+    }
+  });
+  return templateId;
+}
+
+/**
+ * Link a Freestyle session to a newly-created template (sets
+ * session_exercise.template_id on every plan row). Used by the
+ * Freestyle finish dialog's 「升級成 Template」 option to flip the
+ * session's identity from freestyle → template-based.
+ */
+export async function linkSessionToTemplate(
+  db: Database,
+  args: { session_id: string; template_id: string }
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session_exercise SET template_id = ? WHERE session_id = ?`,
+    args.template_id,
+    args.session_id
+  );
+}

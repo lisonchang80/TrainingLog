@@ -1,20 +1,20 @@
 import {
+  computeDetailPageStats,
   computeSessionStats,
   computeSessionVolume,
   formatDurationHHMM,
+  formatSessionDuration,
+  formatVolumeShort,
+  type SessionStatsSetInput,
   type SessionVolumeInput,
 } from '../../src/domain/session/sessionStats';
 
 /**
- * Session-level stats for the history detail page header tiles
- * (ADR-0019 Q10, slice 10c session detail page).
+ * Merged from two parallel overnight branches (slice 10c):
+ *   - Agent A: detail page 4-tile stats (ADR-0019 Q10)
+ *   - Agent C: in-session 3-tile stats panel (ADR-0019 Q6)
  *
- * Covers:
- *  - 容量 (volume) — warmup excluded, is_logged=1 filter
- *  - asymmetric cluster handling
- *  - empty session, single-set session
- *  - HH:mm duration formatter
- *  - composite computeSessionStats
+ * Both share underlying `computeSessionVolume`. Separate format helpers.
  */
 
 function mk(
@@ -26,7 +26,18 @@ function mk(
   return { set_kind, is_logged, weight_kg, reps };
 }
 
-describe('computeSessionVolume', () => {
+function s(
+  set_kind: 'warmup' | 'working' | 'dropset',
+  is_logged: 0 | 1,
+  weight_kg: number | null = 60,
+  reps: number | null = 10,
+): SessionStatsSetInput {
+  return { set_kind, is_logged, weight_kg, reps };
+}
+
+// ── Shared volume function ────────────────────────────────────────────────────
+
+describe('computeSessionVolume (shared)', () => {
   it('empty session → 0 volume', () => {
     expect(computeSessionVolume([])).toBe(0);
   });
@@ -60,10 +71,6 @@ describe('computeSessionVolume', () => {
   });
 
   it('asymmetric cluster: A side 4 cycles logged, B side 3 cycles logged', () => {
-    // Cluster pairs are stored as two separate session_exercise rows whose
-    // sets are linked via parent_set_id. From the volume POV each row's set
-    // contributes its own weight×reps; asymmetric just means one side has
-    // fewer logged rows than the other.
     const setsA: SessionVolumeInput[] = [
       mk('working', 1, 80, 5),
       mk('working', 1, 80, 5),
@@ -90,40 +97,101 @@ describe('computeSessionVolume', () => {
   });
 });
 
-describe('formatDurationHHMM', () => {
-  it('zero ms → 00:00', () => {
-    expect(formatDurationHHMM(0)).toBe('00:00');
+// ── In-session stats panel (Agent C, Q6) ──────────────────────────────────────
+
+describe('computeSessionStats (in-session 3-tile)', () => {
+  it('empty session → zeros except duration', () => {
+    const out = computeSessionStats({
+      sets: [],
+      exercise_count: 0,
+      started_at_ms: 0,
+      now_ms: 60_000,
+    });
+    expect(out).toEqual({
+      duration_ms: 60_000,
+      volume_kg: 0,
+      exercise_count: 0,
+    });
   });
 
-  it('1 hour 13 min → 01:13', () => {
-    expect(formatDurationHHMM((3600 + 13 * 60) * 1000)).toBe('01:13');
+  it('logged working sets contribute to volume', () => {
+    const out = computeSessionStats({
+      sets: [s('working', 1, 60, 10), s('working', 1, 70, 8)],
+      exercise_count: 1,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.volume_kg).toBe(60 * 10 + 70 * 8);
   });
 
-  it('rolls past 24h without wrapping', () => {
-    // 48h 5min — open-ended in-progress session left for 2 days
-    expect(formatDurationHHMM((48 * 3600 + 5 * 60) * 1000)).toBe('48:05');
+  it('warmup excluded from volume even when is_logged=1', () => {
+    const out = computeSessionStats({
+      sets: [s('warmup', 1, 40, 12), s('working', 1, 60, 10)],
+      exercise_count: 1,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.volume_kg).toBe(600);
   });
 
-  it('null / undefined → 00:00 (defensive)', () => {
-    expect(formatDurationHHMM(null)).toBe('00:00');
-    expect(formatDurationHHMM(undefined)).toBe('00:00');
+  it('non-logged sets excluded from volume', () => {
+    const out = computeSessionStats({
+      sets: [s('working', 0, 80, 5), s('working', 1, 60, 10)],
+      exercise_count: 1,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.volume_kg).toBe(600);
   });
 
-  it('negative duration → 00:00 (defensive)', () => {
-    expect(formatDurationHHMM(-1000)).toBe('00:00');
+  it('dropset logged contributes to volume (non-warmup)', () => {
+    const out = computeSessionStats({
+      sets: [s('working', 1, 60, 10), s('dropset', 1, 45, 8)],
+      exercise_count: 1,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.volume_kg).toBe(60 * 10 + 45 * 8);
   });
 
-  it('seconds are truncated (no rounding up)', () => {
-    // 5min 59.9s should show 05 minutes still
-    expect(formatDurationHHMM(5 * 60 * 1000 + 59_900)).toBe('00:05');
+  it('null reps / weight treated as 0', () => {
+    const out = computeSessionStats({
+      sets: [s('working', 1, null, 10), s('working', 1, 60, null)],
+      exercise_count: 1,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.volume_kg).toBe(0);
+  });
+
+  it('duration_ms clamps to 0 on clock skew (now < start)', () => {
+    const out = computeSessionStats({
+      sets: [],
+      exercise_count: 0,
+      started_at_ms: 100,
+      now_ms: 50,
+    });
+    expect(out.duration_ms).toBe(0);
+  });
+
+  it('exercise_count passes through verbatim', () => {
+    const out = computeSessionStats({
+      sets: [],
+      exercise_count: 5,
+      started_at_ms: 0,
+      now_ms: 0,
+    });
+    expect(out.exercise_count).toBe(5);
   });
 });
 
-describe('computeSessionStats', () => {
+// ── Detail page stats (Agent A, Q10) ──────────────────────────────────────────
+
+describe('computeDetailPageStats (detail page 4-tile)', () => {
   it('ended session: duration = ended_at - started_at; volume reflects sets; kcal passthrough', () => {
     const started_at = 1_700_000_000_000;
-    const ended_at = started_at + (1 * 3600 + 13 * 60) * 1000; // 1h13
-    const stats = computeSessionStats({
+    const ended_at = started_at + (1 * 3600 + 13 * 60) * 1000;
+    const stats = computeDetailPageStats({
       session: { started_at, ended_at, kcal: 350 },
       exerciseCount: 3,
       sets: [
@@ -141,7 +209,7 @@ describe('computeSessionStats', () => {
   it('open session: duration measured against now()', () => {
     const started_at = 1_700_000_000_000;
     const nowTs = started_at + 5 * 60 * 1000;
-    const stats = computeSessionStats({
+    const stats = computeDetailPageStats({
       session: { started_at, ended_at: null, kcal: null },
       exerciseCount: 0,
       sets: [],
@@ -153,8 +221,7 @@ describe('computeSessionStats', () => {
   });
 
   it('empty session: volume 0, exerciseCount 0, durationMs floored to 0 when ended_at < started_at', () => {
-    // Defensive: caller passes bad data — clamp to 0 rather than emit negative.
-    const stats = computeSessionStats({
+    const stats = computeDetailPageStats({
       session: { started_at: 2000, ended_at: 1000, kcal: null },
       exerciseCount: 0,
       sets: [],
@@ -163,5 +230,77 @@ describe('computeSessionStats', () => {
     expect(stats.volume).toBe(0);
     expect(stats.exerciseCount).toBe(0);
     expect(stats.kcal).toBeNull();
+  });
+});
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+
+describe('formatDurationHHMM (detail page)', () => {
+  it('zero ms → 00:00', () => {
+    expect(formatDurationHHMM(0)).toBe('00:00');
+  });
+
+  it('1 hour 13 min → 01:13', () => {
+    expect(formatDurationHHMM((3600 + 13 * 60) * 1000)).toBe('01:13');
+  });
+
+  it('rolls past 24h without wrapping', () => {
+    expect(formatDurationHHMM((48 * 3600 + 5 * 60) * 1000)).toBe('48:05');
+  });
+
+  it('null / undefined → 00:00 (defensive)', () => {
+    expect(formatDurationHHMM(null)).toBe('00:00');
+    expect(formatDurationHHMM(undefined)).toBe('00:00');
+  });
+
+  it('negative duration → 00:00 (defensive)', () => {
+    expect(formatDurationHHMM(-1000)).toBe('00:00');
+  });
+
+  it('seconds are truncated (no rounding up)', () => {
+    expect(formatDurationHHMM(5 * 60 * 1000 + 59_900)).toBe('00:05');
+  });
+});
+
+describe('formatSessionDuration (in-session)', () => {
+  it('< 1 minute → 00:SS', () => {
+    expect(formatSessionDuration(30_000)).toBe('00:30');
+  });
+
+  it('< 1h → MM:SS', () => {
+    expect(formatSessionDuration(42 * 60_000 + 7_000)).toBe('42:07');
+  });
+
+  it('exactly 1h → 1:00', () => {
+    expect(formatSessionDuration(60 * 60_000)).toBe('1:00');
+  });
+
+  it('1h 23min → 1:23 (seconds dropped over 1h)', () => {
+    expect(formatSessionDuration(60 * 60_000 + 23 * 60_000 + 45_000)).toBe(
+      '1:23',
+    );
+  });
+
+  it('0 → 00:00', () => {
+    expect(formatSessionDuration(0)).toBe('00:00');
+  });
+
+  it('negative clamps to 00:00', () => {
+    expect(formatSessionDuration(-100)).toBe('00:00');
+  });
+});
+
+describe('formatVolumeShort', () => {
+  it('zero → "0"', () => {
+    expect(formatVolumeShort(0)).toBe('0');
+  });
+
+  it('< 1000 rounds to int', () => {
+    expect(formatVolumeShort(425.7)).toBe('426');
+  });
+
+  it('>= 1000 shows 1 decimal k', () => {
+    expect(formatVolumeShort(1234)).toBe('1.2k');
+    expect(formatVolumeShort(12_500)).toBe('12.5k');
   });
 });

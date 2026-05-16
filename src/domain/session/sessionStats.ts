@@ -1,33 +1,25 @@
 /**
- * Session-level stats for the history detail page header tiles
- * (ADR-0019 Q10, slice 10c session detail page).
+ * Session stats — pure computation for two distinct UI contexts.
  *
- * The 4-tile row on the session detail page shows:
- *   訓練時間 — duration from started_at → ended_at, format `HH:mm`
- *   容量    — Σ weight × reps over is_logged=1 AND set_kind != 'warmup'
- *   動作數  — count of distinct session_exercise rows
- *   大卡    — HealthKit kcal column (v016); null → '—'
+ * MERGED from two parallel overnight branches (slice 10c):
+ *   - Agent A: detail page 4-tile stats (ADR-0019 Q10) — `computeDetailPageStats`
+ *   - Agent C: in-session 3-tile stats panel (ADR-0019 Q6) — `computeSessionStats`
  *
- * Mirrors the per-exercise progress helper (`exerciseProgress.ts`):
- *   pure functions over input arrays, no DB, no React; the UI calls these
- *   with already-loaded rows so the same logic round-trips through tests.
+ * Both share the same underlying volume formula (Q15.5 翻盤 ledger):
+ *   Σ weight_kg × reps WHERE is_logged=1 AND set_kind != 'warmup'
  *
- * Warmup exclusion uses the v015 `set.set_kind` column (warmup / working /
- * dropset). Sets with kind='warmup' are PREP, not real volume, per
- * ADR-0019 Q4 / Q15.5 翻盤 ledger entry on 容量 公式.
+ * Warmup excluded (PREP only). Dropset is_logged=1 DOES contribute (non-warmup).
+ * Asymmetric cluster handled naturally — each side's rows iterate independently.
  *
- * is_logged filter: only completed sets (tap-✓ flipped is_logged to 1)
- * contribute to 容量 — matches ADR-0019 Q15.5「Σ working/non-warmup
- * (is_logged=1)」.
- *
- * Asymmetric cluster handling: a cluster row pair (A side / B side) lives
- * as two separate `set` rows linked via `session_exercise.parent_id`; the
- * volume helper treats them identically (each side contributes its own
- * weight×reps). Asymmetric = unequal number of completed cycles on each
- * side, which is handled naturally by per-row iteration.
+ * Two format helpers coexist because the two UIs want different cadence:
+ *   - `formatDurationHHMM(ms)` → `HH:mm`        (Agent A — detail page, ended session)
+ *   - `formatSessionDuration(ms)` → `MM:SS` or `H:MM` (Agent C — in-session live tile)
+ * `formatVolumeShort(kg)` → `0`/`426`/`1.2k`/`12.5k` (Agent C — bounded tile width)
  */
 
 import type { SetKind } from '../set/setLabels';
+
+// ── Shared volume input ───────────────────────────────────────────────────────
 
 export interface SessionVolumeInput {
   set_kind: SetKind;
@@ -35,6 +27,9 @@ export interface SessionVolumeInput {
   weight_kg: number | null;
   reps: number | null;
 }
+
+/** Alias retained for Agent C call-site compatibility. */
+export type SessionStatsSetInput = SessionVolumeInput;
 
 /**
  * Σ weight × reps over `is_logged=1 AND set_kind != 'warmup'` rows.
@@ -52,20 +47,35 @@ export function computeSessionVolume(sets: SessionVolumeInput[]): number {
   return total;
 }
 
-/**
- * Format a millisecond duration as `HH:mm`. Negative or non-finite input
- * returns `00:00`. Hours roll past 24 (e.g. an open in-progress session
- * left for two days would show e.g. `48:13` rather than wrap).
- */
-export function formatDurationHHMM(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return '00:00';
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+// ── In-session 3-tile stats panel (Agent C, ADR-0019 Q6) ──────────────────────
+
+export interface SessionStats {
+  /** Wall-clock duration since session.started_at (ms). */
+  duration_ms: number;
+  /** Σ weight × reps for is_logged=1, non-warmup sets (kg). */
+  volume_kg: number;
+  /** Count of session_exercise rows (incl. cluster members, ad-hoc). */
+  exercise_count: number;
 }
 
-export interface SessionStatsInput {
+export function computeSessionStats(args: {
+  sets: SessionStatsSetInput[];
+  exercise_count: number;
+  started_at_ms: number;
+  now_ms: number;
+}): SessionStats {
+  const volume_kg = computeSessionVolume(args.sets);
+  const duration_ms = Math.max(0, args.now_ms - args.started_at_ms);
+  return {
+    duration_ms,
+    volume_kg,
+    exercise_count: args.exercise_count,
+  };
+}
+
+// ── Detail page 4-tile stats (Agent A, ADR-0019 Q10) ──────────────────────────
+
+export interface DetailPageStatsInput {
   session: {
     started_at: number;
     ended_at: number | null;
@@ -79,7 +89,7 @@ export interface SessionStatsInput {
   now?: () => number;
 }
 
-export interface SessionStats {
+export interface DetailPageStats {
   /** Total session duration in ms (started_at → ended_at, or → now if open). */
   durationMs: number;
   /** Volume — Σ weight×reps over logged non-warmup sets. */
@@ -90,7 +100,7 @@ export interface SessionStats {
   kcal: number | null;
 }
 
-export function computeSessionStats(input: SessionStatsInput): SessionStats {
+export function computeDetailPageStats(input: DetailPageStatsInput): DetailPageStats {
   const endTs = input.session.ended_at ?? (input.now ?? Date.now)();
   const durationMs = Math.max(0, endTs - input.session.started_at);
   return {
@@ -99,4 +109,48 @@ export function computeSessionStats(input: SessionStatsInput): SessionStats {
     exerciseCount: input.exerciseCount,
     kcal: input.session.kcal,
   };
+}
+
+// ── Format helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Format a millisecond duration as `HH:mm`. Negative or non-finite input
+ * returns `00:00`. Hours roll past 24 (e.g. an open in-progress session
+ * left for two days would show e.g. `48:13` rather than wrap).
+ * Used by detail page (Agent A).
+ */
+export function formatDurationHHMM(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Format a duration as `H:MM` or `MM:SS` for the in-session stats panel tile.
+ *   - < 1h → `MM:SS` (e.g. `42:30`)
+ *   - >= 1h → `H:MM` (e.g. `1:23` — minutes always zero-padded)
+ * Used by in-session stats panel (Agent C).
+ */
+export function formatSessionDuration(duration_ms: number): string {
+  const totalSec = Math.max(0, Math.floor(duration_ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}`;
+  }
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Format volume for the tile. Shortens to k for >= 1000 (e.g. `4.2k`,
+ * `12.5k`) so the tile width stays bounded for high-volume sessions.
+ * Used by in-session stats panel (Agent C).
+ */
+export function formatVolumeShort(volume_kg: number): string {
+  if (volume_kg <= 0) return '0';
+  if (volume_kg >= 1000) return `${(volume_kg / 1000).toFixed(1)}k`;
+  return String(Math.round(volume_kg));
 }
