@@ -51,6 +51,7 @@ import {
   addClusterCycleAtEnd,
   cloneClusterCycle,
   deleteClusterCycle,
+  insertSessionSetAfter,
   markClusterCycleLogged,
   markClusterCycleUnlogged,
   recordSetInSession,
@@ -672,9 +673,12 @@ export default function TodayScreen() {
     const repsNum = source?.reps ?? 0;
     setBusy(true);
     try {
-      const result = await recordSetInSession(db, {
+      // Use insertSessionSetAfter so the new row lands DIRECTLY below the
+      // swiped row (not at end of session). Repo func handles the ordering
+      // shift + mirrors source's set_kind / weight / reps automatically.
+      const result = await insertSessionSetAfter(db, {
         session_id,
-        input: { exercise_id, weight_kg, reps: repsNum },
+        source_set_id,
         uuid: randomUUID,
       });
       const sets = await listSetsBySession(db, session_id);

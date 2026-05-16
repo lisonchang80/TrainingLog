@@ -475,6 +475,83 @@ export async function recordSetInSession(
 }
 
 /**
+ * Insert a new set immediately AFTER the given source set, preserving the
+ * source's exercise / weight / reps / set_kind (slice 10c Phase 2 — fix
+ * right-swipe `+1` action so the new row appears directly under the swiped
+ * row instead of jumping to the bottom of the session list).
+ *
+ * Implementation: shift all `set` rows in this session with
+ * `ordering >= source.ordering + 1` by +1, then INSERT at the freed slot.
+ * Whole operation in a transaction so partial shifts can't leave gaps.
+ *
+ * `set.ordering` is global per session (not per exercise), so the shift
+ * also bumps OTHER exercises' sets that happen to live after source —
+ * but their relative order to each other is preserved, so users don't
+ * see anything weird in their respective cards.
+ *
+ * Inherits `parent_set_id` = NULL by default (right-swipe +1 always
+ * creates a sibling, not a dropset follower). Caller can wrap a follow-up
+ * `updateSetFields` if they need to convert it later.
+ */
+export async function insertSessionSetAfter(
+  db: Database,
+  args: {
+    session_id: string;
+    source_set_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ set_id: string; ordering: number; created_at: number }> {
+  const src = await db.getFirstAsync<{
+    exercise_id: string;
+    ordering: number;
+    weight_kg: number | null;
+    reps: number | null;
+    set_kind: SetKind;
+  }>(
+    `SELECT exercise_id, ordering, weight_kg, reps, set_kind
+       FROM "set" WHERE id = ? AND session_id = ?`,
+    args.source_set_id,
+    args.session_id
+  );
+  if (!src) {
+    throw new Error(
+      `insertSessionSetAfter: source set "${args.source_set_id}" not found in session "${args.session_id}"`
+    );
+  }
+
+  const new_set_id = args.uuid();
+  const now = args.now ?? Date.now;
+  const ts = now();
+  const new_ordering = src.ordering + 1;
+
+  await db.withTransactionAsync(async () => {
+    // Shift everything from new_ordering onwards down by 1 to free the slot.
+    await db.runAsync(
+      `UPDATE "set" SET ordering = ordering + 1
+        WHERE session_id = ? AND ordering >= ?`,
+      args.session_id,
+      new_ordering
+    );
+    // Insert at the freed slot, mirroring source's exercise / kind / values.
+    await insertSessionSet(db, {
+      id: new_set_id,
+      session_id: args.session_id,
+      exercise_id: src.exercise_id,
+      weight_kg: src.weight_kg ?? 0,
+      reps: src.reps ?? 0,
+      is_skipped: 0,
+      ordering: new_ordering,
+      created_at: ts,
+      set_kind: src.set_kind,
+      parent_set_id: null,
+    });
+  });
+
+  return { set_id: new_set_id, ordering: new_ordering, created_at: ts };
+}
+
+/**
  * Reorder sets WITHIN a single (session, exercise) without disturbing other
  * exercises' set orderings (slice 10c Phase 2 commit 9 留尾 — set-row long-press
  * reorder modal, mirrored from `reorderSessionExercises` in sessionRepository).
