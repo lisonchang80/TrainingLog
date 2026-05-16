@@ -46,6 +46,11 @@ import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
+import {
+  computePRSnapshot,
+  type PRSnapshot,
+} from '@/src/domain/pr/prQuery';
+import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
@@ -131,6 +136,15 @@ export default function TodayScreen() {
     field: 'reps' | 'weight';
     current: number;
   } | null>(null);
+  /**
+   * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
+   * computed once on refresh from listExerciseHistorySets (cross-session).
+   * Stays static during the session — newly recorded PRs surface via the
+   * existing PR banner (lastPRDelta), this map is the "已知 PR" baseline.
+   */
+  const [prSnapshotById, setPrSnapshotById] = useState<
+    Record<string, PRSnapshot>
+  >({});
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms] = await Promise.all([
@@ -159,10 +173,24 @@ export default function TodayScreen() {
       setSetsInSession(sets);
       setPlan(planned);
       setBwSnapshotKg(active.bodyweight_snapshot_kg ?? null);
+      // Fetch all-time history for each planned exercise + compute its PR
+      // snapshot once per refresh. Per-exercise queries — cheap given the
+      // typical session has <10 planned exercises.
+      const prMap: Record<string, PRSnapshot> = {};
+      await Promise.all(
+        planned.map(async (p) => {
+          const history = await listExerciseHistorySets(db, p.exercise_id);
+          prMap[p.exercise_id] = computePRSnapshot(
+            history.map((h) => ({ weight_kg: h.weight_kg, reps: h.reps })),
+          );
+        }),
+      );
+      setPrSnapshotById(prMap);
     } else {
       setSetsInSession([]);
       setPlan([]);
       setBwSnapshotKg(null);
+      setPrSnapshotById({});
     }
   }, [db]);
 
@@ -878,6 +906,7 @@ export default function TodayScreen() {
                       onTapNumber={(set_id, field, current) =>
                         setKeypadTarget({ set_id, field, current })
                       }
+                      prSnapshot={prSnapshotById[p.exercise_id] ?? null}
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -1044,6 +1073,7 @@ function ExerciseCard({
   onToggleLogged,
   onShowSetNote,
   onTapNumber,
+  prSnapshot,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -1069,6 +1099,7 @@ function ExerciseCard({
     field: 'reps' | 'weight',
     current: number,
   ) => void;
+  prSnapshot: PRSnapshot | null;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
@@ -1142,6 +1173,34 @@ function ExerciseCard({
           <Text style={styles.exerciseCardGearText}>⚙️</Text>
         </Pressable>
       </View>
+      {prSnapshot &&
+      (prSnapshot.weightPRs.length > 0 || prSnapshot.volumePR !== null) ? (
+        <View style={styles.exerciseCardPRLine}>
+          {prSnapshot.weightPRs.length > 0 ? (
+            <Text style={styles.exerciseCardPRText}>
+              🏆 PR:{' '}
+              {prSnapshot.weightPRs.map((pr, idx) => (
+                <Text key={idx}>
+                  {idx > 0 ? '  ' : ''}
+                  <Text style={styles.exerciseCardPREmphasis}>
+                    {pr.weight_kg}
+                  </Text>
+                  <Text> × </Text>
+                  <Text style={styles.exerciseCardPREmphasis}>{pr.reps}</Text>
+                </Text>
+              ))}
+            </Text>
+          ) : null}
+          {prSnapshot.volumePR !== null ? (
+            <Text style={styles.exerciseCardPRText}>
+              整體容量 PR:{' '}
+              <Text style={styles.exerciseCardPREmphasis}>
+                {Math.round(prSnapshot.volumePR)}
+              </Text>
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
           {sets.length === 0 ? (
@@ -1386,6 +1445,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     opacity: 0.55,
     marginTop: 2,
+  },
+  exerciseCardPRLine: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 2,
+  },
+  exerciseCardPRText: {
+    fontSize: 12,
+    color: '#b35900',
+  },
+  exerciseCardPREmphasis: {
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+    color: '#b35900',
   },
   exerciseCardBody: {
     paddingHorizontal: 12,
