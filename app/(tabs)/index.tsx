@@ -62,6 +62,7 @@ import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-she
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
+import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import {
   computePRSnapshot,
   type PRSnapshot,
@@ -1202,6 +1203,19 @@ export default function TodayScreen() {
         </View>
         <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
           {programBanner}
+          {/* ADR-0019 Q6 — in-session 3-tile stats panel (P1 position) */}
+          {sessionState.status === 'in_progress' ? (
+            <SessionStatsPanel
+              sets={setsInSession.map((s) => ({
+                set_kind: s.set_kind,
+                is_logged: s.is_logged,
+                reps: s.reps,
+                weight_kg: s.weight_kg,
+              }))}
+              exercise_count={plan.length}
+              started_at_ms={sessionState.started_at}
+            />
+          ) : null}
           <Text style={styles.subhead}>
             Session in progress · {setsInSession.length} set
             {setsInSession.length === 1 ? '' : 's'}
