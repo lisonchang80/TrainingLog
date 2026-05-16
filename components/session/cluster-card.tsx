@@ -197,9 +197,10 @@ export function ClusterCard({
                 <Text style={styles.clusterPlus}> + </Text>
                 {group.b.exercise.exercise_name}
               </Text>
-              {totalCycles > 0 ? (
+              {volume.denominator > 0 ? (
                 <Text style={styles.clusterVolumeChip}>
-                  {completedCycles}/{totalCycles}
+                  {Math.round(volume.numerator)}/
+                  {Math.round(volume.denominator)}
                 </Text>
               ) : null}
             </View>
@@ -227,26 +228,11 @@ export function ClusterCard({
         </Pressable>
       </View>
       {/*
-        容量 (volume) row — visible both COLLAPSED and EXPANDED, sitting under
-        the header (mirrors solo card's `exerciseCardPRLine`). Per user
-        overnight 第 8 點: cluster collapsed should keep header + chip +
-        progress bar + 容量/PR row 視覺節奏 — only the cycle list collapses.
+        容量 row 砍除（overnight #3 第 2 點）— header chip 已表達 done/total
+        kg·reps，第二行重複資訊；solo card 第二行是 PR row（重量/容量 PR），
+        cluster 沒有 RS-level PR 概念所以直接不渲染第二行。cycle 進度由
+        progress bar 表達。
       */}
-      {volume.denominator > 0 ? (
-        <View style={styles.clusterPRLine}>
-          <Text style={styles.clusterPRText}>
-            容量{' '}
-            <Text style={styles.clusterPREmphasis}>
-              {Math.round(volume.numerator)}
-            </Text>
-            {' / '}
-            <Text style={styles.clusterPREmphasis}>
-              {Math.round(volume.denominator)}
-            </Text>
-            {' kg·reps'}
-          </Text>
-        </View>
-      ) : null}
 
       {isExpanded ? (
         <View style={styles.clusterBody}>
@@ -636,21 +622,6 @@ const styles = StyleSheet.create({
   clusterProgressBar: {
     marginTop: 4,
     width: '100%',
-  },
-  // 容量 line under header — mirrors solo card's `exerciseCardPRLine` (point 8).
-  clusterPRLine: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-    gap: 2,
-  },
-  clusterPRText: {
-    fontSize: 12,
-    color: '#b35900',
-  },
-  clusterPREmphasis: {
-    fontWeight: '700',
-    textDecorationLine: 'underline',
-    color: '#b35900',
   },
   clusterBody: {
     paddingHorizontal: 12,
