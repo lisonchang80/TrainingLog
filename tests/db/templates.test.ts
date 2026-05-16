@@ -291,4 +291,73 @@ describe('Template + snapshot isolation (slice 3)', () => {
     expect(await listSessionExercisesWithName(db, session_id)).toEqual([]);
     expect((await getSession(db, session_id))?.started_at).toBe(1_000);
   });
+
+  // Slice 10b — schema bridge integration test. Verifies the full pipeline:
+  // template_exercise.rest_seconds (legacy column) → templateRepository read
+  // → snapshotForSession copy → session_exercise.rest_sec (new column).
+  it('startSessionFromTemplate carries rest_sec from template (legacy rest_seconds column)', async () => {
+    const exercises = await listExercises(db);
+    const bench = exercises.find((e) => e.name === 'Bench Press')!;
+    const squat = exercises.find((e) => e.name === 'Back Squat')!;
+
+    let n = 0;
+    const uuid = () => `id-${++n}`;
+
+    await createTemplate(db, { id: 'tpl-rest', name: 'Rest test', now: () => 100 });
+    const { id: benchTeId } = await addTemplateExercise(db, {
+      template_id: 'tpl-rest',
+      exercise_id: bench.id,
+      default_sets: 3,
+      default_reps: 5,
+      default_weight_kg: 80,
+      uuid,
+      now: () => 100,
+    });
+    const { id: squatTeId } = await addTemplateExercise(db, {
+      template_id: 'tpl-rest',
+      exercise_id: squat.id,
+      default_sets: 3,
+      default_reps: 5,
+      default_weight_kg: 100,
+      uuid,
+      now: () => 100,
+    });
+
+    // Set rest_seconds (legacy column) on the template rows directly. In
+    // production this happens via the template editor's saveTemplateDraft
+    // path; we shortcut here so the test focuses on the read/snapshot/
+    // persist pipeline.
+    await db.runAsync(
+      `UPDATE template_exercise SET rest_seconds = ? WHERE id = ?`,
+      90,
+      benchTeId,
+    );
+    await db.runAsync(
+      `UPDATE template_exercise SET rest_seconds = ? WHERE id = ?`,
+      null,
+      squatTeId,
+    );
+
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-rest',
+      uuid,
+      now: () => 1_000,
+    });
+
+    const planned = await db.getAllAsync<{
+      exercise_id: string;
+      rest_sec: number | null;
+    }>(
+      `SELECT exercise_id, rest_sec FROM session_exercise
+        WHERE session_id = ? ORDER BY ordering ASC`,
+      session_id,
+    );
+    expect(planned).toHaveLength(2);
+    // bench had rest_seconds=90 → session_exercise.rest_sec=90
+    expect(planned[0]?.exercise_id).toBe(bench.id);
+    expect(planned[0]?.rest_sec).toBe(90);
+    // squat had rest_seconds=NULL → session_exercise.rest_sec=NULL (no coalesce)
+    expect(planned[1]?.exercise_id).toBe(squat.id);
+    expect(planned[1]?.rest_sec).toBeNull();
+  });
 });
