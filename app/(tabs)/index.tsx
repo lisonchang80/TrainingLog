@@ -42,6 +42,7 @@ import {
   type SetRowItem,
 } from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
+import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
@@ -118,6 +119,9 @@ export default function TodayScreen() {
   const [inlineSmmInput, setInlineSmmInput] = useState('');
   const [lastPRDelta, setLastPRDelta] = useState<PRDelta | null>(null);
   const [lastPRExerciseName, setLastPRExerciseName] = useState<string>('');
+  /** Per-set notes editor sheet — `null` means closed. */
+  const [noteSheetTarget, setNoteSheetTarget] =
+    useState<{ set_id: string; initial: string | null } | null>(null);
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms] = await Promise.all([
@@ -562,6 +566,24 @@ export default function TodayScreen() {
     }
   };
 
+  /**
+   * Persist a notes patch (from SetNoteSheet confirm). Empty / whitespace
+   * are coerced to NULL upstream by the sheet so the 📝 indicator hides
+   * cleanly when the user clears the field.
+   */
+  const onUpdateNotes = async (set_id: string, notes: string | null) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await updateSetFields(db, set_id, { notes });
+      setSetsInSession((curr) =>
+        curr.map((s) => (s.id === set_id ? { ...s, notes } : s)),
+      );
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
@@ -841,6 +863,9 @@ export default function TodayScreen() {
                         onAddSetAfter(p.exercise_id, set_id)
                       }
                       onToggleLogged={onToggleLogged}
+                      onShowSetNote={(set_id, current) =>
+                        setNoteSheetTarget({ set_id, initial: current })
+                      }
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -913,6 +938,15 @@ export default function TodayScreen() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+      <SetNoteSheet
+        visible={noteSheetTarget !== null}
+        initialValue={noteSheetTarget?.initial ?? null}
+        onConfirm={(notes) => {
+          if (noteSheetTarget) onUpdateNotes(noteSheetTarget.set_id, notes);
+          setNoteSheetTarget(null);
+        }}
+        onCancel={() => setNoteSheetTarget(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -979,6 +1013,7 @@ function ExerciseCard({
   onDeleteSet,
   onAddSetAfter,
   onToggleLogged,
+  onShowSetNote,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -998,6 +1033,7 @@ function ExerciseCard({
   onDeleteSet: (set_id: string) => void;
   onAddSetAfter: (set_id: string) => void;
   onToggleLogged: (set_id: string, currentlyLogged: boolean) => void;
+  onShowSetNote: (set_id: string, currentNotes: string | null) => void;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
@@ -1060,7 +1096,7 @@ function ExerciseCard({
                 id: s.id,
                 reps: s.reps ?? 0,
                 weight: s.weight_kg ?? 0,
-                notes: null,
+                notes: s.notes,
               };
               const isDropsetFollower =
                 s.set_kind === 'dropset' && s.parent_set_id !== null;
@@ -1098,6 +1134,12 @@ function ExerciseCard({
                       color: '#28a745',
                       onPress: () => onAddSetAfter(s.id),
                     },
+                    {
+                      key: 'note',
+                      label: '備註',
+                      color: '#007AFF',
+                      onPress: () => onShowSetNote(s.id, s.notes),
+                    },
                   ]}
                 >
                   <View style={styles.exerciseCardSetRowWrapper}>
@@ -1128,12 +1170,12 @@ function ExerciseCard({
                         isDropsetFollower={isDropsetFollower}
                         isClusterLast={false}
                         minusDisabled={true}
-                        hideNoteIndicator={true}
+                        hideNoteIndicator={false}
                         onUpdateSet={(set_id, patch) =>
                           onUpdateSet(set_id, patch)
                         }
-                        onShowSetNote={() =>
-                          notImplementedAlert('📝 set 備註')
+                        onShowSetNote={(target) =>
+                          onShowSetNote(target.id, target.notes)
                         }
                         onRemoveDropsetRow={() =>
                           notImplementedAlert('− 移除 dropset 一列')

@@ -99,6 +99,7 @@ export interface SessionSetWithExercise extends SetWithExercise {
   set_kind: SetKind;
   parent_set_id: string | null;
   is_logged: number; // 0/1
+  notes: string | null;
 }
 
 export async function listAllSetsWithExercise(
@@ -126,7 +127,7 @@ export async function listSetsBySession(
   return db.getAllAsync<SessionSetWithExercise>(
     `SELECT s.id, s.session_id, s.exercise_id, s.weight_kg, s.reps,
             s.is_skipped, s.ordering, s.created_at,
-            s.set_kind, s.parent_set_id, s.is_logged,
+            s.set_kind, s.parent_set_id, s.is_logged, s.notes,
             e.name AS exercise_name
        FROM "set" s
        JOIN exercise e ON e.id = s.exercise_id
@@ -155,6 +156,7 @@ export async function updateSetFields(
     set_kind?: SetKind;
     parent_set_id?: string | null;
     is_logged?: number;
+    notes?: string | null;
   }
 ): Promise<void> {
   const cols: string[] = [];
@@ -178,6 +180,10 @@ export async function updateSetFields(
   if (patch.is_logged !== undefined) {
     cols.push('is_logged = ?');
     vals.push(patch.is_logged);
+  }
+  if (patch.notes !== undefined) {
+    cols.push('notes = ?');
+    vals.push(patch.notes);
   }
   if (cols.length === 0) return; // nothing to update
   vals.push(set_id);

@@ -16,6 +16,7 @@ import { v014_session_exercise_cluster } from './schema/v014_session_exercise_cl
 import { v015_set_kind_and_clusters } from './schema/v015_set_kind_and_clusters';
 import { v016_session_runtime_data } from './schema/v016_session_runtime_data';
 import { v017_program_none_seed } from './schema/v017_program_none_seed';
+import { v018_set_notes } from './schema/v018_set_notes';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -47,6 +48,7 @@ const migrations: Record<number, MigrationFn> = {
   15: v015_set_kind_and_clusters,
   16: v016_session_runtime_data,
   17: v017_program_none_seed,
+  18: v018_set_notes,
 };
 
 export async function migrate(db: Database): Promise<void> {
