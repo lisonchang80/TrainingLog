@@ -30,6 +30,8 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
+  deleteSet,
+  insertSessionSet,
   listSetsBySession,
   recordSetInSession,
   updateSetFields,
@@ -40,6 +42,7 @@ import {
   type SetRowItem,
 } from '@/components/shared/set-row-content';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
+import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import {
   latestPerMetric,
@@ -384,6 +387,74 @@ export default function TodayScreen() {
     }
   };
 
+  /**
+   * Apply a tap-label cycle (warmup ↔ working ↔ dropset) to one set
+   * within one exercise. Slice 10c Phase 2 commit 7a: pure
+   * `cycleSessionSetKind` emits the DB op list; this handler walks the
+   * ops and issues the corresponding repo calls in sequence, then
+   * refreshes `setsInSession`.
+   *
+   * No transaction wrapping yet — a partial failure mid-list would leave
+   * an inconsistent kind/follower state, but the user can re-tap to
+   * re-converge. Wrapping in a transaction is a future hardening (would
+   * require pushing the op application down into the repo).
+   */
+  const onCycleSetKind = async (exercise_id: string, set_id: string) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    const setsForExercise = setsInSession.filter(
+      (s) => s.exercise_id === exercise_id,
+    );
+    const ops = cycleSessionSetKind(
+      setsForExercise.map((s) => ({
+        id: s.id,
+        set_kind: s.set_kind,
+        parent_set_id: s.parent_set_id,
+        reps: s.reps,
+        weight_kg: s.weight_kg,
+      })),
+      set_id,
+      randomUUID(),
+    );
+    if (ops.length === 0) return;
+    try {
+      // Compute the ordering for any insertFollower op once, up front, by
+      // grabbing the current max ordering. Same trick recordSetInSession
+      // uses — we don't expect concurrent writes in the same session.
+      const maxOrdering = setsInSession.reduce(
+        (m, s) => Math.max(m, s.ordering),
+        0,
+      );
+      let appendOffset = 1;
+      for (const op of ops) {
+        if (op.type === 'update') {
+          await updateSetFields(db, op.set_id, op.patch);
+        } else if (op.type === 'delete') {
+          await deleteSet(db, op.set_id);
+        } else {
+          // insertFollower
+          await insertSessionSet(db, {
+            id: op.new_set_id,
+            session_id,
+            exercise_id,
+            weight_kg: op.weight_kg,
+            reps: op.reps,
+            is_skipped: 0,
+            ordering: maxOrdering + appendOffset,
+            created_at: Date.now(),
+            set_kind: 'dropset',
+            parent_set_id: op.parent_set_id,
+          });
+          appendOffset += 1;
+        }
+      }
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
@@ -650,6 +721,9 @@ export default function TodayScreen() {
                       }
                       onAddSet={() => onAddSet(p.exercise_id)}
                       onUpdateSet={onUpdateSet}
+                      onCycleSetKind={(set_id) =>
+                        onCycleSetKind(p.exercise_id, set_id)
+                      }
                       onOpenHistory={() =>
                         router.push(`/exercise-history/${p.exercise_id}`)
                       }
@@ -784,6 +858,7 @@ function ExerciseCard({
   onToggleExpand,
   onAddSet,
   onUpdateSet,
+  onCycleSetKind,
   onOpenHistory,
   onSettingsPress,
 }: {
@@ -799,6 +874,7 @@ function ExerciseCard({
     set_id: string,
     patch: { reps?: number; weight?: number },
   ) => void;
+  onCycleSetKind: (set_id: string) => void;
   onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
@@ -882,9 +958,7 @@ function ExerciseCard({
                   onAddDropsetRow={() =>
                     notImplementedAlert('+ 新增 dropset 一列')
                   }
-                  onCycleLabel={() =>
-                    notImplementedAlert('tap label cycle 熱/N/D')
-                  }
+                  onCycleLabel={(target) => onCycleSetKind(target.id)}
                 />
               );
             })

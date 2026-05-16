@@ -21,6 +21,55 @@ export async function insertSet(db: Database, set: SetRow): Promise<void> {
   );
 }
 
+/**
+ * Insert one set row including v015 lifecycle columns (set_kind /
+ * parent_set_id). Slice 10c Phase 2 commit 7a uses this for tap-label
+ * cycle's dropset-follower add: the new row needs set_kind='dropset' +
+ * parent_set_id pointing at the head. Plain `insertSet` relies on DB
+ * defaults (set_kind='working', parent_set_id=NULL) which works for the
+ * normal "+ 新增 1 組" path but not for follower inserts.
+ *
+ * is_logged always defaults to 0 — newly inserted rows are not yet
+ * completed. is_skipped is taken from caller (typical: 0).
+ */
+export async function insertSessionSet(
+  db: Database,
+  set: SetRow & {
+    set_kind: SetKind;
+    parent_set_id: string | null;
+  }
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                        is_skipped, ordering, created_at,
+                        set_kind, parent_set_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    set.id,
+    set.session_id,
+    set.exercise_id,
+    set.weight_kg,
+    set.reps,
+    set.is_skipped,
+    set.ordering,
+    set.created_at,
+    set.set_kind,
+    set.parent_set_id
+  );
+}
+
+/**
+ * Hard-delete one set row by id. Slice 10c Phase 2 commit 7a uses this
+ * to cascade-strip dropset followers when the head cycles back to
+ * working (per `cycleSessionSetKind` op type 'delete').
+ *
+ * No referential checks: the `set` table is a leaf — nothing in the schema
+ * references `set.id` (PR replay / achievements run on copies / derived
+ * state). Caller should ensure session is still in_progress.
+ */
+export async function deleteSet(db: Database, set_id: string): Promise<void> {
+  await db.runAsync(`DELETE FROM "set" WHERE id = ?`, set_id);
+}
+
 export async function listAllSets(db: Database): Promise<SetRow[]> {
   return db.getAllAsync<SetRow>(
     `SELECT id, session_id, exercise_id, weight_kg, reps,
