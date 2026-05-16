@@ -404,12 +404,44 @@ export default function TodayScreen() {
       Alert.alert('No active session');
       return;
     }
+    // Defaults priority chain (ADR-0012/0016 動作記憶):
+    //   1. Last set in CURRENT session for this exercise (same-session continuity)
+    //   2. Last set in HISTORY across all prior sessions (cross-session memory)
+    //   3. Sensible starter defaults (weight=0, reps=10) for true first-time exercises
     const priorInSession = setsInSession.filter(
       (s) => s.exercise_id === exercise_id
     );
-    const lastSet = priorInSession[priorInSession.length - 1] ?? null;
-    const weight_kg = lastSet?.weight_kg ?? 0;
-    const repsNum = lastSet?.reps ?? 0;
+    const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
+
+    let weight_kg = 0;
+    let repsNum = 10; // Starter default for true first-time exercises
+
+    if (lastSetInSession) {
+      weight_kg = lastSetInSession.weight_kg ?? 0;
+      repsNum = lastSetInSession.reps ?? repsNum;
+    } else {
+      // Fall back to cross-session history (動作記憶) — pull most recent set
+      // for this exercise from any prior session.
+      try {
+        const historicalPriors = await listPriorSetsForExercise(
+          db,
+          exercise_id,
+          Date.now() + 1 // cutoff exclusive of now+1ms = include all prior
+        );
+        if (historicalPriors.length > 0) {
+          const mostRecent = historicalPriors[0]; // ORDER BY created_at DESC
+          weight_kg = mostRecent.weight_kg ?? 0;
+          repsNum = mostRecent.reps ?? repsNum;
+        }
+      } catch {
+        // History query failure → fall through to starter defaults
+      }
+    }
+
+    // Final guard: if reps somehow still 0 / non-positive, use starter default
+    // so validator never rejects an auto-add. User can tap-edit afterwards.
+    if (!Number.isInteger(repsNum) || repsNum <= 0) repsNum = 10;
+
     const err = validateRecordSet({
       exercise_id,
       weight_kg,
