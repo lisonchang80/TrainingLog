@@ -48,6 +48,9 @@ import {
   deleteSet,
   insertSessionSet,
   listSetsBySession,
+  addClusterCycleAtEnd,
+  cloneClusterCycle,
+  deleteClusterCycle,
   markClusterCycleLogged,
   markClusterCycleUnlogged,
   recordSetInSession,
@@ -813,6 +816,140 @@ export default function TodayScreen() {
   };
 
   /**
+   * Delete one cluster cycle row (atomic A+B set delete). Wired into the
+   * cluster card's left-swipe 「刪」 gesture per the template-editor pattern.
+   */
+  const onDeleteClusterCycle = async (args: {
+    a_set_id: string | null;
+    b_set_id: string | null;
+  }) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await deleteClusterCycle(db, args);
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert(
+        'Delete failed',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
+  /**
+   * Clone one cluster cycle row (atomic A+B set insert with weight/reps
+   * copied from source). Wired into the cluster card's right-swipe 「加」
+   * gesture per the template-editor pattern.
+   */
+  const onCloneClusterCycle = async (args: {
+    a_set_id: string | null;
+    b_set_id: string | null;
+  }) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    // Look up the source rows in memory to get exercise_id for each side
+    const a_row = args.a_set_id
+      ? setsInSession.find((s) => s.id === args.a_set_id) ?? null
+      : null;
+    const b_row = args.b_set_id
+      ? setsInSession.find((s) => s.id === args.b_set_id) ?? null
+      : null;
+    try {
+      await cloneClusterCycle(db, {
+        a_source: a_row
+          ? { id: a_row.id, exercise_id: a_row.exercise_id }
+          : null,
+        b_source: b_row
+          ? { id: b_row.id, exercise_id: b_row.exercise_id }
+          : null,
+        session_id,
+        new_a_set_id: randomUUID(),
+        new_b_set_id: randomUUID(),
+      });
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert(
+        'Clone failed',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
+  /**
+   * Add one cluster cycle at end (atomic A+B set insert with last cycle's
+   * weight/reps OR cross-session 動作記憶 fallback). Wired into the cluster
+   * card's footer [新增 1 組] button per the template-editor pattern.
+   */
+  const onAddClusterCycle = async (
+    group: import('@/src/domain/session/clusterCard').ClusterGroup<
+      SessionExerciseRowWithName,
+      SessionSetWithExercise
+    >,
+  ) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+
+    // For each side, pick defaults: last set in this session OR fallback
+    // to historical 動作記憶 OR starter defaults.
+    const pickDefaults = async (exercise_id: string) => {
+      const inSession = setsInSession
+        .filter((s) => s.exercise_id === exercise_id)
+        .slice(-1)[0];
+      if (inSession) {
+        return {
+          weight_kg: inSession.weight_kg ?? 0,
+          reps: inSession.reps ?? 10,
+        };
+      }
+      try {
+        const historical = await listPriorSetsForExercise(
+          db,
+          exercise_id,
+          Date.now() + 1,
+        );
+        if (historical.length > 0) {
+          return {
+            weight_kg: historical[0].weight_kg ?? 0,
+            reps: historical[0].reps ?? 10,
+          };
+        }
+      } catch {
+        // fall through to starter defaults
+      }
+      return { weight_kg: 0, reps: 10 };
+    };
+
+    try {
+      const aDefaults = await pickDefaults(group.a.exercise.exercise_id);
+      const bDefaults = await pickDefaults(group.b.exercise.exercise_id);
+      await addClusterCycleAtEnd(db, {
+        session_id,
+        a: {
+          exercise_id: group.a.exercise.exercise_id,
+          new_set_id: randomUUID(),
+          weight_kg: aDefaults.weight_kg,
+          reps: aDefaults.reps,
+        },
+        b: {
+          exercise_id: group.b.exercise.exercise_id,
+          new_set_id: randomUUID(),
+          weight_kg: bDefaults.weight_kg,
+          reps: bDefaults.reps,
+        },
+      });
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert(
+        'Add cycle failed',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  };
+
+  /**
    * Persist a notes patch (from SetNoteSheet confirm). Empty / whitespace
    * are coerced to NULL upstream by the sheet so the 📝 indicator hides
    * cleanly when the user clears the field.
@@ -1488,6 +1625,18 @@ export default function TodayScreen() {
                           onToggleCycleLogged={(args) =>
                             onToggleClusterCycle(group, args)
                           }
+                          onAddCycle={() => onAddClusterCycle(group)}
+                          onDeleteCycle={onDeleteClusterCycle}
+                          onCloneCycle={onCloneClusterCycle}
+                          onShowCycleNote={(parent_set_id) => {
+                            const parent = setsInSession.find(
+                              (s) => s.id === parent_set_id,
+                            );
+                            setNoteSheetTarget({
+                              set_id: parent_set_id,
+                              initial: parent?.notes ?? null,
+                            });
+                          }}
                           onOpenHistory={() =>
                             router.push(
                               `/exercise-history/${group.a.exercise.exercise_id}`,

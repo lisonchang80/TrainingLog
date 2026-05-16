@@ -38,6 +38,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
+import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   computeClusterCycles,
   computeClusterVolume,
@@ -62,11 +63,22 @@ type ClusterCardProps = {
     /** Currently both is_logged=1 → caller will UNLOG. */
     currentlyLogged: boolean;
   }) => void;
-  /** Append one new cycle row (parent set + follower set inserted in same txn).
-   *  Wired by the parent — implementation needs both `insertSessionSet` calls
-   *  + a ✓ row-pair-id alignment. Phase 7 emits the callback but defers the
-   *  parent-side handler to follow-up if not present. */
+  /** Append one new cycle row (atomic A+B insert via addClusterCycleAtEnd). */
   onAddCycle?: () => void;
+  /** Delete one cycle row (atomic A+B delete via deleteClusterCycle). */
+  onDeleteCycle?: (args: {
+    a_set_id: string | null;
+    b_set_id: string | null;
+  }) => void;
+  /** Clone one cycle row (atomic A+B insert with copied weight/reps via cloneClusterCycle). */
+  onCloneCycle?: (args: {
+    a_set_id: string | null;
+    b_set_id: string | null;
+  }) => void;
+  /** Open the parent set's note editor (right-swipe 備註). */
+  onShowCycleNote?: (parent_set_id: string) => void;
+  /** Long-press cycle row — deferred (nested ScrollView gesture conflict). */
+  onLongPressCycle?: () => void;
   /** Open the per-RS history page. RS id is on the A side via reusable_superset_id. */
   onOpenHistory?: () => void;
   /** ⚙️ menu (delete cluster / rest_sec / notes). Falls back to a no-op. */
@@ -79,6 +91,10 @@ export function ClusterCard({
   onToggleExpand,
   onToggleCycleLogged,
   onAddCycle,
+  onDeleteCycle,
+  onCloneCycle,
+  onShowCycleNote,
+  onLongPressCycle,
   onOpenHistory,
   onSettingsPress,
 }: ClusterCardProps): React.ReactElement {
@@ -108,12 +124,14 @@ export function ClusterCard({
         >
           <Text style={styles.clusterMark}>{allComplete ? '✓' : '○'}</Text>
           <View style={styles.clusterText}>
-            <Text style={styles.clusterName} numberOfLines={1}>
-              <Text style={styles.clusterChip}>⚓ </Text>
-              {group.a.exercise.exercise_name}
-              <Text style={styles.clusterPlus}> + </Text>
-              {group.b.exercise.exercise_name}
-            </Text>
+            <View style={styles.clusterNameRow}>
+              <Text style={styles.supersetTag}>超級組</Text>
+              <Text style={styles.clusterName} numberOfLines={1}>
+                {group.a.exercise.exercise_name}
+                <Text style={styles.clusterPlus}> + </Text>
+                {group.b.exercise.exercise_name}
+              </Text>
+            </View>
             <Text style={styles.clusterDetails}>
               {completedCycles}/{totalCycles} cycles
             </Text>
@@ -162,66 +180,115 @@ export function ClusterCard({
 
           {cycles.length === 0 ? (
             <Text style={styles.clusterEmpty}>
-              還沒有 cycle — 按下方「+ 新增一輪」開始記錄
+              還沒有 cycle — 按下方「新增 1 組」開始記錄
             </Text>
           ) : (
             cycles.map((c) => {
               const bothLogged = c.both_logged;
               const canTap = c.a_set !== null && c.b_set !== null;
+              // Right-swipe note target = parent (A side) set, if present.
+              const noteTarget = c.a_set?.id ?? c.b_set?.id ?? null;
               return (
-                <View key={c.cycle_idx} style={styles.cycleRow}>
-                  <Text style={styles.cycleIdx}>{c.cycle_idx}</Text>
-                  <View style={styles.cycleSide}>
-                    {c.a_set ? (
-                      <Text style={styles.cycleCell}>
-                        {formatSetCell(c.a_set)}
-                      </Text>
-                    ) : (
-                      <Text style={styles.cycleEmpty}>—</Text>
-                    )}
-                  </View>
-                  <View style={styles.cycleSide}>
-                    {c.b_set ? (
-                      <Text style={styles.cycleCell}>
-                        {formatSetCell(c.b_set)}
-                      </Text>
-                    ) : (
-                      <Text style={styles.cycleEmpty}>—</Text>
-                    )}
-                  </View>
-                  <Pressable
-                    onPress={() => {
-                      if (!canTap || !c.a_set || !c.b_set) return;
-                      onToggleCycleLogged({
-                        a_set_id: c.a_set.id,
-                        b_set_id: c.b_set.id,
-                        currentlyLogged: bothLogged,
-                      });
-                    }}
-                    disabled={!canTap}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      bothLogged ? '取消完成 cycle' : '標記 cycle 完成'
-                    }
-                    accessibilityState={{ disabled: !canTap }}
-                    hitSlop={6}
-                    style={({ pressed }) => [
-                      styles.completeBtn,
-                      bothLogged && styles.completeBtnDone,
-                      !canTap && styles.completeBtnDisabled,
-                      pressed && canTap && styles.btnPressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.completeBtnText,
-                        bothLogged && styles.completeBtnTextDone,
+                <SwipeableSetRow
+                  key={c.cycle_idx}
+                  swipeLeftActions={
+                    onDeleteCycle
+                      ? [
+                          {
+                            key: 'del-cluster-cycle',
+                            label: '刪',
+                            color: '#FF3B30',
+                            onPress: () =>
+                              onDeleteCycle({
+                                a_set_id: c.a_set?.id ?? null,
+                                b_set_id: c.b_set?.id ?? null,
+                              }),
+                          },
+                        ]
+                      : []
+                  }
+                  swipeRightActions={[
+                    ...(onCloneCycle
+                      ? [
+                          {
+                            key: 'clone-cluster-cycle',
+                            label: '加',
+                            color: '#34C759',
+                            onPress: () =>
+                              onCloneCycle({
+                                a_set_id: c.a_set?.id ?? null,
+                                b_set_id: c.b_set?.id ?? null,
+                              }),
+                          },
+                        ]
+                      : []),
+                    ...(onShowCycleNote && noteTarget
+                      ? [
+                          {
+                            key: 'note-cluster-cycle',
+                            label: '備註',
+                            color: '#007AFF',
+                            onPress: () => onShowCycleNote(noteTarget),
+                          },
+                        ]
+                      : []),
+                  ]}
+                  onLongPress={onLongPressCycle}
+                >
+                  <View style={styles.cycleRow}>
+                    <Text style={styles.cycleIdx}>{c.cycle_idx}</Text>
+                    <View style={styles.cycleSide}>
+                      {c.a_set ? (
+                        <Text style={styles.cycleCell}>
+                          {formatSetCell(c.a_set)}
+                        </Text>
+                      ) : (
+                        <Text style={styles.cycleEmpty}>—</Text>
+                      )}
+                    </View>
+                    <View style={styles.cycleSide}>
+                      {c.b_set ? (
+                        <Text style={styles.cycleCell}>
+                          {formatSetCell(c.b_set)}
+                        </Text>
+                      ) : (
+                        <Text style={styles.cycleEmpty}>—</Text>
+                      )}
+                    </View>
+                    <Pressable
+                      onPress={() => {
+                        if (!canTap || !c.a_set || !c.b_set) return;
+                        onToggleCycleLogged({
+                          a_set_id: c.a_set.id,
+                          b_set_id: c.b_set.id,
+                          currentlyLogged: bothLogged,
+                        });
+                      }}
+                      disabled={!canTap}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        bothLogged ? '取消完成 cycle' : '標記 cycle 完成'
+                      }
+                      accessibilityState={{ disabled: !canTap }}
+                      hitSlop={6}
+                      style={({ pressed }) => [
+                        styles.completeBtn,
+                        bothLogged && styles.completeBtnDone,
+                        !canTap && styles.completeBtnDisabled,
+                        pressed && canTap && styles.btnPressed,
                       ]}
                     >
-                      {bothLogged ? '✓' : '○'}
-                    </Text>
-                  </Pressable>
-                </View>
+                      <Text
+                        style={[
+                          styles.completeBtnText,
+                          bothLogged && styles.completeBtnTextDone,
+                        ]}
+                      >
+                        {bothLogged ? '✓' : '○'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </SwipeableSetRow>
               );
             })
           )}
@@ -238,7 +305,7 @@ export function ClusterCard({
                 pressed && styles.btnPressed,
               ]}
             >
-              <Text style={styles.clusterFooterBtnTextPrimary}>+ 新增一輪</Text>
+              <Text style={styles.clusterFooterBtnTextPrimary}>新增 1 組</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -309,8 +376,20 @@ const styles = StyleSheet.create({
   },
   clusterMark: { fontSize: 18, width: 22, textAlign: 'center' },
   clusterText: { flex: 1 },
-  clusterName: { fontSize: 15, fontWeight: '600' },
+  clusterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  clusterName: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   clusterChip: { fontSize: 13 },
+  // 「超級組」 tag — mirrors template editor's supersetTag style.
+  supersetTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0a7ea4',
+    backgroundColor: 'rgba(10, 126, 164, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
   clusterPlus: { fontSize: 14, opacity: 0.5 },
   clusterDetails: { fontSize: 12, opacity: 0.7 },
   clusterChevron: {
