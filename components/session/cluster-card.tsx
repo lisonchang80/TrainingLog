@@ -241,11 +241,11 @@ export function ClusterCard({
           <View style={styles.sideLabelRow}>
             <View style={styles.sideLabelLead} />
             <Text style={styles.sideLabel} numberOfLines={1}>
-              A: {group.a.exercise.exercise_name}
+              {group.a.exercise.exercise_name}
             </Text>
             <View style={styles.sideLabelDivider} />
             <Text style={styles.sideLabel} numberOfLines={1}>
-              B: {group.b.exercise.exercise_name}
+              {group.b.exercise.exercise_name}
             </Text>
             <View style={styles.sideLabelGap} />
           </View>
