@@ -654,11 +654,61 @@ Slice 10a v016 加 `template_exercise.rest_sec INTEGER NULL`，但 **v009 早已
 - Today tab `programBanner` 改用此 helper；3 unit tests
 - Future UI surfaces 一律走此 helper，避免散落 `?? '無'` fallback
 
+### Slice 10c 落地紀錄（2026-05-16 ultra-late）
+
+Slice 10c Phase 1-5 + Phase 8 (本 amend) 落地，**Phase 6-7 留尾**。
+
+**Phase 1** — components/shared/ 共用（commits `3bce155`, `ea0b011`）
+- `SwipeableSetRow` 從 `components/template-editor/` 搬到 `components/shared/`
+- `SetRowContent` 抽出 + 改寫成 generic over `S extends SetRowItem`
+
+**Phase 2** — Solo set logger（commits `9ca2447` … `8cb8986`）
+- `cycleSetKindAcrossExercises` template-side wrapper + 8 cluster tests
+- `NumericKeypad` modal + pure `src/domain/keypad.ts` + 31 tests
+- 砍 `app/(tabs)/index.tsx` 外層 pills / Weight / Reps / Save Set / Recent sets，set logger 全 inline 進動作卡
+- `SetRowContent` inline 編輯接通 + `setLabels` pure extract（template + session 共用）
+- `cycleSessionSetKind` pure（4 transitions + DB op list）+ 10 tests
+- 左滑刪 / 右滑加 / tap-✓ is_logged 全接通
+- **v018 migration**：`ALTER set ADD COLUMN notes` + 4 migration tests
+- 右滑「備註」sheet
+- NumericKeypad swap 進 SetRowContent（`onTapNumber` prop）
+- DB+domain integration smoke 7 tests
+- **留尾**：commit 9 long-press reorder via draggable-flatlist 需 `npm install react-native-draggable-flatlist`（user installs in separate Terminal per feedback_workflow）
+
+**Phase 3** — Progress bar + PR display（commits `22b0ca1`, `800693a`）
+- `computeExerciseProgress` pure（7 tests）：workingDone / plannedTotal / volumeDone / volumeTotal
+- `SegmentedProgressBar` 元件
+- 卡 header 顯示 `done/planned` + 進度條 + 容量 numerator/denominator（warmup 排除）
+- `computePRSnapshot` pure（10 tests）：Pareto frontier of (weight, reps) + max volume PR
+- 卡 header 下方 PR line：🏆 `100 × 8` `85 × 12` + 整體容量 PR，底線 emphasis 數字
+
+**Phase 4** — ⚙️ menu 4 sheets（commits `dd0fa3a`, `7451ff6`, `18ea66d`）
+- ActionSheetIOS 4 項（📝/⏱️/🔀/🗑️）+ cancel slot
+- 📝 編輯備註：SetNoteSheet 加 `title`/`placeholder` props, 寫回 `Exercise.notes`（全域 per ADR-0017）
+- ⏱️ 休息秒數：NumericKeypad reuse, 寫回 `session_exercise.rest_sec`
+- 🔀 換動作：SwapExerciseSheet（scrollable picker）+ `swapSessionExercise` transactional（set + session_exercise 都 UPDATE）
+- 🗑️ 刪除動作：confirm Alert with logged-set count breakdown + `deleteSessionExerciseAndSets` cascade
+- ADR-0014 sibling rename propagation 仍留尾（simple replace only）
+
+**Phase 5** — Session chrome（commit `ca0f3fe`）
+- Header 右上 `[⋯][完成]`：[⋯] ActionSheet → 放棄訓練 → `discardSession` cascade delete；[完成] 替換原 bottom End Session
+- Bottom sticky bar `[+ 動作][傳至手錶 ⌚]`：跳出 ScrollView 之外
+- [+ 動作] reuse SwapExerciseSheet + `appendSessionExercise`（ad-hoc, ordering=MAX+1, planned_sets=3）
+- [傳至手錶] placeholder Alert（slice 13 WatchConnectivity wires real）
+
+**Schema drift fix**: spec `/tmp/slice-10c-ship-spec-2026-05-16.md` L311「no migration」是樂觀假設；Q9 per-set notes 必須 v018 ADD COLUMN「notes」到 runtime `set` table（template_set 從 v009 就有）。第一個 schema-touching commit 是 Phase 2 commit 7c `4ff79e0`。
+
+**Phase 6-7 留尾**：
+- **Phase 6** — Reorder modal（Q10）：需 `react-native-draggable-flatlist` 或自寫 up/down 按鈕 UI
+- **Phase 7** — Cluster atomic ✓ pull-forward（Q16）：需新 `components/session/cluster-card.tsx` 元件 + warmup↔working 限制的 sibling mirror + aggregated 容量計算
+
+**測試**：main baseline 663/663 → branch 10c 累積 765/765（+102 tests）。
+
 ### Out of scope for slice 10b（slice 10c-10g 接手）
-- ⚙️ menu 4 項 bottom sheets（slice 10c）
-- Set logger 5-gesture（slice 10c）
+- ~~⚙️ menu 4 項 bottom sheets（slice 10c）~~ ✅ done in slice 10c Phase 4
+- ~~Set logger 5-gesture（slice 10c）~~ ✅ partially done（4/5 — long-press reorder 留尾）
 - Rest timer chip + modal + auto-popup（slice 10d）
-- Cluster ✓ 一 cycle 一 ✓ semantic（slice 10d）
+- ~~Cluster ✓ 一 cycle 一 ✓ semantic（slice 10d）~~ moved to slice 10c Phase 7（留尾）
 - Freestyle finish 2-option dialog（slice 10e）
 - 歷史詳情頁 layout 整合（slice 10f）
 - HealthKit 真實寫入（slice 13）
