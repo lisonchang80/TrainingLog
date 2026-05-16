@@ -113,3 +113,37 @@ phase-precheck attacks ~70% of drift. Remaining 30% requires complementary disci
 - **Semantic equivalence**: spec uses "swap" and "替換" interchangeably; agent doesn't link them. → discipline at write-time to use the canonical term.
 
 If precheck reports clean but reality drifts anyway, the failure mode is almost always one of the above four. Diagnose which class before re-running precheck.
+
+## Variants
+
+### Post-implementation drift audit (validated 2026-05-16 ultra-late, TrainingLog slice 10c)
+
+phase-precheck was designed for **pre-Phase** drift audit. But the same sub-agent ritual works **post-implementation** to find code-vs-ADR divergence after a slice ships. Use when:
+- User says "看一下實作跟 grill 結果差多少" / "I bet there's drift"
+- Smoke testing reveals unexpected behavior and you want to bound the gap
+- About to merge a big slice and want a final audit before PR
+
+**Setup**: spawn 2–3 **parallel** Explore sub-agents, each covering a distinct functional area (e.g. Today tab UI / Session detail page / Templates start flow). Single audit on a multi-screen slice is too coarse — parallel split keeps each report focused and ≤ 600 words.
+
+Each sub-agent gets:
+- ADR section to verify (e.g. "Q1–Q16 in ADR-0019")
+- Code files to read (specific paths)
+- Output format with 4 buckets: `❌ direct contradiction`, `⚠️ partial`, `🟡 known留尾`, `🟢 goes beyond ADR`
+
+**Validated outcome**: 2 parallel auditors found 7 ❌ drift items in slice 10c session UI without user prompting. User confirmed 6/7 (~ 85% catch rate, matches predicted ceiling). The 1 false positive (auditor missed an already-shipped commit) is the failure mode below.
+
+### Sub-agent ⚠️ "suspicious silence" — re-grep before accepting
+
+Sub-agents reading large ADRs (e.g. ADR-0019 at ~750 lines) may report `⚠️ no acknowledgment found in ADR` when in fact the answer exists at a specific line they didn't read deeply. **Cross-check every ⚠️ by direct grep before treating as gap**.
+
+Example (TrainingLog slice 10c Phase 7 precheck, 2026-05-16): auditor reported `⚠️ Cluster sibling mirror scope unclear`. Direct grep found ADR-0019 line 709 explicitly stating "warmup ↔ working 限制的 sibling mirror" — fully answered. Cost of skipping the re-grep: would have re-grilled the user unnecessarily.
+
+**Rule**: every ⚠️ becomes a `grep -nE "topic|keyword" docs/adr/*.md` before deciding it's verbal-only drift.
+
+### Sub-agent reports a "false positive ❌" — the code may already have it
+
+Auditor may flag a feature as missing when the implementation actually exists elsewhere in the codebase (different file/line than auditor expected, or in a recent commit auditor's snapshot didn't index). When user says "I have no memory of that one being broken" — verify via `git log -p --grep="<feature>"` before re-implementing.
+
+Example (TrainingLog slice 10c, 2026-05-16 ultra-late): auditor reported `❌ Header [⋯] menu missing` for the discard affordance. User flagged: "I don't remember that being decided." `git log` showed commit `ca0f3fe` already added it. Sub-agent had not looked at the right file region.
+
+**Rule**: validate every ❌ via `git log --oneline -S"<keyword>"` before adding to the fix list. False-positive cost: one wasted implementation cycle.
