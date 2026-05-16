@@ -280,6 +280,76 @@ export function cycleSetKind(
 }
 
 // ---------------------------------------------------------------------------
+// cycleSetKindAcrossExercises (ADR-0019 Q7, slice 10c Phase 2 commit 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cluster-aware wrapper around `cycleSetKind`. Use this from any caller
+ * that operates on the full `exercises[]` array — it routes to the right
+ * branch automatically:
+ *
+ *   - Solo exercise (`reusable_superset_id === null`):
+ *     delegates to `cycleSetKind(ex, set_id, idgen)`. Same transitions
+ *     as before (working → warmup → dropset(head + follower) → working,
+ *     follower → no-op).
+ *
+ *   - Reusable cluster (`reusable_superset_id !== null`):
+ *     restricts cycle to warmup ↔ working only (dropset would break the
+ *     "一列 = 一組" sets-length parallel invariant — slice 9.8b grill Q5
+ *     sub-(iii)) and **mirrors** the change to all cluster siblings at
+ *     the same `idx` position so a cycle on row 2 of side A also flips
+ *     row 2 of side B simultaneously. Defensive: any non-warmup state
+ *     (including a stray dropset) cycles to warmup; subsequent taps then
+ *     resume the warmup ↔ working ping-pong normally.
+ *
+ * Returns a fresh `exercises[]`. If the target ex/set isn't found the
+ * input array is returned unchanged.
+ *
+ * Previously this dispatch lived as a closure inside
+ * `components/template-editor/template-editor-view.tsx`; promoted to
+ * pure ops in slice 10c Phase 2 so the session set logger (Phase 2+)
+ * can share the same logic via this single entry point.
+ */
+export function cycleSetKindAcrossExercises(
+  exercises: TemplateExercise[],
+  ex_id: string,
+  set_id: string,
+  idgen: IdGenerator,
+): TemplateExercise[] {
+  const targetEx = exercises.find((e) => e.id === ex_id);
+  if (!targetEx) return exercises;
+
+  // Reusable cluster — mirror across siblings, warmup ↔ working only.
+  if (targetEx.reusable_superset_id !== null) {
+    const idx = targetEx.sets.findIndex((s) => s.id === set_id);
+    if (idx === -1) return exercises;
+    const currentKind = targetEx.sets[idx].kind;
+    // warmup ↔ working only. Defensive: any non-warmup state (including a
+    // stray dropset that shouldn't exist in a reusable cluster) cycles to
+    // warmup so the next tap resumes the normal ping-pong.
+    const newKind: TemplateSet['kind'] =
+      currentKind === 'warmup' ? 'working' : 'warmup';
+    const clusterHead = targetEx.parent_id ?? targetEx.id;
+    return exercises.map((ex) => {
+      const inCluster = ex.id === clusterHead || ex.parent_id === clusterHead;
+      if (!inCluster) return ex;
+      if (idx >= ex.sets.length) return ex;
+      return {
+        ...ex,
+        sets: ex.sets.map((s, i) =>
+          i === idx ? { ...s, kind: newKind } : s,
+        ),
+      };
+    });
+  }
+
+  // Solo — delegate to per-exercise cycleSetKind.
+  return exercises.map((ex) =>
+    ex.id === ex_id ? cycleSetKind(ex, set_id, idgen) : ex,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Superset row ops (ADR-0016 2026-05-12 amendment §7 + 2026-05-13 §D)
 // ---------------------------------------------------------------------------
 

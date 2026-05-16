@@ -4,6 +4,7 @@ import {
   deleteSet,
   reorderSets,
   cycleSetKind,
+  cycleSetKindAcrossExercises,
   deleteSupersetRowAt,
   cloneSupersetRowAt,
   addClusterAfter,
@@ -314,6 +315,196 @@ describe('templateOps — cycleSetKind', () => {
     });
     const out = cycleSetKind(ex, 'f1', deterministicIdGen());
     expect(out).toEqual(ex);
+  });
+});
+
+describe('templateOps — cycleSetKindAcrossExercises', () => {
+  // Slice 10c Phase 2 commit 3: cluster-aware wrapper. Solo dispatch
+  // routes to per-exercise cycleSetKind; reusable cluster mirrors
+  // warmup ↔ working across all sibling members at the same set index.
+
+  it('solo: working → warmup via wrapper (delegates to per-ex cycleSetKind)', () => {
+    const exercises = [
+      makeEx({
+        id: 'solo',
+        sets: [makeSet({ id: 's1', position: 0, kind: 'working' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'solo',
+      's1',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('warmup');
+  });
+
+  it('solo: warmup → dropset(head + follower) via wrapper', () => {
+    const exercises = [
+      makeEx({
+        id: 'solo',
+        sets: [makeSet({ id: 's1', position: 0, kind: 'warmup', reps: 6, weight: 40 })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'solo',
+      's1',
+      deterministicIdGen('cyc'),
+    );
+    expect(out[0].sets).toHaveLength(2);
+    expect(out[0].sets[0]).toMatchObject({ id: 's1', kind: 'dropset', parent_set_id: null });
+    expect(out[0].sets[1]).toMatchObject({
+      id: 'cyc-1',
+      kind: 'dropset',
+      parent_set_id: 's1',
+      reps: 6,
+      weight: 40,
+    });
+  });
+
+  it('cluster: warmup → working mirrors to sibling at same idx', () => {
+    // Two-side reusable cluster (parent + child, both stamped rs_id='rs-1').
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [
+          makeSet({ id: 'pA0', position: 0, kind: 'warmup' }),
+          makeSet({ id: 'pA1', position: 1, kind: 'working' }),
+        ],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [
+          makeSet({ id: 'cB0', position: 0, kind: 'warmup' }),
+          makeSet({ id: 'cB1', position: 1, kind: 'working' }),
+        ],
+      }),
+    ];
+    // Tap row 0 (warmup) on parent — should flip both pA0 and cB0 to working.
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('working'); // parent row 0
+    expect(out[1].sets[0].kind).toBe('working'); // child row 0 mirrored
+    expect(out[0].sets[1].kind).toBe('working'); // row 1 untouched (was working)
+    expect(out[1].sets[1].kind).toBe('working'); // row 1 untouched
+  });
+
+  it('cluster: working → warmup mirrors to sibling at same idx', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'working' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'working' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'child',
+      'cB0',
+      deterministicIdGen(),
+    );
+    // Tap on child row should mirror to parent too.
+    expect(out[0].sets[0].kind).toBe('warmup');
+    expect(out[1].sets[0].kind).toBe('warmup');
+  });
+
+  it('cluster: defensive — non-warmup state cycles to warmup (dropset stray)', () => {
+    // Shouldn't happen in practice (cluster restricts warmup ↔ working),
+    // but if a stray dropset slips through, cycle routes it to warmup so
+    // the next tap resumes the normal warmup ↔ working ping-pong.
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'dropset' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'dropset' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('warmup');
+    expect(out[1].sets[0].kind).toBe('warmup');
+  });
+
+  it('cluster: leaves non-cluster exercises untouched', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'warmup' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'warmup' })],
+      }),
+      makeEx({
+        id: 'unrelated',
+        sets: [makeSet({ id: 'u0', position: 0, kind: 'warmup' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[2].sets[0].kind).toBe('warmup'); // unrelated unchanged
+    expect(out[2]).toBe(exercises[2]); // referential equality preserved
+  });
+
+  it('returns input unchanged (referential equality) when ex_id not found', () => {
+    const exercises = [
+      makeEx({ id: 'a', sets: [makeSet({ id: 's1', position: 0, kind: 'working' })] }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'nonexistent',
+      's1',
+      deterministicIdGen(),
+    );
+    expect(out).toBe(exercises);
+  });
+
+  it('cluster: returns input unchanged when set_id not found in target ex', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'warmup' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'nonexistent-set',
+      deterministicIdGen(),
+    );
+    expect(out).toBe(exercises);
   });
 });
 
