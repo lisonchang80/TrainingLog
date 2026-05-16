@@ -4,6 +4,7 @@ import {
   dateToCycleDay,
   expandWizardDraft,
   isoDateToUtcMs,
+  resolveProgramLabel,
   todayCell,
   utcMsToIsoDate,
   validateProgram,
@@ -220,5 +221,24 @@ describe('programManager — cellForDate / todayCell', () => {
 
   it('todayCell returns null for null active program', () => {
     expect(todayCell({ active: null, today: '2026-05-08' })).toBeNull();
+  });
+});
+
+// Slice 10b — RESERVED_NONE_PROGRAM_ID seed label resolution
+// (ADR-0019 § (N1) + slice 10a v017 seed).
+describe('programManager — resolveProgramLabel', () => {
+  it('returns the program name when a real program is given', () => {
+    expect(resolveProgramLabel({ name: '增肌-Q1' })).toBe('增肌-Q1');
+  });
+
+  it('returns the sentinel name 「無」 when the seed program is given', () => {
+    // Sentinel row's name is also '無' per slice 10a Q1+Q1b 拍板 — the helper
+    // simply forwards the name; no special-case branch needed.
+    expect(resolveProgramLabel({ name: '無' })).toBe('無');
+  });
+
+  it('falls back to 「無」 for null/undefined (legacy data with no row joined)', () => {
+    expect(resolveProgramLabel(null)).toBe('無');
+    expect(resolveProgramLabel(undefined)).toBe('無');
   });
 });

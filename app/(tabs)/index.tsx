@@ -48,6 +48,7 @@ import {
 } from '@/src/domain/body/unitConversion';
 import type { Exercise } from '@/src/domain/exercise/types';
 import {
+  resolveProgramLabel,
   todayCell,
   utcMsToIsoDate,
 } from '@/src/domain/program/programManager';
@@ -384,7 +385,7 @@ export default function TodayScreen() {
   const programBanner = activeProgram ? (
     <View style={styles.programBanner}>
       <Text style={styles.programBannerName} numberOfLines={1}>
-        {activeProgram.program.name}
+        {resolveProgramLabel(activeProgram.program)}
         {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
       </Text>
       {programCellToday ? (
