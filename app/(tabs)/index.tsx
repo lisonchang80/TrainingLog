@@ -2052,14 +2052,27 @@ function ExerciseCard({
                 </Text>
               ) : null}
             </View>
-            {progress.plannedTotal > 0 ? (
-              <View style={styles.exerciseCardProgressBar}>
-                <SegmentedProgressBar
-                  done={progress.workingDone}
-                  total={progress.plannedTotal}
-                />
-              </View>
-            ) : null}
+            {(() => {
+              // Bar 分段 = max(planned_sets, 實際 working set rows)。
+              // 用戶加 set 超過 planned 時 segment 隨之擴張，per
+              // ADR-0019 Q5 修訂 — bar 跟著 body row 數走，而非死綁 template。
+              const workingRowCount = sets.filter(
+                (s) => s.set_kind === 'working',
+              ).length;
+              const barTotal = Math.max(
+                progress.plannedTotal,
+                workingRowCount,
+              );
+              if (barTotal <= 0) return null;
+              return (
+                <View style={styles.exerciseCardProgressBar}>
+                  <SegmentedProgressBar
+                    done={progress.workingDone}
+                    total={barTotal}
+                  />
+                </View>
+              );
+            })()}
           </View>
           <Text style={styles.exerciseCardChevron}>{isExpanded ? '▼' : '▶'}</Text>
         </Pressable>
@@ -2085,10 +2098,7 @@ function ExerciseCard({
                 <Text style={styles.exerciseCardPREmphasis}>
                   {prSnapshot.topWeightSet.weight_kg}
                 </Text>
-                <Text>×</Text>
-                <Text style={styles.exerciseCardPREmphasis}>
-                  {prSnapshot.topWeightSet.reps}
-                </Text>
+                <Text>×{prSnapshot.topWeightSet.reps}</Text>
               </>
             ) : null}
             {prSnapshot.topWeightSet !== null &&
