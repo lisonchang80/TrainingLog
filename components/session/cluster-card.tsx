@@ -130,7 +130,6 @@ export function ClusterCard({
   // composition, is one progress unit).
   const completedCycles = cycles.filter((c) => c.both_logged).length;
   const totalCycles = cycles.length;
-  const allComplete = totalCycles > 0 && completedCycles === totalCycles;
 
   return (
     <View
@@ -146,19 +145,20 @@ export function ClusterCard({
             pressed && styles.btnPressed,
           ]}
         >
-          <Text style={styles.clusterMark}>{allComplete ? '✓' : '○'}</Text>
           <View style={styles.clusterText}>
             <View style={styles.clusterNameRow}>
-              <Text style={styles.supersetTag}>超級組</Text>
+              <Text style={styles.supersetTag}>[超]</Text>
               <Text style={styles.clusterName} numberOfLines={1}>
                 {group.a.exercise.exercise_name}
                 <Text style={styles.clusterPlus}> + </Text>
                 {group.b.exercise.exercise_name}
               </Text>
+              {totalCycles > 0 ? (
+                <Text style={styles.clusterVolumeChip}>
+                  {completedCycles}/{totalCycles}
+                </Text>
+              ) : null}
             </View>
-            <Text style={styles.clusterDetails}>
-              {completedCycles}/{totalCycles} cycles
-            </Text>
             {totalCycles > 0 ? (
               <View style={styles.clusterProgressBar}>
                 <SegmentedProgressBar
@@ -455,24 +455,33 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  clusterMark: { fontSize: 18, width: 22, textAlign: 'center' },
   clusterText: { flex: 1 },
-  clusterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  clusterName: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  clusterNameRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  clusterName: { fontSize: 15, fontWeight: '600', flex: 1 },
   clusterChip: { fontSize: 13 },
-  // 「超級組」 tag — mirrors template editor's supersetTag style.
+  // [超] marker — text badge (per ADR-0019 Q8 amendment, 2026-05-17 overnight).
+  // 取代舊版 `○`/`✓` + 「超級組」 chip 兩件：濃縮為一個文字 marker 在動作名旁。
   supersetTag: {
     fontSize: 11,
     fontWeight: '700',
     color: '#0a7ea4',
     backgroundColor: 'rgba(10, 126, 164, 0.12)',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 999,
+    borderRadius: 4,
     overflow: 'hidden',
   },
   clusterPlus: { fontSize: 14, opacity: 0.5 },
-  clusterDetails: { fontSize: 12, opacity: 0.7 },
+  // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
+  clusterVolumeChip: {
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.7,
+  },
   clusterChevron: {
     fontSize: 14,
     opacity: 0.5,
