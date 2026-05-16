@@ -103,3 +103,65 @@ export function cycleSessionSetKind(
     ),
   ];
 }
+
+/**
+ * Cluster-sibling-aware variant (ADR-0019 line 709, slice 10c Phase 7).
+ *
+ * Sets that belong to a cluster sibling (i.e. the owning
+ * `session_exercise.parent_id !== null` OR the row is the cluster parent)
+ * have **restricted** cycle behaviour:
+ *
+ *   warmup ↔ working only — dropset branch is DISABLED.
+ *
+ * Rationale: ADR-0019 Q2 § (C) makes dropset cluster C1 disable rest
+ * timer mid-cluster; combined with the visual "one cycle one ✓" model
+ * (Q8 (f) / Q16), introducing dropset followers inside a cluster sibling
+ * would multiply set rows out of phase with the cluster's cycle count.
+ * The simpler rule — sibling sets cycle only between warmup and working
+ * — keeps the cycle-row alignment intact.
+ *
+ * Solo branch (non-cluster `session_exercise`) preserves the full
+ * working → warmup → dropset transition list via the unchanged
+ * `cycleSessionSetKind`.
+ *
+ * `is_in_cluster` is the caller's responsibility — it's a per-call
+ * boolean rather than a derived field because the cluster linkage lives
+ * on `session_exercise.parent_id` (one layer out from the set), and we
+ * don't want to thread that lookup into every pure call site. The
+ * caller in `app/(tabs)/index.tsx` derives this from the plan row.
+ */
+export function cycleSessionSetKindClusterAware(
+  sets: CycleSessionSetInput[],
+  set_id: string,
+  new_set_id: string,
+  is_in_cluster: boolean,
+): CycleSessionSetOp[] {
+  if (!is_in_cluster) {
+    return cycleSessionSetKind(sets, set_id, new_set_id);
+  }
+  const target = sets.find((s) => s.id === set_id);
+  if (!target) return [];
+
+  // Cluster sibling: only working ↔ warmup. Any dropset state on the
+  // set (shouldn't happen via UI but possible via legacy data) is
+  // collapsed back to working.
+  if (target.set_kind === 'working') {
+    return [{ type: 'update', set_id, patch: { set_kind: 'warmup' } }];
+  }
+  if (target.set_kind === 'warmup') {
+    return [{ type: 'update', set_id, patch: { set_kind: 'working' } }];
+  }
+  // target.set_kind === 'dropset' — defensive fallback: cycle to working.
+  // Strip any dangling follower rows (mirror cluster invariant).
+  const followers = sets.filter((s) => s.parent_set_id === set_id);
+  return [
+    {
+      type: 'update',
+      set_id,
+      patch: { set_kind: 'working', parent_set_id: null },
+    },
+    ...followers.map(
+      (f): CycleSessionSetOp => ({ type: 'delete', set_id: f.id }),
+    ),
+  ];
+}

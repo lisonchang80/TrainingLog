@@ -194,6 +194,63 @@ export async function updateSetFields(
 }
 
 /**
+ * Atomic "one cycle ✓" mark for a cluster row pair (ADR-0019 Q16, slice
+ * 10c Phase 7). Sets `is_logged = 1` on BOTH sides of a cluster cycle in
+ * a single transaction — if either UPDATE throws, neither side is
+ * committed (better-sqlite3 BEGIN/COMMIT/ROLLBACK per
+ * `withTransactionAsync`).
+ *
+ * Either-side null short-cycle (asymmetric A=4 B=3 cycle 4 → b_set=null)
+ * is the caller's responsibility — they shouldn't invoke this with a
+ * null id (the UI surfaces "—" placeholder per Q8 (d) AS1 and disables
+ * tap-✓ for those slots). This function is intentionally strict on the
+ * id-pair contract so a bug in the caller surfaces as a SQL "row not
+ * found" rather than a silent partial write.
+ *
+ * No cascade to the underlying `parent_set_id` dropset-follower chain —
+ * cluster sibling mirror per ADR-0019 line 709 is warmup ↔ working only
+ * (see `cycleSessionSetKindClusterAware`), and is_logged is independent
+ * of set_kind cycling anyway.
+ */
+export async function markClusterCycleLogged(
+  db: Database,
+  args: { a_set_id: string; b_set_id: string }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE "set" SET is_logged = 1 WHERE id = ?`,
+      args.a_set_id
+    );
+    await db.runAsync(
+      `UPDATE "set" SET is_logged = 1 WHERE id = ?`,
+      args.b_set_id
+    );
+  });
+}
+
+/**
+ * Inverse of `markClusterCycleLogged` — atomic "uncheck cycle ✓" for a
+ * cluster row pair. Per ADR-0019 Q2.3 (d) Y2 (un-logging cancels the
+ * "set complete" side-effects), the UI calls this when tapping ✓ on a
+ * cycle row that's already both-logged.
+ */
+export async function markClusterCycleUnlogged(
+  db: Database,
+  args: { a_set_id: string; b_set_id: string }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE "set" SET is_logged = 0 WHERE id = ?`,
+      args.a_set_id
+    );
+    await db.runAsync(
+      `UPDATE "set" SET is_logged = 0 WHERE id = ?`,
+      args.b_set_id
+    );
+  });
+}
+
+/**
  * Insert one set into an OPEN session. Caller must ensure the session exists
  * and is still in_progress (per the Session Manager state machine).
  *

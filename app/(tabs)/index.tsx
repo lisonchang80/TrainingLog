@@ -48,6 +48,8 @@ import {
   deleteSet,
   insertSessionSet,
   listSetsBySession,
+  markClusterCycleLogged,
+  markClusterCycleUnlogged,
   recordSetInSession,
   updateSetFields,
   type SessionSetWithExercise,
@@ -64,6 +66,8 @@ import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
+import { ClusterCard } from '@/components/session/cluster-card';
+import { groupClusterSides } from '@/src/domain/session/clusterCard';
 import {
   computePRSnapshot,
   type PRSnapshot,
@@ -712,6 +716,71 @@ export default function TodayScreen() {
   };
 
   /**
+   * Atomic cluster cycle ✓ tap (ADR-0019 Q16, slice 10c Phase 7).
+   *
+   * Tap on a cluster cycle row's shared ✓ flips BOTH sides via the
+   * atomic `markClusterCycleLogged` repo method (transaction; partial
+   * state never observable). Per Q2 § (C) the rest timer is started
+   * from the **cluster parent's** rest_sec (A side), not either child —
+   * cluster timing is cluster-level (Q2.2 § (C) decision).
+   *
+   * Un-tap (currentlyLogged=true) calls the inverse and cancels the
+   * timer per Q2.3 (d) Y2.
+   */
+  const onToggleClusterCycle = async (
+    group: import('@/src/domain/session/clusterCard').ClusterGroup<
+      SessionExerciseRowWithName,
+      SessionSetWithExercise
+    >,
+    args: {
+      a_set_id: string;
+      b_set_id: string;
+      currentlyLogged: boolean;
+    },
+  ) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    const nextLogged = args.currentlyLogged ? 0 : 1;
+    try {
+      if (nextLogged === 1) {
+        await markClusterCycleLogged(db, {
+          a_set_id: args.a_set_id,
+          b_set_id: args.b_set_id,
+        });
+      } else {
+        await markClusterCycleUnlogged(db, {
+          a_set_id: args.a_set_id,
+          b_set_id: args.b_set_id,
+        });
+      }
+      // Optimistic update — set both rows' is_logged in memory.
+      setSetsInSession((curr) =>
+        curr.map((s) => {
+          if (s.id === args.a_set_id || s.id === args.b_set_id) {
+            return { ...s, is_logged: nextLogged };
+          }
+          return s;
+        }),
+      );
+    } catch (e) {
+      console.warn('[cluster cycle ✓] failed:', e);
+      return;
+    }
+
+    if (nextLogged === 1 && autoPopupTimer) {
+      // Q2 § (C): cluster timer launched from PARENT's rest_sec, not
+      // either child's. Falls back to 60s when NULL (system default).
+      const rest_sec = group.a.exercise.rest_sec ?? 60;
+      // Banner-style name: "A名 + B名"
+      const exercise_name = `${group.a.exercise.exercise_name} + ${group.b.exercise.exercise_name}`;
+      setRestTimerTarget({ rest_sec, exercise_name });
+      setRestTimerTrigger((n) => n + 1);
+    } else if (nextLogged === 0) {
+      setRestTimerTarget(null);
+    }
+  };
+
+  /**
    * Persist a notes patch (from SetNoteSheet confirm). Empty / whitespace
    * are coerced to NULL upstream by the sheet so the 📝 indicator hides
    * cleanly when the user clears the field.
@@ -1343,55 +1412,112 @@ export default function TodayScreen() {
             <>
               <Text style={styles.label}>Today&apos;s plan</Text>
               <View style={styles.planList}>
-                {plan.map((p) => {
-                  const setsForExercise = setsInSession.filter(
-                    (s) => s.exercise_id === p.exercise_id
+                {(() => {
+                  // ADR-0019 Q16 (slice 10c Phase 7): cluster session_exercise
+                  // rows (linked via parent_id v014 schema) render as a single
+                  // ClusterCard. Follower rows are skipped — the parent owns the
+                  // render. Solo rows pass through unchanged.
+                  const clusterGroups = groupClusterSides(plan, setsInSession);
+                  // Set of session_exercise ids whose render is owned by a
+                  // cluster (both parent A and follower B).
+                  const clusterMemberIds = new Set<string>();
+                  for (const g of clusterGroups) {
+                    clusterMemberIds.add(g.a.exercise.id);
+                    clusterMemberIds.add(g.b.exercise.id);
+                  }
+                  // Pre-index cluster groups by parent row id for quick lookup
+                  // during the plan iteration.
+                  const clusterByParentId = new Map(
+                    clusterGroups.map((g) => [g.a.exercise.id, g] as const),
                   );
-                  // Per ADR-0019 Q4: "done" reflects completed sets
-                  // (is_logged=1), not just recorded ones. Warmup
-                  // exclusion is handled in Phase 3's progress bar.
-                  const done = setsForExercise.filter(
-                    (s) => s.is_logged === 1
-                  ).length;
-                  const complete = done >= p.planned_sets;
-                  const isExpanded = expandedExerciseId === p.id;
-                  return (
-                    <ExerciseCard
-                      key={p.id}
-                      planRow={p}
-                      done={done}
-                      complete={complete}
-                      isExpanded={isExpanded}
-                      sets={setsForExercise}
-                      busy={busy}
-                      onToggleExpand={() =>
-                        setExpandedExerciseId(isExpanded ? null : p.id)
-                      }
-                      onAddSet={() => onAddSet(p.exercise_id)}
-                      onUpdateSet={onUpdateSet}
-                      onCycleSetKind={(set_id) =>
-                        onCycleSetKind(p.exercise_id, set_id)
-                      }
-                      onDeleteSet={onDeleteSet}
-                      onAddSetAfter={(set_id) =>
-                        onAddSetAfter(p.exercise_id, set_id)
-                      }
-                      onToggleLogged={onToggleLogged}
-                      onShowSetNote={(set_id, current) =>
-                        setNoteSheetTarget({ set_id, initial: current })
-                      }
-                      onTapNumber={(set_id, field, current) =>
-                        setKeypadTarget({ set_id, field, current })
-                      }
-                      prSnapshot={prSnapshotById[p.exercise_id] ?? null}
-                      onOpenHistory={() =>
-                        router.push(`/exercise-history/${p.exercise_id}`)
-                      }
-                      onSettingsPress={() => onSettingsPress(p)}
-                      onLongPressHeader={() => setReorderSheetOpen(true)}
-                    />
-                  );
-                })}
+
+                  const out: React.ReactNode[] = [];
+                  for (const p of plan) {
+                    // Cluster follower → skip (parent owns the render)
+                    if (
+                      p.parent_id !== null &&
+                      clusterMemberIds.has(p.id)
+                    ) {
+                      continue;
+                    }
+
+                    // Cluster parent → render ClusterCard
+                    const group = clusterByParentId.get(p.id);
+                    if (group) {
+                      const isExpanded = expandedExerciseId === p.id;
+                      out.push(
+                        <ClusterCard
+                          key={p.id}
+                          group={group}
+                          isExpanded={isExpanded}
+                          onToggleExpand={() =>
+                            setExpandedExerciseId(isExpanded ? null : p.id)
+                          }
+                          onToggleCycleLogged={(args) =>
+                            onToggleClusterCycle(group, args)
+                          }
+                          onOpenHistory={() =>
+                            router.push(
+                              `/exercise-history/${group.a.exercise.exercise_id}`,
+                            )
+                          }
+                          onSettingsPress={() => onSettingsPress(p)}
+                        />,
+                      );
+                      continue;
+                    }
+
+                    // Solo path — existing render unchanged
+                    const setsForExercise = setsInSession.filter(
+                      (s) => s.exercise_id === p.exercise_id,
+                    );
+                    // Per ADR-0019 Q4: "done" reflects completed sets
+                    // (is_logged=1), not just recorded ones. Warmup
+                    // exclusion is handled in Phase 3's progress bar.
+                    const done = setsForExercise.filter(
+                      (s) => s.is_logged === 1,
+                    ).length;
+                    const complete = done >= p.planned_sets;
+                    const isExpanded = expandedExerciseId === p.id;
+                    out.push(
+                      <ExerciseCard
+                        key={p.id}
+                        planRow={p}
+                        done={done}
+                        complete={complete}
+                        isExpanded={isExpanded}
+                        sets={setsForExercise}
+                        busy={busy}
+                        onToggleExpand={() =>
+                          setExpandedExerciseId(isExpanded ? null : p.id)
+                        }
+                        onAddSet={() => onAddSet(p.exercise_id)}
+                        onUpdateSet={onUpdateSet}
+                        onCycleSetKind={(set_id) =>
+                          onCycleSetKind(p.exercise_id, set_id)
+                        }
+                        onDeleteSet={onDeleteSet}
+                        onAddSetAfter={(set_id) =>
+                          onAddSetAfter(p.exercise_id, set_id)
+                        }
+                        onToggleLogged={onToggleLogged}
+                        onShowSetNote={(set_id, current) =>
+                          setNoteSheetTarget({ set_id, initial: current })
+                        }
+                        onTapNumber={(set_id, field, current) =>
+                          setKeypadTarget({ set_id, field, current })
+                        }
+                        prSnapshot={prSnapshotById[p.exercise_id] ?? null}
+                        onOpenHistory={() =>
+                          router.push(`/exercise-history/${p.exercise_id}`)
+                        }
+                        onSettingsPress={() => onSettingsPress(p)}
+                        onLongPressHeader={() => setReorderSheetOpen(true)}
+                      />,
+                    );
+                  }
+                  return out;
+                })()}
               </View>
             </>
           )}
