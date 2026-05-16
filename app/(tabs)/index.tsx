@@ -286,44 +286,17 @@ export default function TodayScreen() {
             // Reusable supersets FIRST (per pickerBridge convention) — each
             // explodes into a cluster pair (A + B session_exercise rows
             // linked via parent_id + reusable_superset_id).
+            //
+            // NOTE: RS pick is treated as a NEW exercise unit (per user
+            // 「超級組應視為新的動作，不該開起來已經有個別運動的記憶」),
+            // so we DELIBERATELY skip prefillSessionExerciseFromLastSession.
+            // Cluster starts empty; user adds cycles manually.
             for (const rs_id of payload.reusableSupersetIds) {
-              const { a_id, b_id } = await appendReusableSupersetToSession(
-                db,
-                {
-                  session_id: active.id,
-                  reusable_superset_id: rs_id,
-                  uuid: randomUUID,
-                },
-              );
-              // Pre-fill each side from its own history (independent
-              // per-exercise lookup; cluster pairing on prefill rows is
-              // intentionally null per repo func contract).
-              const exA = (
-                await db.getFirstAsync<{ exercise_id: string }>(
-                  `SELECT exercise_id FROM session_exercise WHERE id = ?`,
-                  a_id,
-                )
-              )?.exercise_id;
-              const exB = (
-                await db.getFirstAsync<{ exercise_id: string }>(
-                  `SELECT exercise_id FROM session_exercise WHERE id = ?`,
-                  b_id,
-                )
-              )?.exercise_id;
-              if (exA) {
-                await prefillSessionExerciseFromLastSession(db, {
-                  session_id: active.id,
-                  exercise_id: exA,
-                  uuid: randomUUID,
-                });
-              }
-              if (exB) {
-                await prefillSessionExerciseFromLastSession(db, {
-                  session_id: active.id,
-                  exercise_id: exB,
-                  uuid: randomUUID,
-                });
-              }
+              await appendReusableSupersetToSession(db, {
+                session_id: active.id,
+                reusable_superset_id: rs_id,
+                uuid: randomUUID,
+              });
             }
             // Solo exercises after.
             for (const exercise_id of payload.exerciseIds) {
@@ -1691,6 +1664,26 @@ export default function TodayScreen() {
                             )
                           }
                           onSettingsPress={() => onSettingsPress(p)}
+                          onUpdateClusterSet={(set_id, patch) =>
+                            onUpdateSet(set_id, patch)
+                          }
+                          onTapClusterNumber={(set_id, field, current) =>
+                            setKeypadTarget({ set_id, field, current })
+                          }
+                          onCycleClusterSetKind={(set_id) => {
+                            // Mirror solo path: route through onCycleSetKind
+                            // with the set's owning exercise_id.
+                            const s = setsInSession.find(
+                              (x) => x.id === set_id,
+                            );
+                            if (s) onCycleSetKind(s.exercise_id, set_id);
+                          }}
+                          onShowClusterSetNote={(set_id, current) =>
+                            setNoteSheetTarget({
+                              set_id,
+                              initial: current,
+                            })
+                          }
                         />,
                       );
                       continue;

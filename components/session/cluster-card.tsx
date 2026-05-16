@@ -38,6 +38,10 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
+import {
+  SetRowContent,
+  type SetRowItem,
+} from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   computeClusterCycles,
@@ -83,6 +87,22 @@ type ClusterCardProps = {
   onOpenHistory?: () => void;
   /** ⚙️ menu (delete cluster / rest_sec / notes). Falls back to a no-op. */
   onSettingsPress?: () => void;
+  /** Inline edit weight / reps for any cluster set (matches solo card UX
+   *  — user 「沒有可以改的格子和＃」). Threads through to updateSetFields. */
+  onUpdateClusterSet?: (
+    set_id: string,
+    patch: { reps?: number; weight?: number },
+  ) => void;
+  /** Tap-to-edit reps / weight numeric keypad (per ADR-0019 Q6). */
+  onTapClusterNumber?: (
+    set_id: string,
+    field: 'reps' | 'weight',
+    current: number,
+  ) => void;
+  /** Tap label `# / 熱 / D{N}` to cycle set_kind. */
+  onCycleClusterSetKind?: (set_id: string) => void;
+  /** Right-swipe 備註 also offered inline as 📝 indicator. */
+  onShowClusterSetNote?: (set_id: string, current: string | null) => void;
 };
 
 export function ClusterCard({
@@ -97,6 +117,10 @@ export function ClusterCard({
   onLongPressCycle,
   onOpenHistory,
   onSettingsPress,
+  onUpdateClusterSet,
+  onTapClusterNumber,
+  onCycleClusterSetKind,
+  onShowClusterSetNote,
 }: ClusterCardProps): React.ReactElement {
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
@@ -239,18 +263,58 @@ export function ClusterCard({
                     <Text style={styles.cycleIdx}>{c.cycle_idx}</Text>
                     <View style={styles.cycleSide}>
                       {c.a_set ? (
-                        <Text style={styles.cycleCell}>
-                          {formatSetCell(c.a_set)}
-                        </Text>
+                        <SetRowContent
+                          compact
+                          set={toSetRowItem(c.a_set)}
+                          setLabel={setKindLabel(c.a_set.set_kind)}
+                          isDropsetFollower={false}
+                          isClusterLast={false}
+                          minusDisabled={true}
+                          hideNoteIndicator={false}
+                          onUpdateSet={(set_id, patch) =>
+                            onUpdateClusterSet?.(set_id, patch)
+                          }
+                          onTapNumber={(s, field, current) =>
+                            onTapClusterNumber?.(s.id, field, current)
+                          }
+                          onCycleLabel={(s) =>
+                            onCycleClusterSetKind?.(s.id)
+                          }
+                          onShowSetNote={(s) =>
+                            onShowClusterSetNote?.(s.id, s.notes)
+                          }
+                          onRemoveDropsetRow={() => {}}
+                          onAddDropsetRow={() => {}}
+                        />
                       ) : (
                         <Text style={styles.cycleEmpty}>—</Text>
                       )}
                     </View>
                     <View style={styles.cycleSide}>
                       {c.b_set ? (
-                        <Text style={styles.cycleCell}>
-                          {formatSetCell(c.b_set)}
-                        </Text>
+                        <SetRowContent
+                          compact
+                          set={toSetRowItem(c.b_set)}
+                          setLabel={setKindLabel(c.b_set.set_kind)}
+                          isDropsetFollower={false}
+                          isClusterLast={false}
+                          minusDisabled={true}
+                          hideNoteIndicator={false}
+                          onUpdateSet={(set_id, patch) =>
+                            onUpdateClusterSet?.(set_id, patch)
+                          }
+                          onTapNumber={(s, field, current) =>
+                            onTapClusterNumber?.(s.id, field, current)
+                          }
+                          onCycleLabel={(s) =>
+                            onCycleClusterSetKind?.(s.id)
+                          }
+                          onShowSetNote={(s) =>
+                            onShowClusterSetNote?.(s.id, s.notes)
+                          }
+                          onRemoveDropsetRow={() => {}}
+                          onAddDropsetRow={() => {}}
+                        />
                       ) : (
                         <Text style={styles.cycleEmpty}>—</Text>
                       )}
@@ -346,6 +410,23 @@ function formatSetCell(set: {
   if (w == null) return `× ${r}`;
   if (r == null) return `${w} kg`;
   return `${w} × ${r}`;
+}
+
+/** Adapt SessionSet → SetRowItem shape (SetRowContent needs non-null fields). */
+function toSetRowItem(s: SessionSetWithExercise): SetRowItem {
+  return {
+    id: s.id,
+    reps: s.reps ?? 0,
+    weight: s.weight_kg ?? 0,
+    notes: s.notes,
+  };
+}
+
+/** Map set_kind → display label for SetRowContent's tap-cycle button. */
+function setKindLabel(set_kind: string): string {
+  if (set_kind === 'warmup') return '熱';
+  if (set_kind === 'dropset') return 'D';
+  return '#';
 }
 
 const styles = StyleSheet.create({
