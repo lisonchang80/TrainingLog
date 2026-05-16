@@ -36,6 +36,10 @@
  */
 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  NestableDraggableFlatList,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import {
@@ -46,6 +50,7 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   computeClusterCycles,
   computeClusterVolume,
+  type ClusterCycle,
   type ClusterGroup,
 } from '@/src/domain/session/clusterCard';
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
@@ -81,8 +86,20 @@ type ClusterCardProps = {
   }) => void;
   /** Open the parent set's note editor (right-swipe 備註). */
   onShowCycleNote?: (parent_set_id: string) => void;
-  /** Long-press cycle row — deferred (nested ScrollView gesture conflict). */
+  /** Long-press cycle row — deferred (nested ScrollView gesture conflict).
+   *  Slice 10c overnight 第 5 點 enabled inline drag via DraggableFlatList,
+   *  so this prop is no longer used (kept for API compat). */
   onLongPressCycle?: () => void;
+  /**
+   * Slice 10c overnight 第 5 點 — inline drag reorder. On drop, this callback
+   * fires with the new ordered cycle list (post-drag). Caller commits via
+   * `reorderSessionSetsForExercise` ×2 (A side + B side), mapping the new
+   * cycle order to per-side ordered set-id arrays. Asymmetric short-side
+   * slots (a_set === null or b_set === null) are skipped on the empty side.
+   */
+  onConfirmReorderCycles?: (
+    newOrder: ClusterCycle<SessionSetWithExercise>[],
+  ) => Promise<void> | void;
   /** Open the per-RS history page. RS id is on the A side via reusable_superset_id. */
   onOpenHistory?: () => void;
   /** ⚙️ menu (delete cluster / rest_sec / notes). Falls back to a no-op. */
@@ -131,6 +148,7 @@ export function ClusterCard({
   onCycleClusterSetKind,
   onCycleClusterCycleSetKind,
   onShowClusterSetNote,
+  onConfirmReorderCycles,
 }: ClusterCardProps): React.ReactElement {
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
@@ -217,59 +235,90 @@ export function ClusterCard({
               還沒有組 — 按下方「+ 新增 1 組」開始記錄
             </Text>
           ) : (
-            cycles.map((c) => {
-              const bothLogged = c.both_logged;
-              const canTap = c.a_set !== null && c.b_set !== null;
-              // Right-swipe note target = parent (A side) set, if present.
-              const noteTarget = c.a_set?.id ?? c.b_set?.id ?? null;
-              return (
-                <SwipeableSetRow
-                  key={c.cycle_idx}
-                  swipeLeftActions={
-                    onDeleteCycle
-                      ? [
-                          {
-                            key: 'del-cluster-cycle',
-                            label: '刪',
-                            color: '#FF3B30',
-                            onPress: () =>
-                              onDeleteCycle({
-                                a_set_id: c.a_set?.id ?? null,
-                                b_set_id: c.b_set?.id ?? null,
-                              }),
-                          },
-                        ]
-                      : []
-                  }
-                  swipeRightActions={[
-                    ...(onCloneCycle
-                      ? [
-                          {
-                            key: 'clone-cluster-cycle',
-                            label: '加',
-                            color: '#34C759',
-                            onPress: () =>
-                              onCloneCycle({
-                                a_set_id: c.a_set?.id ?? null,
-                                b_set_id: c.b_set?.id ?? null,
-                              }),
-                          },
-                        ]
-                      : []),
-                    ...(onShowCycleNote && noteTarget
-                      ? [
-                          {
-                            key: 'note-cluster-cycle',
-                            label: '備註',
-                            color: '#007AFF',
-                            onPress: () => onShowCycleNote(noteTarget),
-                          },
-                        ]
-                      : []),
-                  ]}
-                  onLongPress={onLongPressCycle}
-                >
-                  <View style={styles.cycleRow}>
+            <NestableDraggableFlatList
+              data={cycles}
+              keyExtractor={(c) =>
+                // Stable key per cycle: prefer a_set id, fallback b_set id.
+                // Both null cycles are impossible (would imply empty row).
+                c.a_set?.id ?? c.b_set?.id ?? `cycle-${c.cycle_idx}`
+              }
+              activationDistance={20}
+              onDragEnd={async ({ data }) => {
+                // Only commit if order actually changed.
+                const newKeys = data.map(
+                  (c) => c.a_set?.id ?? c.b_set?.id ?? '',
+                );
+                const oldKeys = cycles.map(
+                  (c) => c.a_set?.id ?? c.b_set?.id ?? '',
+                );
+                const changed = newKeys.some(
+                  (k, idx) => k !== oldKeys[idx],
+                );
+                if (changed && onConfirmReorderCycles) {
+                  await onConfirmReorderCycles(data);
+                }
+              }}
+              renderItem={({
+                item: c,
+                drag,
+                isActive,
+              }: RenderItemParams<ClusterCycle<SessionSetWithExercise>>) => {
+                const bothLogged = c.both_logged;
+                const canTap = c.a_set !== null && c.b_set !== null;
+                // Right-swipe note target = parent (A side) set, if present.
+                const noteTarget = c.a_set?.id ?? c.b_set?.id ?? null;
+                return (
+                  <SwipeableSetRow
+                    swipeLeftActions={
+                      onDeleteCycle
+                        ? [
+                            {
+                              key: 'del-cluster-cycle',
+                              label: '刪',
+                              color: '#FF3B30',
+                              onPress: () =>
+                                onDeleteCycle({
+                                  a_set_id: c.a_set?.id ?? null,
+                                  b_set_id: c.b_set?.id ?? null,
+                                }),
+                            },
+                          ]
+                        : []
+                    }
+                    swipeRightActions={[
+                      ...(onCloneCycle
+                        ? [
+                            {
+                              key: 'clone-cluster-cycle',
+                              label: '+1',
+                              color: '#28a745',
+                              onPress: () =>
+                                onCloneCycle({
+                                  a_set_id: c.a_set?.id ?? null,
+                                  b_set_id: c.b_set?.id ?? null,
+                                }),
+                            },
+                          ]
+                        : []),
+                      ...(onShowCycleNote && noteTarget
+                        ? [
+                            {
+                              key: 'note-cluster-cycle',
+                              label: '備註',
+                              color: '#007AFF',
+                              onPress: () => onShowCycleNote(noteTarget),
+                            },
+                          ]
+                        : []),
+                    ]}
+                    onLongPress={drag}
+                  >
+                    <View
+                      style={[
+                        styles.cycleRow,
+                        isActive && styles.cycleRowDragActive,
+                      ]}
+                    >
                     {/*
                       Shared # button — single tap cycles set_kind on BOTH A
                       and B atomically (per overnight 第 3 點). Mirrors solo
@@ -401,8 +450,9 @@ export function ClusterCard({
                     </Pressable>
                   </View>
                 </SwipeableSetRow>
-              );
-            })
+                );
+              }}
+            />
           )}
 
           <View style={styles.clusterFooter}>
@@ -582,6 +632,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: 6,
+  },
+  // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
+  // (overnight 第 5 點, inline drag reorder).
+  cycleRowDragActive: {
+    backgroundColor: '#f3f4f6',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    borderRadius: 8,
   },
   // Shared `#` button at row start — replaces per-side label buttons.
   // Visual style matches `setLabelBtnCompact` in set-row-content so the

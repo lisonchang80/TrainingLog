@@ -1703,6 +1703,52 @@ export default function TodayScreen() {
                               initial: current,
                             })
                           }
+                          onConfirmReorderCycles={async (newOrder) => {
+                            // 第 5 點 — inline drag reorder for cluster cycles.
+                            // One drag affects BOTH A and B sides in lockstep:
+                            // newOrder[i] is the cycle that should land in
+                            // cycle slot i, so we project per-side ordered ids
+                            // and run reorderSessionSetsForExercise twice.
+                            // Asymmetric short-side null slots are skipped on
+                            // the empty side (the side's existing ordering for
+                            // those slots stays a no-op).
+                            const session_id = getSessionId(sessionState);
+                            if (!session_id) return;
+                            const aOrderedIds = newOrder
+                              .map((c) => c.a_set?.id)
+                              .filter(
+                                (id): id is string =>
+                                  typeof id === 'string' && id.length > 0,
+                              );
+                            const bOrderedIds = newOrder
+                              .map((c) => c.b_set?.id)
+                              .filter(
+                                (id): id is string =>
+                                  typeof id === 'string' && id.length > 0,
+                              );
+                            try {
+                              if (aOrderedIds.length > 0) {
+                                await reorderSessionSetsForExercise(db, {
+                                  session_id,
+                                  exercise_id: group.a.exercise.exercise_id,
+                                  orderedIds: aOrderedIds,
+                                });
+                              }
+                              if (bOrderedIds.length > 0) {
+                                await reorderSessionSetsForExercise(db, {
+                                  session_id,
+                                  exercise_id: group.b.exercise.exercise_id,
+                                  orderedIds: bOrderedIds,
+                                });
+                              }
+                              await refresh();
+                            } catch (e) {
+                              Alert.alert(
+                                '排序失敗',
+                                e instanceof Error ? e.message : String(e),
+                              );
+                            }
+                          }}
                         />,
                       );
                       continue;
