@@ -98,28 +98,33 @@ Cluster 是**單一 block**（含 A+B 兩 side、cycle row 共 ✓，per Q8 + St
 - **I1** — Image 3 「set ✓ 後右下 ⋯ icon 出現」是漏標 X；**維持 ADR-0012「per-row ⋯ icon 全砍」**
 - ADR-0012 已把所有破壞性 / 切換 action 都改成 gesture-driven（左滑刪 / 右滑加 + 備註 / tap label cycle / 長按 reorder / tap ✓ toggle），⋯ menu 無功能可放，視覺噪訊不必引回
 
-## Q5 — Per-exercise 備註入口 + ⚙️ menu 內容（N1 + 4 項 + 副作用）
+## Q5 — Per-exercise 備註入口 + ⚙️ menu 內容（N1 + 3 項 + 副作用）
 
 ### (a) N1 — ⚙️ menu 內「📝 編輯備註」一項
 
-跟 user 直覺對齊；⚙️ menu 統一容納 per-exercise 各種設定（備註 / 休息 / 換動作 / 刪除動作）。
+跟 user 直覺對齊；⚙️ menu 統一容納 per-exercise 各種設定（備註 / 休息 / 刪除動作）。
 
-### (b) ⚙️ menu 4 項（cluster mark 第 5 項由 Q7 拍板移除）
+### (b) ⚙️ menu 3 項（**2026-05-16 修訂**：原 4 項砍除 🔄 換動作；cluster mark 第 5 項由 Q7 拍板移除）
 
 | 項目 | 用途 | Schema 動作 |
 |---|---|---|
 | 📝 編輯備註 | 開 bottom sheet 改 per-Exercise 全局 notes | UPDATE `exercise.notes`（per ADR-0017 Q5）|
 | ⏱️ 休息秒數 | 開 bottom sheet 數字輸入改 `session_exercise.rest_sec` | UPDATE `session_exercise.rest_sec` |
-| 🔄 換動作 | 開動作選擇器（Exercise only，不能挑 RS — 見已知 known issues #3） → swap exercise_id + 砍 set 重建 | UPDATE `session_exercise.exercise_id`；DELETE + 重建 `set` rows |
 | 🗑️ 刪除動作 | confirm dialog「確定刪除？已記錄的 set 將一併刪除」→ DELETE CASCADE | DELETE `session_exercise` + CASCADE `set` |
 
-> **訂正紀錄**：grill 原 Q5 拍板含第 5 項「🔗 連結為超級組」當作 cluster 標記入口；Q7 拍板「cluster 來源唯一性」後 ad-hoc 標記入口砍除，「連結為超級組」這項若保留則跟底部 `[⊕ 加動作]` 進動作庫 picker 的 flow 功能重複——本 ADR 拍板**砍除這項**回歸 4 項 menu。
+> **訂正紀錄 (2026-05-16 修訂)**：原拍板含 4 項，第 4 項「🔄 換動作」slice 10b ⚙️ icon 落地時 user 提出砍除：「想換動作 = ⚙️ 🗑️ 刪除動作 + [⊕ 加動作] 動作庫勾選（或新建勾選）」即可達成相同效果，無需獨立 swap action。Cluster 與 solo 動作**統一適用**此流程：cluster 想換成員 = 刪整個 cluster + 加兩個新動作 + 重新配對成 cluster（不再有 cluster-內 swap 的快速路徑）。
+>
+> **接受的 trade-off**：(1) 操作步數多 1 step；(2) 新動作出現在列表最末（想換到原位需手動長按 reorder）；(3) Save-back 視為 delete + add 兩個獨立 op（既有 Save-back 已支援此 propagation，無需新邏輯）。
+>
+> **副效益**：(a) UI 簡化 4 項 → 3 項；(b) Known issues #3「🔄 picker 能否挑 RS」整題消失（已 ✅ resolved by removal）；(c) Slice 10c scope 簡化（少 1 個 sheet + 少 1 grill 議題「換動作 logged sets 處理」）；(d) 沒有 cluster 成員 swap 也避開了「cluster 內換 1 邊 schema 怎處理」的隱性複雜度。
+>
+> **更早的修訂紀錄**：grill 原 Q5 拍板含第 5 項「🔗 連結為超級組」當作 cluster 標記入口；Q7 拍板「cluster 來源唯一性」後 ad-hoc 標記入口砍除，「連結為超級組」這項若保留則跟底部 `[⊕ 加動作]` 進動作庫 picker 的 flow 功能重複——本 ADR 拍板**砍除這項**回歸 4 項 menu，再經 2026-05-16 修訂進一步簡化為 3 項。
 
 ### 副作用拍板
 
 - **編輯 UI**：📝 編輯備註 / ⏱️ 休息秒數 都走 bottom sheet（per ADR-0013 沿用的 `.sheet(presentationDetents:)` 多 detent；keyboard 滑上來；[完成] btn）
-- **換動作 swap-b**：set 全砍重建（清空、依新動作 fallback 預建 row，跟 Freestyle 加動作同 code path，per ADR-0012 § C3.2）
 - **刪除動作 D1**：要 confirm dialog（不可 redo 的多 set 紀錄全沒、跟 ADR-0014 friction 與不可逆性匹配原則一致）
+- **「換動作」flow（無獨立 menu 項，2026-05-16 修訂）**：⚙️ 🗑️ 刪除動作 → [⊕ 加動作] (底部入口) → 動作庫 picker 勾選或新建後勾選（per ADR-0017 K1 picker + B1 即時新建 + L1 自動保存入口沿用）。Cluster 想換成員 → 刪整個 cluster → 加新成員 → 重新配對。
 - **三入口連動**（per ADR-0017 Q5）：`exercise.notes` 是 per-Exercise 全局單層，Session ⚙️ menu / Template editor / 動作詳情頁三處入口改的是同一份；session 內編 → immediate UPDATE `exercise.notes`；`session_exercise.notes_snapshot` 不跟 in-session 編輯更新（snapshot 已凍結於 create 時，per ADR-0013 雙欄哲學中保留的「歷史保鮮」這條）
 
 ## Q6 — In-session stats panel（P1 + 3-tile / Watch 5-tile）— **翻盤 ADR-0012**
@@ -557,7 +562,7 @@ PRD #1（GitHub issue）原本已 drift 5 個 ADR（0014/15/16/17/18）— 本 A
 
 1. **「無」schema seed 細節**（✅ **2026-05-16 late grill Q1+Q1b 拍板**）— `program.name = '無'`（短版，DB 直接存 UI 顯示字串，不另存 `'無 Program'`）；`program.id = '00000000-0000-0000-0000-000000000000'`（**nil UUID** 全零保留 id，安全因為 UUID v4 variant + version bits 保證生成 id 不會碰撞）。匯出 `RESERVED_NONE_PROGRAM_ID` 常數於 `src/db/seed/v017ProgramNone.ts`。其他欄位：`cycle_length=3`（v005 CHECK 最低值）/ `cycle_count=1` / `start_date='1970-01-01'` / `is_active=0` / `main_tag=NULL`。Slice 10a `v017_program_none_seed.ts` 落地；`listPrograms` 過濾此 sentinel id（Programs tab 不顯示，非用戶可編輯/刪除）。
 2. **Cluster size 固定 2 跟 schema `parent_id` 支援 N children 的張力** — schema 允許 N children 但 UI 層強制 2；invariant 明寫在 ADR-0017 + ADR-0018，本 ADR Q8 cluster size 固定 2 重申
-3. **「換動作」🔄 內動作 picker 可否挑 RS** — Q5 grill 未深入；本 ADR 拍**不允許 RS**（換動作 = swap 單一 exercise；想換 cluster 走 `[⊕ 加動作]` flow + ⚙️「🗑️ 刪除動作」砍舊 cluster）
+3. **「換動作」🔄 內動作 picker 可否挑 RS** — ✅ **2026-05-16 ultra-late slice 10b 拍板：整題消失** — 「🔄 換動作」 menu 項本身砍除（per Q5 § (b) 修訂段），cluster 與 solo 統一走 ⚙️ 🗑️ 刪除動作 → [⊕ 加動作] 動作庫勾選 flow。沒有獨立 swap action = 沒有「picker 能否挑 RS」這個子問題。
 4. **Finish dialog「另存」UI 共用歷史頁 flow** — Freestyle finish「儲存」option 與 ADR-0014「另存模板」same flow 確認為**是**（per 本 ADR Q9 (d) 表 + ADR-0014 § Freestyle 升級流程既有設計）
 5. **PRD 已 drift 6 條 ADR**（原 5 + 本 ADR-0019）— ✅ **2026-05-16 overnight wave-1 完成**（PR #39 ship docs；PR #40 ship terminology propagation；PRD issue #1 catch-up applied via gh issue edit，744→874 行 + 70 new stories #287-#356）
 
@@ -639,7 +644,9 @@ Slice 10a v016 加 `template_exercise.rest_sec INTEGER NULL`，但 **v009 早已
 - Expanded body 含 rest_sec 顯示（NULL fallback「60s default」）+ set logger gesture coming-soon hint
 
 ### Q5 ⚙️ menu — placeholder only（slice 10c 完整 sheet 落地）
-本 slice 只落 affordance（icon + Alert），4 個 sheet 內容（📝編輯備註 / ⏱️休息秒數 / 🔄換動作 / 🗑️刪除動作）以及 DB write paths 在 slice 10c。
+本 slice 只落 affordance（icon + Alert），**3 個** sheet 內容（📝編輯備註 / ⏱️休息秒數 / 🗑️刪除動作）以及 DB write paths 在 slice 10c。
+
+**2026-05-16 ultra-late 修訂**：原 4 項中第 4 項「🔄 換動作」於 slice 10b ⚙️ icon 落地時 user 拍板砍除（per Q5 § (b) 修訂段）。Today tab Alert placeholder 文字同步更新為 3 項。「換動作」flow 改走 ⚙️ 🗑️ 刪除動作 → [⊕ 加動作] 動作庫勾選。
 
 ### 「無」 program label resolution（ADR-0019 § (N1) 配套）
 - 新增 `resolveProgramLabel(program | null | undefined): string` 在 `src/domain/program/programManager.ts`

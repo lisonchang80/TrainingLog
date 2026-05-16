@@ -605,7 +605,7 @@ export default function TodayScreen() {
                       onSettingsPress={() =>
                         Alert.alert(
                           '⚙️ menu',
-                          'Coming in slice 10c — 編輯備註 / 休息秒數 / 換動作 / 刪除動作',
+                          'Coming in slice 10c — 編輯備註 / 休息秒數 / 刪除動作（換動作 = 刪 + ⊕ 動作庫勾選）',
                         )
                       }
                     />
@@ -792,7 +792,10 @@ function formatPRDeltaValue(
  *   - e-3: expanded card uses bigger padding + same border (no active ring)
  *
  * The ⚙️ icon on the right opens the settings menu (slice 10c). For slice 10b
- * it's a placeholder Alert documenting the four sheets coming next.
+ * it's a placeholder Alert documenting the three sheets coming next
+ * (📝 編輯備註 / ⏱️ 休息秒數 / 🗑️ 刪除動作). The original ADR-0019 Q5 4-item
+ * design was reduced to 3 on 2026-05-16 — 「🔄 換動作」 was removed in favour
+ * of the 刪 + [⊕ 加動作] 動作庫勾選 flow (cluster + solo unified).
  *
  * Set logger gestures (left-swipe delete / right-swipe add+notes / tap-label
  * cycle / long-press reorder / tap-✓ complete) land in slice 10c — the
