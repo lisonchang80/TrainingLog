@@ -29,12 +29,16 @@ import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
+  computeSessionDiff,
   createSession,
+  createTemplateFromSession,
   deleteSessionExerciseAndSets,
   discardSession,
   endSession,
   getActiveSession,
+  linkSessionToTemplate,
   listSessionExercisesWithName,
+  overwriteTemplateFromSession,
   reorderSessionExercises,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
@@ -825,41 +829,223 @@ export default function TodayScreen() {
     );
   };
 
+  /**
+   * Finalise the session and route forward. Per ADR-0019 Q9d the finish
+   * flow is diff-aware:
+   *
+   *   - Template-based session + NO diff vs snapshot → finish silently,
+   *     route to `/session/{id}` (no Save-back dialog).
+   *   - Template-based session + diff → 3-option Alert: 儲存模板 (overwrite)
+   *     / 另存模板 (new sibling Template) / 否 (just finish).
+   *   - Freestyle session → 2-option Alert: 升級成 Template (新建 + link)
+   *     / 否 (stay freestyle).
+   *
+   * In every branch we ALWAYS end the session (UPDATE session.ended_at) +
+   * run achievement eval — the dialog only chooses whether to mutate the
+   * template too. The Save-back review screen `/save-back/{id}` is bypassed
+   * in this flow: this dialog replaces it as the per-spec finish UX.
+   */
+  const finalizeEndAndRoute = async (session_id: string) => {
+    const ended_at = Date.now();
+    await endSession(db, { id: session_id, ended_at });
+    try {
+      await evaluateAndPersistAchievements(db, {
+        ended_session_id: session_id,
+        unlocked_at: ended_at,
+      });
+    } catch (e) {
+      console.warn('[achievements] evaluate failed:', e);
+    }
+    setLastPRDelta(null);
+    setLastPRExerciseName('');
+    endState(sessionState, ended_at);
+    router.push(`/session/${session_id}`);
+  };
+
+  const promptForTemplateName = (
+    title: string,
+    defaultName: string,
+    onConfirm: (name: string) => void,
+  ) => {
+    if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        title,
+        '輸入模板名稱',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '儲存',
+            onPress: (input?: string) => {
+              const name = (input ?? defaultName).trim() || defaultName;
+              onConfirm(name);
+            },
+          },
+        ],
+        'plain-text',
+        defaultName,
+      );
+    } else {
+      // Non-iOS fallback: skip the prompt, use the default name silently.
+      onConfirm(defaultName);
+    }
+  };
+
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
+
+    const fromTemplate = plan.some((p) => p.template_id != null);
+    const templateId =
+      plan.find((p) => p.template_id != null)?.template_id ?? null;
+
     setBusy(true);
     try {
-      const ended_at = Date.now();
-      await endSession(db, { id: session_id, ended_at });
-      // Slice 9: evaluate achievements on Session end (iPhone-only batch eval).
-      // We swallow errors — failure here must not block the user from leaving
-      // the session, but we surface a non-fatal alert so it doesn't go silent.
-      try {
-        await evaluateAndPersistAchievements(db, {
-          ended_session_id: session_id,
-          unlocked_at: ended_at,
-        });
-      } catch (e) {
-        console.warn('[achievements] evaluate failed:', e);
-      }
-      // Clear PR banner so it doesn't bleed into the next session.
-      setLastPRDelta(null);
-      setLastPRExerciseName('');
-      // Validate the transition then redirect.
-      endState(sessionState, ended_at);
-      // If this Session was started from a Template (plan rows have a
-      // template_id), intercept with the Save-back review screen first;
-      // otherwise go straight to the summary.
-      const fromTemplate = plan.some((p) => p.template_id != null);
-      if (fromTemplate) {
-        router.push(`/save-back/${session_id}`);
+      if (fromTemplate && templateId) {
+        // Template-based session — diff-aware (Q9d 3-option path).
+        const diff = await computeSessionDiff(db, { session_id });
+        if (!diff.has_diff) {
+          await finalizeEndAndRoute(session_id);
+          return;
+        }
+        // 3-option Alert
+        Alert.alert(
+          '結束訓練？',
+          '此次訓練內容與模板有差異，要把變更存回模板嗎？',
+          [
+            {
+              text: '儲存模板',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await overwriteTemplateFromSession(db, {
+                    session_id,
+                    template_id: templateId,
+                    uuid: randomUUID,
+                  });
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Save failed',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+            {
+              text: '另存模板',
+              onPress: () => {
+                const defaultName = `Session ${new Date().toLocaleDateString()}`;
+                promptForTemplateName(
+                  '另存為新模板',
+                  defaultName,
+                  async (name) => {
+                    setBusy(true);
+                    try {
+                      await createTemplateFromSession(db, {
+                        session_id,
+                        name,
+                        uuid: randomUUID,
+                      });
+                      await finalizeEndAndRoute(session_id);
+                    } catch (e) {
+                      Alert.alert(
+                        'Save failed',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                );
+              },
+            },
+            {
+              text: '否',
+              style: 'cancel',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Could not end session',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+          ],
+        );
       } else {
-        router.push(`/session/${session_id}`);
+        // Freestyle session — 2-option (Q9d Freestyle path).
+        Alert.alert(
+          '結束訓練？',
+          '要把這次的內容升級成可重複使用的模板嗎？',
+          [
+            {
+              text: '升級成 Template',
+              onPress: () => {
+                const defaultName = `Session ${new Date().toLocaleDateString()}`;
+                promptForTemplateName(
+                  '建立新模板',
+                  defaultName,
+                  async (name) => {
+                    setBusy(true);
+                    try {
+                      const newTemplateId = await createTemplateFromSession(
+                        db,
+                        {
+                          session_id,
+                          name,
+                          uuid: randomUUID,
+                        },
+                      );
+                      await linkSessionToTemplate(db, {
+                        session_id,
+                        template_id: newTemplateId,
+                      });
+                      await finalizeEndAndRoute(session_id);
+                    } catch (e) {
+                      Alert.alert(
+                        'Save failed',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                );
+              },
+            },
+            {
+              text: '否',
+              style: 'cancel',
+              onPress: async () => {
+                setBusy(true);
+                try {
+                  await finalizeEndAndRoute(session_id);
+                } catch (e) {
+                  Alert.alert(
+                    'Could not end session',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              },
+            },
+          ],
+        );
       }
-      // Local state will reset on next focus via refresh().
     } catch (e) {
-      Alert.alert('Could not end session', e instanceof Error ? e.message : String(e));
+      Alert.alert(
+        'Could not end session',
+        e instanceof Error ? e.message : String(e),
+      );
     } finally {
       setBusy(false);
     }
