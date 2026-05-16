@@ -99,8 +99,17 @@ type ClusterCardProps = {
     field: 'reps' | 'weight',
     current: number,
   ) => void;
-  /** Tap label `# / 熱 / D{N}` to cycle set_kind. */
+  /** Tap label `# / 熱 / D{N}` to cycle set_kind. (Internal — kept for note
+   *  sheet plumbing; per-row UI no longer exposes a per-side # button. The
+   *  shared # button uses `onCycleClusterCycleSetKind` which fires for both
+   *  A+B at once.) */
   onCycleClusterSetKind?: (set_id: string) => void;
+  /** Shared `#` button per row — cycles set_kind for BOTH A and B atomically.
+   *  Caller dispatches to onCycleSetKind for each side. */
+  onCycleClusterCycleSetKind?: (args: {
+    a_set_id: string | null;
+    b_set_id: string | null;
+  }) => void;
   /** Right-swipe 備註 also offered inline as 📝 indicator. */
   onShowClusterSetNote?: (set_id: string, current: string | null) => void;
 };
@@ -120,6 +129,7 @@ export function ClusterCard({
   onUpdateClusterSet,
   onTapClusterNumber,
   onCycleClusterSetKind,
+  onCycleClusterCycleSetKind,
   onShowClusterSetNote,
 }: ClusterCardProps): React.ReactElement {
   const cycles = computeClusterCycles(group);
@@ -260,11 +270,46 @@ export function ClusterCard({
                   onLongPress={onLongPressCycle}
                 >
                   <View style={styles.cycleRow}>
-                    <Text style={styles.cycleIdx}>{c.cycle_idx}</Text>
+                    {/*
+                      Shared # button — single tap cycles set_kind on BOTH A
+                      and B atomically (per overnight 第 3 點). Mirrors solo
+                      card's leftmost label button position.
+                    */}
+                    {(() => {
+                      const refSet = c.a_set ?? c.b_set;
+                      const sharedLabel = refSet
+                        ? setKindLabel(refSet.set_kind)
+                        : '#';
+                      const disabled =
+                        c.a_set === null && c.b_set === null;
+                      return (
+                        <Pressable
+                          onPress={() => {
+                            if (disabled) return;
+                            onCycleClusterCycleSetKind?.({
+                              a_set_id: c.a_set?.id ?? null,
+                              b_set_id: c.b_set?.id ?? null,
+                            });
+                          }}
+                          disabled={disabled}
+                          hitSlop={6}
+                          style={({ pressed }) => [
+                            styles.sharedLabelBtn,
+                            pressed && !disabled && styles.sharedLabelBtnPressed,
+                            disabled && styles.sharedLabelBtnDisabled,
+                          ]}
+                        >
+                          <Text style={styles.sharedLabelText}>
+                            {sharedLabel}
+                          </Text>
+                        </Pressable>
+                      );
+                    })()}
                     <View style={styles.cycleSide}>
                       {c.a_set ? (
                         <SetRowContent
                           compact
+                          hideLabel
                           set={toSetRowItem(c.a_set)}
                           setLabel={setKindLabel(c.a_set.set_kind)}
                           isDropsetFollower={false}
@@ -290,10 +335,13 @@ export function ClusterCard({
                         <Text style={styles.cycleEmpty}>—</Text>
                       )}
                     </View>
+                    {/* Vertical divider between A and B (point 4) */}
+                    <View style={styles.cycleDivider} />
                     <View style={styles.cycleSide}>
                       {c.b_set ? (
                         <SetRowContent
                           compact
+                          hideLabel
                           set={toSetRowItem(c.b_set)}
                           setLabel={setKindLabel(c.b_set.set_kind)}
                           isDropsetFollower={false}
@@ -535,16 +583,59 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 6,
   },
-  cycleIdx: {
-    width: 22,
-    textAlign: 'center',
-    fontSize: 13,
-    opacity: 0.6,
+  // Shared `#` button at row start — replaces per-side label buttons.
+  // Visual style matches `setLabelBtnCompact` in set-row-content so the
+  // affordance reads as "cluster row's set_kind toggle".
+  sharedLabelBtn: {
+    width: 28,
+    height: 22,
+    borderRadius: 5,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#f3f4f6',
+    borderLeftColor: '#d1d5db',
+    borderRightColor: '#9ca3af',
+    borderBottomColor: '#6b7280',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
   },
+  sharedLabelBtnPressed: {
+    backgroundColor: '#e5e7eb',
+    borderTopWidth: 2,
+    borderBottomWidth: 1,
+    borderTopColor: '#6b7280',
+    borderLeftColor: '#9ca3af',
+    borderRightColor: '#d1d5db',
+    borderBottomColor: '#f3f4f6',
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 1 }],
+  },
+  sharedLabelBtnDisabled: {
+    opacity: 0.35,
+  },
+  sharedLabelText: { fontSize: 11, fontWeight: '600', color: '#374151' },
   cycleSide: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Vertical divider between A and B sides (point 4) — light hairline to
+  // mirror solo card's row-internal visual rhythm without adding heaviness.
+  cycleDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(127,127,127,0.35)',
+    marginHorizontal: 2,
   },
   cycleCell: {
     fontSize: 14,
@@ -552,6 +643,8 @@ const styles = StyleSheet.create({
   cycleEmpty: {
     fontSize: 14,
     opacity: 0.4,
+    flex: 1,
+    textAlign: 'center',
   },
   completeBtn: {
     width: 28,

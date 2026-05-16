@@ -52,6 +52,12 @@ type SetRowContentProps<S extends SetRowItem> = {
   /** Suppress 📝 note indicator (e.g., when caller renders it elsewhere). */
   hideNoteIndicator?: boolean;
   /**
+   * Slice 10c overnight (2026-05-17): cluster card uses a SHARED `#` button
+   * that cycles both A and B's set_kind in lockstep — so the per-side
+   * SetRowContent suppresses its own label button. Solo card never sets this.
+   */
+  hideLabel?: boolean;
+  /**
    * Slice 10c Phase 2 commit 8 (ADR-0019 Q6) — session set logger swap:
    * if provided, the reps/weight cells render as tap-targets that open the
    * caller's NumericKeypad modal instead of inline TextInput (so the system
@@ -78,6 +84,7 @@ export function SetRowContent<S extends SetRowItem>({
   isClusterLast,
   minusDisabled,
   hideNoteIndicator,
+  hideLabel,
   onTapNumber,
   onUpdateSet,
   onShowSetNote,
@@ -130,26 +137,28 @@ export function SetRowContent<S extends SetRowItem>({
 
   return (
     <View style={styles.setRow}>
-      <Pressable
-        onPress={() => {
-          if (!isDropsetFollower) onCycleLabel(set);
-        }}
-        disabled={isDropsetFollower}
-        hitSlop={6}
-        style={({ pressed }) => [
-          compact ? styles.setLabelBtnCompact : styles.setLabelBtn,
-          isDropsetFollower && styles.setLabelBtnDisabled,
-          pressed && !isDropsetFollower && styles.setLabelBtnPressed,
-        ]}>
-        <Text
-          style={[
-            styles.setLabelText,
-            compact && styles.setLabelTextCompact,
-            isDropsetFollower && styles.setLabelTextDisabled,
+      {hideLabel ? null : (
+        <Pressable
+          onPress={() => {
+            if (!isDropsetFollower) onCycleLabel(set);
+          }}
+          disabled={isDropsetFollower}
+          hitSlop={6}
+          style={({ pressed }) => [
+            compact ? styles.setLabelBtnCompact : styles.setLabelBtn,
+            isDropsetFollower && styles.setLabelBtnDisabled,
+            pressed && !isDropsetFollower && styles.setLabelBtnPressed,
           ]}>
-          {setLabel}
-        </Text>
-      </Pressable>
+          <Text
+            style={[
+              styles.setLabelText,
+              compact && styles.setLabelTextCompact,
+              isDropsetFollower && styles.setLabelTextDisabled,
+            ]}>
+            {setLabel}
+          </Text>
+        </Pressable>
+      )}
       {onTapNumber ? (
         <Pressable
           onPress={() => onTapNumber(set, 'reps', set.reps)}

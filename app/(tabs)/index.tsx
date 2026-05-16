@@ -1678,6 +1678,25 @@ export default function TodayScreen() {
                             );
                             if (s) onCycleSetKind(s.exercise_id, set_id);
                           }}
+                          onCycleClusterCycleSetKind={async (args) => {
+                            // Shared `#` button — fire both sides in lockstep
+                            // (overnight 第 3 點). Per ADR-0019 Q5 amend,
+                            // A and B should share set_kind state at the
+                            // cycle granularity since the shared button is
+                            // the only entry point exposed in UI.
+                            const a = args.a_set_id
+                              ? setsInSession.find(
+                                  (x) => x.id === args.a_set_id,
+                                )
+                              : null;
+                            const b = args.b_set_id
+                              ? setsInSession.find(
+                                  (x) => x.id === args.b_set_id,
+                                )
+                              : null;
+                            if (a) await onCycleSetKind(a.exercise_id, a.id);
+                            if (b) await onCycleSetKind(b.exercise_id, b.id);
+                          }}
                           onShowClusterSetNote={(set_id, current) =>
                             setNoteSheetTarget({
                               set_id,
