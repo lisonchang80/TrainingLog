@@ -1527,10 +1527,6 @@ export default function TodayScreen() {
               started_at_ms={sessionState.started_at}
             />
           ) : null}
-          <Text style={styles.subhead}>
-            Session in progress · {setsInSession.length} set
-            {setsInSession.length === 1 ? '' : 's'}
-          </Text>
 
           {/* Inline body data panel — quick add during session */}
           <View style={styles.inlineBodyHeader}>
@@ -2446,7 +2442,6 @@ const styles = StyleSheet.create({
   idleBody: { padding: 24, gap: 12, flex: 1, justifyContent: 'center' },
   scrollBody: { padding: 24, gap: 12, paddingBottom: 48 },
   heading: { fontSize: 28, fontWeight: '700' },
-  subhead: { fontSize: 14, opacity: 0.7, marginBottom: 8 },
   idleHint: { fontSize: 16, opacity: 0.65, marginBottom: 16, textAlign: 'center' },
   label: { fontSize: 14, fontWeight: '500', marginTop: 12, opacity: 0.7 },
   pillsRow: { gap: 8, paddingVertical: 4 },
