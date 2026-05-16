@@ -212,6 +212,43 @@ export async function archiveCustomExercise(
   );
 }
 
+/**
+ * Update the global notes for an exercise (per ADR-0019 ⚙️ menu's 📝
+ * option, slice 10c Phase 4 commit 18). Works for both built-in and
+ * custom exercises — notes is a v010 column that any exercise can have.
+ *
+ * Empty / whitespace-only input is coerced to NULL upstream by the
+ * SetNoteSheet so the indicator stays consistent with the per-set
+ * `notes` semantics from commit 7c.
+ */
+/**
+ * Read the global notes for an exercise (for prefilling the 📝 sheet).
+ * Returns null when the row has no notes (or the row doesn't exist —
+ * caller shouldn't get there with a valid exercise_id).
+ */
+export async function getExerciseNotes(
+  db: Database,
+  exercise_id: string
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ notes: string | null }>(
+    `SELECT notes FROM exercise WHERE id = ?`,
+    exercise_id
+  );
+  return row?.notes ?? null;
+}
+
+export async function updateExerciseNotes(
+  db: Database,
+  exercise_id: string,
+  notes: string | null
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE exercise SET notes = ? WHERE id = ?`,
+    notes,
+    exercise_id
+  );
+}
+
 export async function updateCustomExercise(
   db: Database,
   id: string,

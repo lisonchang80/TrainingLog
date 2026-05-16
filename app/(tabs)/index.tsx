@@ -21,6 +21,10 @@ import {
   listBodyMetrics,
 } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
+import {
+  getExerciseNotes,
+  updateExerciseNotes,
+} from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   createSession,
@@ -144,6 +148,16 @@ export default function TodayScreen() {
     session_exercise_id: string;
     current: number;
     exercise_name: string;
+  } | null>(null);
+  /**
+   * Exercise-level notes sheet target (📝 menu path). Reuses SetNoteSheet
+   * with a custom title; the Exercise.notes column is global (per-Exercise,
+   * not per-Session) per ADR-0017.
+   */
+  const [exerciseNoteTarget, setExerciseNoteTarget] = useState<{
+    exercise_id: string;
+    exercise_name: string;
+    initial: string | null;
   } | null>(null);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
@@ -652,10 +666,21 @@ export default function TodayScreen() {
       (idx) => {
         if (idx === 0) return;
         if (idx === 1) {
-          Alert.alert(
-            '📝 編輯備註',
-            'Coming in Phase 4 commit 18 — 編輯該動作的備註 (Exercise.notes，全域)。',
-          );
+          (async () => {
+            try {
+              const initial = await getExerciseNotes(db, planRow.exercise_id);
+              setExerciseNoteTarget({
+                exercise_id: planRow.exercise_id,
+                exercise_name: planRow.exercise_name,
+                initial,
+              });
+            } catch (e) {
+              Alert.alert(
+                '讀取失敗',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          })();
         } else if (idx === 2) {
           // Open keypad pre-filled with current rest_sec (default 60).
           setRestSecTarget({
@@ -1092,6 +1117,30 @@ export default function TodayScreen() {
           setKeypadTarget(null);
         }}
         onCancel={() => setKeypadTarget(null)}
+      />
+      <SetNoteSheet
+        visible={exerciseNoteTarget !== null}
+        initialValue={exerciseNoteTarget?.initial ?? null}
+        title={`📝 ${exerciseNoteTarget?.exercise_name ?? ''} 備註`}
+        placeholder="例：握距、發力重點、易犯錯誤..."
+        onConfirm={async (notes) => {
+          if (exerciseNoteTarget) {
+            try {
+              await updateExerciseNotes(
+                db,
+                exerciseNoteTarget.exercise_id,
+                notes,
+              );
+            } catch (e) {
+              Alert.alert(
+                'Save failed',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }
+          setExerciseNoteTarget(null);
+        }}
+        onCancel={() => setExerciseNoteTarget(null)}
       />
       <NumericKeypad
         visible={restSecTarget !== null}

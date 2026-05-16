@@ -21,6 +21,10 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 type SetNoteSheetProps = {
   visible: boolean;
   initialValue: string | null;
+  /** Title shown in the top bar. Defaults to '備註'. */
+  title?: string;
+  /** Placeholder shown inside the input. */
+  placeholder?: string;
   onConfirm: (notes: string | null) => void;
   onCancel: () => void;
 };
@@ -28,6 +32,8 @@ type SetNoteSheetProps = {
 export function SetNoteSheet({
   visible,
   initialValue,
+  title = '備註',
+  placeholder = '這組想留下什麼？（例：RPE 8、左肘有點緊）',
   onConfirm,
   onCancel,
 }: SetNoteSheetProps) {
@@ -55,7 +61,7 @@ export function SetNoteSheet({
             <Pressable onPress={onCancel} hitSlop={8}>
               <Text style={styles.topBarBtnText}>取消</Text>
             </Pressable>
-            <Text style={styles.topBarTitle}>備註</Text>
+            <Text style={styles.topBarTitle}>{title}</Text>
             <Pressable onPress={handleConfirm} hitSlop={8}>
               <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
                 完成
@@ -68,7 +74,7 @@ export function SetNoteSheet({
             multiline
             value={draft}
             onChangeText={setDraft}
-            placeholder="這組想留下什麼？（例：RPE 8、左肘有點緊）"
+            placeholder={placeholder}
             placeholderTextColor="#9ca3af"
             autoFocus
             textAlignVertical="top"
