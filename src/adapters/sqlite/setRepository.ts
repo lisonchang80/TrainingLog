@@ -251,6 +251,186 @@ export async function markClusterCycleUnlogged(
 }
 
 /**
+ * Atomic "delete one cycle row" for a cluster pair (ADR-0019 Q8 left-swipe
+ * cycle row → 刪 — mirrors template editor's `deleteSupersetRowAt`).
+ *
+ * Single transaction → either both sides delete or neither. Asymmetric short
+ * side (b_set_id=null) is handled — only the A side gets deleted, which lets
+ * the user prune extra A-side cycles down to match B-side. Defensive against
+ * either id being unknown (DELETE WHERE id = unknown is a no-op in SQLite).
+ */
+export async function deleteClusterCycle(
+  db: Database,
+  args: { a_set_id: string | null; b_set_id: string | null }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    if (args.a_set_id) {
+      await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.a_set_id);
+    }
+    if (args.b_set_id) {
+      await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.b_set_id);
+    }
+  });
+}
+
+/**
+ * Atomic "clone one cycle row" — inserts a new A+B set pair right after the
+ * existing pair, copying weight_kg / reps / set_kind from the source. Used
+ * by cluster cycle row right-swipe 加 (mirrors template's `cloneSupersetRowAt`).
+ *
+ * Ordering: simple MAX+1 within session (cluster cycles don't share an
+ * ordering namespace across A/B sides — each exercise_id has its own MAX).
+ * is_logged is reset to 0 on the new copies (a clone is "to-do, not done").
+ *
+ * Asymmetric handling: if either side is null (no source on that side), the
+ * clone for that side is skipped. The caller decides whether asymmetric
+ * clone is allowed for the UI affordance.
+ */
+export async function cloneClusterCycle(
+  db: Database,
+  args: {
+    a_source: { id: string; exercise_id: string } | null;
+    b_source: { id: string; exercise_id: string } | null;
+    session_id: string;
+    new_a_set_id: string;
+    new_b_set_id: string;
+    now?: () => number;
+  }
+): Promise<void> {
+  const now = (args.now ?? (() => Date.now()))();
+  await db.withTransactionAsync(async () => {
+    const maxFor = async (exercise_id: string) => {
+      const row = await db.getFirstAsync<{ max_ord: number | null }>(
+        `SELECT MAX(ordering) AS max_ord FROM "set"
+          WHERE session_id = ? AND exercise_id = ?`,
+        args.session_id,
+        exercise_id
+      );
+      return (row?.max_ord ?? 0) + 1;
+    };
+
+    if (args.a_source) {
+      const source = await db.getFirstAsync<{
+        weight_kg: number | null;
+        reps: number | null;
+        set_kind: SetKind;
+      }>(
+        `SELECT weight_kg, reps, set_kind FROM "set" WHERE id = ?`,
+        args.a_source.id
+      );
+      if (source) {
+        await db.runAsync(
+          `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                              is_skipped, ordering, created_at,
+                              set_kind, parent_set_id, is_logged)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+          args.new_a_set_id,
+          args.session_id,
+          args.a_source.exercise_id,
+          source.weight_kg,
+          source.reps,
+          await maxFor(args.a_source.exercise_id),
+          now,
+          source.set_kind
+        );
+      }
+    }
+    if (args.b_source) {
+      const source = await db.getFirstAsync<{
+        weight_kg: number | null;
+        reps: number | null;
+        set_kind: SetKind;
+      }>(
+        `SELECT weight_kg, reps, set_kind FROM "set" WHERE id = ?`,
+        args.b_source.id
+      );
+      if (source) {
+        await db.runAsync(
+          `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                              is_skipped, ordering, created_at,
+                              set_kind, parent_set_id, is_logged)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+          args.new_b_set_id,
+          args.session_id,
+          args.b_source.exercise_id,
+          source.weight_kg,
+          source.reps,
+          await maxFor(args.b_source.exercise_id),
+          now,
+          source.set_kind
+        );
+      }
+    }
+  });
+}
+
+/**
+ * Atomic "add 1 cycle at end" — inserts a new A+B set pair at the end of the
+ * cluster (mirrors template editor's `addSetToSuperset`). Each side defaults
+ * to the LAST set's weight_kg / reps for that exercise within this session
+ * (動作記憶 within-session), or caller-supplied starter defaults.
+ *
+ * Caller responsible for: pre-computing default weight/reps (e.g. via the
+ * historical 動作記憶 lookup), generating fresh UUIDs, providing exercise ids.
+ */
+export async function addClusterCycleAtEnd(
+  db: Database,
+  args: {
+    session_id: string;
+    a: { exercise_id: string; new_set_id: string; weight_kg: number; reps: number };
+    b: { exercise_id: string; new_set_id: string; weight_kg: number; reps: number };
+    set_kind?: SetKind;
+    now?: () => number;
+  }
+): Promise<void> {
+  const now = (args.now ?? (() => Date.now()))();
+  const set_kind: SetKind = args.set_kind ?? 'working';
+
+  await db.withTransactionAsync(async () => {
+    const maxFor = async (exercise_id: string) => {
+      const row = await db.getFirstAsync<{ max_ord: number | null }>(
+        `SELECT MAX(ordering) AS max_ord FROM "set"
+          WHERE session_id = ? AND exercise_id = ?`,
+        args.session_id,
+        exercise_id
+      );
+      return (row?.max_ord ?? 0) + 1;
+    };
+    const aOrder = await maxFor(args.a.exercise_id);
+    const bOrder = await maxFor(args.b.exercise_id);
+
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                          is_skipped, ordering, created_at,
+                          set_kind, parent_set_id, is_logged)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+      args.a.new_set_id,
+      args.session_id,
+      args.a.exercise_id,
+      args.a.weight_kg,
+      args.a.reps,
+      aOrder,
+      now,
+      set_kind
+    );
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                          is_skipped, ordering, created_at,
+                          set_kind, parent_set_id, is_logged)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+      args.b.new_set_id,
+      args.session_id,
+      args.b.exercise_id,
+      args.b.weight_kg,
+      args.b.reps,
+      bOrder,
+      now,
+      set_kind
+    );
+  });
+}
+
+/**
  * Insert one set into an OPEN session. Caller must ensure the session exists
  * and is still in_progress (per the Session Manager state machine).
  *
