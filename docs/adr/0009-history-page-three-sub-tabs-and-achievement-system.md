@@ -257,6 +257,8 @@ PRD 原本 8 個 pure domain logic modules → 升級為 **10 個**：
 
 ## 2026-05-13 amendment（ADR-0017 觸發 — 動作歷史頁 / 圖表頁 filter chip 改 rep bucket）
 
+> **Terminology note (2026-05-16, ADR-0019 § Q9.2)**：本 amendment 內所有「Program 副標籤」/「副標籤」字眼 = UI label「**強度**」（schema 欄位名不動）。為保留 amendment trail 描述原寫錯字眼，本段不替換原字串；canonical 對照表見 CONTEXT.md § Terminology rename 對照表 + ADR-0003 amendment。
+
 ADR-0017 Q14 grill 期間發現本 ADR 既訂「動作歷史頁 Filter chip 列 = Program 副標籤」是**寫錯**，應為 **rep bucket**（CONTEXT L269 同步寫錯）。
 
 ### 翻盤的既有拍板

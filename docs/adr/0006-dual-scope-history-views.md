@@ -4,14 +4,14 @@
 
 - **Inline 歷史指標**（Session 內 Exercise 卡片動作名下方 3 chip：上次 / 容量峰 / 重量峰）走**嚴格 scope**：
   - **Tier 1**：該 Template entity (三元組嚴格)
-  - **Tier 2** (fallback)：(Template name, Program 副標籤) 跨 Program 主標籤（保 rep range 不變）
-  - **Tier 3 不啟用**：跨 Program 副標籤對 progressive overload 無意義
+  - **Tier 2** (fallback)：(Template name, **強度**（原 Program 副標籤）) 跨**週期**（原 Program 主標籤）（保 rep range 不變）
+  - **Tier 3 不啟用**：跨**強度**（原 Program 副標籤）對 progressive overload 無意義
   - 三 chip 同步 tier，Tier 1 一旦有任何 Session 就鎖 Tier 1
-- **動作歷史頁**（按鈕進入的完整列表頁）走 **Exercise level scope (scope c)**：跨所有 Template、跨所有 Program 副標籤、跨所有 rep range
+- **動作歷史頁**（按鈕進入的完整列表頁）走 **Exercise level scope (scope c)**：跨所有 Template、跨所有**強度**（原 Program 副標籤）、跨所有 rep range
 
 理由：兩個視圖回答的是**不同問題**，不是同一資料的兩種顯示密度：
 
-- **Inline = 「現在這個三元組要怎麼設今天的重量？」** — 需要的是同 rep range、同三元組身份的精確訊號。混 rep range 會誤導 progressive overload 判讀（看到「容量峰 70×10」但其實來自 12-15RM 紀錄，今天 6-8RM 直接套會 underload 或 overload）。Tier 2 fallback 嚴格保 rep range，只放寬 Program 主標籤是因為週期切換時純嚴格 scope 會讓 chip 全空，使用者體驗斷層
+- **Inline = 「現在這個三元組要怎麼設今天的重量？」** — 需要的是同 rep range、同三元組身份的精確訊號。混 rep range 會誤導 progressive overload 判讀（看到「容量峰 70×10」但其實來自 12-15RM 紀錄，今天 6-8RM 直接套會 underload 或 overload）。Tier 2 fallback 嚴格保 rep range，只放寬**週期**（原 Program 主標籤）是因為週期切換時純嚴格 scope 會讓 chip 全空，使用者體驗斷層
 - **動作歷史頁 = 「我這個動作的全時表現如何？跨週期我做到過什麼？」** — 需要的是 cross-RM 比對能力（「我這次 6-8RM 要設多重？看一下上週期 10-12RM 做到 60×10，這次抓 75×6 應該合理」）。這恰恰是 inline 不能給的訊號類型，也是使用者「主動點按鈕進深度頁」的核心動機
 
 把兩個 scope 分配給兩個視圖、不互通也不切換，semantic 上最乾淨：每個視圖回答**自己擅長**的問題。
@@ -21,7 +21,7 @@
 - **兩視圖都用嚴格 scope (a)**：動作歷史頁變成「per Template entity 三元組」，週期切換重置會讓使用者看不到任何跨 RM 比對，無法回答「我這次 6-8RM 要設多重」這個常見決策問題。深度頁失去存在意義
 - **兩視圖都用 Exercise level (c)**：inline chip 會混 rep range，3 個小 chip 沒空間做 rep range 視覺編碼（chip 已經要顯示「重量×次數」+ tier 指示 + tooltip），訊號失真且使用者只看到數字無法判讀來源 rep range
 - **提供 scope 切換 (toggle)**：inline 空間 3 個 chip 已經很滿放不下 toggle；動作歷史頁加 toggle 又對應分裂兩種 mental model（使用者要記「這頁現在是哪個 scope」），強制單一語意更乾淨
-- **動作歷史頁延用 scope a 但加 Tier 3 fallback (跨副標籤)**：fallback 是「本來該嚴格但臨時放寬」的補丁味，與「動作歷史頁的本意就是跨 RM 全展」語意衝突。直接定義為 scope c 才語意乾淨，使用者也不會誤以為「動作歷史頁顯示的數字是嚴格 scope 的 fallback 結果」
+- **動作歷史頁延用 scope a 但加 Tier 3 fallback (跨副標籤（強度）)**：fallback 是「本來該嚴格但臨時放寬」的補丁味，與「動作歷史頁的本意就是跨 RM 全展」語意衝突。直接定義為 scope c 才語意乾淨，使用者也不會誤以為「動作歷史頁顯示的數字是嚴格 scope 的 fallback 結果」
 
 —— Consequences：
 

@@ -37,7 +37,7 @@ Watch → iPhone events 走 `WCSession.transferUserInfo`（OS-managed reliable d
 
 | # | 功能 | 重點 |
 |---|---|---|
-| 1 | 選 Template 開訓練 | name → (Program, 副標籤) 兩層 nav；active Program 自動套**當期副標籤** 1-tap；今日排程一鍵 |
+| 1 | 選 Template 開訓練 | name → (週期, 強度) 兩層 nav（原 (Program, 副標籤)）；active 週期（原 Program）自動套**當期強度**（原副標籤） 1-tap；今日排程一鍵 |
 | 2 | Exercise 名下 chip「上次 / 重量峰 / 容量峰」 | 走 inline scope（不是 PR） |
 | 3 | 即時心率 | sticky top bar、zone 顏色 |
 | 4 | 增 / 刪組數 + 修改 weight × reps | Digital Crown 滾輪 |

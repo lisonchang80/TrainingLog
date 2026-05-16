@@ -10,7 +10,7 @@ Three downstream symptoms emerged when the slice 9.8c data layer landed:
 
 1. **Session detail page is cluster-blind** — `app/session/[id].tsx` reads sets via `listSetsBySession()` flat and renders them as a single ordered list. Templated clusters (both RS-explode and ADR-0016 manual) render as two independent solos. The page has been wrong since slice 6 templated cluster shipped, but the regression was invisible until the dedicated RS history page (9.8c) made the inconsistency stark.
 2. **`queryReusableSupersetHistory` walks a brittle indirection** — to associate a logged set with the RS it was performed under, it must JOIN `set → session_exercise.template_id → template_exercise WHERE reusable_superset_id = ?`. The function header (`exerciseHistoryRepository.ts:382-403`) self-documents three breakage modes: template edited after snapshot, RS deleted (`ON DELETE SET NULL`), and freestyle sessions (`session_exercise.template_id IS NULL`).
-3. **Freestyle / ad-hoc clusters cannot be recorded at all** — the user reported three real situations where they superset exercises without a template path: (i) pure freestyle session, (ii) Session Split's extras-becomes-freestyle flow (ADR-0006), (iii) templated session with on-the-fly cross-pairing. Volume is "偶爾" in all three, but cumulatively non-trivial and unrepresentable today.
+3. **Freestyle / ad-hoc clusters cannot be recorded at all** — the user reported three real situations where they superset exercises without a template path: (i) pure freestyle session, (ii) Session Split's extras-becomes-freestyle flow (ADR-0006), (iii) templated session with on-the-fly cross-pairing. Volume is "偶爾" in all three, but cumulatively non-trivial and unrepresentable today. （**2026-05-16 Q7 修訂**：ad-hoc cluster 模型撤銷。三場景由「即時新建 RS」承擔（picker mode 內 `[+ 新建超級組]`），cluster session-side row 仍可有 `reusable_superset_id IS NULL`，但語意限縮為「backfill β'-skipped fallback」。見 ADR-0019 § Q7 + 本文末 amendment）
 
 The session-side cluster gap is therefore not a freestyle-only concern — it is a **first-class data fidelity gap** that has been silently accumulating since templated clusters shipped.
 
@@ -149,7 +149,7 @@ This ADR does **not** specify pixel-level UI — that is deferred to the upcomin
 | I3 | Pairing semantics: A.set[i] visually pairs B.set[i] (per-side ordering index — matches ADR-0017 cluster B3 / ADR-0016 cluster memory pre-fill) |
 | I4 | Asymmetric set counts render as-is — no padding, no truncation |
 | I5 | Each side's `load_type` is rendered independently (loaded vs bodyweight need different cells) |
-| I6 | `reusable_superset_id NOT NULL` → cluster uses RS color + name; `reusable_superset_id IS NULL` → neutral "Superset" label + default color (ad-hoc) |
+| I6 | `reusable_superset_id NOT NULL` → cluster uses RS color + name; `reusable_superset_id IS NULL` → neutral "Superset" label + default color (ad-hoc) （**2026-05-16 Q7 修訂**：I6 NULL 分支實質僅命中 backfill β'-skipped 歷史 sessions（read-only legacy）；寫路徑無 NULL 來源，I6 NULL UI fallback 維持作為 read-side 保險。見 ADR-0019） |
 
 ### Out of scope (deferred to session UI/UX grill — Q6 DEFERRED)
 

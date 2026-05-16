@@ -2,7 +2,7 @@
 
 引入 `session.title TEXT NOT NULL DEFAULT ''` 欄位：Template-based session create 時 eager copy Template name，Freestyle session 起始為空字串、UI fallback「自由訓練」。session.title 是 session 的「身份 snapshot」，凍結後不隨 Template 改名動態變動（跟 ADR-0013 notes_snapshot 同 eager-copy 哲學）。
 
-歷史詳情頁頂部加三按鈕 [儲存模板] [另存模板] [刪除本訓練]，作為「身份維度」編輯入口；既有 ADR-0002 Save-back dialog 維持，負責「內容維度」（sets/reps/weight 差異）。兩維度**正交共存**。
+歷史詳情頁頂部加三按鈕 [儲存模板] [另存模板] [刪除本訓練]，作為「身份維度」編輯入口；既有 ADR-0002 Save-back dialog 維持，負責「內容維度」（sets/reps/weight 差異）。兩維度**正交共存**。（**2026-05-16 Q9/Q10 修訂**：Save-back 範圍由「僅 sets/reps/weight 差異」**擴展為任何 in-session 修改 vs snapshot**（diff scope 涵蓋 set count / set_kind / set_position / 加刪換動作 / cluster 加刪 / rest_sec；不含 exercise.notes / session.title）。見 ADR-0019 § Q9 + 本文末 amendment）
 
 本 ADR 整併 Q7.1–Q7.8 全鎖定（CONTEXT.md Q7 close-out 段）；對 ADR-0013 Q5.4-A 有一處微補充（collapsed 卡 title 來源 Template name → session.title），一併固化於本 ADR。
 
@@ -10,7 +10,7 @@
 
 **「內容是 sets，身份是 title；內容靠 Save-back，身份靠歷史頁三按鈕」**——兩個維度正交，分別處理：
 
-- **內容維度** (Save-back, ADR-0002)：session 結束時若 sets/reps/weight ≠ snapshot 目標 → 跳 dialog 問「同意修改模板？」；focus on 數據差異
+- **內容維度** (Save-back, ADR-0002)：session 結束時若 sets/reps/weight ≠ snapshot 目標 → 跳 dialog 問「同意修改模板？」；focus on 數據差異（**2026-05-16 Q9 修訂**：「sets/reps/weight ≠ snapshot」**改為**「任何 in-session 修改 vs snapshot」；Template-based 有 diff → 3-option dialog（儲存/另存/否）/ 無 diff → 直接 finish 無 dialog。見 ADR-0019 § Q9d）
 - **身份維度** (本 ADR)：session.title 隨時可改 (in-session header tap-to-edit / 歷史頁編輯)；歷史詳情頁三按鈕負責 rename Template name / 新建 Template / 刪除本場
 
 session.title 是「我這場叫什麼」的字串身份，跟 sets 數值正交。混在一起會破壞單一職責；分開後 trigger 點清晰、語意單一。
@@ -55,7 +55,7 @@ UPDATE session
 | Session 來源 | title 狀態 | 行為 |
 |---|---|---|
 | Template-based | 未改（= template.name） | 改 Template sets/reps/weight 內容；不改 name |
-| Template-based | 手動改過（≠ template.name） | 改 sets + rename Template name = session.title + **連動所有同 name sibling 一起 rename**（不改內容）+ 繼承 Program 主副標籤；更新 Program 頁面 |
+| Template-based | 手動改過（≠ template.name） | 改 sets + rename Template name = session.title + **連動所有同 name sibling 一起 rename**（不改內容）+ 繼承週期 · 強度（原 Program 主副標籤）；更新 Program 頁面 |
 | Freestyle | session.title 已填 | 引導使用者選要覆蓋的三元組 → 改 sets + rename group（同上連動規則） |
 | Freestyle | session.title = '' | 強制跳輸入框先填 session.title，再走上一條 |
 
@@ -63,9 +63,9 @@ UPDATE session
 
 ### 按鈕 2：「另存模板」（新建 Template entity）
 
-引導補齊三元組 (Program, 副標籤) → 建新 Template entity，name = session.title。
+引導補齊三元組 (週期, 強度)（原 (Program, 副標籤)） → 建新 Template entity，name = session.title。
 
-**衝突偵測（Q7.5-α）**：UI 即時偵測（reactive query），若 (session.title, Program, 副標籤) 命中既有 entity → **hard block** + 提示「該組合已存在於 T_existing」+ escape button「改用『儲存模板』覆蓋既有」。
+**衝突偵測（Q7.5-α）**：UI 即時偵測（reactive query），若 (session.title, 週期, 強度)（原 (session.title, Program, 副標籤)） 命中既有 entity → **hard block** + 提示「該組合已存在於 T_existing」+ escape button「改用『儲存模板』覆蓋既有」。
 
 跟 Program 起始日期 overlap 的「hard block + smart suggest」（ADR-0002）一致 UX 風格。
 
@@ -93,7 +93,7 @@ UPDATE session
 | Save-back dialog | session 結束 summary | 內容差異（sets/reps/weight ≠ snapshot 目標）（**2026-05-16 Q9 修訂**：範圍擴展到任何 in-session 修改 vs snapshot，含 set count / set_kind / set_position / 加刪 / 換 / cluster / rest_sec；exercise.notes + session.title 不算 diff。見 ADR-0019 § Q9） | ADR-0002 既有 |
 | 歷史頁三按鈕 | 歷史詳情頁手動 | 身份操作（rename / 升級 freestyle / 刪除） | 本 ADR |
 
-兩者**不互相觸發**；按了 Save-back 同意 ≠ 按了「儲存模板」（前者改 sets、後者改 name）。
+兩者**不互相觸發**；按了 Save-back 同意 ≠ 按了「儲存模板」（前者改 sets、後者改 name）。（**2026-05-16 Q9 修訂**：「前者改 sets、後者改 name」描述失準 — Save-back 範圍擴展為任何 in-session 修改（含 cluster 加刪 / rest_sec 等），不只 sets；「身份維度」三按鈕仍只改 title / template_id linkage。差異化以「session-end 自動 prompt」vs「歷史頁手動編輯」為界、不以欄位類別為界。見 ADR-0019 § Q9）
 
 使用者若同時想改內容 + 身份：session-end 走 Save-back (改 sets) → 進歷史詳情頁按「儲存模板」(rename + sibling 連動)。
 
@@ -105,7 +105,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 2. In-session：tap header 填 session.title（或不填，等結束）
 3. Session 結束 → Save-back dialog **不會觸發**（無 template_id 無 snapshot 目標可比）（**2026-05-16 Q9 修訂**：Freestyle session 結束改為跳 **2-option dialog（儲存 / 否）**，「儲存」走「另存模板」same flow 即時升級為 Template entity；歷史詳情頁三按鈕路徑仍保留作為補升級入口。見 ADR-0019 § Q9）
 4. 進歷史詳情頁：
-   - 按「另存模板」：補齊三元組 (Program, 副標) → 建新 Template entity → `session.template_id` UPDATE 為新 id（建立關聯）
+   - 按「另存模板」：補齊三元組 (週期, 強度)（原 (Program, 副標)） → 建新 Template entity → `session.template_id` UPDATE 為新 id（建立關聯）
    - 按「儲存模板」：引導選要覆蓋的三元組 → 同 group rename (Q7.3-A) + 內容覆蓋
 
 **Program 日曆顯示**：
@@ -126,7 +126,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 
 ## 歷史頁顯示（ADR-0013 Q5.4-A 微補充）
 
-ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + Program 主+副標 + 容量總和 + 動作數)。本 ADR 微補充：
+ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + 週期 · 強度（原 Program 主+副標） + 容量總和 + 動作數)。本 ADR 微補充：
 
 > Collapsed 卡 title 來源從 **Template name** 改為 **session.title**。Template-based 未改時 session.title = template.name (eager copy)，視覺上等效；手動改過或 freestyle 時顯示 session.title（空 → UI fallback「自由訓練」）。
 
@@ -135,7 +135,7 @@ ADR-0013 Q5.4-A 鎖定 collapsed 卡 = (Template name + Program 主+副標 + 容
 ## 跨 Backlog 影響
 
 - **Backlog #9 月曆視圖**：Freestyle session 在 Program 日曆顯示行為（未升級 freestyle → 非 Template 打勾）；升級流程 trigger 重新標記
-- **Backlog #11 Template 編輯流程**：「另存模板補齊三元組」UI 可共用 Template 建立的 UI 元件 (Program + 副標 selector)
+- **Backlog #11 Template 編輯流程**：「另存模板補齊三元組」UI 可共用 Template 建立的 UI 元件 (週期 + 強度 selector)（原 Program + 副標 selector）
 - **ADR-0013 Q5.4-A**：collapsed 卡 title 來源微 amendment（本 ADR cross-link）
 
 ## 拒絕的替代方案
@@ -254,9 +254,9 @@ stats panel 之下、動作卡之上條件式顯示：
 
 「‹ 回月曆」→ 「**‹ 返回**」（不寫死目的地語意，因為 user 可能從表列 view 進入）。
 
-### Program 主標題顯示
+### 週期 · 強度 標題顯示（原「Program 主標題顯示」）
 
-標題附近顯示 `Program 主標題 · Program 副標` 合併一行（如 `5x5 強度週 · 10-12RM`）。Freestyle session 無 Program 時不顯示這一行。
+標題附近顯示 **`週期 · 強度`** 合併一行（原 `Program 主標題 · Program 副標`；如 `5x5 強度週 · 10-12RM`）。Freestyle session 無週期時不顯示這一行。（**2026-05-16 Q9.2 rename**：Program 主標 → 週期 / Program 副標 → 強度 / 無 Program → 無。見 ADR-0003 amendment + ADR-0019 § Q9.2）
 
 ---
 
