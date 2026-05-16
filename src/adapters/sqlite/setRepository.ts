@@ -475,6 +475,72 @@ export async function recordSetInSession(
 }
 
 /**
+ * Reorder sets WITHIN a single (session, exercise) without disturbing other
+ * exercises' set orderings (slice 10c Phase 2 commit 9 留尾 — set-row long-press
+ * reorder modal, mirrored from `reorderSessionExercises` in sessionRepository).
+ *
+ * `set.ordering` is globally per-session (not per-exercise), so naive
+ * 1..N renumbering would clobber other exercises' sets. The slot-preserving
+ * approach: query current orderings of the target exercise's sets ASC,
+ * then assign each existing slot to the new id sequence by index.
+ *
+ * Example: session has 5 sets total — exA's sets at orderings [3, 5, 8],
+ * exB's at [1, 2, 4, 6, 7]. Reorder exA from [a3, a5, a8] to [a8, a3, a5]
+ * → a8 takes ordering 3, a3 takes 5, a5 takes 8. exB stays untouched.
+ *
+ * No constraint on `ordering` (no unique), so intermediate duplicates
+ * during the loop are fine. Transaction-wrapped for atomicity.
+ *
+ * If `orderedIds` doesn't match the queried set count for that exercise,
+ * we throw — caller should ensure the modal pass-through preserves the
+ * exact set list (no add / remove between long-press and confirm).
+ */
+export async function reorderSessionSetsForExercise(
+  db: Database,
+  args: {
+    session_id: string;
+    exercise_id: string;
+    orderedIds: string[];
+  }
+): Promise<void> {
+  // Fetch current set slots in ascending ordering.
+  const slots = await db.getAllAsync<{ id: string; ordering: number }>(
+    `SELECT id, ordering FROM "set"
+      WHERE session_id = ? AND exercise_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id,
+    args.exercise_id
+  );
+  if (slots.length !== args.orderedIds.length) {
+    throw new Error(
+      `reorderSessionSetsForExercise: id-count mismatch — ` +
+        `db has ${slots.length} sets, caller supplied ${args.orderedIds.length}`
+    );
+  }
+  // Verify all orderedIds belong to this exercise.
+  const validIds = new Set(slots.map((s) => s.id));
+  for (const id of args.orderedIds) {
+    if (!validIds.has(id)) {
+      throw new Error(
+        `reorderSessionSetsForExercise: id "${id}" not in this exercise's sets`
+      );
+    }
+  }
+
+  await db.withTransactionAsync(async () => {
+    for (let i = 0; i < args.orderedIds.length; i++) {
+      const target_id = args.orderedIds[i];
+      const slot_ordering = slots[i].ordering;
+      await db.runAsync(
+        `UPDATE "set" SET ordering = ? WHERE id = ?`,
+        slot_ordering,
+        target_id
+      );
+    }
+  });
+}
+
+/**
  * High-level entry point used by the Today tab.
  *
  * Per the #2 design decision: each Save auto-creates a Session, inserts the Set,

@@ -54,6 +54,7 @@ import {
   markClusterCycleLogged,
   markClusterCycleUnlogged,
   recordSetInSession,
+  reorderSessionSetsForExercise,
   updateSetFields,
   type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
@@ -64,6 +65,10 @@ import {
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
+import {
+  ReorderSetsSheet,
+  type ReorderSetItem,
+} from '@/components/shared/reorder-sets-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -179,6 +184,18 @@ export default function TodayScreen() {
   } | null>(null);
   /** 🔃 reorder-exercises modal open flag. */
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
+  /**
+   * 🔃 reorder-sets modal target — opens when user long-presses a set row.
+   * Holds the exercise context + initial item list (snapshot) so the modal
+   * can render without further DB reads. On confirm, commits via
+   * `reorderSessionSetsForExercise` and triggers refresh.
+   */
+  const [setReorderTarget, setSetReorderTarget] = useState<{
+    session_exercise_id: string;
+    exercise_id: string;
+    exercise_name: string;
+    items: ReorderSetItem[];
+  } | null>(null);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
    * computed once on refresh from listExerciseHistorySets (cross-session).
@@ -1694,6 +1711,38 @@ export default function TodayScreen() {
                         }
                         onSettingsPress={() => onSettingsPress(p)}
                         onLongPressHeader={() => setReorderSheetOpen(true)}
+                        onLongPressSet={() => {
+                          // Snapshot the current set list (working + dropset +
+                          // warmup) for this exercise; pass to modal. Caller
+                          // confirms a new order; we commit via
+                          // reorderSessionSetsForExercise (slot-based renumber).
+                          const exSets = setsInSession.filter(
+                            (s) => s.exercise_id === p.exercise_id,
+                          );
+                          if (exSets.length < 2) return; // nothing to reorder
+                          const setLabelsForRow = computeSetLabels(
+                            exSets.map((s) => ({
+                              kind:
+                                s.set_kind === 'warmup'
+                                  ? 'warmup'
+                                  : s.set_kind === 'dropset'
+                                  ? 'dropset'
+                                  : 'working',
+                              parent_set_id: s.parent_set_id,
+                            })),
+                          );
+                          setSetReorderTarget({
+                            session_exercise_id: p.id,
+                            exercise_id: p.exercise_id,
+                            exercise_name: p.exercise_name,
+                            items: exSets.map((s, idx) => ({
+                              id: s.id,
+                              label: setLabelsForRow[idx],
+                              weight_kg: s.weight_kg,
+                              reps: s.reps,
+                            })),
+                          });
+                        }}
                       />,
                     );
                   }
@@ -1850,6 +1899,31 @@ export default function TodayScreen() {
         }}
         onCancel={() => setReorderSheetOpen(false)}
       />
+      <ReorderSetsSheet
+        visible={setReorderTarget !== null}
+        exerciseName={setReorderTarget?.exercise_name ?? ''}
+        initialItems={setReorderTarget?.items ?? []}
+        onConfirm={async (orderedIds) => {
+          const target = setReorderTarget;
+          setSetReorderTarget(null);
+          const session_id = getSessionId(sessionState);
+          if (!session_id || !target) return;
+          try {
+            await reorderSessionSetsForExercise(db, {
+              session_id,
+              exercise_id: target.exercise_id,
+              orderedIds,
+            });
+            await refresh();
+          } catch (e) {
+            Alert.alert(
+              '排序失敗',
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        }}
+        onCancel={() => setSetReorderTarget(null)}
+      />
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
         initialValue={exerciseNoteTarget?.initial ?? null}
@@ -1979,6 +2053,7 @@ function ExerciseCard({
   onOpenHistory,
   onSettingsPress,
   onLongPressHeader,
+  onLongPressSet,
 }: {
   planRow: SessionExerciseRowWithName;
   done: number;
@@ -2006,6 +2081,8 @@ function ExerciseCard({
   onOpenHistory: () => void;
   onSettingsPress: () => void;
   onLongPressHeader: () => void;
+  /** Long-press any set row → open reorder-sets sheet (slice 10c Phase 2 c9 留尾). */
+  onLongPressSet: () => void;
 }): React.ReactElement {
   // Map session set_kind → kind so the shared computeSetLabels (which uses
   // the template-side `kind` field name) works without a session-specific
@@ -2039,7 +2116,6 @@ function ExerciseCard({
             styles.exerciseCardHeaderMain,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
           <View style={styles.planText}>
             <View style={styles.exerciseCardTitleRow}>
               <Text style={styles.planName} numberOfLines={1}>
@@ -2075,6 +2151,7 @@ function ExerciseCard({
             })()}
           </View>
           <Text style={styles.exerciseCardChevron}>{isExpanded ? '▼' : '▶'}</Text>
+          <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -2143,6 +2220,7 @@ function ExerciseCard({
                 <SwipeableSetRow
                   key={s.id}
                   enabled={!isDropsetFollower}
+                  onLongPress={onLongPressSet}
                   swipeLeftActions={[
                     {
                       key: 'delete',
