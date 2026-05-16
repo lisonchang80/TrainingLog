@@ -32,6 +32,7 @@ import {
   endSession,
   getActiveSession,
   listSessionExercisesWithName,
+  swapSessionExercise,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
@@ -50,6 +51,7 @@ import {
 } from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
+import { SwapExerciseSheet } from '@/components/shared/swap-exercise-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -158,6 +160,11 @@ export default function TodayScreen() {
     exercise_id: string;
     exercise_name: string;
     initial: string | null;
+  } | null>(null);
+  /** 🔀 swap-exercise sheet target. */
+  const [swapTarget, setSwapTarget] = useState<{
+    session_exercise_id: string;
+    old_exercise_id: string;
   } | null>(null);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
@@ -689,10 +696,10 @@ export default function TodayScreen() {
             exercise_name: planRow.exercise_name,
           });
         } else if (idx === 3) {
-          Alert.alert(
-            '🔀 換動作',
-            'Coming in Phase 4 commit 20 — 動作庫勾選 + simple replace session_exercise.exercise_id。',
-          );
+          setSwapTarget({
+            session_exercise_id: planRow.id,
+            old_exercise_id: planRow.exercise_id,
+          });
         } else if (idx === 4) {
           const setsForExercise = setsInSession.filter(
             (s) => s.exercise_id === planRow.exercise_id,
@@ -1117,6 +1124,34 @@ export default function TodayScreen() {
           setKeypadTarget(null);
         }}
         onCancel={() => setKeypadTarget(null)}
+      />
+      <SwapExerciseSheet
+        visible={swapTarget !== null}
+        currentExerciseId={swapTarget?.old_exercise_id ?? null}
+        exercises={exercises.map((e) => ({ id: e.id, name: e.name }))}
+        onConfirm={async (new_exercise_id) => {
+          if (swapTarget) {
+            const session_id = getSessionId(sessionState);
+            if (session_id) {
+              try {
+                await swapSessionExercise(db, {
+                  session_exercise_id: swapTarget.session_exercise_id,
+                  session_id,
+                  old_exercise_id: swapTarget.old_exercise_id,
+                  new_exercise_id,
+                });
+                await refresh();
+              } catch (e) {
+                Alert.alert(
+                  'Swap failed',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }
+          }
+          setSwapTarget(null);
+        }}
+        onCancel={() => setSwapTarget(null)}
       />
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}

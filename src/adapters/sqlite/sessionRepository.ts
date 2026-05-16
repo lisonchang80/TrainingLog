@@ -185,6 +185,43 @@ export async function deleteSessionExerciseAndSets(
  *
  * Slice 10c Phase 4 commit 18.
  */
+/**
+ * Swap one session_exercise row's exercise_id (🔀 menu path). Also
+ * updates the underlying sets' exercise_id to keep volume math, PR
+ * detection, and history queries consistent with the new exercise.
+ *
+ * Sibling propagation for reusable superset clusters is deferred (per
+ * spec L121 "ADR-0014 sibling rename propagation in 換動作 flow 留尾,
+ * simple replace only") — callers that hit a reusable cluster get only
+ * the targeted side replaced.
+ *
+ * Slice 10c Phase 4 commit 20.
+ */
+export async function swapSessionExercise(
+  db: Database,
+  args: {
+    session_exercise_id: string;
+    session_id: string;
+    old_exercise_id: string;
+    new_exercise_id: string;
+  }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE "set" SET exercise_id = ?
+        WHERE session_id = ? AND exercise_id = ?`,
+      args.new_exercise_id,
+      args.session_id,
+      args.old_exercise_id
+    );
+    await db.runAsync(
+      `UPDATE session_exercise SET exercise_id = ? WHERE id = ?`,
+      args.new_exercise_id,
+      args.session_exercise_id
+    );
+  });
+}
+
 export async function updateSessionExerciseRestSec(
   db: Database,
   session_exercise_id: string,
