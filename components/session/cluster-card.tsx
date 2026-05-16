@@ -192,7 +192,7 @@ export function ClusterCard({
           <View style={styles.clusterText}>
             <View style={styles.clusterNameRow}>
               <Text style={styles.supersetTag}>超</Text>
-              <Text style={styles.clusterName} numberOfLines={1}>
+              <Text style={styles.clusterName}>
                 {group.a.exercise.exercise_name}
                 <Text style={styles.clusterPlus}> + </Text>
                 {group.b.exercise.exercise_name}
@@ -607,10 +607,12 @@ const styles = StyleSheet.create({
   clusterText: { flex: 1 },
   clusterNameRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    // 換行友好: flex-start 對齊 — 超 tag / chip pin 到 top, title 可向下 wrap
+    // 不被 ... truncate（overnight #3 第 5 點）。
+    alignItems: 'flex-start',
     gap: 8,
   },
-  clusterName: { fontSize: 15, fontWeight: '600', flex: 1 },
+  clusterName: { fontSize: 15, fontWeight: '600', flex: 1, lineHeight: 20 },
   clusterChip: { fontSize: 13 },
   // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
   // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
@@ -625,6 +627,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     overflow: 'hidden',
+    // align with title first-line baseline (title lineHeight 20, pill ~16)
+    marginTop: 2,
   },
   clusterPlus: { fontSize: 14, opacity: 0.5 },
   // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
@@ -632,6 +636,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     opacity: 0.7,
+    // align with title first-line baseline when title wraps
+    marginTop: 2,
   },
   clusterChevron: {
     fontSize: 14,
