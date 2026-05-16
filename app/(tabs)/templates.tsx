@@ -13,16 +13,37 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import {
   createTemplate,
+  listDistinctSubTags,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
+import { listPrograms } from '@/src/adapters/sqlite/programRepository';
+import {
+  getSetting,
+  setSetting,
+} from '@/src/adapters/sqlite/settingsRepository';
+import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
+import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
+import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
+
+/**
+ * Sticky-state keys for the start-template bottom sheet
+ * (ADR-0019 §Q9.1a + Q9.2 FB1). Stored via the existing app_settings JSON
+ * helper — no new schema column needed.
+ */
+const LAST_PROGRAM_KEY = 'start_dialog_last_program_id';
+const LAST_SUB_TAG_KEY = 'start_dialog_last_sub_tag';
 
 /**
  * Templates tab — list of saved Templates, newest-edited first.
  *
- * Tap a row → editor (`/template/[id]`).
+ * Tap a row → 週期/強度 bottom sheet (ADR-0019 §Q9.1a) → either
+ *   [編輯模板]  → router.push('/template/{id}')                 (existing route)
+ *   [開始訓練]  → startSessionFromTemplate(db, …) → router.replace('/')
+ *
  * Tap "+ New" → create an empty template, then push the editor.
  */
 export default function TemplatesScreen() {
@@ -32,6 +53,17 @@ export default function TemplatesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Bottom sheet state — the tapped template + the picker option lists.
+  const [sheetTemplate, setSheetTemplate] = useState<TemplateSummary | null>(
+    null,
+  );
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
+  const [subTags, setSubTags] = useState<string[]>([]);
+  const [lastUsedProgramId, setLastUsedProgramId] = useState<string | null>(
+    null,
+  );
+  const [lastUsedSubTag, setLastUsedSubTag] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     const list = await listTemplates(db);
     setRows(list);
@@ -40,7 +72,7 @@ export default function TemplatesScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load])
+    }, [load]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -56,7 +88,115 @@ export default function TemplatesScreen() {
       await createTemplate(db, { id, name: 'New Template' });
       router.push(`/template/${id}`);
     } catch (e) {
-      Alert.alert('Could not create template', e instanceof Error ? e.message : String(e));
+      Alert.alert(
+        'Could not create template',
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Tap row → load picker data + open sheet. Loading happens inline (not on
+   * mount) so the lists reflect any program / template edits the user made
+   * between visits.
+   */
+  const onRowPress = async (item: TemplateSummary) => {
+    setBusy(true);
+    try {
+      const [programSummaries, distinctSubTags, lastProgram, lastTag] =
+        await Promise.all([
+          listPrograms(db),
+          listDistinctSubTags(db),
+          getSetting<string>(db, LAST_PROGRAM_KEY),
+          getSetting<string>(db, LAST_SUB_TAG_KEY),
+        ]);
+      setPrograms(
+        programSummaries.map((p) => ({ id: p.id, name: p.name })),
+      );
+      setSubTags(distinctSubTags);
+      setLastUsedProgramId(lastProgram);
+      setLastUsedSubTag(lastTag);
+      setSheetTemplate(item);
+    } catch (e) {
+      Alert.alert(
+        '無法開啟',
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeSheet = () => setSheetTemplate(null);
+
+  const persistSticky = async (
+    program_id: string,
+    sub_tag: string | null,
+  ): Promise<void> => {
+    await setSetting<string>(db, LAST_PROGRAM_KEY, program_id);
+    if (sub_tag != null) {
+      await setSetting<string>(db, LAST_SUB_TAG_KEY, sub_tag);
+    }
+  };
+
+  /**
+   * [編輯模板] handler — closes sheet, persists sticky selection, then opens
+   * the editor for the tapped template's id. Per Q9.2 E1 spec the intended
+   * target is the (name, period, intensity) triple's matching Template
+   * entity (create empty sibling when missing); slice 10c ships the simpler
+   * "edit the tapped row's template" — sibling-resolution lands in the next
+   * slice once the picker also gains 「+ 新增週期/強度」 affordances.
+   */
+  const onEdit = async (selection: {
+    period_id: string;
+    intensity_id: string | null;
+  }) => {
+    if (!sheetTemplate) return;
+    const template_id = sheetTemplate.id;
+    closeSheet();
+    try {
+      await persistSticky(selection.period_id, selection.intensity_id);
+    } catch {
+      // Sticky persistence is best-effort — don't block the edit flow.
+    }
+    router.push(`/template/${template_id}`);
+  };
+
+  /**
+   * [開始訓練] handler — start a session from the tapped template, persist
+   * sticky, then navigate to Today. Refuses if a session is already in
+   * progress (mirrors template editor's onStartSession guard).
+   */
+  const onStart = async (selection: {
+    period_id: string;
+    intensity_id: string | null;
+  }) => {
+    if (!sheetTemplate) return;
+    const template_id = sheetTemplate.id;
+    setBusy(true);
+    try {
+      const active = await getActiveSession(db);
+      if (active) {
+        Alert.alert(
+          '已有進行中的訓練',
+          '請先在「今日」分頁結束目前的訓練再開始新的。',
+        );
+        return;
+      }
+      await persistSticky(selection.period_id, selection.intensity_id);
+      await startSessionFromTemplate(db, {
+        template_id,
+        uuid: randomUUID,
+      });
+      closeSheet();
+      router.replace('/');
+    } catch (e) {
+      Alert.alert(
+        '無法開始訓練',
+        e instanceof Error ? e.message : String(e),
+      );
     } finally {
       setBusy(false);
     }
@@ -93,7 +233,8 @@ export default function TemplatesScreen() {
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push(`/template/${item.id}`)}
+            onPress={() => onRowPress(item)}
+            disabled={busy}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
             <Text style={styles.rowName}>{item.name}</Text>
             <Text style={styles.rowDetails}>
@@ -102,6 +243,17 @@ export default function TemplatesScreen() {
             </Text>
           </Pressable>
         )}
+      />
+      <StartTemplateSheet
+        visible={sheetTemplate != null}
+        templateName={sheetTemplate?.name ?? ''}
+        programs={programs}
+        subTags={subTags}
+        lastUsedProgramId={lastUsedProgramId}
+        lastUsedSubTag={lastUsedSubTag}
+        onEdit={onEdit}
+        onStart={onStart}
+        onCancel={closeSheet}
       />
     </SafeAreaView>
   );
