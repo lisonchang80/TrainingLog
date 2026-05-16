@@ -1,7 +1,9 @@
 /**
- * Slice 9.5 set-row gesture wrapper (ADR-0016 amendment §F).
+ * Set-row gesture wrapper — shared between template editor and session
+ * set logger (ADR-0016 amendment §F; promoted to `components/shared/`
+ * in slice 10c Phase 1 per ADR-0019 Q9).
  *
- * Ported from `Prototype/SwipeableSetRow.tsx` with the same API:
+ * Ported originally from `Prototype/SwipeableSetRow.tsx`. API:
  *   - `enabled=false` falls through to a plain `View` (cluster followers
  *     are followed by their head's gesture; see ADR-0016 amendment §C).
  *   - swipe left → reveal right actions (edge-anchored, animated to follow

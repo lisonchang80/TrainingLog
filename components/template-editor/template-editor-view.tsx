@@ -78,7 +78,7 @@ import type {
 } from '@/src/domain/template/types';
 
 import { PALETTE, hashColor } from './palette';
-import { SwipeableSetRow, type SwipeAction } from './swipeable-set-row';
+import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 
 const SECTION_LABEL: Record<ExerciseSection, string> = {
   general: '一般動作',
