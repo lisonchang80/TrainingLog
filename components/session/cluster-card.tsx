@@ -65,6 +65,16 @@ type ClusterCardProps = {
   group: ClusterCardGroup;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  /**
+   * RS accent color for the left vertical bar (per ADR-0019 Q8 (c) H1).
+   * Threaded from `session_exercise.reusable_superset_id` → `superset.color_hex`
+   * via `listSessionExercisesWithName`'s LEFT JOIN. NULL → fall back to the
+   * neutral accent (`#b35900`) — applies to manual/ad-hoc clusters whose
+   * source RS has no color, and to RS rows that were never colored.
+   *
+   * Slice 10c overnight 第 2 點 — cluster color threading.
+   */
+  colorHex?: string | null;
   /** Atomic "tap-✓ this cycle" — flips both sides via repo. */
   onToggleCycleLogged: (args: {
     a_set_id: string;
@@ -149,6 +159,7 @@ export function ClusterCard({
   onCycleClusterCycleSetKind,
   onShowClusterSetNote,
   onConfirmReorderCycles,
+  colorHex,
 }: ClusterCardProps): React.ReactElement {
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
@@ -159,9 +170,17 @@ export function ClusterCard({
   const completedCycles = cycles.filter((c) => c.both_logged).length;
   const totalCycles = cycles.length;
 
+  // ADR-0019 Q8 (c) H1 — left vertical bar in RS color. Threaded prop
+  // overrides the neutral fallback baked into styles.clusterCard.
+  const borderLeftColor = colorHex ?? undefined;
+
   return (
     <View
-      style={[styles.clusterCard, isExpanded && styles.clusterCardExpanded]}
+      style={[
+        styles.clusterCard,
+        isExpanded && styles.clusterCardExpanded,
+        borderLeftColor ? { borderLeftColor } : null,
+      ]}
     >
       <View style={styles.clusterCardHeader}>
         <Pressable
@@ -551,9 +570,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     borderLeftWidth: 4,
-    // ADR-0019 Q8 (c) H1: left vertical bar in RS color. We don't have the
-    // color threaded in here yet (would need a join through superset.color_hex);
-    // use a neutral accent for v1.
+    // ADR-0019 Q8 (c) H1: left vertical bar in RS color. Default is the
+    // neutral accent — when a `colorHex` prop is provided (threaded from
+    // `session_exercise.reusable_superset_id` → `superset.color_hex` via
+    // `listSessionExercisesWithName`'s LEFT JOIN), it overrides this fallback
+    // inline on the View style. Slice 10c overnight 第 2 點.
     borderLeftColor: '#b35900',
   },
   clusterCardExpanded: {
