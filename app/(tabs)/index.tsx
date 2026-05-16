@@ -50,7 +50,6 @@ import {
   insertSessionSet,
   listSetsBySession,
   addClusterCycleAtEnd,
-  cloneClusterCycle,
   deleteClusterCycle,
   insertSessionSetAfter,
   markClusterCycleLogged,
@@ -856,9 +855,17 @@ export default function TodayScreen() {
   };
 
   /**
-   * Clone one cluster cycle row (atomic A+B set insert with weight/reps
-   * copied from source). Wired into the cluster card's right-swipe 「加」
-   * gesture per the template-editor pattern.
+   * Clone one cluster cycle row, landing the new pair DIRECTLY BELOW the
+   * source cycle (overnight 第 6 點). Uses `insertSessionSetAfter` per side
+   * — which slot-shifts everything `>= new_ordering` by +1, mirroring solo
+   * card's right-swipe `+1` behavior (commit 0a9c1d3-style logic, lifted to
+   * cluster). Mirrors source weight/reps/set_kind on the new row.
+   *
+   * Why two sequential insertSessionSetAfter calls (not the atomic
+   * cloneClusterCycle): cloneClusterCycle uses MAX+1 per side, so the new
+   * pair lands at the end of EACH side — which violates "加在該排之下".
+   * Sequential insertSessionSetAfter correctly handles the cluster-interleaved
+   * ordering (see tests/db/insertClusterCycleAfter.test.ts).
    */
   const onCloneClusterCycle = async (args: {
     a_set_id: string | null;
@@ -866,25 +873,24 @@ export default function TodayScreen() {
   }) => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
-    // Look up the source rows in memory to get exercise_id for each side
-    const a_row = args.a_set_id
-      ? setsInSession.find((s) => s.id === args.a_set_id) ?? null
-      : null;
-    const b_row = args.b_set_id
-      ? setsInSession.find((s) => s.id === args.b_set_id) ?? null
-      : null;
     try {
-      await cloneClusterCycle(db, {
-        a_source: a_row
-          ? { id: a_row.id, exercise_id: a_row.exercise_id }
-          : null,
-        b_source: b_row
-          ? { id: b_row.id, exercise_id: b_row.exercise_id }
-          : null,
-        session_id,
-        new_a_set_id: randomUUID(),
-        new_b_set_id: randomUUID(),
-      });
+      // Order matters: insert A first, then B. The second call re-reads
+      // b's CURRENT ordering (post-A-insert shift), so transitive correctness
+      // is preserved by the repo's per-call shift+re-read.
+      if (args.a_set_id) {
+        await insertSessionSetAfter(db, {
+          session_id,
+          source_set_id: args.a_set_id,
+          uuid: randomUUID,
+        });
+      }
+      if (args.b_set_id) {
+        await insertSessionSetAfter(db, {
+          session_id,
+          source_set_id: args.b_set_id,
+          uuid: randomUUID,
+        });
+      }
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
     } catch (e) {
