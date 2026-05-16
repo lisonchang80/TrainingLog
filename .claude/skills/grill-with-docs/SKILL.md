@@ -69,6 +69,16 @@ When domain relationships are being discussed, stress-test them with specific sc
 
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
+### When user pins to existing pattern, scan that pattern's code BEFORE proposing options
+
+If the user says "match X's pattern" / "reference X" / "X 怎麼做的就照辦" / "後續優先參考 X" — that's a meta-rule binding all subsequent answers. Aggressively grep / read X's code BEFORE answering the next question.
+
+Wrong move: propose generic options that contradict the existing implementation. The user will keep correcting you until you do scan it. Each round of correction = wasted tokens + erodes user trust in your recommendations.
+
+Example (TrainingLog 2026-05-16 slice 10c grill round Q16): user said「後續優先參考模板」 mid-grill. I should have grep'd template editor's cluster card pattern before proposing Q16 cluster row "read-only display + per-row ✓" — which contradicted template's "整 cycle row in one SwipeableSetRow + shared ✓". Cost: 2 round-trips of correction before the recommendation aligned with reality.
+
+**Pattern**: when the meta-pin lands, immediately do a focused read of the referenced component (top-level structure, key handlers, gesture wiring), then base every subsequent option on what's actually there.
+
 ### Update CONTEXT.md inline
 
 When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md).
