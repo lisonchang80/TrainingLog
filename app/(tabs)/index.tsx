@@ -44,6 +44,8 @@ import {
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
+import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
+import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { computeSetLabels } from '@/src/domain/set/setLabels';
 import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
@@ -1081,6 +1083,15 @@ function ExerciseCard({
       what,
       'Coming in slice 10c Phase 2 commit 7+ (5-gesture / 備註 sheet)。',
     );
+  const progress = computeExerciseProgress(
+    sets.map((s) => ({
+      set_kind: s.set_kind,
+      is_logged: s.is_logged,
+      weight_kg: s.weight_kg,
+      reps: s.reps,
+    })),
+    planRow.planned_sets,
+  );
   return (
     <View style={[styles.exerciseCard, isExpanded && styles.exerciseCardExpanded]}>
       <View style={styles.exerciseCardHeader}>
@@ -1095,7 +1106,7 @@ function ExerciseCard({
           <View style={styles.planText}>
             <Text style={styles.planName}>{planRow.exercise_name}</Text>
             <Text style={styles.planDetails}>
-              {done}/{planRow.planned_sets} sets
+              {progress.workingDone}/{progress.plannedTotal} sets
               {planRow.planned_reps != null
                 ? ` · target ${planRow.planned_reps} reps`
                 : ''}
@@ -1103,6 +1114,20 @@ function ExerciseCard({
                 ? ` @ ${planRow.planned_weight_kg} kg`
                 : ''}
             </Text>
+            {progress.plannedTotal > 0 ? (
+              <View style={styles.exerciseCardProgressBar}>
+                <SegmentedProgressBar
+                  done={progress.workingDone}
+                  total={progress.plannedTotal}
+                />
+              </View>
+            ) : null}
+            {progress.volumeTotal > 0 ? (
+              <Text style={styles.exerciseCardVolume}>
+                容量 {Math.round(progress.volumeDone)} /{' '}
+                {Math.round(progress.volumeTotal)} kg·reps
+              </Text>
+            ) : null}
           </View>
           <Text style={styles.exerciseCardChevron}>{isExpanded ? '▾' : '▸'}</Text>
         </Pressable>
@@ -1353,6 +1378,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   exerciseCardGearText: { fontSize: 18 },
+  exerciseCardProgressBar: {
+    marginTop: 4,
+    width: '100%',
+  },
+  exerciseCardVolume: {
+    fontSize: 11,
+    opacity: 0.55,
+    marginTop: 2,
+  },
   exerciseCardBody: {
     paddingHorizontal: 12,
     paddingBottom: 12,
