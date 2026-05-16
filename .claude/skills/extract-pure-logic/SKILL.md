@@ -95,6 +95,33 @@ Conventional-commit prefix:
 - `refactor(domain): ...` when promoting existing closure logic without changing behavior.
 - `feat(...): ...` when the extraction creates a new module that didn't exist before (e.g. `src/domain/keypad.ts` for slice 10c commit 4 — even though the logic was new, it WAS net-new domain code).
 
+## DB-mutating logic: emit ops, don't return new arrays
+
+When the closure mutates rows in a DB-backed list (rather than just returning a new in-memory array), prefer emitting **a list of DB ops** over returning a new array.
+
+The template-side `cycleSetKind` returns a new `TemplateExercise` because template data lives in a React state object — the entire `sets[]` array is replaced on every change. But the session-side `cycleSessionSetKind` (slice 10c Phase 2 commit 7a) instead returns:
+
+```ts
+type CycleSessionSetOp =
+  | { type: 'update'; set_id: string; patch: {...} }
+  | { type: 'insertFollower'; new_set_id: string; parent_set_id: string; ... }
+  | { type: 'delete'; set_id: string };
+
+function cycleSessionSetKind(sets, set_id, new_set_id): CycleSessionSetOp[]
+```
+
+The caller maps each op to a single repo call (updateSetFields / insertSessionSet / deleteSet). Why ops, not array:
+
+1. **Each row is its own DB record** — diffing old vs new array to figure out which rows to UPDATE / INSERT / DELETE is busywork the pure function shouldn't do.
+2. **Caller controls non-deterministic context** — ordering (max+1), session_id, exercise_id, created_at all live in the caller's runtime state. Pure function shouldn't fabricate them.
+3. **Tests stay simple** — assert on the op list shape (`expect(ops).toEqual([{type: 'update', ...}, ...])`) instead of reconstructing the DB state.
+
+When to use array-return vs op-emit:
+- **Array-return**: data lives in a single in-memory container that's replaced wholesale (React state, draft objects). Template editor's `cycleSetKind` is the canonical example.
+- **Op-emit**: data lives in a normalized DB where each item is its own row. Session set logger's `cycleSessionSetKind` is the canonical example. Reorder operations, cascade deletes, and partial-update bulk-edit logic also fit this mold.
+
+The op-emit pattern needs the caller to inject `new_set_id` (or any other id-gen output) so the pure function stays deterministic — same `deps` parameter rule from §4 above.
+
 ## Anti-pattern: colocating tests in `tests/components/foo.test.tsx`
 
 Tempting because the test file lives next to the component conceptually. Doesn't work — jest's `testMatch` is `.test.ts` only. Even if you fix the glob to include `.tsx`, you then need a jsdom-like env that can render RN, which means installing `@testing-library/react-native` + adjusting `testEnvironment`, which is a separate slice-level decision. Don't do it casually.

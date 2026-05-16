@@ -114,6 +114,55 @@ Only offer to create an ADR when all three are true:
 
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
 
+### Closing ritual — ledger writeback BEFORE grill ends (drift prevention)
+
+The "Mark revisions" rule above protects against silent overwrites WITHIN the ADR. But the larger drift hazard is **verbal-only decisions that never make it into any document**. The 🔀 換動作 incident in TrainingLog slice 10c is the canonical case: user grilled and 砍 🔀 in mid-conversation, but nothing got written down → spec stayed at "重新加 🔀" → execution drifted → revert commit (4 files, -270 lines).
+
+**The rule**: BEFORE announcing grill complete, run this 3-step closing ritual:
+
+1. **Diff conversation vs existing ADR / ledger / spec**:
+   - Scroll up. For every decision the user has made (especially anything containing 「砍」「廢」「不要」「翻盤」「改」「OK」 + a noun), check: is it already written in ADR amend or ledger?
+   - For every "I'll just verify" / "let me think" moment that resolved into a decision: same check.
+
+2. **List new decisions + revisions in a single message to the user**:
+   - Format:
+     ```
+     本場 grill 新拍板 / 翻盤（將寫入 ADR ledger）：
+     1. [topic]: [old → new]
+     2. ...
+     確認落筆？
+     ```
+   - Wait for explicit confirmation. Don't auto-write if user says "等一下" or asks a clarifying question.
+
+3. **Write to BOTH ADR amend (narrative) AND ADR ledger table (greppable)**:
+   - Amend section: prose explanation of the revision + reasoning + which old decisions are now superseded.
+   - Ledger table (see "ADR ledger appendix format" below): one row per revision, machine-greppable, sorted by date DESC at top.
+   - Update MEMORY hook line if the slice's "next step" / "current state" changed.
+
+If grill ends without ritual, the next execution phase is guaranteed to drift. The `phase-precheck` skill catches structural drift (spec ≠ ADR), but it can't catch decisions that exist only in conversation.
+
+### ADR ledger appendix format
+
+Every ADR with ≥ 1 revision SHOULD have a "翻盤 ledger" section at the END (after all amend sections, before any "Out of scope" footer). Format:
+
+```markdown
+## 翻盤 ledger（greppable）
+
+| 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
+|---|---|---|---|---|---|
+| 2026-05-16 ultra-late | Q11 menu | 🔀 重新加 | 砍 🔀，走 🗑️+⊕ | user post-spec | 4b89d63 revert |
+| 2026-05-15 | Q15.5 容量公式 | planned_X × planned_Y | Σ working/non-warmup | grill Q15.5 | n/a (pre-impl) |
+```
+
+Why this matters: `phase-precheck` skill's sub-agent's FIRST grep is for this ledger table. If a revision exists only in narrative amend text, sub-agent may miss it (long ADRs, mid-paragraph). Ledger table is the structured fallback. **Without ledger, drift catch rate drops from 90% → 70%**.
+
+Rules for ledger entries:
+- Add at TOP (newest first) so bottom-up readers hit fresh entries first.
+- "原拍板" = the wording from the previous grill round / ADR section that's now overruled.
+- "新拍板" = the current accepted decision in ≤15 chars.
+- "觸發" = how the revision came about (grill round / spec-floor / user-post-impl / sub-agent-spec-drift / etc.).
+- "關聯 commit" = if the revision triggered an impl change, list the commit SHA. If pre-impl, write `n/a (pre-impl)`. If reverted, list both the bad-impl AND the revert commit.
+
 ### Post-grill: sweep PRD + memory if they exist
 
 If a PRD has already been published (e.g., as issue #1) when this grill round adds a new ADR, the grill round is **not complete** when ADR + CONTEXT.md are updated — PRD body and user-level memory will drift. Use the `feature-decision-sweep` skill to handle the full 4-location update (ADR → CONTEXT.md → PRD body → memory).
