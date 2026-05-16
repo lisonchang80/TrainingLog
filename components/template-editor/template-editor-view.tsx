@@ -78,6 +78,7 @@ import type {
 } from '@/src/domain/template/types';
 
 import { PALETTE, hashColor } from './palette';
+import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 
 const SECTION_LABEL: Record<ExerciseSection, string> = {
@@ -1697,159 +1698,6 @@ function SectionHeader({ label }: { label: string }) {
   );
 }
 
-type SetRowContentProps = {
-  set: TemplateSet;
-  setLabel: string;
-  compact?: boolean;
-  isDropsetFollower: boolean;
-  isClusterLast: boolean;
-  minusDisabled: boolean;
-  hideNoteIndicator?: boolean;
-  onUpdateSet: (set_id: string, patch: Partial<TemplateSet>) => void;
-  onShowSetNote: (set: TemplateSet) => void;
-  onRemoveDropsetRow: (set_id: string) => void;
-  onAddDropsetRow: (set_id: string) => void;
-  onCycleLabel: (set: TemplateSet) => void;
-};
-
-function SetRowContent({
-  set,
-  setLabel,
-  compact,
-  isDropsetFollower,
-  isClusterLast,
-  minusDisabled,
-  hideNoteIndicator,
-  onUpdateSet,
-  onShowSetNote,
-  onRemoveDropsetRow,
-  onAddDropsetRow,
-  onCycleLabel,
-}: SetRowContentProps) {
-  const hasNote =
-    !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
-
-  // Local string buffers so the user can type partial values like "12."
-  // without the controlled <TextInput> immediately re-rendering the
-  // numeric round-trip (`Number("12.") === 12 → "12"` would eat the dot).
-  // Sync from prop when the *parsed* local value diverges from set.* — so
-  // external changes (cycleSetKind, cluster clone) refresh the field but a
-  // mid-typed "12." (which parses to set.weight = 12) is left alone.
-  const [repsText, setRepsText] = useState(() => String(set.reps));
-  const [weightText, setWeightText] = useState(() => String(set.weight));
-  useEffect(() => {
-    const local = Number(repsText);
-    if (Number.isFinite(local) && local === set.reps) return;
-    setRepsText(String(set.reps));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set.reps]);
-  useEffect(() => {
-    const local = Number(weightText);
-    if (Number.isFinite(local) && local === set.weight) return;
-    setWeightText(String(set.weight));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set.weight]);
-
-  const handleRepsChange = (t: string) => {
-    const cleaned = t.replace(/[^0-9]/g, '');
-    setRepsText(cleaned);
-    onUpdateSet(set.id, { reps: cleaned === '' ? 0 : Number(cleaned) });
-  };
-
-  const handleWeightChange = (t: string) => {
-    // Allow digits + at most one decimal point; strip everything else.
-    let cleaned = t.replace(/[^0-9.]/g, '');
-    const firstDot = cleaned.indexOf('.');
-    if (firstDot !== -1) {
-      cleaned =
-        cleaned.slice(0, firstDot + 1) +
-        cleaned.slice(firstDot + 1).replace(/\./g, '');
-    }
-    setWeightText(cleaned);
-    if (cleaned === '' || cleaned === '.') {
-      onUpdateSet(set.id, { weight: 0 });
-      return;
-    }
-    const parsed = Number(cleaned);
-    if (Number.isFinite(parsed)) {
-      onUpdateSet(set.id, { weight: parsed });
-    }
-  };
-
-  return (
-    <View style={styles.setRow}>
-      <Pressable
-        onPress={() => {
-          if (!isDropsetFollower) onCycleLabel(set);
-        }}
-        disabled={isDropsetFollower}
-        hitSlop={6}
-        style={({ pressed }) => [
-          compact ? styles.setLabelBtnCompact : styles.setLabelBtn,
-          isDropsetFollower && styles.setLabelBtnDisabled,
-          pressed && !isDropsetFollower && styles.setLabelBtnPressed,
-        ]}>
-        <Text
-          style={[
-            styles.setLabelText,
-            compact && styles.setLabelTextCompact,
-            isDropsetFollower && styles.setLabelTextDisabled,
-          ]}>
-          {setLabel}
-        </Text>
-      </Pressable>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={repsText}
-        onChangeText={handleRepsChange}
-        keyboardType="number-pad"
-      />
-      <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={weightText}
-        onChangeText={handleWeightChange}
-        keyboardType="decimal-pad"
-      />
-      <Text style={styles.setUnit}>kg</Text>
-      {hasNote ? (
-        <Pressable
-          onPress={() => onShowSetNote(set)}
-          style={styles.setNoteIndicator}
-          hitSlop={6}>
-          <Text style={styles.setNoteIndicatorText}>📝</Text>
-        </Pressable>
-      ) : null}
-      {isDropsetFollower ? (
-        <Pressable
-          onPress={() => onRemoveDropsetRow(set.id)}
-          disabled={minusDisabled}
-          style={[
-            styles.dropsetInlineBtn,
-            minusDisabled && styles.dropsetTailBtnDisabled,
-          ]}
-          hitSlop={6}>
-          <Text
-            style={[
-              styles.dropsetInlineBtnText,
-              minusDisabled && styles.dropsetTailBtnTextDisabled,
-            ]}>
-            −
-          </Text>
-        </Pressable>
-      ) : null}
-      {isDropsetFollower && isClusterLast ? (
-        <Pressable
-          onPress={() => onAddDropsetRow(set.id)}
-          style={styles.dropsetInlineBtn}
-          hitSlop={6}>
-          <Text style={styles.dropsetInlineBtnText}>+</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
 function computeExMeta(ex: TemplateExercise) {
   const clusterInfo = ex.sets.map((s) => {
     if (s.kind !== 'dropset') return { clusterSize: 0, isClusterLast: false };
@@ -2284,7 +2132,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   setsBoxCompact: { paddingHorizontal: 8, paddingBottom: 8, paddingTop: 6 },
-  setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   setRowPlaceholder: { height: 32 },
   clusterStack: { gap: 4 },
   supersetRowNoteSlot: {
@@ -2292,89 +2139,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  setLabelBtn: {
-    width: 32,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnCompact: {
-    width: 26,
-    height: 20,
-    borderRadius: 5,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnDisabled: {
-    backgroundColor: 'transparent',
-    borderTopColor: 'transparent',
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'transparent',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  setLabelBtnPressed: {
-    backgroundColor: '#e5e7eb',
-    borderTopWidth: 2,
-    borderBottomWidth: 1,
-    borderTopColor: '#6b7280',
-    borderLeftColor: '#9ca3af',
-    borderRightColor: '#d1d5db',
-    borderBottomColor: '#f3f4f6',
-    shadowOpacity: 0,
-    elevation: 0,
-    transform: [{ translateY: 1 }],
-  },
-  setLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 11 },
-  setLabelTextDisabled: { color: '#9ca3af' },
-  setInput: {
-    minWidth: 48,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: '#fff',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  setInputCompact: {
-    minWidth: 34,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-    fontSize: 11,
-  },
-  setUnit: { fontSize: 12, color: '#6B7280' },
-  setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
+  // Note: setRow / setLabelBtn{,Compact,Disabled,Pressed} / setLabelText{,Compact,Disabled} /
+  // setInput{,Compact} / setUnit / setNoteIndicator / dropsetInlineBtn{,Text} /
+  // dropsetTailBtn{Disabled,TextDisabled} now live in components/shared/set-row-content.tsx.
+  // setNoteIndicatorText kept here because the cluster card render (line ~1379) still uses it
+  // outside SetRowContent.
   setNoteIndicatorText: { fontSize: 14 },
   exNoteIndicator: {
     paddingHorizontal: 6,
