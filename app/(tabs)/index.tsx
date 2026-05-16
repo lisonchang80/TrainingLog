@@ -1613,6 +1613,26 @@ export default function TodayScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="手動開始休息倒數"
+            onPress={() => {
+              // 手動計時 — opens the same RestTimerModal that tap-✓ uses,
+              // but unbounded from any specific set. Default 60s; user can
+              // cancel anytime. Per 2026-05-12 grill recommendation +
+              // 2026-05-16 ultra-late pull-forward from slice 10d.
+              setRestTimerTarget({ rest_sec: 60, exercise_name: '手動休息' });
+              setRestTimerTrigger((n) => n + 1);
+            }}
+            style={({ pressed }) => [
+              styles.bottomStickyBtn,
+              styles.bottomStickyBtnSecondary,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.bottomStickyBtnTextSecondary}>
+              ⏱ 手動計時
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             onPress={() =>
               Alert.alert(
                 '傳至手錶 ⌚',
