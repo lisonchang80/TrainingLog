@@ -54,6 +54,7 @@ import {
   insertSessionSetAfter,
   markClusterCycleLogged,
   markClusterCycleUnlogged,
+  prefillSessionExerciseFromLastSession,
   recordSetInSession,
   reorderSessionSetsForExercise,
   updateSetFields,
@@ -282,6 +283,14 @@ export default function TodayScreen() {
                 id: randomUUID(),
                 session_id: active.id,
                 exercise_id,
+              });
+              // Pre-fill from last session's set list (per user
+              // 「如果有以前的記錄，會載入最後一次的紀錄」). No-op silently
+              // when no prior history exists — user can still add manually.
+              await prefillSessionExerciseFromLastSession(db, {
+                session_id: active.id,
+                exercise_id,
+                uuid: randomUUID,
               });
             }
             await refresh();
@@ -2090,22 +2099,19 @@ function ExerciseCard({
               ) : null}
             </View>
             {(() => {
-              // Bar 分段 = max(planned_sets, 實際 working set rows)。
-              // 用戶加 set 超過 planned 時 segment 隨之擴張，per
-              // ADR-0019 Q5 修訂 — bar 跟著 body row 數走，而非死綁 template。
+              // Bar 分段 = 實際 working set row 數（drop plannedTotal — user
+              // 反映 chip 100% 但 bar 1/3 不一致；template plannedTotal
+              // 跟 body 實際 row 數脫節）。0 row 不渲染（per user「沒組時
+              // 不要有進度條」）。
               const workingRowCount = sets.filter(
                 (s) => s.set_kind === 'working',
               ).length;
-              const barTotal = Math.max(
-                progress.plannedTotal,
-                workingRowCount,
-              );
-              if (barTotal <= 0) return null;
+              if (workingRowCount <= 0) return null;
               return (
                 <View style={styles.exerciseCardProgressBar}>
                   <SegmentedProgressBar
                     done={progress.workingDone}
-                    total={barTotal}
+                    total={workingRowCount}
                   />
                 </View>
               );
@@ -2239,26 +2245,6 @@ function ExerciseCard({
                         isActive && styles.exerciseCardSetRowDragActive,
                       ]}
                     >
-                      <Pressable
-                        onPress={() => onToggleLogged(s.id, logged)}
-                        hitSlop={6}
-                        accessibilityRole="button"
-                        accessibilityLabel={logged ? '取消完成' : '標為完成'}
-                        style={({ pressed }) => [
-                          styles.completeBtn,
-                          logged && styles.completeBtnDone,
-                          pressed && styles.btnPressed,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.completeBtnText,
-                            logged && styles.completeBtnTextDone,
-                          ]}
-                        >
-                          {logged ? '✓' : '○'}
-                        </Text>
-                      </Pressable>
                       <View style={styles.exerciseCardSetRowContent}>
                         <SetRowContent
                           set={row}
@@ -2287,6 +2273,26 @@ function ExerciseCard({
                           }
                         />
                       </View>
+                      <Pressable
+                        onPress={() => onToggleLogged(s.id, logged)}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={logged ? '取消完成' : '標為完成'}
+                        style={({ pressed }) => [
+                          styles.completeBtn,
+                          logged && styles.completeBtnDone,
+                          pressed && styles.btnPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.completeBtnText,
+                            logged && styles.completeBtnTextDone,
+                          ]}
+                        >
+                          {logged ? '✓' : '○'}
+                        </Text>
+                      </Pressable>
                     </View>
                   </SwipeableSetRow>
                 );

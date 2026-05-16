@@ -475,6 +475,93 @@ export async function recordSetInSession(
 }
 
 /**
+ * Pre-fill a freshly added session_exercise's set rows from the user's
+ * LAST session for that exercise (slice 10c Phase 2 — [+ 動作] picker UX
+ * polish per user "如果有以前的記錄，會載入最後一次的紀錄").
+ *
+ * Behaviour:
+ *   - Looks up the most recent session that contains any non-skipped set
+ *     for `exercise_id`, EXCLUDING the current session
+ *   - Copies that session's set list verbatim (weight / reps / set_kind /
+ *     ordering within exercise) into the current session, appended to
+ *     current session's MAX(ordering)
+ *   - All copied rows have `is_logged = 0` (user must tick to confirm)
+ *   - Returns count of inserted rows (0 if no history exists → caller can
+ *     fall back to template defaults / leave empty)
+ *
+ * Returns 0 silently when no prior session exists — not an error case.
+ */
+export async function prefillSessionExerciseFromLastSession(
+  db: Database,
+  args: {
+    session_id: string;
+    exercise_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<number> {
+  // Find most recent session_id (excl current) that has any set for this exercise.
+  const lastSession = await db.getFirstAsync<{ session_id: string }>(
+    `SELECT s.session_id
+       FROM "set" s
+       JOIN session ss ON ss.id = s.session_id
+      WHERE s.exercise_id = ?
+        AND s.is_skipped = 0
+        AND s.session_id != ?
+      ORDER BY s.created_at DESC, s.id DESC
+      LIMIT 1`,
+    args.exercise_id,
+    args.session_id
+  );
+  if (!lastSession) return 0;
+
+  // Pull that session's full set list for this exercise, sorted ASC by ordering
+  // (preserves warmup-before-working flow).
+  const sourceSets = await db.getAllAsync<{
+    weight_kg: number | null;
+    reps: number | null;
+    set_kind: SetKind;
+  }>(
+    `SELECT weight_kg, reps, set_kind
+       FROM "set"
+      WHERE session_id = ? AND exercise_id = ? AND is_skipped = 0
+      ORDER BY ordering ASC`,
+    lastSession.session_id,
+    args.exercise_id
+  );
+  if (sourceSets.length === 0) return 0;
+
+  // Current session MAX ordering — new rows append after.
+  const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+    args.session_id
+  );
+  const baseOrdering = maxRow?.max_ordering ?? 0;
+
+  const now = args.now ?? Date.now;
+  const ts = now();
+  await db.withTransactionAsync(async () => {
+    for (let i = 0; i < sourceSets.length; i++) {
+      const src = sourceSets[i];
+      await insertSessionSet(db, {
+        id: args.uuid(),
+        session_id: args.session_id,
+        exercise_id: args.exercise_id,
+        weight_kg: src.weight_kg ?? 0,
+        reps: src.reps ?? 0,
+        is_skipped: 0,
+        ordering: baseOrdering + i + 1,
+        created_at: ts,
+        set_kind: src.set_kind,
+        parent_set_id: null, // Don't carry over cluster pairing on prefill.
+      });
+    }
+  });
+
+  return sourceSets.length;
+}
+
+/**
  * Insert a new set immediately AFTER the given source set, preserving the
  * source's exercise / weight / reps / set_kind (slice 10c Phase 2 — fix
  * right-swipe `+1` action so the new row appears directly under the swiped
