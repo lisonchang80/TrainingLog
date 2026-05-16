@@ -16,13 +16,19 @@ function mkEx(
   id: string,
   ordering: number,
   parent_id: string | null = null,
+  exercise_id?: string,
 ): ClusterExerciseInput {
-  return { id, ordering, parent_id };
+  // For tests, by default exercise_id = id (most tests use distinct ids per side).
+  return { id, exercise_id: exercise_id ?? `ex-${id}`, ordering, parent_id };
 }
 
 function mkSet(
   id: string,
-  session_exercise_id: string,
+  // Test fixtures previously named this `session_exercise_id` — now it's
+  // an `exercise_id`. Caller passes the parent exercise's `ex-<id>` token.
+  // To minimise per-test diff, helpers map the previous parent-row id
+  // (e.g. 'p') to 'ex-p' (matching mkEx default).
+  parent_token: string,
   ordering: number,
   opts: {
     set_kind?: 'warmup' | 'working' | 'dropset';
@@ -33,7 +39,7 @@ function mkSet(
 ): ClusterSetInput {
   return {
     id,
-    session_exercise_id,
+    exercise_id: `ex-${parent_token}`,
     ordering,
     set_kind: opts.set_kind ?? 'working',
     is_logged: opts.is_logged ?? 0,

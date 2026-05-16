@@ -32,6 +32,10 @@
 /** Structural-only fields needed for cluster grouping + cycle layout. */
 export interface ClusterExerciseInput {
   id: string;
+  /** Underlying Exercise entity id — used to partition sets per side
+   *  (the runtime `set` table foreign-keys to `exercise_id`, not to
+   *  `session_exercise.id`, per v001 schema). */
+  exercise_id: string;
   ordering: number;
   /** NULL = solo or cluster parent. NOT NULL = cluster follower; points to parent's id. */
   parent_id: string | null;
@@ -40,13 +44,10 @@ export interface ClusterExerciseInput {
 /** Structural-only fields needed for cycle alignment + volume aggregation. */
 export interface ClusterSetInput {
   id: string;
-  /** session_exercise.id this set belongs to. Used to partition per-side. */
-  session_exercise_id?: string;
-  /** Fallback for callers that only have exercise_id (legacy callers).
-   *  ClusterCard only uses session_exercise_id; this field is unused here
-   *  but kept on the input shape so callers can pass `SessionSetWithExercise`
-   *  directly without wrapping. */
-  exercise_id?: string;
+  /** Owning Exercise id — sets are linked to exercises via this column
+   *  (v001 schema). Cluster partitioning uses this against the matching
+   *  ClusterExerciseInput.exercise_id. */
+  exercise_id: string;
   ordering: number;
   set_kind: 'warmup' | 'working' | 'dropset';
   is_logged: number; // 0/1
@@ -114,8 +115,8 @@ export function groupClusterSides<
     const fols = followers.get(ex.id);
     if (!fols || fols.length === 0) continue; // solo — skip
     const bExercise = fols[0]; // 2-side only
-    const aSets = sortedSetsFor(sets, ex.id);
-    const bSets = sortedSetsFor(sets, bExercise.id);
+    const aSets = sortedSetsFor(sets, ex.exercise_id);
+    const bSets = sortedSetsFor(sets, bExercise.exercise_id);
     groups.push({
       a: { exercise: ex, sets: aSets },
       b: { exercise: bExercise, sets: bSets },
@@ -129,10 +130,10 @@ export function groupClusterSides<
 
 function sortedSetsFor<S extends ClusterSetInput>(
   sets: S[],
-  exercise_row_id: string,
+  exercise_id: string,
 ): S[] {
   return sets
-    .filter((s) => s.session_exercise_id === exercise_row_id)
+    .filter((s) => s.exercise_id === exercise_id)
     .slice()
     .sort((x, y) => x.ordering - y.ordering);
 }
