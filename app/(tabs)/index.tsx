@@ -76,6 +76,7 @@ import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { computeLoggedExerciseCount } from '@/src/domain/session/sessionStats';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import { ClusterCard } from '@/components/session/cluster-card';
 import { groupClusterSides } from '@/src/domain/session/clusterCard';
@@ -1522,7 +1523,7 @@ export default function TodayScreen() {
                 reps: s.reps,
                 weight_kg: s.weight_kg,
               }))}
-              exercise_count={plan.length}
+              exercise_count={computeLoggedExerciseCount(plan, setsInSession)}
               started_at_ms={sessionState.started_at}
             />
           ) : null}
