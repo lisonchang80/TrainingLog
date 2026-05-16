@@ -682,18 +682,24 @@ Slice 10c Phase 1-5 + Phase 8 (本 amend) 落地，**Phase 6-7 留尾**。
 - `computePRSnapshot` pure（10 tests）：Pareto frontier of (weight, reps) + max volume PR
 - 卡 header 下方 PR line：🏆 `100 × 8` `85 × 12` + 整體容量 PR，底線 emphasis 數字
 
-**Phase 4** — ⚙️ menu 4 sheets（commits `dd0fa3a`, `7451ff6`, `18ea66d`）
-- ActionSheetIOS 4 項（📝/⏱️/🔀/🗑️）+ cancel slot
+**Phase 4** — ⚙️ menu 3 sheets + reorder（commits `dd0fa3a`, `7451ff6`, `18ea66d` (reverted in 後續 commit), `a3dc423`, `<this-commit>`）
+- ActionSheetIOS 3 主項（📝/⏱️/🗑️）+ 1 reorder utility（🔃）+ cancel slot
 - 📝 編輯備註：SetNoteSheet 加 `title`/`placeholder` props, 寫回 `Exercise.notes`（全域 per ADR-0017）
 - ⏱️ 休息秒數：NumericKeypad reuse, 寫回 `session_exercise.rest_sec`
-- 🔀 換動作：SwapExerciseSheet（scrollable picker）+ `swapSessionExercise` transactional（set + session_exercise 都 UPDATE）
 - 🗑️ 刪除動作：confirm Alert with logged-set count breakdown + `deleteSessionExerciseAndSets` cascade
-- ADR-0014 sibling rename propagation 仍留尾（simple replace only）
+- 🔃 排序動作：full-screen DraggableFlatList modal（per Phase 6 落地，5th menu item + 長按 card header 雙入口）
 
-**Phase 5** — Session chrome（commit `ca0f3fe`）
+**Q11 修訂（2026-05-16 ultra-late）**：原 grill 拍板 4 主項（📝/⏱️/🔀/🗑️），slice 10c Phase 4 commit `18ea66d` 曾落地 🔀。但用戶在落地後拍板再次砍除 🔀 — 統一回到「換動作」走 🗑️ 刪除動作 → bottom-bar [+ 動作] 動作庫勾選 flow（per ADR-0019 amend Q5 § (b) 修訂段的既有共識）。實裝 revert：
+  - 砍 `components/shared/swap-exercise-sheet.tsx`
+  - 砍 `swapSessionExercise` repo method
+  - 砍 ⚙️ menu「🔀 換動作」項目（idx 3 移除，🗑️ 改為 idx 3 + destructive）
+
+ADR-0014 sibling rename propagation 隨 🔀 一起 moot — 不再需要 in-session swap path。
+
+**Phase 5** — Session chrome（commit `ca0f3fe` + revert `<this-commit>`）
 - Header 右上 `[⋯][完成]`：[⋯] ActionSheet → 放棄訓練 → `discardSession` cascade delete；[完成] 替換原 bottom End Session
 - Bottom sticky bar `[+ 動作][傳至手錶 ⌚]`：跳出 ScrollView 之外
-- [+ 動作] reuse SwapExerciseSheet + `appendSessionExercise`（ad-hoc, ordering=MAX+1, planned_sets=3）
+- [+ 動作] `router.push('/exercise-picker?mode=picker')` → LibraryScreen multi-select → `submitPick` → `consumePick` 在 Today 的 `useFocusEffect` drain → `appendSessionExercise` per id（ordering=MAX+1, planned_sets=3）。**初版用 SwapExerciseSheet quick picker**，user 反映該對齊 template editor 全頁動作庫 → 改走 exercise-picker route（per ADR-0017 統一 picker convention）。
 - [傳至手錶] placeholder Alert（slice 13 WatchConnectivity wires real）
 
 **Schema drift fix**: spec `/tmp/slice-10c-ship-spec-2026-05-16.md` L311「no migration」是樂觀假設；Q9 per-set notes 必須 v018 ADD COLUMN「notes」到 runtime `set` table（template_set 從 v009 就有）。第一個 schema-touching commit 是 Phase 2 commit 7c `4ff79e0`。

@@ -25,6 +25,7 @@ import {
   getExerciseNotes,
   updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
@@ -35,7 +36,6 @@ import {
   getActiveSession,
   listSessionExercisesWithName,
   reorderSessionExercises,
-  swapSessionExercise,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
@@ -54,7 +54,6 @@ import {
 } from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
-import { SwapExerciseSheet } from '@/components/shared/swap-exercise-sheet';
 import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
@@ -165,13 +164,6 @@ export default function TodayScreen() {
     exercise_name: string;
     initial: string | null;
   } | null>(null);
-  /** 🔀 swap-exercise sheet target. */
-  const [swapTarget, setSwapTarget] = useState<{
-    session_exercise_id: string;
-    old_exercise_id: string;
-  } | null>(null);
-  /** [+ 動作] sticky-bar add-exercise sheet open flag. */
-  const [addExerciseSheetOpen, setAddExerciseSheetOpen] = useState(false);
   /** 🔃 reorder-exercises modal open flag. */
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
   /**
@@ -233,10 +225,38 @@ export default function TodayScreen() {
   }, [db]);
 
   // Re-fetch on every focus so returning from the detail screen resets us.
+  // Also drain the picker mailbox here (per template editor convention) for
+  // the [+ 動作] flow: when Library screen submitPick → router.back(), this
+  // focus listener fires, grabs the payload, and appends rows. The append
+  // logic is inlined (vs extracted as a useCallback above) so we don't have
+  // to hoist + thread through `useFocusEffect`'s dep array — the only
+  // caller is here.
   useFocusEffect(
     useCallback(() => {
+      const payload = consumePick();
       refresh();
-    }, [refresh])
+      if (payload && payload.exerciseIds.length > 0) {
+        void (async () => {
+          const active = await getActiveSession(db);
+          if (!active) return;
+          try {
+            for (const exercise_id of payload.exerciseIds) {
+              await appendSessionExercise(db, {
+                id: randomUUID(),
+                session_id: active.id,
+                exercise_id,
+              });
+            }
+            await refresh();
+          } catch (e) {
+            Alert.alert(
+              'Add failed',
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        })();
+      }
+    }, [refresh, db])
   );
 
   const onShowPrePrompt = () => {
@@ -661,12 +681,12 @@ export default function TodayScreen() {
 
   /**
    * Open the ⚙️ ActionSheetIOS menu for one exercise card. Per ADR-0019 Q11
-   * the menu has 4 paths:
-   *   - 📝 編輯備註 → opens an exercise-level note editor (Exercise.notes,
-   *     v010+) — placeholder Alert this commit, separate sheet wires next
-   *   - ⏱️ 休息秒數 → opens NumericKeypad pre-filled with current rest_sec
-   *   - 🔀 換動作 → placeholder Alert this commit (needs library picker)
-   *   - 🗑️ 刪除動作 → confirm Alert + cascade-delete session_exercise + sets
+   * (post-grill revision 2026-05-16 ultra-late) the menu has 3 main paths
+   * + 1 reorder utility. 「🔀 換動作」 was discarded; the "change exercise"
+   * UX is unified via 🗑️ 刪除動作 → bottom-bar [+ 動作] 動作庫勾選 flow
+   * (per ADR-0019 amend Q5 § (b) 修訂段). The 5th item「🔃 排序動作」 is
+   * here as a secondary entry; the primary trigger is long-press on the
+   * card header.
    *
    * Cancel slot is index 0 + cancelButtonIndex per iOS convention.
    */
@@ -678,12 +698,11 @@ export default function TodayScreen() {
           '取消',
           '📝 編輯備註',
           '⏱️ 休息秒數',
-          '🔀 換動作',
           '🗑️ 刪除動作',
           '🔃 排序動作',
         ],
         cancelButtonIndex: 0,
-        destructiveButtonIndex: 4,
+        destructiveButtonIndex: 3,
       },
       (idx) => {
         if (idx === 0) return;
@@ -710,14 +729,9 @@ export default function TodayScreen() {
             current: planRow.rest_sec ?? 60,
             exercise_name: planRow.exercise_name,
           });
-        } else if (idx === 3) {
-          setSwapTarget({
-            session_exercise_id: planRow.id,
-            old_exercise_id: planRow.exercise_id,
-          });
-        } else if (idx === 5) {
-          setReorderSheetOpen(true);
         } else if (idx === 4) {
+          setReorderSheetOpen(true);
+        } else if (idx === 3) {
           const setsForExercise = setsInSession.filter(
             (s) => s.exercise_id === planRow.exercise_id,
           );
@@ -809,29 +823,6 @@ export default function TodayScreen() {
         );
       },
     );
-  };
-
-  /**
-   * [+ 動作] sticky-bar action — append an ad-hoc exercise to the running
-   * session. Reuses SwapExerciseSheet's picker UI but treats the selection
-   * as "create new session_exercise" instead of "replace existing".
-   */
-  const onAddExerciseConfirm = async (new_exercise_id: string) => {
-    const session_id = getSessionId(sessionState);
-    if (!session_id) return;
-    try {
-      await appendSessionExercise(db, {
-        id: randomUUID(),
-        session_id,
-        exercise_id: new_exercise_id,
-      });
-      await refresh();
-    } catch (e) {
-      Alert.alert(
-        'Add failed',
-        e instanceof Error ? e.message : String(e),
-      );
-    }
   };
 
   const onEndSession = async () => {
@@ -1207,7 +1198,7 @@ export default function TodayScreen() {
         <View style={styles.bottomStickyBar}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => setAddExerciseSheetOpen(true)}
+            onPress={() => router.push('/exercise-picker?mode=picker')}
             disabled={busy}
             style={({ pressed }) => [
               styles.bottomStickyBtn,
@@ -1286,44 +1277,6 @@ export default function TodayScreen() {
           }
         }}
         onCancel={() => setReorderSheetOpen(false)}
-      />
-      <SwapExerciseSheet
-        visible={addExerciseSheetOpen}
-        currentExerciseId={null}
-        exercises={exercises.map((e) => ({ id: e.id, name: e.name }))}
-        onConfirm={(new_exercise_id) => {
-          setAddExerciseSheetOpen(false);
-          onAddExerciseConfirm(new_exercise_id);
-        }}
-        onCancel={() => setAddExerciseSheetOpen(false)}
-      />
-      <SwapExerciseSheet
-        visible={swapTarget !== null}
-        currentExerciseId={swapTarget?.old_exercise_id ?? null}
-        exercises={exercises.map((e) => ({ id: e.id, name: e.name }))}
-        onConfirm={async (new_exercise_id) => {
-          if (swapTarget) {
-            const session_id = getSessionId(sessionState);
-            if (session_id) {
-              try {
-                await swapSessionExercise(db, {
-                  session_exercise_id: swapTarget.session_exercise_id,
-                  session_id,
-                  old_exercise_id: swapTarget.old_exercise_id,
-                  new_exercise_id,
-                });
-                await refresh();
-              } catch (e) {
-                Alert.alert(
-                  'Swap failed',
-                  e instanceof Error ? e.message : String(e),
-                );
-              }
-            }
-          }
-          setSwapTarget(null);
-        }}
-        onCancel={() => setSwapTarget(null)}
       />
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
