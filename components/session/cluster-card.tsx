@@ -204,7 +204,7 @@ export function ClusterCard({
 
           {cycles.length === 0 ? (
             <Text style={styles.clusterEmpty}>
-              還沒有 cycle — 按下方「新增 1 組」開始記錄
+              還沒有組 — 按下方「+ 新增 1 組」開始記錄
             </Text>
           ) : (
             cycles.map((c) => {
@@ -331,7 +331,7 @@ export function ClusterCard({
                       disabled={!canTap}
                       accessibilityRole="button"
                       accessibilityLabel={
-                        bothLogged ? '取消完成 cycle' : '標記 cycle 完成'
+                        bothLogged ? '取消完成這組' : '標記這組完成'
                       }
                       accessibilityState={{ disabled: !canTap }}
                       hitSlop={6}
