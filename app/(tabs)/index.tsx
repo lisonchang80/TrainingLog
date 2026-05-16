@@ -2528,7 +2528,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: 4,
-    backgroundColor: '#fff',
+    // Transparent — let the card's translucent gray (exerciseCard backgroundColor)
+    // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
   exerciseCardSetRowDragActive: {
     backgroundColor: '#f3f4f6',
