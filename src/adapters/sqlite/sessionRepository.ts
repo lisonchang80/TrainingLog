@@ -174,7 +174,7 @@ export async function listSessionExercisesWithName(
   return db.getAllAsync<SessionExerciseRowWithName>(
     `SELECT se.id, se.session_id, se.exercise_id, se.ordering,
             se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id, se.is_evergreen,
-            se.parent_id, se.reusable_superset_id,
+            se.parent_id, se.reusable_superset_id, se.rest_sec,
             e.name      AS exercise_name,
             e.load_type AS exercise_load_type
        FROM session_exercise se
