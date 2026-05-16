@@ -4,6 +4,7 @@ import type {
   ProgramCore,
   ProgramWithCells,
 } from '../../domain/program/types';
+import { RESERVED_NONE_PROGRAM_ID } from '../../db/seed/v017ProgramNone';
 
 /**
  * Persistence layer for Program + cells (slice 5).
@@ -36,14 +37,21 @@ export interface ProgramSummary {
 }
 
 export async function listPrograms(db: Database): Promise<ProgramSummary[]> {
+  // The reserved 「無」 program (id = RESERVED_NONE_PROGRAM_ID, seeded by
+  // v017 per ADR-0019 § (N1)) is filtered out of the user-facing program
+  // list — it represents "no program assigned" and is not editable /
+  // deletable. Sessions / templates can still resolve their `program_id`
+  // FK to it via `getProgram(id)` for display purposes.
   return db.getAllAsync<ProgramSummary>(
     `SELECT p.id, p.name, p.main_tag, p.cycle_length, p.cycle_count,
             p.start_date, p.is_active,
             COUNT(c.id) AS cellCount
        FROM program p
        LEFT JOIN program_cell c ON c.program_id = p.id
+      WHERE p.id != ?
       GROUP BY p.id
-      ORDER BY p.is_active DESC, p.updated_at DESC`
+      ORDER BY p.is_active DESC, p.updated_at DESC`,
+    RESERVED_NONE_PROGRAM_ID
   );
 }
 

@@ -13,7 +13,7 @@ import type { Database } from '../types';
  *      Session end can read it from `session_exercise` directly without
  *      having to re-join the (potentially-edited) Template.
  *
- * Existing rows default to 0 (一般 = general zone). Slice 5 (Program / 副標籤)
+ * Existing rows default to 0 (一般 = general zone). Slice 5 (Program / 強度)
  * will add the name-level propagation rules from ADR-0005; slice 4 only sets
  * up the flag + per-template save-back semantics.
  */

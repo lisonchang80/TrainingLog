@@ -555,8 +555,52 @@ PRD #1（GitHub issue）原本已 drift 5 個 ADR（0014/15/16/17/18）— 本 A
 
 從 grill summary § 已知 known issues 繼承（slice ship 時逐一決議；不卡 ADR ship）：
 
-1. **「無」schema seed 細節** — `program.name` 存 "無 Program" 還是 "無"？用「無」當 UI label 顯，但 DB 欄位字串長版短版 slice ship 時定（CONTEXT.md 用「無」描述即可）
+1. **「無」schema seed 細節**（✅ **2026-05-16 late grill Q1+Q1b 拍板**）— `program.name = '無'`（短版，DB 直接存 UI 顯示字串，不另存 `'無 Program'`）；`program.id = '00000000-0000-0000-0000-000000000000'`（**nil UUID** 全零保留 id，安全因為 UUID v4 variant + version bits 保證生成 id 不會碰撞）。匯出 `RESERVED_NONE_PROGRAM_ID` 常數於 `src/db/seed/v017ProgramNone.ts`。其他欄位：`cycle_length=3`（v005 CHECK 最低值）/ `cycle_count=1` / `start_date='1970-01-01'` / `is_active=0` / `main_tag=NULL`。Slice 10a `v017_program_none_seed.ts` 落地；`listPrograms` 過濾此 sentinel id（Programs tab 不顯示，非用戶可編輯/刪除）。
 2. **Cluster size 固定 2 跟 schema `parent_id` 支援 N children 的張力** — schema 允許 N children 但 UI 層強制 2；invariant 明寫在 ADR-0017 + ADR-0018，本 ADR Q8 cluster size 固定 2 重申
 3. **「換動作」🔄 內動作 picker 可否挑 RS** — Q5 grill 未深入；本 ADR 拍**不允許 RS**（換動作 = swap 單一 exercise；想換 cluster 走 `[⊕ 加動作]` flow + ⚙️「🗑️ 刪除動作」砍舊 cluster）
 4. **Finish dialog「另存」UI 共用歷史頁 flow** — Freestyle finish「儲存」option 與 ADR-0014「另存模板」same flow 確認為**是**（per 本 ADR Q9 (d) 表 + ADR-0014 § Freestyle 升級流程既有設計）
-5. **PRD 已 drift 6 條 ADR**（原 5 + 本 ADR-0019）— PRD catch-up 是後續獨立 task（issue tracker triage flow），不卡 ADR ship
+5. **PRD 已 drift 6 條 ADR**（原 5 + 本 ADR-0019）— ✅ **2026-05-16 overnight wave-1 完成**（PR #39 ship docs；PR #40 ship terminology propagation；PRD issue #1 catch-up applied via gh issue edit，744→874 行 + 70 new stories #287-#356）
+
+## Slice 10a foundation schema 落地（2026-05-16 late grill Q1-Q5 拍板）
+
+實作 slice 10a foundation 前需收 5 條 ADR-0019 schema 留尾。2026-05-16 late grill 拍板如下；slice 10a worktree `slice/10a-foundation-schema` 已落地（branch `slice/10a-foundation-schema`，PR pending）。
+
+### Q1 + Q1b — 「無」 program seed
+見上方 § Known issues #1。
+
+### Q2 — Set table 三欄擴充（v015）
+- v015 ALTER `"set"` 加：
+  - `set_kind TEXT NOT NULL DEFAULT 'working' CHECK(set_kind IN ('warmup','working','dropset'))` — same enum as v009 `template_set.set_kind`，**不**為 v014 cluster 加新值
+  - `parent_set_id TEXT NULL` — no FK，沿用 v014 `session_exercise.parent_id` convention；用於 Q2.4 一 cycle 一 ✓ cluster + dropset chain
+  - `is_logged INTEGER NOT NULL DEFAULT 0` — per-row 「set 完成」 flag，tap ✓ 翻 1 + 啟 rest timer；cluster ✓ 事務寫整 cluster member
+- **不**做 `is_warmup` data migration — 2026-05-16 grep 驗證：runtime `set` 表**從未**有 `is_warmup` 欄（ADR-0012 § 161 deprecate 計畫未落地）；既有 rows 走 default 'working' / 0 即可
+- `set_kind` 維持 v009 既有三值 enum（warmup/working/dropset）
+
+### Q3 — Session HealthKit stub 三欄（v016）
+- v016 ALTER `session` 加：
+  - `healthkit_workout_uuid TEXT NULL` — slice 13 真實 writer 填
+  - `avg_hr_bpm REAL NULL`
+  - `kcal REAL NULL`
+- Slice 10b 5-tile UI 走 NULL fallback（不顯心率區間 / kcal tile 顯「—」）；slice 13 HealthKit 整合後自動有資料
+
+### Q4 — Terminology rename 範圍（UI strings only）
+- **動**：UI strings ~20 hits in `app/`（「主標籤」→「週期」、「副標籤」→「強度」）+ JSDoc 註解
+- **不動**：schema column names `main_tag` / `sub_tag` 保留英文；TS identifiers `mainTag` / `subTag` 不動（192 hits 視為 internal naming，out of scope）
+- 落地 commit：`refactor(ui): rename 主標→週期 / 副標→強度 (terminology propagation)`
+
+### Q5 — 3 grouped migrations 落點
+- `src/db/schema/v015_set_kind_and_clusters.ts` — Q2 set 三欄
+- `src/db/schema/v016_session_runtime_data.ts` — Q3 HK 三欄 + `template_exercise.rest_sec` + `session_exercise.rest_sec`（per 本 ADR line 54-55 雙欄 ALTER 要求）+ `app_settings.auto_popup_rest_timer='1'` seed
+- `src/db/schema/v017_program_none_seed.ts` + `src/db/seed/v017ProgramNone.ts` — Q1 「無」 seed
+
+每 migration 配對 idempotency + defaults test（v015 = 4 cases、v016 = 6 cases、v017 = 5 cases）。
+
+### Out of scope for slice 10a（slice 10b-10g 接手）
+
+- Set logger 5-gesture UI / ⚙️ menu bottom sheets
+- Rest timer chip / modal / auto-popup
+- Cluster row UI（一 cycle 一 ✓ semantic）
+- Freestyle finish 2-option dialog
+- 歷史詳情頁 layout 整合（4-tile + chart + 動作清單）
+- HealthKit 真實寫入（slice 13）
+- `snapshotForSession` 把 `template_exercise.rest_sec` 複製到 `session_exercise.rest_sec`

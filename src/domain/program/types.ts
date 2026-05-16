@@ -16,7 +16,7 @@ export type IsoDate = string;
 export interface ProgramCore {
   id: string;
   name: string;
-  /** Free-form 主標籤 (e.g. "增肌-Q1"); null when the user picks 「無」. */
+  /** Free-form 週期 (e.g. "增肌-Q1"); null when the user picks 「無」. */
   main_tag: string | null;
   /** Cycle length in days, 3-14 inclusive (ADR-0004). */
   cycle_length: number;
@@ -36,7 +36,7 @@ export interface ProgramCell {
   day_index: number;
   /** Template assigned to this cell; null = rest day or unfilled. */
   template_id: string | null;
-  /** Per-cell 副標籤 free-form text; null when the cell has no template. */
+  /** Per-cell 強度 free-form text; null when the cell has no template. */
   sub_tag: string | null;
 }
 
