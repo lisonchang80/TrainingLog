@@ -27,8 +27,10 @@
  * `computeClusterVolume` (Q15.5 ledger applied to cluster: warmup
  * excluded, is_logged=1 numerator over both A+B sides combined).
  *
- * Long-press cycle row → reorder is DEFERRED — see the README at the
- * bottom of this file (matches Phase 2 commit 9 留尾 reasoning).
+ * Long-press cycle row → inline drag reorder (slice 10c overnight 第 5 點)
+ * via `NestableDraggableFlatList`; on drop, `onConfirmReorderCycles` fires
+ * with the new ordered cycle list and the caller commits per-side via
+ * `reorderSessionSetsForExercise` ×2.
  *
  * Component is intentionally presentational; all DB writes flow back to
  * the parent (Today screen) via callbacks. Pure logic lives in
@@ -96,10 +98,6 @@ type ClusterCardProps = {
   }) => void;
   /** Open the parent set's note editor (right-swipe 備註). */
   onShowCycleNote?: (parent_set_id: string) => void;
-  /** Long-press cycle row — deferred (nested ScrollView gesture conflict).
-   *  Slice 10c overnight 第 5 點 enabled inline drag via DraggableFlatList,
-   *  so this prop is no longer used (kept for API compat). */
-  onLongPressCycle?: () => void;
   /**
    * Slice 10c overnight 第 5 點 — inline drag reorder. On drop, this callback
    * fires with the new ordered cycle list (post-drag). Caller commits via
@@ -150,7 +148,6 @@ export function ClusterCard({
   onDeleteCycle,
   onCloneCycle,
   onShowCycleNote,
-  onLongPressCycle,
   onOpenHistory,
   onSettingsPress,
   onUpdateClusterSet,
