@@ -67,9 +67,10 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
 import {
-  ReorderSetsSheet,
-  type ReorderSetItem,
-} from '@/components/shared/reorder-sets-sheet';
+  NestableScrollContainer,
+  NestableDraggableFlatList,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -185,18 +186,6 @@ export default function TodayScreen() {
   } | null>(null);
   /** 🔃 reorder-exercises modal open flag. */
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
-  /**
-   * 🔃 reorder-sets modal target — opens when user long-presses a set row.
-   * Holds the exercise context + initial item list (snapshot) so the modal
-   * can render without further DB reads. On confirm, commits via
-   * `reorderSessionSetsForExercise` and triggers refresh.
-   */
-  const [setReorderTarget, setSetReorderTarget] = useState<{
-    session_exercise_id: string;
-    exercise_id: string;
-    exercise_name: string;
-    items: ReorderSetItem[];
-  } | null>(null);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
    * computed once on refresh from listExerciseHistorySets (cross-session).
@@ -1505,7 +1494,10 @@ export default function TodayScreen() {
             </Pressable>
           </View>
         </View>
-        <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
+        <NestableScrollContainer
+          contentContainerStyle={styles.scrollBody}
+          keyboardShouldPersistTaps="handled"
+        >
           {programBanner}
           {/* ADR-0019 Q6 — in-session 3-tile stats panel (P1 position) */}
           {sessionState.status === 'in_progress' ? (
@@ -1715,37 +1707,22 @@ export default function TodayScreen() {
                         }
                         onSettingsPress={() => onSettingsPress(p)}
                         onLongPressHeader={() => setReorderSheetOpen(true)}
-                        onLongPressSet={() => {
-                          // Snapshot the current set list (working + dropset +
-                          // warmup) for this exercise; pass to modal. Caller
-                          // confirms a new order; we commit via
-                          // reorderSessionSetsForExercise (slot-based renumber).
-                          const exSets = setsInSession.filter(
-                            (s) => s.exercise_id === p.exercise_id,
-                          );
-                          if (exSets.length < 2) return; // nothing to reorder
-                          const setLabelsForRow = computeSetLabels(
-                            exSets.map((s) => ({
-                              kind:
-                                s.set_kind === 'warmup'
-                                  ? 'warmup'
-                                  : s.set_kind === 'dropset'
-                                  ? 'dropset'
-                                  : 'working',
-                              parent_set_id: s.parent_set_id,
-                            })),
-                          );
-                          setSetReorderTarget({
-                            session_exercise_id: p.id,
-                            exercise_id: p.exercise_id,
-                            exercise_name: p.exercise_name,
-                            items: exSets.map((s, idx) => ({
-                              id: s.id,
-                              label: setLabelsForRow[idx],
-                              weight_kg: s.weight_kg,
-                              reps: s.reps,
-                            })),
-                          });
+                        onConfirmReorderSets={async (orderedIds) => {
+                          const session_id = getSessionId(sessionState);
+                          if (!session_id) return;
+                          try {
+                            await reorderSessionSetsForExercise(db, {
+                              session_id,
+                              exercise_id: p.exercise_id,
+                              orderedIds,
+                            });
+                            await refresh();
+                          } catch (e) {
+                            Alert.alert(
+                              '排序失敗',
+                              e instanceof Error ? e.message : String(e),
+                            );
+                          }
                         }}
                       />,
                     );
@@ -1799,7 +1776,7 @@ export default function TodayScreen() {
             </View>
           ) : null}
 
-        </ScrollView>
+        </NestableScrollContainer>
         <View style={styles.bottomStickyBar}>
           <Pressable
             accessibilityRole="button"
@@ -1902,31 +1879,6 @@ export default function TodayScreen() {
           }
         }}
         onCancel={() => setReorderSheetOpen(false)}
-      />
-      <ReorderSetsSheet
-        visible={setReorderTarget !== null}
-        exerciseName={setReorderTarget?.exercise_name ?? ''}
-        initialItems={setReorderTarget?.items ?? []}
-        onConfirm={async (orderedIds) => {
-          const target = setReorderTarget;
-          setSetReorderTarget(null);
-          const session_id = getSessionId(sessionState);
-          if (!session_id || !target) return;
-          try {
-            await reorderSessionSetsForExercise(db, {
-              session_id,
-              exercise_id: target.exercise_id,
-              orderedIds,
-            });
-            await refresh();
-          } catch (e) {
-            Alert.alert(
-              '排序失敗',
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-        }}
-        onCancel={() => setSetReorderTarget(null)}
       />
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
@@ -2057,7 +2009,7 @@ function ExerciseCard({
   onOpenHistory,
   onSettingsPress,
   onLongPressHeader,
-  onLongPressSet,
+  onConfirmReorderSets,
 }: {
   planRow: SessionExerciseRowWithName;
   done: number;
@@ -2085,8 +2037,13 @@ function ExerciseCard({
   onOpenHistory: () => void;
   onSettingsPress: () => void;
   onLongPressHeader: () => void;
-  /** Long-press any set row → open reorder-sets sheet (slice 10c Phase 2 c9 留尾). */
-  onLongPressSet: () => void;
+  /**
+   * Long-press any set row → inline drag mode (slice 10c Phase 2 c9 留尾 —
+   * 翻盤 modal approach 後落地 inline via NestableDraggableFlatList per user
+   * "直接在動作卡上移動"). On drop, this callback fires with the new
+   * orderedIds; caller commits via reorderSessionSetsForExercise + refresh.
+   */
+  onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
 }): React.ReactElement {
   // Map session set_kind → kind so the shared computeSetLabels (which uses
   // the template-side `kind` field name) works without a session-specific
@@ -2155,7 +2112,6 @@ function ExerciseCard({
             })()}
           </View>
           <Text style={styles.exerciseCardChevron}>{isExpanded ? '▼' : '▶'}</Text>
-          <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -2208,109 +2164,134 @@ function ExerciseCard({
               還沒有 set — 按下方「+ 新增 1 組」開始記錄
             </Text>
           ) : (
-            sets.map((s, i) => {
-              const row: SetRowItem = {
-                id: s.id,
-                reps: s.reps ?? 0,
-                weight: s.weight_kg ?? 0,
-                notes: s.notes,
-              };
-              const isDropsetFollower =
-                s.set_kind === 'dropset' && s.parent_set_id !== null;
-              const logged = s.is_logged === 1;
-              // Followers inherit their head's gesture surface (ADR-0016 §C);
-              // disable swipe on the follower itself.
-              return (
-                <SwipeableSetRow
-                  key={s.id}
-                  enabled={!isDropsetFollower}
-                  onLongPress={onLongPressSet}
-                  swipeLeftActions={[
-                    {
-                      key: 'delete',
-                      label: '刪除',
-                      color: '#dc3545',
-                      onPress: () =>
-                        Alert.alert(
-                          '刪除這組？',
-                          undefined,
-                          [
-                            { text: '取消', style: 'cancel' },
-                            {
-                              text: '刪除',
-                              style: 'destructive',
-                              onPress: () => onDeleteSet(s.id),
-                            },
-                          ],
-                        ),
-                    },
-                  ]}
-                  swipeRightActions={[
-                    {
-                      key: 'add',
-                      label: '+1',
-                      color: '#28a745',
-                      onPress: () => onAddSetAfter(s.id),
-                    },
-                    {
-                      key: 'note',
-                      label: '備註',
-                      color: '#007AFF',
-                      onPress: () => onShowSetNote(s.id, s.notes),
-                    },
-                  ]}
-                >
-                  <View style={styles.exerciseCardSetRowWrapper}>
-                    <Pressable
-                      onPress={() => onToggleLogged(s.id, logged)}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel={logged ? '取消完成' : '標為完成'}
-                      style={({ pressed }) => [
-                        styles.completeBtn,
-                        logged && styles.completeBtnDone,
-                        pressed && styles.btnPressed,
+            <NestableDraggableFlatList
+              data={sets}
+              keyExtractor={(s) => s.id}
+              activationDistance={20}
+              onDragEnd={async ({ data }) => {
+                // Commit only if order actually changed (drop-in-place no-op).
+                const newIds = data.map((s) => s.id);
+                const oldIds = sets.map((s) => s.id);
+                const changed = newIds.some((id, idx) => id !== oldIds[idx]);
+                if (changed) await onConfirmReorderSets(newIds);
+              }}
+              renderItem={({
+                item: s,
+                drag,
+                isActive,
+              }: RenderItemParams<SessionSetWithExercise>) => {
+                // Recompute set label per-item from CURRENT positional index.
+                // (DraggableFlatList re-renders rows on hover; using the
+                // outer-scope setLabels indexed by `i` is brittle — recompute
+                // by id lookup against the snapshot.)
+                const i = sets.findIndex((x) => x.id === s.id);
+                const row: SetRowItem = {
+                  id: s.id,
+                  reps: s.reps ?? 0,
+                  weight: s.weight_kg ?? 0,
+                  notes: s.notes,
+                };
+                const isDropsetFollower =
+                  s.set_kind === 'dropset' && s.parent_set_id !== null;
+                const logged = s.is_logged === 1;
+                return (
+                  <SwipeableSetRow
+                    enabled={!isDropsetFollower}
+                    onLongPress={drag}
+                    swipeLeftActions={[
+                      {
+                        key: 'delete',
+                        label: '刪除',
+                        color: '#dc3545',
+                        onPress: () =>
+                          Alert.alert(
+                            '刪除這組？',
+                            undefined,
+                            [
+                              { text: '取消', style: 'cancel' },
+                              {
+                                text: '刪除',
+                                style: 'destructive',
+                                onPress: () => onDeleteSet(s.id),
+                              },
+                            ],
+                          ),
+                      },
+                    ]}
+                    swipeRightActions={[
+                      {
+                        key: 'add',
+                        label: '+1',
+                        color: '#28a745',
+                        onPress: () => onAddSetAfter(s.id),
+                      },
+                      {
+                        key: 'note',
+                        label: '備註',
+                        color: '#007AFF',
+                        onPress: () => onShowSetNote(s.id, s.notes),
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.exerciseCardSetRowWrapper,
+                        isActive && styles.exerciseCardSetRowDragActive,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.completeBtnText,
-                          logged && styles.completeBtnTextDone,
+                      <Pressable
+                        onPress={() => onToggleLogged(s.id, logged)}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={logged ? '取消完成' : '標為完成'}
+                        style={({ pressed }) => [
+                          styles.completeBtn,
+                          logged && styles.completeBtnDone,
+                          pressed && styles.btnPressed,
                         ]}
                       >
-                        {logged ? '✓' : '○'}
-                      </Text>
-                    </Pressable>
-                    <View style={styles.exerciseCardSetRowContent}>
-                      <SetRowContent
-                        set={row}
-                        setLabel={setLabels[i]}
-                        isDropsetFollower={isDropsetFollower}
-                        isClusterLast={false}
-                        minusDisabled={true}
-                        hideNoteIndicator={false}
-                        onUpdateSet={(set_id, patch) =>
-                          onUpdateSet(set_id, patch)
-                        }
-                        onShowSetNote={(target) =>
-                          onShowSetNote(target.id, target.notes)
-                        }
-                        onTapNumber={(target, field, current) =>
-                          onTapNumber(target.id, field, current)
-                        }
-                        onRemoveDropsetRow={() =>
-                          notImplementedAlert('− 移除 dropset 一列')
-                        }
-                        onAddDropsetRow={() =>
-                          notImplementedAlert('+ 新增 dropset 一列')
-                        }
-                        onCycleLabel={(target) => onCycleSetKind(target.id)}
-                      />
+                        <Text
+                          style={[
+                            styles.completeBtnText,
+                            logged && styles.completeBtnTextDone,
+                          ]}
+                        >
+                          {logged ? '✓' : '○'}
+                        </Text>
+                      </Pressable>
+                      <View style={styles.exerciseCardSetRowContent}>
+                        <SetRowContent
+                          set={row}
+                          setLabel={setLabels[i] ?? ''}
+                          isDropsetFollower={isDropsetFollower}
+                          isClusterLast={false}
+                          minusDisabled={true}
+                          hideNoteIndicator={false}
+                          onUpdateSet={(set_id, patch) =>
+                            onUpdateSet(set_id, patch)
+                          }
+                          onShowSetNote={(target) =>
+                            onShowSetNote(target.id, target.notes)
+                          }
+                          onTapNumber={(target, field, current) =>
+                            onTapNumber(target.id, field, current)
+                          }
+                          onRemoveDropsetRow={() =>
+                            notImplementedAlert('− 移除 dropset 一列')
+                          }
+                          onAddDropsetRow={() =>
+                            notImplementedAlert('+ 新增 dropset 一列')
+                          }
+                          onCycleLabel={(target) =>
+                            onCycleSetKind(target.id)
+                          }
+                        />
+                      </View>
                     </View>
-                  </View>
-                </SwipeableSetRow>
-              );
-            })
+                  </SwipeableSetRow>
+                );
+              }}
+            />
           )}
           <View style={styles.exerciseCardFooter}>
             <Pressable
@@ -2541,6 +2522,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: 4,
+    backgroundColor: '#fff',
+  },
+  exerciseCardSetRowDragActive: {
+    backgroundColor: '#f3f4f6',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    borderRadius: 8,
   },
   exerciseCardSetRowContent: {
     flex: 1,
