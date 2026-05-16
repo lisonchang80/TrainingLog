@@ -1358,7 +1358,7 @@ export default function TodayScreen() {
   if (sessionState.status === 'idle') {
     const latest = latestPerMetric(bodyMetrics);
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.flex}>
@@ -1451,7 +1451,7 @@ export default function TodayScreen() {
   // sessionState.status === 'in_progress' (ended is unreachable: we navigate away)
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
