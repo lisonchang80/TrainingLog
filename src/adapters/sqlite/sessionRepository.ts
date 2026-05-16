@@ -102,6 +102,18 @@ export interface SessionExerciseRow {
    * FK to superset(id) ON DELETE SET NULL.
    */
   reusable_superset_id: string | null;
+  /**
+   * Per-exercise rest seconds (ADR-0019 Q2 + slice 10b bridge). NULL = inherit
+   * hardcoded 60s system default. snapshotForSession copies this from the
+   * source template_exercise.rest_seconds (legacy column name) verbatim;
+   * future ⚙️ menu sheet (slice 10c) lets users edit per-session.
+   *
+   * Optional on the input type so older test fixtures (pre-slice-10b) that
+   * don't model rest_sec still compile — they default to null on insert,
+   * which matches the v016 column nullability semantics. Production callers
+   * always set the field via snapshotForSession.
+   */
+  rest_sec?: number | null;
 }
 
 export async function insertSessionExercise(
@@ -112,8 +124,8 @@ export async function insertSessionExercise(
     `INSERT INTO session_exercise
        (id, session_id, exercise_id, ordering,
         planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
-        parent_id, reusable_superset_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.session_id,
     row.exercise_id,
@@ -124,7 +136,8 @@ export async function insertSessionExercise(
     row.template_id,
     row.is_evergreen,
     row.parent_id,
-    row.reusable_superset_id
+    row.reusable_superset_id,
+    row.rest_sec ?? null
   );
 }
 
@@ -135,7 +148,7 @@ export async function listSessionExercises(
   return db.getAllAsync<SessionExerciseRow>(
     `SELECT id, session_id, exercise_id, ordering,
             planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
-            parent_id, reusable_superset_id
+            parent_id, reusable_superset_id, rest_sec
        FROM session_exercise
       WHERE session_id = ?
       ORDER BY ordering ASC`,
