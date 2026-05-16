@@ -3,7 +3,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -82,7 +81,6 @@ export default function TodayScreen() {
   const db = useDatabase();
   const router = useRouter();
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SetWithExercise[]>([]);
   const [plan, setPlan] = useState<SessionExerciseRowWithName[]>([]);
@@ -95,8 +93,6 @@ export default function TodayScreen() {
    * cards to collapsed (per ADR-0019 Q3 § 副作用拍板「狀態持久化」).
    */
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeProgram, setActiveProgram] = useState<ProgramWithCells | null>(null);
   const [templatesById, setTemplatesById] = useState<Record<string, TemplateSummary>>({});
@@ -140,16 +136,10 @@ export default function TodayScreen() {
       setSetsInSession(sets);
       setPlan(planned);
       setBwSnapshotKg(active.bodyweight_snapshot_kg ?? null);
-      // If the session was started from a template, default the picker to the
-      // first planned exercise so the user can record against it immediately.
-      setSelectedExerciseId(
-        (prev) => prev ?? planned[0]?.exercise_id ?? exs[0]?.id ?? null
-      );
     } else {
       setSetsInSession([]);
       setPlan([]);
       setBwSnapshotKg(null);
-      setSelectedExerciseId((prev) => prev ?? exs[0]?.id ?? null);
     }
   }, [db]);
 
@@ -262,20 +252,30 @@ export default function TodayScreen() {
     }
   };
 
-  const onSaveSet = async () => {
+  /**
+   * Append one set to a specific exercise within the active session. Slice
+   * 10c Phase 2 commit 5: replaces the previous outer Weight/Reps form +
+   * Save Set button — now triggered from inside the exercise card's footer
+   * 「+ 新增 1 組」 (ADR-0019 Q3). Default reps/weight come from the most
+   * recent set already recorded for this exercise in this session (per the
+   * v0 add-set UX); falls back to 0/0 if the exercise has no sets yet.
+   * Subsequent commits will swap this minimum-viable handler for the full
+   * 5-gesture wire-up (right-swipe add + notes, etc.).
+   */
+  const onAddSet = async (exercise_id: string) => {
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
       Alert.alert('No active session');
       return;
     }
-    if (!selectedExerciseId) {
-      Alert.alert('Pick an exercise first');
-      return;
-    }
-    const weight_kg = Number(weight);
-    const repsNum = Number(reps);
+    const priorInSession = setsInSession.filter(
+      (s) => s.exercise_id === exercise_id
+    );
+    const lastSet = priorInSession[priorInSession.length - 1] ?? null;
+    const weight_kg = lastSet?.weight_kg ?? 0;
+    const repsNum = lastSet?.reps ?? 0;
     const err = validateRecordSet({
-      exercise_id: selectedExerciseId,
+      exercise_id,
       weight_kg,
       reps: repsNum,
     });
@@ -288,22 +288,19 @@ export default function TodayScreen() {
     try {
       const result = await recordSetInSession(db, {
         session_id,
-        input: { exercise_id: selectedExerciseId, weight_kg, reps: repsNum },
+        input: { exercise_id, weight_kg, reps: repsNum },
         uuid: randomUUID,
       });
-      setWeight('');
-      setReps('');
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
 
       // PR Engine: fetch prior sets for this exercise (strictly before the
       // just-inserted set), then detect bucket-level + cross-bucket PR breaks.
-      const exerciseObj =
-        exercises.find((e) => e.id === selectedExerciseId) ?? null;
+      const exerciseObj = exercises.find((e) => e.id === exercise_id) ?? null;
       if (exerciseObj) {
         const priors = await listPriorSetsForExercise(
           db,
-          selectedExerciseId,
+          exercise_id,
           result.created_at
         );
         const delta = detectPRBreaks({
@@ -493,8 +490,6 @@ export default function TodayScreen() {
   }
 
   // sessionState.status === 'in_progress' (ended is unreachable: we navigate away)
-  const selectedExercise =
-    exercises.find((e) => e.id === selectedExerciseId) ?? null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -587,9 +582,10 @@ export default function TodayScreen() {
               <Text style={styles.label}>Today&apos;s plan</Text>
               <View style={styles.planList}>
                 {plan.map((p) => {
-                  const done = setsInSession.filter(
+                  const setsForExercise = setsInSession.filter(
                     (s) => s.exercise_id === p.exercise_id
-                  ).length;
+                  );
+                  const done = setsForExercise.length;
                   const complete = done >= p.planned_sets;
                   const isExpanded = expandedExerciseId === p.id;
                   return (
@@ -599,8 +595,14 @@ export default function TodayScreen() {
                       done={done}
                       complete={complete}
                       isExpanded={isExpanded}
+                      sets={setsForExercise}
+                      busy={busy}
                       onToggleExpand={() =>
                         setExpandedExerciseId(isExpanded ? null : p.id)
+                      }
+                      onAddSet={() => onAddSet(p.exercise_id)}
+                      onOpenHistory={() =>
+                        router.push(`/exercise-history/${p.exercise_id}`)
                       }
                       onSettingsPress={() =>
                         Alert.alert(
@@ -614,75 +616,6 @@ export default function TodayScreen() {
               </View>
             </>
           )}
-
-          <View style={styles.exerciseHeaderRow}>
-            <Text style={styles.label}>Exercise</Text>
-            {selectedExerciseId ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push(`/exercise-history/${selectedExerciseId}`)
-                }
-                style={styles.linkBtn}>
-                <Text style={styles.linkBtnText}>📖 動作歷史</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.pillsRow}>
-            {exercises.map((ex) => {
-              const isActive = ex.id === selectedExerciseId;
-              return (
-                <Pressable
-                  key={ex.id}
-                  accessibilityRole="button"
-                  onPress={() => setSelectedExerciseId(ex.id)}
-                  style={({ pressed }) => [
-                    styles.pill,
-                    isActive && styles.pillActive,
-                    pressed && styles.btnPressed,
-                  ]}>
-                  <Text style={[styles.pillText, isActive && styles.pillTextActive]}>
-                    {ex.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={styles.label}>Weight (kg)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            value={weight}
-            onChangeText={setWeight}
-            placeholder="60"
-            placeholderTextColor="#999"
-          />
-
-          <Text style={styles.label}>Reps</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="number-pad"
-            value={reps}
-            onChangeText={setReps}
-            placeholder="10"
-            placeholderTextColor="#999"
-          />
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={onSaveSet}
-            disabled={busy || !selectedExercise}
-            style={({ pressed }) => [
-              styles.saveBtn,
-              (busy || !selectedExercise) && styles.btnDisabled,
-              pressed && styles.btnPressed,
-            ]}>
-            <Text style={styles.saveBtnText}>{busy ? 'Saving…' : 'Save Set'}</Text>
-          </Pressable>
 
           {lastPRDelta ? (
             <View style={styles.prBanner}>
@@ -727,27 +660,6 @@ export default function TodayScreen() {
             </View>
           ) : null}
 
-          <Text style={styles.label}>Sets in this session</Text>
-          {setsInSession.length === 0 ? (
-            <Text style={styles.emptyText}>None yet — record your first set above.</Text>
-          ) : (
-            <FlatList
-              data={setsInSession}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
-                <View style={styles.setRow}>
-                  <Text style={styles.setRowOrdering}>#{item.ordering}</Text>
-                  <Text style={styles.setRowExercise}>{item.exercise_name}</Text>
-                  <Text style={styles.setRowDetails}>
-                    {item.weight_kg} kg × {item.reps} reps
-                  </Text>
-                </View>
-              )}
-              ItemSeparatorComponent={() => <View style={styles.separator} />}
-            />
-          )}
-
           <Pressable
             accessibilityRole="button"
             onPress={onEndSession}
@@ -791,30 +703,43 @@ function formatPRDeltaValue(
  *   - d-1: vertical scroll for the card list (the parent ScrollView)
  *   - e-3: expanded card uses bigger padding + same border (no active ring)
  *
- * The ⚙️ icon on the right opens the settings menu (slice 10c). For slice 10b
- * it's a placeholder Alert documenting the three sheets coming next
- * (📝 編輯備註 / ⏱️ 休息秒數 / 🗑️ 刪除動作). The original ADR-0019 Q5 4-item
- * design was reduced to 3 on 2026-05-16 — 「🔄 換動作」 was removed in favour
- * of the 刪 + [⊕ 加動作] 動作庫勾選 flow (cluster + solo unified).
+ * The ⚙️ icon on the right opens the settings menu (slice 10c, Phase 4).
+ * For Phase 2 it's a placeholder Alert documenting the four sheets coming
+ * next (📝 編輯備註 / ⏱️ 休息秒數 / 🔀 換動作 / 🗑️ 刪除動作).
  *
- * Set logger gestures (left-swipe delete / right-swipe add+notes / tap-label
- * cycle / long-press reorder / tap-✓ complete) land in slice 10c — the
- * expanded body for slice 10b just shows planned details with a note that
- * the full set logger is pending.
+ * Expanded body (slice 10c Phase 2 commit 5 — minimum viable set logger):
+ *   - Readonly list of sets recorded for this exercise in this session
+ *     (one row each, format: "#N · {weight} kg × {reps} reps")
+ *   - Footer two-button row [+ 新增 1 組][📖 動作歷史] per ADR-0019 Q3
+ *
+ * Subsequent commits replace the readonly list with `SetRowContent` +
+ * `SwipeableSetRow` + tap-label cycle + tap-✓ + NumericKeypad (commits 6-8)
+ * and the row drag-reorder via draggable-flatlist (commit 9). For now,
+ * "新增 1 組" inserts a set with reps/weight defaulting to the most recent
+ * set already recorded for this exercise; the user has no UI to edit those
+ * numbers yet (commit 6 will add it). PR detection still fires.
  */
 function ExerciseCard({
   planRow,
   done,
   complete,
   isExpanded,
+  sets,
+  busy,
   onToggleExpand,
+  onAddSet,
+  onOpenHistory,
   onSettingsPress,
 }: {
   planRow: SessionExerciseRowWithName;
   done: number;
   complete: boolean;
   isExpanded: boolean;
+  sets: SetWithExercise[];
+  busy: boolean;
   onToggleExpand: () => void;
+  onAddSet: () => void;
+  onOpenHistory: () => void;
   onSettingsPress: () => void;
 }): React.ReactElement {
   return (
@@ -855,20 +780,48 @@ function ExerciseCard({
       </View>
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
-          <Text style={styles.exerciseCardBodyHint}>
-            Set logger gestures (左滑刪 / 右滑加 / tap label / 長按 reorder /
-            tap ✓) — coming in slice 10c.
-          </Text>
-          {planRow.rest_sec != null && (
-            <Text style={styles.exerciseCardRestLine}>
-              ⏱️ Rest: {planRow.rest_sec}s
+          {sets.length === 0 ? (
+            <Text style={styles.exerciseCardEmpty}>
+              還沒有 set — 按下方「+ 新增 1 組」開始記錄
             </Text>
+          ) : (
+            sets.map((s, i) => (
+              <View key={s.id} style={styles.exerciseCardSetRow}>
+                <Text style={styles.exerciseCardSetIndex}>#{i + 1}</Text>
+                <Text style={styles.exerciseCardSetDetails}>
+                  {s.weight_kg} kg × {s.reps} reps
+                </Text>
+              </View>
+            ))
           )}
-          {planRow.rest_sec == null && (
-            <Text style={styles.exerciseCardRestLine}>
-              ⏱️ Rest: 60s (default)
-            </Text>
-          )}
+          <View style={styles.exerciseCardFooter}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onAddSet}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.exerciseCardFooterBtn,
+                styles.exerciseCardFooterBtnPrimary,
+                busy && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.exerciseCardFooterBtnTextPrimary}>
+                + 新增 1 組
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onOpenHistory}
+              style={({ pressed }) => [
+                styles.exerciseCardFooterBtn,
+                styles.exerciseCardFooterBtnSecondary,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.exerciseCardFooterBtnTextSecondary}>
+                📖 動作歷史
+              </Text>
+            </Pressable>
+          </View>
         </View>
       )}
     </View>
@@ -926,22 +879,7 @@ const styles = StyleSheet.create({
   endBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
   btnDisabled: { opacity: 0.5 },
   btnPressed: { opacity: 0.85 },
-  emptyText: { fontSize: 14, opacity: 0.6, fontStyle: 'italic' },
-  setRow: { paddingVertical: 8, gap: 2 },
-  setRowOrdering: { fontSize: 12, opacity: 0.6 },
-  setRowExercise: { fontSize: 15, fontWeight: '600' },
-  setRowDetails: { fontSize: 14 },
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.3)' },
   planList: { gap: 8, paddingVertical: 4 },
-  planRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    borderRadius: 10,
-  },
   planMark: { fontSize: 18, width: 22, textAlign: 'center' },
   planText: { flex: 1 },
   planName: { fontSize: 15, fontWeight: '600' },
@@ -987,14 +925,53 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     gap: 6,
   },
-  exerciseCardBodyHint: {
-    fontSize: 12,
+  exerciseCardEmpty: {
+    fontSize: 13,
     opacity: 0.55,
     fontStyle: 'italic',
+    paddingVertical: 8,
   },
-  exerciseCardRestLine: {
-    fontSize: 13,
-    opacity: 0.75,
+  exerciseCardSetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  exerciseCardSetIndex: {
+    fontSize: 12,
+    opacity: 0.55,
+    minWidth: 28,
+  },
+  exerciseCardSetDetails: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  exerciseCardFooter: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  exerciseCardFooterBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  exerciseCardFooterBtnPrimary: {
+    backgroundColor: '#0a7ea4',
+  },
+  exerciseCardFooterBtnSecondary: {
+    backgroundColor: 'rgba(127,127,127,0.18)',
+  },
+  exerciseCardFooterBtnTextPrimary: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  exerciseCardFooterBtnTextSecondary: {
+    color: '#0a7ea4',
+    fontSize: 14,
+    fontWeight: '600',
   },
   programBanner: {
     paddingVertical: 10,
