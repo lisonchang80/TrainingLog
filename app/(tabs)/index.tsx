@@ -43,7 +43,7 @@ import {
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
-import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
+import { getSetting, getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
   deleteSet,
   insertSessionSet,
@@ -63,6 +63,7 @@ import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import {
   computePRSnapshot,
   type PRSnapshot,
@@ -180,21 +181,38 @@ export default function TodayScreen() {
   const [prSnapshotById, setPrSnapshotById] = useState<
     Record<string, PRSnapshot>
   >({});
+  /**
+   * Rest timer (ADR-0019 Q2 R1 v1). `autoPopup` mirrors the
+   * `auto_popup_rest_timer` app setting (default ON via v016 seed).
+   * `restTimerTrigger` is bumped each tap-✓ to flag the modal it
+   * should restart with fresh rest_sec; `restTimerTarget` carries the
+   * rest_sec + exercise name to render in the modal.
+   */
+  const [autoPopupTimer, setAutoPopupTimer] = useState<boolean>(true);
+  const [restTimerTarget, setRestTimerTarget] = useState<{
+    rest_sec: number;
+    exercise_name: string;
+  } | null>(null);
+  const [restTimerTrigger, setRestTimerTrigger] = useState<number>(0);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, bms] = await Promise.all([
+    const [exs, active, prog, tpls, u, bms, popup] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
       listTemplates(db),
       getUnitPreference(db),
       listBodyMetrics(db),
+      // v016 seeds auto_popup_rest_timer = '1' (raw string, JSON-parses to 1).
+      // null / 0 / undefined → autoPopup off.
+      getSetting<number | boolean>(db, 'auto_popup_rest_timer'),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
     setBodyMetrics(bms);
+    setAutoPopupTimer(popup === 1 || popup === true);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
@@ -648,21 +666,48 @@ export default function TodayScreen() {
    * Q4's segmented progress bar + the header `done/planned` count.
    * No alert on failure — toggle is idempotent so retry-on-next-render is
    * fine; we only catch the failure to avoid a hard crash.
+   *
+   * Slice 10c rest-timer hookup (ADR-0019 Q2 R1 v1):
+   *   - flip TO 1 + autoPopup ON → launch rest-timer modal with the
+   *     set's owning session_exercise.rest_sec (or 60 default). Per
+   *     Q2.3 (b) M1 the modal restarts with fresh time even if already
+   *     open (we bump `restTimerTrigger`).
+   *   - flip TO 0 → cancel timer (Q2.3 (d) Y2 — un-logging removes the
+   *     set's "complete" side-effect, timer included).
    */
   const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
+    const nextLogged = currentlyLogged ? 0 : 1;
     try {
       await updateSetFields(db, set_id, {
-        is_logged: currentlyLogged ? 0 : 1,
+        is_logged: nextLogged,
       });
       setSetsInSession((curr) =>
         curr.map((s) =>
-          s.id === set_id ? { ...s, is_logged: currentlyLogged ? 0 : 1 } : s,
+          s.id === set_id ? { ...s, is_logged: nextLogged } : s,
         ),
       );
     } catch (e) {
       console.warn('[toggle is_logged] failed:', e);
+      return;
+    }
+
+    if (nextLogged === 1 && autoPopupTimer) {
+      // Resolve the owning session_exercise → rest_sec / exercise name.
+      // Lookup via setsInSession (just-toggled set) → exercise_id →
+      // plan row. NULL rest_sec uses 60s system default.
+      const toggled = setsInSession.find((s) => s.id === set_id);
+      const planRow = toggled
+        ? plan.find((p) => p.exercise_id === toggled.exercise_id) ?? null
+        : null;
+      const rest_sec = planRow?.rest_sec ?? 60;
+      const exercise_name = planRow?.exercise_name ?? '';
+      setRestTimerTarget({ rest_sec, exercise_name });
+      setRestTimerTrigger((n) => n + 1);
+    } else if (nextLogged === 0) {
+      // Cancel timer per Q2.3 (d) Y2.
+      setRestTimerTarget(null);
     }
   };
 
@@ -1526,6 +1571,14 @@ export default function TodayScreen() {
           setRestSecTarget(null);
         }}
         onCancel={() => setRestSecTarget(null)}
+      />
+      <RestTimerModal
+        visible={restTimerTarget !== null}
+        rest_sec={restTimerTarget?.rest_sec ?? 60}
+        triggerKey={restTimerTrigger}
+        exerciseName={restTimerTarget?.exercise_name}
+        onSkip={() => setRestTimerTarget(null)}
+        onCancel={() => setRestTimerTarget(null)}
       />
     </SafeAreaView>
   );
