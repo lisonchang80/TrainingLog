@@ -1604,6 +1604,21 @@ export default function TodayScreen() {
             </View>
           )}
 
+          {/*
+            Empty-state placeholder — session 已開但 plan.length === 0
+            (freestyle start without template, or all exercises deleted via
+            ⚙️ 🗑️). Guides the user to the bottom-bar [+ 動作] flow.
+            Slice 10c overnight 第 3 點 — empty-state placeholder.
+          */}
+          {plan.length === 0 && (
+            <View style={styles.emptyPlanBlock}>
+              <Text style={styles.emptyPlanTitle}>尚未加入動作</Text>
+              <Text style={styles.emptyPlanBody}>
+                點下方「+ 動作」開始記錄這次訓練。
+              </Text>
+            </View>
+          )}
+
           {plan.length > 0 && (
             <>
               <Text style={styles.label}>Today&apos;s plan</Text>
@@ -2529,6 +2544,19 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.5 },
   btnPressed: { opacity: 0.85 },
   planList: { gap: 8, paddingVertical: 4 },
+  // Empty-state for in_progress session with 0 exercises (overnight 第 3 點).
+  // Mirrors `library.tsx` empty pattern (尚未建立超級組) for consistency.
+  emptyPlanBlock: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    gap: 6,
+    marginTop: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.06)',
+  },
+  emptyPlanTitle: { fontSize: 15, fontWeight: '600', opacity: 0.75 },
+  emptyPlanBody: { fontSize: 13, opacity: 0.55, textAlign: 'center' },
   planMark: { fontSize: 18, width: 22, textAlign: 'center' },
   planText: { flex: 1 },
   planName: { fontSize: 15, fontWeight: '600' },
