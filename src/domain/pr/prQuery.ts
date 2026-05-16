@@ -37,6 +37,19 @@ export interface PRSnapshot {
   weightPRs: WeightRepsPR[];
   /** Max single-set volume (weight_kg × reps), or null if no qualifying sets. */
   volumePR: number | null;
+  /**
+   * **Single-set 重量 PR**: the set with the heaviest weight ever logged.
+   * Tie-break (same weight, different reps): pick the row with max reps so
+   * we surface the most impressive single rep×weight combo on the card.
+   * Null if no qualifying sets. ADR-0019 Q5 amend (2026-05-16 ultra-late):
+   * card collapses Pareto frontier into single top-weight + top-volume.
+   */
+  topWeightSet: WeightRepsPR | null;
+  /**
+   * **Single-set 容量 PR**: the set with max (weight × reps). Tie-break:
+   * max weight then max reps. Null if no qualifying sets. ADR-0019 Q5 amend.
+   */
+  topVolumeSet: WeightRepsPR | null;
 }
 
 export function computePRSnapshot(sets: PRQueryInput[]): PRSnapshot {
@@ -78,12 +91,37 @@ export function computePRSnapshot(sets: PRQueryInput[]): PRSnapshot {
     (a, b) => b.weight_kg - a.weight_kg || b.reps - a.reps,
   );
 
-  // Max volume.
+  // Max volume + top-weight set + top-volume set (single-set views per Q5 amend).
   let volumePR: number | null = null;
+  let topWeightSet: WeightRepsPR | null = null;
+  let topVolumeSet: WeightRepsPR | null = null;
   for (const s of valid) {
     const v = s.weight_kg * s.reps;
     if (volumePR === null || v > volumePR) volumePR = v;
+
+    // Top-weight set: max weight, tie-break max reps.
+    if (
+      topWeightSet === null ||
+      s.weight_kg > topWeightSet.weight_kg ||
+      (s.weight_kg === topWeightSet.weight_kg && s.reps > topWeightSet.reps)
+    ) {
+      topWeightSet = { weight_kg: s.weight_kg, reps: s.reps };
+    }
+
+    // Top-volume set: max w×r, tie-break max weight then max reps.
+    const cur = topVolumeSet;
+    const curVol = cur === null ? -Infinity : cur.weight_kg * cur.reps;
+    if (
+      cur === null ||
+      v > curVol ||
+      (v === curVol && s.weight_kg > cur.weight_kg) ||
+      (v === curVol &&
+        s.weight_kg === cur.weight_kg &&
+        s.reps > cur.reps)
+    ) {
+      topVolumeSet = { weight_kg: s.weight_kg, reps: s.reps };
+    }
   }
 
-  return { weightPRs: frontier, volumePR };
+  return { weightPRs: frontier, volumePR, topWeightSet, topVolumeSet };
 }

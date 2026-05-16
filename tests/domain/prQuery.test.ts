@@ -9,8 +9,13 @@ function s(weight_kg: number | null, reps: number | null): PRQueryInput {
 }
 
 describe('computePRSnapshot', () => {
-  it('empty input → empty frontier + null volume', () => {
-    expect(computePRSnapshot([])).toEqual({ weightPRs: [], volumePR: null });
+  it('empty input → empty frontier + null volume + null top sets', () => {
+    expect(computePRSnapshot([])).toEqual({
+      weightPRs: [],
+      volumePR: null,
+      topWeightSet: null,
+      topVolumeSet: null,
+    });
   });
 
   it('filters out null/zero/negative rows', () => {
@@ -18,13 +23,17 @@ describe('computePRSnapshot', () => {
     expect(computePRSnapshot(sets)).toEqual({
       weightPRs: [],
       volumePR: null,
+      topWeightSet: null,
+      topVolumeSet: null,
     });
   });
 
-  it('single valid set → single PR + volume', () => {
+  it('single valid set → single PR + volume + same top sets', () => {
     expect(computePRSnapshot([s(100, 8)])).toEqual({
       weightPRs: [{ weight_kg: 100, reps: 8 }],
       volumePR: 800,
+      topWeightSet: { weight_kg: 100, reps: 8 },
+      topVolumeSet: { weight_kg: 100, reps: 8 },
     });
   });
 
@@ -32,6 +41,8 @@ describe('computePRSnapshot', () => {
     expect(computePRSnapshot([s(80, 10), s(80, 10)])).toEqual({
       weightPRs: [{ weight_kg: 80, reps: 10 }],
       volumePR: 800,
+      topWeightSet: { weight_kg: 80, reps: 10 },
+      topVolumeSet: { weight_kg: 80, reps: 10 },
     });
   });
 
@@ -90,5 +101,36 @@ describe('computePRSnapshot', () => {
     expect(result.weightPRs).toHaveLength(5);
     expect(result.weightPRs[0]).toEqual({ weight_kg: 100, reps: 3 });
     expect(result.weightPRs[4]).toEqual({ weight_kg: 40, reps: 20 });
+  });
+
+  // ── Q5 amend (2026-05-16 ultra-late) — single top sets for card display ───
+
+  describe('topWeightSet / topVolumeSet (ADR-0019 Q5 amend)', () => {
+    it('topWeightSet = the heaviest single set; topVolumeSet = max w×r set', () => {
+      const result = computePRSnapshot([
+        s(100, 5), // 500 — heaviest weight
+        s(85, 12), // 1020 — highest volume
+        s(60, 10), // 600
+      ]);
+      expect(result.topWeightSet).toEqual({ weight_kg: 100, reps: 5 });
+      expect(result.topVolumeSet).toEqual({ weight_kg: 85, reps: 12 });
+    });
+
+    it('topWeightSet tie-break: same weight, picks max reps row', () => {
+      const result = computePRSnapshot([s(100, 3), s(100, 5), s(100, 8)]);
+      expect(result.topWeightSet).toEqual({ weight_kg: 100, reps: 8 });
+    });
+
+    it('topVolumeSet tie-break: same volume, picks max weight then max reps', () => {
+      // (60, 20) and (40, 30) both volume 1200; weight 60 > 40 so (60,20) wins.
+      const result = computePRSnapshot([s(60, 20), s(40, 30)]);
+      expect(result.topVolumeSet).toEqual({ weight_kg: 60, reps: 20 });
+    });
+
+    it('same set is both top-weight and top-volume when no PR competition', () => {
+      const result = computePRSnapshot([s(100, 8), s(60, 10)]);
+      expect(result.topWeightSet).toEqual({ weight_kg: 100, reps: 8 });
+      expect(result.topVolumeSet).toEqual({ weight_kg: 100, reps: 8 }); // 800 > 600
+    });
   });
 });

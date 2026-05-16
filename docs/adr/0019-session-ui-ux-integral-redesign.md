@@ -678,9 +678,9 @@ Slice 10c Phase 1-5 + Phase 8 (本 amend) 落地，**Phase 6-7 留尾**。
 **Phase 3** — Progress bar + PR display（commits `22b0ca1`, `800693a`）
 - `computeExerciseProgress` pure（7 tests）：workingDone / plannedTotal / volumeDone / volumeTotal
 - `SegmentedProgressBar` 元件
-- 卡 header 顯示 `done/planned` + 進度條 + 容量 numerator/denominator（warmup 排除）
-- `computePRSnapshot` pure（10 tests）：Pareto frontier of (weight, reps) + max volume PR
-- 卡 header 下方 PR line：🏆 `100 × 8` `85 × 12` + 整體容量 PR，底線 emphasis 數字
+- 卡 header 顯示 `done/planned` + 進度條 + 容量 numerator/denominator（warmup 排除）（**Q5 修訂 2026-05-17 ultra-late**：sets count line + target line 砍除；容量 `done/planned` chip 提升為 header 主位，無單位文字；見下方 ledger）
+- `computePRSnapshot` pure（10 tests）：Pareto frontier of (weight, reps) + max volume PR（**Q5 修訂**：新增 `topWeightSet` + `topVolumeSet` 兩個 single-set 欄位給卡 PR 行用；Pareto frontier 保留給將來圖表 / 多 PR 使用情境）
+- 卡 header 下方 PR line：🏆 `100 × 8` `85 × 12` + 整體容量 PR，底線 emphasis 數字（**Q5 修訂**：改 inline `重量 PR: w×r  容量 PR: w×r` 單組顯示，砍 🏆 + 砍「整體」字 — UI 簡潔；per-bucket 細節留給動作歷史頁）
 
 **Phase 4** — ⚙️ menu 3 sheets + reorder（commits `dd0fa3a`, `7451ff6`, `18ea66d` (reverted in 後續 commit), `a3dc423`, `<this-commit>`）
 - ActionSheetIOS 3 主項（📝/⏱️/🗑️）+ 1 reorder utility（🔃）+ cancel slot
@@ -716,6 +716,7 @@ Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's 
 
 | 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
 |---|---|---|---|---|---|
+| 2026-05-16 ultra-late | Q5 動作卡 header + PR row 結構 | sets count + target line + Pareto frontier `🏆 PR: ...` + `整體容量 PR: <sum>` 兩行 | 容量 chip `done/planned` 主位 + PR row inline `重量 PR: w×r  容量 PR: w×r`（單組 top-weight + top-volume，不再 Pareto multi-display） | user 雙 mockup confirm 後拍板 — UI 簡潔 / per-bucket 細節留給動作歷史頁 | (this commit) |
 | 2026-05-16 ultra-late | Q11 ⚙️ menu 砍 🔀 | spec L45「重新加 🔀」 | 4 槽 cancel + 3 主項 + 🔃 reorder | user post-spec verbal grill | `18ea66d` (bad impl) + `4b89d63` (revert) |
 | 2026-05-16 ultra-late | [+ 動作] picker UX | initial: SwapExerciseSheet quick-list | router.push('/exercise-picker?mode=picker') 全頁 + consumePick | user post-impl preference | `4b89d63` |
 | 2026-05-16 ultra-late | 「換動作」flow | 砍 🔀 之 ADR-0014 sibling propagation 留尾 | moot — flow 改走 🗑️ 刪除 + [+ 動作] 動作庫勾選 | derivative of 🔀 砍除 | n/a (跟 4b89d63 同) |

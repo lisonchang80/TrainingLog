@@ -2041,16 +2041,17 @@ function ExerciseCard({
           ]}>
           <Text style={styles.planMark}>{complete ? '✓' : '○'}</Text>
           <View style={styles.planText}>
-            <Text style={styles.planName}>{planRow.exercise_name}</Text>
-            <Text style={styles.planDetails}>
-              {progress.workingDone}/{progress.plannedTotal} sets
-              {planRow.planned_reps != null
-                ? ` · target ${planRow.planned_reps} reps`
-                : ''}
-              {planRow.planned_weight_kg != null
-                ? ` @ ${planRow.planned_weight_kg} kg`
-                : ''}
-            </Text>
+            <View style={styles.exerciseCardTitleRow}>
+              <Text style={styles.planName} numberOfLines={1}>
+                {planRow.exercise_name}
+              </Text>
+              {progress.volumeTotal > 0 ? (
+                <Text style={styles.exerciseCardVolumeChip}>
+                  {Math.round(progress.volumeDone)}/
+                  {Math.round(progress.volumeTotal)}
+                </Text>
+              ) : null}
+            </View>
             {progress.plannedTotal > 0 ? (
               <View style={styles.exerciseCardProgressBar}>
                 <SegmentedProgressBar
@@ -2059,14 +2060,8 @@ function ExerciseCard({
                 />
               </View>
             ) : null}
-            {progress.volumeTotal > 0 ? (
-              <Text style={styles.exerciseCardVolume}>
-                容量 {Math.round(progress.volumeDone)} /{' '}
-                {Math.round(progress.volumeTotal)} kg·reps
-              </Text>
-            ) : null}
           </View>
-          <Text style={styles.exerciseCardChevron}>{isExpanded ? '▾' : '▸'}</Text>
+          <Text style={styles.exerciseCardChevron}>{isExpanded ? '▼' : '▶'}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -2080,31 +2075,39 @@ function ExerciseCard({
         </Pressable>
       </View>
       {prSnapshot &&
-      (prSnapshot.weightPRs.length > 0 || prSnapshot.volumePR !== null) ? (
+      (prSnapshot.topWeightSet !== null ||
+        prSnapshot.topVolumeSet !== null) ? (
         <View style={styles.exerciseCardPRLine}>
-          {prSnapshot.weightPRs.length > 0 ? (
-            <Text style={styles.exerciseCardPRText}>
-              🏆 PR:{' '}
-              {prSnapshot.weightPRs.map((pr, idx) => (
-                <Text key={idx}>
-                  {idx > 0 ? '  ' : ''}
-                  <Text style={styles.exerciseCardPREmphasis}>
-                    {pr.weight_kg}
-                  </Text>
-                  <Text> × </Text>
-                  <Text style={styles.exerciseCardPREmphasis}>{pr.reps}</Text>
+          <Text style={styles.exerciseCardPRText}>
+            {prSnapshot.topWeightSet !== null ? (
+              <>
+                重量 PR:{' '}
+                <Text style={styles.exerciseCardPREmphasis}>
+                  {prSnapshot.topWeightSet.weight_kg}
                 </Text>
-              ))}
-            </Text>
-          ) : null}
-          {prSnapshot.volumePR !== null ? (
-            <Text style={styles.exerciseCardPRText}>
-              整體容量 PR:{' '}
-              <Text style={styles.exerciseCardPREmphasis}>
-                {Math.round(prSnapshot.volumePR)}
-              </Text>
-            </Text>
-          ) : null}
+                <Text>×</Text>
+                <Text style={styles.exerciseCardPREmphasis}>
+                  {prSnapshot.topWeightSet.reps}
+                </Text>
+              </>
+            ) : null}
+            {prSnapshot.topWeightSet !== null &&
+            prSnapshot.topVolumeSet !== null
+              ? '   '
+              : ''}
+            {prSnapshot.topVolumeSet !== null ? (
+              <>
+                容量 PR:{' '}
+                <Text style={styles.exerciseCardPREmphasis}>
+                  {prSnapshot.topVolumeSet.weight_kg}
+                </Text>
+                <Text>×</Text>
+                <Text style={styles.exerciseCardPREmphasis}>
+                  {prSnapshot.topVolumeSet.reps}
+                </Text>
+              </>
+            ) : null}
+          </Text>
         </View>
       ) : null}
       {isExpanded && (
@@ -2229,7 +2232,7 @@ function ExerciseCard({
                 pressed && styles.btnPressed,
               ]}>
               <Text style={styles.exerciseCardFooterBtnTextPrimary}>
-                + 新增 1 組
+                新增 1 組
               </Text>
             </Pressable>
             <Pressable
@@ -2241,7 +2244,7 @@ function ExerciseCard({
                 pressed && styles.btnPressed,
               ]}>
               <Text style={styles.exerciseCardFooterBtnTextSecondary}>
-                📖 動作歷史
+                動作歷史
               </Text>
             </Pressable>
           </View>
@@ -2404,6 +2407,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     opacity: 0.55,
     marginTop: 2,
+  },
+  exerciseCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  exerciseCardVolumeChip: {
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.7,
   },
   exerciseCardPRLine: {
     paddingHorizontal: 12,
