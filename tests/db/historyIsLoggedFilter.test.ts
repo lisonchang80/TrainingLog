@@ -4,6 +4,7 @@ import { listExercises } from '../../src/adapters/sqlite/exerciseRepository';
 import { createSession } from '../../src/adapters/sqlite/sessionRepository';
 import { insertSet, updateSetFields } from '../../src/adapters/sqlite/setRepository';
 import {
+  getExerciseHistoryHeader,
   listExerciseHistoryBySession,
   listExerciseHistorySets,
   queryExerciseHistory,
@@ -138,6 +139,67 @@ describe('exerciseHistoryRepository — is_logged filter (slice 10c #10)', () =>
     expect(priors).toHaveLength(1);
     expect(priors[0].set_id).toBe('set-past');
     expect(priors[0].weight_kg).toBe(70);
+  });
+
+  it('case 4: getExerciseHistoryHeader aggregates exclude planned-only sessions', async () => {
+    const NOW = 1_700_000_000_000;
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+    // Old (30d ago) logged session — counts toward total but NOT 7d
+    await createSession(db, {
+      id: 'sess-old-logged',
+      started_at: NOW - 30 * ONE_DAY_MS,
+    });
+    await insertSet(db, {
+      id: 'set-old',
+      session_id: 'sess-old-logged',
+      exercise_id: benchId,
+      weight_kg: 70,
+      reps: 8,
+      is_skipped: 0,
+      ordering: 1,
+      created_at: NOW - 30 * ONE_DAY_MS,
+    });
+    await markLogged('set-old');
+
+    // Recent (2d ago) logged session — counts toward both
+    await createSession(db, {
+      id: 'sess-recent-logged',
+      started_at: NOW - 2 * ONE_DAY_MS,
+    });
+    await insertSet(db, {
+      id: 'set-recent',
+      session_id: 'sess-recent-logged',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 10,
+      is_skipped: 0,
+      ordering: 1,
+      created_at: NOW - 2 * ONE_DAY_MS,
+    });
+    await markLogged('set-recent');
+
+    // Recent (1d ago) PLANNED-ONLY session — must NOT count anywhere
+    await createSession(db, {
+      id: 'sess-recent-planned',
+      started_at: NOW - 1 * ONE_DAY_MS,
+    });
+    await insertSet(db, {
+      id: 'set-planned',
+      session_id: 'sess-recent-planned',
+      exercise_id: benchId,
+      weight_kg: 75,
+      reps: 10,
+      is_skipped: 0,
+      ordering: 1,
+      created_at: NOW - 1 * ONE_DAY_MS,
+    });
+    // Deliberately NOT calling markLogged — this row stays is_logged=0
+
+    const h = await getExerciseHistoryHeader(db, benchId, () => NOW);
+    expect(h).not.toBeNull();
+    expect(h!.total_sessions).toBe(2); // old logged + recent logged
+    expect(h!.sessions_last_7_days).toBe(1); // recent logged only
   });
 
   it('case 3: tap-✓ then un-tap (is_logged 0→1→0) — the row appears, then disappears, on each query', async () => {
