@@ -19,6 +19,7 @@ import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 import { useDatabase } from '@/components/database-provider';
 import {
   getExerciseHistoryHeader,
+  hasClusterHistory,
   listExerciseHistoryBySession,
   listProgramsForExercise,
   type ExerciseHistoryHeader,
@@ -42,7 +43,14 @@ import {
   peekFilter,
   submitFilter,
 } from '@/src/domain/exercise/historyFilterMailbox';
-import { DEFAULT_CLUSTER_MODE } from '@/src/domain/exercise/clusterFilter';
+import {
+  CLUSTER_FILTER_MODES,
+  DEFAULT_CLUSTER_MODE,
+  clusterFilterLabel,
+  filterSetsByClusterMode,
+  parseClusterMode,
+  type ClusterFilterMode,
+} from '@/src/domain/exercise/clusterFilter';
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
@@ -72,10 +80,14 @@ const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
  * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
  */
 export default function ExerciseChartScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, clusterMode: clusterModeParam } = useLocalSearchParams<{
+    id: string;
+    clusterMode?: string;
+  }>();
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
+  const [hasClusterRows, setHasClusterRows] = useState(false);
   const screenOptions = useMemo(
     () => ({
       title: '動作圖表',
@@ -102,6 +114,11 @@ export default function ExerciseChartScreen() {
   );
   const [programId, setProgramId] = useState<string | null>(null);
   const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
+  // Slice 10c — same 3-段 cluster mode as the history page, shared via mailbox.
+  // URL param wins on cold open, mailbox on warm re-focus.
+  const [clusterMode, setClusterMode] = useState<ClusterFilterMode>(
+    parseClusterMode(clusterModeParam)
+  );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [programPickerOpen, setProgramPickerOpen] = useState(false);
 
@@ -112,16 +129,18 @@ export default function ExerciseChartScreen() {
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [h, ss, ps, u] = await Promise.all([
+    const [h, ss, ps, u, has] = await Promise.all([
       getExerciseHistoryHeader(db, id),
       listExerciseHistoryBySession(db, id),
       listProgramsForExercise(db, id),
       getUnitPreference(db),
+      hasClusterHistory(db, id),
     ]);
     setHeader(h);
     setSessions(ss);
     setPrograms(ps);
     setUnit(u);
+    setHasClusterRows(has);
   }, [db, id]);
 
   useFocusEffect(
@@ -132,6 +151,7 @@ export default function ExerciseChartScreen() {
         setBucketFilters(new Set(f.buckets));
         setProgramId(f.programId);
         setSubTagFilters(new Set(f.subTags));
+        setClusterMode(f.clusterMode);
         if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
           setAdvancedOpen(true);
         }
@@ -143,16 +163,14 @@ export default function ExerciseChartScreen() {
     (
       buckets: Set<RepBucketChip>,
       pid: string | null,
-      tags: Set<string>
+      tags: Set<string>,
+      mode: ClusterFilterMode
     ) => {
-      // Slice 10c step 4 will rewrite this to thread clusterMode through;
-      // for the step-3 commit boundary we just preserve the default so the
-      // mailbox payload stays well-formed.
       submitFilter({
         buckets,
         programId: pid,
         subTags: tags,
-        clusterMode: DEFAULT_CLUSTER_MODE,
+        clusterMode: mode,
       });
     },
     []
@@ -178,17 +196,19 @@ export default function ExerciseChartScreen() {
         }
         return true;
       })
-      .map((s) => ({
-        ...s,
-        sets:
+      .map((s) => {
+        const bucketed =
           bucketFilters.size === 0
             ? s.sets
             : s.sets.filter((set) =>
                 [...bucketFilters].some((b) => matchesChip(set.reps, b))
-              ),
-      }))
+              );
+        // Slice 10c — cluster filter (independent of bucket filter axis).
+        const clustered = filterSetsByClusterMode(bucketed, clusterMode);
+        return { ...s, sets: clustered };
+      })
       .filter((s) => s.sets.length > 0);
-  }, [sessions, bucketFilters, programId, subTagFilters]);
+  }, [sessions, bucketFilters, programId, subTagFilters, clusterMode]);
 
   if (!id) return null;
 
@@ -202,9 +222,14 @@ export default function ExerciseChartScreen() {
       } else {
         next.add(chip);
       }
-      persistFilter(next, programId, subTagFilters);
+      persistFilter(next, programId, subTagFilters, clusterMode);
       return next;
     });
+  };
+
+  const onClusterModeTap = (mode: ClusterFilterMode) => {
+    setClusterMode(mode);
+    persistFilter(bucketFilters, programId, subTagFilters, mode);
   };
 
   const onSubTagTap = (tag: string) => {
@@ -212,7 +237,7 @@ export default function ExerciseChartScreen() {
       const next = new Set(prev);
       if (next.has(tag)) next.delete(tag);
       else next.add(tag);
-      persistFilter(bucketFilters, programId, next);
+      persistFilter(bucketFilters, programId, next, clusterMode);
       return next;
     });
   };
@@ -221,12 +246,12 @@ export default function ExerciseChartScreen() {
     setProgramId(newPid);
     const newSubTags = new Set<string>();
     setSubTagFilters(newSubTags);
-    persistFilter(bucketFilters, newPid, newSubTags);
+    persistFilter(bucketFilters, newPid, newSubTags, clusterMode);
     setProgramPickerOpen(false);
   };
 
   const onJumpToHistory = () => {
-    persistFilter(bucketFilters, programId, subTagFilters);
+    persistFilter(bucketFilters, programId, subTagFilters, clusterMode);
     // replace (not push) to avoid stacking two modal screens — see ADR-0017
     // Q14 amendment notes; two stacked modals crash on Metro R reload.
     router.replace(`/exercise-history/${id}`);
@@ -238,6 +263,7 @@ export default function ExerciseChartScreen() {
     setBucketFilters(empty);
     setProgramId(null);
     setSubTagFilters(emptyTags);
+    setClusterMode(DEFAULT_CLUSTER_MODE);
     submitFilter(EMPTY_FILTER);
     clearFilter();
   };
@@ -274,6 +300,11 @@ export default function ExerciseChartScreen() {
                 );
               })}
             </View>
+
+            {/* 3-段 cluster filter (slice 10c) — same surface as history page. */}
+            {hasClusterRows ? (
+              <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+            ) : null}
 
             {/* Advanced filter section (collapsible) */}
             <View style={styles.advancedWrap}>
@@ -503,6 +534,47 @@ function SubTagChip({
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+/**
+ * iOS-style 3-段 segmented control — mirrors exercise-history page (slice 10c).
+ * Self-rolled to avoid a new dep; same styling as the page's metric toggle.
+ */
+function ClusterModeSegmented({
+  value,
+  onChange,
+}: {
+  value: ClusterFilterMode;
+  onChange: (mode: ClusterFilterMode) => void;
+}) {
+  return (
+    <View style={styles.segmentedWrap}>
+      {CLUSTER_FILTER_MODES.map((mode) => {
+        const active = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            style={({ pressed }) => [
+              styles.segmentedBtn,
+              active && styles.segmentedBtnActive,
+              pressed && styles.btnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}>
+            <Text
+              style={[
+                styles.segmentedText,
+                active && styles.segmentedTextActive,
+              ]}
+              numberOfLines={1}>
+              {clusterFilterLabel(mode)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -825,6 +897,22 @@ const styles = StyleSheet.create({
   filterChipTextActive: { color: 'white' },
   filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
   filterChipSubtextActive: { color: 'white', opacity: 0.85 },
+  segmentedWrap: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    padding: 2,
+  },
+  segmentedBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  segmentedBtnActive: { backgroundColor: '#0a7ea4' },
+  segmentedText: { fontSize: 13, fontWeight: '500' },
+  segmentedTextActive: { color: 'white' },
   advancedWrap: {
     borderRadius: 12,
     backgroundColor: 'rgba(127,127,127,0.08)',
