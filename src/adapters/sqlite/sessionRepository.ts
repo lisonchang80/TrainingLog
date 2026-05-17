@@ -162,15 +162,32 @@ export async function listSessionExercises(
  * 🗑️ option). Manual cascade because the v003 FK between set and
  * session_exercise is via (exercise_id, session_id) not a real CASCADE.
  *
- * Slice 10c Phase 4 commit 17. rest_sec / set_kind / parent_set_id state
- * on the orphaned sets is gone with them — no need to clean up elsewhere.
+ * Slice 10c Phase 4 commit 17 introduced this.
+ *
+ * v019 isolation fix (slice 10c #17): the set DELETE now scopes by
+ * `session_exercise_id = ?` (the card-scoped column from v019). When two
+ * session_exercise rows in the same session shared an `exercise_id` (e.g.
+ * RS A-side Cable Crossover + a solo Cable Crossover card) the prior
+ * `WHERE session_id = ? AND exercise_id = ?` would wipe BOTH cards' sets
+ * — a leak. The fallback `OR (session_exercise_id IS NULL AND ...)` arm
+ * keeps the old behavior alive for any legacy / pre-v019 rows the
+ * migration's backfill couldn't tag; those rows still respond to the
+ * coarse (session, exercise) filter exactly as they did pre-#17.
+ *
+ * rest_sec / set_kind / parent_set_id state on the orphaned sets is
+ * gone with them — no need to clean up elsewhere.
  */
 export async function deleteSessionExerciseAndSets(
   db: Database,
   args: { session_id: string; exercise_id: string; session_exercise_id: string }
 ): Promise<void> {
   await db.runAsync(
-    `DELETE FROM "set" WHERE session_id = ? AND exercise_id = ?`,
+    `DELETE FROM "set"
+      WHERE session_exercise_id = ?
+         OR (session_exercise_id IS NULL
+             AND session_id = ?
+             AND exercise_id = ?)`,
+    args.session_exercise_id,
     args.session_id,
     args.exercise_id
   );

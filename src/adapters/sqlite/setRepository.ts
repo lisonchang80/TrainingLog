@@ -780,16 +780,33 @@ export async function reorderSessionSetsForExercise(
     session_id: string;
     exercise_id: string;
     orderedIds: string[];
+    /**
+     * v019 isolation (slice 10c #17). When provided, the slot fetch scopes
+     * by session_exercise_id so reorder stays inside one card even when
+     * another card in the same session targets the same exercise_id. Left
+     * optional so legacy tests / fixtures (one-card-per-exercise) still
+     * compile and behave as before.
+     */
+    session_exercise_id?: string | null;
   }
 ): Promise<void> {
-  // Fetch current set slots in ascending ordering.
-  const slots = await db.getAllAsync<{ id: string; ordering: number }>(
-    `SELECT id, ordering FROM "set"
-      WHERE session_id = ? AND exercise_id = ?
-      ORDER BY ordering ASC`,
-    args.session_id,
-    args.exercise_id
-  );
+  // Fetch current set slots in ascending ordering. When session_exercise_id
+  // is provided we scope to that exact card; otherwise we fall back to the
+  // legacy (session, exercise) heuristic for backward compatibility.
+  const slots = args.session_exercise_id
+    ? await db.getAllAsync<{ id: string; ordering: number }>(
+        `SELECT id, ordering FROM "set"
+          WHERE session_exercise_id = ?
+          ORDER BY ordering ASC`,
+        args.session_exercise_id
+      )
+    : await db.getAllAsync<{ id: string; ordering: number }>(
+        `SELECT id, ordering FROM "set"
+          WHERE session_id = ? AND exercise_id = ?
+          ORDER BY ordering ASC`,
+        args.session_id,
+        args.exercise_id
+      );
   if (slots.length !== args.orderedIds.length) {
     throw new Error(
       `reorderSessionSetsForExercise: id-count mismatch — ` +

@@ -1806,6 +1806,8 @@ export default function TodayScreen() {
                                   session_id,
                                   exercise_id: group.a.exercise.exercise_id,
                                   orderedIds: aOrderedIds,
+                                  // v019 isolation — scope to cluster A card
+                                  session_exercise_id: group.a.exercise.id,
                                 });
                               }
                               if (bOrderedIds.length > 0) {
@@ -1813,6 +1815,8 @@ export default function TodayScreen() {
                                   session_id,
                                   exercise_id: group.b.exercise.exercise_id,
                                   orderedIds: bOrderedIds,
+                                  // v019 isolation — scope to cluster B card
+                                  session_exercise_id: group.b.exercise.id,
                                 });
                               }
                               await refresh();
@@ -1887,6 +1891,8 @@ export default function TodayScreen() {
                               session_id,
                               exercise_id: p.exercise_id,
                               orderedIds,
+                              // v019 isolation — scope reorder to this card
+                              session_exercise_id: p.id,
                             });
                             await refresh();
                           } catch (e) {
