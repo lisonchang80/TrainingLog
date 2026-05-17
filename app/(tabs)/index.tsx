@@ -1493,33 +1493,35 @@ export default function TodayScreen() {
                   placeholderTextColor="#999"
                   autoFocus
                 />
-                <View style={styles.prePromptActions}>
-                  <Pressable
-                    onPress={onCancelPrePrompt}
-                    disabled={busy}
-                    style={({ pressed }) => [
-                      styles.secondaryBtn,
-                      busy && styles.btnDisabled,
-                      pressed && styles.btnPressed,
-                    ]}>
-                    <Text style={styles.secondaryBtnText}>取消</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => onConfirmPrePrompt(true)}
-                    disabled={busy}
-                    style={({ pressed }) => [
-                      styles.secondaryBtn,
-                      busy && styles.btnDisabled,
-                      pressed && styles.btnPressed,
-                    ]}>
-                    <Text style={styles.secondaryBtnText}>略過</Text>
-                  </Pressable>
+                <View style={styles.prePromptActionsWrapper}>
+                  <View style={styles.prePromptSecondaryRow}>
+                    <Pressable
+                      onPress={onCancelPrePrompt}
+                      disabled={busy}
+                      style={({ pressed }) => [
+                        styles.secondaryBtn,
+                        busy && styles.btnDisabled,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text style={styles.secondaryBtnText}>取消</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => onConfirmPrePrompt(true)}
+                      disabled={busy}
+                      style={({ pressed }) => [
+                        styles.secondaryBtn,
+                        busy && styles.btnDisabled,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text style={styles.secondaryBtnText}>略過</Text>
+                    </Pressable>
+                  </View>
                   <Pressable
                     onPress={() => onConfirmPrePrompt(false)}
                     disabled={busy}
                     style={({ pressed }) => [
                       styles.startBtn,
-                      styles.flex1,
+                      styles.prePromptConfirmBtn,
                       busy && styles.btnDisabled,
                       pressed && styles.btnPressed,
                     ]}>
@@ -2787,8 +2789,9 @@ const styles = StyleSheet.create({
   },
   prePromptHeading: { fontSize: 18, fontWeight: '700' },
   prePromptHint: { fontSize: 13, opacity: 0.8 },
-  prePromptActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  flex1: { flex: 1 },
+  prePromptActionsWrapper: { gap: 8, marginTop: 4 },
+  prePromptSecondaryRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  prePromptConfirmBtn: { width: '100%' },
   secondaryBtn: {
     paddingVertical: 14,
     paddingHorizontal: 14,
