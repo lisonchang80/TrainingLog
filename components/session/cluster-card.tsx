@@ -454,13 +454,17 @@ export function ClusterCard({
                       falls back to B if A is null/empty). Per-side SetRowContent
                       suppresses its own 📝 via `hideNoteIndicator={true}` so the
                       row width is reserved for this single shared indicator.
+                      overnight #5 第 4 點: slot 永遠 render (沒備註留 placeholder)
+                      避免欄位 shift, ✓ 永遠在固定 column 位置.
                     */}
                     {(() => {
                       const aHasNote =
                         !!(c.a_set?.notes && c.a_set.notes.trim().length > 0);
                       const bHasNote =
                         !!(c.b_set?.notes && c.b_set.notes.trim().length > 0);
-                      if (!aHasNote && !bHasNote) return null;
+                      if (!aHasNote && !bHasNote) {
+                        return <View style={styles.cycleNoteBtnPlaceholder} />;
+                      }
                       const target = aHasNote ? c.a_set! : c.b_set!;
                       return (
                         <Pressable
@@ -702,8 +706,9 @@ const styles = StyleSheet.create({
   sideLabelLead: { width: 24 },
   // Divider spacer matching cycleDivider column.
   sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
-  // Trailing spacer matching completeBtn column (28) + row gap (8).
-  sideLabelGap: { width: 28 },
+  // Trailing spacer matching note slot (20) + completeBtn (28) + row gap.
+  // overnight #5 第 4 點: 加 20 容納 note placeholder column.
+  sideLabelGap: { width: 52 },
   clusterEmpty: {
     fontSize: 13,
     opacity: 0.55,
@@ -720,10 +725,17 @@ const styles = StyleSheet.create({
   // (per overnight #3 第 4 點). Compact width to keep cluster row inside
   // available space; tap opens A side's note editor (parent priority).
   cycleNoteBtn: {
+    width: 20,
     paddingHorizontal: 2,
     paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cycleNoteBtnText: { fontSize: 14 },
+  // overnight #5 第 4 點: 沒備註留 placeholder 同寬, ✓ column 固定
+  cycleNoteBtnPlaceholder: {
+    width: 20,
+  },
   // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
   // (overnight 第 5 點, inline drag reorder).
   cycleRowDragActive: {

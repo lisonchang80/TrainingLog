@@ -193,14 +193,21 @@ export function SetRowContent<S extends SetRowItem>({
         />
       )}
       <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>kg</Text>
-      {hasNote ? (
+      {/*
+        overnight #5 第 4 點: note slot 永遠保留 column (沒備註 placeholder 同寬)
+        — 避免欄位 shift, 三排 set rows 嚴格 column-aligned.
+        hideNoteIndicator (cluster 用) 直接 skip 兩種, 因為 cluster 自己渲染 shared 📝.
+      */}
+      {hideNoteIndicator ? null : hasNote ? (
         <Pressable
           onPress={() => onShowSetNote(set)}
           style={styles.setNoteIndicator}
           hitSlop={6}>
           <Text style={styles.setNoteIndicatorText}>📝</Text>
         </Pressable>
-      ) : null}
+      ) : (
+        <View style={styles.setNoteIndicatorPlaceholder} />
+      )}
       {isDropsetFollower ? (
         <Pressable
           onPress={() => onRemoveDropsetRow(set.id)}
@@ -329,6 +336,8 @@ const styles = StyleSheet.create({
   setUnitCompact: { fontSize: 10 },
   setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
   setNoteIndicatorText: { fontSize: 14 },
+  // overnight #5 第 4 點: 沒備註留 placeholder 同寬 (4+4 padding + ~16 emoji + 4 marginLeft)
+  setNoteIndicatorPlaceholder: { width: 28, marginLeft: 4 },
   dropsetInlineBtn: {
     width: 22,
     height: 22,
