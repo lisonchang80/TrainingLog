@@ -190,26 +190,37 @@ export function ClusterCard({
           ]}
         >
           <View style={styles.clusterText}>
-            <View style={styles.clusterNameRow}>
+            {/*
+              Row 1: tag only (chevron + gear 在 outer header row 右側).
+              overnight #5 第 5 點: 標題分行 — tag 一行、title 獨佔下一行.
+            */}
+            <View style={styles.clusterTagRow}>
               <Text style={styles.supersetTag}>超</Text>
-              <Text style={styles.clusterName}>
-                {group.a.exercise.exercise_name}
-                <Text style={styles.clusterPlus}> + </Text>
-                {group.b.exercise.exercise_name}
-              </Text>
-              {volume.denominator > 0 ? (
-                <Text style={styles.clusterVolumeChip}>
-                  {Math.round(volume.numerator)}/
-                  {Math.round(volume.denominator)}
-                </Text>
-              ) : null}
             </View>
+            {/* Row 2: title 獨佔全寬, 不再 ... truncate. */}
+            <Text style={styles.clusterName}>
+              {group.a.exercise.exercise_name}
+              <Text style={styles.clusterPlus}> + </Text>
+              {group.b.exercise.exercise_name}
+            </Text>
+            {/*
+              Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
+              chip 在 bar 右側、與齒輪 column 對齊.
+            */}
             {totalCycles > 0 ? (
-              <View style={styles.clusterProgressBar}>
-                <SegmentedProgressBar
-                  done={completedCycles}
-                  total={totalCycles}
-                />
+              <View style={styles.clusterProgressRow}>
+                <View style={styles.clusterProgressBarFill}>
+                  <SegmentedProgressBar
+                    done={completedCycles}
+                    total={totalCycles}
+                  />
+                </View>
+                {volume.denominator > 0 ? (
+                  <Text style={styles.clusterVolumeChip}>
+                    {Math.round(volume.numerator)}/
+                    {Math.round(volume.denominator)}
+                  </Text>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -604,15 +615,25 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  clusterText: { flex: 1 },
-  clusterNameRow: {
+  clusterText: { flex: 1, gap: 4 },
+  // Row 1: tag only (chevron + gear 在 outer header right column).
+  // overnight #5 第 5 點: 標題分行.
+  clusterTagRow: {
     flexDirection: 'row',
-    // 換行友好: flex-start 對齊 — 超 tag / chip pin 到 top, title 可向下 wrap
-    // 不被 ... truncate（overnight #3 第 5 點）。
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
   },
-  clusterName: { fontSize: 15, fontWeight: '600', flex: 1, lineHeight: 20 },
+  // Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
+  clusterProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  clusterProgressBarFill: {
+    flex: 1,
+  },
+  // Title 獨佔 row 2, 不再 ... truncate (overnight #3 第 5 點 + #5 第 5 點).
+  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
   clusterChip: { fontSize: 13 },
   // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
   // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
@@ -627,17 +648,18 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     overflow: 'hidden',
-    // align with title first-line baseline (title lineHeight 20, pill ~16)
-    marginTop: 2,
+    alignSelf: 'flex-start',
   },
   clusterPlus: { fontSize: 14, opacity: 0.5 },
   // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
+  // overnight #5 第 1 點 + 第 2 點: 純數字、無 prefix；minWidth 鎖避免 jitter；
+  // 字體 fit `9999/9999`.
   clusterVolumeChip: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     opacity: 0.7,
-    // align with title first-line baseline when title wraps
-    marginTop: 2,
+    minWidth: 72,
+    textAlign: 'right',
   },
   clusterChevron: {
     fontSize: 14,

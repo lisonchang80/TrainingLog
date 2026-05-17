@@ -2148,28 +2148,31 @@ function ExerciseCard({
               <Text style={styles.planName} numberOfLines={1}>
                 {planRow.exercise_name}
               </Text>
-              {progress.volumeTotal > 0 ? (
-                <Text style={styles.exerciseCardVolumeChip}>
-                  {Math.round(progress.volumeDone)}/
-                  {Math.round(progress.volumeTotal)}
-                </Text>
-              ) : null}
             </View>
             {(() => {
               // Bar 分段 = 實際 working set row 數（drop plannedTotal — user
               // 反映 chip 100% 但 bar 1/3 不一致；template plannedTotal
               // 跟 body 實際 row 數脫節）。0 row 不渲染（per user「沒組時
               // 不要有進度條」）。
+              // 容量 chip 搬到 progress bar row 右側 (overnight #5 第 1 點)
               const workingRowCount = sets.filter(
                 (s) => s.set_kind === 'working',
               ).length;
               if (workingRowCount <= 0) return null;
               return (
-                <View style={styles.exerciseCardProgressBar}>
-                  <SegmentedProgressBar
-                    done={progress.workingDone}
-                    total={workingRowCount}
-                  />
+                <View style={styles.exerciseCardProgressRow}>
+                  <View style={styles.exerciseCardProgressBarFill}>
+                    <SegmentedProgressBar
+                      done={progress.workingDone}
+                      total={workingRowCount}
+                    />
+                  </View>
+                  {progress.volumeTotal > 0 ? (
+                    <Text style={styles.exerciseCardVolumeChip}>
+                      {Math.round(progress.volumeDone)}/
+                      {Math.round(progress.volumeTotal)}
+                    </Text>
+                  ) : null}
                 </View>
               );
             })()}
@@ -2543,6 +2546,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
     width: '100%',
   },
+  // Progress bar + 容量 chip 同一 row (overnight #5 第 1 點)
+  // chip 在 bar 右側、與齒輪 column 對齊
+  exerciseCardProgressRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  exerciseCardProgressBarFill: {
+    flex: 1,
+  },
   exerciseCardVolume: {
     fontSize: 11,
     opacity: 0.55,
@@ -2555,9 +2570,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   exerciseCardVolumeChip: {
-    fontSize: 13,
+    // overnight #5 第 2 點: 字體 fit `9999/9999`, minWidth 鎖避免 progress bar
+    // 寬度 jitter, 純數字無「容量」prefix.
+    fontSize: 12,
     fontWeight: '600',
     opacity: 0.7,
+    minWidth: 72,
+    textAlign: 'right',
   },
   exerciseCardPRLine: {
     paddingHorizontal: 12,
