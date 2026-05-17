@@ -78,4 +78,26 @@ describe('displaySetLabel', () => {
   it('returns ? for a working row missing from the map (defensive)', () => {
     expect(displaySetLabel({ id: 'missing', set_kind: 'working' }, new Map())).toBe('?');
   });
+
+  // Slice 10c overnight #7 第 3 點 — legacy dropset 顯示驗證.
+  // Cluster siblings shouldn't ever land in `set_kind === 'dropset'` via the
+  // current UI (the shared `#` button skips D — see point 2). But legacy
+  // rows from before the cluster cycle restriction COULD exist, and the
+  // display must keep rendering them as `D` so users can recognise + cycle
+  // them back to working. This test pins that contract.
+  it('legacy dropset row in a cluster still displays D (no D-deletion in display layer)', () => {
+    // Simulate a cluster A side that has [working, dropset (legacy), working].
+    // The ordinal map skips the dropset (warmup/dropset don't consume the
+    // working ordinal), so the working rows are 1 and 2 respectively, and
+    // the dropset row renders as `D` regardless.
+    const sets: WorkingSetOrdinalInput[] = [
+      mk('a-work-1', 'working', 0),
+      mk('a-legacy-d', 'dropset', 1),
+      mk('a-work-2', 'working', 2),
+    ];
+    const map = computeWorkingSetOrdinals(sets);
+    expect(displaySetLabel({ id: 'a-work-1', set_kind: 'working' }, map)).toBe('1');
+    expect(displaySetLabel({ id: 'a-legacy-d', set_kind: 'dropset' }, map)).toBe('D');
+    expect(displaySetLabel({ id: 'a-work-2', set_kind: 'working' }, map)).toBe('2');
+  });
 });

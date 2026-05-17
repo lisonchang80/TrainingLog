@@ -169,6 +169,14 @@ export function ClusterCard({
   // a different working-row composition per side. The shared `#` button
   // prefers the A side (parent priority); B-side fallback covers the
   // asymmetric short-side case where only B has a row in this cycle.
+  //
+  // Slice 10c overnight #7 第 3 點 — legacy dropset 顯示驗證:
+  // `displaySetLabel` 仍保留 dropset → 'D' 分支. cluster siblings 不應該
+  // 從 UI 產生 dropset state (見第 2 點: cluster shared `#` button cycle
+  // 跳過 D), 但 legacy data 可能有 — display 層必須照常 render 'D' 讓使用者
+  // 可以辨識、然後按 # 走 cycleSessionSetKindClusterAware 的 defensive
+  // fallback 轉回 working. (見 tests/domain/cycleSessionSetKind.test.ts
+  // 「legacy dropset → working → warmup → working round-trip」.)
   const aOrdinalMap = computeWorkingSetOrdinals(group.a.sets);
   const bOrdinalMap = computeWorkingSetOrdinals(group.b.sets);
   // "done" cycles = atomic both_logged. Non-warmup cycles count toward the
