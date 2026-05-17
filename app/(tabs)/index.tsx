@@ -597,8 +597,17 @@ export default function TodayScreen() {
   ) => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
-    const setsForExercise = setsInSession.filter(
-      (s) => s.exercise_id === exercise_id,
+    // v019 isolation (slice 10c #17): cycle ops operate on a SINGLE card's
+    // set list (warmup/working/dropset transitions are card-scoped). Look
+    // up the target set's owning card via its session_exercise_id and
+    // filter the cycle universe to that card; fall back to legacy
+    // exercise_id when the row is pre-v019 untagged.
+    const target = setsInSession.find((s) => s.id === set_id);
+    const targetSeId = target?.session_exercise_id ?? null;
+    const setsForExercise = setsInSession.filter((s) =>
+      targetSeId
+        ? s.session_exercise_id === targetSeId
+        : s.exercise_id === exercise_id,
     );
     const ops = cycleSessionSetKindClusterAware(
       setsForExercise.map((s) => ({
@@ -790,11 +799,17 @@ export default function TodayScreen() {
 
     if (nextLogged === 1 && autoPopupTimer) {
       // Resolve the owning session_exercise → rest_sec / exercise name.
-      // Lookup via setsInSession (just-toggled set) → exercise_id →
-      // plan row. NULL rest_sec uses 60s system default.
+      // Lookup via setsInSession (just-toggled set) → session_exercise_id →
+      // plan row. v019 isolation (#17): prefer the per-row session_exercise_id
+      // (unique per card) over the legacy exercise_id heuristic, which
+      // would pick the wrong card when two cards share an exercise_id
+      // (RS A side Cable Crossover + solo Cable Crossover). Fall back to
+      // exercise_id only if the row is pre-v019 untagged.
       const toggled = setsInSession.find((s) => s.id === set_id);
       const planRow = toggled
-        ? plan.find((p) => p.exercise_id === toggled.exercise_id) ?? null
+        ? (toggled.session_exercise_id
+            ? plan.find((p) => p.id === toggled.session_exercise_id) ?? null
+            : plan.find((p) => p.exercise_id === toggled.exercise_id) ?? null)
         : null;
       const rest_sec = planRow?.rest_sec ?? 60;
       const exercise_name = planRow?.exercise_name ?? '';
@@ -1142,8 +1157,14 @@ export default function TodayScreen() {
         } else if (label === '🔃 排序動作') {
           setReorderSheetOpen(true);
         } else if (label === '🗑️ 刪除動作') {
+          // v019 isolation: count sets on THIS card only (not all cards
+          // that happen to share the same exercise_id). Falls back to
+          // legacy exercise_id matching for any pre-v019 untagged rows.
           const setsForExercise = setsInSession.filter(
-            (s) => s.exercise_id === planRow.exercise_id,
+            (s) =>
+              s.session_exercise_id === planRow.id ||
+              (s.session_exercise_id == null &&
+                s.exercise_id === planRow.exercise_id),
           );
           const loggedCount = setsForExercise.filter(
             (s) => s.is_logged === 1,
@@ -1832,9 +1853,16 @@ export default function TodayScreen() {
                       continue;
                     }
 
-                    // Solo path — existing render unchanged
+                    // Solo path — existing render unchanged.
+                    // v019 isolation (#17): show ONLY this card's sets so
+                    // a coincidentally-same-exercise solo card doesn't
+                    // mirror its rows into another card. Legacy untagged
+                    // rows fall back to exercise_id match.
                     const setsForExercise = setsInSession.filter(
-                      (s) => s.exercise_id === p.exercise_id,
+                      (s) =>
+                        s.session_exercise_id === p.id ||
+                        (s.session_exercise_id == null &&
+                          s.exercise_id === p.exercise_id),
                     );
                     // Per ADR-0019 Q4: "done" reflects completed sets
                     // (is_logged=1), not just recorded ones. Warmup

@@ -606,11 +606,20 @@ function buildClusters(
     if (!parentIds.has(parent.id)) continue;
     const child = sessionExercises.find((e) => e.parent_id === parent.id);
     if (!child) continue;
+    // v019 isolation (slice 10c #17): scope per cluster card via
+    // session_exercise_id when present; fall back to legacy exercise_id
+    // for pre-v019 untagged rows.
     const setsA = sets
-      .filter((s) => s.exercise_id === parent.exercise_id)
+      .filter((s) =>
+        s.session_exercise_id === parent.id ||
+        (s.session_exercise_id == null && s.exercise_id === parent.exercise_id),
+      )
       .sort((a, b) => a.ordering - b.ordering);
     const setsB = sets
-      .filter((s) => s.exercise_id === child.exercise_id)
+      .filter((s) =>
+        s.session_exercise_id === child.id ||
+        (s.session_exercise_id == null && s.exercise_id === child.exercise_id),
+      )
       .sort((a, b) => a.ordering - b.ordering);
     out.push({ parent, child, setsA, setsB });
   }
@@ -642,8 +651,13 @@ function buildOrderedItems(
       continue;
     }
     // Solo exercise.
+    // v019 isolation (slice 10c #17): scope per card via session_exercise_id
+    // so two cards sharing an exercise_id don't mirror each other's rows.
     const exSets = sets
-      .filter((s) => s.exercise_id === ex.exercise_id)
+      .filter((s) =>
+        s.session_exercise_id === ex.id ||
+        (s.session_exercise_id == null && s.exercise_id === ex.exercise_id),
+      )
       .sort((a, b) => a.ordering - b.ordering);
     out.push({ kind: 'solo', exercise: ex, sets: exSets });
   }
