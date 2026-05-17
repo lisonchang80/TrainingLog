@@ -1636,8 +1636,10 @@ export default function TodayScreen() {
                             // Cluster card → default to cluster_only view so the
                             // user lands on the pair's shared history (overnight
                             // #8 spec — replaces deprecated /superset-history).
+                            // Slice 10c overnight #11 — carry `partner=B.id` so
+                            // the destination renders the A↔B switcher.
                             router.push(
-                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only`,
+                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}`,
                             )
                           }
                           onSettingsPress={() => onSettingsPress(p)}

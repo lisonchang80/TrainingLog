@@ -160,7 +160,12 @@ export default function SupersetDetailScreen() {
           onPress={() =>
             exA
               ? router.push(
-                  `/exercise-history/${exA.id}?clusterMode=cluster_only`,
+                  // Slice 10c overnight #11 — carry `partner=B.id` so the
+                  // destination renders the A↔B switcher. RS always has both
+                  // sides; `exB?.id ?? ''` is a safe fallback — an empty
+                  // partner trips the switcher's null-guard → falls back to
+                  // the plain '動作歷史' title.
+                  `/exercise-history/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}`,
                 )
               : undefined
           }
@@ -170,7 +175,7 @@ export default function SupersetDetailScreen() {
           onPress={() =>
             exA
               ? router.push(
-                  `/exercise-chart/${exA.id}?clusterMode=cluster_only`,
+                  `/exercise-chart/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}`,
                 )
               : undefined
           }
