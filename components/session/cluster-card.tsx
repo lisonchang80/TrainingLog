@@ -596,13 +596,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(127,127,127,0.10)',
     borderRadius: 10,
     overflow: 'hidden',
-    borderLeftWidth: 4,
-    // ADR-0019 Q8 (c) H1: left vertical bar in RS color. Default is the
-    // neutral accent — when a `colorHex` prop is provided (threaded from
-    // `session_exercise.reusable_superset_id` → `superset.color_hex` via
-    // `listSessionExercisesWithName`'s LEFT JOIN), it overrides this fallback
-    // inline on the View style. Slice 10c overnight 第 2 點.
-    borderLeftColor: '#b35900',
+    // Slice 10c overnight #6: 砍掉左側 RS 彩色 border，與 solo card 一致。
+    // colorHex prop 暫保留（無視覺效果，留待未來再用）。
   },
   clusterCardExpanded: {
     backgroundColor: 'rgba(127,127,127,0.14)',
