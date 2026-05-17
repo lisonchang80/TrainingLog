@@ -104,11 +104,18 @@ export default function ExerciseHistoryScreen() {
     id,
     clusterMode: clusterModeParam,
     partner: partnerParam,
+    side: sideParam,
   } = useLocalSearchParams<{
     id: string;
     clusterMode?: string;
     partner?: string;
+    side?: 'A' | 'B';
   }>();
+  // Slice 10c overnight #13 — A↔B switcher boundary dim. Cluster only has 2
+  // sides; current side is purely URL-driven (no DB lookup). Anything that
+  // isn't literal 'B' falls back to 'A' so a missing/garbled param won't dim
+  // the wrong arrow.
+  const side: 'A' | 'B' = sideParam === 'B' ? 'B' : 'A';
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
@@ -145,10 +152,14 @@ export default function ExerciseHistoryScreen() {
 
   const onSwapPartner = useCallback(() => {
     if (!id || !partnerParam) return;
+    // Side flips on swap: A→B (and vice versa). The new route's `id` is the
+    // partner and its `partner` is the current id, so the URL remains
+    // self-consistent on both sides of the swap.
+    const nextSide: 'A' | 'B' = side === 'A' ? 'B' : 'A';
     router.replace(
-      `/exercise-history/${partnerParam}?clusterMode=cluster_only&partner=${id}`
+      `/exercise-history/${partnerParam}?clusterMode=cluster_only&partner=${id}&side=${nextSide}`
     );
-  }, [id, partnerParam, router]);
+  }, [id, partnerParam, router, side]);
 
   const screenOptions = useMemo(
     () => ({
@@ -333,8 +344,9 @@ export default function ExerciseHistoryScreen() {
     // same A↔B switcher (even when clusterMode is not cluster_only, the chip
     // is harmless and lets the user toggle modes there without losing it).
     // clusterMode is also forwarded because chart cold-open reads URL first.
+    // Carry `side` so the chart page knows which arrow to dim on cold open.
     const query = partnerParam
-      ? `?clusterMode=${clusterMode}&partner=${partnerParam}`
+      ? `?clusterMode=${clusterMode}&partner=${partnerParam}&side=${side}`
       : '';
     router.replace(`/exercise-chart/${id}${query}`);
   };
@@ -369,6 +381,7 @@ export default function ExerciseHistoryScreen() {
               showSwitcher={showSwitcher}
               onSwapPartner={onSwapPartner}
               partnerName={partnerName}
+              side={side}
             />
             <Text style={styles.empty}>
               還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
@@ -385,6 +398,7 @@ export default function ExerciseHistoryScreen() {
               showSwitcher={showSwitcher}
               onSwapPartner={onSwapPartner}
               partnerName={partnerName}
+              side={side}
             />
 
             {/* Bucket multi-select chips */}
@@ -559,6 +573,7 @@ function HeaderCard({
   showSwitcher,
   onSwapPartner,
   partnerName,
+  side,
 }: {
   header: ExerciseHistoryHeader;
   prs: PRSnapshotWithDate[];
@@ -568,7 +583,12 @@ function HeaderCard({
   showSwitcher: boolean;
   onSwapPartner: () => void;
   partnerName: string | null;
+  side: 'A' | 'B';
 }) {
+  // Slice 10c overnight #13 — only the arrow opposite the current side is
+  // tappable. On A, left ‹ is dim/no-op; on B, right › is dim/no-op.
+  const leftDisabled = side === 'A';
+  const rightDisabled = side === 'B';
   // Collapsed: only render 'all'. Expanded: render all (全部 + 5 buckets).
   const visiblePRs = prSectionOpen
     ? prs
@@ -580,10 +600,18 @@ function HeaderCard({
         <View style={styles.headerNameRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`切換到 ${partnerName}`}
-            onPress={onSwapPartner}
+            accessibilityLabel={leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`}
+            accessibilityState={{ disabled: leftDisabled }}
+            onPress={leftDisabled ? undefined : onSwapPartner}
+            disabled={leftDisabled}
             hitSlop={12}>
-            <Text style={styles.headerArrow}>‹</Text>
+            <Text
+              style={[
+                styles.headerArrow,
+                leftDisabled && styles.headerArrowDisabled,
+              ]}>
+              ‹
+            </Text>
           </Pressable>
           <Text
             style={[styles.headerName, styles.headerNameInRow]}
@@ -592,10 +620,18 @@ function HeaderCard({
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`切換到 ${partnerName}`}
-            onPress={onSwapPartner}
+            accessibilityLabel={rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`}
+            accessibilityState={{ disabled: rightDisabled }}
+            onPress={rightDisabled ? undefined : onSwapPartner}
+            disabled={rightDisabled}
             hitSlop={12}>
-            <Text style={styles.headerArrow}>›</Text>
+            <Text
+              style={[
+                styles.headerArrow,
+                rightDisabled && styles.headerArrowDisabled,
+              ]}>
+              ›
+            </Text>
           </Pressable>
         </View>
       ) : (
@@ -1078,6 +1114,9 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     paddingHorizontal: 4,
   },
+  // Slice 10c overnight #13 — dim boundary arrow (current side has no
+  // further partner to swap to). 0.3 matches iOS toolbar disabled-tint feel.
+  headerArrowDisabled: { opacity: 0.3 },
   headerNameInRow: { flex: 1, textAlign: 'center' },
   btnPressed: { opacity: 0.85 },
   modalOverlay: {
