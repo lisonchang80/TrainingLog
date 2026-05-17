@@ -1019,24 +1019,51 @@ export default function TodayScreen() {
    * card header.
    *
    * Cancel slot is index 0 + cancelButtonIndex per iOS convention.
+   *
+   * Slice 10c overnight #14C — cluster context (partnerExerciseId truthy)
+   * adds two history entries「📖 動作歷史 (A)」「📖 動作歷史 (B)」直接從
+   * ⚙️ menu 跳到對應側 cluster-only 歷史頁，省去 footer 按「動作歷史」
+   * 後再到歷史頁切換 switcher 的兩步操作。其他 menu 行為（編輯備註、
+   * 休息秒數、刪除、排序）保留共用 solo logic 不分離，等正解 redesign。
    */
-  const onSettingsPress = (planRow: SessionExerciseRowWithName) => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: planRow.exercise_name,
-        options: [
+  const onSettingsPress = (
+    planRow: SessionExerciseRowWithName,
+    options?: { partnerExerciseId?: string },
+  ) => {
+    const partnerExerciseId = options?.partnerExerciseId;
+    const isCluster = !!partnerExerciseId;
+    // Build options array. Cluster context inserts two history items
+    // before 🔃 排序動作 so the destructive 🗑️ 刪除動作 keeps its
+    // visual separation. Indices below are derived from this array.
+    const menuOptions: string[] = isCluster
+      ? [
+          '取消',
+          '📝 編輯備註',
+          '⏱️ 休息秒數',
+          '📖 動作歷史 (A)',
+          '📖 動作歷史 (B)',
+          '🗑️ 刪除動作',
+          '🔃 排序動作',
+        ]
+      : [
           '取消',
           '📝 編輯備註',
           '⏱️ 休息秒數',
           '🗑️ 刪除動作',
           '🔃 排序動作',
-        ],
+        ];
+    const destructiveButtonIndex = isCluster ? 5 : 3;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: planRow.exercise_name,
+        options: menuOptions,
         cancelButtonIndex: 0,
-        destructiveButtonIndex: 3,
+        destructiveButtonIndex,
       },
       (idx) => {
         if (idx === 0) return;
-        if (idx === 1) {
+        const label = menuOptions[idx];
+        if (label === '📝 編輯備註') {
           (async () => {
             try {
               const initial = await getExerciseNotes(db, planRow.exercise_id);
@@ -1052,16 +1079,30 @@ export default function TodayScreen() {
               );
             }
           })();
-        } else if (idx === 2) {
+        } else if (label === '⏱️ 休息秒數') {
           // Open keypad pre-filled with current rest_sec (default 60).
           setRestSecTarget({
             session_exercise_id: planRow.id,
             current: planRow.rest_sec ?? 60,
             exercise_name: planRow.exercise_name,
           });
-        } else if (idx === 4) {
+        } else if (label === '📖 動作歷史 (A)') {
+          // cluster A side history — mirror cluster card footer entry
+          // (overnight #11) so user can reach A-side cluster_only history
+          // from the ⚙️ menu without going through footer + switcher.
+          router.push(
+            `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A`,
+          );
+        } else if (label === '📖 動作歷史 (B)') {
+          // cluster B side history — direct entry skips the manual swap
+          // step on the destination's A↔B switcher. partner inverted so
+          // the switcher arrow points back to A.
+          router.push(
+            `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B`,
+          );
+        } else if (label === '🔃 排序動作') {
           setReorderSheetOpen(true);
-        } else if (idx === 3) {
+        } else if (label === '🗑️ 刪除動作') {
           const setsForExercise = setsInSession.filter(
             (s) => s.exercise_id === planRow.exercise_id,
           );
