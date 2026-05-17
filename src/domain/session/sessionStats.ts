@@ -47,69 +47,6 @@ export function computeSessionVolume(sets: SessionVolumeInput[]): number {
   return total;
 }
 
-// ── 動作數計算 (slice 10c overnight #4 第 1 點) ────────────────────────────────
-
-/**
- * Plan row input for {@link computeLoggedExerciseCount} — a structural subset
- * of `SessionExerciseRowWithName` so domain code stays free of adapter types.
- */
-export interface LoggedExerciseCountPlanInput {
-  id: string;
-  exercise_id: string;
-  /** Cluster linkage (ADR-0018, v014). NULL = solo / cluster parent. */
-  parent_id: string | null;
-}
-
-/**
- * Set row input for {@link computeLoggedExerciseCount} — a structural subset
- * of `SessionSetWithExercise`. Only `exercise_id` + `is_logged` are needed.
- */
-export interface LoggedExerciseCountSetInput {
-  exercise_id: string;
-  is_logged: number; // 0/1
-}
-
-/**
- * Count distinct exercises that have at least one logged (✓) set in the
- * session. Used by the in-session 3-tile stats panel's 動作數 tile.
- *
- * Rules (per slice 10c overnight #4 第 1 點):
- *   - Only count plan rows where `parent_id IS NULL` (solo or cluster parent).
- *     B-side of a cluster (parent_id != null) shares ownership with the A-side
- *     and must not be double-counted — the cluster as a whole is 1 動作.
- *   - The plan row counts only if ∃ a set with the same `exercise_id` and
- *     `is_logged = 1`. Untouched (no ✓) exercises do not contribute.
- *
- * Note on cluster semantics: a cluster's A and B sides have DIFFERENT
- * exercise_ids by definition (different lifts paired together). The
- * count-1-not-2 rule covers the B-side; the ✓-on-A rule still has to be
- * satisfied for the cluster to count at all. If only B has ✓, the cluster
- * still counts (because B's set rows reference the A row's exercise via
- * the cluster relationship? No — sets reference their own exercise_id).
- *
- * The simple interpretation per the spec: cluster = 1 IF the A side (the
- * parent_id IS NULL row) has at least one logged set. B-side ✓s are
- * captured by their own plan row, but that row is skipped (parent_id !=
- * null), so a "B only ✓" cluster would count 0 under a strict reading.
- * Test case 3 ("1 cluster 只 A 側有打勾 → 算 1") confirms this is the
- * intended behaviour — we count from the A-side's perspective.
- */
-export function computeLoggedExerciseCount(
-  plan: LoggedExerciseCountPlanInput[],
-  sets: LoggedExerciseCountSetInput[]
-): number {
-  const loggedExerciseIds = new Set<string>();
-  for (const s of sets) {
-    if (s.is_logged === 1) loggedExerciseIds.add(s.exercise_id);
-  }
-  let count = 0;
-  for (const p of plan) {
-    if (p.parent_id !== null) continue; // skip cluster B-side
-    if (loggedExerciseIds.has(p.exercise_id)) count += 1;
-  }
-  return count;
-}
-
 // ── In-session 3-tile stats panel (Agent C, ADR-0019 Q6) ──────────────────────
 
 export interface SessionStats {

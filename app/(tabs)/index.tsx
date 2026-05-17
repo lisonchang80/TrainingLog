@@ -77,7 +77,6 @@ import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { BodyDataSheet } from '@/components/session/body-data-sheet';
-import { computeLoggedExerciseCount } from '@/src/domain/session/sessionStats';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import { ClusterCard } from '@/components/session/cluster-card';
 import { groupClusterSides } from '@/src/domain/session/clusterCard';
@@ -1531,7 +1530,7 @@ export default function TodayScreen() {
                 reps: s.reps,
                 weight_kg: s.weight_kg,
               }))}
-              exercise_count={computeLoggedExerciseCount(plan, setsInSession)}
+              exercise_count={plan.length}
               started_at_ms={sessionState.started_at}
             />
           ) : null}
