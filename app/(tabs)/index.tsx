@@ -1683,7 +1683,17 @@ export default function TodayScreen() {
                               `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}&side=A`,
                             )
                           }
-                          onSettingsPress={() => onSettingsPress(p)}
+                          onSettingsPress={() =>
+                            // Slice 10c overnight #14C — pass partner B's
+                            // exercise_id so the ⚙️ menu can render the
+                            // dual「動作歷史 (A)」「動作歷史 (B)」entries
+                            // that jump straight to the matching side's
+                            // cluster_only history page.
+                            onSettingsPress(p, {
+                              partnerExerciseId:
+                                group.b.exercise.exercise_id,
+                            })
+                          }
                           onUpdateClusterSet={(set_id, patch) =>
                             onUpdateSet(set_id, patch)
                           }
