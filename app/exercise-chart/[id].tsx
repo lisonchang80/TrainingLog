@@ -25,6 +25,7 @@ import {
   type ExerciseHistoryHeader,
   type ExerciseHistorySession,
 } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { getExerciseName } from '@/src/adapters/sqlite/exerciseRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import { formatWeight, kgToDisplay } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -80,30 +81,22 @@ const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
  * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
  */
 export default function ExerciseChartScreen() {
-  const { id, clusterMode: clusterModeParam } = useLocalSearchParams<{
+  const {
+    id,
+    clusterMode: clusterModeParam,
+    partner: partnerParam,
+  } = useLocalSearchParams<{
     id: string;
     clusterMode?: string;
+    partner?: string;
   }>();
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [hasClusterRows, setHasClusterRows] = useState(false);
-  const screenOptions = useMemo(
-    () => ({
-      title: '動作圖表',
-      headerBackVisible: false,
-      headerLeft: () => (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="返回"
-          onPress={() => router.back()}
-          hitSlop={12}>
-          <Text style={styles.headerBack}>‹ 返回</Text>
-        </Pressable>
-      ),
-    }),
-    [router]
-  );
+  // Slice 10c overnight #11 — cluster A↔B switcher partner name lookup
+  // (mirrors history page). null when no partner param or lookup miss.
+  const [partnerName, setPartnerName] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
@@ -127,21 +120,87 @@ export default function ExerciseChartScreen() {
     new Date().getFullYear()
   );
 
+  // Slice 10c overnight #11 — switcher visible only in cluster_only mode with
+  // resolved partner; mirrors exercise-history logic exactly.
+  const showSwitcher =
+    clusterMode === 'cluster_only' && !!partnerParam && !!partnerName;
+
+  const onSwapPartner = useCallback(() => {
+    if (!id || !partnerParam) return;
+    router.replace(
+      `/exercise-chart/${partnerParam}?clusterMode=cluster_only&partner=${id}`
+    );
+  }, [id, partnerParam, router]);
+
+  const screenOptions = useMemo(
+    () =>
+      showSwitcher && header
+        ? {
+            headerBackVisible: false,
+            headerLeft: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="返回"
+                onPress={() => router.back()}
+                hitSlop={12}>
+                <Text style={styles.headerBack}>‹ 返回</Text>
+              </Pressable>
+            ),
+            headerTitle: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`切換到 ${partnerName}`}
+                onPress={onSwapPartner}
+                hitSlop={12}
+                style={styles.switcherRow}>
+                <Text style={styles.switcherArrow}>‹</Text>
+                <Text style={styles.switcherPartner} numberOfLines={1}>
+                  {partnerName}
+                </Text>
+                <Text style={styles.switcherSep}> | </Text>
+                <Text style={styles.switcherCurrent} numberOfLines={1}>
+                  {header.exercise_name}
+                </Text>
+              </Pressable>
+            ),
+          }
+        : {
+            title: '動作圖表',
+            headerBackVisible: false,
+            headerLeft: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="返回"
+                onPress={() => router.back()}
+                hitSlop={12}>
+                <Text style={styles.headerBack}>‹ 返回</Text>
+              </Pressable>
+            ),
+          },
+    [router, showSwitcher, header, partnerName, onSwapPartner]
+  );
+
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [h, ss, ps, u, has] = await Promise.all([
+    const [h, ss, ps, u, has, pName] = await Promise.all([
       getExerciseHistoryHeader(db, id),
       listExerciseHistoryBySession(db, id),
       listProgramsForExercise(db, id),
       getUnitPreference(db),
       hasClusterHistory(db, id),
+      // Slice 10c overnight #11 — partner name for A↔B switcher; skip the
+      // DB call when caller didn't pass `partner=`.
+      partnerParam
+        ? getExerciseName(db, partnerParam)
+        : Promise.resolve(null),
     ]);
     setHeader(h);
     setSessions(ss);
     setPrograms(ps);
     setUnit(u);
     setHasClusterRows(has);
-  }, [db, id]);
+    setPartnerName(pName);
+  }, [db, id, partnerParam]);
 
   useFocusEffect(
     useCallback(() => {
@@ -254,7 +313,12 @@ export default function ExerciseChartScreen() {
     persistFilter(bucketFilters, programId, subTagFilters, clusterMode);
     // replace (not push) to avoid stacking two modal screens — see ADR-0017
     // Q14 amendment notes; two stacked modals crash on Metro R reload.
-    router.replace(`/exercise-history/${id}`);
+    // Slice 10c overnight #11 — forward partner + clusterMode so the history
+    // page renders the same A↔B switcher (mirror of onJumpToChart over there).
+    const query = partnerParam
+      ? `?clusterMode=${clusterMode}&partner=${partnerParam}`
+      : '';
+    router.replace(`/exercise-history/${id}${query}`);
   };
 
   const onClearAllFilters = () => {
@@ -1039,6 +1103,35 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '400',
     paddingHorizontal: 8,
+  },
+  // Slice 10c overnight #11 — A↔B switcher pressable in headerTitle slot
+  // (mirror of exercise-history styles, kept local for screen independence).
+  switcherRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: 260,
+  },
+  switcherArrow: {
+    color: '#8E8E93',
+    fontSize: 17,
+    fontWeight: '400',
+    marginRight: 2,
+  },
+  switcherPartner: {
+    color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  switcherSep: {
+    color: '#8E8E93',
+    fontSize: 17,
+    fontWeight: '400',
+  },
+  switcherCurrent: {
+    fontSize: 17,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   btnPressed: { opacity: 0.85 },
   modalOverlay: {
