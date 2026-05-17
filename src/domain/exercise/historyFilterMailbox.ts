@@ -12,6 +12,10 @@
  * Reset = `clear()` — called by 「取消篩選」 to wipe both pages' shared state.
  */
 
+import {
+  DEFAULT_CLUSTER_MODE,
+  type ClusterFilterMode,
+} from './clusterFilter';
 import type { RepBucketChip } from './repBucketFilter';
 
 export interface HistoryFilterState {
@@ -21,12 +25,18 @@ export interface HistoryFilterState {
   programId: string | null;
   /** Empty set = no sub_tag filter. */
   subTags: ReadonlySet<string>;
+  /**
+   * 3-段 cluster filter (slice 10c). Default 'all' = legacy behavior.
+   * Persists across history ↔ chart hops just like every other filter axis.
+   */
+  clusterMode: ClusterFilterMode;
 }
 
 export const EMPTY_FILTER: HistoryFilterState = {
   buckets: new Set(),
   programId: null,
   subTags: new Set(),
+  clusterMode: DEFAULT_CLUSTER_MODE,
 };
 
 let current: HistoryFilterState | null = null;
@@ -54,6 +64,7 @@ export function isEmptyFilter(state: HistoryFilterState): boolean {
   return (
     state.buckets.size === 0 &&
     state.programId == null &&
-    state.subTags.size === 0
+    state.subTags.size === 0 &&
+    state.clusterMode === DEFAULT_CLUSTER_MODE
   );
 }

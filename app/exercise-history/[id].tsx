@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@/components/database-provider';
 import {
   getExerciseHistoryHeader,
+  hasClusterHistory,
   listExerciseHistoryBySession,
   listProgramsForExercise,
   type ExerciseHistoryHeader,
@@ -76,6 +77,14 @@ import {
   peekFilter,
   submitFilter,
 } from '@/src/domain/exercise/historyFilterMailbox';
+import {
+  CLUSTER_FILTER_MODES,
+  DEFAULT_CLUSTER_MODE,
+  clusterFilterLabel,
+  filterSetsByClusterMode,
+  parseClusterMode,
+  type ClusterFilterMode,
+} from '@/src/domain/exercise/clusterFilter';
 
 /**
  * Exercise History — cross-Template, cross-Program aggregate (ADR-0006).
@@ -90,10 +99,14 @@ import {
  * exclusive with bucket chips per ADR-0017 Q14 second amendment.
  */
 export default function ExerciseHistoryScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, clusterMode: clusterModeParam } = useLocalSearchParams<{
+    id: string;
+    clusterMode?: string;
+  }>();
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
+  const [hasClusterRows, setHasClusterRows] = useState(false);
   const screenOptions = useMemo(
     () => ({
       title: '動作歷史',
@@ -121,24 +134,32 @@ export default function ExerciseHistoryScreen() {
   );
   const [programId, setProgramId] = useState<string | null>(null);
   const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
+  // Slice 10c: 3-段 cluster mode. URL param takes precedence over mailbox on
+  // first focus (caller decided the default — e.g. cluster ⚙️ → cluster_only).
+  const [clusterMode, setClusterMode] = useState<ClusterFilterMode>(
+    parseClusterMode(clusterModeParam)
+  );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [programPickerOpen, setProgramPickerOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [h, ss, ps, u] = await Promise.all([
+    const [h, ss, ps, u, has] = await Promise.all([
       getExerciseHistoryHeader(db, id),
       listExerciseHistoryBySession(db, id),
       listProgramsForExercise(db, id),
       getUnitPreference(db),
+      hasClusterHistory(db, id),
     ]);
     setHeader(h);
     setSessions(ss);
     setPrograms(ps);
     setUnit(u);
+    setHasClusterRows(has);
   }, [db, id]);
 
-  // Hydrate filter from mailbox on focus + refresh data
+  // Hydrate filter from mailbox on focus + refresh data.
+  // URL clusterMode param wins on cold open; mailbox wins on warm re-focus.
   useFocusEffect(
     useCallback(() => {
       refresh();
@@ -147,6 +168,7 @@ export default function ExerciseHistoryScreen() {
         setBucketFilters(new Set(f.buckets));
         setProgramId(f.programId);
         setSubTagFilters(new Set(f.subTags));
+        setClusterMode(f.clusterMode);
         if (
           f.buckets.size > 0 ||
           f.programId != null ||
@@ -163,12 +185,14 @@ export default function ExerciseHistoryScreen() {
     (
       buckets: Set<RepBucketChip>,
       pid: string | null,
-      tags: Set<string>
+      tags: Set<string>,
+      mode: ClusterFilterMode
     ) => {
       submitFilter({
         buckets,
         programId: pid,
         subTags: tags,
+        clusterMode: mode,
       });
     },
     []
@@ -204,17 +228,20 @@ export default function ExerciseHistoryScreen() {
         }
         return true;
       })
-      .map((s) => ({
-        ...s,
-        sets:
+      .map((s) => {
+        const bucketed =
           bucketFilters.size === 0
             ? s.sets
             : s.sets.filter((set) =>
                 [...bucketFilters].some((b) => matchesChip(set.reps, b))
-              ),
-      }))
+              );
+        // Slice 10c — cluster filter applied after bucket filter; both axes
+        // are independent so order is irrelevant for correctness.
+        const clustered = filterSetsByClusterMode(bucketed, clusterMode);
+        return { ...s, sets: clustered };
+      })
       .filter((s) => s.sets.length > 0);
-  }, [sessions, bucketFilters, programId, subTagFilters]);
+  }, [sessions, bucketFilters, programId, subTagFilters, clusterMode]);
 
   if (!id) return null;
 
@@ -237,9 +264,14 @@ export default function ExerciseHistoryScreen() {
       } else {
         next.add(chip);
       }
-      persistFilter(next, programId, subTagFilters);
+      persistFilter(next, programId, subTagFilters, clusterMode);
       return next;
     });
+  };
+
+  const onClusterModeTap = (mode: ClusterFilterMode) => {
+    setClusterMode(mode);
+    persistFilter(bucketFilters, programId, subTagFilters, mode);
   };
 
   const onSubTagTap = (tag: string) => {
@@ -247,7 +279,7 @@ export default function ExerciseHistoryScreen() {
       const next = new Set(prev);
       if (next.has(tag)) next.delete(tag);
       else next.add(tag);
-      persistFilter(bucketFilters, programId, next);
+      persistFilter(bucketFilters, programId, next, clusterMode);
       return next;
     });
   };
@@ -257,12 +289,12 @@ export default function ExerciseHistoryScreen() {
     // Reset sub_tag when program changes
     const newSubTags = new Set<string>();
     setSubTagFilters(newSubTags);
-    persistFilter(bucketFilters, newPid, newSubTags);
+    persistFilter(bucketFilters, newPid, newSubTags, clusterMode);
     setProgramPickerOpen(false);
   };
 
   const onJumpToChart = () => {
-    persistFilter(bucketFilters, programId, subTagFilters);
+    persistFilter(bucketFilters, programId, subTagFilters, clusterMode);
     // replace (not push) to avoid stacking two modal screens — see ADR-0017
     // Q14 amendment notes; two stacked modals crash on Metro R reload.
     router.replace(`/exercise-chart/${id}`);
@@ -274,6 +306,7 @@ export default function ExerciseHistoryScreen() {
     setBucketFilters(empty);
     setProgramId(null);
     setSubTagFilters(emptyTags);
+    setClusterMode(DEFAULT_CLUSTER_MODE);
     submitFilter(EMPTY_FILTER);
     clearFilter();
   };
@@ -327,6 +360,12 @@ export default function ExerciseHistoryScreen() {
                 );
               })}
             </View>
+
+            {/* 3-段 cluster filter (slice 10c) — only when this exercise has
+                cluster history; otherwise all 3 segments would be identical. */}
+            {hasClusterRows ? (
+              <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+            ) : null}
 
             {/* Advanced filter section (collapsible) */}
             <View style={styles.advancedWrap}>
@@ -654,6 +693,50 @@ function SubTagChip({
   );
 }
 
+/**
+ * iOS-style 3-段 segmented control for cluster filter (slice 10c).
+ * Self-rolled Pressable+flexbox to avoid the platform-specific behavior of
+ * @react-native-segmented-control/segmented-control (we don't already depend
+ * on it; the spec forbids new deps). Active segment uses the page's accent
+ * blue to match other chips' active state.
+ */
+function ClusterModeSegmented({
+  value,
+  onChange,
+}: {
+  value: ClusterFilterMode;
+  onChange: (mode: ClusterFilterMode) => void;
+}) {
+  return (
+    <View style={styles.segmentedWrap}>
+      {CLUSTER_FILTER_MODES.map((mode) => {
+        const active = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            style={({ pressed }) => [
+              styles.segmentedBtn,
+              active && styles.segmentedBtnActive,
+              pressed && styles.btnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}>
+            <Text
+              style={[
+                styles.segmentedText,
+                active && styles.segmentedTextActive,
+              ]}
+              numberOfLines={1}>
+              {clusterFilterLabel(mode)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function SessionRow({
   session,
   expanded,
@@ -794,6 +877,22 @@ const styles = StyleSheet.create({
   filterChipTextActive: { color: 'white' },
   filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
   filterChipSubtextActive: { color: 'white', opacity: 0.85 },
+  segmentedWrap: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    padding: 2,
+  },
+  segmentedBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  segmentedBtnActive: { backgroundColor: '#0a7ea4' },
+  segmentedText: { fontSize: 13, fontWeight: '500' },
+  segmentedTextActive: { color: 'white' },
   advancedWrap: {
     borderRadius: 12,
     backgroundColor: 'rgba(127,127,127,0.08)',

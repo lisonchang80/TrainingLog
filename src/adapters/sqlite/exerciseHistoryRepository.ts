@@ -26,6 +26,12 @@ export interface ExerciseHistorySet {
   ordering: number;
   created_at: number;
   load_type: LoadType;
+  /**
+   * True iff the originating `session_exercise` belongs to a cluster (slice 10c).
+   * Drives the 3-段 cluster filter on the timeline list — see
+   * `domain/exercise/clusterFilter.ts`.
+   */
+  is_in_cluster: boolean;
 }
 
 /**
@@ -63,7 +69,10 @@ export async function listExerciseHistorySets(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySet[]> {
-  return db.getAllAsync<ExerciseHistorySet>(
+  type Row = Omit<ExerciseHistorySet, 'is_in_cluster'> & {
+    is_in_cluster: number;
+  };
+  const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -73,15 +82,27 @@ export async function listExerciseHistorySets(
             s.reps         AS reps,
             s.ordering     AS ordering,
             s.created_at   AS created_at,
-            e.load_type    AS load_type
+            e.load_type    AS load_type,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON se.session_id = s.session_id
+        AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id
   );
+  return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }
 
 /**
@@ -98,7 +119,10 @@ export async function listExerciseHistoryBySession(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySession[]> {
-  const rows = await db.getAllAsync<HistorySetWithSessionMeta>(
+  type RawRow = Omit<HistorySetWithSessionMeta, 'is_in_cluster'> & {
+    is_in_cluster: number;
+  };
+  const rows = await db.getAllAsync<RawRow>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -111,7 +135,15 @@ export async function listExerciseHistoryBySession(
             e.load_type    AS load_type,
             se.template_id AS template_id,
             t.program_id   AS program_id,
-            t.sub_tag      AS sub_tag
+            t.sub_tag      AS sub_tag,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
@@ -144,9 +176,10 @@ export async function listExerciseHistoryBySession(
       grouped.set(r.session_id, sess);
       order.push(r.session_id);
     }
-    // Strip JOIN columns from the set row before pushing
-    const { template_id, program_id, sub_tag, ...setRow } = r;
-    sess.sets.push(setRow);
+    // Strip JOIN-only columns from the set row before pushing; coerce
+    // SQLite 0/1 to boolean for is_in_cluster.
+    const { template_id, program_id, sub_tag, is_in_cluster, ...rest } = r;
+    sess.sets.push({ ...rest, is_in_cluster: is_in_cluster === 1 });
   }
 
   return order.map((id) => grouped.get(id)!);
@@ -738,7 +771,10 @@ export async function listPriorSetsForExercise(
   exercise_id: string,
   before_created_at: number
 ): Promise<ExerciseHistorySet[]> {
-  return db.getAllAsync<ExerciseHistorySet>(
+  type Row = Omit<ExerciseHistorySet, 'is_in_cluster'> & {
+    is_in_cluster: number;
+  };
+  const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -748,10 +784,21 @@ export async function listPriorSetsForExercise(
             s.reps         AS reps,
             s.ordering     AS ordering,
             s.created_at   AS created_at,
-            e.load_type    AS load_type
+            e.load_type    AS load_type,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON se.session_id = s.session_id
+        AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.created_at < ?
@@ -759,4 +806,5 @@ export async function listPriorSetsForExercise(
     exercise_id,
     before_created_at
   );
+  return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }

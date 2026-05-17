@@ -42,6 +42,7 @@ import {
   peekFilter,
   submitFilter,
 } from '@/src/domain/exercise/historyFilterMailbox';
+import { DEFAULT_CLUSTER_MODE } from '@/src/domain/exercise/clusterFilter';
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
@@ -144,10 +145,14 @@ export default function ExerciseChartScreen() {
       pid: string | null,
       tags: Set<string>
     ) => {
+      // Slice 10c step 4 will rewrite this to thread clusterMode through;
+      // for the step-3 commit boundary we just preserve the default so the
+      // mailbox payload stays well-formed.
       submitFilter({
         buckets,
         programId: pid,
         subTags: tags,
+        clusterMode: DEFAULT_CLUSTER_MODE,
       });
     },
     []
