@@ -42,6 +42,21 @@ Don't write prompt blind. Confirm exact file paths + line numbers. Spot existing
 
 ### 4. Draft prompt + show to user BEFORE launching
 
+**用戶可能要求簡化呈現**（TrainingLog 用戶 2026-05-18 立 rule）：
+- 預設**不要貼 prompt 全文給用戶**
+- 改用**≤100 字自然語言描述**：簡短交代「修哪個 bug / 加什麼 feature / 幾個 commits」，end with「OK 就 launch」
+- Prompt 全文自己處理，內部仍要 self-contained（給 agent 用）
+- 用戶 OK 就 launch；用戶要看細節再貼
+
+範例自然語言 spec（≤100 字）：
+> **Overnight #N — 一句 task 名**
+>
+> 修 bug / 加 feature 描述（1-2 句帶 root cause 或 spec）。改 X 檔，加 Y test。N commits、background 跑。
+>
+> **OK 就 launch。**
+
+如果用戶沒有設此 rule，預設仍可貼 prompt template 給用戶 review：
+
 ```
 **Working dir**: <absolute worktree path>
 **Branch base**: <branch>@<sha>
@@ -101,10 +116,28 @@ Agent({
 
 新 request 進來時：
 - **Same file in scope?** → queue 給下一輪 overnight。**禁止 parallel-launch**（file conflict）
-- **Different file 真獨立?** → 可 parallel，但 polish 很少有真獨立
+- **Different file 真獨立?** → 可 parallel（見下方 same-worktree parallel pattern）
 - **1-2 line 小改?** → 等本輪完，foreground 手做
 
 每個 queue item 用 1-line table update 確認收到。
+
+### 6b. Same-worktree parallel launch（disjoint files only）
+
+當 ≥ 2 個 task **真的不動同檔**（grep 確認），可以同一個 message 內 launch 多個 background agent。但兩個 agent 共用同 branch / 同 remote，會有 `git push` race（後完成的需要 rebase）。
+
+**在每個 prompt 開頭加 ⚠️ 並行注意 section**：
+
+```
+## ⚠️ 並行注意
+
+本任務與 Overnight #NX「<其他 task 名>」並行跑（不同檔，不該衝突）。
+- 本任務只動 <file A>
+- 不要動 <file B>（那是 #NX 的範圍）
+- 推時若 `git push` 因 remote ahead 失敗 → `git pull --rebase` → 解衝突（理論上無）→ 再推
+- 若 rebase 遇衝突（不該發生）→ STOP 並列在 report
+```
+
+驗證 2026-05-18 #14A + #14C 並行成功（5ca63dd/94b821d/034ca4b/7b8f911 全綠 push）。後完成的那個 agent fast-forward 沒衝突。
 
 ### 7. Verify on completion（**不信 agent 自報**）
 
