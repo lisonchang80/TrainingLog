@@ -135,10 +135,11 @@ export default function ExerciseHistoryScreen() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [programPickerOpen, setProgramPickerOpen] = useState(false);
 
-  // Slice 10c overnight #11 — switcher visible only in cluster_only mode with
-  // a resolved partner. Tapping swaps A↔B by router.replace-ing the partner
-  // route and swapping the partner param back to current id. Mailbox keeps
-  // segment + bucket filters intact across the swap (warm focus path).
+  // Slice 10c overnight #12 — A↔B switcher moved to body title (left/right
+  // arrows around exercise name). Visible only in cluster_only mode with a
+  // resolved partner. Tapping either arrow swaps A↔B by router.replace-ing
+  // the partner route and swapping the partner param back to current id.
+  // Mailbox keeps segment + bucket filters intact across the swap.
   const showSwitcher =
     clusterMode === 'cluster_only' && !!partnerParam && !!partnerName;
 
@@ -150,51 +151,20 @@ export default function ExerciseHistoryScreen() {
   }, [id, partnerParam, router]);
 
   const screenOptions = useMemo(
-    () =>
-      showSwitcher && header
-        ? {
-            headerBackVisible: false,
-            headerLeft: () => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="返回"
-                onPress={() => router.back()}
-                hitSlop={12}>
-                <Text style={styles.headerBack}>‹ 返回</Text>
-              </Pressable>
-            ),
-            headerTitle: () => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`切換到 ${partnerName}`}
-                onPress={onSwapPartner}
-                hitSlop={12}
-                style={styles.switcherRow}>
-                <Text style={styles.switcherArrow}>‹</Text>
-                <Text style={styles.switcherPartner} numberOfLines={1}>
-                  {partnerName}
-                </Text>
-                <Text style={styles.switcherSep}> | </Text>
-                <Text style={styles.switcherCurrent} numberOfLines={1}>
-                  {header.exercise_name}
-                </Text>
-              </Pressable>
-            ),
-          }
-        : {
-            title: '動作歷史',
-            headerBackVisible: false,
-            headerLeft: () => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="返回"
-                onPress={() => router.back()}
-                hitSlop={12}>
-                <Text style={styles.headerBack}>‹ 返回</Text>
-              </Pressable>
-            ),
-          },
-    [router, showSwitcher, header, partnerName, onSwapPartner]
+    () => ({
+      title: '動作歷史',
+      headerBackVisible: false,
+      headerLeft: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="返回"
+          onPress={() => router.back()}
+          hitSlop={12}>
+          <Text style={styles.headerBack}>‹ 返回</Text>
+        </Pressable>
+      ),
+    }),
+    [router]
   );
 
   const refresh = useCallback(async () => {
@@ -396,6 +366,9 @@ export default function ExerciseHistoryScreen() {
               unit={unit}
               prSectionOpen={prSectionOpen}
               togglePrSection={() => setPrSectionOpen((v) => !v)}
+              showSwitcher={showSwitcher}
+              onSwapPartner={onSwapPartner}
+              partnerName={partnerName}
             />
             <Text style={styles.empty}>
               還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
@@ -409,6 +382,9 @@ export default function ExerciseHistoryScreen() {
               unit={unit}
               prSectionOpen={prSectionOpen}
               togglePrSection={() => setPrSectionOpen((v) => !v)}
+              showSwitcher={showSwitcher}
+              onSwapPartner={onSwapPartner}
+              partnerName={partnerName}
             />
 
             {/* Bucket multi-select chips */}
@@ -580,12 +556,18 @@ function HeaderCard({
   unit,
   prSectionOpen,
   togglePrSection,
+  showSwitcher,
+  onSwapPartner,
+  partnerName,
 }: {
   header: ExerciseHistoryHeader;
   prs: PRSnapshotWithDate[];
   unit: UnitPreference;
   prSectionOpen: boolean;
   togglePrSection: () => void;
+  showSwitcher: boolean;
+  onSwapPartner: () => void;
+  partnerName: string | null;
 }) {
   // Collapsed: only render 'all'. Expanded: render all (全部 + 5 buckets).
   const visiblePRs = prSectionOpen
@@ -594,7 +576,31 @@ function HeaderCard({
 
   return (
     <View style={styles.headerCard}>
-      <Text style={styles.headerName}>{header.exercise_name}</Text>
+      {showSwitcher ? (
+        <View style={styles.headerNameRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`切換到 ${partnerName}`}
+            onPress={onSwapPartner}
+            hitSlop={12}>
+            <Text style={styles.headerArrow}>‹</Text>
+          </Pressable>
+          <Text
+            style={[styles.headerName, styles.headerNameInRow]}
+            numberOfLines={2}>
+            {header.exercise_name}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`切換到 ${partnerName}`}
+            onPress={onSwapPartner}
+            hitSlop={12}>
+            <Text style={styles.headerArrow}>›</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Text style={styles.headerName}>{header.exercise_name}</Text>
+      )}
       <Text style={styles.headerSubline}>
         共 {header.total_sessions} 次 Session · 最近 7 天 {header.sessions_last_7_days} 次
       </Text>
@@ -1058,34 +1064,21 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     paddingHorizontal: 8,
   },
-  // Slice 10c overnight #11 — A↔B switcher pressable in headerTitle slot.
-  switcherRow: {
+  // Slice 10c overnight #12 — A↔B switcher relocated to body title row.
+  // Arrow Pressables flank the exercise name; tap either to swap to partner.
+  headerNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    maxWidth: 260,
+    justifyContent: 'space-between',
+    gap: 8,
   },
-  switcherArrow: {
-    color: '#8E8E93',
-    fontSize: 17,
-    fontWeight: '400',
-    marginRight: 2,
-  },
-  switcherPartner: {
+  headerArrow: {
     color: '#007AFF',
-    fontSize: 17,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  switcherSep: {
-    color: '#8E8E93',
-    fontSize: 17,
+    fontSize: 28,
     fontWeight: '400',
+    paddingHorizontal: 4,
   },
-  switcherCurrent: {
-    fontSize: 17,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
+  headerNameInRow: { flex: 1, textAlign: 'center' },
   btnPressed: { opacity: 0.85 },
   modalOverlay: {
     flex: 1,
