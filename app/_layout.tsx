@@ -40,13 +40,18 @@ export default function RootLayout() {
             name="exercise/edit/[id]"
             options={{ presentation: 'modal', title: 'Edit Exercise' }}
           />
+          {/* Slice 10c overnight #16 — exercise-history / exercise-chart
+              changed from modal → card (default Stack presentation). Modal's
+              bottom-up animation conflicts with the A↔B horizontal paging
+              swipe (#16 #2/#3) and made router-replace swaps feel like
+              re-launches rather than page flips. */}
           <Stack.Screen
             name="exercise-history/[id]"
-            options={{ presentation: 'modal', title: '動作歷史' }}
+            options={{ title: '動作歷史' }}
           />
           <Stack.Screen
             name="exercise-chart/[id]"
-            options={{ presentation: 'modal', title: '動作圖表' }}
+            options={{ title: '動作圖表' }}
           />
           <Stack.Screen
             name="exercise-picker"
