@@ -2570,12 +2570,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   exerciseCardVolumeChip: {
-    // overnight #5 第 2 點: 字體 fit `9999/9999`, minWidth 鎖避免 progress bar
-    // 寬度 jitter, 純數字無「容量」prefix.
+    // overnight #5 第 2 點: 字體 fit `9999/9999` (9 chars), minWidth 鎖避免
+    // progress bar 寬度 jitter (短數字如 `0/200` 不會讓 bar 變長), 純數字無
+    // 「容量」prefix. fontSize 12 (原 13) — 在 ~75px 寬內可容 9999/9999.
     fontSize: 12,
     fontWeight: '600',
     opacity: 0.7,
-    minWidth: 72,
+    minWidth: 76,
     textAlign: 'right',
   },
   exerciseCardPRLine: {

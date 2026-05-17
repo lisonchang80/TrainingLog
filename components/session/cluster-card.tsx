@@ -653,12 +653,12 @@ const styles = StyleSheet.create({
   clusterPlus: { fontSize: 14, opacity: 0.5 },
   // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
   // overnight #5 第 1 點 + 第 2 點: 純數字、無 prefix；minWidth 鎖避免 jitter；
-  // 字體 fit `9999/9999`.
+  // 字體 fit `9999/9999` (9 chars). fontSize 12 (原 13) — 在 ~76px 寬內可容.
   clusterVolumeChip: {
     fontSize: 12,
     fontWeight: '600',
     opacity: 0.7,
-    minWidth: 72,
+    minWidth: 76,
     textAlign: 'right',
   },
   clusterChevron: {
