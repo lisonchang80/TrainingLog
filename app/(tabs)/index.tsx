@@ -305,8 +305,14 @@ export default function TodayScreen() {
             }
             // Solo exercises after.
             for (const exercise_id of payload.exerciseIds) {
+              // v019 isolation fix: hold onto the newly-minted
+              // session_exercise.id and thread it into the prefill call so
+              // the cloned sets tag onto the new card (not some other card
+              // that happens to target the same exercise_id elsewhere in
+              // this session).
+              const newSeId = randomUUID();
               await appendSessionExercise(db, {
-                id: randomUUID(),
+                id: newSeId,
                 session_id: active.id,
                 exercise_id,
               });
@@ -314,6 +320,7 @@ export default function TodayScreen() {
                 session_id: active.id,
                 exercise_id,
                 uuid: randomUUID,
+                session_exercise_id: newSeId,
               });
             }
             await refresh();
@@ -440,7 +447,10 @@ export default function TodayScreen() {
    * Subsequent commits will swap this minimum-viable handler for the full
    * 5-gesture wire-up (right-swipe add + notes, etc.).
    */
-  const onAddSet = async (exercise_id: string) => {
+  const onAddSet = async (
+    exercise_id: string,
+    session_exercise_id: string,
+  ) => {
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
       Alert.alert('No active session');
@@ -450,8 +460,13 @@ export default function TodayScreen() {
     //   1. Last set in CURRENT session for this exercise (same-session continuity)
     //   2. Last set in HISTORY across all prior sessions (cross-session memory)
     //   3. Sensible starter defaults (weight=0, reps=10) for true first-time exercises
+    //
+    // v019 isolation fix: filter by session_exercise_id (the card) — not
+    // bare exercise_id — so an RS A-side card doesn't pick up "last set"
+    // from a coincidentally-same-exercise solo card sitting elsewhere in
+    // the same session.
     const priorInSession = setsInSession.filter(
-      (s) => s.exercise_id === exercise_id
+      (s) => s.session_exercise_id === session_exercise_id
     );
     const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
 
@@ -500,6 +515,7 @@ export default function TodayScreen() {
         session_id,
         input: { exercise_id, weight_kg, reps: repsNum },
         uuid: randomUUID,
+        session_exercise_id, // v019 isolation
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
@@ -612,7 +628,11 @@ export default function TodayScreen() {
         } else if (op.type === 'delete') {
           await deleteSet(db, op.set_id);
         } else {
-          // insertFollower
+          // insertFollower — v019 isolation fix: inherit the head set's
+          // session_exercise_id so the dropset follower stays on the
+          // same card as its parent (matters when two cards share
+          // exercise_id; #17).
+          const head = setsInSession.find((s) => s.id === op.parent_set_id);
           await insertSessionSet(db, {
             id: op.new_set_id,
             session_id,
@@ -624,6 +644,7 @@ export default function TodayScreen() {
             created_at: Date.now(),
             set_kind: 'dropset',
             parent_set_id: op.parent_set_id,
+            session_exercise_id: head?.session_exercise_id ?? null,
           });
           appendOffset += 1;
         }
@@ -935,9 +956,16 @@ export default function TodayScreen() {
 
     // For each side, pick defaults: last set in this session OR fallback
     // to historical 動作記憶 OR starter defaults.
-    const pickDefaults = async (exercise_id: string) => {
+    //
+    // v019 isolation: filter by session_exercise_id (the cluster side)
+    // not raw exercise_id, so an A-side cycle add doesn't pick up
+    // weight/reps from a coincidentally-same-exercise solo card.
+    const pickDefaults = async (
+      exercise_id: string,
+      session_exercise_id: string,
+    ) => {
       const inSession = setsInSession
-        .filter((s) => s.exercise_id === exercise_id)
+        .filter((s) => s.session_exercise_id === session_exercise_id)
         .slice(-1)[0];
       if (inSession) {
         return {
@@ -964,8 +992,14 @@ export default function TodayScreen() {
     };
 
     try {
-      const aDefaults = await pickDefaults(group.a.exercise.exercise_id);
-      const bDefaults = await pickDefaults(group.b.exercise.exercise_id);
+      const aDefaults = await pickDefaults(
+        group.a.exercise.exercise_id,
+        group.a.exercise.id,
+      );
+      const bDefaults = await pickDefaults(
+        group.b.exercise.exercise_id,
+        group.b.exercise.id,
+      );
       await addClusterCycleAtEnd(db, {
         session_id,
         a: {
@@ -973,12 +1007,17 @@ export default function TodayScreen() {
           new_set_id: randomUUID(),
           weight_kg: aDefaults.weight_kg,
           reps: aDefaults.reps,
+          // v019 isolation: tag each new set to its cluster card so
+          // the A side doesn't collide with a coincidentally-same-exercise
+          // solo card sitting elsewhere in the same session.
+          session_exercise_id: group.a.exercise.id,
         },
         b: {
           exercise_id: group.b.exercise.exercise_id,
           new_set_id: randomUUID(),
           weight_kg: bDefaults.weight_kg,
           reps: bDefaults.reps,
+          session_exercise_id: group.b.exercise.id,
         },
       });
       const sets = await listSetsBySession(db, session_id);
@@ -1813,7 +1852,7 @@ export default function TodayScreen() {
                         onToggleExpand={() =>
                           setExpandedExerciseId(isExpanded ? null : p.id)
                         }
-                        onAddSet={() => onAddSet(p.exercise_id)}
+                        onAddSet={() => onAddSet(p.exercise_id, p.id)}
                         onUpdateSet={onUpdateSet}
                         onCycleSetKind={(set_id) =>
                           onCycleSetKind(p.exercise_id, set_id)

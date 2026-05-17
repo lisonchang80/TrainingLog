@@ -4,12 +4,24 @@ import type { SetKind } from '../../domain/set/setLabels';
 import { validateRecordSet } from '../../domain/set/validateRecordSet';
 import { createSession, endSession } from './sessionRepository';
 
-/** Insert one set row directly. Caller supplies all fields including IDs/timestamps. */
-export async function insertSet(db: Database, set: SetRow): Promise<void> {
+/**
+ * Insert one set row directly. Caller supplies all fields including
+ * IDs/timestamps.
+ *
+ * `session_exercise_id` (v019) is optional on the type — production
+ * callers should provide it via the higher-level helpers (recordSetInSession
+ * etc) so within-session card isolation works. When NULL, the row joins to
+ * its session_exercise via the legacy (session_id, exercise_id) heuristic
+ * which is fine for single-card-per-exercise fixtures.
+ */
+export async function insertSet(
+  db: Database,
+  set: SetRow & { session_exercise_id?: string | null }
+): Promise<void> {
   await db.runAsync(
     `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
-                        is_skipped, ordering, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        is_skipped, ordering, created_at, session_exercise_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     set.id,
     set.session_id,
     set.exercise_id,
@@ -17,7 +29,8 @@ export async function insertSet(db: Database, set: SetRow): Promise<void> {
     set.reps,
     set.is_skipped,
     set.ordering,
-    set.created_at
+    set.created_at,
+    set.session_exercise_id ?? null
   );
 }
 
@@ -31,19 +44,29 @@ export async function insertSet(db: Database, set: SetRow): Promise<void> {
  *
  * is_logged always defaults to 0 — newly inserted rows are not yet
  * completed. is_skipped is taken from caller (typical: 0).
+ *
+ * `session_exercise_id` (v019, slice 10c #17 isolation fix): production
+ * callers MUST pass this — it's the only way to disambiguate two
+ * session_exercise cards that share the same `exercise_id` (e.g. RS A
+ * side Cable Crossover + solo Cable Crossover in the same session). Left
+ * optional in the type to keep legacy fixture tests (where the bug doesn't
+ * apply because there's only one card per exercise) compiling without
+ * mass edits — they store NULL and rely on `(session_id, exercise_id)`
+ * uniqueness within the fixture.
  */
 export async function insertSessionSet(
   db: Database,
   set: SetRow & {
     set_kind: SetKind;
     parent_set_id: string | null;
+    session_exercise_id?: string | null;
   }
 ): Promise<void> {
   await db.runAsync(
     `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                         is_skipped, ordering, created_at,
-                        set_kind, parent_set_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        set_kind, parent_set_id, session_exercise_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     set.id,
     set.session_id,
     set.exercise_id,
@@ -53,7 +76,8 @@ export async function insertSessionSet(
     set.ordering,
     set.created_at,
     set.set_kind,
-    set.parent_set_id
+    set.parent_set_id,
+    set.session_exercise_id ?? null
   );
 }
 
@@ -100,6 +124,15 @@ export interface SessionSetWithExercise extends SetWithExercise {
   parent_set_id: string | null;
   is_logged: number; // 0/1
   notes: string | null;
+  /**
+   * v019 (slice 10c #17) — owning session_exercise.id. NULL for legacy
+   * rows the backfill couldn't match; production rows minted after #17
+   * will always have this populated. Within-session filters on the Today
+   * tab + session detail page key off this field instead of `exercise_id`
+   * to keep two cards that share the same exercise (e.g. RS A side
+   * Cable Crossover + solo Cable Crossover) independently editable.
+   */
+  session_exercise_id: string | null;
 }
 
 export async function listAllSetsWithExercise(
@@ -128,6 +161,7 @@ export async function listSetsBySession(
     `SELECT s.id, s.session_id, s.exercise_id, s.weight_kg, s.reps,
             s.is_skipped, s.ordering, s.created_at,
             s.set_kind, s.parent_set_id, s.is_logged, s.notes,
+            s.session_exercise_id,
             e.name AS exercise_name
        FROM "set" s
        JOIN exercise e ON e.id = s.exercise_id
@@ -289,8 +323,8 @@ export async function deleteClusterCycle(
 export async function cloneClusterCycle(
   db: Database,
   args: {
-    a_source: { id: string; exercise_id: string } | null;
-    b_source: { id: string; exercise_id: string } | null;
+    a_source: { id: string; exercise_id: string; session_exercise_id?: string | null } | null;
+    b_source: { id: string; exercise_id: string; session_exercise_id?: string | null } | null;
     session_id: string;
     new_a_set_id: string;
     new_b_set_id: string;
@@ -299,7 +333,25 @@ export async function cloneClusterCycle(
 ): Promise<void> {
   const now = (args.now ?? (() => Date.now()))();
   await db.withTransactionAsync(async () => {
-    const maxFor = async (exercise_id: string) => {
+    // v019 isolation fix (slice 10c #17): scope MAX(ordering) to the
+    // session_exercise_id when caller provides it — without this, a cluster
+    // card and a solo card sharing the same exercise_id collide on the
+    // bare `(session_id, exercise_id)` MAX and one side's new row jumps
+    // to the wrong ordering bucket. Falls back to the legacy
+    // (session_id, exercise_id) MAX for callers that don't supply the id
+    // (test fixtures pre-#17).
+    const maxFor = async (
+      exercise_id: string,
+      session_exercise_id?: string | null
+    ) => {
+      if (session_exercise_id) {
+        const row = await db.getFirstAsync<{ max_ord: number | null }>(
+          `SELECT MAX(ordering) AS max_ord FROM "set"
+            WHERE session_exercise_id = ?`,
+          session_exercise_id
+        );
+        return (row?.max_ord ?? 0) + 1;
+      }
       const row = await db.getFirstAsync<{ max_ord: number | null }>(
         `SELECT MAX(ordering) AS max_ord FROM "set"
           WHERE session_id = ? AND exercise_id = ?`,
@@ -322,16 +374,18 @@ export async function cloneClusterCycle(
         await db.runAsync(
           `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                               is_skipped, ordering, created_at,
-                              set_kind, parent_set_id, is_logged)
-           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+                              set_kind, parent_set_id, is_logged,
+                              session_exercise_id)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0, ?)`,
           args.new_a_set_id,
           args.session_id,
           args.a_source.exercise_id,
           source.weight_kg,
           source.reps,
-          await maxFor(args.a_source.exercise_id),
+          await maxFor(args.a_source.exercise_id, args.a_source.session_exercise_id),
           now,
-          source.set_kind
+          source.set_kind,
+          args.a_source.session_exercise_id ?? null
         );
       }
     }
@@ -348,16 +402,18 @@ export async function cloneClusterCycle(
         await db.runAsync(
           `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                               is_skipped, ordering, created_at,
-                              set_kind, parent_set_id, is_logged)
-           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+                              set_kind, parent_set_id, is_logged,
+                              session_exercise_id)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0, ?)`,
           args.new_b_set_id,
           args.session_id,
           args.b_source.exercise_id,
           source.weight_kg,
           source.reps,
-          await maxFor(args.b_source.exercise_id),
+          await maxFor(args.b_source.exercise_id, args.b_source.session_exercise_id),
           now,
-          source.set_kind
+          source.set_kind,
+          args.b_source.session_exercise_id ?? null
         );
       }
     }
@@ -377,8 +433,20 @@ export async function addClusterCycleAtEnd(
   db: Database,
   args: {
     session_id: string;
-    a: { exercise_id: string; new_set_id: string; weight_kg: number; reps: number };
-    b: { exercise_id: string; new_set_id: string; weight_kg: number; reps: number };
+    a: {
+      exercise_id: string;
+      new_set_id: string;
+      weight_kg: number;
+      reps: number;
+      session_exercise_id?: string | null;
+    };
+    b: {
+      exercise_id: string;
+      new_set_id: string;
+      weight_kg: number;
+      reps: number;
+      session_exercise_id?: string | null;
+    };
     set_kind?: SetKind;
     now?: () => number;
   }
@@ -387,7 +455,20 @@ export async function addClusterCycleAtEnd(
   const set_kind: SetKind = args.set_kind ?? 'working';
 
   await db.withTransactionAsync(async () => {
-    const maxFor = async (exercise_id: string) => {
+    // v019 isolation fix: scope MAX(ordering) to session_exercise_id when
+    // provided. See cloneClusterCycle for the rationale.
+    const maxFor = async (
+      exercise_id: string,
+      session_exercise_id?: string | null
+    ) => {
+      if (session_exercise_id) {
+        const row = await db.getFirstAsync<{ max_ord: number | null }>(
+          `SELECT MAX(ordering) AS max_ord FROM "set"
+            WHERE session_exercise_id = ?`,
+          session_exercise_id
+        );
+        return (row?.max_ord ?? 0) + 1;
+      }
       const row = await db.getFirstAsync<{ max_ord: number | null }>(
         `SELECT MAX(ordering) AS max_ord FROM "set"
           WHERE session_id = ? AND exercise_id = ?`,
@@ -396,14 +477,15 @@ export async function addClusterCycleAtEnd(
       );
       return (row?.max_ord ?? 0) + 1;
     };
-    const aOrder = await maxFor(args.a.exercise_id);
-    const bOrder = await maxFor(args.b.exercise_id);
+    const aOrder = await maxFor(args.a.exercise_id, args.a.session_exercise_id);
+    const bOrder = await maxFor(args.b.exercise_id, args.b.session_exercise_id);
 
     await db.runAsync(
       `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                           is_skipped, ordering, created_at,
-                          set_kind, parent_set_id, is_logged)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+                          set_kind, parent_set_id, is_logged,
+                          session_exercise_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0, ?)`,
       args.a.new_set_id,
       args.session_id,
       args.a.exercise_id,
@@ -411,13 +493,15 @@ export async function addClusterCycleAtEnd(
       args.a.reps,
       aOrder,
       now,
-      set_kind
+      set_kind,
+      args.a.session_exercise_id ?? null
     );
     await db.runAsync(
       `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                           is_skipped, ordering, created_at,
-                          set_kind, parent_set_id, is_logged)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0)`,
+                          set_kind, parent_set_id, is_logged,
+                          session_exercise_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, 0, ?)`,
       args.b.new_set_id,
       args.session_id,
       args.b.exercise_id,
@@ -425,7 +509,8 @@ export async function addClusterCycleAtEnd(
       args.b.reps,
       bOrder,
       now,
-      set_kind
+      set_kind,
+      args.b.session_exercise_id ?? null
     );
   });
 }
@@ -445,6 +530,13 @@ export async function recordSetInSession(
     input: RecordSetInput;
     uuid: () => string;
     now?: () => number;
+    /**
+     * v019 isolation fix (slice 10c #17). Production callers pass the
+     * owning `session_exercise.id` so the new set rows links unambiguously
+     * to one card even when another card in the same session targets the
+     * same exercise_id. Left optional to preserve legacy test fixtures.
+     */
+    session_exercise_id?: string | null;
   }
 ): Promise<{ set_id: string; ordering: number; created_at: number }> {
   const err = validateRecordSet(args.input);
@@ -469,6 +561,7 @@ export async function recordSetInSession(
     is_skipped: 0,
     ordering,
     created_at: ts,
+    session_exercise_id: args.session_exercise_id ?? null,
   });
 
   return { set_id, ordering, created_at: ts };
@@ -498,6 +591,13 @@ export async function prefillSessionExerciseFromLastSession(
     exercise_id: string;
     uuid: () => string;
     now?: () => number;
+    /**
+     * v019 isolation fix: the owning session_exercise.id. Tagged onto each
+     * cloned set row so the new card is independently filterable even when
+     * another card in the same session shares the same exercise_id (the
+     * RS A + solo same-exercise bug scenario).
+     */
+    session_exercise_id?: string | null;
   }
 ): Promise<number> {
   // Find most recent session_id (excl current) that has any LOGGED set for
@@ -563,6 +663,7 @@ export async function prefillSessionExerciseFromLastSession(
         created_at: ts,
         set_kind: src.set_kind,
         parent_set_id: null, // Don't carry over cluster pairing on prefill.
+        session_exercise_id: args.session_exercise_id ?? null,
       });
     }
   });
@@ -604,8 +705,9 @@ export async function insertSessionSetAfter(
     weight_kg: number | null;
     reps: number | null;
     set_kind: SetKind;
+    session_exercise_id: string | null;
   }>(
-    `SELECT exercise_id, ordering, weight_kg, reps, set_kind
+    `SELECT exercise_id, ordering, weight_kg, reps, set_kind, session_exercise_id
        FROM "set" WHERE id = ? AND session_id = ?`,
     args.source_set_id,
     args.session_id
@@ -630,6 +732,9 @@ export async function insertSessionSetAfter(
       new_ordering
     );
     // Insert at the freed slot, mirroring source's exercise / kind / values.
+    // v019 isolation fix: inherit source's session_exercise_id so the new
+    // sibling lands on the SAME card (cluster A side stays on A, never
+    // leaks to a coincidentally-same-exercise solo card).
     await insertSessionSet(db, {
       id: new_set_id,
       session_id: args.session_id,
@@ -641,6 +746,7 @@ export async function insertSessionSetAfter(
       created_at: ts,
       set_kind: src.set_kind,
       parent_set_id: null,
+      session_exercise_id: src.session_exercise_id,
     });
   });
 
