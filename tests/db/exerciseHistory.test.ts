@@ -6,7 +6,13 @@ import {
   endSession,
   setSessionBwSnapshot,
 } from '../../src/adapters/sqlite/sessionRepository';
-import { recordSetInSession, insertSet } from '../../src/adapters/sqlite/setRepository';
+import {
+  recordSetInSession as _recordSetInSession,
+  insertSet as _insertSet,
+} from '../../src/adapters/sqlite/setRepository';
+import type { SetRow } from '../../src/domain/set/types';
+import type { RecordSetInput } from '../../src/domain/set/types';
+import type { Database } from '../../src/db/types';
 import {
   listExerciseHistorySets,
   listExerciseHistoryBySession,
@@ -19,6 +25,41 @@ import {
  * Each test seeds two distinct sessions for the same exercise, then verifies
  * the history queries glue them together.
  */
+
+/**
+ * Slice 10c overnight #10 — history queries filter `is_logged = 1`. These
+ * test helpers wrap the raw setRepository inserts so every seeded row is
+ * marked logged by default, preserving the pre-filter intent of every test
+ * here (all rows in this file represent "completed" sets, not planned).
+ *
+ * Pass `is_logged: 0` to opt-out (e.g. the "skips is_skipped=1 rows" test
+ * doesn't care, and a few future cases might want unlogged rows).
+ */
+async function insertSet(
+  db: Database,
+  set: SetRow,
+  opts: { is_logged?: 0 | 1 } = {}
+): Promise<void> {
+  await _insertSet(db, set);
+  if ((opts.is_logged ?? 1) === 1) {
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, set.id);
+  }
+}
+
+async function recordSetInSession(
+  db: Database,
+  args: {
+    session_id: string;
+    input: RecordSetInput;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ set_id: string; ordering: number; created_at: number }> {
+  const r = await _recordSetInSession(db, args);
+  await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, r.set_id);
+  return r;
+}
+
 describe('exerciseHistoryRepository — cross-Session aggregation', () => {
   let db: BetterSqliteDatabase;
   let benchId: string;

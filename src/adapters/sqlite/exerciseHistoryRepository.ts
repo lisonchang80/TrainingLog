@@ -5,7 +5,12 @@
  * session start time and bw snapshot (needed for load_type='assisted'
  * effective-load math).
  *
- * Includes only `is_skipped = 0` sets.
+ * Includes only `is_skipped = 0 AND is_logged = 1` sets. The `is_logged = 1`
+ * filter (slice 10c overnight #10) is the source-of-truth definition of
+ * "this set actually happened" — planned-but-unticked rows from an
+ * in-progress session must NOT bleed into the historical aggregate. Session
+ * `ended_at` is intentionally NOT a gate: a user can complete a set
+ * (✓-tap → is_logged=1) and we surface it immediately, even mid-session.
  */
 
 import type { Database } from '../../db/types';
@@ -99,6 +104,7 @@ export async function listExerciseHistorySets(
         AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id
   );
@@ -153,6 +159,7 @@ export async function listExerciseHistoryBySession(
        LEFT JOIN template t ON t.id = se.template_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY ss.started_at DESC, s.ordering ASC`,
     exercise_id
   );
@@ -203,6 +210,7 @@ export async function listProgramsForExercise(
        JOIN program p  ON p.id = t.program_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY p.name ASC`,
     exercise_id
   );
@@ -227,7 +235,7 @@ export async function getExerciseHistoryHeader(
   const totalRow = await db.getFirstAsync<{ n: number }>(
     `SELECT COUNT(DISTINCT session_id) AS n
        FROM "set"
-      WHERE exercise_id = ? AND is_skipped = 0`,
+      WHERE exercise_id = ? AND is_skipped = 0 AND is_logged = 1`,
     exercise_id
   );
 
@@ -238,6 +246,7 @@ export async function getExerciseHistoryHeader(
        JOIN session ss ON ss.id = s.session_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND ss.started_at >= ?`,
     exercise_id,
     cutoff
@@ -413,7 +422,8 @@ export async function queryExerciseHistory(
          ON se.session_id = s.session_id
         AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
-        AND s.is_skipped = 0${bucket.sql}
+        AND s.is_skipped = 0
+        AND s.is_logged = 1${bucket.sql}
       ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC
       LIMIT ? OFFSET ?`,
     exerciseId,
@@ -634,6 +644,7 @@ export async function queryReusableSupersetHistory(
                                    AND se.exercise_id = s.exercise_id
           WHERE se.reusable_superset_id = ?
             AND s.is_skipped = 0
+            AND s.is_logged = 1
             AND s.exercise_id IN (?, ?)
 
          UNION ALL
@@ -662,6 +673,7 @@ export async function queryReusableSupersetHistory(
             AND se.template_id IS NOT NULL
             AND te.reusable_superset_id = ?
             AND s.is_skipped = 0
+            AND s.is_logged = 1
             AND s.exercise_id IN (?, ?)
        )
       ORDER BY session_started_at DESC, ordering ASC, set_id ASC`,
@@ -801,6 +813,7 @@ export async function listPriorSetsForExercise(
         AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND s.created_at < ?
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id,

@@ -62,6 +62,10 @@ async function seedSet(
     ordering: args.ordering,
     created_at: NOW_MS + args.ordering,
   });
+  // Slice 10c overnight #10 — history queries filter is_logged=1; mark
+  // every seeded row as logged so the existing "exists in history" assertions
+  // still hold post-filter.
+  await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, args.set_id);
 }
 
 describe('queryExerciseHistory — is_in_cluster flag', () => {
