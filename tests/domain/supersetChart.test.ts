@@ -15,6 +15,10 @@ const setRow = (over: Partial<ExerciseHistoryRow>): ExerciseHistoryRow => ({
   ordering: 1,
   load_type: 'loaded',
   bw_snapshot_kg: null,
+  // Slice 10c: ExerciseHistoryRow gained `is_in_cluster`. Function B (the
+  // only caller of supersetChart at the moment) hardcodes true; this fixture
+  // mirrors that. supersetChart itself is on the chopping block in step 5.
+  is_in_cluster: true,
   ...over,
 });
 

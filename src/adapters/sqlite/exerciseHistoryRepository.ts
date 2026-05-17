@@ -280,6 +280,13 @@ export interface ExerciseHistoryRow {
   load_type: LoadType;
   /** session.bodyweight_snapshot_kg — null when unset. */
   bw_snapshot_kg: number | null;
+  /**
+   * True iff the originating `session_exercise` belongs to a cluster (A side =
+   * parent of another se row in the same session, OR B side = `parent_id` set).
+   * Drives the 3-段 cluster filter on the history / chart pages (slice 10c —
+   * see `domain/exercise/clusterFilter.ts`).
+   */
+  is_in_cluster: boolean;
 }
 
 const DEFAULT_LIMIT = 200;
@@ -341,8 +348,14 @@ export async function queryExerciseHistory(
     ordering: number;
     load_type: LoadType;
     bw_snapshot_kg: number | null;
+    /** 0 / 1 from SQLite — coerced to boolean below. */
+    is_in_cluster: number;
   };
 
+  // is_in_cluster: cluster B (parent_id != NULL) OR cluster A (this se's id
+  // is referenced by another se's parent_id within the same session). The
+  // `LEFT JOIN session_exercise se` is single-row per `(session_id,exercise_id)`
+  // (asserted by createSessionExercise upserts in sessionRepository.ts).
   const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
@@ -351,10 +364,21 @@ export async function queryExerciseHistory(
             s.weight_kg    AS weight_kg,
             s.ordering     AS ordering,
             e.load_type    AS load_type,
-            ss.bodyweight_snapshot_kg AS bw_snapshot_kg
+            ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON se.session_id = s.session_id
+        AND se.exercise_id = s.exercise_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0${bucket.sql}
       ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC
@@ -376,7 +400,39 @@ export async function queryExerciseHistory(
     ordering: r.ordering,
     load_type: r.load_type,
     bw_snapshot_kg: r.bw_snapshot_kg,
+    is_in_cluster: r.is_in_cluster === 1,
   }));
+}
+
+/**
+ * Does this exercise ever appear in a cluster (A side or B side) across all
+ * sessions? Used by the history / chart UI to decide whether to render the
+ * 3-段 cluster filter segmented control — if false, all bars would be identical
+ * so the control is hidden.
+ *
+ * Slice 10c — replaces the standalone `/superset-history/[id]` route. Cheap
+ * EXISTS query; no need to cache. Returns false for unknown exercise_id.
+ */
+export async function hasClusterHistory(
+  db: Database,
+  exerciseId: string
+): Promise<boolean> {
+  const row = await db.getFirstAsync<{ flag: number }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM session_exercise se
+        WHERE se.exercise_id = ?
+          AND (
+            se.parent_id IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM session_exercise se2
+               WHERE se2.parent_id = se.id
+            )
+          )
+     ) AS flag`,
+    exerciseId
+  );
+  return (row?.flag ?? 0) === 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +676,10 @@ export async function queryReusableSupersetHistory(
       ordering: r.ordering,
       load_type: r.load_type,
       bw_snapshot_kg: r.bw_snapshot_kg,
+      // Function B is invoked from a reusable-superset surface — every row it
+      // returns is by definition in a cluster. (The deprecated `/superset-*`
+      // routes are the only callers; slice 10c step 5 deletes them.)
+      is_in_cluster: true,
     };
     if (r.exercise_id === slotA.exercise_id) b.sideA.push(setRow);
     else if (r.exercise_id === slotB.exercise_id) b.sideB.push(setRow);
