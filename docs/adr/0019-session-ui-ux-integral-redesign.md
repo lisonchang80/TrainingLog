@@ -716,6 +716,7 @@ Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's 
 
 | 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
 |---|---|---|---|---|---|
+| 2026-05-17 | 超級組獨立 history/chart 頁砍除 | ADR-0017 9.8a 落地時新增 `/superset-history/[id]` + `/superset-chart/[id]` 兩個獨立 modal 頁（搭配 `historyChartFilterMailbox` + `supersetChart` domain wrapper）作為 reusable superset 的歷史檢視管道 | 砍掉兩頁 + domain wrapper；改在 `/exercise-history/[id]` + `/exercise-chart/[id]` 加 3-段 segmented control（`不含超級組` / `包含超級組` / `只含超級組`），由 `clusterMode` URL param + `historyFilterMailbox.clusterMode` 控制；cluster card ⚙️ → cluster_only / solo card ⚙️ → exclude_cluster；reusable superset 詳情頁的「歷史/圖表」footer button 重導向到 A side exercise + `clusterMode=cluster_only` | overnight #8 — segmented control 比兩頁分散更直覺，且省掉 `historyChartFilterMailbox` + `supersetChart` 整層代碼路徑 | overnight #8 commits c9f4c5a → (this commit) |
 | 2026-05-16 ultra-late | Q5 動作卡 header + PR row 結構 | sets count + target line + Pareto frontier `🏆 PR: ...` + `整體容量 PR: <sum>` 兩行 | 容量 chip `done/planned` 主位 + PR row inline `重量 PR: w×r  容量 PR: w×r`（單組 top-weight + top-volume，不再 Pareto multi-display） | user 雙 mockup confirm 後拍板 — UI 簡潔 / per-bucket 細節留給動作歷史頁 | (this commit) |
 | 2026-05-16 ultra-late | Q11 ⚙️ menu 砍 🔀 | spec L45「重新加 🔀」 | 4 槽 cancel + 3 主項 + 🔃 reorder | user post-spec verbal grill | `18ea66d` (bad impl) + `4b89d63` (revert) |
 | 2026-05-16 ultra-late | [+ 動作] picker UX | initial: SwapExerciseSheet quick-list | router.push('/exercise-picker?mode=picker') 全頁 + consumePick | user post-impl preference | `4b89d63` |

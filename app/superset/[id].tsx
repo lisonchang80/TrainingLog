@@ -151,13 +151,29 @@ export default function SupersetDetailScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {/* Slice 10c — independent superset history/chart pages were dropped
+            in favor of the 3-段 cluster filter on the per-exercise pages.
+            We funnel "歷史" / "圖表" to the A-side exercise pre-set to
+            cluster_only so the user lands on the same shared cluster view. */}
         <FooterButton
           label="歷史"
-          onPress={() => router.push(`/superset-history/${superset.id}`)}
+          onPress={() =>
+            exA
+              ? router.push(
+                  `/exercise-history/${exA.id}?clusterMode=cluster_only`,
+                )
+              : undefined
+          }
         />
         <FooterButton
           label="圖表"
-          onPress={() => router.push(`/superset-chart/${superset.id}`)}
+          onPress={() =>
+            exA
+              ? router.push(
+                  `/exercise-chart/${exA.id}?clusterMode=cluster_only`,
+                )
+              : undefined
+          }
         />
         <FooterButton
           label="編輯"

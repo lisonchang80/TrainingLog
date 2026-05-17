@@ -1633,8 +1633,11 @@ export default function TodayScreen() {
                             });
                           }}
                           onOpenHistory={() =>
+                            // Cluster card → default to cluster_only view so the
+                            // user lands on the pair's shared history (overnight
+                            // #8 spec — replaces deprecated /superset-history).
                             router.push(
-                              `/exercise-history/${group.a.exercise.exercise_id}`,
+                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only`,
                             )
                           }
                           onSettingsPress={() => onSettingsPress(p)}
@@ -1773,7 +1776,12 @@ export default function TodayScreen() {
                         }
                         prSnapshot={prSnapshotById[p.exercise_id] ?? null}
                         onOpenHistory={() =>
-                          router.push(`/exercise-history/${p.exercise_id}`)
+                          // Solo card → default to exclude_cluster (overnight #8
+                          // spec default 1) so cluster sessions don't pollute
+                          // the user's "what does this exercise do solo" view.
+                          router.push(
+                            `/exercise-history/${p.exercise_id}?clusterMode=exclude_cluster`,
+                          )
                         }
                         onSettingsPress={() => onSettingsPress(p)}
                         onLongPressHeader={() => setReorderSheetOpen(true)}

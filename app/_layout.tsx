@@ -64,14 +64,9 @@ export default function RootLayout() {
             name="superset/edit/[id]"
             options={{ presentation: 'modal', title: '編輯超級組' }}
           />
-          <Stack.Screen
-            name="superset-history/[id]"
-            options={{ presentation: 'modal', title: '超級組歷史' }}
-          />
-          <Stack.Screen
-            name="superset-chart/[id]"
-            options={{ presentation: 'modal', title: '超級組圖表' }}
-          />
+          {/* Slice 10c — /superset-history and /superset-chart were folded into
+              /exercise-history + /exercise-chart with a `clusterMode=cluster_only`
+              param (3-段 segmented control replaces the standalone pages). */}
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
