@@ -4,9 +4,12 @@ import {
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { useDatabase } from '@/components/database-provider';
+import type { Database } from '@/src/db/types';
 import {
   getExerciseHistoryHeader,
   hasClusterHistory,
@@ -52,6 +56,13 @@ import {
   parseClusterMode,
   type ClusterFilterMode,
 } from '@/src/domain/exercise/clusterFilter';
+import {
+  parseSide,
+  sideToPageIndex,
+  pageIndexToSide,
+  switcherArrowDisabled,
+  type ClusterSide,
+} from '@/src/domain/exercise/clusterSwitcher';
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
@@ -79,6 +90,13 @@ const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
  * Exercise Chart page (ADR-0017 Q14). Shares filter surface with history page
  * via historyFilterMailbox: rep bucket multi-select + Program 週期 / 強度.
  * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
+ *
+ * Slice 10c overnight #16 — same A↔B cluster paging shell as the
+ * history page. When caller passes `partner=` + `clusterMode=cluster_only`,
+ * body is wrapped in a horizontal pagingEnabled ScrollView with two
+ * ChartPageContent instances. Chart queries are heavier (trend
+ * aggregation per metric), so per-side isolated state matters even
+ * more than on the history page.
  */
 export default function ExerciseChartScreen() {
   const {
@@ -92,55 +110,35 @@ export default function ExerciseChartScreen() {
     partner?: string;
     side?: 'A' | 'B';
   }>();
-  // Slice 10c overnight #13 — A↔B switcher boundary dim (mirror of
-  // exercise-history). Cluster only has 2 sides; current side is purely URL-
-  // driven. Anything that isn't literal 'B' falls back to 'A'.
-  const side: 'A' | 'B' = sideParam === 'B' ? 'B' : 'A';
+  const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
   const router = useRouter();
-  const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
-  const [hasClusterRows, setHasClusterRows] = useState(false);
-  // Slice 10c overnight #11 — cluster A↔B switcher partner name lookup
-  // (mirrors history page). null when no partner param or lookup miss.
+  const initialClusterMode = useMemo(
+    () => parseClusterMode(clusterModeParam),
+    [clusterModeParam]
+  );
+
+  // Shell-level name lookup so both PageContents render switcher arrows
+  // consistently (each side shows its own name; arrow points to partner).
   const [partnerName, setPartnerName] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
-  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
-  const [unit, setUnit] = useState<UnitPreference>('kg');
-
-  // Filter state (mirrors mailbox)
-  const [bucketFilters, setBucketFilters] = useState<Set<RepBucketChip>>(
-    new Set()
-  );
-  const [programId, setProgramId] = useState<string | null>(null);
-  const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
-  // Slice 10c — same 3-段 cluster mode as the history page, shared via mailbox.
-  // URL param wins on cold open, mailbox on warm re-focus.
-  const [clusterMode, setClusterMode] = useState<ClusterFilterMode>(
-    parseClusterMode(clusterModeParam)
-  );
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [programPickerOpen, setProgramPickerOpen] = useState(false);
-
-  const [chartToggle, setChartToggle] = useState<ChartToggle>('weight');
-  const [yearFilter, setYearFilter] = useState<number | null>(
-    new Date().getFullYear()
-  );
-
-  // Slice 10c overnight #12 — A↔B switcher moved to body title (mirror of
-  // exercise-history). Visible only in cluster_only mode with resolved
-  // partner; tap either arrow to swap A↔B.
-  const showSwitcher =
-    clusterMode === 'cluster_only' && !!partnerParam && !!partnerName;
-
-  const onSwapPartner = useCallback(() => {
-    if (!id || !partnerParam) return;
-    // Side flips on swap. The new route's `id` is the partner and its
-    // `partner` is the current id, so the URL stays self-consistent.
-    const nextSide: 'A' | 'B' = side === 'A' ? 'B' : 'A';
-    router.replace(
-      `/exercise-chart/${partnerParam}?clusterMode=cluster_only&partner=${id}&side=${nextSide}`
-    );
-  }, [id, partnerParam, router, side]);
+  const [selfName, setSelfName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [pName, sName] = await Promise.all([
+        partnerParam
+          ? getExerciseName(db, partnerParam)
+          : Promise.resolve(null),
+        id ? getExerciseName(db, id) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      setPartnerName(pName);
+      setSelfName(sName);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, id, partnerParam]);
 
   const screenOptions = useMemo(
     () => ({
@@ -159,27 +157,208 @@ export default function ExerciseChartScreen() {
     [router]
   );
 
+  if (!id) return null;
+
+  const pagingEnabled =
+    !!partnerParam && initialClusterMode === 'cluster_only';
+
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Stack.Screen options={screenOptions} />
+      {pagingEnabled ? (
+        <PagingShell
+          idA={id}
+          idB={partnerParam!}
+          initialSide={initialSide}
+          nameA={selfName}
+          nameB={partnerName}
+          initialClusterMode={initialClusterMode}
+          db={db}
+        />
+      ) : (
+        <ChartPageContent
+          db={db}
+          exerciseId={id}
+          partnerExerciseId={partnerParam ?? null}
+          partnerName={partnerName}
+          selfName={selfName}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={false}
+          currentSide="A"
+          onRequestSwap={undefined}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+/**
+ * Horizontal paging shell — mirror of exercise-history's PagingShell.
+ * Per-side isolated state matters extra here because chart trend builds
+ * are O(n_sessions × n_sets) per metric.
+ */
+function PagingShell({
+  idA,
+  idB,
+  initialSide,
+  nameA,
+  nameB,
+  initialClusterMode,
+  db,
+}: {
+  idA: string;
+  idB: string;
+  initialSide: ClusterSide;
+  nameA: string | null;
+  nameB: string | null;
+  initialClusterMode: ClusterFilterMode;
+  db: Database;
+}) {
+  const router = useRouter();
+  const [pageWidth, setPageWidth] = useState<number>(() =>
+    Dimensions.get('window').width
+  );
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [currentSide, setCurrentSide] = useState<ClusterSide>(initialSide);
+  const didInitialScrollRef = useRef(false);
+
+  const onLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => {
+      const w = e.nativeEvent.layout.width;
+      if (w > 0 && w !== pageWidth) setPageWidth(w);
+      if (!didInitialScrollRef.current && initialSide === 'B' && w > 0) {
+        scrollRef.current?.scrollTo({ x: w, y: 0, animated: false });
+        didInitialScrollRef.current = true;
+      } else if (!didInitialScrollRef.current && w > 0) {
+        didInitialScrollRef.current = true;
+      }
+    },
+    [initialSide, pageWidth]
+  );
+
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const idx = Math.round(x / Math.max(pageWidth, 1));
+      const nextSide = pageIndexToSide(idx);
+      if (nextSide !== currentSide) {
+        setCurrentSide(nextSide);
+        router.setParams({ side: nextSide });
+      }
+    },
+    [pageWidth, currentSide, router]
+  );
+
+  const onRequestSwap = useCallback(() => {
+    const targetSide: ClusterSide = currentSide === 'A' ? 'B' : 'A';
+    const targetX = sideToPageIndex(targetSide) * pageWidth;
+    scrollRef.current?.scrollTo({ x: targetX, y: 0, animated: true });
+    setCurrentSide(targetSide);
+    router.setParams({ side: targetSide });
+  }, [currentSide, pageWidth, router]);
+
+  return (
+    <ScrollView
+      ref={scrollRef}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      onLayout={onLayout}
+      onMomentumScrollEnd={onMomentumScrollEnd}
+      style={styles.pager}>
+      <View style={{ width: pageWidth }}>
+        <ChartPageContent
+          db={db}
+          exerciseId={idA}
+          partnerExerciseId={idB}
+          partnerName={nameB}
+          selfName={nameA}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={true}
+          currentSide={currentSide}
+          onRequestSwap={onRequestSwap}
+        />
+      </View>
+      <View style={{ width: pageWidth }}>
+        <ChartPageContent
+          db={db}
+          exerciseId={idB}
+          partnerExerciseId={idA}
+          partnerName={nameA}
+          selfName={nameB}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={true}
+          currentSide={currentSide}
+          onRequestSwap={onRequestSwap}
+        />
+      </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * Per-page body: title with switcher + chips + segmented + advanced +
+ * period stats + metric toggle + chart card(s) + year filter. Owns its
+ * own DB fetch + filter state so two PageContents are fully isolated.
+ */
+function ChartPageContent({
+  db,
+  exerciseId,
+  partnerExerciseId,
+  partnerName,
+  selfName: _selfName,
+  initialClusterMode,
+  showSwitcher,
+  currentSide,
+  onRequestSwap,
+}: {
+  db: Database;
+  exerciseId: string;
+  partnerExerciseId: string | null;
+  partnerName: string | null;
+  selfName: string | null;
+  initialClusterMode: ClusterFilterMode;
+  showSwitcher: boolean;
+  currentSide: ClusterSide;
+  onRequestSwap: (() => void) | undefined;
+}) {
+  const router = useRouter();
+  const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
+  const [hasClusterRows, setHasClusterRows] = useState(false);
+  const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
+  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
+  const [unit, setUnit] = useState<UnitPreference>('kg');
+
+  const [bucketFilters, setBucketFilters] = useState<Set<RepBucketChip>>(
+    new Set()
+  );
+  const [programId, setProgramId] = useState<string | null>(null);
+  const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
+  const [clusterMode, setClusterMode] =
+    useState<ClusterFilterMode>(initialClusterMode);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [programPickerOpen, setProgramPickerOpen] = useState(false);
+
+  const [chartToggle, setChartToggle] = useState<ChartToggle>('weight');
+  const [yearFilter, setYearFilter] = useState<number | null>(
+    new Date().getFullYear()
+  );
+
   const refresh = useCallback(async () => {
-    if (!id) return;
-    const [h, ss, ps, u, has, pName] = await Promise.all([
-      getExerciseHistoryHeader(db, id),
-      listExerciseHistoryBySession(db, id),
-      listProgramsForExercise(db, id),
+    if (!exerciseId) return;
+    const [h, ss, ps, u, has] = await Promise.all([
+      getExerciseHistoryHeader(db, exerciseId),
+      listExerciseHistoryBySession(db, exerciseId),
+      listProgramsForExercise(db, exerciseId),
       getUnitPreference(db),
-      hasClusterHistory(db, id),
-      // Slice 10c overnight #11 — partner name for A↔B switcher; skip the
-      // DB call when caller didn't pass `partner=`.
-      partnerParam
-        ? getExerciseName(db, partnerParam)
-        : Promise.resolve(null),
+      hasClusterHistory(db, exerciseId),
     ]);
     setHeader(h);
     setSessions(ss);
     setPrograms(ps);
     setUnit(u);
     setHasClusterRows(has);
-    setPartnerName(pName);
-  }, [db, id, partnerParam]);
+  }, [db, exerciseId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -241,14 +420,11 @@ export default function ExerciseChartScreen() {
             : s.sets.filter((set) =>
                 [...bucketFilters].some((b) => matchesChip(set.reps, b))
               );
-        // Slice 10c — cluster filter (independent of bucket filter axis).
         const clustered = filterSetsByClusterMode(bucketed, clusterMode);
         return { ...s, sets: clustered };
       })
       .filter((s) => s.sets.length > 0);
   }, [sessions, bucketFilters, programId, subTagFilters, clusterMode]);
-
-  if (!id) return null;
 
   const onBucketChipTap = (chip: RepBucketChip) => {
     setBucketFilters((prev) => {
@@ -290,15 +466,13 @@ export default function ExerciseChartScreen() {
 
   const onJumpToHistory = () => {
     persistFilter(bucketFilters, programId, subTagFilters, clusterMode);
-    // replace (not push) to avoid stacking two modal screens — see ADR-0017
-    // Q14 amendment notes; two stacked modals crash on Metro R reload.
-    // Slice 10c overnight #11 — forward partner + clusterMode so the history
-    // page renders the same A↔B switcher (mirror of onJumpToChart over there).
-    // Carry `side` so history page knows which arrow to dim on cold open.
-    const query = partnerParam
-      ? `?clusterMode=${clusterMode}&partner=${partnerParam}&side=${side}`
+    // replace (not push) — see ADR-0017 Q14 amendment notes; carry
+    // partner + clusterMode + side so history page mirrors this paging
+    // shell on cold open.
+    const query = partnerExerciseId
+      ? `?clusterMode=${clusterMode}&partner=${partnerExerciseId}&side=${currentSide}`
       : '';
-    router.replace(`/exercise-history/${id}${query}`);
+    router.replace(`/exercise-history/${exerciseId}${query}`);
   };
 
   const onClearAllFilters = () => {
@@ -315,8 +489,7 @@ export default function ExerciseChartScreen() {
   const selectedProgram = programs.find((p) => p.id === programId);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Stack.Screen options={screenOptions} />
+    <>
       <ScrollView contentContainerStyle={styles.scroll}>
         {!header ? (
           <Text style={styles.empty}>找不到此動作。</Text>
@@ -326,65 +499,20 @@ export default function ExerciseChartScreen() {
           </Text>
         ) : (
           <View style={{ gap: 12 }}>
-            {/* Slice 10c overnight #12 — body title with A↔B switcher arrows
-                when in cluster_only mode with resolved partner. Mirrors the
-                exercise-history HeaderCard's name row. */}
+            {/* Body title with A↔B switcher arrows when paging; plain
+                name otherwise. Disabled boundary arrow per
+                switcherArrowDisabled() in clusterSwitcher.ts. */}
             {showSwitcher ? (
-              (() => {
-                // Slice 10c overnight #13 — only the arrow opposite the
-                // current side is tappable; the boundary arrow is dimmed
-                // and disabled.
-                const leftDisabled = side === 'A';
-                const rightDisabled = side === 'B';
-                return (
-                  <View style={styles.headerNameRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`
-                      }
-                      accessibilityState={{ disabled: leftDisabled }}
-                      onPress={leftDisabled ? undefined : onSwapPartner}
-                      disabled={leftDisabled}
-                      hitSlop={12}>
-                      <Text
-                        style={[
-                          styles.headerArrow,
-                          leftDisabled && styles.headerArrowDisabled,
-                        ]}>
-                        ‹
-                      </Text>
-                    </Pressable>
-                    <Text
-                      style={[styles.headerName, styles.headerNameInRow]}
-                      numberOfLines={2}>
-                      {header.exercise_name}
-                    </Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`
-                      }
-                      accessibilityState={{ disabled: rightDisabled }}
-                      onPress={rightDisabled ? undefined : onSwapPartner}
-                      disabled={rightDisabled}
-                      hitSlop={12}>
-                      <Text
-                        style={[
-                          styles.headerArrow,
-                          rightDisabled && styles.headerArrowDisabled,
-                        ]}>
-                        ›
-                      </Text>
-                    </Pressable>
-                  </View>
-                );
-              })()
+              <SwitcherTitle
+                name={header.exercise_name}
+                currentSide={currentSide}
+                onRequestSwap={onRequestSwap}
+                partnerName={partnerName}
+              />
             ) : (
               <Text style={styles.headerName}>{header.exercise_name}</Text>
             )}
 
-            {/* Bucket multi-select chips */}
             <View style={styles.filterRow}>
               {REP_BUCKET_CHIPS.map((chip) => {
                 const active =
@@ -403,12 +531,10 @@ export default function ExerciseChartScreen() {
               })}
             </View>
 
-            {/* 3-段 cluster filter (slice 10c) — same surface as history page. */}
             {hasClusterRows ? (
               <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
             ) : null}
 
-            {/* Advanced filter section (collapsible) */}
             <View style={styles.advancedWrap}>
               <Pressable
                 onPress={() => setAdvancedOpen((v) => !v)}
@@ -483,7 +609,6 @@ export default function ExerciseChartScreen() {
               ) : null}
             </View>
 
-            {/* Period stats */}
             <PeriodStatsCard
               sessions={filteredSessions}
               header={header}
@@ -491,7 +616,6 @@ export default function ExerciseChartScreen() {
               yearFilter={yearFilter}
             />
 
-            {/* Metric toggle */}
             <View style={styles.metricToggle}>
               {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((t) => (
                 <Pressable
@@ -512,7 +636,6 @@ export default function ExerciseChartScreen() {
               ))}
             </View>
 
-            {/* Chart card(s) */}
             {chartToggle === 'parallel'
               ? (['weight', 'volume', 'e1rm'] as const).map((m) => (
                   <ChartCard
@@ -537,7 +660,6 @@ export default function ExerciseChartScreen() {
             <YearFilterRow value={yearFilter} onChange={setYearFilter} />
           </View>
         )}
-
       </ScrollView>
 
       <Modal
@@ -576,7 +698,61 @@ export default function ExerciseChartScreen() {
           </View>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </>
+  );
+}
+
+function SwitcherTitle({
+  name,
+  currentSide,
+  onRequestSwap,
+  partnerName,
+}: {
+  name: string;
+  currentSide: ClusterSide;
+  onRequestSwap: (() => void) | undefined;
+  partnerName: string | null;
+}) {
+  const leftDisabled = switcherArrowDisabled(currentSide, 'left');
+  const rightDisabled = switcherArrowDisabled(currentSide, 'right');
+  return (
+    <View style={styles.headerNameRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`}
+        accessibilityState={{ disabled: leftDisabled }}
+        onPress={leftDisabled ? undefined : onRequestSwap}
+        disabled={leftDisabled || !onRequestSwap}
+        hitSlop={12}>
+        <Text
+          style={[
+            styles.headerArrow,
+            leftDisabled && styles.headerArrowDisabled,
+          ]}>
+          ‹
+        </Text>
+      </Pressable>
+      <Text
+        style={[styles.headerName, styles.headerNameInRow]}
+        numberOfLines={2}>
+        {name}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`}
+        accessibilityState={{ disabled: rightDisabled }}
+        onPress={rightDisabled ? undefined : onRequestSwap}
+        disabled={rightDisabled || !onRequestSwap}
+        hitSlop={12}>
+        <Text
+          style={[
+            styles.headerArrow,
+            rightDisabled && styles.headerArrowDisabled,
+          ]}>
+          ›
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -981,6 +1157,7 @@ function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  pager: { flex: 1 },
   scroll: { padding: 16, paddingBottom: 36, gap: 12 },
   empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic', paddingVertical: 12 },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
@@ -1142,9 +1319,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     paddingHorizontal: 8,
   },
-  // Slice 10c overnight #12 — A↔B switcher relocated to body title row
-  // (mirror of exercise-history). Chart had no body exercise name before, so
-  // we add headerName here too for consistent visual hierarchy.
   headerName: { fontSize: 22, fontWeight: '700' },
   headerNameRow: {
     flexDirection: 'row',
@@ -1158,7 +1332,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     paddingHorizontal: 4,
   },
-  // Slice 10c overnight #13 — dim boundary arrow (mirror of history).
   headerArrowDisabled: { opacity: 0.3 },
   headerNameInRow: { flex: 1, textAlign: 'center' },
   btnPressed: { opacity: 0.85 },
