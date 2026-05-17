@@ -1639,7 +1639,7 @@ export default function TodayScreen() {
                             // Slice 10c overnight #11 — carry `partner=B.id` so
                             // the destination renders the A↔B switcher.
                             router.push(
-                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}`,
+                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}&side=A`,
                             )
                           }
                           onSettingsPress={() => onSettingsPress(p)}

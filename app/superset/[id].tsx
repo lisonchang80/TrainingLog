@@ -165,7 +165,7 @@ export default function SupersetDetailScreen() {
                   // sides; `exB?.id ?? ''` is a safe fallback — an empty
                   // partner trips the switcher's null-guard → falls back to
                   // the plain '動作歷史' title.
-                  `/exercise-history/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}`,
+                  `/exercise-history/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}&side=A`,
                 )
               : undefined
           }
@@ -175,7 +175,7 @@ export default function SupersetDetailScreen() {
           onPress={() =>
             exA
               ? router.push(
-                  `/exercise-chart/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}`,
+                  `/exercise-chart/${exA.id}?clusterMode=cluster_only&partner=${exB?.id ?? ''}&side=A`,
                 )
               : undefined
           }
