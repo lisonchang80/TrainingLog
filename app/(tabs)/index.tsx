@@ -2190,7 +2190,13 @@ function ExerciseCard({
           <Text style={styles.exerciseCardGearText}>⚙️</Text>
         </Pressable>
       </View>
-      {prSnapshot &&
+      {/*
+        PR row 只在 expanded 才渲染 (overnight #5 第 3 點): collapsed = 只有
+        header + progress bar row (跟 cluster card 一致 — cluster 沒 PR row);
+        expanded = PR row + set rows + footer.
+      */}
+      {isExpanded &&
+      prSnapshot &&
       (prSnapshot.topWeightSet !== null ||
         prSnapshot.topVolumeSet !== null) ? (
         <View style={styles.exerciseCardPRLine}>
