@@ -85,11 +85,17 @@ export default function ExerciseChartScreen() {
     id,
     clusterMode: clusterModeParam,
     partner: partnerParam,
+    side: sideParam,
   } = useLocalSearchParams<{
     id: string;
     clusterMode?: string;
     partner?: string;
+    side?: 'A' | 'B';
   }>();
+  // Slice 10c overnight #13 — A↔B switcher boundary dim (mirror of
+  // exercise-history). Cluster only has 2 sides; current side is purely URL-
+  // driven. Anything that isn't literal 'B' falls back to 'A'.
+  const side: 'A' | 'B' = sideParam === 'B' ? 'B' : 'A';
   const db = useDatabase();
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
@@ -128,10 +134,13 @@ export default function ExerciseChartScreen() {
 
   const onSwapPartner = useCallback(() => {
     if (!id || !partnerParam) return;
+    // Side flips on swap. The new route's `id` is the partner and its
+    // `partner` is the current id, so the URL stays self-consistent.
+    const nextSide: 'A' | 'B' = side === 'A' ? 'B' : 'A';
     router.replace(
-      `/exercise-chart/${partnerParam}?clusterMode=cluster_only&partner=${id}`
+      `/exercise-chart/${partnerParam}?clusterMode=cluster_only&partner=${id}&side=${nextSide}`
     );
-  }, [id, partnerParam, router]);
+  }, [id, partnerParam, router, side]);
 
   const screenOptions = useMemo(
     () => ({
@@ -285,8 +294,9 @@ export default function ExerciseChartScreen() {
     // Q14 amendment notes; two stacked modals crash on Metro R reload.
     // Slice 10c overnight #11 — forward partner + clusterMode so the history
     // page renders the same A↔B switcher (mirror of onJumpToChart over there).
+    // Carry `side` so history page knows which arrow to dim on cold open.
     const query = partnerParam
-      ? `?clusterMode=${clusterMode}&partner=${partnerParam}`
+      ? `?clusterMode=${clusterMode}&partner=${partnerParam}&side=${side}`
       : '';
     router.replace(`/exercise-history/${id}${query}`);
   };
@@ -320,27 +330,56 @@ export default function ExerciseChartScreen() {
                 when in cluster_only mode with resolved partner. Mirrors the
                 exercise-history HeaderCard's name row. */}
             {showSwitcher ? (
-              <View style={styles.headerNameRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`切換到 ${partnerName}`}
-                  onPress={onSwapPartner}
-                  hitSlop={12}>
-                  <Text style={styles.headerArrow}>‹</Text>
-                </Pressable>
-                <Text
-                  style={[styles.headerName, styles.headerNameInRow]}
-                  numberOfLines={2}>
-                  {header.exercise_name}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`切換到 ${partnerName}`}
-                  onPress={onSwapPartner}
-                  hitSlop={12}>
-                  <Text style={styles.headerArrow}>›</Text>
-                </Pressable>
-              </View>
+              (() => {
+                // Slice 10c overnight #13 — only the arrow opposite the
+                // current side is tappable; the boundary arrow is dimmed
+                // and disabled.
+                const leftDisabled = side === 'A';
+                const rightDisabled = side === 'B';
+                return (
+                  <View style={styles.headerNameRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`
+                      }
+                      accessibilityState={{ disabled: leftDisabled }}
+                      onPress={leftDisabled ? undefined : onSwapPartner}
+                      disabled={leftDisabled}
+                      hitSlop={12}>
+                      <Text
+                        style={[
+                          styles.headerArrow,
+                          leftDisabled && styles.headerArrowDisabled,
+                        ]}>
+                        ‹
+                      </Text>
+                    </Pressable>
+                    <Text
+                      style={[styles.headerName, styles.headerNameInRow]}
+                      numberOfLines={2}>
+                      {header.exercise_name}
+                    </Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`
+                      }
+                      accessibilityState={{ disabled: rightDisabled }}
+                      onPress={rightDisabled ? undefined : onSwapPartner}
+                      disabled={rightDisabled}
+                      hitSlop={12}>
+                      <Text
+                        style={[
+                          styles.headerArrow,
+                          rightDisabled && styles.headerArrowDisabled,
+                        ]}>
+                        ›
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })()
             ) : (
               <Text style={styles.headerName}>{header.exercise_name}</Text>
             )}
@@ -1119,6 +1158,8 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     paddingHorizontal: 4,
   },
+  // Slice 10c overnight #13 — dim boundary arrow (mirror of history).
+  headerArrowDisabled: { opacity: 0.3 },
   headerNameInRow: { flex: 1, textAlign: 'center' },
   btnPressed: { opacity: 0.85 },
   modalOverlay: {
