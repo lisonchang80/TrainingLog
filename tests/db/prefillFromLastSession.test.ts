@@ -44,6 +44,7 @@ describe('prefillSessionExerciseFromLastSession', () => {
     reps: number,
     set_kind: 'warmup' | 'working' | 'dropset' = 'working',
     created_at = 1_700_000_000_000,
+    is_logged: 0 | 1 = 1, // default to logged — existing tests assume fully-completed prior session
   ) {
     await insertSessionSet(db, {
       id,
@@ -57,6 +58,9 @@ describe('prefillSessionExerciseFromLastSession', () => {
       set_kind,
       parent_set_id: null,
     });
+    if (is_logged === 1) {
+      await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, id);
+    }
   }
 
   it('copies last session sets into current (weight / reps / set_kind verbatim)', async () => {

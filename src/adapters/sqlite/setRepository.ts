@@ -500,13 +500,18 @@ export async function prefillSessionExerciseFromLastSession(
     now?: () => number;
   }
 ): Promise<number> {
-  // Find most recent session_id (excl current) that has any set for this exercise.
+  // Find most recent session_id (excl current) that has any LOGGED set for
+  // this exercise. is_logged=1 is the single source of truth for "this set
+  // actually happened" (ADR-0019); filtering ensures an in-progress prior
+  // session's still-unchecked planned values don't bleed into the new
+  // session (sibling fix to commit 1f255f5 in exerciseHistoryRepository).
   const lastSession = await db.getFirstAsync<{ session_id: string }>(
     `SELECT s.session_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND s.session_id != ?
       ORDER BY s.created_at DESC, s.id DESC
       LIMIT 1`,
@@ -515,8 +520,10 @@ export async function prefillSessionExerciseFromLastSession(
   );
   if (!lastSession) return 0;
 
-  // Pull that session's full set list for this exercise, sorted ASC by ordering
-  // (preserves warmup-before-working flow).
+  // Pull that session's full LOGGED set list for this exercise, sorted ASC by
+  // ordering (preserves warmup-before-working flow). is_logged=1 filter is
+  // load-bearing for the same reason as the lookup above: a partially-logged
+  // prior session must only contribute the sets the user actually ticked.
   const sourceSets = await db.getAllAsync<{
     weight_kg: number | null;
     reps: number | null;
@@ -524,7 +531,9 @@ export async function prefillSessionExerciseFromLastSession(
   }>(
     `SELECT weight_kg, reps, set_kind
        FROM "set"
-      WHERE session_id = ? AND exercise_id = ? AND is_skipped = 0
+      WHERE session_id = ? AND exercise_id = ?
+        AND is_skipped = 0
+        AND is_logged = 1
       ORDER BY ordering ASC`,
     lastSession.session_id,
     args.exercise_id
