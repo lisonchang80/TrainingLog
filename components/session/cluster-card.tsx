@@ -609,12 +609,15 @@ const styles = StyleSheet.create({
   },
   clusterCardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // overnight #5 第 5 點: 控制鈕 (chevron + gear) align row 1 (tag row)
+    // 而不是 vertical center, 配合 3-row 標題 layout (tag / title / bar+chip)
+    alignItems: 'flex-start',
   },
   clusterCardHeaderMain: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    // 同上: chevron align row 1 (tag), 不要垂直中心
+    alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
