@@ -55,6 +55,10 @@ import {
   type ClusterCycle,
   type ClusterGroup,
 } from '@/src/domain/session/clusterCard';
+import {
+  computeWorkingSetOrdinals,
+  displaySetLabel,
+} from '@/src/domain/set/workingSetOrdinal';
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
 
@@ -160,6 +164,13 @@ export function ClusterCard({
 }: ClusterCardProps): React.ReactElement {
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
+  // Working-set ordinal per side (slice 10c overnight #7 第 1 點).
+  // Each side computes its own map because asymmetric clusters may have
+  // a different working-row composition per side. The shared `#` button
+  // prefers the A side (parent priority); B-side fallback covers the
+  // asymmetric short-side case where only B has a row in this cycle.
+  const aOrdinalMap = computeWorkingSetOrdinals(group.a.sets);
+  const bOrdinalMap = computeWorkingSetOrdinals(group.b.sets);
   // "done" cycles = atomic both_logged. Non-warmup cycles count toward the
   // progress bar denominator (mirrors solo card's planned_sets semantic at
   // the cycle granularity — every cycle row, regardless of cycle's set_kind
@@ -357,8 +368,12 @@ export function ClusterCard({
                     */}
                     {(() => {
                       const refSet = c.a_set ?? c.b_set;
+                      // A-side first (parent priority per ADR-0019 Q8 (d));
+                      // fall back to B's ordinal map for asymmetric cycles
+                      // where only the B side has a set in this slot.
+                      const refMap = c.a_set ? aOrdinalMap : bOrdinalMap;
                       const sharedLabel = refSet
-                        ? setKindLabel(refSet.set_kind)
+                        ? displaySetLabel(refSet, refMap)
                         : '#';
                       const disabled =
                         c.a_set === null && c.b_set === null;
@@ -391,7 +406,7 @@ export function ClusterCard({
                           compact
                           hideLabel
                           set={toSetRowItem(c.a_set)}
-                          setLabel={setKindLabel(c.a_set.set_kind)}
+                          setLabel={displaySetLabel(c.a_set, aOrdinalMap)}
                           isDropsetFollower={false}
                           isClusterLast={false}
                           minusDisabled={true}
@@ -423,7 +438,7 @@ export function ClusterCard({
                           compact
                           hideLabel
                           set={toSetRowItem(c.b_set)}
-                          setLabel={setKindLabel(c.b_set.set_kind)}
+                          setLabel={displaySetLabel(c.b_set, bOrdinalMap)}
                           isDropsetFollower={false}
                           isClusterLast={false}
                           minusDisabled={true}
@@ -584,12 +599,10 @@ function toSetRowItem(s: SessionSetWithExercise): SetRowItem {
   };
 }
 
-/** Map set_kind → display label for SetRowContent's tap-cycle button. */
-function setKindLabel(set_kind: string): string {
-  if (set_kind === 'warmup') return '熱';
-  if (set_kind === 'dropset') return 'D';
-  return '#';
-}
+// Slice 10c overnight #7 第 1 點: 砍掉舊 `setKindLabel` (working → '#')，
+// 改用 `displaySetLabel` + `computeWorkingSetOrdinals` 顯示 working ordinal。
+// 'warmup' → '熱' / 'dropset' → 'D' 的分支由 `displaySetLabel` 保留 (第 3 點
+// — legacy dropset 顯示驗證).
 
 const styles = StyleSheet.create({
   clusterCard: {

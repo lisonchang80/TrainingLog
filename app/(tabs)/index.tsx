@@ -85,8 +85,14 @@ import {
   type PRSnapshot,
 } from '@/src/domain/pr/prQuery';
 import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRepository';
-import { computeSetLabels } from '@/src/domain/set/setLabels';
-import { cycleSessionSetKind } from '@/src/domain/set/cycleSessionSetKind';
+import {
+  computeWorkingSetOrdinals,
+  displaySetLabel,
+} from '@/src/domain/set/workingSetOrdinal';
+import {
+  cycleSessionSetKind,
+  cycleSessionSetKindClusterAware,
+} from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import {
   latestPerMetric,
@@ -2111,11 +2117,17 @@ function ExerciseCard({
    */
   onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
 }): React.ReactElement {
-  // Map session set_kind → kind so the shared computeSetLabels (which uses
-  // the template-side `kind` field name) works without a session-specific
-  // copy. Same trick is documented on computeSetLabels' JSDoc.
-  const setLabels = computeSetLabels(
-    sets.map((s) => ({ kind: s.set_kind, parent_set_id: s.parent_set_id })),
+  // Slice 10c overnight #7 第 1 點: `#` 改顯示 working set ordinal —
+  // build per-id map (only working rows present) and feed into the
+  // shared `displaySetLabel` helper per render (per-id lookup avoids
+  // positional brittleness when the drag-flat-list re-renders rows
+  // mid-hover with a different index).
+  const ordinalMap = computeWorkingSetOrdinals(
+    sets.map((s) => ({
+      id: s.id,
+      set_kind: s.set_kind,
+      ordering: s.ordering,
+    })),
   );
   const notImplementedAlert = (what: string) =>
     Alert.alert(
@@ -2252,11 +2264,8 @@ function ExerciseCard({
                 drag,
                 isActive,
               }: RenderItemParams<SessionSetWithExercise>) => {
-                // Recompute set label per-item from CURRENT positional index.
-                // (DraggableFlatList re-renders rows on hover; using the
-                // outer-scope setLabels indexed by `i` is brittle — recompute
-                // by id lookup against the snapshot.)
-                const i = sets.findIndex((x) => x.id === s.id);
+                // Per-id ordinal lookup (slice 10c overnight #7 第 1 點)
+                // — survives drag re-renders where positional index drifts.
                 const row: SetRowItem = {
                   id: s.id,
                   reps: s.reps ?? 0,
@@ -2314,7 +2323,17 @@ function ExerciseCard({
                       <View style={styles.exerciseCardSetRowContent}>
                         <SetRowContent
                           set={row}
-                          setLabel={setLabels[i] ?? ''}
+                          setLabel={
+                            // dropset follower 維持隱藏 (空字串)；其餘走
+                            // displaySetLabel: working → ordinal / warmup → 熱 /
+                            // dropset head → D (overnight #7 第 1 點).
+                            isDropsetFollower
+                              ? ''
+                              : displaySetLabel(
+                                  { id: s.id, set_kind: s.set_kind },
+                                  ordinalMap,
+                                )
+                          }
                           isDropsetFollower={isDropsetFollower}
                           isClusterLast={false}
                           minusDisabled={true}
