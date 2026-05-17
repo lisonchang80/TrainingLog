@@ -250,4 +250,53 @@ describe('cycleSessionSetKindClusterAware', () => {
       cycleSessionSetKindClusterAware([mk('a', 'working')], 'missing', 'new-1', true),
     ).toEqual([]);
   });
+
+  // Slice 10c overnight #7 第 2 點 — explicit contract: solo vs cluster
+  // diverge at the warmup transition. Solo emits an insertFollower op
+  // (→ dropset state), cluster emits a plain update (→ working state).
+  // This test pins the difference so future refactors keep the cluster
+  // shared `#` button skipping dropset entirely (per ADR-0019 Q2 § (C)).
+  it('cluster vs solo divergence: warmup tap emits dropset for solo, working for cluster', () => {
+    const sets = [mk('a', 'warmup', null, 10, 60)];
+    const solo = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', false);
+    const cluster = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    // Solo: 2 ops (update kind + insertFollower).
+    expect(solo).toHaveLength(2);
+    expect(solo[0]).toMatchObject({
+      type: 'update',
+      patch: { set_kind: 'dropset' },
+    });
+    expect(solo[1]).toMatchObject({ type: 'insertFollower' });
+    // Cluster: 1 op (update kind), NO follower insert.
+    expect(cluster).toHaveLength(1);
+    expect(cluster[0]).toEqual({
+      type: 'update',
+      set_id: 'a',
+      patch: { set_kind: 'working' },
+    });
+  });
+
+  it('is_in_cluster=true: existing dropset (legacy data) cycles back to working — never re-enters dropset', () => {
+    // Sanity: a cluster row that somehow holds set_kind='dropset' (e.g.
+    // legacy row from before the cluster cycle restriction) gets nudged
+    // back to working on the next tap. The follow-up tap then resumes
+    // the W ↔ Wm ping-pong without ever revisiting dropset.
+    let sets: CycleSessionSetInput[] = [mk('a', 'dropset', null)];
+    let ops = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    expect(ops[0]).toEqual({
+      type: 'update',
+      set_id: 'a',
+      patch: { set_kind: 'working', parent_set_id: null },
+    });
+    sets = [mk('a', 'working')];
+    ops = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    expect(ops).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'warmup' } },
+    ]);
+    sets = [mk('a', 'warmup')];
+    ops = cycleSessionSetKindClusterAware(sets, 'a', 'new-1', true);
+    expect(ops).toEqual([
+      { type: 'update', set_id: 'a', patch: { set_kind: 'working' } },
+    ]);
+  });
 });

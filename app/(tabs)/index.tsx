@@ -89,10 +89,7 @@ import {
   computeWorkingSetOrdinals,
   displaySetLabel,
 } from '@/src/domain/set/workingSetOrdinal';
-import {
-  cycleSessionSetKind,
-  cycleSessionSetKindClusterAware,
-} from '@/src/domain/set/cycleSessionSetKind';
+import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import {
   latestPerMetric,
@@ -570,13 +567,24 @@ export default function TodayScreen() {
    * re-converge. Wrapping in a transaction is a future hardening (would
    * require pushing the op application down into the repo).
    */
-  const onCycleSetKind = async (exercise_id: string, set_id: string) => {
+  /**
+   * Slice 10c overnight #7 第 2 點: cluster path routes through
+   * `cycleSessionSetKindClusterAware` with `is_in_cluster=true` so the
+   * cycle order is W ↔ Wm (skip dropset entirely). Solo path
+   * (`is_in_cluster=false`, default) keeps the existing
+   * W → Wm → D → W transition unchanged.
+   */
+  const onCycleSetKind = async (
+    exercise_id: string,
+    set_id: string,
+    is_in_cluster: boolean = false,
+  ) => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     const setsForExercise = setsInSession.filter(
       (s) => s.exercise_id === exercise_id,
     );
-    const ops = cycleSessionSetKind(
+    const ops = cycleSessionSetKindClusterAware(
       setsForExercise.map((s) => ({
         id: s.id,
         set_kind: s.set_kind,
@@ -586,6 +594,7 @@ export default function TodayScreen() {
       })),
       set_id,
       randomUUID(),
+      is_in_cluster,
     );
     if (ops.length === 0) return;
     try {
@@ -1637,11 +1646,12 @@ export default function TodayScreen() {
                           }
                           onCycleClusterSetKind={(set_id) => {
                             // Mirror solo path: route through onCycleSetKind
-                            // with the set's owning exercise_id.
+                            // with the set's owning exercise_id. is_in_cluster=true
+                            // → cycle 跳過 dropset (overnight #7 第 2 點).
                             const s = setsInSession.find(
                               (x) => x.id === set_id,
                             );
-                            if (s) onCycleSetKind(s.exercise_id, set_id);
+                            if (s) onCycleSetKind(s.exercise_id, set_id, true);
                           }}
                           onCycleClusterCycleSetKind={async (args) => {
                             // Shared `#` button — fire both sides in lockstep
@@ -1649,6 +1659,8 @@ export default function TodayScreen() {
                             // A and B should share set_kind state at the
                             // cycle granularity since the shared button is
                             // the only entry point exposed in UI.
+                            // is_in_cluster=true → cycle 跳過 dropset，A 跟 B
+                            // 都只 W ↔ Wm 兩態 (overnight #7 第 2 點).
                             const a = args.a_set_id
                               ? setsInSession.find(
                                   (x) => x.id === args.a_set_id,
@@ -1659,8 +1671,8 @@ export default function TodayScreen() {
                                   (x) => x.id === args.b_set_id,
                                 )
                               : null;
-                            if (a) await onCycleSetKind(a.exercise_id, a.id);
-                            if (b) await onCycleSetKind(b.exercise_id, b.id);
+                            if (a) await onCycleSetKind(a.exercise_id, a.id, true);
+                            if (b) await onCycleSetKind(b.exercise_id, b.id, true);
                           }}
                           onShowClusterSetNote={(set_id, current) =>
                             setNoteSheetTarget({
