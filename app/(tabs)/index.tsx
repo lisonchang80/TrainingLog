@@ -1078,14 +1078,21 @@ export default function TodayScreen() {
    * adds two history entries「📖 動作歷史 (A)」「📖 動作歷史 (B)」直接從
    * ⚙️ menu 跳到對應側 cluster-only 歷史頁，省去 footer 按「動作歷史」
    * 後再到歷史頁切換 switcher 的兩步操作。其他 menu 行為（編輯備註、
-   * 休息秒數、刪除、排序）保留共用 solo logic 不分離，等正解 redesign。
+   * 休息秒數、排序）保留共用 solo logic 不分離，等正解 redesign。
+   *
+   * Slice 10c overnight #18 — cluster context (partnerSessionExerciseId also
+   * truthy) makes 🗑️ 刪除動作 cascade-delete BOTH sides of the cluster
+   * (A + B session_exercise rows + every set on either side). Without
+   * this, deleting one side left the other as an orphan card (B's
+   * parent_id still pointed at the deleted A row). Solo path unchanged.
    */
   const onSettingsPress = (
     planRow: SessionExerciseRowWithName,
-    options?: { partnerExerciseId?: string },
+    options?: { partnerExerciseId?: string; partnerSessionExerciseId?: string },
   ) => {
     const partnerExerciseId = options?.partnerExerciseId;
-    const isCluster = !!partnerExerciseId;
+    const partnerSessionExerciseId = options?.partnerSessionExerciseId;
+    const isCluster = !!partnerExerciseId && !!partnerSessionExerciseId;
     // Build options array. Cluster context inserts two history items
     // before 🔃 排序動作 so the destructive 🗑️ 刪除動作 keeps its
     // visual separation. Indices below are derived from this array.
@@ -1157,6 +1164,82 @@ export default function TodayScreen() {
         } else if (label === '🔃 排序動作') {
           setReorderSheetOpen(true);
         } else if (label === '🗑️ 刪除動作') {
+          // Slice 10c overnight #18 — cluster context cascade-deletes BOTH
+          // sides (A + B session_exercise rows + every set on either side).
+          // 「刪超級組」= 拆掉整個 cluster, otherwise the B side becomes an
+          // orphan card (parent_id pointing at a deleted row). Solo path
+          // unchanged from #17 — single-card scoped delete.
+          if (isCluster && partnerSessionExerciseId) {
+            // v019 isolation: count sets across BOTH cards by
+            // session_exercise_id ∈ {A.id, B.id}. Legacy fallback (untagged
+            // pre-v019 rows) is intentionally NOT applied here — cluster
+            // pairs were always created post-v019 so any row in this branch
+            // has session_exercise_id set.
+            const partnerPlan = plan.find(
+              (p) => p.id === partnerSessionExerciseId,
+            );
+            const partnerName =
+              partnerPlan?.exercise_name ?? '(未知動作)';
+            const setsForCluster = setsInSession.filter(
+              (s) =>
+                s.session_exercise_id === planRow.id ||
+                s.session_exercise_id === partnerSessionExerciseId,
+            );
+            const loggedCount = setsForCluster.filter(
+              (s) => s.is_logged === 1,
+            ).length;
+            const totalSets = setsForCluster.length;
+            const warningSuffix =
+              loggedCount > 0
+                ? `\n\n將連同 ${totalSets} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                : totalSets > 0
+                  ? `\n\n將連同 ${totalSets} 組未完成記錄一起刪除。`
+                  : '';
+            Alert.alert(
+              '刪除超級組？',
+              `要從這次訓練中移除整個超級組「${planRow.exercise_name} + ${partnerName}」？${warningSuffix}`,
+              [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '刪除',
+                  style: 'destructive',
+                  onPress: async () => {
+                    const session_id = getSessionId(sessionState);
+                    if (!session_id) return;
+                    // sessionRepository's deleteSessionExerciseAndSets is
+                    // not transactional, so we await sequentially. Partial-
+                    // failure handling: if the SECOND delete throws, the
+                    // first is already committed — refresh() in the catch
+                    // arm so UI reflects the actual half-state instead of
+                    // a stale full-cluster card. User can re-tap delete on
+                    // the remaining orphan to finish the job.
+                    try {
+                      await deleteSessionExerciseAndSets(db, {
+                        session_id,
+                        exercise_id: planRow.exercise_id,
+                        session_exercise_id: planRow.id,
+                      });
+                      await deleteSessionExerciseAndSets(db, {
+                        session_id,
+                        exercise_id:
+                          partnerPlan?.exercise_id ?? '',
+                        session_exercise_id: partnerSessionExerciseId,
+                      });
+                      await refresh();
+                    } catch (e) {
+                      Alert.alert(
+                        '刪除失敗',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                      await refresh();
+                    }
+                  },
+                },
+              ],
+            );
+            return;
+          }
+          // Solo path — single-card cascade (unchanged from #17).
           // v019 isolation: count sets on THIS card only (not all cards
           // that happen to share the same exercise_id). Falls back to
           // legacy exercise_id matching for any pre-v019 untagged rows.
@@ -1751,9 +1834,16 @@ export default function TodayScreen() {
                             // dual「動作歷史 (A)」「動作歷史 (B)」entries
                             // that jump straight to the matching side's
                             // cluster_only history page.
+                            //
+                            // Slice 10c overnight #18 — also pass partner B's
+                            // session_exercise.id so 🗑️ 刪除動作 in cluster
+                            // context can cascade-delete BOTH sides (A + B
+                            // session_exercise rows + all their sets) rather
+                            // than half-tearing the RS (B-side orphan).
                             onSettingsPress(p, {
                               partnerExerciseId:
                                 group.b.exercise.exercise_id,
+                              partnerSessionExerciseId: group.b.exercise.id,
                             })
                           }
                           onUpdateClusterSet={(set_id, patch) =>
