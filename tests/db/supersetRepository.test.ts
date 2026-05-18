@@ -2,6 +2,8 @@ import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteData
 import { migrate } from '../../src/db/migrate';
 import {
   deleteReusableSuperset,
+  getReusableSupersetSessionCount,
+  getReusableSupersetSessionCounts,
   getReusableSupersetWithExercises,
   incrementUseCount,
   insertReusableSuperset,
@@ -11,6 +13,12 @@ import {
   updateReusableSupersetColor,
   updateReusableSupersetName,
 } from '../../src/adapters/sqlite/supersetRepository';
+import {
+  createSession,
+  endSession,
+  insertSessionExercise,
+} from '../../src/adapters/sqlite/sessionRepository';
+import { insertSessionSet } from '../../src/adapters/sqlite/setRepository';
 import type { ReusableSupersetDraft } from '../../src/domain/superset/supersetManager';
 
 const BENCH = '00000000-0000-4000-8000-000000000001';
@@ -179,6 +187,221 @@ describe('supersetRepository', () => {
         BENCH,
         SQUAT,
       ]);
+    });
+  });
+
+  /**
+   * Slice 10c overnight #24 — dynamic "N 次" badge for the RS template card.
+   * "N 次" = count of ended sessions that recorded at least one logged
+   * (is_logged=1, is_skipped=0) set against a session_exercise carrying
+   * `reusable_superset_id = this RS template`.
+   */
+  describe('getReusableSupersetSessionCount / Counts (#24)', () => {
+    async function seedRsSession(args: {
+      session_id: string;
+      session_exercise_id_a: string;
+      session_exercise_id_b: string;
+      rs_id: string;
+      set_id_a: string;
+      set_id_b: string;
+      started_at: number;
+      ended_at: number | null;
+      a_is_logged: 0 | 1;
+      b_is_logged: 0 | 1;
+    }): Promise<void> {
+      await createSession(db, {
+        id: args.session_id,
+        started_at: args.started_at,
+      });
+      // A side
+      await insertSessionExercise(db, {
+        id: args.session_exercise_id_a,
+        session_id: args.session_id,
+        exercise_id: BENCH,
+        ordering: 0,
+        planned_sets: 3,
+        planned_reps: null,
+        planned_weight_kg: null,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: args.rs_id,
+      });
+      // B side (parent points back to A)
+      await insertSessionExercise(db, {
+        id: args.session_exercise_id_b,
+        session_id: args.session_id,
+        exercise_id: ROW,
+        ordering: 1,
+        planned_sets: 3,
+        planned_reps: null,
+        planned_weight_kg: null,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: args.session_exercise_id_a,
+        reusable_superset_id: args.rs_id,
+      });
+      // One set per side, session_exercise_id wired through
+      await insertSessionSet(db, {
+        id: args.set_id_a,
+        session_id: args.session_id,
+        exercise_id: BENCH,
+        weight_kg: 80,
+        reps: 10,
+        is_skipped: 0,
+        ordering: 1,
+        created_at: args.started_at + 1,
+        set_kind: 'working',
+        parent_set_id: null,
+        session_exercise_id: args.session_exercise_id_a,
+      });
+      await insertSessionSet(db, {
+        id: args.set_id_b,
+        session_id: args.session_id,
+        exercise_id: ROW,
+        weight_kg: 60,
+        reps: 12,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: args.started_at + 2,
+        set_kind: 'working',
+        parent_set_id: null,
+        session_exercise_id: args.session_exercise_id_b,
+      });
+      if (args.a_is_logged === 1) {
+        await db.runAsync(
+          `UPDATE "set" SET is_logged = 1 WHERE id = ?`,
+          args.set_id_a
+        );
+      }
+      if (args.b_is_logged === 1) {
+        await db.runAsync(
+          `UPDATE "set" SET is_logged = 1 WHERE id = ?`,
+          args.set_id_b
+        );
+      }
+      if (args.ended_at !== null) {
+        await endSession(db, { id: args.session_id, ended_at: args.ended_at });
+      }
+    }
+
+    it('counts an ended session with A+B logged sets as 1', async () => {
+      const rsId = await insertReusableSuperset(db, draft(), uuid, now);
+      await seedRsSession({
+        session_id: 'sess-1',
+        session_exercise_id_a: 'se-1a',
+        session_exercise_id_b: 'se-1b',
+        rs_id: rsId,
+        set_id_a: 's-1a',
+        set_id_b: 's-1b',
+        started_at: 10_000,
+        ended_at: 11_000,
+        a_is_logged: 1,
+        b_is_logged: 1,
+      });
+      expect(await getReusableSupersetSessionCount(db, rsId)).toBe(1);
+      const map = await getReusableSupersetSessionCounts(db);
+      expect(map.get(rsId)).toBe(1);
+    });
+
+    it('does NOT count an active (ended_at IS NULL) session even when sets logged', async () => {
+      const rsId = await insertReusableSuperset(db, draft(), uuid, now);
+      await seedRsSession({
+        session_id: 'sess-active',
+        session_exercise_id_a: 'se-a-a',
+        session_exercise_id_b: 'se-a-b',
+        rs_id: rsId,
+        set_id_a: 's-a-a',
+        set_id_b: 's-a-b',
+        started_at: 10_000,
+        ended_at: null,
+        a_is_logged: 1,
+        b_is_logged: 1,
+      });
+      expect(await getReusableSupersetSessionCount(db, rsId)).toBe(0);
+      const map = await getReusableSupersetSessionCounts(db);
+      expect(map.has(rsId)).toBe(false);
+    });
+
+    it('does NOT count an ended session whose sets are all is_logged=0', async () => {
+      const rsId = await insertReusableSuperset(db, draft(), uuid, now);
+      await seedRsSession({
+        session_id: 'sess-unticked',
+        session_exercise_id_a: 'se-u-a',
+        session_exercise_id_b: 'se-u-b',
+        rs_id: rsId,
+        set_id_a: 's-u-a',
+        set_id_b: 's-u-b',
+        started_at: 10_000,
+        ended_at: 11_000,
+        a_is_logged: 0,
+        b_is_logged: 0,
+      });
+      expect(await getReusableSupersetSessionCount(db, rsId)).toBe(0);
+      const map = await getReusableSupersetSessionCounts(db);
+      expect(map.has(rsId)).toBe(false);
+    });
+
+    it('counts 2 distinct ended sessions using the same RS template as 2', async () => {
+      const rsId = await insertReusableSuperset(db, draft(), uuid, now);
+      await seedRsSession({
+        session_id: 'sess-1',
+        session_exercise_id_a: 'se-1a',
+        session_exercise_id_b: 'se-1b',
+        rs_id: rsId,
+        set_id_a: 's-1a',
+        set_id_b: 's-1b',
+        started_at: 10_000,
+        ended_at: 11_000,
+        a_is_logged: 1,
+        b_is_logged: 1,
+      });
+      await seedRsSession({
+        session_id: 'sess-2',
+        session_exercise_id_a: 'se-2a',
+        session_exercise_id_b: 'se-2b',
+        rs_id: rsId,
+        set_id_a: 's-2a',
+        set_id_b: 's-2b',
+        started_at: 20_000,
+        ended_at: 21_000,
+        a_is_logged: 1,
+        b_is_logged: 0, // only A logged — session still counts (DISTINCT session_id)
+      });
+      expect(await getReusableSupersetSessionCount(db, rsId)).toBe(2);
+      const map = await getReusableSupersetSessionCounts(db);
+      expect(map.get(rsId)).toBe(2);
+    });
+
+    it('batch variant scopes counts per-RS (different templates do not bleed)', async () => {
+      const rsA = await insertReusableSuperset(
+        db,
+        draft({ name: 'A', exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      const rsB = await insertReusableSuperset(
+        db,
+        draft({ name: 'B', exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      await seedRsSession({
+        session_id: 'sess-A',
+        session_exercise_id_a: 'se-A-a',
+        session_exercise_id_b: 'se-A-b',
+        rs_id: rsA,
+        set_id_a: 's-A-a',
+        set_id_b: 's-A-b',
+        started_at: 10_000,
+        ended_at: 11_000,
+        a_is_logged: 1,
+        b_is_logged: 1,
+      });
+      const map = await getReusableSupersetSessionCounts(db);
+      expect(map.get(rsA)).toBe(1);
+      expect(map.has(rsB)).toBe(false);
+      expect(await getReusableSupersetSessionCount(db, rsB)).toBe(0);
     });
   });
 });

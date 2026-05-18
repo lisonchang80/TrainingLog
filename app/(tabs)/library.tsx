@@ -36,7 +36,10 @@ import {
   getActiveSession,
   listSessionUsedExercises,
 } from '@/src/adapters/sqlite/sessionRepository';
-import { listReusableSupersetsWithExercises } from '@/src/adapters/sqlite/supersetRepository';
+import {
+  getReusableSupersetSessionCounts,
+  listReusableSupersetsWithExercises,
+} from '@/src/adapters/sqlite/supersetRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
   clearNewlyCreatedSuperset,
@@ -86,6 +89,12 @@ export default function LibraryScreen() {
   const [supersets, setSupersets] = useState<ReusableSupersetWithExercises[]>(
     []
   );
+  // Slice 10c #24 — dynamic RS "N 次" badge: real session count keyed on
+  // `session_exercise.reusable_superset_id`, NOT `superset.use_count` (which
+  // is only bumped on Template explode and so under-counts actual usage).
+  const [supersetCounts, setSupersetCounts] = useState<Map<string, number>>(
+    new Map()
+  );
 
   const [selectedMgId, setSelectedMgId] = useState<string | null>(null);
   const [isSupersetTab, setIsSupersetTab] = useState(false);
@@ -122,12 +131,13 @@ export default function LibraryScreen() {
   }, [isPickerMode]);
 
   const refresh = useCallback(async () => {
-    const [{ exercises, links }, mgs, ms, counts, ss] = await Promise.all([
+    const [{ exercises, links }, mgs, ms, counts, ss, sCounts] = await Promise.all([
       listExercisesWithLinks(db),
       listMuscleGroups(db),
       listMuscles(db),
       getExerciseSessionCounts(db),
       listReusableSupersetsWithExercises(db),
+      getReusableSupersetSessionCounts(db),
     ]);
     setExercises(exercises);
     setLinks(links);
@@ -135,6 +145,7 @@ export default function LibraryScreen() {
     setMuscles(ms);
     setSessionCounts(counts);
     setSupersets(ss);
+    setSupersetCounts(sCounts);
     // Default to first MG on first load if none selected yet.
     if (selectedMgId === null && !isSupersetTab && mgs.length > 0) {
       setSelectedMgId(mgs[0].id);
@@ -300,6 +311,7 @@ export default function LibraryScreen() {
           {isSupersetTab ? (
             <SupersetGrid
               supersets={supersets}
+              counts={supersetCounts}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
               onTap={onSupersetCardTap}
@@ -674,6 +686,7 @@ function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
 
 function SupersetGrid({
   supersets,
+  counts,
   cardWidth,
   cardHeight,
   onTap,
@@ -682,6 +695,8 @@ function SupersetGrid({
   onInfoPress,
 }: {
   supersets: ReusableSupersetWithExercises[];
+  /** Slice 10c #24 — dynamic per-RS session count (`session_exercise.reusable_superset_id`-keyed). */
+  counts: Map<string, number>;
   cardWidth: number;
   cardHeight: number;
   onTap: (s: ReusableSupersetWithExercises) => void;
@@ -715,6 +730,7 @@ function SupersetGrid({
         <View key={i} style={styles.gridRow}>
           <SupersetCard
             item={pair[0]}
+            count={counts.get(pair[0].superset.id) ?? 0}
             width={cardWidth}
             height={cardHeight}
             onPress={() => onTap(pair[0])}
@@ -726,6 +742,7 @@ function SupersetGrid({
           {pair[1] ? (
             <SupersetCard
               item={pair[1]}
+              count={counts.get(pair[1].superset.id) ?? 0}
               width={cardWidth}
               height={cardHeight}
               onPress={() => onTap(pair[1])}
@@ -745,6 +762,7 @@ function SupersetGrid({
 
 function SupersetCard({
   item,
+  count,
   width,
   height,
   onPress,
@@ -754,6 +772,9 @@ function SupersetCard({
   onInfoPress,
 }: {
   item: ReusableSupersetWithExercises;
+  /** Slice 10c #24 — dynamic session count (ended sessions with at least one
+   *  logged set against this RS template). Replaces `superset.use_count`. */
+  count: number;
   width: number;
   height: number;
   onPress: () => void;
@@ -782,8 +803,8 @@ function SupersetCard({
         pressed && styles.pressed,
       ]}>
       <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
-      {superset.use_count > 0 && (
-        <Text style={styles.countBadge}>{superset.use_count} 次</Text>
+      {count > 0 && (
+        <Text style={styles.countBadge}>{count} 次</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>

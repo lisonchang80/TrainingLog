@@ -231,8 +231,81 @@ export async function updateReusableSupersetColor(
 }
 
 /**
+ * Slice 10c overnight #24 — dynamic "N 次" badge for the RS template card,
+ * aligned with #19 方向 A for solo exercises (`exerciseLibraryRepository.
+ * getExerciseSessionCount`). One "次" = one ended session that recorded at
+ * least one logged (`is_logged=1 AND is_skipped=0`) set against a
+ * `session_exercise` row carrying `reusable_superset_id = ?`.
+ *
+ * Why not read `superset.use_count` directly?
+ *   `superset.use_count` is a hand-maintained counter that only bumps on
+ *   "explode RS into Template" via `incrementUseCount`. Sessions that
+ *   actually log sets through a Template→Session expansion never re-bump
+ *   the counter, so the library badge under-counts real usage. The
+ *   counter column is preserved for the explode flow but UIs that want
+ *   "real usage" should call this function instead.
+ *
+ * INNER JOIN on `session_exercise.id = set.session_exercise_id`:
+ *   All RS-side `set` rows are inserted with `session_exercise_id` set —
+ *   the slice 10c set logger has always wired this through (see
+ *   `setRepository.insertSessionSet`). v019-and-later sets are guaranteed
+ *   non-NULL on `session_exercise_id` when the set originated from a
+ *   cluster card. Pre-v019 data MAY have NULL `session_exercise_id`, but
+ *   pre-v019 also pre-dates RS-on-session-side, so a NULL row physically
+ *   cannot belong to an RS — the inner JOIN is safe.
+ */
+export async function getReusableSupersetSessionCount(
+  db: Database,
+  supersetId: string
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(DISTINCT s.session_id) AS n
+       FROM "set" s
+       JOIN session ss ON ss.id = s.session_id
+       JOIN session_exercise se ON se.id = s.session_exercise_id
+      WHERE se.reusable_superset_id = ?
+        AND s.is_logged = 1
+        AND s.is_skipped = 0
+        AND ss.ended_at IS NOT NULL`,
+    supersetId
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Batch variant — one query returns a `Map<supersetId, count>` covering
+ * every RS template that has at least one logged set in an ended session.
+ * Used by the library grid to avoid N+1 lookups.
+ *
+ * RS templates with zero usage will be MISSING from the map (not present
+ * with value 0) — callers should treat `map.get(id) ?? 0` as the count.
+ */
+export async function getReusableSupersetSessionCounts(
+  db: Database
+): Promise<Map<string, number>> {
+  const rows = await db.getAllAsync<{ reusable_superset_id: string; n: number }>(
+    `SELECT se.reusable_superset_id AS reusable_superset_id,
+            COUNT(DISTINCT s.session_id) AS n
+       FROM "set" s
+       JOIN session ss ON ss.id = s.session_id
+       JOIN session_exercise se ON se.id = s.session_exercise_id
+      WHERE se.reusable_superset_id IS NOT NULL
+        AND s.is_logged = 1
+        AND s.is_skipped = 0
+        AND ss.ended_at IS NOT NULL
+      GROUP BY se.reusable_superset_id`
+  );
+  return new Map(rows.map((r) => [r.reusable_superset_id, r.n]));
+}
+
+/**
  * Increment `use_count` by 1 and bump `updated_at`. Called by domain hooks
  * after a successful explode-into-Template / add-to-Session.
+ *
+ * Slice 10c #24: `superset.use_count` column is preserved for the explode
+ * flow's bump call site (`bumpReusableSupersetUseCount`) but is NO LONGER
+ * read by the library "N 次" badge — use `getReusableSupersetSessionCount`
+ * / `getReusableSupersetSessionCounts` instead.
  */
 export async function incrementUseCount(
   db: Database,
