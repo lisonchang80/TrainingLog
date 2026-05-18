@@ -2,8 +2,8 @@
  * Set-row body — shared between template editor and session set logger
  * (ADR-0019 Q9, slice 10c Phase 1).
  *
- * Renders the inner row content of a single set: [label btn] [reps] ×
- * [weight] kg [optional note indicator] [optional dropset +/− buttons].
+ * Renders the inner row content of a single set: [label btn] [weight] kg
+ * × [reps] [optional note indicator] [optional dropset +/− buttons].
  *
  * Generic over the set type via `S extends SetRowItem` so callers in
  * template-editor (passing `TemplateSet`) and session set logger
@@ -161,23 +161,6 @@ export function SetRowContent<S extends SetRowItem>({
       )}
       {onTapNumber ? (
         <Pressable
-          onPress={() => onTapNumber(set, 'reps', set.reps)}
-          hitSlop={4}
-          style={[styles.setInput, compact && styles.setInputCompact]}
-        >
-          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(set.reps)}</Text>
-        </Pressable>
-      ) : (
-        <TextInput
-          style={[styles.setInput, compact && styles.setInputCompact]}
-          value={repsText}
-          onChangeText={handleRepsChange}
-          keyboardType="number-pad"
-        />
-      )}
-      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>{compact ? '×' : 'reps'}</Text>
-      {onTapNumber ? (
-        <Pressable
           onPress={() => onTapNumber(set, 'weight', set.weight)}
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
@@ -193,6 +176,23 @@ export function SetRowContent<S extends SetRowItem>({
         />
       )}
       <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>kg</Text>
+      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>×</Text>
+      {onTapNumber ? (
+        <Pressable
+          onPress={() => onTapNumber(set, 'reps', set.reps)}
+          hitSlop={4}
+          style={[styles.setInput, compact && styles.setInputCompact]}
+        >
+          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(set.reps)}</Text>
+        </Pressable>
+      ) : (
+        <TextInput
+          style={[styles.setInput, compact && styles.setInputCompact]}
+          value={repsText}
+          onChangeText={handleRepsChange}
+          keyboardType="number-pad"
+        />
+      )}
       {/*
         overnight #5 第 4 點: note slot 永遠保留 column (沒備註 placeholder 同寬)
         — 避免欄位 shift, 三排 set rows 嚴格 column-aligned.
