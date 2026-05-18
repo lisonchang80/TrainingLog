@@ -47,6 +47,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -72,6 +73,13 @@ type StartTemplateSheetProps = {
   onEdit: (selection: { period_id: string; intensity_id: string | null }) => void;
   /** [開始訓練] handler — caller calls startSessionFromTemplate + persists sticky. */
   onStart: (selection: { period_id: string; intensity_id: string | null }) => void;
+  /**
+   * Create a brand-new Program from the inline「新增計畫」CTA. Caller persists
+   * the row + refreshes its own `programs` state, then returns the new
+   * `{ id, name }` so the sheet auto-selects it. Throws → silent retry (we
+   * keep the inline input visible so user can edit + retry).
+   */
+  onCreateProgram: (name: string) => Promise<{ id: string; name: string }>;
   onCancel: () => void;
 };
 
@@ -89,6 +97,7 @@ export function StartTemplateSheet({
   lastUsedSubTag,
   onEdit,
   onStart,
+  onCreateProgram,
   onCancel,
 }: StartTemplateSheetProps) {
   // Prepend the reserved 「無」 to the picker list, dedupe if listPrograms
@@ -102,6 +111,17 @@ export function StartTemplateSheet({
   const [periodId, setPeriodId] = useState<string>(RESERVED_NONE_PROGRAM_ID);
   const [intensityId, setIntensityId] = useState<string | null>(null);
 
+  /**
+   * Inline「新增計畫」TextInput state — mirror template-meta-sheet's
+   * customProgramMode pattern (round 32 ledger). When `customProgramMode` is
+   * true we render an inline TextInput + 建立 button under the period radio
+   * list. On success the new program's id is auto-selected and the parent
+   * re-fetches `programs` so it shows up in the radio list next render.
+   */
+  const [customProgramMode, setCustomProgramMode] = useState(false);
+  const [customProgramName, setCustomProgramName] = useState('');
+  const [creatingProgram, setCreatingProgram] = useState(false);
+
   // Re-resolve defaults each time the sheet opens — sticky state may have
   // changed since last open (e.g. another tab confirmed a session).
   useEffect(() => {
@@ -114,6 +134,10 @@ export function StartTemplateSheet({
     });
     setPeriodId(defaults.period_id);
     setIntensityId(defaults.intensity_id);
+    // Reset inline-add state so they don't persist across opens.
+    setCustomProgramMode(false);
+    setCustomProgramName('');
+    setCreatingProgram(false);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + raw inputs.
@@ -123,6 +147,23 @@ export function StartTemplateSheet({
   const isNoneSelected = periodId === RESERVED_NONE_PROGRAM_ID;
   // When 無 is selected, force intensity to null on confirm (hidden picker).
   const effectiveIntensity = isNoneSelected ? null : intensityId;
+
+  const handleConfirmNewProgram = async () => {
+    const trimmed = customProgramName.trim();
+    if (!trimmed || trimmed.length > 60) return;
+    setCreatingProgram(true);
+    try {
+      const created = await onCreateProgram(trimmed);
+      // Auto-select the new program and exit inline mode.
+      setPeriodId(created.id);
+      setCustomProgramMode(false);
+      setCustomProgramName('');
+    } catch {
+      // Silent: keep user in inline-input mode so they can retry / cancel.
+    } finally {
+      setCreatingProgram(false);
+    }
+  };
 
   return (
     <Modal
@@ -168,6 +209,53 @@ export function StartTemplateSheet({
                 </Pressable>
               );
             })}
+
+            {/*
+             * 「新增計畫」inline CTA — mirror template-meta-sheet pattern (round
+             * 30 + 32). Tap shows an inline TextInput + 建立 button; on success
+             * the parent creates the Program row + refreshes its `programs`
+             * state, returning {id, name} so we auto-select the new option.
+             */}
+            <Pressable
+              onPress={() => {
+                setCustomProgramMode(true);
+                setCustomProgramName('');
+              }}
+              style={[styles.addCta, customProgramMode && styles.addCtaActive]}
+            >
+              <Text style={styles.addCtaText}>新增計畫</Text>
+            </Pressable>
+            {customProgramMode ? (
+              <View style={styles.inlineRow}>
+                <TextInput
+                  style={[styles.input, styles.inlineInput]}
+                  value={customProgramName}
+                  onChangeText={setCustomProgramName}
+                  placeholder="輸入新計畫名稱（≤ 60 字）"
+                  placeholderTextColor="#9ca3af"
+                  maxLength={60}
+                  editable={!creatingProgram}
+                />
+                <Pressable
+                  onPress={handleConfirmNewProgram}
+                  hitSlop={8}
+                  disabled={
+                    creatingProgram ||
+                    customProgramName.trim().length === 0
+                  }
+                  style={[
+                    styles.inlineConfirm,
+                    (creatingProgram ||
+                      customProgramName.trim().length === 0) &&
+                      styles.inlineConfirmDisabled,
+                  ]}
+                >
+                  <Text style={styles.inlineConfirmText}>
+                    {creatingProgram ? '建立中…' : '建立'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {!isNoneSelected && (
               <>
@@ -320,6 +408,61 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     paddingVertical: 8,
     paddingHorizontal: 4,
+  },
+  /**
+   * Primary CTA「新增計畫 / 強度」— always blue-solid white-text so the entry
+   * point visually stands out from the radio rows above. Active state darkens
+   * the fill slightly to signal「inline-add mode is open」. Mirrors
+   * components/session/template-meta-sheet.tsx (round 32).
+   */
+  addCta: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    marginTop: 6,
+  },
+  addCtaActive: {
+    backgroundColor: '#0050B3',
+  },
+  addCtaText: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+  },
+  inlineInput: {
+    flex: 1,
+  },
+  inlineConfirm: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+  },
+  inlineConfirmDisabled: {
+    opacity: 0.4,
+  },
+  inlineConfirmText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   actionRow: {
     flexDirection: 'row',

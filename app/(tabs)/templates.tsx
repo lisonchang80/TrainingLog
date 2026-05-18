@@ -20,7 +20,11 @@ import {
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
-import { listPrograms } from '@/src/adapters/sqlite/programRepository';
+import {
+  createProgram,
+  listPrograms,
+} from '@/src/adapters/sqlite/programRepository';
+import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 import {
   getSetting,
   setSetting,
@@ -130,6 +134,34 @@ export default function TemplatesScreen() {
   };
 
   const closeSheet = () => setSheetTemplate(null);
+
+  /**
+   * Inline「新增計畫」handler — creates a minimal Program (name + ADR-0004
+   * minimum defaults), refreshes the parent's `programs` state so the new
+   * option shows up in the picker, and returns {id, name} so the sheet can
+   * auto-select it. User can edit the full cycle structure later from the
+   * Program editor page. Mirrors template-meta-sheet round 30 minimal-defaults
+   * pattern.
+   */
+  const handleCreateProgram = async (
+    name: string,
+  ): Promise<{ id: string; name: string }> => {
+    const id = randomUUID();
+    const today = utcMsToIsoDate(Date.now());
+    await createProgram(db, {
+      program: {
+        id,
+        name,
+        main_tag: null,
+        cycle_length: 3,
+        cycle_count: 1,
+        start_date: today,
+        is_active: 0,
+      },
+    });
+    setPrograms((prev) => [...prev, { id, name }]);
+    return { id, name };
+  };
 
   const persistSticky = async (
     program_id: string,
@@ -253,6 +285,7 @@ export default function TemplatesScreen() {
         lastUsedSubTag={lastUsedSubTag}
         onEdit={onEdit}
         onStart={onStart}
+        onCreateProgram={handleCreateProgram}
         onCancel={closeSheet}
       />
     </SafeAreaView>
