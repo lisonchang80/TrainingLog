@@ -89,6 +89,13 @@ export function TemplateMetaSheet({
   /** Per-program distinct sub_tags, re-fetched whenever programId changes. */
   const [subTags, setSubTags] = useState<string[]>([]);
   /**
+   * In-session user-added sub_tags (via「新增強度」→「建立」button). Not
+   * persisted to db — sub_tag is a free-form string column, the new tag lands
+   * in db only when the parent's `onConfirm` insert fires. Rendered alongside
+   * `subTags` so the new chip appears immediately. Cleared on each open.
+   */
+  const [localSubTags, setLocalSubTags] = useState<string[]>([]);
+  /**
    * Local copy of the program list — seeded from props on open and grows when
    * the user creates a new program via the「+ 新增計畫」inline input. We don't
    * push back into the parent's state; parent re-fetches `listPrograms` on
@@ -109,6 +116,7 @@ export function TemplateMetaSheet({
       setCustomSubTag('');
       setCustomMode(false);
       setSubTags([]);
+      setLocalSubTags([]);
       setProgramList(programs);
       setCustomProgramMode(false);
       setCustomProgramName('');
@@ -123,12 +131,16 @@ export function TemplateMetaSheet({
     if (!visible) return;
     if (programId == null) {
       setSubTags([]);
+      setLocalSubTags([]);
       // Reset 強度 state when switching back to 通用.
       setSubTag(null);
       setCustomMode(false);
       setCustomSubTag('');
       return;
     }
+    // Switching to a different program → drop the previous program's in-session
+    // tags so they don't bleed across programs.
+    setLocalSubTags([]);
     listDistinctSubTagsByProgram(db, programId)
       .then((tags) => {
         if (!cancelled) setSubTags(tags);
@@ -188,6 +200,29 @@ export function TemplateMetaSheet({
     } finally {
       setCreatingProgram(false);
     }
+  };
+
+  /**
+   * Confirm an in-session new sub_tag from the inline TextInput. Pure local
+   * state — no db write (sub_tag is just a string column, it lands when the
+   * parent's onConfirm fires with this subTag value).
+   *
+   * Dedupe: if the trimmed name already exists in either the fetched
+   * `subTags` (per-program distinct from db) or the in-session `localSubTags`,
+   * we don't append a duplicate chip — we just set it active so the user
+   * still gets the "selected" feedback.
+   */
+  const handleConfirmNewSubTag = () => {
+    const trimmed = customSubTag.trim();
+    if (!trimmed) return;
+    const isDuplicate =
+      subTags.includes(trimmed) || localSubTags.includes(trimmed);
+    if (!isDuplicate) {
+      setLocalSubTags((prev) => [...prev, trimmed]);
+    }
+    setSubTag(trimmed);
+    setCustomMode(false);
+    setCustomSubTag('');
   };
 
   const handleConfirm = () => {
@@ -335,7 +370,7 @@ export function TemplateMetaSheet({
                       setSubTag(null);
                     }}
                   />
-                  {subTags.map((t) => (
+                  {[...subTags, ...localSubTags].map((t) => (
                     <Chip
                       key={t}
                       label={t}
@@ -360,13 +395,27 @@ export function TemplateMetaSheet({
                   </Pressable>
                 </View>
                 {customMode ? (
-                  <TextInput
-                    style={[styles.input, styles.customInput]}
-                    value={customSubTag}
-                    onChangeText={setCustomSubTag}
-                    placeholder="輸入新強度標籤（如 5x5、最大力量）"
-                    placeholderTextColor="#9ca3af"
-                  />
+                  <View style={styles.inlineRow}>
+                    <TextInput
+                      style={[styles.input, styles.inlineInput]}
+                      value={customSubTag}
+                      onChangeText={setCustomSubTag}
+                      placeholder="輸入新強度標籤（如 5x5、最大力量）"
+                      placeholderTextColor="#9ca3af"
+                    />
+                    <Pressable
+                      onPress={handleConfirmNewSubTag}
+                      hitSlop={8}
+                      disabled={customSubTag.trim().length === 0}
+                      style={[
+                        styles.inlineConfirm,
+                        customSubTag.trim().length === 0 &&
+                          styles.inlineConfirmDisabled,
+                      ]}
+                    >
+                      <Text style={styles.inlineConfirmText}>建立</Text>
+                    </Pressable>
+                  </View>
                 ) : null}
               </View>
             ) : null}
@@ -463,9 +512,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#111827',
     backgroundColor: '#f9fafb',
-  },
-  customInput: {
-    marginTop: 6,
   },
   inlineRow: {
     flexDirection: 'row',
