@@ -116,16 +116,20 @@ export async function getExerciseMuscleLinks(
 
 /**
  * ADR-0017 Q7 「N 次」徽章 — number of distinct Sessions where this exercise
- * had at least one **done** (`is_skipped = 0`) set.
+ * has at least one ✓ **logged** (`is_skipped = 0 AND is_logged = 1`) set.
  *
  * Derived (no cached column on `exercise`). Library grid calls
  * `getExerciseSessionCounts` once, detail page calls
  * `getExerciseSessionCount` for a single id; 0 returns from the map mean
- * "no done sets ever" — UI hides the badge per ADR-0017 「0 次時不顯示」.
+ * "no logged sets ever" — UI hides the badge per ADR-0017 「0 次時不顯示」.
+ *
+ * 方向 A 對齊 `getExerciseHistoryHeader` / `getExerciseHistoryBySession` 的
+ * `is_logged = 1` filter (per 用戶 5/18 中午拍板) — 「N 次 Session」一致
+ * 指 ✓ 完成 N 次 Session，純 planned (未 ✓) session 不計入。
  *
  * Note: the spec text in ADR says `is_done = 1`; the v001 schema actually
- * uses `is_skipped` (inverse), so the predicate here is `is_skipped = 0`.
- * Semantically identical.
+ * uses `is_skipped` (inverse), so the predicate here is `is_skipped = 0`;
+ * `is_logged = 1` is the v015 per-row 完成 flag.
  */
 export async function getExerciseSessionCount(
   db: Database,
@@ -134,7 +138,7 @@ export async function getExerciseSessionCount(
   const row = await db.getFirstAsync<{ n: number }>(
     `SELECT COUNT(DISTINCT session_id) AS n
        FROM "set"
-      WHERE exercise_id = ? AND is_skipped = 0`,
+      WHERE exercise_id = ? AND is_skipped = 0 AND is_logged = 1`,
     exerciseId
   );
   return row?.n ?? 0;
@@ -146,7 +150,7 @@ export async function getExerciseSessionCounts(
   const rows = await db.getAllAsync<{ exercise_id: string; n: number }>(
     `SELECT exercise_id, COUNT(DISTINCT session_id) AS n
        FROM "set"
-      WHERE is_skipped = 0
+      WHERE is_skipped = 0 AND is_logged = 1
       GROUP BY exercise_id`
   );
   return new Map(rows.map((r) => [r.exercise_id, r.n]));
