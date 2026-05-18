@@ -584,6 +584,23 @@ function HistoryPageContent({
 
   const selectedProgram = programs.find((p) => p.id === programId);
 
+  // Slice 10c overnight #21 —「再次訓練」button gating.
+  //   - cluster mode: need BOTH ids (A + B) to do the cluster replay.
+  //   - solo mode: need currentSeId.
+  //   - library / pure browse: neither set → button hidden.
+  // The two flags are mutually exclusive in practice (cluster callsites
+  // never pass currentSeId, solo callsites never pass the A/B pair) but
+  // we treat cluster as taking precedence if both happen to be passed.
+  const isClusterReplay = currentSeIdA != null && currentSeIdB != null;
+  const canReplay = isClusterReplay || currentSeId != null;
+
+  // Stub onReplay handler — Commit 4 wires the alert + DB call. For
+  // Commit 3 we just expose the affordance; tapping is a no-op so the
+  // shape is testable without DB dependencies.
+  const onReplay = useCallback((_session: ExerciseHistorySession) => {
+    // Intentionally empty — see Commit 4 for the live handler.
+  }, []);
+
   return (
     <>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -726,6 +743,8 @@ function HistoryPageContent({
                     onToggle={() => toggleExpand(sess.session_id)}
                     loadType={header.load_type}
                     unit={unit}
+                    canReplay={canReplay}
+                    onReplay={() => onReplay(sess)}
                   />
                 ))
               )}
@@ -1063,12 +1082,21 @@ function SessionRow({
   onToggle,
   loadType,
   unit,
+  canReplay,
+  onReplay,
 }: {
   session: ExerciseHistorySession;
   expanded: boolean;
   onToggle: () => void;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
   unit: UnitPreference;
+  // Slice 10c overnight #21 —「再次訓練」button affordance. canReplay is
+  // computed at the parent level (HistoryPageContent) from the URL params
+  // — true only when a current-card context is wired (solo currentSeId OR
+  // both cluster currentSeIdA + currentSeIdB). Library / RS detail browse
+  // paths leave canReplay=false and the button is not rendered.
+  canReplay: boolean;
+  onReplay: () => void;
 }) {
   const topSet = session.sets
     .map((s) => ({
@@ -1134,6 +1162,26 @@ function SessionRow({
               </View>
             );
           })}
+          {canReplay ? (
+            <Pressable
+              onPress={(e) => {
+                // Stop the Pressable bubble so the outer card's onToggle
+                // (which collapses the row) doesn't fire and yank the
+                // alert away. RN Pressable doesn't have a true bubble
+                // model, but on iOS the inner Pressable wins focus and
+                // the outer's onPress is suppressed — defensive guard.
+                e.stopPropagation?.();
+                onReplay();
+              }}
+              style={({ pressed }) => [
+                styles.replayBtn,
+                pressed && styles.btnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="再次訓練 — 覆蓋目前卡片的 sets">
+              <Text style={styles.replayBtnText}>↻ 再次訓練</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
     </Pressable>
@@ -1304,6 +1352,22 @@ const styles = StyleSheet.create({
   setOrdering: { fontSize: 12, opacity: 0.6, width: 28 },
   setText: { fontSize: 13, flex: 1 },
   setBucket: { fontSize: 11, opacity: 0.7 },
+  // Slice 10c overnight #21 —「再次訓練」button (SessionRow expanded).
+  // iOS-system blue + white text, centered, modest padding so it doesn't
+  // dominate the set list above it.
+  replayBtn: {
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replayBtnText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   headerBack: {
     color: '#0a7ea4',
     fontSize: 17,
