@@ -207,7 +207,15 @@ export function StartTemplateSheet({
     setLocalSubTags([]);
     listDistinctSubTagsByProgram(db, periodId)
       .then((tags) => {
-        if (!cancelled) setProgramSubTags(tags);
+        if (cancelled) return;
+        setProgramSubTags(tags);
+        // If the previously-resolved intensityId is no longer present in this
+        // program's sub_tags (e.g. user switched programs and the prior tag
+        // doesn't apply), collapse to null = 通用 so the radio doesn't show
+        // a phantom selection.
+        setIntensityId((prev) =>
+          prev != null && !tags.includes(prev) ? null : prev
+        );
       })
       .catch(() => {
         if (!cancelled) setProgramSubTags([]);
@@ -368,6 +376,38 @@ export function StartTemplateSheet({
                 <View style={{ height: 16 }} />
                 <Text style={styles.sectionLabel}>選擇強度</Text>
                 <View style={styles.divider} />
+                {/*
+                 * Fixed 通用 row (round 35 polish) — represents `sub_tag = null`
+                 * within the picked program, aligning with template-meta-sheet
+                 * which uses「通用」label for the null sub_tag chip. Selected
+                 * state hinges on `intensityId === null && !customSubTagMode`
+                 * to avoid showing 通用 as selected while the user is typing a
+                 * brand-new sub_tag name.
+                 */}
+                {(() => {
+                  const isSelected =
+                    intensityId === null && !customSubTagMode;
+                  return (
+                    <Pressable
+                      onPress={() => {
+                        setIntensityId(null);
+                        setCustomSubTagMode(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.row,
+                        pressed && styles.rowPressed,
+                      ]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Text style={styles.radio}>
+                        {isSelected ? '◉' : '○'}
+                      </Text>
+                      <Text style={styles.rowName}>通用</Text>
+                      <Text style={styles.rowHint}>(固定項)</Text>
+                    </Pressable>
+                  );
+                })()}
                 {[...programSubTags, ...localSubTags].map((tag) => {
                   const isSelected = tag === intensityId;
                   const isLastUsed = tag === lastUsedSubTag;
