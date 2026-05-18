@@ -22,6 +22,7 @@ import type { Exercise } from '@/src/domain/exercise/types';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
   deleteReusableSuperset,
+  getReusableSupersetSessionCount,
   getReusableSupersetWithExercises,
 } from '@/src/adapters/sqlite/supersetRepository';
 
@@ -46,11 +47,18 @@ export default function SupersetDetailScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const [data, setData] = useState<ReusableSupersetWithExercises | null>(null);
+  // Slice 10c #24 — dynamic session count (replaces `superset.use_count`,
+  // which only bumps on Template explode and under-counts real usage).
+  const [sessionCount, setSessionCount] = useState<number>(0);
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const d = await getReusableSupersetWithExercises(db, id);
+    const [d, n] = await Promise.all([
+      getReusableSupersetWithExercises(db, id),
+      getReusableSupersetSessionCount(db, id),
+    ]);
     setData(d);
+    setSessionCount(n);
   }, [db, id]);
 
   useFocusEffect(
@@ -130,7 +138,7 @@ export default function SupersetDetailScreen() {
         </View>
         <Text style={styles.subheading}>
           超級組
-          {superset.use_count > 0 ? ` · 已使用 ${superset.use_count} 次` : ''}
+          {sessionCount > 0 ? ` · 已使用 ${sessionCount} 次` : ''}
         </Text>
 
         <View style={styles.exercisesRow}>
