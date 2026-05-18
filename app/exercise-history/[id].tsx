@@ -44,6 +44,7 @@ import type { BucketKey } from '@/src/domain/pr/types';
 import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
+import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 
 type PRKey = 'all' | BucketKey;
 
@@ -1206,6 +1207,23 @@ function SessionRow({
   const date = new Date(session.session_started_at);
   const dateLabel = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
+  // Slice 10c overnight #22 — replace `#{ordering}` with set-kind labels
+  // (熱 / 1 / D1 …). Map is per-session so warmup / dropset counters reset
+  // between sessions; memoised on session.sets so the expanded card doesn't
+  // recompute on unrelated re-renders (collapse/expand still triggers it
+  // exactly once).
+  const labelMap = useMemo(
+    () =>
+      computeHistorySetLabels(
+        session.sets.map((s) => ({
+          id: s.set_id,
+          set_kind: s.set_kind,
+          ordering: s.ordering,
+        }))
+      ),
+    [session.sets]
+  );
+
   return (
     <Pressable onPress={onToggle} style={styles.sessionCard}>
       <View style={styles.sessionRowHeader}>
@@ -1236,7 +1254,9 @@ function SessionRow({
                 : null;
             return (
               <View key={set.set_id} style={styles.setLine}>
-                <Text style={styles.setOrdering}>#{set.ordering}</Text>
+                <Text style={styles.setLabel}>
+                  {labelMap.get(set.set_id) ?? '—'}
+                </Text>
                 <Text style={styles.setText}>
                   {formatPRWeight(eff, unit)} × {set.reps ?? '—'}
                 </Text>
@@ -1433,7 +1453,16 @@ const styles = StyleSheet.create({
   },
   bwLine: { fontSize: 12, opacity: 0.7 },
   setLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  setOrdering: { fontSize: 12, opacity: 0.6, width: 28 },
+  // Slice 10c overnight #22 — set-kind label column (熱 / 1 / D1 …)
+  // replaces the previous `#{ordering}` text. Slightly bolder + larger
+  // than the old caption so "熱" / "D2" are immediately readable on the
+  // expanded card; same fixed width keeps the value column aligned.
+  setLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.85,
+    width: 28,
+  },
   setText: { fontSize: 13, flex: 1 },
   setBucket: { fontSize: 11, opacity: 0.7 },
   // Slice 10c overnight #21 —「再次訓練」button (SessionRow expanded).
