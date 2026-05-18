@@ -168,17 +168,24 @@ export function StartTemplateSheet({
 
   /**
    * Confirm an in-session new sub_tag from the inline TextInput. Pure local
-   * state — no db write. Dedupe against both db-loaded `subTags` and in-session
-   * `localSubTags`.
+   * state — no db write.
+   *
+   * Dup guard (case-insensitive): collide against db-loaded `subTags` +
+   * in-session `localSubTags` → Alert + keep inline input open for retry.
+   * Casing preserved on append (we store the original trimmed input).
    */
   const handleConfirmNewSubTag = () => {
     const trimmed = customSubTag.trim();
     if (!trimmed) return;
-    const isDuplicate =
-      subTags.includes(trimmed) || localSubTags.includes(trimmed);
-    if (!isDuplicate) {
-      setLocalSubTags((prev) => [...prev, trimmed]);
+    const lower = trimmed.toLowerCase();
+    const isDuplicate = [...subTags, ...localSubTags].some(
+      (t) => t.toLowerCase() === lower
+    );
+    if (isDuplicate) {
+      Alert.alert('無法新增強度', '強度名稱已存在，請改用別的名稱。');
+      return;
     }
+    setLocalSubTags((prev) => [...prev, trimmed]);
     setIntensityId(trimmed);
     setCustomSubTagMode(false);
     setCustomSubTag('');

@@ -216,19 +216,24 @@ export function TemplateMetaSheet({
    * state — no db write (sub_tag is just a string column, it lands when the
    * parent's onConfirm fires with this subTag value).
    *
-   * Dedupe: if the trimmed name already exists in either the fetched
-   * `subTags` (per-program distinct from db) or the in-session `localSubTags`,
-   * we don't append a duplicate chip — we just set it active so the user
-   * still gets the "selected" feedback.
+   * Dup guard (case-insensitive): if the trimmed name (lower-cased) collides
+   * with either the fetched `subTags` (per-program distinct from db) or the
+   * in-session `localSubTags`, surface an Alert and keep the inline input
+   * open so the user can rename + retry. Casing is preserved on append —
+   * we store the user's original trimmed input, not the lower-cased form.
    */
   const handleConfirmNewSubTag = () => {
     const trimmed = customSubTag.trim();
     if (!trimmed) return;
-    const isDuplicate =
-      subTags.includes(trimmed) || localSubTags.includes(trimmed);
-    if (!isDuplicate) {
-      setLocalSubTags((prev) => [...prev, trimmed]);
+    const lower = trimmed.toLowerCase();
+    const isDuplicate = [...subTags, ...localSubTags].some(
+      (t) => t.toLowerCase() === lower
+    );
+    if (isDuplicate) {
+      Alert.alert('無法新增強度', '強度名稱已存在，請改用別的名稱。');
+      return;
     }
+    setLocalSubTags((prev) => [...prev, trimmed]);
     setSubTag(trimmed);
     setCustomMode(false);
     setCustomSubTag('');
