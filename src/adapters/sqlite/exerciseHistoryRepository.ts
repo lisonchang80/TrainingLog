@@ -122,8 +122,10 @@ export async function listExerciseHistorySets(
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
        LEFT JOIN session_exercise se
-         ON se.session_id = s.session_id
-        AND se.exercise_id = s.exercise_id
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.is_logged = 1
@@ -179,8 +181,10 @@ export async function listExerciseHistoryBySession(
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
        LEFT JOIN session_exercise se
-         ON se.session_id = s.session_id
-        AND se.exercise_id = s.exercise_id
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
        LEFT JOIN template t ON t.id = se.template_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
@@ -421,8 +425,8 @@ export async function queryExerciseHistory(
 
   // is_in_cluster: cluster B (parent_id != NULL) OR cluster A (this se's id
   // is referenced by another se's parent_id within the same session). The
-  // `LEFT JOIN session_exercise se` is single-row per `(session_id,exercise_id)`
-  // (asserted by createSessionExercise upserts in sessionRepository.ts).
+  // LEFT JOIN matches on `set.session_exercise_id` first (v019+, supports
+  // multiple `(session_id, exercise_id)` cards) — see slice 10c #24.
   const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
@@ -444,8 +448,10 @@ export async function queryExerciseHistory(
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
        LEFT JOIN session_exercise se
-         ON se.session_id = s.session_id
-        AND se.exercise_id = s.exercise_id
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.is_logged = 1${bucket.sql}
@@ -834,8 +840,10 @@ export async function listPriorSetsForExercise(
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
        LEFT JOIN session_exercise se
-         ON se.session_id = s.session_id
-        AND se.exercise_id = s.exercise_id
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.is_logged = 1
