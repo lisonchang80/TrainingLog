@@ -1,5 +1,5 @@
 /**
- * Start-template bottom sheet — picks (週期, 強度) for a tapped Template
+ * Start-template bottom sheet — picks (計畫, 強度) for a tapped Template
  * before either editing it or starting a session (ADR-0019 §Q9.1a + Q9.2).
  *
  * Layout (per spec mockup):
@@ -7,24 +7,29 @@
  *   ╔═══════════════════════════════╗
  *   ║  ‹ 返回         <template>     ║
  *   ║  選擇計畫                      ║
- *   ║  ○ 無               (固定項)  ║
+ *   ║  ○ 通用             (固定項)  ║
  *   ║  ◉ 5x5 強度週   (最後使用)    ║
- *   ║  [ + 新增週期 ]                ║   ← deferred to next slice
+ *   ║  [ + 新增計畫 ]                ║
  *   ║                                ║
  *   ║  選擇強度                      ║
  *   ║  ◉ 10-12RM       (最後使用)   ║
- *   ║  [ + 新增強度 ]                ║   ← deferred to next slice
+ *   ║  [ + 新增強度 ]                ║
  *   ║                                ║
  *   ║  [編輯模板]    [開始訓練]     ║
  *   ╚═══════════════════════════════╝
  *
  * Period picker = `program` entities (real Program rows). The reserved
- * 「無」 row (RESERVED_NONE_PROGRAM_ID, seeded by v017) is prepended as a
- * fixed first option per Q9.2 N1 — it's never NULL on schema.
+ * 「通用」 row (RESERVED_NONE_PROGRAM_ID, seeded by v017) is prepended as a
+ * fixed first option per Q9.2 N1 — it's never NULL on schema. Renamed from
+ * 「無」 to 「通用」 in the start-template-sheet for naming consistency with
+ * template-meta-sheet (round 35 polish).
  *
- * Intensity picker = distinct `template.sub_tag` values across all templates.
- * Hidden entirely when 無 is selected (per spec: 「無 Program」 三元組無
- * 「強度」 概念). null = no selection.
+ * Intensity picker = distinct `template.sub_tag` values **scoped to the
+ * currently-selected program** (per-program filter — round 35 polish, mirror
+ * of template-meta-sheet round 30). Re-fetched via
+ * `listDistinctSubTagsByProgram(db, periodId)` whenever the period selection
+ * changes. Hidden entirely when 通用 is selected (per spec: 「無 Program」
+ * 三元組無「強度」 概念). null = no selection.
  *
  * Sticky last-selected state is read from `app_settings` via
  * `getSetting<string>(db, 'start_dialog_last_program_id')` /
@@ -35,9 +40,10 @@
  *   - [編輯模板]  → `onEdit()`            (close + router.push existing)
  *   - [開始訓練]  → `onStart(program_id, sub_tag)` (close + start session)
  *
- * Picker `[+ 新增週期 / 強度]` actions are tracked but deferred — Q9.2 P1
- * specifies the modal-push behaviour but slice 10c ships read-only picker
- * (next slice extends to create-and-auto-select).
+ * 「+ 新增計畫 / + 新增強度」 inline CTAs let the user create a new program
+ * row / append an in-session sub_tag respectively. New program lands in db
+ * via `onCreateProgram`; new sub_tag stays in `localSubTags` until the
+ * parent's onStart / onEdit persists sticky.
  */
 
 import { useEffect, useState } from 'react';
@@ -52,6 +58,8 @@ import {
   View,
 } from 'react-native';
 
+import { useDatabase } from '@/components/database-provider';
+import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
 import {
   resolveProgramDefaults,
   type ProgramOption,
@@ -62,9 +70,15 @@ type StartTemplateSheetProps = {
   visible: boolean;
   /** Tapped Template's name — shown in the top bar. */
   templateName: string;
-  /** Programs from `listPrograms(db)` — caller filters; we prepend 「無」 here. */
+  /** Programs from `listPrograms(db)` — caller filters; we prepend 「通用」 here. */
   programs: ProgramOption[];
-  /** Distinct sub_tag strings from `listDistinctSubTags(db)`. */
+  /**
+   * @deprecated Round 35 polish — intensity radios now fetch per-program via
+   * `listDistinctSubTagsByProgram(db, programId)` on each period selection.
+   * The prop is kept (and still accepted) only as an initial-render fallback
+   * before the first useEffect fires + for the `resolveProgramDefaults`
+   * sticky-resolution input. Parent should keep passing it for now.
+   */
   subTags: string[];
   /** Sticky last-used program_id (from app_settings). */
   lastUsedProgramId: string | null;
@@ -101,7 +115,8 @@ export function StartTemplateSheet({
   onCreateProgram,
   onCancel,
 }: StartTemplateSheetProps) {
-  // Prepend the reserved 「無」 to the picker list, dedupe if listPrograms
+  const db = useDatabase();
+  // Prepend the reserved 「通用」 to the picker list, dedupe if listPrograms
   // somehow returned it (shouldn't — programRepository filters it out, but
   // defending against future regressions).
   const periodOptions: ProgramOption[] = [
@@ -137,6 +152,16 @@ export function StartTemplateSheet({
   const [customSubTag, setCustomSubTag] = useState('');
   const [localSubTags, setLocalSubTags] = useState<string[]>([]);
 
+  /**
+   * Per-program distinct sub_tags (round 35 polish — mirror of
+   * template-meta-sheet round 30). Re-fetched whenever the period selection
+   * changes. Empty list when periodId === RESERVED_NONE_PROGRAM_ID since the
+   * intensity section is hidden in that case. Initial render before the
+   * first useEffect fires falls back to the legacy cross-program `subTags`
+   * prop to avoid a flash of empty list on open.
+   */
+  const [programSubTags, setProgramSubTags] = useState<string[]>([]);
+
   // Re-resolve defaults each time the sheet opens — sticky state may have
   // changed since last open (e.g. another tab confirmed a session).
   useEffect(() => {
@@ -156,11 +181,41 @@ export function StartTemplateSheet({
     setCustomSubTagMode(false);
     setCustomSubTag('');
     setLocalSubTags([]);
+    setProgramSubTags([]);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + raw inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, lastUsedProgramId, lastUsedSubTag, subTags.join('|'), programs.length]);
+
+  /**
+   * Re-fetch per-program sub_tags whenever the user changes period selection
+   * (round 35 polish — mirror template-meta-sheet pattern). When 通用 (=
+   * RESERVED_NONE_PROGRAM_ID) is selected we don't fetch — the intensity
+   * section is hidden in that case anyway. Switching periods also clears the
+   * in-session `localSubTags` so user-added tags from a previous program
+   * don't bleed across.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    if (!visible) return;
+    if (periodId === RESERVED_NONE_PROGRAM_ID) {
+      setProgramSubTags([]);
+      setLocalSubTags([]);
+      return;
+    }
+    setLocalSubTags([]);
+    listDistinctSubTagsByProgram(db, periodId)
+      .then((tags) => {
+        if (!cancelled) setProgramSubTags(tags);
+      })
+      .catch(() => {
+        if (!cancelled) setProgramSubTags([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, periodId, db]);
 
   const isNoneSelected = periodId === RESERVED_NONE_PROGRAM_ID;
   // When 無 is selected, force intensity to null on confirm (hidden picker).
@@ -178,7 +233,7 @@ export function StartTemplateSheet({
     const trimmed = customSubTag.trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
-    const isDuplicate = [...subTags, ...localSubTags].some(
+    const isDuplicate = [...programSubTags, ...localSubTags].some(
       (t) => t.toLowerCase() === lower
     );
     if (isDuplicate) {
@@ -313,7 +368,7 @@ export function StartTemplateSheet({
                 <View style={{ height: 16 }} />
                 <Text style={styles.sectionLabel}>選擇強度</Text>
                 <View style={styles.divider} />
-                {[...subTags, ...localSubTags].map((tag) => {
+                {[...programSubTags, ...localSubTags].map((tag) => {
                   const isSelected = tag === intensityId;
                   const isLastUsed = tag === lastUsedSubTag;
                   return (
