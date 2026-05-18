@@ -297,6 +297,24 @@ export async function appendSessionExercise(
     planned_sets?: number;
   }
 ): Promise<void> {
+  // Defensive guard (slice 10c #20) — picker UI is supposed to dim already-
+  // used solo exercises so this throw should never fire in practice, but if
+  // a race / future caller / test bug slips through we'd rather hard-fail
+  // than create a second card the user can't easily distinguish from the
+  // first. Scoped to solo only (reusable_superset_id IS NULL); RS-spawned
+  // rows are a different bucket.
+  const dup = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND reusable_superset_id IS NULL
+      LIMIT 1`,
+    args.session_id,
+    args.exercise_id
+  );
+  if (dup) {
+    throw new Error('duplicate solo exercise in session');
+  }
   const row = await db.getFirstAsync<{ max_ordering: number | null }>(
     `SELECT MAX(ordering) AS max_ordering FROM session_exercise
       WHERE session_id = ?`,
@@ -356,6 +374,22 @@ export async function appendReusableSupersetToSession(
     throw new Error(
       `appendReusableSupersetToSession: RS "${args.reusable_superset_id}" has ${rs.exercises.length} exercises, expected 2`
     );
+  }
+
+  // Defensive guard (slice 10c #20) — picker UI dims already-used RS
+  // templates so this throw should never fire, but if a race / future
+  // caller bug slips through we fail loud rather than silently insert a
+  // second cluster pair sharing the same RS template id.
+  const dup = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND reusable_superset_id = ?
+      LIMIT 1`,
+    args.session_id,
+    args.reusable_superset_id
+  );
+  if (dup) {
+    throw new Error('duplicate RS in session');
   }
 
   const row = await db.getFirstAsync<{ max_ordering: number | null }>(
