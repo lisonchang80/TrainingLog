@@ -32,6 +32,10 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import {
+  getActiveSession,
+  listSessionUsedExercises,
+} from '@/src/adapters/sqlite/sessionRepository';
 import { listReusableSupersetsWithExercises } from '@/src/adapters/sqlite/supersetRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
@@ -97,6 +101,16 @@ export default function LibraryScreen() {
   const [supersetSelection, setSupersetSelection] = useState<readonly string[]>(
     EMPTY_SELECTION
   );
+  // Slice 10c #20 — items already inside the in-progress session render
+  // dimmed + tap-disabled (but ⓘ stays live) so the user can't add a
+  // duplicate. Solo and RS buckets are independent (see
+  // listSessionUsedExercises doc). Empty sets in browse mode = nothing dims.
+  const [disabledExerciseIds, setDisabledExerciseIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [disabledSupersetIds, setDisabledSupersetIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   // Drop any stale picker-mode mailbox on mount so a prior abandoned pick
   // does not leak into a fresh picker session.
@@ -144,7 +158,26 @@ export default function LibraryScreen() {
       if (newSupId && isPickerMode) {
         setSupersetSelection((prev) => addSelection(prev, newSupId));
       }
-    }, [refresh, isPickerMode])
+      // #20 — only in picker mode do we look up "already in this session"
+      // for the dim/disable layer. Browse mode keeps both sets empty so
+      // the library tab never dims anything.
+      if (isPickerMode) {
+        void (async () => {
+          const active = await getActiveSession(db);
+          if (!active) {
+            setDisabledExerciseIds(new Set());
+            setDisabledSupersetIds(new Set());
+            return;
+          }
+          const used = await listSessionUsedExercises(db, active.id);
+          setDisabledExerciseIds(used.solo_exercise_ids);
+          setDisabledSupersetIds(used.rs_template_ids);
+        })();
+      } else {
+        setDisabledExerciseIds(new Set());
+        setDisabledSupersetIds(new Set());
+      }
+    }, [refresh, isPickerMode, db])
   );
 
   const subMuscles = useMemo(() => {
@@ -182,6 +215,10 @@ export default function LibraryScreen() {
 
   const onCardTap = (ex: Exercise) => {
     if (isPickerMode) {
+      // Safety net for race conditions (focus refresh mid-pick) — disabled
+      // items are also ignored at the props level via `disabled={true}` on
+      // the card Pressable, but if a tap somehow lands here we refuse it.
+      if (disabledExerciseIds.has(ex.id)) return;
       setSelection((prev) => toggleSelection(prev, ex.id));
     } else {
       router.push(`/exercise/${ex.id}`);
@@ -204,6 +241,7 @@ export default function LibraryScreen() {
 
   const onSupersetCardTap = (s: ReusableSupersetWithExercises) => {
     if (isPickerMode) {
+      if (disabledSupersetIds.has(s.superset.id)) return;
       setSupersetSelection((prev) => toggleSelection(prev, s.superset.id));
     } else {
       router.push(`/superset/${s.superset.id}`);
@@ -266,6 +304,7 @@ export default function LibraryScreen() {
               cardHeight={cardHeight}
               onTap={onSupersetCardTap}
               selection={isPickerMode ? supersetSelection : null}
+              disabledIds={disabledSupersetIds}
               onInfoPress={
                 isPickerMode
                   ? (s) => router.push(`/superset/${s.superset.id}`)
@@ -285,6 +324,7 @@ export default function LibraryScreen() {
                 cardHeight={cardHeight}
                 onTap={onCardTap}
                 selection={isPickerMode ? selection : null}
+                disabledIds={disabledExerciseIds}
                 onInfoPress={
                   isPickerMode
                     ? (ex) => router.push(`/exercise/${ex.id}`)
@@ -470,6 +510,7 @@ function ExerciseGrid({
   cardHeight,
   onTap,
   selection,
+  disabledIds,
   onInfoPress,
 }: {
   exercises: Exercise[];
@@ -478,6 +519,11 @@ function ExerciseGrid({
   cardHeight: number;
   onTap: (ex: Exercise) => void;
   selection: readonly string[] | null;
+  /** Slice 10c #20 — ids that are already in the in-progress session.
+   *  Cards in this set render dim (opacity 0.4) with the main Pressable
+   *  disabled, but the ⓘ button stays live for detail preview. Always
+   *  pass an empty Set in browse mode. */
+  disabledIds: Set<string>;
   /** When set, each card renders a small ⓘ button (bottom-right) that
    *  navigates to the exercise's detail page without affecting selection. */
   onInfoPress: ((ex: Exercise) => void) | null;
@@ -511,6 +557,7 @@ function ExerciseGrid({
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].id) : false}
             rank={selection ? selectionRank(selection, pair[0].id) : -1}
+            disabled={disabledIds.has(pair[0].id)}
             onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
@@ -522,6 +569,7 @@ function ExerciseGrid({
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].id) : false}
               rank={selection ? selectionRank(selection, pair[1].id) : -1}
+              disabled={disabledIds.has(pair[1].id)}
               onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
@@ -541,6 +589,7 @@ function ExerciseCard({
   onPress,
   selected,
   rank,
+  disabled,
   onInfoPress,
 }: {
   exercise: Exercise;
@@ -550,6 +599,9 @@ function ExerciseCard({
   onPress: () => void;
   selected: boolean;
   rank: number;
+  /** Slice 10c #20 — already in the in-progress session. Whole card dims;
+   *  main Pressable disabled (no toggle); ⓘ stays live. */
+  disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
@@ -558,10 +610,12 @@ function ExerciseCard({
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.card,
         { width, height },
         selected && styles.cardSelected,
+        disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
       {hasCues && (
@@ -624,6 +678,7 @@ function SupersetGrid({
   cardHeight,
   onTap,
   selection,
+  disabledIds,
   onInfoPress,
 }: {
   supersets: ReusableSupersetWithExercises[];
@@ -632,6 +687,8 @@ function SupersetGrid({
   onTap: (s: ReusableSupersetWithExercises) => void;
   /** Non-null = picker mode (toggle on tap, render badge); null = browse mode. */
   selection: readonly string[] | null;
+  /** Slice 10c #20 — RS template ids already in the in-progress session. */
+  disabledIds: Set<string>;
   /** Non-null = picker mode (render ⓘ for detail preview); null = browse mode. */
   onInfoPress: ((s: ReusableSupersetWithExercises) => void) | null;
 }) {
@@ -663,6 +720,7 @@ function SupersetGrid({
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].superset.id) : false}
             rank={rankOf(pair[0])}
+            disabled={disabledIds.has(pair[0].superset.id)}
             onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
@@ -673,6 +731,7 @@ function SupersetGrid({
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].superset.id) : false}
               rank={rankOf(pair[1])}
+              disabled={disabledIds.has(pair[1].superset.id)}
               onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
@@ -691,6 +750,7 @@ function SupersetCard({
   onPress,
   selected,
   rank,
+  disabled,
   onInfoPress,
 }: {
   item: ReusableSupersetWithExercises;
@@ -699,6 +759,9 @@ function SupersetCard({
   onPress: () => void;
   selected: boolean;
   rank: number;
+  /** Slice 10c #20 — already in the in-progress session. Whole card dims;
+   *  main Pressable disabled (no toggle); ⓘ stays live. */
+  disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
   const { superset, exercises } = item;
@@ -709,11 +772,13 @@ function SupersetCard({
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.card,
         styles.supersetCard,
         { width, height },
         selected && styles.cardSelected,
+        disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
       <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
@@ -896,6 +961,14 @@ const styles = StyleSheet.create({
   cardSelected: {
     borderColor: '#34C759',
     backgroundColor: 'rgba(52,199,89,0.15)',
+  },
+  /** Slice 10c #20 — exercise/RS already in the in-progress session. Dim
+   *  the whole card so the user sees it but can't tap to add a duplicate.
+   *  ⓘ button overlay is rendered separately (after this Pressable's child
+   *  tree) and keeps its own opacity / hitSlop, so the detail-preview path
+   *  remains usable even when the card body is dimmed. */
+  cardDisabled: {
+    opacity: 0.4,
   },
   selectedBadge: {
     position: 'absolute',
