@@ -124,11 +124,26 @@ export default function ExerciseHistoryScreen() {
     clusterMode: clusterModeParam,
     partner: partnerParam,
     side: sideParam,
+    currentSeId: currentSeIdParam,
+    currentSeIdA: currentSeIdAParam,
+    currentSeIdB: currentSeIdBParam,
   } = useLocalSearchParams<{
     id: string;
     clusterMode?: string;
     partner?: string;
     side?: 'A' | 'B';
+    // Slice 10c overnight #21 — owning card's session_exercise.id from the
+    // current active session, used by the「再次訓練」button (SessionRow) to
+    // overwrite the current card's sets with a historical session's sets.
+    // - currentSeId: solo card context (caller is a solo ExerciseCard).
+    // - currentSeIdA / currentSeIdB: cluster pair context (caller is a
+    //   cluster card or cluster ⚙️ menu). Both must be set for cluster
+    //   replay to fire; if only one is set, replay button is hidden.
+    // - None of these set: caller is library / RS detail / pure browse,
+    //   no in-progress card to replay onto → button hidden.
+    currentSeId?: string;
+    currentSeIdA?: string;
+    currentSeIdB?: string;
   }>();
   const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
@@ -197,6 +212,9 @@ export default function ExerciseHistoryScreen() {
           nameB={partnerName}
           initialClusterMode={initialClusterMode}
           db={db}
+          currentSeId={currentSeIdParam ?? null}
+          currentSeIdA={currentSeIdAParam ?? null}
+          currentSeIdB={currentSeIdBParam ?? null}
         />
       ) : (
         <HistoryPageContent
@@ -209,6 +227,9 @@ export default function ExerciseHistoryScreen() {
           showSwitcher={false}
           currentSide="A"
           onRequestSwap={undefined}
+          currentSeId={currentSeIdParam ?? null}
+          currentSeIdA={currentSeIdAParam ?? null}
+          currentSeIdB={currentSeIdBParam ?? null}
         />
       )}
     </SafeAreaView>
@@ -227,6 +248,9 @@ function PagingShell({
   nameB,
   initialClusterMode,
   db,
+  currentSeId,
+  currentSeIdA,
+  currentSeIdB,
 }: {
   idA: string;
   idB: string;
@@ -235,6 +259,13 @@ function PagingShell({
   nameB: string | null;
   initialClusterMode: ClusterFilterMode;
   db: Database;
+  // Slice 10c overnight #21 — passed through verbatim to both PageContents
+  // so each side's SessionRow can mount the「再次訓練」button. Both pages
+  // see the same cluster pair ids; the helper invocation is positional
+  // (A→A, B→B) regardless of which side is currently visible.
+  currentSeId: string | null;
+  currentSeIdA: string | null;
+  currentSeIdB: string | null;
 }) {
   const router = useRouter();
   // RN ScrollView doesn't accept a percent-based contentOffset, so we
@@ -311,6 +342,9 @@ function PagingShell({
           showSwitcher={true}
           currentSide={currentSide}
           onRequestSwap={onRequestSwap}
+          currentSeId={currentSeId}
+          currentSeIdA={currentSeIdA}
+          currentSeIdB={currentSeIdB}
         />
       </View>
       <View style={{ width: pageWidth }}>
@@ -324,6 +358,9 @@ function PagingShell({
           showSwitcher={true}
           currentSide={currentSide}
           onRequestSwap={onRequestSwap}
+          currentSeId={currentSeId}
+          currentSeIdA={currentSeIdA}
+          currentSeIdB={currentSeIdB}
         />
       </View>
     </ScrollView>
@@ -345,6 +382,9 @@ function HistoryPageContent({
   showSwitcher,
   currentSide,
   onRequestSwap,
+  currentSeId,
+  currentSeIdA,
+  currentSeIdB,
 }: {
   db: Database;
   exerciseId: string;
@@ -355,6 +395,11 @@ function HistoryPageContent({
   showSwitcher: boolean;
   currentSide: ClusterSide;
   onRequestSwap: (() => void) | undefined;
+  // Slice 10c overnight #21 — see top-level page comment. Used by the
+  //「再次訓練」button on each SessionRow.
+  currentSeId: string | null;
+  currentSeIdA: string | null;
+  currentSeIdB: string | null;
 }) {
   const router = useRouter();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);

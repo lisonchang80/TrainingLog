@@ -1151,15 +1151,27 @@ export default function TodayScreen() {
           // cluster A side history — mirror cluster card footer entry
           // (overnight #11) so user can reach A-side cluster_only history
           // from the ⚙️ menu without going through footer + switcher.
+          //
+          // Slice 10c overnight #21 — pass current session_exercise ids for
+          // BOTH sides so the「再次訓練」button on the destination history
+          // page can overwrite the current cluster pair's sets. Order: the
+          // page's primary side is A → currentSeIdA = this card's se.id;
+          // partner B → currentSeIdB = partner's se.id.
           router.push(
-            `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A`,
+            `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A&currentSeIdA=${planRow.id}&currentSeIdB=${partnerSessionExerciseId}`,
           );
         } else if (label === '📖 動作歷史 (B)') {
           // cluster B side history — direct entry skips the manual swap
           // step on the destination's A↔B switcher. partner inverted so
           // the switcher arrow points back to A.
+          //
+          // Slice 10c overnight #21 — currentSeIdA/B reflect the OWNER per
+          // the swapped perspective: from B's side, the「A」of the cluster
+          // pair in user terms is THIS card (planRow), and partner is the
+          // other one. The replay helper takes A/B by position not by
+          // letter, so we invert to match the side=B viewing.
           router.push(
-            `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B`,
+            `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B&currentSeIdA=${partnerSessionExerciseId}&currentSeIdB=${planRow.id}`,
           );
         } else if (label === '🔃 排序動作') {
           setReorderSheetOpen(true);
@@ -1824,8 +1836,14 @@ export default function TodayScreen() {
                             // #8 spec — replaces deprecated /superset-history).
                             // Slice 10c overnight #11 — carry `partner=B.id` so
                             // the destination renders the A↔B switcher.
+                            //
+                            // Slice 10c overnight #21 — currentSeIdA/B carry
+                            // the cluster pair's session_exercise ids so the
+                            //「再次訓練」button on the destination history page
+                            // can overwrite the current cluster pair's sets
+                            // (both A and B together).
                             router.push(
-                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}&side=A`,
+                              `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}&side=A&currentSeIdA=${group.a.exercise.id}&currentSeIdB=${group.b.exercise.id}`,
                             )
                           }
                           onSettingsPress={() =>
@@ -1995,8 +2013,13 @@ export default function TodayScreen() {
                           // Solo card → default to exclude_cluster (overnight #8
                           // spec default 1) so cluster sessions don't pollute
                           // the user's "what does this exercise do solo" view.
+                          //
+                          // Slice 10c overnight #21 — currentSeId carries this
+                          // solo card's session_exercise.id so the「再次訓練」
+                          // button on the destination history page can
+                          // overwrite this card's sets.
                           router.push(
-                            `/exercise-history/${p.exercise_id}?clusterMode=exclude_cluster`,
+                            `/exercise-history/${p.exercise_id}?clusterMode=exclude_cluster&currentSeId=${p.id}`,
                           )
                         }
                         onSettingsPress={() => onSettingsPress(p)}
