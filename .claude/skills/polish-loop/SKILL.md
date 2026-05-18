@@ -40,6 +40,8 @@ Common clarification axes:
 ### 3. Quick explore (grep + Read 1-3 files)
 Don't write prompt blind. Confirm exact file paths + line numbers. Spot existing patterns to mirror.
 
+**用戶報 UI 顯示異常 / 資料消失 / 兩處不一致時** → 先用 `simulator-db-query` skill 直查 simulator SQLite 對症（5-10 min），確認是 code bug 還是 data/spec 問題，**再決定是否 launch overnight**。2026-05-18 wave round 4 學到的教訓：歷史頁顯示 0 而 library 顯示 19 結果是兩 query 對「次數」定義不同（spec 不一致），不是 code regression — 若直接 launch overnight 修「歷史 query bug」會走錯方向。
+
 ### 4. Draft prompt + show to user BEFORE launching
 
 **用戶可能要求簡化呈現**（TrainingLog 用戶 2026-05-18 立 rule）：
