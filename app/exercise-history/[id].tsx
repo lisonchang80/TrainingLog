@@ -643,20 +643,74 @@ function HistoryPageContent({
                 return;
               }
               if (isClusterReplay) {
+                // #27 source isolation — look up the source session's RS A/B
+                // session_exercise rows so the replay helper can scope the
+                // source SELECT by card (not by exercise_id alone, which
+                // would conflate a sibling solo Bench card with the RS A
+                // Bench card in the same source session).
+                const sourceA = await db.getFirstAsync<{ id: string }>(
+                  `SELECT id FROM session_exercise
+                    WHERE session_id = ?
+                      AND exercise_id = ?
+                      AND parent_id IS NULL
+                      AND reusable_superset_id IS NOT NULL
+                    ORDER BY ordering ASC
+                    LIMIT 1`,
+                  sourceSession.session_id,
+                  exerciseId,
+                );
+                if (!sourceA) {
+                  Alert.alert('覆蓋失敗', '找不到該超級組 A 側來源卡。');
+                  return;
+                }
+                const sourceB = await db.getFirstAsync<{ id: string }>(
+                  `SELECT id FROM session_exercise
+                    WHERE session_id = ?
+                      AND exercise_id = ?
+                      AND parent_id = ?
+                    LIMIT 1`,
+                  sourceSession.session_id,
+                  partnerExerciseId!,
+                  sourceA.id,
+                );
+                if (!sourceB) {
+                  Alert.alert('覆蓋失敗', '找不到該超級組 B 側來源卡。');
+                  return;
+                }
                 await replayClusterCardSetsFromHistoricalSession(db, {
                   current_session_id: activeSession.id,
                   current_se_id_a: currentSeIdA!,
                   current_se_id_b: currentSeIdB!,
                   source_session_id: sourceSession.session_id,
+                  source_session_exercise_id_a: sourceA.id,
+                  source_session_exercise_id_b: sourceB.id,
                   source_exercise_id_a: exerciseId,
                   source_exercise_id_b: partnerExerciseId!,
                   uuid: randomUUID,
                 });
               } else {
+                // #27 source isolation — look up the source session's solo
+                // (non-RS, no parent) card for this exercise.
+                const sourceCard = await db.getFirstAsync<{ id: string }>(
+                  `SELECT id FROM session_exercise
+                    WHERE session_id = ?
+                      AND exercise_id = ?
+                      AND parent_id IS NULL
+                      AND reusable_superset_id IS NULL
+                    ORDER BY ordering ASC
+                    LIMIT 1`,
+                  sourceSession.session_id,
+                  exerciseId,
+                );
+                if (!sourceCard) {
+                  Alert.alert('覆蓋失敗', '找不到該動作來源卡。');
+                  return;
+                }
                 await replayCardSetsFromHistoricalSession(db, {
                   current_session_id: activeSession.id,
                   current_se_id: currentSeId!,
                   source_session_id: sourceSession.session_id,
+                  source_session_exercise_id: sourceCard.id,
                   source_exercise_id: exerciseId,
                   uuid: randomUUID,
                 });
