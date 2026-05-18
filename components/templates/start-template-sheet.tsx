@@ -98,9 +98,16 @@ type StartTemplateSheetProps = {
   onCancel: () => void;
 };
 
+/**
+ * The reserved「無 Program」row, surfaced in the picker as「通用」(round 35
+ * polish — naming consistency with template-meta-sheet's 通用 chip). The
+ * underlying DB row still stores `name = '無'` per v017 seed; we only
+ * remap the display label locally — changing the seed would ripple through
+ * other sheets that read the program's name directly.
+ */
 const NONE_OPTION: ProgramOption = {
   id: RESERVED_NONE_PROGRAM_ID,
-  name: '無',
+  name: '通用',
 };
 
 export function StartTemplateSheet({
@@ -305,6 +312,12 @@ export function StartTemplateSheet({
               const isSelected = opt.id === periodId;
               const isFixedNone = opt.id === RESERVED_NONE_PROGRAM_ID;
               const isLastUsed = !isFixedNone && opt.id === lastUsedProgramId;
+              // Defensive local rename: even if `opt.name` somehow arrived as
+              // the legacy「無」 (e.g. listPrograms ever surfaced the reserved
+              // row), display「通用」 in this sheet. The DB seed remains 「無」
+              // — changing it would ripple through other sheets reading the
+              // program's name directly.
+              const displayName = isFixedNone ? '通用' : opt.name;
               return (
                 <Pressable
                   key={opt.id}
@@ -317,7 +330,7 @@ export function StartTemplateSheet({
                   accessibilityState={{ selected: isSelected }}
                 >
                   <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
-                  <Text style={styles.rowName}>{opt.name}</Text>
+                  <Text style={styles.rowName}>{displayName}</Text>
                   {isFixedNone && <Text style={styles.rowHint}>(固定項)</Text>}
                   {isLastUsed && <Text style={styles.rowHint}>(最後使用)</Text>}
                 </Pressable>
