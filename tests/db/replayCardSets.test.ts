@@ -124,6 +124,7 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_session_id: 'cur',
       current_se_id: 'cur-seA',
       source_session_id: 'src',
+      source_session_exercise_id: 'src-seA',
       source_exercise_id: exA,
       uuid: randomUUID,
     });
@@ -158,6 +159,7 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_session_id: 'cur',
       current_se_id: 'cur-seA',
       source_session_id: 'src',
+      source_session_exercise_id: 'src-seA',
       source_exercise_id: exA,
       uuid: randomUUID,
     });
@@ -198,6 +200,8 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_se_id_a: 'cur-A',
       current_se_id_b: 'cur-B',
       source_session_id: 'src',
+      source_session_exercise_id_a: 'src-A',
+      source_session_exercise_id_b: 'src-B',
       source_exercise_id_a: exA,
       source_exercise_id_b: exB,
       uuid: randomUUID,
@@ -240,6 +244,8 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_se_id_a: 'cur-A',
       current_se_id_b: 'cur-B',
       source_session_id: 'src',
+      source_session_exercise_id_a: 'src-A',
+      source_session_exercise_id_b: 'src-B',
       source_exercise_id_a: exA,
       source_exercise_id_b: exB,
       uuid: randomUUID,
@@ -267,6 +273,7 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_session_id: 'cur',
       current_se_id: 'cur-seA',
       source_session_id: 'cur', // same session
+      source_session_exercise_id: 'cur-seA',
       source_exercise_id: exA,
       uuid: randomUUID,
     });
@@ -301,6 +308,7 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
       current_session_id: 'cur',
       current_se_id: 'cur-clusterA',
       source_session_id: 'src',
+      source_session_exercise_id: 'src-A',
       source_exercise_id: exA,
       uuid: randomUUID,
     });
@@ -314,5 +322,138 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
     expect(soloRows[0].reps).toBe(7);
     // Stale cluster A set wiped.
     expect(rows.find((r) => r.id === 'clusA1')).toBeUndefined();
+  });
+
+  // ── #27 source-side isolation cases (added after the 5/18 prefill bug
+  // where a source session had 2 cards sharing the same exercise_id and
+  // the replay helper scooped BOTH into a single side). ────────────────
+
+  it('Case 7 — solo replay source isolation: source session has solo + RS-A for same exercise → only target SE matched is pulled', async () => {
+    // Source session: a solo Bench card (3 sets) AND an RS A-side Bench card
+    // (1 set) — same exercise_id. We're replaying the solo card → must get
+    // exactly 3 sets, not the RS A-side's 1 set mixed in.
+    await mkSession('src', 1_000_000);
+    await mkSE('src-solo', 'src', exA, 1);
+    await mkSE('src-rsA', 'src', exA, 2); // RS A-side, same exercise_id
+    await mkSE('src-rsB', 'src', exB, 3, 'src-rsA');
+    await addSet('soloS1', 'src', exA, 'src-solo', 1, 20, 10);
+    await addSet('soloS2', 'src', exA, 'src-solo', 2, 20, 10);
+    await addSet('soloS3', 'src', exA, 'src-solo', 3, 20, 10);
+    await addSet('rsA1', 'src', exA, 'src-rsA', 4, 999, 1); // different values
+
+    // Current empty target.
+    await mkActiveSession('cur', 2_000_000);
+    await mkSE('cur-target', 'cur', exA, 1);
+
+    const result = await replayCardSetsFromHistoricalSession(db, {
+      current_session_id: 'cur',
+      current_se_id: 'cur-target',
+      source_session_id: 'src',
+      source_session_exercise_id: 'src-solo', // <- specifically the solo card
+      source_exercise_id: exA,
+      uuid: randomUUID,
+    });
+
+    expect(result.inserted).toBe(3);
+    const rows = await listSetsBySession(db, 'cur');
+    expect(rows.length).toBe(3);
+    // No 999 from the RS A side bled in.
+    expect(rows.every((r) => r.weight_kg === 20 && r.reps === 10)).toBe(true);
+  });
+
+  it('Case 8 — cluster replay source isolation: source has RS-A + sibling solo + RS-B → only RS cards pulled per side', async () => {
+    // Source session: RS A Bench (1 set) + solo Bench (3 sets) + RS B Dip (1 set).
+    // Replaying the cluster → A side should pull just 1 set (RS A) and B side
+    // just 1 set (RS B), NOT the 3 solo-Bench sets.
+    await mkSession('src', 1_000_000);
+    await mkSE('src-rsA', 'src', exA, 1);
+    await mkSE('src-rsB', 'src', exB, 2, 'src-rsA');
+    await mkSE('src-solo', 'src', exA, 3); // sibling solo, same exercise as RS A
+    await addSet('rsA1', 'src', exA, 'src-rsA', 1, 20, 10); // RS A target
+    await addSet('rsB1', 'src', exB, 'src-rsB', 2, 5, 10);  // RS B target
+    await addSet('soloS1', 'src', exA, 'src-solo', 3, 999, 1);
+    await addSet('soloS2', 'src', exA, 'src-solo', 4, 999, 1);
+    await addSet('soloS3', 'src', exA, 'src-solo', 5, 999, 1);
+
+    // Current empty cluster pair.
+    await mkActiveSession('cur', 2_000_000);
+    await mkSE('cur-A', 'cur', exA, 1);
+    await mkSE('cur-B', 'cur', exB, 2, 'cur-A');
+
+    const result = await replayClusterCardSetsFromHistoricalSession(db, {
+      current_session_id: 'cur',
+      current_se_id_a: 'cur-A',
+      current_se_id_b: 'cur-B',
+      source_session_id: 'src',
+      source_session_exercise_id_a: 'src-rsA',
+      source_session_exercise_id_b: 'src-rsB',
+      source_exercise_id_a: exA,
+      source_exercise_id_b: exB,
+      uuid: randomUUID,
+    });
+
+    expect(result.inserted_a).toBe(1);
+    expect(result.inserted_b).toBe(1);
+    const rows = await listSetsBySession(db, 'cur');
+    const aRows = rows.filter((r) => r.session_exercise_id === 'cur-A');
+    const bRows = rows.filter((r) => r.session_exercise_id === 'cur-B');
+    expect(aRows.length).toBe(1);
+    expect(bRows.length).toBe(1);
+    expect(aRows[0].weight_kg).toBe(20);
+    expect(aRows[0].reps).toBe(10);
+    expect(bRows[0].weight_kg).toBe(5);
+    expect(bRows[0].reps).toBe(10);
+  });
+
+  it('Case 9 — legacy fallback: source rows with session_exercise_id NULL fall back to (session_id, exercise_id)', async () => {
+    // Pre-v019 source session: rows untagged (session_exercise_id NULL).
+    // Replay should still find them by the legacy exercise_id match.
+    await mkSession('src', 1_000_000);
+    await mkSE('src-seA', 'src', exA, 1);
+    // Insert sets directly with session_exercise_id NULL to simulate
+    // pre-v019 data shape.
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                          is_skipped, ordering, created_at, is_logged,
+                          set_kind, parent_set_id, session_exercise_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1, 'working', NULL, NULL)`,
+      'legacy1',
+      'src',
+      exA,
+      40,
+      8,
+      1,
+      1_700_000_000_001,
+    );
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
+                          is_skipped, ordering, created_at, is_logged,
+                          set_kind, parent_set_id, session_exercise_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1, 'working', NULL, NULL)`,
+      'legacy2',
+      'src',
+      exA,
+      40,
+      8,
+      2,
+      1_700_000_000_002,
+    );
+
+    await mkActiveSession('cur', 2_000_000);
+    await mkSE('cur-seA', 'cur', exA, 1);
+
+    const result = await replayCardSetsFromHistoricalSession(db, {
+      current_session_id: 'cur',
+      current_se_id: 'cur-seA',
+      source_session_id: 'src',
+      source_session_exercise_id: 'src-seA', // primary key — but legacy rows
+      source_exercise_id: exA,                // fall through this fallback
+      uuid: randomUUID,
+    });
+
+    expect(result.inserted).toBe(2);
+    const rows = await listSetsBySession(db, 'cur');
+    expect(rows.length).toBe(2);
+    expect(rows.every((r) => r.weight_kg === 40 && r.reps === 8)).toBe(true);
   });
 });

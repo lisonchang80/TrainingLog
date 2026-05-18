@@ -755,6 +755,10 @@ export async function prefillReusableSupersetFromLastSession(
     current_se_id_a: args.new_a_session_exercise_id,
     current_se_id_b: args.new_b_session_exercise_id,
     source_session_id: lastSession.session_id,
+    // #27 isolation — thread the source A/B session_exercise ids so the
+    // helper's source SELECT can scope by card, not just (session, exercise).
+    source_session_exercise_id_a: sideA.id,
+    source_session_exercise_id_b: sideB.id,
     source_exercise_id_a: sideA.exercise_id,
     source_exercise_id_b: sideB.exercise_id,
     uuid: args.uuid,
@@ -982,6 +986,24 @@ export async function replayCardSetsFromHistoricalSession(
     current_session_id: string;
     current_se_id: string;
     source_session_id: string;
+    /**
+     * v019+ source-side card isolation key. SHOULD be passed by all
+     * production callers. Without this, a source session containing TWO
+     * cards for the same exercise_id (e.g. solo Bench + RS A-side Bench in
+     * one session) would have both cards' sets scooped up — the bug #25
+     * prefill exposed on 2026-05-18 (4 sets pulled when only 1 should have
+     * been). Optional for migration compatibility — callers in the same
+     * commit set being migrated may omit; once all callers pass it the
+     * field should become required.
+     */
+    source_session_exercise_id?: string;
+    /**
+     * Legacy fallback. Retained so pre-v019 source rows (which have
+     * `set.session_exercise_id IS NULL`) still match by `(session_id,
+     * exercise_id)`. Slice 10c-and-later sets always carry
+     * session_exercise_id so the primary clause wins; this fallback is
+     * dormant for fresh DBs.
+     */
     source_exercise_id: string;
     uuid: () => string;
     now?: () => number;
@@ -991,24 +1013,58 @@ export async function replayCardSetsFromHistoricalSession(
 
   // Capture source first so the same-card edge case (source_se == current
   // card) doesn't lose rows when DELETE wipes the card's sets.
-  const sourceSets = await db.getAllAsync<{
-    id: string;
-    weight_kg: number | null;
-    reps: number | null;
-    set_kind: SetKind;
-    parent_set_id: string | null;
-    ordering: number;
-  }>(
-    `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
-       FROM "set"
-      WHERE session_id = ?
-        AND exercise_id = ?
-        AND is_skipped = 0
-        AND is_logged = 1
-      ORDER BY ordering ASC`,
-    args.source_session_id,
-    args.source_exercise_id
-  );
+  //
+  // Source isolation (#27): scope by `session_exercise_id = ?` so two cards
+  // sharing the same exercise_id in the source session don't bleed into
+  // each other. Pre-v019 untagged rows fall through the second branch
+  // (mirrors #17 / #23 / #24 isolation pattern used elsewhere).
+  //
+  // When the optional `source_session_exercise_id` isn't passed (legacy
+  // caller still being migrated in commit 2), we degrade to the OLD
+  // (session_id, exercise_id) match — historically broken behaviour, but
+  // preserved transiently so the type is non-breaking. Removed once all
+  // callers pass the new field.
+  const useIsolation = args.source_session_exercise_id != null;
+  const sourceSets = useIsolation
+    ? await db.getAllAsync<{
+        id: string;
+        weight_kg: number | null;
+        reps: number | null;
+        set_kind: SetKind;
+        parent_set_id: string | null;
+        ordering: number;
+      }>(
+        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+           FROM "set"
+          WHERE session_id = ?
+            AND (session_exercise_id = ?
+                 OR (session_exercise_id IS NULL
+                     AND exercise_id = ?))
+            AND is_skipped = 0
+            AND is_logged = 1
+          ORDER BY ordering ASC`,
+        args.source_session_id,
+        args.source_session_exercise_id!,
+        args.source_exercise_id,
+      )
+    : await db.getAllAsync<{
+        id: string;
+        weight_kg: number | null;
+        reps: number | null;
+        set_kind: SetKind;
+        parent_set_id: string | null;
+        ordering: number;
+      }>(
+        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+           FROM "set"
+          WHERE session_id = ?
+            AND exercise_id = ?
+            AND is_skipped = 0
+            AND is_logged = 1
+          ORDER BY ordering ASC`,
+        args.source_session_id,
+        args.source_exercise_id,
+      );
 
   await db.withTransactionAsync(async () => {
     // Wipe current card's sets — scope by session_exercise_id (#17
@@ -1099,7 +1155,19 @@ export async function replayClusterCardSetsFromHistoricalSession(
     current_se_id_a: string;
     current_se_id_b: string;
     source_session_id: string;
+    /**
+     * v019+ source-side A-card isolation key (#27). SHOULD be passed by all
+     * production callers. See solo helper's doc — without this, a source
+     * session containing solo + RS-A cards for the same exercise would
+     * conflate both into the A side. Optional only for migration
+     * compatibility (legacy callsites switched over in commit 2).
+     */
+    source_session_exercise_id_a?: string;
+    /** v019+ source-side B-card isolation key (#27). */
+    source_session_exercise_id_b?: string;
+    /** Legacy fallback for pre-v019 source rows (session_exercise_id NULL). */
     source_exercise_id_a: string;
+    /** Legacy fallback for pre-v019 source rows (session_exercise_id NULL). */
     source_exercise_id_b: string;
     uuid: () => string;
     now?: () => number;
@@ -1109,27 +1177,62 @@ export async function replayClusterCardSetsFromHistoricalSession(
 
   // Capture both sides' source rows BEFORE any DELETE (same edge case
   // protection as solo path).
-  const fetchSource = async (exercise_id: string) =>
-    db.getAllAsync<{
-      id: string;
-      weight_kg: number | null;
-      reps: number | null;
-      set_kind: SetKind;
-      parent_set_id: string | null;
-      ordering: number;
-    }>(
-      `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
-         FROM "set"
-        WHERE session_id = ?
-          AND exercise_id = ?
-          AND is_skipped = 0
-          AND is_logged = 1
-        ORDER BY ordering ASC`,
-      args.source_session_id,
-      exercise_id
-    );
-  const sourceA = await fetchSource(args.source_exercise_id_a);
-  const sourceB = await fetchSource(args.source_exercise_id_b);
+  //
+  // Source isolation (#27): scope by `session_exercise_id` first; fall back
+  // to `exercise_id` only for pre-v019 untagged rows OR when the optional
+  // SE param hasn't been wired through yet by a legacy caller.
+  const fetchSource = async (
+    exercise_id: string,
+    source_session_exercise_id: string | undefined,
+  ) =>
+    source_session_exercise_id != null
+      ? db.getAllAsync<{
+          id: string;
+          weight_kg: number | null;
+          reps: number | null;
+          set_kind: SetKind;
+          parent_set_id: string | null;
+          ordering: number;
+        }>(
+          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+             FROM "set"
+            WHERE session_id = ?
+              AND (session_exercise_id = ?
+                   OR (session_exercise_id IS NULL
+                       AND exercise_id = ?))
+              AND is_skipped = 0
+              AND is_logged = 1
+            ORDER BY ordering ASC`,
+          args.source_session_id,
+          source_session_exercise_id,
+          exercise_id,
+        )
+      : db.getAllAsync<{
+          id: string;
+          weight_kg: number | null;
+          reps: number | null;
+          set_kind: SetKind;
+          parent_set_id: string | null;
+          ordering: number;
+        }>(
+          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+             FROM "set"
+            WHERE session_id = ?
+              AND exercise_id = ?
+              AND is_skipped = 0
+              AND is_logged = 1
+            ORDER BY ordering ASC`,
+          args.source_session_id,
+          exercise_id,
+        );
+  const sourceA = await fetchSource(
+    args.source_exercise_id_a,
+    args.source_session_exercise_id_a,
+  );
+  const sourceB = await fetchSource(
+    args.source_exercise_id_b,
+    args.source_session_exercise_id_b,
+  );
 
   await db.withTransactionAsync(async () => {
     // Wipe both sides first so the ordering base reflects only OTHER
