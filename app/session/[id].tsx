@@ -153,6 +153,14 @@ export default function SessionDetailScreen() {
     [sessionExercises, clusters, sets]
   );
 
+  // Freestyle session = no row carries a template_id. session_exercise.
+  // template_id 是 nullable string; null = Freestyle. 「儲存模板」(update mode)
+  // 對 Freestyle 沒意義 → dim + disabled。「另存模板」(create mode) 永遠 enabled。
+  const isFreestyle = useMemo(
+    () => sessionExercises.every((se) => se.template_id == null),
+    [sessionExercises]
+  );
+
   const handleSetFieldChange = useCallback(
     async (set_id: string, patch: { weight_kg?: number; reps?: number }) => {
       try {
@@ -364,7 +372,8 @@ export default function SessionDetailScreen() {
           </Text>
         </Pressable>
         <Pressable
-          style={styles.actionBtn}
+          style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
+          disabled={isFreestyle}
           onPress={() => handleSaveTemplate('update')}>
           <Text style={styles.actionBtnText}>儲存模板</Text>
         </Pressable>
@@ -869,6 +878,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionBtnActive: { backgroundColor: 'rgba(0,122,255,0.25)' },
+  actionBtnDisabled: { opacity: 0.4 },
   actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
   actionBtnTextActive: { color: '#0050B3' },
   actionBtnTextDestructive: { color: '#FF3B30' },
