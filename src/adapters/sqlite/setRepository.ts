@@ -837,6 +837,274 @@ export async function reorderSessionSetsForExercise(
 }
 
 /**
+ * Replay (overwrite) one session_exercise card's sets from a historical
+ * session's logged sets for the same exercise (slice 10c overnight #21
+ *「再次訓練」button).
+ *
+ * Behaviour:
+ *   - DELETE all existing `set` rows scoped by `session_exercise_id =
+ *     current_se_id` (v019 isolation — sibling cards untouched even if they
+ *     share `exercise_id`).
+ *   - SELECT source sets from `session_id = source_session_id AND
+ *     exercise_id = source_exercise_id` where `is_skipped = 0`. We DO NOT
+ *     filter by `is_logged = 1` here — the spec says "依該歷史 session 的
+ *     sets 全部 INSERT"; the page that surfaces the「再次訓練」button
+ *     already lists only is_logged=1 sets so the visible card count equals
+ *     what we copy. But because aggregator queries always join on
+ *     is_logged=1, this defensive copy avoids the edge case where a stale
+ *     in-progress set in the source session would silently sneak in.
+ *     Therefore we DO filter is_logged=1 to align with the page view.
+ *   - INSERT one new `set` per source row, with:
+ *       * fresh UUID (from caller's `uuid()` injection)
+ *       * `session_id = current_session_id`
+ *       * `session_exercise_id = current_se_id`
+ *       * `weight_kg / reps / set_kind` copied verbatim
+ *       * `parent_set_id` REMAPPED via a Map<source.id, new.id> so dropset
+ *         followers chain to their NEW head (head sets always have
+ *         parent_set_id=null so they're inserted before their followers in
+ *         source ordering order; the natural ORDER BY ordering ASC handles
+ *         the dependency since followers' ordering > head's ordering by
+ *         construction)
+ *       * `is_logged = 0` (replay = not done yet, user must re-tick)
+ *       * `is_skipped = 0`
+ *       * `ordering = base + 1..N` where base = current session's MAX
+ *         ordering (mirrors the prefill helper's ordering scheme so the
+ *         replayed sets land at the END of the session's global ordering
+ *         slot, not mixed in with other cards)
+ *       * `notes` NOT copied (NULL) — spec: source set notes belong to the
+ *         original session's context, not the replay
+ *
+ * Wraps in a single transaction — any failure rolls back both the DELETE
+ * and any partial INSERTs, leaving the current card in its pre-call state.
+ *
+ * Idempotent against same-card replay (source == current): the DELETE
+ * happens first, then SELECT returns 0 rows (because we just deleted
+ * them), so the card ends up empty. This is acceptable per spec Case 5 —
+ * "雖然多此一舉但不破壞資料"; user can re-tap to recover. NOTE: we capture
+ * source rows BEFORE the DELETE to avoid this footgun.
+ */
+export async function replayCardSetsFromHistoricalSession(
+  db: Database,
+  args: {
+    current_session_id: string;
+    current_se_id: string;
+    source_session_id: string;
+    source_exercise_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ inserted: number }> {
+  const now = (args.now ?? (() => Date.now()))();
+
+  // Capture source first so the same-card edge case (source_se == current
+  // card) doesn't lose rows when DELETE wipes the card's sets.
+  const sourceSets = await db.getAllAsync<{
+    id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    set_kind: SetKind;
+    parent_set_id: string | null;
+    ordering: number;
+  }>(
+    `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+       FROM "set"
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND is_skipped = 0
+        AND is_logged = 1
+      ORDER BY ordering ASC`,
+    args.source_session_id,
+    args.source_exercise_id
+  );
+
+  await db.withTransactionAsync(async () => {
+    // Wipe current card's sets — scope by session_exercise_id (#17
+    // isolation). Mirrors deleteSessionExerciseAndSets' set-DELETE clause
+    // but keeps the parent session_exercise row alive (we're replacing
+    // sets, not deleting the card).
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_exercise_id = ?`,
+      args.current_se_id
+    );
+
+    if (sourceSets.length === 0) {
+      // Nothing to copy — card ends up empty. Per spec Case 4 cluster-side
+      // 「source 該側 0 sets → target 該側被 delete 空」this is intentional.
+      return;
+    }
+
+    // Build current session's ordering base: MAX(ordering) BEFORE we
+    // insert anything new. Replayed sets append after existing sets
+    // belonging to OTHER cards in the same session (global per-session
+    // ordering convention).
+    const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+      `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+      args.current_session_id
+    );
+    const baseOrdering = maxRow?.max_ordering ?? 0;
+
+    // Remap parent_set_id: source set id → new set id. Source rows arrive
+    // in ordering ASC, and dropset followers always have ordering >
+    // their head's ordering (head is inserted first by `+ 新增 1 組`,
+    // follower by cycle-to-dropset which uses `insertSessionSetAfter`
+    // with source = head). So a forward sweep populates the map by the
+    // time any follower references its head.
+    const idMap = new Map<string, string>();
+
+    for (let i = 0; i < sourceSets.length; i++) {
+      const src = sourceSets[i];
+      const new_id = args.uuid();
+      idMap.set(src.id, new_id);
+      const remapped_parent =
+        src.parent_set_id != null
+          ? idMap.get(src.parent_set_id) ?? null
+          : null;
+      await insertSessionSet(db, {
+        id: new_id,
+        session_id: args.current_session_id,
+        exercise_id: args.source_exercise_id,
+        weight_kg: src.weight_kg ?? 0,
+        reps: src.reps ?? 0,
+        is_skipped: 0,
+        ordering: baseOrdering + i + 1,
+        created_at: now,
+        set_kind: src.set_kind,
+        parent_set_id: remapped_parent,
+        session_exercise_id: args.current_se_id,
+      });
+    }
+  });
+
+  return { inserted: sourceSets.length };
+}
+
+/**
+ * Cluster-pair version of `replayCardSetsFromHistoricalSession` — wipes
+ * both A and B cards' sets and copies the source session's sets for both
+ * exercises into the new pair (slice 10c overnight #21).
+ *
+ * Single transaction wraps both sides — partial failure on B rolls back
+ * the wipe + INSERT on A too, so the cluster pair never ends up half-
+ * replaced.
+ *
+ * Asymmetric source handling: if `source_session_id` had only A-side sets
+ * for that exercise (user skipped B that day), B side ends up empty
+ * (DELETEd, no INSERT) — per spec Q4 (c) "整組一起覆蓋" with "source 該側
+ * 0 sets → target 該側被 delete 空".
+ *
+ * Same ordering scheme as solo: each side independently appends after the
+ * session's pre-call MAX(ordering), with the A side claiming slots first.
+ * This mirrors the existing `addClusterCycleAtEnd` per-side ordering
+ * (each side independent), not the cluster cycle alignment — replay does
+ * not enforce A.set[i] / B.set[i] cycle alignment because the source
+ * session may have asymmetric set counts.
+ */
+export async function replayClusterCardSetsFromHistoricalSession(
+  db: Database,
+  args: {
+    current_session_id: string;
+    current_se_id_a: string;
+    current_se_id_b: string;
+    source_session_id: string;
+    source_exercise_id_a: string;
+    source_exercise_id_b: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ inserted_a: number; inserted_b: number }> {
+  const now = (args.now ?? (() => Date.now()))();
+
+  // Capture both sides' source rows BEFORE any DELETE (same edge case
+  // protection as solo path).
+  const fetchSource = async (exercise_id: string) =>
+    db.getAllAsync<{
+      id: string;
+      weight_kg: number | null;
+      reps: number | null;
+      set_kind: SetKind;
+      parent_set_id: string | null;
+      ordering: number;
+    }>(
+      `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+         FROM "set"
+        WHERE session_id = ?
+          AND exercise_id = ?
+          AND is_skipped = 0
+          AND is_logged = 1
+        ORDER BY ordering ASC`,
+      args.source_session_id,
+      exercise_id
+    );
+  const sourceA = await fetchSource(args.source_exercise_id_a);
+  const sourceB = await fetchSource(args.source_exercise_id_b);
+
+  await db.withTransactionAsync(async () => {
+    // Wipe both sides first so the ordering base reflects only OTHER
+    // cards' sets in the session (the deleted current-cluster sets
+    // shouldn't claim any new slot).
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_exercise_id = ?`,
+      args.current_se_id_a
+    );
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_exercise_id = ?`,
+      args.current_se_id_b
+    );
+
+    const insertSide = async (
+      sourceSets: typeof sourceA,
+      exercise_id: string,
+      session_exercise_id: string
+    ) => {
+      if (sourceSets.length === 0) return;
+      // Recompute base before each side so the second side's ordering
+      // doesn't overlap with the first side's freshly-inserted slots.
+      const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+        `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+        args.current_session_id
+      );
+      const baseOrdering = maxRow?.max_ordering ?? 0;
+      const idMap = new Map<string, string>();
+      for (let i = 0; i < sourceSets.length; i++) {
+        const src = sourceSets[i];
+        const new_id = args.uuid();
+        idMap.set(src.id, new_id);
+        const remapped_parent =
+          src.parent_set_id != null
+            ? idMap.get(src.parent_set_id) ?? null
+            : null;
+        await insertSessionSet(db, {
+          id: new_id,
+          session_id: args.current_session_id,
+          exercise_id,
+          weight_kg: src.weight_kg ?? 0,
+          reps: src.reps ?? 0,
+          is_skipped: 0,
+          ordering: baseOrdering + i + 1,
+          created_at: now,
+          set_kind: src.set_kind,
+          parent_set_id: remapped_parent,
+          session_exercise_id,
+        });
+      }
+    };
+
+    await insertSide(
+      sourceA,
+      args.source_exercise_id_a,
+      args.current_se_id_a
+    );
+    await insertSide(
+      sourceB,
+      args.source_exercise_id_b,
+      args.current_se_id_b
+    );
+  });
+
+  return { inserted_a: sourceA.length, inserted_b: sourceB.length };
+}
+
+/**
  * High-level entry point used by the Today tab.
  *
  * Per the #2 design decision: each Save auto-creates a Session, inserts the Set,
