@@ -6,6 +6,7 @@ import {
 } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   Modal,
   type NativeScrollEvent,
@@ -17,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { randomUUID } from 'expo-crypto';
 
 import { useDatabase } from '@/components/database-provider';
 import type { Database } from '@/src/db/types';
@@ -29,6 +31,11 @@ import {
   type ExerciseHistorySession,
 } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { getExerciseName } from '@/src/adapters/sqlite/exerciseRepository';
+import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
+import {
+  replayCardSetsFromHistoricalSession,
+  replayClusterCardSetsFromHistoricalSession,
+} from '@/src/adapters/sqlite/setRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import { formatWeight, kgToDisplay } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -594,12 +601,89 @@ function HistoryPageContent({
   const isClusterReplay = currentSeIdA != null && currentSeIdB != null;
   const canReplay = isClusterReplay || currentSeId != null;
 
-  // Stub onReplay handler — Commit 4 wires the alert + DB call. For
-  // Commit 3 we just expose the affordance; tapping is a no-op so the
-  // shape is testable without DB dependencies.
-  const onReplay = useCallback((_session: ExerciseHistorySession) => {
-    // Intentionally empty — see Commit 4 for the live handler.
-  }, []);
+  // Slice 10c overnight #21 Commit 4 —「再次訓練」live handler.
+  //
+  // Flow: confirm via Alert → resolve active session id → wipe + replay
+  // (solo or cluster helper depending on canReplay branch) → router.back()
+  // → Today tab's useFocusEffect re-fetches and shows the new sets with
+  // is_logged=0 ready for user ✓.
+  //
+  // Active session id: fetched lazily via getActiveSession on confirm
+  // rather than threaded through URL params (alternative was a
+  // currentSessionId URL param, but that bloats every callsite for a
+  // value the DB can resolve on demand). If no active session is found
+  // (user opened history from library while no in-progress session
+  // existed), we surface a friendly error — but this shouldn't happen in
+  // practice because canReplay=true requires a currentSeId, which only
+  // gets passed when there IS an in-progress session.
+  const onReplay = useCallback(
+    (sourceSession: ExerciseHistorySession) => {
+      const setCount = sourceSession.sets.length;
+      const title = isClusterReplay
+        ? '再次訓練（超級組）？'
+        : '再次訓練？';
+      const msg = isClusterReplay
+        ? `將砍掉目前這組超級組 A+B 兩側所有 sets，依該 session 的 ${setCount} 組記錄重新建立。\n\n（is_logged 會重置為未 ✓ 狀態，weight / reps / set_kind 會複製，notes 不複製）`
+        : `將砍掉目前這張卡片所有 sets，依該 session 的 ${setCount} 組記錄重新建立。\n\n（is_logged 會重置為未 ✓ 狀態，weight / reps / set_kind 會複製，notes 不複製）`;
+
+      Alert.alert(title, msg, [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '覆蓋',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const activeSession = await getActiveSession(db);
+              if (!activeSession) {
+                Alert.alert(
+                  '無法覆蓋',
+                  '找不到進行中的訓練 session。請先回 Today 頁開始一次訓練後再試。',
+                );
+                return;
+              }
+              if (isClusterReplay) {
+                await replayClusterCardSetsFromHistoricalSession(db, {
+                  current_session_id: activeSession.id,
+                  current_se_id_a: currentSeIdA!,
+                  current_se_id_b: currentSeIdB!,
+                  source_session_id: sourceSession.session_id,
+                  source_exercise_id_a: exerciseId,
+                  source_exercise_id_b: partnerExerciseId!,
+                  uuid: randomUUID,
+                });
+              } else {
+                await replayCardSetsFromHistoricalSession(db, {
+                  current_session_id: activeSession.id,
+                  current_se_id: currentSeId!,
+                  source_session_id: sourceSession.session_id,
+                  source_exercise_id: exerciseId,
+                  uuid: randomUUID,
+                });
+              }
+              // Back to Today — its useFocusEffect re-fetches plan +
+              // setsInSession so the user sees the replayed sets land.
+              router.back();
+            } catch (e) {
+              Alert.alert(
+                '覆蓋失敗',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          },
+        },
+      ]);
+    },
+    [
+      db,
+      isClusterReplay,
+      currentSeId,
+      currentSeIdA,
+      currentSeIdB,
+      exerciseId,
+      partnerExerciseId,
+      router,
+    ],
+  );
 
   return (
     <>
