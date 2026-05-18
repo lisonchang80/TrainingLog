@@ -708,6 +708,7 @@ export async function overwriteTemplateFromSession(
   const setRows = await db.getAllAsync<{
     id: string;
     exercise_id: string;
+    session_exercise_id: string | null;
     weight_kg: number | null;
     reps: number | null;
     ordering: number;
@@ -716,8 +717,8 @@ export async function overwriteTemplateFromSession(
     parent_set_id: string | null;
     notes: string | null;
   }>(
-    `SELECT id, exercise_id, weight_kg, reps, ordering, is_skipped,
-            set_kind, parent_set_id, notes
+    `SELECT id, exercise_id, session_exercise_id, weight_kg, reps, ordering,
+            is_skipped, set_kind, parent_set_id, notes
        FROM "set"
       WHERE session_id = ?
       ORDER BY ordering ASC`,
@@ -749,8 +750,17 @@ export async function overwriteTemplateFromSession(
         se.parent_id != null ? seIdToTeId.get(se.parent_id) ?? null : null;
       // Compute default_sets from session sets (NOT NULL — count of
       // non-skipped rows, fallback to 1 if zero so the constraint holds).
+      // v019 session_exercise_id isolation (slice 10c #17 pattern) — prefer
+      // the precise per-card key when set, fall back to exercise_id only for
+      // pre-v019 untagged rows. Without this, two cards sharing an exercise
+      // (RS A↔B share + solo + dual-RS sharing Chest Dip) get their set
+      // counts merged in the resulting template.
       const sets = setRows.filter(
-        (s) => s.exercise_id === se.exercise_id && s.is_skipped === 0
+        (s) =>
+          ((s.session_exercise_id != null && s.session_exercise_id === se.id) ||
+            (s.session_exercise_id == null &&
+              s.exercise_id === se.exercise_id)) &&
+          s.is_skipped === 0
       );
       await db.runAsync(
         `INSERT INTO template_exercise
