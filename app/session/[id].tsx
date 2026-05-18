@@ -30,10 +30,7 @@ import {
   type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
-import {
-  convertSessionToTemplate,
-  listDistinctSubTags,
-} from '@/src/adapters/sqlite/templateRepository';
+import { convertSessionToTemplate } from '@/src/adapters/sqlite/templateRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
 import {
@@ -85,11 +82,10 @@ export default function SessionDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
 
-  // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次
-  // programs + subTags 給 picker 用。
+  // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次 programs
+  // 給 picker 用；sub_tags 由 sheet 內依選擇 program 動態查 (5/18 polish round 30).
   const [templateMetaSheetOpen, setTemplateMetaSheetOpen] = useState(false);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
-  const [subTags, setSubTags] = useState<string[]>([]);
   const [templateMetaBusy, setTemplateMetaBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -202,12 +198,8 @@ export default function SessionDetailScreen() {
       // template 既有的 program/sub_tag。
       if (mode === 'create') {
         try {
-          const [progs, tags] = await Promise.all([
-            listPrograms(db),
-            listDistinctSubTags(db),
-          ]);
+          const progs = await listPrograms(db);
           setPrograms(progs);
-          setSubTags(tags);
         } catch (e) {
           Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
           return;
@@ -458,7 +450,6 @@ export default function SessionDetailScreen() {
           session ? `Session ${formatDateLabel(session.started_at)}` : 'Session'
         }
         programs={programs}
-        subTags={subTags}
         onCancel={() => setTemplateMetaSheetOpen(false)}
         onConfirm={handleTemplateMetaConfirm}
         busy={templateMetaBusy}

@@ -77,6 +77,33 @@ export async function listDistinctSubTags(db: Database): Promise<string[]> {
 }
 
 /**
+ * Per-program distinct sub_tags. Similar to listDistinctSubTags but scoped
+ * to a single program_id. Returns empty array when no template under that
+ * program has a sub_tag yet — caller renders the intensity chip row with
+ * only the「通用」(null) chip + 「+ 新增強度」 affordance.
+ *
+ * Used by 另存模板 TemplateMetaSheet (5/18 polish): when the user selects
+ * a specific program, the 強度標籤 chip list should only surface sub_tags
+ * already used within THAT program — not the cross-program union. Picking
+ * 「通用」(program_id = null) hides the whole 強度標籤 section per the
+ * sheet's UI spec, so this helper is not called for the null case.
+ */
+export async function listDistinctSubTagsByProgram(
+  db: Database,
+  program_id: string
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT DISTINCT sub_tag FROM template
+      WHERE program_id = ?
+        AND sub_tag IS NOT NULL
+        AND sub_tag != ''
+      ORDER BY sub_tag ASC`,
+    program_id
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
+/**
  * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
  * (name, program_id, sub_tag) triple becomes the Template's new identity.
  * Caller should ensure (name, program_id, sub_tag) is unique within the DB.

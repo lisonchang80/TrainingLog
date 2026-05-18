@@ -3,7 +3,15 @@
  *
  * 2026-05-18 UX: 另存模板按下後跳這個 sheet，引導用戶填 Template 的 3 元組
  * (name + program_id + sub_tag)。name 必填 (空白 fallback 預設名)，
- * program / sub_tag 可選 (null = 不指定)。
+ * program / sub_tag 可選 (null = 通用 / free template)。
+ *
+ * 2026-05-18 polish (round 30):
+ *   - 「不指定」label 改為「通用」(more natural)
+ *   - 選「通用」(program_id = null) 時整個強度標籤 section 隱藏 — 通用 template
+ *     沒有 program scope，自然也沒有強度概念
+ *   - 強度 chip 列只顯示**該 program** 既有的 distinct sub_tags (per-program
+ *     filter)，避免跨 program 混顯造成的視覺噪音
+ *   - 「自訂」chip rename 為「+ 新增強度」(行為不變 — 點下去切換 inline TextInput)
  *
  * Mirrors `components/session/body-data-sheet.tsx`:
  *   Modal { transparent, animationType: 'slide' }
@@ -26,6 +34,8 @@ import {
   View,
 } from 'react-native';
 
+import { useDatabase } from '@/components/database-provider';
+import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
 import type { ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 
 export interface TemplateMetaSheetProps {
@@ -34,8 +44,6 @@ export interface TemplateMetaSheetProps {
   defaultName: string;
   /** Existing programs from listPrograms (excludes the reserved 「無」 row). */
   programs: ProgramSummary[];
-  /** Distinct existing sub_tags from listDistinctSubTags. */
-  subTags: string[];
   onCancel: () => void;
   onConfirm: (args: {
     name: string;
@@ -50,16 +58,18 @@ export function TemplateMetaSheet({
   visible,
   defaultName,
   programs,
-  subTags,
   onCancel,
   onConfirm,
   busy = false,
 }: TemplateMetaSheetProps) {
+  const db = useDatabase();
   const [name, setName] = useState(defaultName);
   const [programId, setProgramId] = useState<string | null>(null);
   const [subTag, setSubTag] = useState<string | null>(null);
   const [customSubTag, setCustomSubTag] = useState('');
   const [customMode, setCustomMode] = useState(false);
+  /** Per-program distinct sub_tags, re-fetched whenever programId changes. */
+  const [subTags, setSubTags] = useState<string[]>([]);
 
   // Reset state on each open so the sheet is fresh.
   useEffect(() => {
@@ -69,14 +79,44 @@ export function TemplateMetaSheet({
       setSubTag(null);
       setCustomSubTag('');
       setCustomMode(false);
+      setSubTags([]);
     }
   }, [visible, defaultName]);
 
+  // Re-fetch per-program sub_tags when the user changes program selection.
+  // null program → no fetch, section is hidden entirely.
+  useEffect(() => {
+    let cancelled = false;
+    if (!visible) return;
+    if (programId == null) {
+      setSubTags([]);
+      // Reset 強度 state when switching back to 通用.
+      setSubTag(null);
+      setCustomMode(false);
+      setCustomSubTag('');
+      return;
+    }
+    listDistinctSubTagsByProgram(db, programId)
+      .then((tags) => {
+        if (!cancelled) setSubTags(tags);
+      })
+      .catch(() => {
+        if (!cancelled) setSubTags([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, programId, db]);
+
   const handleConfirm = () => {
     const trimmed = name.trim() || defaultName;
-    const finalSubTag = customMode
-      ? (customSubTag.trim() || null)
-      : subTag;
+    // 通用 program → always null sub_tag (section hidden).
+    const finalSubTag =
+      programId == null
+        ? null
+        : customMode
+          ? customSubTag.trim() || null
+          : subTag;
     onConfirm({
       name: trimmed,
       program_id: programId,
@@ -136,7 +176,7 @@ export function TemplateMetaSheet({
               <Text style={styles.fieldLabel}>歸屬計畫</Text>
               <View style={styles.chipRow}>
                 <Chip
-                  label="不指定"
+                  label="通用"
                   active={programId == null}
                   onPress={() => setProgramId(null)}
                 />
@@ -151,51 +191,55 @@ export function TemplateMetaSheet({
               </View>
             </View>
 
-            {/* 強度標籤 */}
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>強度標籤</Text>
-              <View style={styles.chipRow}>
-                <Chip
-                  label="不指定"
-                  active={!customMode && subTag == null}
-                  onPress={() => {
-                    setCustomMode(false);
-                    setSubTag(null);
-                  }}
-                />
-                {subTags.map((t) => (
+            {/* 強度標籤 — only when a specific program is selected. */}
+            {programId !== null ? (
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>強度標籤</Text>
+                <View style={styles.chipRow}>
                   <Chip
-                    key={t}
-                    label={t}
-                    active={!customMode && subTag === t}
+                    label="通用"
+                    active={!customMode && subTag == null}
                     onPress={() => {
                       setCustomMode(false);
-                      setSubTag(t);
+                      setSubTag(null);
                     }}
                   />
-                ))}
-                <Chip
-                  label="自訂"
-                  active={customMode}
-                  onPress={() => {
-                    setCustomMode(true);
-                    setSubTag(null);
-                  }}
-                />
+                  {subTags.map((t) => (
+                    <Chip
+                      key={t}
+                      label={t}
+                      active={!customMode && subTag === t}
+                      onPress={() => {
+                        setCustomMode(false);
+                        setSubTag(t);
+                      }}
+                    />
+                  ))}
+                  <Chip
+                    label="+ 新增強度"
+                    active={customMode}
+                    onPress={() => {
+                      setCustomMode(true);
+                      setSubTag(null);
+                    }}
+                  />
+                </View>
+                {customMode ? (
+                  <TextInput
+                    style={[styles.input, styles.customInput]}
+                    value={customSubTag}
+                    onChangeText={setCustomSubTag}
+                    placeholder="輸入新強度標籤（如 5x5、最大力量）"
+                    placeholderTextColor="#9ca3af"
+                  />
+                ) : null}
               </View>
-              {customMode ? (
-                <TextInput
-                  style={[styles.input, styles.customInput]}
-                  value={customSubTag}
-                  onChangeText={setCustomSubTag}
-                  placeholder="輸入新強度標籤（如 5x5、最大力量）"
-                  placeholderTextColor="#9ca3af"
-                />
-              ) : null}
-            </View>
+            ) : null}
 
             <Text style={styles.hint}>
-              名稱必填、計畫與強度可不指定（null = free template）。
+              {programId === null
+                ? '名稱必填、計畫選「通用」時不指定強度（= 自由模板）。'
+                : '名稱必填、強度可選「通用」或新增。'}
             </Text>
           </ScrollView>
         </Pressable>
