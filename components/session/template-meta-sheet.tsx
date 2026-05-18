@@ -37,6 +37,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -195,8 +196,16 @@ export function TemplateMetaSheet({
       setProgramId(newId);
       setCustomProgramMode(false);
       setCustomProgramName('');
-    } catch {
-      // Silent: keep user in inline-input mode so they can retry / cancel.
+    } catch (err) {
+      // Dup name (createProgram throws 'DUPLICATE_PROGRAM_NAME' case-insensitive
+      // + trim) → Alert + keep inline state intact so user can edit + retry.
+      // Other errors → quiet console.warn fallback (same inline-retry UX).
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'DUPLICATE_PROGRAM_NAME') {
+        Alert.alert('無法建立計畫', '計畫名稱已存在，請改用別的名稱。');
+      } else {
+        console.warn('[TemplateMetaSheet] createProgram failed:', err);
+      }
     } finally {
       setCreatingProgram(false);
     }
