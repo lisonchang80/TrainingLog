@@ -12,6 +12,10 @@
  *   - 強度 chip 列只顯示**該 program** 既有的 distinct sub_tags (per-program
  *     filter)，避免跨 program 混顯造成的視覺噪音
  *   - 「自訂」chip rename 為「+ 新增強度」(行為不變 — 點下去切換 inline TextInput)
+ *   - 「+ 新增計畫」inline TextInput：mirror 強度的 inline 建立 pattern；只填
+ *     name，其他 ProgramCore 欄位用 reasonable defaults (cycle_length=3 是
+ *     ADR-0004 最小合法值 / cycle_count=1 / start_date=今日 / main_tag=null /
+ *     is_active=0)。用戶可事後到 Program 編輯頁補完整 cycle structure。
  *
  * Mirrors `components/session/body-data-sheet.tsx`:
  *   Modal { transparent, animationType: 'slide' }
@@ -34,9 +38,15 @@ import {
   View,
 } from 'react-native';
 
+import { randomUUID } from 'expo-crypto';
+
 import { useDatabase } from '@/components/database-provider';
 import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
-import type { ProgramSummary } from '@/src/adapters/sqlite/programRepository';
+import {
+  createProgram,
+  type ProgramSummary,
+} from '@/src/adapters/sqlite/programRepository';
+import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 
 export interface TemplateMetaSheetProps {
   visible: boolean;
@@ -70,6 +80,17 @@ export function TemplateMetaSheet({
   const [customMode, setCustomMode] = useState(false);
   /** Per-program distinct sub_tags, re-fetched whenever programId changes. */
   const [subTags, setSubTags] = useState<string[]>([]);
+  /**
+   * Local copy of the program list — seeded from props on open and grows when
+   * the user creates a new program via the「+ 新增計畫」inline input. We don't
+   * push back into the parent's state; parent re-fetches `listPrograms` on
+   * each open so any program created here surfaces next time the sheet opens.
+   */
+  const [programList, setProgramList] = useState<ProgramSummary[]>(programs);
+  /** Inline「+ 新增計畫」TextInput state — mirrors the「+ 新增強度」pattern. */
+  const [customProgramMode, setCustomProgramMode] = useState(false);
+  const [customProgramName, setCustomProgramName] = useState('');
+  const [creatingProgram, setCreatingProgram] = useState(false);
 
   // Reset state on each open so the sheet is fresh.
   useEffect(() => {
@@ -80,8 +101,12 @@ export function TemplateMetaSheet({
       setCustomSubTag('');
       setCustomMode(false);
       setSubTags([]);
+      setProgramList(programs);
+      setCustomProgramMode(false);
+      setCustomProgramName('');
+      setCreatingProgram(false);
     }
-  }, [visible, defaultName]);
+  }, [visible, defaultName, programs]);
 
   // Re-fetch per-program sub_tags when the user changes program selection.
   // null program → no fetch, section is hidden entirely.
@@ -107,6 +132,55 @@ export function TemplateMetaSheet({
       cancelled = true;
     };
   }, [visible, programId, db]);
+
+  const handleConfirmNewProgram = async () => {
+    const trimmedName = customProgramName.trim();
+    if (!trimmedName || trimmedName.length > 60) return;
+    setCreatingProgram(true);
+    try {
+      const newId = randomUUID();
+      const today = utcMsToIsoDate(Date.now());
+      // Reasonable defaults for a "just give me a name" minimal Program:
+      //   - main_tag = null (no 週期 tag)
+      //   - cycle_length = 3 (ADR-0004 minimum 合法值; programManager.validateProgram
+      //     enforces [3, 14] — we can't go lower)
+      //   - cycle_count = 1 (single cycle)
+      //   - start_date = today (yyyy-mm-dd)
+      //   - is_active = 0 (createProgram forces this internally)
+      // User can edit cycle structure later from the Program editor page.
+      await createProgram(db, {
+        program: {
+          id: newId,
+          name: trimmedName,
+          main_tag: null,
+          cycle_length: 3,
+          cycle_count: 1,
+          start_date: today,
+          is_active: 0,
+        },
+      });
+      // Append to local chip list (parent will re-fetch next open).
+      // Match the ProgramSummary shape — cellCount = 0 since we didn't seed cells.
+      const newSummary: ProgramSummary = {
+        id: newId,
+        name: trimmedName,
+        main_tag: null,
+        cycle_length: 3,
+        cycle_count: 1,
+        start_date: today,
+        is_active: 0,
+        cellCount: 0,
+      };
+      setProgramList((prev) => [...prev, newSummary]);
+      setProgramId(newId);
+      setCustomProgramMode(false);
+      setCustomProgramName('');
+    } catch {
+      // Silent: keep user in inline-input mode so they can retry / cancel.
+    } finally {
+      setCreatingProgram(false);
+    }
+  };
 
   const handleConfirm = () => {
     const trimmed = name.trim() || defaultName;
@@ -177,18 +251,63 @@ export function TemplateMetaSheet({
               <View style={styles.chipRow}>
                 <Chip
                   label="通用"
-                  active={programId == null}
-                  onPress={() => setProgramId(null)}
+                  active={programId == null && !customProgramMode}
+                  onPress={() => {
+                    setCustomProgramMode(false);
+                    setProgramId(null);
+                  }}
                 />
-                {programs.map((p) => (
+                {programList.map((p) => (
                   <Chip
                     key={p.id}
                     label={p.name}
-                    active={programId === p.id}
-                    onPress={() => setProgramId(p.id)}
+                    active={programId === p.id && !customProgramMode}
+                    onPress={() => {
+                      setCustomProgramMode(false);
+                      setProgramId(p.id);
+                    }}
                   />
                 ))}
+                <Chip
+                  label="+ 新增計畫"
+                  active={customProgramMode}
+                  onPress={() => {
+                    setCustomProgramMode(true);
+                    setCustomProgramName('');
+                  }}
+                />
               </View>
+              {customProgramMode ? (
+                <View style={styles.inlineRow}>
+                  <TextInput
+                    style={[styles.input, styles.inlineInput]}
+                    value={customProgramName}
+                    onChangeText={setCustomProgramName}
+                    placeholder="輸入新計畫名稱（≤ 60 字）"
+                    placeholderTextColor="#9ca3af"
+                    maxLength={60}
+                    editable={!creatingProgram}
+                  />
+                  <Pressable
+                    onPress={handleConfirmNewProgram}
+                    hitSlop={8}
+                    disabled={
+                      creatingProgram ||
+                      customProgramName.trim().length === 0
+                    }
+                    style={[
+                      styles.inlineConfirm,
+                      (creatingProgram ||
+                        customProgramName.trim().length === 0) &&
+                        styles.inlineConfirmDisabled,
+                    ]}
+                  >
+                    <Text style={styles.inlineConfirmText}>
+                      {creatingProgram ? '建立中…' : '建立'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
 
             {/* 強度標籤 — only when a specific program is selected. */}
@@ -331,6 +450,29 @@ const styles = StyleSheet.create({
   },
   customInput: {
     marginTop: 6,
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  inlineInput: {
+    flex: 1,
+  },
+  inlineConfirm: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+  },
+  inlineConfirmDisabled: {
+    opacity: 0.4,
+  },
+  inlineConfirmText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   chipRow: {
     flexDirection: 'row',
