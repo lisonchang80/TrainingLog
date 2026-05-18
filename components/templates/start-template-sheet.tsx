@@ -122,6 +122,20 @@ export function StartTemplateSheet({
   const [customProgramName, setCustomProgramName] = useState('');
   const [creatingProgram, setCreatingProgram] = useState(false);
 
+  /**
+   * Inline「新增強度」TextInput state — mirror the new-program pattern. New
+   * sub_tag values land in `localSubTags` (in-session only, not persisted —
+   * sub_tag is a free-form string column, the new value will reach db when
+   * the parent persists sticky in `onStart` / `onEdit`).
+   *
+   * Dedupe: if user types a name that already exists in `subTags` (from db)
+   * or `localSubTags` (in-session), we don't append a duplicate radio row —
+   * just activate the existing one.
+   */
+  const [customSubTagMode, setCustomSubTagMode] = useState(false);
+  const [customSubTag, setCustomSubTag] = useState('');
+  const [localSubTags, setLocalSubTags] = useState<string[]>([]);
+
   // Re-resolve defaults each time the sheet opens — sticky state may have
   // changed since last open (e.g. another tab confirmed a session).
   useEffect(() => {
@@ -138,6 +152,9 @@ export function StartTemplateSheet({
     setCustomProgramMode(false);
     setCustomProgramName('');
     setCreatingProgram(false);
+    setCustomSubTagMode(false);
+    setCustomSubTag('');
+    setLocalSubTags([]);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + raw inputs.
@@ -147,6 +164,24 @@ export function StartTemplateSheet({
   const isNoneSelected = periodId === RESERVED_NONE_PROGRAM_ID;
   // When 無 is selected, force intensity to null on confirm (hidden picker).
   const effectiveIntensity = isNoneSelected ? null : intensityId;
+
+  /**
+   * Confirm an in-session new sub_tag from the inline TextInput. Pure local
+   * state — no db write. Dedupe against both db-loaded `subTags` and in-session
+   * `localSubTags`.
+   */
+  const handleConfirmNewSubTag = () => {
+    const trimmed = customSubTag.trim();
+    if (!trimmed) return;
+    const isDuplicate =
+      subTags.includes(trimmed) || localSubTags.includes(trimmed);
+    if (!isDuplicate) {
+      setLocalSubTags((prev) => [...prev, trimmed]);
+    }
+    setIntensityId(trimmed);
+    setCustomSubTagMode(false);
+    setCustomSubTag('');
+  };
 
   const handleConfirmNewProgram = async () => {
     const trimmed = customProgramName.trim();
@@ -262,34 +297,63 @@ export function StartTemplateSheet({
                 <View style={{ height: 16 }} />
                 <Text style={styles.sectionLabel}>選擇強度</Text>
                 <View style={styles.divider} />
-                {subTags.length === 0 ? (
-                  <Text style={styles.emptyText}>
-                    （還沒有強度標籤；下一個 slice 提供「+ 新增強度」）
-                  </Text>
-                ) : (
-                  subTags.map((tag) => {
-                    const isSelected = tag === intensityId;
-                    const isLastUsed = tag === lastUsedSubTag;
-                    return (
-                      <Pressable
-                        key={tag}
-                        onPress={() => setIntensityId(tag)}
-                        style={({ pressed }) => [
-                          styles.row,
-                          pressed && styles.rowPressed,
-                        ]}
-                        accessibilityRole="radio"
-                        accessibilityState={{ selected: isSelected }}
-                      >
-                        <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
-                        <Text style={styles.rowName}>{tag}</Text>
-                        {isLastUsed && (
-                          <Text style={styles.rowHint}>(最後使用)</Text>
-                        )}
-                      </Pressable>
-                    );
-                  })
-                )}
+                {[...subTags, ...localSubTags].map((tag) => {
+                  const isSelected = tag === intensityId;
+                  const isLastUsed = tag === lastUsedSubTag;
+                  return (
+                    <Pressable
+                      key={tag}
+                      onPress={() => setIntensityId(tag)}
+                      style={({ pressed }) => [
+                        styles.row,
+                        pressed && styles.rowPressed,
+                      ]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
+                      <Text style={styles.rowName}>{tag}</Text>
+                      {isLastUsed && (
+                        <Text style={styles.rowHint}>(最後使用)</Text>
+                      )}
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => {
+                    setCustomSubTagMode(true);
+                    setCustomSubTag('');
+                  }}
+                  style={[
+                    styles.addCta,
+                    customSubTagMode && styles.addCtaActive,
+                  ]}
+                >
+                  <Text style={styles.addCtaText}>新增強度</Text>
+                </Pressable>
+                {customSubTagMode ? (
+                  <View style={styles.inlineRow}>
+                    <TextInput
+                      style={[styles.input, styles.inlineInput]}
+                      value={customSubTag}
+                      onChangeText={setCustomSubTag}
+                      placeholder="輸入新強度標籤（如 5x5、最大力量）"
+                      placeholderTextColor="#9ca3af"
+                    />
+                    <Pressable
+                      onPress={handleConfirmNewSubTag}
+                      hitSlop={8}
+                      disabled={customSubTag.trim().length === 0}
+                      style={[
+                        styles.inlineConfirm,
+                        customSubTag.trim().length === 0 &&
+                          styles.inlineConfirmDisabled,
+                      ]}
+                    >
+                      <Text style={styles.inlineConfirmText}>建立</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </>
             )}
           </ScrollView>
