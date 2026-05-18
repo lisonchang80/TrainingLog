@@ -45,9 +45,16 @@ export interface ClusterExerciseInput {
 export interface ClusterSetInput {
   id: string;
   /** Owning Exercise id — sets are linked to exercises via this column
-   *  (v001 schema). Cluster partitioning uses this against the matching
-   *  ClusterExerciseInput.exercise_id. */
+   *  (v001 schema). Used as legacy fallback when `session_exercise_id`
+   *  is null (pre-v019 untagged rows). */
   exercise_id: string;
+  /** v019 (slice 10c #17) — owning session_exercise.id. Preferred key
+   *  for within-card filtering so a coincidentally-same-exercise solo
+   *  card doesn't mirror its rows into an RS A/B side (or vice versa).
+   *  NULL for legacy rows the backfill couldn't match; production rows
+   *  minted after #17 will always have this populated. Must be explicit
+   *  nullable (not optional) to keep type narrowing honest. */
+  session_exercise_id: string | null;
   ordering: number;
   set_kind: 'warmup' | 'working' | 'dropset';
   is_logged: number; // 0/1
@@ -115,8 +122,12 @@ export function groupClusterSides<
     const fols = followers.get(ex.id);
     if (!fols || fols.length === 0) continue; // solo — skip
     const bExercise = fols[0]; // 2-side only
-    const aSets = sortedSetsFor(sets, ex.exercise_id);
-    const bSets = sortedSetsFor(sets, bExercise.exercise_id);
+    // v019 isolation (#17): partition by session_exercise.id so that a
+    // coincidentally-same-exercise solo card doesn't bleed its sets into
+    // this cluster's A/B side. Legacy untagged rows (session_exercise_id
+    // null) fall back to exercise_id match — see sortedSetsFor.
+    const aSets = sortedSetsFor(sets, ex.exercise_id, ex.id);
+    const bSets = sortedSetsFor(sets, bExercise.exercise_id, bExercise.id);
     groups.push({
       a: { exercise: ex, sets: aSets },
       b: { exercise: bExercise, sets: bSets },
@@ -128,12 +139,26 @@ export function groupClusterSides<
   return groups;
 }
 
+/**
+ * v019 isolation filter — mirrors the solo path in `app/(tabs)/index.tsx`
+ * (line ~1969) so cluster + solo cards apply identical scoping rules.
+ *
+ *   - Prefer `session_exercise_id` (per-card identity, populated for all
+ *     rows minted after slice 10c #17).
+ *   - Fallback to `exercise_id` only when `session_exercise_id` is null
+ *     (legacy untagged rows the v019 backfill couldn't match).
+ */
 function sortedSetsFor<S extends ClusterSetInput>(
   sets: S[],
   exercise_id: string,
+  session_exercise_id: string,
 ): S[] {
   return sets
-    .filter((s) => s.exercise_id === exercise_id)
+    .filter(
+      (s) =>
+        s.session_exercise_id === session_exercise_id ||
+        (s.session_exercise_id == null && s.exercise_id === exercise_id),
+    )
     .slice()
     .sort((x, y) => x.ordering - y.ordering);
 }

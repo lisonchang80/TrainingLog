@@ -24,10 +24,10 @@ function mkEx(
 
 function mkSet(
   id: string,
-  // Test fixtures previously named this `session_exercise_id` — now it's
-  // an `exercise_id`. Caller passes the parent exercise's `ex-<id>` token.
-  // To minimise per-test diff, helpers map the previous parent-row id
-  // (e.g. 'p') to 'ex-p' (matching mkEx default).
+  // `parent_token` is the owning session_exercise's id (e.g. 'p' or 'f').
+  // exercise_id is derived (matches mkEx default `ex-${id}`); session_exercise_id
+  // defaults to the same token so #17 isolation tests can override it
+  // independently to simulate cross-card bleed.
   parent_token: string,
   ordering: number,
   opts: {
@@ -35,11 +35,21 @@ function mkSet(
     is_logged?: number;
     weight_kg?: number | null;
     reps?: number | null;
+    /** Override session_exercise_id (default: parent_token). Pass `null`
+     *  to simulate legacy pre-v019 untagged rows. Pass another card's
+     *  id to simulate a row owned by a different card. */
+    session_exercise_id?: string | null;
+    /** Override exercise_id (default: `ex-${parent_token}`). */
+    exercise_id?: string;
   } = {},
 ): ClusterSetInput {
   return {
     id,
-    exercise_id: `ex-${parent_token}`,
+    exercise_id: opts.exercise_id ?? `ex-${parent_token}`,
+    session_exercise_id:
+      'session_exercise_id' in opts
+        ? (opts.session_exercise_id as string | null)
+        : parent_token,
     ordering,
     set_kind: opts.set_kind ?? 'working',
     is_logged: opts.is_logged ?? 0,
@@ -109,6 +119,88 @@ describe('groupClusterSides', () => {
     ];
     const groups = groupClusterSides(exs, sets);
     expect(groups[0].a.sets.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+  });
+
+  // v019 isolation (#17 漏網) — cluster filter must scope by
+  // session_exercise_id, not just exercise_id, so a coincidentally-
+  // same-exercise solo card in the same session doesn't bleed sets
+  // into a cluster A/B side. Mirrors the solo path in
+  // `app/(tabs)/index.tsx` line ~1969.
+
+  it('isolates RS A side from solo card with same exercise_id (#17 漏網)', () => {
+    // Setup: same session contains a solo Bench Press card (SE1) +
+    // an RS [Bench Press, Chest Dip] card (SE2 A / SE3 B). Both
+    // Bench Press cards share `exercise_id = ex-bench`. The 3 sets
+    // belong to the solo card (session_exercise_id = SE1). The RS
+    // A side must come back EMPTY — the cluster grouper only sees
+    // SE2 + SE3 in `exercises`, so SE1's sets must not leak in even
+    // though they share exercise_id.
+    const exs = [
+      mkEx('SE2', 1, null, 'ex-bench'), // RS A side
+      mkEx('SE3', 2, 'SE2', 'ex-dip'), // RS B side
+    ];
+    const sets = [
+      // 3 sets owned by the (out-of-group) solo Bench Press card SE1
+      mkSet('s1', 'SE1', 1, { exercise_id: 'ex-bench', weight_kg: 70, reps: 12 }),
+      mkSet('s2', 'SE1', 2, { exercise_id: 'ex-bench', weight_kg: 75, reps: 10 }),
+      mkSet('s3', 'SE1', 3, { exercise_id: 'ex-bench', weight_kg: 80, reps: 8 }),
+    ];
+    const groups = groupClusterSides(exs, sets);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].a.sets).toEqual([]); // <-- the bug: was returning all 3
+    expect(groups[0].b.sets).toEqual([]);
+  });
+
+  it('picks only RS A side own sets when solo card with same exercise_id coexists', () => {
+    // Same shape as above, but now SE2 (RS A) owns 2 sets and SE1
+    // (solo) owns 1. RS A must surface ONLY its own 2 sets.
+    const exs = [
+      mkEx('SE2', 1, null, 'ex-bench'),
+      mkEx('SE3', 2, 'SE2', 'ex-dip'),
+    ];
+    const sets = [
+      mkSet('rsA1', 'SE2', 1, { exercise_id: 'ex-bench' }),
+      mkSet('rsA2', 'SE2', 2, { exercise_id: 'ex-bench' }),
+      mkSet('solo1', 'SE1', 1, { exercise_id: 'ex-bench' }), // bleed candidate
+    ];
+    const groups = groupClusterSides(exs, sets);
+    expect(groups[0].a.sets.map((s) => s.id)).toEqual(['rsA1', 'rsA2']);
+    expect(groups[0].b.sets).toEqual([]);
+  });
+
+  it('legacy untagged set (session_exercise_id=null) falls back to exercise_id match', () => {
+    // Pre-v019 row the backfill couldn't tag. Same exercise_id as the
+    // RS A side → should be pulled into A.sets via the fallback branch.
+    const exs = [
+      mkEx('SE2', 1, null, 'ex-bench'),
+      mkEx('SE3', 2, 'SE2', 'ex-dip'),
+    ];
+    const sets = [
+      mkSet('legacy', 'unused', 1, {
+        exercise_id: 'ex-bench',
+        session_exercise_id: null,
+      }),
+    ];
+    const groups = groupClusterSides(exs, sets);
+    expect(groups[0].a.sets.map((s) => s.id)).toEqual(['legacy']);
+    expect(groups[0].b.sets).toEqual([]);
+  });
+
+  it('keeps ordering ASC after session_exercise_id filtering', () => {
+    // Mix of in-card + out-of-card rows, plus a legacy fallback. Output
+    // must be the 3 in-card rows in ordering ASC.
+    const exs = [
+      mkEx('SE2', 1, null, 'ex-bench'),
+      mkEx('SE3', 2, 'SE2', 'ex-dip'),
+    ];
+    const sets = [
+      mkSet('a3', 'SE2', 3, { exercise_id: 'ex-bench' }),
+      mkSet('solo', 'SE1', 99, { exercise_id: 'ex-bench' }), // out of group — must drop
+      mkSet('a1', 'SE2', 1, { exercise_id: 'ex-bench' }),
+      mkSet('a2', 'SE2', 2, { exercise_id: 'ex-bench' }),
+    ];
+    const groups = groupClusterSides(exs, sets);
+    expect(groups[0].a.sets.map((s) => s.id)).toEqual(['a1', 'a2', 'a3']);
   });
 });
 
