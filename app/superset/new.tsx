@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -34,7 +35,10 @@ import {
   defaultSupersetName,
   validateReusableSupersetDraft,
 } from '@/src/domain/superset/supersetManager';
-import { insertReusableSuperset } from '@/src/adapters/sqlite/supersetRepository';
+import {
+  findExistingReusableSupersetByPair,
+  insertReusableSuperset,
+} from '@/src/adapters/sqlite/supersetRepository';
 import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
 
 /**
@@ -139,6 +143,31 @@ export default function NewSupersetScreen() {
     if (errors.length > 0) return;
     setSubmitting(true);
     try {
+      // Slice 10c #26 — UI pre-check for duplicate (A, B) pair (order-
+      // insensitive). insertReusableSuperset has a last-line DB guard that
+      // throws, but a pre-check gives a friendlier alert with a「前往」
+      // button to the existing template. Race: if two creates land
+      // simultaneously, the DB throw is the final guard.
+      const existingId = await findExistingReusableSupersetByPair(
+        db,
+        draft.exercise_ids[0],
+        draft.exercise_ids[1]
+      );
+      if (existingId !== null) {
+        // `finally` below resets `submitting`; no need to flip it manually.
+        Alert.alert(
+          '已有同樣動作組合的超級組',
+          '是否前往編輯既有的超級組？',
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '前往',
+              onPress: () => router.push(`/superset/${existingId}`),
+            },
+          ]
+        );
+        return;
+      }
       const newId = await insertReusableSuperset(
         db,
         draft,
