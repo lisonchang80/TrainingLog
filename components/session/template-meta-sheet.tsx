@@ -17,6 +17,14 @@
  *     ADR-0004 最小合法值 / cycle_count=1 / start_date=今日 / main_tag=null /
  *     is_active=0)。用戶可事後到 Program 編輯頁補完整 cycle structure。
  *
+ * 2026-05-18 polish (round 32):
+ *   - 「新增計畫」/「新增強度」chip 改成藍底白字 primary CTA Pressable
+ *     (永遠藍底白字，不隨 active toggle 變淡)，讓「新增」入口從 toggle chip
+ *     之中視覺脫穎而出。Active state 改用更深的 #0050B3 微暗一階，仍可辨識。
+ *   - 「新增強度」inline TextInput 加「建立」按鈕 (mirror 計畫 pattern)；
+ *     新標籤 in-session 暫存到 `localSubTags`，不寫 db（sub_tag 是 free-form
+ *     string，落 db 在儲存模板時）。重複名稱不 duplicate chip — 直接 active。
+ *
  * Mirrors `components/session/body-data-sheet.tsx`:
  *   Modal { transparent, animationType: 'slide' }
  *   <Pressable backdrop /> → tap-out cancels
@@ -268,14 +276,18 @@ export function TemplateMetaSheet({
                     }}
                   />
                 ))}
-                <Chip
-                  label="+ 新增計畫"
-                  active={customProgramMode}
+                <Pressable
                   onPress={() => {
                     setCustomProgramMode(true);
                     setCustomProgramName('');
                   }}
-                />
+                  style={[
+                    styles.addCta,
+                    customProgramMode && styles.addCtaActive,
+                  ]}
+                >
+                  <Text style={styles.addCtaText}>新增計畫</Text>
+                </Pressable>
               </View>
               {customProgramMode ? (
                 <View style={styles.inlineRow}>
@@ -334,14 +346,18 @@ export function TemplateMetaSheet({
                       }}
                     />
                   ))}
-                  <Chip
-                    label="+ 新增強度"
-                    active={customMode}
+                  <Pressable
                     onPress={() => {
                       setCustomMode(true);
                       setSubTag(null);
                     }}
-                  />
+                    style={[
+                      styles.addCta,
+                      customMode && styles.addCtaActive,
+                    ]}
+                  >
+                    <Text style={styles.addCtaText}>新增強度</Text>
+                  </Pressable>
                 </View>
                 {customMode ? (
                   <TextInput
@@ -497,6 +513,28 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#0050B3',
+    fontWeight: '600',
+  },
+  /**
+   * Primary CTA chip for「新增計畫」/「新增強度」— always blue-solid white-text
+   * regardless of active state (so the entry point stands out from toggle
+   * chips). Active state darkens the fill slightly to signal「現在在新增模式」.
+   */
+  addCta: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: '#007AFF',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#007AFF',
+  },
+  addCtaActive: {
+    backgroundColor: '#0050B3',
+    borderColor: '#0050B3',
+  },
+  addCtaText: {
+    fontSize: 13,
+    color: '#fff',
     fontWeight: '600',
   },
   hint: {
