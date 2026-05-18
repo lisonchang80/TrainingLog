@@ -18,6 +18,7 @@ import type { LoadType } from '../../domain/exercise/types';
 import type { BucketKey } from '../../domain/pr/types';
 import { BUCKETS, classifyBucket } from '../../domain/pr/buckets';
 import type { RepBucketChip } from '../../domain/exercise/repBucketFilter';
+import type { SetKind } from '../../domain/set/setLabels';
 
 /** One row per set; fields needed by PR / Volume engines + UI display. */
 export interface ExerciseHistorySet {
@@ -31,6 +32,23 @@ export interface ExerciseHistorySet {
   ordering: number;
   created_at: number;
   load_type: LoadType;
+  /**
+   * v015 lifecycle column — 'warmup' | 'working' | 'dropset'. Slice 10c
+   * overnight #22: surfaced to history rows so the expanded session card
+   * can render per-row labels (熱 / 1 / 2 / D1 …) via
+   * `computeHistorySetLabels`. (Previously the column was unused by this
+   * query path and the type for the parallel `ExerciseHistoryRow` shape
+   * still pegs it to `null` — only `ExerciseHistorySet` carries the real
+   * enum today.)
+   */
+  set_kind: SetKind;
+  /**
+   * v015 lifecycle column — dropset followers reference their head's
+   * `set.id`; `null` for cluster heads / warmup / working rows. Slice 10c
+   * overnight #22 surfaces it so future dropset-chain rendering can find
+   * the head without an extra query.
+   */
+  parent_set_id: string | null;
   /**
    * True iff the originating `session_exercise` belongs to a cluster (slice 10c).
    * Drives the 3-段 cluster filter on the timeline list — see
@@ -74,8 +92,10 @@ export async function listExerciseHistorySets(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySet[]> {
-  type Row = Omit<ExerciseHistorySet, 'is_in_cluster'> & {
+  type Row = Omit<ExerciseHistorySet, 'is_in_cluster' | 'set_kind'> & {
     is_in_cluster: number;
+    // v015 column — sqlite returns the raw string 'warmup' | 'working' | 'dropset'.
+    set_kind: SetKind;
   };
   const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
@@ -88,6 +108,8 @@ export async function listExerciseHistorySets(
             s.ordering     AS ordering,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
+            s.set_kind     AS set_kind,
+            s.parent_set_id AS parent_set_id,
             CASE
               WHEN se.parent_id IS NOT NULL THEN 1
               WHEN EXISTS (
@@ -125,8 +147,9 @@ export async function listExerciseHistoryBySession(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySession[]> {
-  type RawRow = Omit<HistorySetWithSessionMeta, 'is_in_cluster'> & {
+  type RawRow = Omit<HistorySetWithSessionMeta, 'is_in_cluster' | 'set_kind'> & {
     is_in_cluster: number;
+    set_kind: SetKind;
   };
   const rows = await db.getAllAsync<RawRow>(
     `SELECT s.id           AS set_id,
@@ -139,6 +162,8 @@ export async function listExerciseHistoryBySession(
             s.ordering     AS ordering,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
+            s.set_kind     AS set_kind,
+            s.parent_set_id AS parent_set_id,
             se.template_id AS template_id,
             t.program_id   AS program_id,
             t.sub_tag      AS sub_tag,
