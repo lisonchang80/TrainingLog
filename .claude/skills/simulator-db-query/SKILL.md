@@ -94,6 +94,45 @@ sqlite3 "$DB" "UPDATE \"set\" SET is_logged = 1
 - backfill 後再跑 SELECT 確認生效
 - 告訴用戶 reload simulator 才會看到效果（expo-sqlite cache 一輪）
 
+## Step 4 — DELETE 含 FK cascade（順序 + dangling 清理）
+
+當要刪 entity row 且該 entity 被別的 table FK 引用時，**手動依 FK 深度由深到淺刪**（schema 無 ON DELETE CASCADE）。2026-05-18 #31 wave 經驗：刪 4 個 corrupted template 順序是 **template_set → template_exercise → template**。
+
+範例 — 刪一組 RS template (cascade superset_exercise link table)：
+```bash
+sqlite3 "$DB" "BEGIN;
+  DELETE FROM superset_exercise WHERE superset_id IN (...);
+  DELETE FROM superset WHERE id IN (...);
+COMMIT;"
+```
+
+範例 — 刪 templates (3 層 cascade: template → template_exercise → template_set)：
+```bash
+sqlite3 "$DB" "BEGIN;
+  DELETE FROM template_set WHERE template_exercise_id IN (SELECT id FROM template_exercise WHERE template_id IN (...));
+  DELETE FROM template_exercise WHERE template_id IN (...);
+  DELETE FROM template WHERE id IN (...);
+COMMIT;"
+```
+
+**規則**：
+- **永遠**先 SELECT count 預覽：`SELECT (SELECT COUNT(*) FROM child) AS child_rows, (SELECT COUNT(*) FROM parent) AS parent_rows;`
+- **永遠**查 dangling FK refs：刪 parent 前先看有沒有其他 table 反向 ref（如 `session_exercise.template_id` 反向 ref 已刪的 template）→ UPDATE 那些 row 設 NULL，**排除 active session**：
+  ```sql
+  UPDATE session_exercise SET template_id = NULL
+    WHERE template_id NOT IN (SELECT id FROM template)
+      AND template_id IS NOT NULL
+      AND session_id NOT IN (SELECT id FROM session WHERE ended_at IS NULL);
+  ```
+- 用 `BEGIN; ... COMMIT;` 包 transaction，部份失敗自動 rollback
+- 刪完跑 verification SELECT 確認 row count = 0
+- 告訴用戶 reload simulator 才會看到效果
+
+**Dangling FK 風險案例（slice 10c）**：
+- 刪 template row 沒清 `session_exercise.template_id` → `convertSessionToTemplate` mode='update' linkedTemplateId lookup 撈到 ghost id 後 `getTemplate(id)` return null → 邏輯 fallback 到 create，但用戶可能困惑
+- 刪 superset row 沒清 `superset_exercise` link rows → list query 仍 join 撈到 partial data，UI render 出 broken card
+- 刪 exercise row（**不要做**）→ 大量 set / template_exercise / superset_exercise 變 orphan，破壞性極大
+
 ## 常見 schema 速查
 
 - **`set` table**: `(id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering, created_at, set_kind, parent_set_id, is_logged, notes, session_exercise_id)` — v019 加 session_exercise_id (slice 10c #17 isolation)
