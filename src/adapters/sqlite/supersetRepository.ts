@@ -158,10 +158,65 @@ export async function getReusableSupersetWithExercises(
 }
 
 /**
+ * Look up whether a Reusable Superset already exists with the SAME pair of
+ * exercises (order-insensitive: {A, B} == {B, A}). Returns the existing
+ * superset's id, or null if no dup.
+ *
+ * Used by:
+ *   - `insertReusableSuperset` — last-line DB guard before INSERT
+ *   - UI pre-check in `app/superset/new.tsx` — earlier user-friendly alert
+ *     before the throw round-trip
+ *
+ * SQL strategy: the inner sub-query restricts to supersets that have
+ * exactly 2 distinct exercise ids (the well-formed shape per v011); the
+ * outer aggregate ensures both of the input ids are present. The
+ * `COUNT(DISTINCT exercise_id) = 2` guard means a row pairing exercise A
+ * with itself cannot match a query for (A, B). The outer
+ * `HAVING COUNT(*) = 2` (combined with the inner `AND exercise_id IN (?, ?)`)
+ * confirms both target ids exist for the same superset. Order-insensitive
+ * by construction — we never reference `position`.
+ */
+export async function findExistingReusableSupersetByPair(
+  db: Database,
+  exercise_id_a: string,
+  exercise_id_b: string
+): Promise<string | null> {
+  if (exercise_id_a === exercise_id_b) {
+    // A pair against itself can't form a valid RS (validate-draft rejects
+    // it). Return null — there is no "existing matching pair" to surface.
+    return null;
+  }
+  type Row = { superset_id: string };
+  const rows = await db.getAllAsync<Row>(
+    `SELECT superset_id
+       FROM superset_exercise
+      WHERE superset_id IN (
+        SELECT superset_id
+          FROM superset_exercise
+         GROUP BY superset_id
+         HAVING COUNT(DISTINCT exercise_id) = 2
+            AND COUNT(*) = 2
+      )
+        AND exercise_id IN (?, ?)
+      GROUP BY superset_id
+      HAVING COUNT(DISTINCT exercise_id) = 2`,
+    exercise_id_a,
+    exercise_id_b
+  );
+  return rows.length > 0 ? rows[0].superset_id : null;
+}
+
+/**
  * Insert a new Reusable Superset + its 2 link rows in one transaction.
  *
  * Caller MUST `validateReusableSupersetDraft` first. UUID generator is
  * injected (Hermes lacks `crypto.randomUUID`).
+ *
+ * Throws `Error('duplicate RS pair: ...')` if an RS template with the same
+ * (exercise_id_a, exercise_id_b) pair (order-insensitive) already exists.
+ * UI should pre-check via `findExistingReusableSupersetByPair` for a nicer
+ * error path; this throw is the last-line DB guard against races / future
+ * caller bugs.
  *
  * Returns the new superset id.
  */
@@ -176,6 +231,17 @@ export async function insertReusableSuperset(
     idGen: uuid,
     now,
   });
+
+  // Dup pair guard — mirror appendReusableSupersetToSession's
+  // SELECT-then-throw pattern. Runs BEFORE the transaction wrap so the
+  // throw doesn't leave behind a partial row.
+  const [exA, exB] = draft.exercise_ids;
+  const existing = await findExistingReusableSupersetByPair(db, exA, exB);
+  if (existing !== null) {
+    throw new Error(
+      `duplicate RS pair: 已有同樣動作組合的超級組 (existing id: ${existing})`
+    );
+  }
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(

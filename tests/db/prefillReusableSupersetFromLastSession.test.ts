@@ -254,12 +254,33 @@ describe('prefillReusableSupersetFromLastSession', () => {
     await addLoggedSet({ id: 'ya1', session_id: 'past-y', exercise_id: BENCH, se_id: y_a, ordering: 1, weight_kg: 80, reps: 5 });
     await addLoggedSet({ id: 'yb1', session_id: 'past-y', exercise_id: CHEST_DIP, se_id: y_b, ordering: 2, weight_kg: 60, reps: 8 });
 
-    // RS X — separate template, never logged anywhere.
-    const rs_x_id = await insertReusableSuperset(
-      db,
-      { name: 'RS X', color_hex: '#0000ff', exercise_ids: [BENCH, CHEST_DIP] },
-      randomUUID,
-      () => now,
+    // RS X — separate template with the SAME pair, never logged anywhere.
+    // #26 dup-pair guard blocks this via the public API, but legacy DBs
+    // pre-dating #26 may still have duplicate-pair RS templates (the user
+    // manually cleaned 3 such pairs from simulator DB). The prefill layer
+    // must still isolate them by `reusable_superset_id` — so insert via
+    // raw SQL to bypass the guard.
+    const rs_x_id = randomUUID();
+    await db.runAsync(
+      `INSERT INTO superset (id, name, color_hex, use_count, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?)`,
+      rs_x_id,
+      'RS X',
+      '#0000ff',
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO superset_exercise (superset_id, position, exercise_id)
+       VALUES (?, 0, ?)`,
+      rs_x_id,
+      BENCH,
+    );
+    await db.runAsync(
+      `INSERT INTO superset_exercise (superset_id, position, exercise_id)
+       VALUES (?, 1, ?)`,
+      rs_x_id,
+      CHEST_DIP,
     );
 
     // Sanity: rs_x_id differs from rs_y_id.

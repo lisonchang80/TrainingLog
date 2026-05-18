@@ -2,6 +2,7 @@ import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteData
 import { migrate } from '../../src/db/migrate';
 import {
   deleteReusableSuperset,
+  findExistingReusableSupersetByPair,
   getReusableSupersetSessionCount,
   getReusableSupersetSessionCounts,
   getReusableSupersetWithExercises,
@@ -24,6 +25,7 @@ import type { ReusableSupersetDraft } from '../../src/domain/superset/supersetMa
 const BENCH = '00000000-0000-4000-8000-000000000001';
 const ROW = '00000000-0000-4000-8000-000000000005';
 const SQUAT = '00000000-0000-4000-8000-000000000002';
+const DEADLIFT = '00000000-0000-4000-8000-000000000003';
 
 const draft = (over: Partial<ReusableSupersetDraft> = {}): ReusableSupersetDraft => ({
   name: 'Bench + Row',
@@ -81,14 +83,115 @@ describe('supersetRepository', () => {
     });
   });
 
+  /**
+   * Slice 10c overnight #26 — block creating duplicate RS templates.
+   * Same pair {A, B} (order-insensitive) is no longer allowed; the helper
+   * surfaces the existing id so UI can offer "go to existing".
+   */
+  describe('findExistingReusableSupersetByPair (#26)', () => {
+    it('returns null when DB has no RS templates', async () => {
+      expect(await findExistingReusableSupersetByPair(db, BENCH, ROW)).toBeNull();
+    });
+
+    it('finds an existing RS by the same (A, B) order', async () => {
+      const id = await insertReusableSuperset(
+        db,
+        draft({ exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      expect(await findExistingReusableSupersetByPair(db, BENCH, ROW)).toBe(id);
+    });
+
+    it('finds an existing RS by the reverse (B, A) order — order-insensitive', async () => {
+      const id = await insertReusableSuperset(
+        db,
+        draft({ exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      expect(await findExistingReusableSupersetByPair(db, ROW, BENCH)).toBe(id);
+    });
+
+    it('returns null when the pair is different', async () => {
+      await insertReusableSuperset(
+        db,
+        draft({ exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      expect(await findExistingReusableSupersetByPair(db, BENCH, SQUAT)).toBeNull();
+    });
+
+    it('disambiguates among multiple existing RS templates', async () => {
+      const ab = await insertReusableSuperset(
+        db,
+        draft({ name: 'AB', exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      const cd = await insertReusableSuperset(
+        db,
+        draft({ name: 'CD', exercise_ids: [SQUAT, ROW] }),
+        uuid,
+        now
+      );
+      expect(await findExistingReusableSupersetByPair(db, BENCH, ROW)).toBe(ab);
+      expect(await findExistingReusableSupersetByPair(db, ROW, BENCH)).toBe(ab);
+      expect(await findExistingReusableSupersetByPair(db, SQUAT, ROW)).toBe(cd);
+      expect(await findExistingReusableSupersetByPair(db, ROW, SQUAT)).toBe(cd);
+      expect(await findExistingReusableSupersetByPair(db, BENCH, SQUAT)).toBeNull();
+    });
+
+    it('insertReusableSuperset throws on duplicate pair (reverse order) and leaves DB unchanged', async () => {
+      const id = await insertReusableSuperset(
+        db,
+        draft({ exercise_ids: [BENCH, ROW] }),
+        uuid,
+        now
+      );
+      await expect(
+        insertReusableSuperset(
+          db,
+          draft({ name: 'dup', exercise_ids: [ROW, BENCH] }),
+          uuid,
+          now
+        )
+      ).rejects.toThrow(/duplicate RS pair/);
+      const list = await listReusableSupersets(db);
+      expect(list).toHaveLength(1);
+      expect(list[0].id).toBe(id);
+      // No orphan link rows from a partially-applied insert.
+      const slots = await listSlotsForSuperset(db, id);
+      expect(slots).toHaveLength(2);
+    });
+  });
+
   describe('listReusableSupersets ordering', () => {
     it('sorts by use_count DESC, updated_at DESC', async () => {
+      // Distinct exercise pairs per RS — insertReusableSuperset rejects
+      // duplicate pairs (#26); ordering only cares about use_count/updated_at.
       // a: use_count=0, updated_at=1000
-      const a = await insertReusableSuperset(db, draft({ name: 'A' }), uuid, () => 1000);
+      const a = await insertReusableSuperset(
+        db,
+        draft({ name: 'A', exercise_ids: [BENCH, ROW] }),
+        uuid,
+        () => 1000
+      );
       // b: use_count=2, updated_at=2000
-      const b = await insertReusableSuperset(db, draft({ name: 'B' }), uuid, () => 2000);
+      const b = await insertReusableSuperset(
+        db,
+        draft({ name: 'B', exercise_ids: [BENCH, SQUAT] }),
+        uuid,
+        () => 2000
+      );
       // c: use_count=2, updated_at=3000
-      const c = await insertReusableSuperset(db, draft({ name: 'C' }), uuid, () => 3000);
+      const c = await insertReusableSuperset(
+        db,
+        draft({ name: 'C', exercise_ids: [BENCH, DEADLIFT] }),
+        uuid,
+        () => 3000
+      );
       await incrementUseCount(db, b, () => 2000);
       await incrementUseCount(db, b, () => 2000);
       await incrementUseCount(db, c, () => 3000);
@@ -374,6 +477,8 @@ describe('supersetRepository', () => {
     });
 
     it('batch variant scopes counts per-RS (different templates do not bleed)', async () => {
+      // Two distinct RS templates — different pairs since insertReusableSuperset
+      // now rejects duplicate-pair inserts.
       const rsA = await insertReusableSuperset(
         db,
         draft({ name: 'A', exercise_ids: [BENCH, ROW] }),
@@ -382,7 +487,7 @@ describe('supersetRepository', () => {
       );
       const rsB = await insertReusableSuperset(
         db,
-        draft({ name: 'B', exercise_ids: [BENCH, ROW] }),
+        draft({ name: 'B', exercise_ids: [BENCH, SQUAT] }),
         uuid,
         now
       );
