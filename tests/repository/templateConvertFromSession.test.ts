@@ -282,4 +282,113 @@ describe('convertSessionToTemplate', () => {
     expect(tpl).not.toBeNull();
     expect(tpl!.exercises).toHaveLength(0);
   });
+
+  // 2026-05-18: 另存模板 bottom sheet 引導 (name + program_id + sub_tag) 3 元組。
+  // create mode 帶入 program_id / sub_tag → 寫進 template row。
+  it('create mode with program_id + sub_tag: writes them onto the new template row', async () => {
+    await setupSession({ session_id: 'sess-meta', template_id: null });
+
+    const newTplId = await convertSessionToTemplate(db, {
+      session_id: 'sess-meta',
+      template_name: 'Meta Test',
+      mode: 'create',
+      program_id: 'prog-foo',
+      sub_tag: '5x5',
+      uuid,
+      now,
+    });
+
+    const row = await db.getFirstAsync<{
+      program_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT program_id, sub_tag FROM template WHERE id = ?`,
+      newTplId,
+    );
+    expect(row?.program_id).toBe('prog-foo');
+    expect(row?.sub_tag).toBe('5x5');
+  });
+
+  it('create mode without program_id / sub_tag: row gets NULL for both (free template)', async () => {
+    await setupSession({ session_id: 'sess-free', template_id: null });
+
+    const newTplId = await convertSessionToTemplate(db, {
+      session_id: 'sess-free',
+      template_name: 'Free Template',
+      mode: 'create',
+      uuid,
+      now,
+    });
+
+    const row = await db.getFirstAsync<{
+      program_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT program_id, sub_tag FROM template WHERE id = ?`,
+      newTplId,
+    );
+    expect(row?.program_id).toBeNull();
+    expect(row?.sub_tag).toBeNull();
+  });
+
+  it('update mode ignores program_id / sub_tag args (linked template keeps its prior tuple)', async () => {
+    // Pre-seed an existing template with a specific program_id + sub_tag.
+    await createTemplate(db, { id: 'tpl-tag', name: 'Old Name', now });
+    await db.runAsync(
+      `UPDATE template SET program_id = ?, sub_tag = ? WHERE id = ?`,
+      'prog-orig',
+      'orig-tag',
+      'tpl-tag',
+    );
+    await setupSession({ session_id: 'sess-update', template_id: 'tpl-tag' });
+
+    // Pass program_id / sub_tag in args — should be IGNORED for update mode.
+    await convertSessionToTemplate(db, {
+      session_id: 'sess-update',
+      template_name: 'Updated Name',
+      mode: 'update',
+      program_id: 'prog-DIFFERENT',
+      sub_tag: 'DIFFERENT-tag',
+      uuid,
+      now: () => NOW + 9000,
+    });
+
+    const row = await db.getFirstAsync<{
+      name: string;
+      program_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT name, program_id, sub_tag FROM template WHERE id = ?`,
+      'tpl-tag',
+    );
+    // Name updated, but program_id / sub_tag stay at original values.
+    expect(row?.name).toBe('Updated Name');
+    expect(row?.program_id).toBe('prog-orig');
+    expect(row?.sub_tag).toBe('orig-tag');
+  });
+
+  it('update mode falling back to create (freestyle session) ALSO honors program_id / sub_tag', async () => {
+    // No linked template_id on session_exercise rows → create-mode fallback.
+    await setupSession({ session_id: 'sess-fallback', template_id: null });
+
+    const newTplId = await convertSessionToTemplate(db, {
+      session_id: 'sess-fallback',
+      template_name: 'Fallback With Meta',
+      mode: 'update', // → falls back to create because no linked template
+      program_id: 'prog-bar',
+      sub_tag: '肌耐力',
+      uuid,
+      now,
+    });
+
+    const row = await db.getFirstAsync<{
+      program_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT program_id, sub_tag FROM template WHERE id = ?`,
+      newTplId,
+    );
+    expect(row?.program_id).toBe('prog-bar');
+    expect(row?.sub_tag).toBe('肌耐力');
+  });
 });

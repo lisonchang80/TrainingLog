@@ -868,11 +868,23 @@ export async function convertSessionToTemplate(
     session_id: string;
     template_name: string;
     mode: 'update' | 'create';
+    /**
+     * Only used when a brand-new template row is INSERTed (mode='create'
+     * or mode='update' falling back to create because session has no
+     * linked template). When updating an existing template row, these are
+     * ignored — the template inherits its prior program_id / sub_tag.
+     *
+     * 2026-05-18: 另存模板 bottom sheet 引導用戶填這 3 元組。
+     */
+    program_id?: string | null;
+    sub_tag?: string | null;
     uuid: () => string;
     now?: () => number;
   },
 ): Promise<string> {
   const ts = (args.now ?? Date.now)();
+  const createProgramId = args.program_id ?? null;
+  const createSubTag = args.sub_tag ?? null;
 
   // Step 1: gather the session's exercise + set state.
   type SeRow = {
@@ -968,13 +980,19 @@ export async function convertSessionToTemplate(
     } else {
       // Create-mode (or update-mode-fallback-to-create when no linked
       // template existed). INSERT a new template row.
+      //
+      // program_id / sub_tag 由 caller 透過 args 帶入 (TemplateMetaSheet 引導
+      // 用戶填的「歸屬計畫」/「強度標籤」)。NULL 表示「不指定」 — 對應 ADR-0003
+      // 的 free template。
       await db.runAsync(
-        `INSERT INTO template (id, name, created_at, updated_at)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         newTemplateId,
         args.template_name,
         ts,
         ts,
+        createProgramId,
+        createSubTag,
       );
     }
 

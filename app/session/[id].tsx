@@ -13,6 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
+import {
+  listPrograms,
+  type ProgramSummary,
+} from '@/src/adapters/sqlite/programRepository';
 import {
   discardSession,
   getSession,
@@ -25,7 +30,10 @@ import {
   type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
-import { convertSessionToTemplate } from '@/src/adapters/sqlite/templateRepository';
+import {
+  convertSessionToTemplate,
+  listDistinctSubTags,
+} from '@/src/adapters/sqlite/templateRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
 import {
@@ -76,6 +84,13 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+
+  // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次
+  // programs + subTags 給 picker 用。
+  const [templateMetaSheetOpen, setTemplateMetaSheetOpen] = useState(false);
+  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
+  const [subTags, setSubTags] = useState<string[]>([]);
+  const [templateMetaBusy, setTemplateMetaBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -176,17 +191,37 @@ export default function SessionDetailScreen() {
   );
 
   const handleSaveTemplate = useCallback(
-    (mode: 'update' | 'create') => {
+    async (mode: 'update' | 'create') => {
       if (!session) return;
       const dateLabel = formatDateLabel(session.started_at);
       const defaultName = `Session ${dateLabel}`;
+
+      // 2026-05-18: create mode (另存模板) → TemplateMetaSheet 引導 3 元組
+      // (name + program_id + sub_tag)。update mode (儲存模板) 維持原本
+      // Alert.prompt 改名流程 — update 不需要 3 元組，inherit linked
+      // template 既有的 program/sub_tag。
+      if (mode === 'create') {
+        try {
+          const [progs, tags] = await Promise.all([
+            listPrograms(db),
+            listDistinctSubTags(db),
+          ]);
+          setPrograms(progs);
+          setSubTags(tags);
+        } catch (e) {
+          Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
+          return;
+        }
+        setTemplateMetaSheetOpen(true);
+        return;
+      }
+
+      // mode === 'update' — 原本 Alert.prompt 流程不變。
       // Alert.prompt is iOS-only; on Android we fall back to the default name.
       if (typeof Alert.prompt === 'function') {
         Alert.prompt(
-          mode === 'update' ? '儲存模板' : '另存模板',
-          mode === 'update'
-            ? '將本場訓練結構覆寫到連結的模板（無連結則新建並綁定）'
-            : '將本場訓練結構另存為新模板',
+          '儲存模板',
+          '將本場訓練結構覆寫到連結的模板（無連結則新建並綁定）',
           [
             { text: '取消', style: 'cancel' },
             {
@@ -200,10 +235,7 @@ export default function SessionDetailScreen() {
                     mode,
                     uuid: randomUUID,
                   });
-                  Alert.alert(
-                    mode === 'update' ? '已儲存' : '已另存',
-                    `模板「${trimmed}」已${mode === 'update' ? '更新' : '建立'}。`
-                  );
+                  Alert.alert('已儲存', `模板「${trimmed}」已更新。`);
                 } catch (e) {
                   Alert.alert(
                     '失敗',
@@ -220,7 +252,7 @@ export default function SessionDetailScreen() {
         // Android: skip prompt, use default name (UI lib could add a Modal
         // later; keep scope minimal for v1).
         Alert.alert(
-          mode === 'update' ? '儲存模板' : '另存模板',
+          '儲存模板',
           `將以預設名稱「${defaultName}」儲存？`,
           [
             { text: '取消', style: 'cancel' },
@@ -234,10 +266,7 @@ export default function SessionDetailScreen() {
                     mode,
                     uuid: randomUUID,
                   });
-                  Alert.alert(
-                    mode === 'update' ? '已儲存' : '已另存',
-                    `模板「${defaultName}」已${mode === 'update' ? '更新' : '建立'}。`
-                  );
+                  Alert.alert('已儲存', `模板「${defaultName}」已更新。`);
                 } catch (e) {
                   Alert.alert(
                     '失敗',
@@ -248,6 +277,37 @@ export default function SessionDetailScreen() {
             },
           ]
         );
+      }
+    },
+    [db, id, session]
+  );
+
+  const handleTemplateMetaConfirm = useCallback(
+    async (args: {
+      name: string;
+      program_id: string | null;
+      sub_tag: string | null;
+    }) => {
+      if (!session) return;
+      const dateLabel = formatDateLabel(session.started_at);
+      const defaultName = `Session ${dateLabel}`;
+      const finalName = args.name.trim() || defaultName;
+      setTemplateMetaBusy(true);
+      try {
+        await convertSessionToTemplate(db, {
+          session_id: id!,
+          template_name: finalName,
+          mode: 'create',
+          program_id: args.program_id,
+          sub_tag: args.sub_tag,
+          uuid: randomUUID,
+        });
+        setTemplateMetaSheetOpen(false);
+        Alert.alert('已另存', `模板「${finalName}」已建立。`);
+      } catch (e) {
+        Alert.alert('失敗', e instanceof Error ? e.message : String(e));
+      } finally {
+        setTemplateMetaBusy(false);
       }
     },
     [db, id, session]
@@ -390,6 +450,19 @@ export default function SessionDetailScreen() {
           </Text>
         </Pressable>
       </View>
+
+      {/* 另存模板 bottom sheet (2026-05-18) */}
+      <TemplateMetaSheet
+        visible={templateMetaSheetOpen}
+        defaultName={
+          session ? `Session ${formatDateLabel(session.started_at)}` : 'Session'
+        }
+        programs={programs}
+        subTags={subTags}
+        onCancel={() => setTemplateMetaSheetOpen(false)}
+        onConfirm={handleTemplateMetaConfirm}
+        busy={templateMetaBusy}
+      />
     </SafeAreaView>
   );
 }
