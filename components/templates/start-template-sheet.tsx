@@ -6,7 +6,7 @@
  *
  *   ╔═══════════════════════════════╗
  *   ║  ‹ 返回         <template>     ║
- *   ║  選擇週期                      ║
+ *   ║  選擇計畫                      ║
  *   ║  ○ 無               (固定項)  ║
  *   ║  ◉ 5x5 強度週   (最後使用)    ║
  *   ║  [ + 新增週期 ]                ║   ← deferred to next slice
@@ -236,7 +236,7 @@ export function StartTemplateSheet({
           </View>
 
           <ScrollView contentContainerStyle={styles.body}>
-            <Text style={styles.sectionLabel}>選擇週期</Text>
+            <Text style={styles.sectionLabel}>選擇計畫</Text>
             <View style={styles.divider} />
             {periodOptions.map((opt) => {
               const isSelected = opt.id === periodId;
