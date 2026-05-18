@@ -142,6 +142,57 @@ export async function insertSessionExercise(
   );
 }
 
+/**
+ * Picker dim/disable input — what the current in-progress session already
+ * contains, partitioned so the [+動作] picker can render the right items
+ * as "已在訓練中" (dim + tap-disabled, ⓘ still tappable for detail
+ * preview).
+ *
+ * Rule recap (user pinned 2026-05-18):
+ *   - Solo: 1 session × same exercise_id allows at most 1 solo card
+ *   - RS:   1 session × same RS template allows at most 1 instance (multiple
+ *           different RS templates can coexist)
+ *   - Solo and RS are independent — solo Cable Crossover + RS(Cable+Dip)
+ *     may live side-by-side; RS A-side Cable does NOT dim the solo Cable
+ *     picker entry (and vice versa)
+ *
+ * Implementation: only rows with `reusable_superset_id IS NULL` count
+ * toward solo conflicts; rows where it's NOT NULL contribute to the RS
+ * template set (distinct on the template id, both A and B sides collapse
+ * to the same id).
+ */
+export interface SessionUsedExercises {
+  /** session_exercise.exercise_id where reusable_superset_id IS NULL. */
+  solo_exercise_ids: Set<string>;
+  /** Distinct session_exercise.reusable_superset_id (NOT NULL only). */
+  rs_template_ids: Set<string>;
+}
+
+export async function listSessionUsedExercises(
+  db: Database,
+  session_id: string
+): Promise<SessionUsedExercises> {
+  const rows = await db.getAllAsync<{
+    exercise_id: string;
+    reusable_superset_id: string | null;
+  }>(
+    `SELECT exercise_id, reusable_superset_id
+       FROM session_exercise
+      WHERE session_id = ?`,
+    session_id
+  );
+  const solo = new Set<string>();
+  const rs = new Set<string>();
+  for (const r of rows) {
+    if (r.reusable_superset_id == null) {
+      solo.add(r.exercise_id);
+    } else {
+      rs.add(r.reusable_superset_id);
+    }
+  }
+  return { solo_exercise_ids: solo, rs_template_ids: rs };
+}
+
 export async function listSessionExercises(
   db: Database,
   session_id: string
