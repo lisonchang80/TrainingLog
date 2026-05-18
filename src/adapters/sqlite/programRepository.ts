@@ -106,6 +106,14 @@ export async function getActiveProgram(
  * `is_active` is forced to 0 here — call `setActiveProgram(id)` afterwards
  * if the caller wants to flip the flag (which also de-activates any other
  * active program in the same transaction).
+ *
+ * Name uniqueness: SELECT-then-throw guard against case-insensitive trimmed
+ * dup names. Throws `Error('DUPLICATE_PROGRAM_NAME')` if `LOWER(TRIM(name))`
+ * collides with an existing row. Mirror the `insertReusableSuperset` pattern
+ * (round 26) — we don't add a SQL UNIQUE constraint because SQLite's
+ * case-insensitive UNIQUE indexes require COLLATE NOCASE on the column and
+ * we'd need a migration. UI is expected to surface this as an Alert so the
+ * user can rename + retry inline.
  */
 export async function createProgram(
   db: Database,
@@ -116,6 +124,15 @@ export async function createProgram(
   }
 ): Promise<void> {
   const ts = (args.now ?? Date.now)();
+  // Dup guard — case-insensitive + trim match. Reserved「無」 (RESERVED_NONE_PROGRAM_ID)
+  // is included in this scan so users can't shadow it either.
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM program WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1`,
+    args.program.name
+  );
+  if (existing) {
+    throw new Error('DUPLICATE_PROGRAM_NAME');
+  }
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `INSERT INTO program

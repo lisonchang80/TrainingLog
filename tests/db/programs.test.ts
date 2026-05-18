@@ -120,6 +120,35 @@ describe('programRepository', () => {
     expect(await getProgram(db, program.id)).toBeNull();
   });
 
+  it('createProgram throws DUPLICATE_PROGRAM_NAME on exact-match dup name', async () => {
+    const a = buildProgram({ name: '推日訓練' });
+    const b = buildProgram({ name: '推日訓練' });
+    await createProgram(db, { program: a });
+    await expect(createProgram(db, { program: b })).rejects.toThrow(
+      'DUPLICATE_PROGRAM_NAME'
+    );
+  });
+
+  it('createProgram throws DUPLICATE_PROGRAM_NAME case-insensitive + trim', async () => {
+    const a = buildProgram({ name: 'TEST' });
+    await createProgram(db, { program: a });
+    // Lower-case collision.
+    await expect(
+      createProgram(db, { program: buildProgram({ name: 'test' }) })
+    ).rejects.toThrow('DUPLICATE_PROGRAM_NAME');
+    // Trim-padded collision.
+    await expect(
+      createProgram(db, { program: buildProgram({ name: '  Test  ' }) })
+    ).rejects.toThrow('DUPLICATE_PROGRAM_NAME');
+  });
+
+  it('createProgram allows distinct names through', async () => {
+    await createProgram(db, { program: buildProgram({ name: '推日' }) });
+    await createProgram(db, { program: buildProgram({ name: '拉日' }) });
+    const list = await listPrograms(db);
+    expect(list.map((p) => p.name).sort()).toEqual(['拉日', '推日']);
+  });
+
   it('updateCell modifies a single cell without touching siblings', async () => {
     const program = buildProgram({ cycle_count: 1 });
     const cells = expandWizardDraft({
