@@ -4,13 +4,14 @@ import {
   createSession,
   insertSessionExercise,
   overwriteTemplateFromSession,
+  createTemplateFromSession,
 } from '../../src/adapters/sqlite/sessionRepository';
 import { createTemplate } from '../../src/adapters/sqlite/templateRepository';
 import { insertSessionSet } from '../../src/adapters/sqlite/setRepository';
 import { listExercises } from '../../src/adapters/sqlite/exerciseRepository';
 
 /**
- * Regression tests for `overwriteTemplateFromSession` and (in a later commit)
+ * Regression tests for `overwriteTemplateFromSession` and
  * `createTemplateFromSession` — both functions previously filtered session
  * set rows by `exercise_id` only, which produced merged set counts whenever
  * two `session_exercise` rows shared an exercise (e.g. two Reusable
@@ -204,8 +205,6 @@ describe('session repo isolation — overwriteTemplateFromSession / createTempla
       parent_set_id: null,
     });
   }
-  // Re-exported for the createTemplateFromSession suite in a later commit.
-  void seedTwoRsSharingChestDip;
 
   describe('overwriteTemplateFromSession', () => {
     it('Case 1: two RS cards sharing Chest Dip — each card gets its own default_sets count, not the merged 4', async () => {
@@ -324,6 +323,96 @@ describe('session repo isolation — overwriteTemplateFromSession / createTempla
       // Legacy NULL-tagged rows still flow through via the exercise_id
       // fallback branch.
       expect(row?.default_sets).toBe(3);
+    });
+  });
+
+  describe('createTemplateFromSession', () => {
+    it('Case 2: two RS cards sharing Chest Dip — each card gets its own default_sets count, not the merged 4', async () => {
+      const sessionId = 'sess-create-rs';
+      await seedTwoRsSharingChestDip(sessionId);
+
+      const newTplId = await createTemplateFromSession(db, {
+        session_id: sessionId,
+        name: 'Two RS Sharing Chest Dip',
+        uuid,
+      });
+
+      const teRows = await db.getAllAsync<{
+        exercise_id: string;
+        default_sets: number;
+        ordering: number;
+      }>(
+        `SELECT exercise_id, default_sets, ordering
+           FROM template_exercise
+          WHERE template_id = ?
+          ORDER BY ordering ASC`,
+        newTplId,
+      );
+
+      expect(teRows).toHaveLength(4);
+      expect(teRows[0].exercise_id).toBe(benchId);
+      expect(teRows[0].default_sets).toBe(1);
+      expect(teRows[1].exercise_id).toBe(chestDipId);
+      expect(teRows[1].default_sets).toBe(2); // not 4
+      expect(teRows[2].exercise_id).toBe(cableId);
+      expect(teRows[2].default_sets).toBe(1);
+      expect(teRows[3].exercise_id).toBe(chestDipId);
+      expect(teRows[3].default_sets).toBe(2); // not 4
+    });
+
+    it('Case 3 (legacy fallback): pre-v019 rows with NULL session_exercise_id still match via exercise_id', async () => {
+      const sessionId = 'sess-create-legacy';
+      await createSession(db, { id: sessionId, started_at: NOW });
+      await insertSessionExercise(db, {
+        id: 'se-legacy-c',
+        session_id: sessionId,
+        exercise_id: chestDipId,
+        ordering: 1,
+        planned_sets: 2,
+        planned_reps: 8,
+        planned_weight_kg: 0,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: null,
+        rest_sec: null,
+      });
+      await insertSessionSet(db, {
+        id: 'set-legacy-c-1',
+        session_id: sessionId,
+        exercise_id: chestDipId,
+        weight_kg: 0,
+        reps: 8,
+        is_skipped: 0,
+        ordering: 1,
+        created_at: NOW,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+      await insertSessionSet(db, {
+        id: 'set-legacy-c-2',
+        session_id: sessionId,
+        exercise_id: chestDipId,
+        weight_kg: 0,
+        reps: 6,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: NOW + 1000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      const newTplId = await createTemplateFromSession(db, {
+        session_id: sessionId,
+        name: 'Legacy Fallback',
+        uuid,
+      });
+
+      const row = await db.getFirstAsync<{ default_sets: number }>(
+        `SELECT default_sets FROM template_exercise WHERE template_id = ?`,
+        newTplId,
+      );
+      expect(row?.default_sets).toBe(2);
     });
   });
 });
