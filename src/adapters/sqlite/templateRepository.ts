@@ -937,6 +937,7 @@ export async function convertSessionToTemplate(
   type SetRow = {
     id: string;
     exercise_id: string;
+    session_exercise_id: string | null;
     weight_kg: number | null;
     reps: number | null;
     ordering: number;
@@ -946,7 +947,7 @@ export async function convertSessionToTemplate(
     notes: string | null;
   };
   const setRows = await db.getAllAsync<SetRow>(
-    `SELECT id, exercise_id, weight_kg, reps, ordering, is_skipped,
+    `SELECT id, exercise_id, session_exercise_id, weight_kg, reps, ordering, is_skipped,
             set_kind, parent_set_id, notes
        FROM "set"
       WHERE session_id = ? AND is_skipped = 0
@@ -1030,12 +1031,20 @@ export async function convertSessionToTemplate(
       const remappedParentId =
         se.parent_id != null ? idByOldSe.get(se.parent_id) ?? null : null;
 
-      // Materialise this exercise's sets from set rows. Cluster's sets
-      // are linked to their session_exercise via exercise_id (per ADR-0018
-      // schema — `set` has no direct session_exercise_id FK; we filter by
-      // exercise_id + session_id, which is sufficient because we don't
-      // currently allow the same exercise_id twice in one session).
-      const exSets = setRows.filter((s) => s.exercise_id === se.exercise_id);
+      // Materialise this exercise's sets from set rows. v019 schema (slice
+      // 10c #17) adds `set.session_exercise_id` for 精準的 per-card isolation;
+      // we prefer that when available and fall back to `exercise_id` match
+      // only for pre-v019 untagged rows. This is essential for RS pairs that
+      // share an exercise (e.g. RS1=Bench+Chest + RS2=Cable+Chest both
+      // contain Chest Dip — without session_exercise_id isolation each card
+      // sees the other RS's Chest Dip sets and the resulting template ends
+      // up with both cards holding the merged set list).
+      // Pattern mirrors #17 / #23 / #24 / #27 wave fixes.
+      const exSets = setRows.filter(
+        (s) =>
+          s.session_exercise_id === se.id ||
+          (s.session_exercise_id == null && s.exercise_id === se.exercise_id),
+      );
 
       await db.runAsync(
         `INSERT INTO template_exercise

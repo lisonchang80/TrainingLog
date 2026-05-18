@@ -367,6 +367,264 @@ describe('convertSessionToTemplate', () => {
     expect(row?.sub_tag).toBe('orig-tag');
   });
 
+  // 2026-05-18: #31 — Two Reusable Supersets in the same session share an
+  // exercise (e.g. RS1=Bench+Chest, RS2=Cable+Chest, both contain Chest Dip).
+  // Before this fix the cluster set filter only matched on exercise_id, so
+  // each Chest Dip card received the OTHER card's Chest Dip sets too — the
+  // saved template ended up with merged set lists on both B sides. We repro
+  // the parent_id pair structure with NULL reusable_superset_id (avoids
+  // needing a real superset row for the FK — the v019 `session_exercise_id`
+  // column on `set` is what drives the bug + the fix; both branches of the
+  // filter behave the same regardless of RS template wiring).
+  //
+  // Same isolation pattern as #17 / #23 / #24 / #27 wave fixes.
+  describe('two RS cards sharing an exercise (#31 cluster set isolation)', () => {
+    let chestDipId: string;
+    let cableId: string;
+
+    beforeEach(async () => {
+      const exercises = await listExercises(db);
+      chestDipId = exercises.find((e) => e.name === 'Chest Dip')!.id;
+      cableId = exercises.find((e) => e.name === 'Cable Crossover')!.id;
+    });
+
+    it('Case A: per-card sets stay isolated when session_exercise_id is populated', async () => {
+      // Build a session that mimics: RS1 (Bench A + ChestDip B) + RS2
+      // (Cable A + ChestDip B). 4 session_exercise rows, two of which share
+      // chestDipId. Each card has its own session_exercise.id.
+      await createSession(db, { id: 'sess-rs', started_at: NOW });
+
+      // RS1
+      await insertSessionExercise(db, {
+        id: 'se-rs1-a',
+        session_id: 'sess-rs',
+        exercise_id: benchId,
+        ordering: 1,
+        planned_sets: 2,
+        planned_reps: 10,
+        planned_weight_kg: 60,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: null,
+        rest_sec: 60,
+      });
+      await insertSessionExercise(db, {
+        id: 'se-rs1-b',
+        session_id: 'sess-rs',
+        exercise_id: chestDipId,
+        ordering: 2,
+        planned_sets: 1,
+        planned_reps: 8,
+        planned_weight_kg: 0,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: 'se-rs1-a',
+        reusable_superset_id: null,
+        rest_sec: 60,
+      });
+
+      // RS2
+      await insertSessionExercise(db, {
+        id: 'se-rs2-a',
+        session_id: 'sess-rs',
+        exercise_id: cableId,
+        ordering: 3,
+        planned_sets: 1,
+        planned_reps: 12,
+        planned_weight_kg: 20,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: null,
+        rest_sec: 60,
+      });
+      await insertSessionExercise(db, {
+        id: 'se-rs2-b',
+        session_id: 'sess-rs',
+        exercise_id: chestDipId,
+        ordering: 4,
+        planned_sets: 1,
+        planned_reps: 8,
+        planned_weight_kg: 0,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: 'se-rs2-a',
+        reusable_superset_id: null,
+        rest_sec: 60,
+      });
+
+      // Bench (RS1 A): 2 sets
+      await insertSessionSet(db, {
+        id: 'set-rs1-a-1',
+        session_id: 'sess-rs',
+        exercise_id: benchId,
+        session_exercise_id: 'se-rs1-a',
+        weight_kg: 60,
+        reps: 10,
+        is_skipped: 0,
+        ordering: 1,
+        created_at: NOW,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+      await insertSessionSet(db, {
+        id: 'set-rs1-a-2',
+        session_id: 'sess-rs',
+        exercise_id: benchId,
+        session_exercise_id: 'se-rs1-a',
+        weight_kg: 65,
+        reps: 8,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: NOW + 1000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      // Chest Dip (RS1 B): 1 set
+      await insertSessionSet(db, {
+        id: 'set-rs1-b-1',
+        session_id: 'sess-rs',
+        exercise_id: chestDipId,
+        session_exercise_id: 'se-rs1-b',
+        weight_kg: 0,
+        reps: 8,
+        is_skipped: 0,
+        ordering: 3,
+        created_at: NOW + 2000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      // Cable (RS2 A): 1 set
+      await insertSessionSet(db, {
+        id: 'set-rs2-a-1',
+        session_id: 'sess-rs',
+        exercise_id: cableId,
+        session_exercise_id: 'se-rs2-a',
+        weight_kg: 20,
+        reps: 12,
+        is_skipped: 0,
+        ordering: 4,
+        created_at: NOW + 3000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      // Chest Dip (RS2 B): 1 set — distinct card from RS1 B even though
+      // they share exercise_id.
+      await insertSessionSet(db, {
+        id: 'set-rs2-b-1',
+        session_id: 'sess-rs',
+        exercise_id: chestDipId,
+        session_exercise_id: 'se-rs2-b',
+        weight_kg: 0,
+        reps: 6,
+        is_skipped: 0,
+        ordering: 5,
+        created_at: NOW + 4000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      const newTplId = await convertSessionToTemplate(db, {
+        session_id: 'sess-rs',
+        template_name: 'Two RS Sharing Chest Dip',
+        mode: 'create',
+        uuid,
+        now,
+      });
+
+      const tpl = await getTemplateFull(db, newTplId);
+      expect(tpl).not.toBeNull();
+      expect(tpl!.exercises).toHaveLength(4);
+
+      // Order follows session_exercise.ordering ASC.
+      const [rs1A, rs1B, rs2A, rs2B] = tpl!.exercises;
+
+      // Bench (RS1 A) — 2 sets, both bench rows.
+      expect(rs1A.exercise_id).toBe(benchId);
+      expect(rs1A.sets).toHaveLength(2);
+
+      // Chest Dip (RS1 B) — exactly 1 set, NOT 2. This is the bug fix.
+      expect(rs1B.exercise_id).toBe(chestDipId);
+      expect(rs1B.sets).toHaveLength(1);
+      expect(rs1B.sets[0].reps).toBe(8); // the RS1 B set
+
+      // Cable (RS2 A) — 1 set.
+      expect(rs2A.exercise_id).toBe(cableId);
+      expect(rs2A.sets).toHaveLength(1);
+
+      // Chest Dip (RS2 B) — exactly 1 set, NOT 2. Independent from RS1 B.
+      expect(rs2B.exercise_id).toBe(chestDipId);
+      expect(rs2B.sets).toHaveLength(1);
+      expect(rs2B.sets[0].reps).toBe(6); // the RS2 B set, not 8
+    });
+
+    it('Case B: legacy pre-v019 rows with NULL session_exercise_id still fall back to exercise_id match', async () => {
+      // Single Chest Dip card, no RS sharing — legacy fixture style where
+      // session_exercise_id was never set. The fallback branch in the filter
+      // (s.session_exercise_id == null && s.exercise_id === se.exercise_id)
+      // ensures these still land in the template.
+      await createSession(db, { id: 'sess-legacy', started_at: NOW });
+      await insertSessionExercise(db, {
+        id: 'se-legacy-dip',
+        session_id: 'sess-legacy',
+        exercise_id: chestDipId,
+        ordering: 1,
+        planned_sets: 2,
+        planned_reps: 8,
+        planned_weight_kg: 0,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: null,
+        rest_sec: null,
+      });
+
+      // Insert sets WITHOUT session_exercise_id (NULL — pre-v019 untagged).
+      await insertSessionSet(db, {
+        id: 'set-legacy-1',
+        session_id: 'sess-legacy',
+        exercise_id: chestDipId,
+        // session_exercise_id intentionally omitted → NULL
+        weight_kg: 0,
+        reps: 8,
+        is_skipped: 0,
+        ordering: 1,
+        created_at: NOW,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+      await insertSessionSet(db, {
+        id: 'set-legacy-2',
+        session_id: 'sess-legacy',
+        exercise_id: chestDipId,
+        weight_kg: 0,
+        reps: 6,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: NOW + 1000,
+        set_kind: 'working',
+        parent_set_id: null,
+      });
+
+      const newTplId = await convertSessionToTemplate(db, {
+        session_id: 'sess-legacy',
+        template_name: 'Legacy Fallback',
+        mode: 'create',
+        uuid,
+        now,
+      });
+
+      const tpl = await getTemplateFull(db, newTplId);
+      expect(tpl!.exercises).toHaveLength(1);
+      // Fallback path still picks up both NULL-tagged rows.
+      expect(tpl!.exercises[0].sets).toHaveLength(2);
+    });
+  });
+
   it('update mode falling back to create (freestyle session) ALSO honors program_id / sub_tag', async () => {
     // No linked template_id on session_exercise rows → create-mode fallback.
     await setupSession({ session_id: 'sess-fallback', template_id: null });
