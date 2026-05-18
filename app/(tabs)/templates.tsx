@@ -218,9 +218,14 @@ export default function TemplatesScreen() {
         return;
       }
       await persistSticky(selection.period_id, selection.intensity_id);
+      // Round 35 — thread the (program, sub_tag) selection through so the
+      // session's planned set rows can be prefilled from matching history
+      // (priority tree: exact triple → P+通用 → P+any sub_tag → empty).
       await startSessionFromTemplate(db, {
         template_id,
         uuid: randomUUID,
+        program_id: selection.period_id,
+        sub_tag: selection.intensity_id,
       });
       closeSheet();
       router.replace('/');

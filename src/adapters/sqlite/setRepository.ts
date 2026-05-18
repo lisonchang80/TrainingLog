@@ -769,6 +769,183 @@ export async function prefillReusableSupersetFromLastSession(
 }
 
 /**
+ * Round 35 — start-session prefill driven by the (program, sub_tag) selected
+ * in the start-template bottom sheet.
+ *
+ * Called per `session_exercise` row immediately after `insertSessionExercise`
+ * during `startSessionFromTemplate`. Walks a 3-tier priority tree to locate
+ * the best historical session_exercise to copy sets from, then delegates to
+ * `replayCardSetsFromHistoricalSession` (same engine the「↻ 再次訓練」 button
+ * uses — battle-tested for dropset-chain remap, ordering, and tx wrap).
+ *
+ * Priority (matches start-template-sheet spec tree):
+ *   A) Exact (program_id = P, sub_tag = S, exercise_id = E) — same triple as
+ *      the user picked just now
+ *   B) Fallback to (P, sub_tag IS NULL, E) — same program's「通用」slot
+ *   C) Fallback to (P, E, any sub_tag) — any session under this program for
+ *      the same exercise, latest ended_at wins
+ *   D) No history matching P+E at all → 0, leave current card empty so the
+ *      template's planned defaults / nothing is shown
+ *
+ * Each tier is NULL-safe on the sub_tag bind: when S is null we use
+ * `t.sub_tag IS NULL`, when S is a string we use `t.sub_tag = ?`. Same for
+ * program_id (the reserved 「無 / 通用」 row has a real UUID, so it's never
+ * NULL on the bind side — but the helper still uses IS NULL OR = ? on the
+ * column side to defend against any session whose template was orphaned).
+ *
+ * Each candidate must satisfy:
+ *   - session.ended_at IS NOT NULL (only finished history, not in-progress)
+ *   - session.id != current_session_id (don't pick up the just-created row)
+ *   - at least one is_logged=1, is_skipped=0 set scoped to the candidate se
+ *     (mirrors `prefillSessionExerciseFromLastSession` "only completed
+ *     history" semantics — an opened-then-discarded session shouldn't leak)
+ *
+ * Returns 0 silently in all "no match" branches. Otherwise returns the row
+ * count produced by `replayCardSetsFromHistoricalSession`.
+ */
+export async function prefillSetsForNewSessionExercise(
+  db: Database,
+  args: {
+    current_session_id: string;
+    current_session_exercise_id: string;
+    exercise_id: string;
+    /**
+     * Program id picked in the start sheet. Always a real UUID — when 通用 was
+     * selected this is `RESERVED_NONE_PROGRAM_ID` (per Q9.2 N1 invariant).
+     */
+    program_id: string;
+    /**
+     * Sub_tag picked in the start sheet. null = 通用 within this program.
+     * Strings may be newly-typed in-session (`localSubTags`); see the tree
+     * doc — even when S is brand-new (no history) we fall back to tier B/C.
+     */
+    sub_tag: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<number> {
+  // Tier resolver — runs SELECT per tier, stops at the first match. Each
+  // query is scoped to history sessions only (ended_at NOT NULL) + must have
+  // at least one logged set scoped to the candidate se.id (legacy
+  // session_exercise_id IS NULL fallback handles pre-v019 rows).
+  type Candidate = { se_id: string; session_id: string };
+
+  const findExactTriple = async (): Promise<Candidate | null> => {
+    return db.getFirstAsync<Candidate>(
+      `SELECT se.id AS se_id, s.id AS session_id
+         FROM session_exercise se
+         JOIN session s ON s.id = se.session_id
+         JOIN template t ON t.id = se.template_id
+        WHERE se.exercise_id = ?
+          AND t.program_id = ?
+          AND ((? IS NULL AND t.sub_tag IS NULL)
+               OR t.sub_tag = ?)
+          AND s.ended_at IS NOT NULL
+          AND s.id != ?
+          AND EXISTS (
+            SELECT 1 FROM "set" st
+             WHERE (st.session_exercise_id = se.id
+                    OR (st.session_exercise_id IS NULL
+                        AND st.session_id = se.session_id
+                        AND st.exercise_id = se.exercise_id))
+               AND st.is_logged = 1
+               AND st.is_skipped = 0
+          )
+        ORDER BY s.ended_at DESC
+        LIMIT 1`,
+      args.exercise_id,
+      args.program_id,
+      args.sub_tag,
+      args.sub_tag,
+      args.current_session_id,
+    );
+  };
+
+  const findProgramGeneric = async (): Promise<Candidate | null> => {
+    return db.getFirstAsync<Candidate>(
+      `SELECT se.id AS se_id, s.id AS session_id
+         FROM session_exercise se
+         JOIN session s ON s.id = se.session_id
+         JOIN template t ON t.id = se.template_id
+        WHERE se.exercise_id = ?
+          AND t.program_id = ?
+          AND t.sub_tag IS NULL
+          AND s.ended_at IS NOT NULL
+          AND s.id != ?
+          AND EXISTS (
+            SELECT 1 FROM "set" st
+             WHERE (st.session_exercise_id = se.id
+                    OR (st.session_exercise_id IS NULL
+                        AND st.session_id = se.session_id
+                        AND st.exercise_id = se.exercise_id))
+               AND st.is_logged = 1
+               AND st.is_skipped = 0
+          )
+        ORDER BY s.ended_at DESC
+        LIMIT 1`,
+      args.exercise_id,
+      args.program_id,
+      args.current_session_id,
+    );
+  };
+
+  const findProgramAnySubTag = async (): Promise<Candidate | null> => {
+    return db.getFirstAsync<Candidate>(
+      `SELECT se.id AS se_id, s.id AS session_id
+         FROM session_exercise se
+         JOIN session s ON s.id = se.session_id
+         JOIN template t ON t.id = se.template_id
+        WHERE se.exercise_id = ?
+          AND t.program_id = ?
+          AND s.ended_at IS NOT NULL
+          AND s.id != ?
+          AND EXISTS (
+            SELECT 1 FROM "set" st
+             WHERE (st.session_exercise_id = se.id
+                    OR (st.session_exercise_id IS NULL
+                        AND st.session_id = se.session_id
+                        AND st.exercise_id = se.exercise_id))
+               AND st.is_logged = 1
+               AND st.is_skipped = 0
+          )
+        ORDER BY s.ended_at DESC
+        LIMIT 1`,
+      args.exercise_id,
+      args.program_id,
+      args.current_session_id,
+    );
+  };
+
+  // Step A — exact triple.
+  let match: Candidate | null;
+  if (args.sub_tag !== null) {
+    match = await findExactTriple();
+    // Step B — fall through to 通用 inside the program.
+    if (!match) match = await findProgramGeneric();
+  } else {
+    // S was 通用 — start at the generic tier directly (Step A with sub_tag=null
+    // is the same query as Step B, so skip the duplicate roundtrip).
+    match = await findProgramGeneric();
+  }
+  // Step C — any sub_tag inside the program.
+  if (!match) match = await findProgramAnySubTag();
+  // Step D — no history → leave empty.
+  if (!match) return 0;
+
+  const result = await replayCardSetsFromHistoricalSession(db, {
+    current_session_id: args.current_session_id,
+    current_se_id: args.current_session_exercise_id,
+    source_session_id: match.session_id,
+    source_session_exercise_id: match.se_id,
+    source_exercise_id: args.exercise_id,
+    uuid: args.uuid,
+    now: args.now,
+  });
+
+  return result.inserted;
+}
+
+/**
  * Insert a new set immediately AFTER the given source set, preserving the
  * source's exercise / weight / reps / set_kind (slice 10c Phase 2 — fix
  * right-swipe `+1` action so the new row appears directly under the swiped
