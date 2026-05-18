@@ -672,6 +672,99 @@ export async function prefillSessionExerciseFromLastSession(
 }
 
 /**
+ * RS prefill counterpart of `prefillSessionExerciseFromLastSession` — when
+ * the user picks a Reusable Superset template into the active session, copy
+ * the set structure of that template's LAST ended session into the freshly-
+ * minted A + B cards (slice 10c overnight #25).
+ *
+ * Why scoped to `reusable_superset_id` (NOT individual exercise history):
+ * RS cards are deliberately isolated from solo exercise memory (per earlier
+ * decision「超級組應視為新的動作，不該開起來已經有個別運動的記憶」).
+ * Pulling from the SAME RS template is a different axis — it's the same
+ * environment, so the user expects last-time's structure to carry over.
+ * Solo exercise history with the same exercise_id stays out of scope.
+ *
+ * Implementation: locate the most recent ended session that has any logged
+ * set inside ANY session_exercise carrying this `reusable_superset_id`,
+ * then delegate to `replayClusterCardSetsFromHistoricalSession` which
+ * already handles wipe + dropset-chain remap + transaction wrap + per-side
+ * empty-source DELETE semantics.
+ *
+ * Returns 0 (silently) when no history exists — caller renders the empty
+ * card state ("還沒有組") unchanged.
+ */
+export async function prefillReusableSupersetFromLastSession(
+  db: Database,
+  args: {
+    current_session_id: string;
+    reusable_superset_id: string;
+    new_a_session_exercise_id: string;
+    new_b_session_exercise_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<number> {
+  // Find the most recent ended session containing this RS template that has
+  // at least one logged set across either side. The EXISTS clause guards
+  // against an ended-but-empty session leaking through (RS planned but no
+  // sets ever ticked).
+  const lastSession = await db.getFirstAsync<{ session_id: string }>(
+    `SELECT s.id AS session_id
+       FROM session s
+       JOIN session_exercise se ON se.session_id = s.id
+      WHERE se.reusable_superset_id = ?
+        AND s.ended_at IS NOT NULL
+        AND s.id != ?
+        AND EXISTS (
+          SELECT 1 FROM "set" st
+           WHERE st.session_exercise_id = se.id
+             AND st.is_logged = 1
+             AND st.is_skipped = 0
+        )
+      ORDER BY s.ended_at DESC
+      LIMIT 1`,
+    args.reusable_superset_id,
+    args.current_session_id
+  );
+  if (!lastSession) return 0;
+
+  // Resolve A side / B side session_exercise rows in the source session.
+  // A side is the parent (parent_id IS NULL); B side is the follower
+  // (parent_id = A.id). Ordering ASC puts A first by construction (see
+  // appendReusableSupersetToSession), but parent_id is the authoritative
+  // discriminator.
+  const seRows = await db.getAllAsync<{
+    id: string;
+    parent_id: string | null;
+    exercise_id: string;
+  }>(
+    `SELECT id, parent_id, exercise_id
+       FROM session_exercise
+      WHERE session_id = ?
+        AND reusable_superset_id = ?
+      ORDER BY ordering ASC`,
+    lastSession.session_id,
+    args.reusable_superset_id
+  );
+  const sideA = seRows.find((r) => r.parent_id === null);
+  const sideB = seRows.find((r) => r.parent_id !== null);
+  if (!sideA || !sideB) return 0; // Defensive: malformed RS pair in history.
+
+  const result = await replayClusterCardSetsFromHistoricalSession(db, {
+    current_session_id: args.current_session_id,
+    current_se_id_a: args.new_a_session_exercise_id,
+    current_se_id_b: args.new_b_session_exercise_id,
+    source_session_id: lastSession.session_id,
+    source_exercise_id_a: sideA.exercise_id,
+    source_exercise_id_b: sideB.exercise_id,
+    uuid: args.uuid,
+    now: args.now,
+  });
+
+  return result.inserted_a + result.inserted_b;
+}
+
+/**
  * Insert a new set immediately AFTER the given source set, preserving the
  * source's exercise / weight / reps / set_kind (slice 10c Phase 2 — fix
  * right-swipe `+1` action so the new row appears directly under the swiped

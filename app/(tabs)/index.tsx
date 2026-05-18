@@ -54,6 +54,7 @@ import {
   insertSessionSetAfter,
   markClusterCycleLogged,
   markClusterCycleUnlogged,
+  prefillReusableSupersetFromLastSession,
   prefillSessionExerciseFromLastSession,
   recordSetInSession,
   reorderSessionSetsForExercise,
@@ -292,14 +293,25 @@ export default function TodayScreen() {
             // explodes into a cluster pair (A + B session_exercise rows
             // linked via parent_id + reusable_superset_id).
             //
-            // NOTE: RS pick is treated as a NEW exercise unit (per user
-            // 「超級組應視為新的動作，不該開起來已經有個別運動的記憶」),
-            // so we DELIBERATELY skip prefillSessionExerciseFromLastSession.
-            // Cluster starts empty; user adds cycles manually.
+            // NOTE: RS pick prefills from SAME RS template history only
+            // (slice 10c overnight #25). 個別 exercise 的 solo / 跨 template
+            // 記憶仍不取 — 避免「我在 solo Bench 練 100kg 結果新加的 RS Bench
+            // 也跳出 100kg」這種混淆。同 RS template 的歷史是同環境記憶，
+            // 不衝突。
             for (const rs_id of payload.reusableSupersetIds) {
-              await appendReusableSupersetToSession(db, {
-                session_id: active.id,
+              const { a_id, b_id } = await appendReusableSupersetToSession(
+                db,
+                {
+                  session_id: active.id,
+                  reusable_superset_id: rs_id,
+                  uuid: randomUUID,
+                },
+              );
+              await prefillReusableSupersetFromLastSession(db, {
+                current_session_id: active.id,
                 reusable_superset_id: rs_id,
+                new_a_session_exercise_id: a_id,
+                new_b_session_exercise_id: b_id,
                 uuid: randomUUID,
               });
             }
