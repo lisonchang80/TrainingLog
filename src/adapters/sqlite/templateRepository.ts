@@ -1120,6 +1120,207 @@ export async function convertSessionToTemplate(
 }
 
 /**
+ * Clone an existing Template into a new row under a new (program_id, sub_tag)
+ * pair. The new template's `name` is inherited from the source — ADR-0003 三
+ *元組 (name, program_id, sub_tag) provides identity, so the same display name
+ * across different (program, sub_tag) cells is intentional.
+ *
+ * Used by the start-template-sheet「新增強度」inline flow (round 37 polish):
+ * tapping「建立」spawns a clone bound to the chosen program + new sub_tag so
+ * the upcoming session links to the clone — overwrites land on the new row,
+ * the source template stays untouched.
+ *
+ * Dup guard: SELECT-then-throw against the (name, program_id, sub_tag)
+ * triple — `Error('DUPLICATE_TEMPLATE_TRIPLE')`. Mirrors createProgram /
+ * insertReusableSuperset patterns. UI surfaces this as an Alert so the user
+ * can rename the sub_tag and retry inline.
+ *
+ * Copies (full deep clone):
+ *   - template_exercise rows: ordering, default_sets/reps/weight_kg,
+ *     is_evergreen, parent_id (REMAPPED via old→new id Map),
+ *     reusable_superset_id (verbatim), rest_seconds, updated_at.
+ *   - template_set rows: position, set_kind, reps, weight,
+ *     parent_set_id (REMAPPED via old→new id Map), notes.
+ *
+ * Single transaction: partial failure rolls back cleanly. Returns the new
+ * template id.
+ *
+ * Note: source `template.color_hex` is NOT cloned — the new row's color_hex
+ * uses the schema default ('') so the renderer falls back to hash-of-name,
+ * keeping the visual coupling to the name (siblings share color). Caller can
+ * recolor via applyRecolorSiblings if needed.
+ */
+export async function cloneTemplateWithSubTag(
+  db: Database,
+  args: {
+    source_template_id: string;
+    new_program_id: string;
+    new_sub_tag: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+
+  // Step 1: load source template header.
+  const source = await db.getFirstAsync<{
+    id: string;
+    name: string;
+  }>(`SELECT id, name FROM template WHERE id = ?`, args.source_template_id);
+  if (!source) {
+    throw new Error('SOURCE_TEMPLATE_NOT_FOUND');
+  }
+
+  // Step 2: dup guard against (name, program_id, sub_tag) triple. Both
+  // program_id and sub_tag are required non-null strings per the signature,
+  // so an exact `=` match suffices (no IS-NULL-safe needed).
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template
+      WHERE name = ? AND program_id = ? AND sub_tag = ?
+      LIMIT 1`,
+    source.name,
+    args.new_program_id,
+    args.new_sub_tag
+  );
+  if (existing) {
+    throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+  }
+
+  // Step 3: load source template_exercise + template_set rows.
+  type SrcExRow = {
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    default_sets: number;
+    default_reps: number | null;
+    default_weight_kg: number | null;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    rest_seconds: number | null;
+    reusable_superset_id: string | null;
+  };
+  const exRows = await db.getAllAsync<SrcExRow>(
+    `SELECT id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, is_evergreen, parent_id, rest_seconds,
+            reusable_superset_id
+       FROM template_exercise
+      WHERE template_id = ?
+      ORDER BY ordering ASC`,
+    args.source_template_id
+  );
+
+  type SrcSetRow = {
+    id: string;
+    template_exercise_id: string;
+    position: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    reps: number;
+    weight: number;
+    parent_set_id: string | null;
+    notes: string | null;
+  };
+  const setRows =
+    exRows.length === 0
+      ? []
+      : await db.getAllAsync<SrcSetRow>(
+          `SELECT ts.id, ts.template_exercise_id, ts.position, ts.set_kind,
+                  ts.reps, ts.weight, ts.parent_set_id, ts.notes
+             FROM template_set ts
+             JOIN template_exercise te ON te.id = ts.template_exercise_id
+            WHERE te.template_id = ?
+            ORDER BY ts.template_exercise_id, ts.position ASC`,
+          args.source_template_id
+        );
+
+  // Step 4: pre-compute id remaps (old → new).
+  const newTemplateId = args.uuid();
+  const exIdRemap = new Map<string, string>();
+  for (const r of exRows) {
+    exIdRemap.set(r.id, args.uuid());
+  }
+  const setIdRemap = new Map<string, string>();
+  for (const r of setRows) {
+    setIdRemap.set(r.id, args.uuid());
+  }
+
+  // Step 5: run the clone in one transaction.
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      newTemplateId,
+      source.name,
+      ts,
+      ts,
+      args.new_program_id,
+      args.new_sub_tag
+    );
+
+    // template_exercise rows — remap id + parent_id.
+    for (const r of exRows) {
+      const newExId = exIdRemap.get(r.id)!;
+      const remappedParentId =
+        r.parent_id != null ? exIdRemap.get(r.parent_id) ?? null : null;
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        newExId,
+        newTemplateId,
+        r.exercise_id,
+        r.ordering,
+        r.default_sets,
+        r.default_reps,
+        r.default_weight_kg,
+        r.is_evergreen,
+        remappedParentId,
+        r.rest_seconds,
+        r.reusable_superset_id,
+        ts
+      );
+    }
+
+    // template_set rows — two-pass to satisfy FK on parent_set_id (some
+    // dropset followers may point to a set inserted later in the loop).
+    // Pass 1: insert with parent_set_id = NULL.
+    for (const r of setRows) {
+      const newSetId = setIdRemap.get(r.id)!;
+      const newExId = exIdRemap.get(r.template_exercise_id);
+      if (!newExId) continue; // dangling — shouldn't happen, defensive.
+      await db.runAsync(
+        `INSERT INTO template_set
+           (id, template_exercise_id, position, set_kind, reps, weight,
+            parent_set_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+        newSetId,
+        newExId,
+        r.position,
+        r.set_kind,
+        r.reps,
+        r.weight,
+        r.notes
+      );
+    }
+    // Pass 2: rewrite parent_set_id for dropset followers.
+    for (const r of setRows) {
+      if (r.parent_set_id == null) continue;
+      const newSetId = setIdRemap.get(r.id);
+      const newParentId = setIdRemap.get(r.parent_set_id);
+      if (!newSetId || !newParentId) continue;
+      await db.runAsync(
+        `UPDATE template_set SET parent_set_id = ? WHERE id = ?`,
+        newParentId,
+        newSetId
+      );
+    }
+  });
+
+  return newTemplateId;
+}
+
+/**
  * Reusable-superset 動作記憶 (ADR-0017 L154 amendment / slice 9.8b grill Q4).
  *
  * Looks up the most-recently-edited cluster where both rows are stamped
