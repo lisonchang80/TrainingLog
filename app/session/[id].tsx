@@ -10,6 +10,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+} from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
@@ -36,6 +40,11 @@ import {
 } from '@/src/adapters/sqlite/templateRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
+import {
+  buildSameDayNavState,
+  parseSameDayIds,
+  siblingId,
+} from '@/src/domain/session/sameDayNav';
 import {
   computeDetailPageStats,
   formatTrainingDuration,
@@ -72,9 +81,71 @@ import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises'
  * (ADR-0018 v014 / buildClusters helper at bottom of file).
  */
 export default function SessionDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // 2026-05-20 overnight #58 — ADR-0015 § Tap 日格行為: history calendar tap
+  // emits ?sameDayIds=<csv> so the detail page can show ← N/M → switcher
+  // between sessions sharing the same date. Absent param (e.g. opened from
+  // Today end-session flow) → buildSameDayNavState degrades to single view.
+  const { id, sameDayIds } = useLocalSearchParams<{
+    id: string;
+    sameDayIds?: string;
+  }>();
   const db = useDatabase();
   const router = useRouter();
+
+  const navState = useMemo(
+    () =>
+      buildSameDayNavState({
+        currentId: id ?? '',
+        ids: parseSameDayIds(sameDayIds),
+      }),
+    [id, sameDayIds],
+  );
+
+  const goToSibling = useCallback(
+    (direction: 'prev' | 'next') => {
+      const target = siblingId(navState, direction);
+      if (target == null) return;
+      // router.replace (not push) so the back stack stays clean — from any
+      // sibling, single back → returns to history tab.
+      router.replace({
+        pathname: '/session/[id]',
+        params: {
+          id: target,
+          sameDayIds: navState.ids.join(','),
+        },
+      });
+    },
+    [navState, router],
+  );
+
+  // Horizontal swipe gesture: ADR-0015 calls for swipe + ←/→ buttons in
+  // parallel. Threshold = `dx > 80 OR velocityX > 600`; activeOffsetX = ±30
+  // so the page-level pan only activates after meaningful horizontal motion,
+  // letting vertical scroll and tap-to-edit children claim small motions.
+  // `.runOnJS(true)` keeps the onEnd handler on the JS thread so we can call
+  // router.replace directly without reanimated worklet bridging.
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-30, 30])
+        .failOffsetY([-15, 15])
+        .runOnJS(true)
+        .onEnd((e) => {
+          if (navState.total <= 1) return;
+          const dx = e.translationX;
+          const vx = e.velocityX;
+          const passDist = Math.abs(dx) > 80;
+          const passVel = Math.abs(vx) > 600;
+          if (!passDist && !passVel) return;
+          // Swipe-left (negative dx) → next; swipe-right (positive) → prev.
+          if (dx < 0) {
+            goToSibling('next');
+          } else {
+            goToSibling('prev');
+          }
+        }),
+    [navState, goToSibling],
+  );
   const [session, setSession] = useState<SessionWithHK | null>(null);
   const [sets, setSets] = useState<SessionSetWithExercise[]>([]);
   const [sessionExercises, setSessionExercises] = useState<
@@ -392,6 +463,53 @@ export default function SessionDetailScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
+      {/*
+        Same-day session switcher (ADR-0015 § Tap 日格行為). Renders only when
+        the history tab embedded `?sameDayIds=<csv>` AND the list contains
+        more than one entry. Sub-row design (under the title bar) so it
+        doesn't fight the existing back-btn/title/spacer layout.
+      */}
+      {navState.total > 1 ? (
+        <View style={styles.sameDayBar}>
+          <Pressable
+            onPress={() => goToSibling('prev')}
+            disabled={navState.currentIndex === 0}
+            style={[
+              styles.sameDayBtn,
+              navState.currentIndex === 0 && styles.sameDayBtnDisabled,
+            ]}>
+            <Text
+              style={[
+                styles.sameDayBtnText,
+                navState.currentIndex === 0 && styles.sameDayBtnTextDisabled,
+              ]}>
+              ←
+            </Text>
+          </Pressable>
+          <Text style={styles.sameDayIndicator}>
+            {navState.currentIndex + 1}/{navState.total}
+          </Text>
+          <Pressable
+            onPress={() => goToSibling('next')}
+            disabled={navState.currentIndex === navState.total - 1}
+            style={[
+              styles.sameDayBtn,
+              navState.currentIndex === navState.total - 1 &&
+                styles.sameDayBtnDisabled,
+            ]}>
+            <Text
+              style={[
+                styles.sameDayBtnText,
+                navState.currentIndex === navState.total - 1 &&
+                  styles.sameDayBtnTextDisabled,
+              ]}>
+              →
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <GestureDetector gesture={swipeGesture}>
       <ScrollView contentContainerStyle={styles.body}>
         {loading ? (
           <Text style={styles.muted}>Loading…</Text>
@@ -456,6 +574,7 @@ export default function SessionDetailScreen() {
           </>
         )}
       </ScrollView>
+      </GestureDetector>
 
       {/* Bottom sticky 4-button action bar */}
       <View style={styles.actionBar}>
@@ -940,6 +1059,38 @@ const styles = StyleSheet.create({
   headerBackText: { fontSize: 15, color: '#007AFF' },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   headerSpacer: { width: 60 },
+
+  // Same-day switcher sub-row (ADR-0015 § Tap 日格行為). Only rendered when
+  // the history tab embedded `?sameDayIds=<csv>` AND the list contains > 1.
+  sameDayBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    gap: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(127,127,127,0.15)',
+    backgroundColor: 'rgba(0,122,255,0.04)',
+  },
+  sameDayBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,122,255,0.12)',
+  },
+  sameDayBtnDisabled: { backgroundColor: 'rgba(127,127,127,0.08)' },
+  sameDayBtnText: { fontSize: 17, color: '#007AFF', fontWeight: '600' },
+  sameDayBtnTextDisabled: { color: 'rgba(127,127,127,0.4)' },
+  sameDayIndicator: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1F2937',
+    minWidth: 36,
+    textAlign: 'center',
+  },
   body: { padding: 16, gap: 12, paddingBottom: 100 },
   timestamp: { fontSize: 13, opacity: 0.65 },
 
