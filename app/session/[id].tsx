@@ -37,6 +37,7 @@ import {
   computeDetailPageStats,
   formatDurationHHMM,
 } from '@/src/domain/session/sessionStats';
+import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 
 /**
  * Session detail page — ADR-0019 Q10 final layout (slice 10c session detail).
@@ -540,6 +541,20 @@ function SoloExerciseBlock({
     patch: { weight_kg?: number; reps?: number }
   ) => void;
 }) {
+  // overnight #47 第 1 點: reuse history page's label helper so
+  // warmup→「熱」、working→「1/2/3」、dropset→「D1/D2」 — and drop the
+  // leading `#` from the rendered ordering column.
+  const labelMap = useMemo(
+    () =>
+      computeHistorySetLabels(
+        sets.map((s) => ({
+          id: s.id,
+          set_kind: s.set_kind,
+          ordering: s.ordering,
+        }))
+      ),
+    [sets]
+  );
   return (
     <View style={styles.exCard}>
       <View style={styles.exHeader}>
@@ -549,10 +564,10 @@ function SoloExerciseBlock({
         <Text style={styles.muted}>No sets recorded.</Text>
       ) : (
         <View style={styles.setsBox}>
-          {sets.map((s, i) => (
+          {sets.map((s) => (
             <SetRow
               key={s.id}
-              ordering={i + 1}
+              label={labelMap.get(s.id) ?? ''}
               setRow={s}
               loadType={exercise.exercise_load_type}
               editMode={editMode}
@@ -566,13 +581,13 @@ function SoloExerciseBlock({
 }
 
 function SetRow({
-  ordering,
+  label,
   setRow,
   loadType,
   editMode,
   onSetFieldChange,
 }: {
-  ordering: number;
+  label: string;
   setRow: SessionSetWithExercise;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
   editMode: boolean;
@@ -609,12 +624,10 @@ function SetRow({
     }
   }, [repsDraft, setRow.reps, setRow.id, onSetFieldChange]);
 
-  const kindLabel = setRow.set_kind === 'warmup' ? '熱' : setRow.set_kind === 'dropset' ? '掉' : String(ordering);
-
   if (editMode) {
     return (
       <View style={styles.setRow}>
-        <Text style={styles.setOrdering}>#{kindLabel}</Text>
+        <Text style={styles.setOrdering}>{label}</Text>
         <View style={styles.setEditFields}>
           {loadType !== 'bodyweight' && (
             <>
@@ -644,7 +657,7 @@ function SetRow({
 
   return (
     <View style={styles.setRow}>
-      <Text style={styles.setOrdering}>#{kindLabel}</Text>
+      <Text style={styles.setOrdering}>{label}</Text>
       <Text style={styles.setText}>
         {formatSetCell(setRow, loadType)}
       </Text>
