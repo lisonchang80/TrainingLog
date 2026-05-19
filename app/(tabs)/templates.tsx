@@ -28,6 +28,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
+import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
 import {
   getSetting,
   setSetting,
@@ -219,9 +220,15 @@ export default function TemplatesScreen() {
    * of the sibling matching (sheetTpl.name, period_id, intensity_id). Caller
    * decides what to do with it (startSessionFromTemplate vs router.push).
    *
-   *   - matchesSelf or 通用 program → sheetTpl.id (no work)
+   * Branching delegated to the pure planner `planResolveTarget` (see
+   * `src/domain/template/resolveTargetTemplate.ts`):
+   *
+   *   - matchesSelf → sheetTpl.id (no DB work)
    *   - findTemplateByTriple hit → sibling's id
-   *   - miss → cloneTemplateWithSubTag spawn + load() refresh
+   *   - miss + 通用 (wanted_program_id=NULL) → fallback to sheetTpl.id +
+   *     Alert「通用變體尚未建立」(memory ledger #38 規則: 通用 program
+   *     略過 spawn 避免擴散)
+   *   - miss + 非通用 → cloneTemplateWithSubTag spawn + load() refresh
    *   - DUPLICATE_TEMPLATE_TRIPLE race → re-probe once
    *
    * Why route picking an EXISTING sub_tag chip through lookup too: without
@@ -229,62 +236,93 @@ export default function TemplatesScreen() {
    * Smoke's row, and downstream 「儲存模板」 would silently overwrite Smoke
    * — exactly the regression #37 left open. Round 42 makes onEdit symmetric:
    * the same drift bites the editor route too once list dedupes by name.
+   *
+   * **overnight #48 fix**: pre-#48 wantedProgramId === null short-circuited
+   * to sheetTpl.id immediately (bypassed lookup). After list-dedupe-by-name
+   * (#41), sheetTpl is the **representative** (e.g. (Smoke, TEST_id, TEST-4))
+   * regardless of which sub_tag was selected, so selecting ●通用 always
+   * opened the representative editor — not the (Smoke, NULL, *) sibling.
+   * Fix: lookup runs unconditionally; only the 通用-miss branch falls back.
    */
   const resolveTargetTemplateId = useCallback(
     async (
       sheetTpl: TemplateSummary,
       selection: { period_id: string; intensity_id: string | null },
-    ): Promise<string> => {
+    ): Promise<{
+      template_id: string;
+      alert?: { title: string; body: string };
+    }> => {
       const sourceProgramId = sheetTpl.program_id ?? null;
       const sourceSubTag = sheetTpl.sub_tag ?? null;
       const isNoneProgram = selection.period_id === RESERVED_NONE_PROGRAM_ID;
       const wantedProgramId = isNoneProgram ? null : selection.period_id;
       const wantedSubTag = selection.intensity_id;
 
+      // #48 fix: matchesSelf path remains synchronous; everything else needs
+      // an explicit lookup (including the 通用 case that pre-fix bypassed).
+      const source = {
+        id: sheetTpl.id,
+        name: sheetTpl.name,
+        program_id: sourceProgramId,
+        sub_tag: sourceSubTag,
+      };
+      const sel = {
+        wanted_program_id: wantedProgramId,
+        wanted_sub_tag: wantedSubTag,
+      };
+
+      // Probe lookup even for 通用 case so #48 bug doesn't recur. matchesSelf
+      // short-circuit is inside the planner — but we still need to skip the
+      // DB roundtrip when we already know we're staying on the same row.
       const matchesSelf =
         sourceProgramId === wantedProgramId && sourceSubTag === wantedSubTag;
-
-      if (matchesSelf || isNoneProgram || wantedProgramId === null) {
-        return sheetTpl.id;
-      }
-
-      const found = await findTemplateByTriple(db, {
-        name: sheetTpl.name,
-        program_id: wantedProgramId,
-        sub_tag: wantedSubTag,
-      });
-      if (found) {
-        return found.id;
-      }
-
-      try {
-        const spawnedId = await cloneTemplateWithSubTag(db, {
-          source_template_id: sheetTpl.id,
-          new_program_id: wantedProgramId,
-          new_sub_tag: wantedSubTag,
-          uuid: randomUUID,
-        });
-        // Refresh the templates list so the new clone shows up under the
-        // Templates tab right after the caller navigates away.
-        await load();
-        return spawnedId;
-      } catch (cloneErr) {
-        // Race: findTemplateByTriple just missed but the dup guard fired
-        // anyway (concurrent insert). Re-probe once before bubbling so the
-        // user isn't blocked on a transient collision.
-        const message =
-          cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-        if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          const retry = await findTemplateByTriple(db, {
+      const found = matchesSelf
+        ? null
+        : await findTemplateByTriple(db, {
             name: sheetTpl.name,
             program_id: wantedProgramId,
             sub_tag: wantedSubTag,
           });
-          if (retry) {
-            return retry.id;
+
+      const plan = planResolveTarget(source, sel, found);
+
+      switch (plan.kind) {
+        case 'use_self':
+        case 'use_sibling':
+          return { template_id: plan.template_id };
+        case 'fallback_with_alert':
+          return { template_id: plan.template_id, alert: plan.alert };
+        case 'spawn': {
+          try {
+            const spawnedId = await cloneTemplateWithSubTag(db, {
+              source_template_id: plan.source_id,
+              new_program_id: plan.new_program_id,
+              new_sub_tag: plan.new_sub_tag,
+              uuid: randomUUID,
+            });
+            // Refresh the templates list so the new clone shows up under the
+            // Templates tab right after the caller navigates away.
+            await load();
+            return { template_id: spawnedId };
+          } catch (cloneErr) {
+            // Race: findTemplateByTriple just missed but the dup guard fired
+            // anyway (concurrent insert). Re-probe once before bubbling so
+            // the user isn't blocked on a transient collision.
+            const message =
+              cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+            if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+              const retry = await findTemplateByTriple(db, {
+                name: sheetTpl.name,
+                program_id: plan.new_program_id,
+                sub_tag: plan.new_sub_tag,
+              });
+              if (retry) {
+                return { template_id: retry.id };
+              }
+            }
+            throw cloneErr;
           }
         }
-        throw cloneErr;
       }
     },
     [db, load],
@@ -310,12 +348,14 @@ export default function TemplatesScreen() {
     setBusy(true);
     try {
       await persistSticky(selection.period_id, selection.intensity_id);
-      const targetTemplateId = await resolveTargetTemplateId(
-        sheetTemplate,
-        selection,
-      );
+      const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       closeSheet();
-      router.push(`/template/${targetTemplateId}`);
+      // #48: 通用-miss 路徑 fallback to representative + 提示用戶（變體尚未建立）。
+      // 編輯器仍開啟、讓用戶在編輯器內按「另存」自行建立通用變體。
+      if (resolved.alert) {
+        Alert.alert(resolved.alert.title, resolved.alert.body);
+      }
+      router.push(`/template/${resolved.template_id}`);
     } catch (e) {
       Alert.alert(
         '無法開啟編輯器',
@@ -365,16 +405,16 @@ export default function TemplatesScreen() {
       }
       await persistSticky(selection.period_id, selection.intensity_id);
 
-      const targetTemplateId = await resolveTargetTemplateId(
-        sheetTemplate,
-        selection,
-      );
+      const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
 
+      // #48: onStart 對「通用變體尚未建立」case 不彈 Alert（spec「不動 onStart
+      // logic」— 避免擴散 scope）。lookup-or-spawn 仍會自動套用、若 lookup hit
+      // 該 sibling 會被使用、若 miss 才 fallback。
       // Round 35 — thread the (program, sub_tag) selection through so the
       // session's planned set rows can be prefilled from matching history
       // (priority tree: exact triple → P+通用 → P+any sub_tag → empty).
       await startSessionFromTemplate(db, {
-        template_id: targetTemplateId,
+        template_id: resolved.template_id,
         uuid: randomUUID,
         program_id: selection.period_id,
         sub_tag: selection.intensity_id,
