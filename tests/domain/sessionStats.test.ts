@@ -2,8 +2,6 @@ import {
   computeDetailPageStats,
   computeSessionStats,
   computeSessionVolume,
-  formatDurationHHMM,
-  formatSessionDuration,
   formatTrainingDuration,
   formatVolumeShort,
   type SessionStatsSetInput,
@@ -235,61 +233,6 @@ describe('computeDetailPageStats (detail page 4-tile)', () => {
 });
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-
-describe('formatDurationHHMM (detail page)', () => {
-  it('zero ms → 00:00', () => {
-    expect(formatDurationHHMM(0)).toBe('00:00');
-  });
-
-  it('1 hour 13 min → 01:13', () => {
-    expect(formatDurationHHMM((3600 + 13 * 60) * 1000)).toBe('01:13');
-  });
-
-  it('rolls past 24h without wrapping', () => {
-    expect(formatDurationHHMM((48 * 3600 + 5 * 60) * 1000)).toBe('48:05');
-  });
-
-  it('null / undefined → 00:00 (defensive)', () => {
-    expect(formatDurationHHMM(null)).toBe('00:00');
-    expect(formatDurationHHMM(undefined)).toBe('00:00');
-  });
-
-  it('negative duration → 00:00 (defensive)', () => {
-    expect(formatDurationHHMM(-1000)).toBe('00:00');
-  });
-
-  it('seconds are truncated (no rounding up)', () => {
-    expect(formatDurationHHMM(5 * 60 * 1000 + 59_900)).toBe('00:05');
-  });
-});
-
-describe('formatSessionDuration (in-session)', () => {
-  it('< 1 minute → 00:SS', () => {
-    expect(formatSessionDuration(30_000)).toBe('00:30');
-  });
-
-  it('< 1h → MM:SS', () => {
-    expect(formatSessionDuration(42 * 60_000 + 7_000)).toBe('42:07');
-  });
-
-  it('exactly 1h → 1:00', () => {
-    expect(formatSessionDuration(60 * 60_000)).toBe('1:00');
-  });
-
-  it('1h 23min → 1:23 (seconds dropped over 1h)', () => {
-    expect(formatSessionDuration(60 * 60_000 + 23 * 60_000 + 45_000)).toBe(
-      '1:23',
-    );
-  });
-
-  it('0 → 00:00', () => {
-    expect(formatSessionDuration(0)).toBe('00:00');
-  });
-
-  it('negative clamps to 00:00', () => {
-    expect(formatSessionDuration(-100)).toBe('00:00');
-  });
-});
 
 describe('formatVolumeShort', () => {
   it('zero → "0"', () => {

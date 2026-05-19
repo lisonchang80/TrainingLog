@@ -11,10 +11,9 @@
  * Warmup excluded (PREP only). Dropset is_logged=1 DOES contribute (non-warmup).
  * Asymmetric cluster handled naturally — each side's rows iterate independently.
  *
- * Two format helpers coexist because the two UIs want different cadence:
- *   - `formatDurationHHMM(ms)` → `HH:mm`        (Agent A — detail page, ended session)
- *   - `formatSessionDuration(ms)` → `MM:SS` or `H:MM` (Agent C — in-session live tile)
- * `formatVolumeShort(kg)` → `0`/`426`/`1.2k`/`12.5k` (Agent C — bounded tile width)
+ * Format helpers:
+ *   - `formatTrainingDuration(sec)` → `H hr M' SS"` (#47 — unified detail + Today)
+ *   - `formatVolumeShort(kg)` → `0`/`426`/`1.2k`/`12.5k` (Agent C — bounded tile width)
  */
 
 import type { SetKind } from '../set/setLabels';
@@ -112,37 +111,6 @@ export function computeDetailPageStats(input: DetailPageStatsInput): DetailPageS
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────────
-
-/**
- * Format a millisecond duration as `HH:mm`. Negative or non-finite input
- * returns `00:00`. Hours roll past 24 (e.g. an open in-progress session
- * left for two days would show e.g. `48:13` rather than wrap).
- * Used by detail page (Agent A).
- */
-export function formatDurationHHMM(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return '00:00';
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/**
- * Format a duration as `H:MM` or `MM:SS` for the in-session stats panel tile.
- *   - < 1h → `MM:SS` (e.g. `42:30`)
- *   - >= 1h → `H:MM` (e.g. `1:23` — minutes always zero-padded)
- * Used by in-session stats panel (Agent C).
- */
-export function formatSessionDuration(duration_ms: number): string {
-  const totalSec = Math.max(0, Math.floor(duration_ms / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, '0')}`;
-  }
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
 
 /**
  * Format volume for the tile. Shortens to k for >= 1000 (e.g. `4.2k`,
