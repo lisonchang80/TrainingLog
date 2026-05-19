@@ -766,6 +766,32 @@ function ClusterBlock({
     a: cluster.setsA[i] ?? null,
     b: cluster.setsB[i] ?? null,
   }));
+  // overnight #47 第 1 點 follow-up — cluster cycle label also goes through
+  // `computeHistorySetLabels` so warmup→「熱」/ working→「1/2/3」/ dropset→
+  // 「D1/D2」 matches the solo card. Compute per side (A and B may have
+  // mismatched set_kind in rare cases — A takes precedence, B is fallback).
+  const labelsA = useMemo(
+    () =>
+      computeHistorySetLabels(
+        cluster.setsA.map((s) => ({
+          id: s.id,
+          set_kind: s.set_kind,
+          ordering: s.ordering,
+        })),
+      ),
+    [cluster.setsA],
+  );
+  const labelsB = useMemo(
+    () =>
+      computeHistorySetLabels(
+        cluster.setsB.map((s) => ({
+          id: s.id,
+          set_kind: s.set_kind,
+          ordering: s.ordering,
+        })),
+      ),
+    [cluster.setsB],
+  );
   return (
     <View
       style={[
@@ -790,9 +816,14 @@ function ClusterBlock({
       {rows.length === 0 ? (
         <Text style={styles.muted}>No sets recorded.</Text>
       ) : (
-        rows.map((r, i) => (
+        rows.map((r, i) => {
+          const cycleLabel =
+            (r.a ? labelsA.get(r.a.id) : undefined) ??
+            (r.b ? labelsB.get(r.b.id) : undefined) ??
+            String(i + 1);
+          return (
           <View key={i} style={styles.clusterPairRow}>
-            <Text style={styles.clusterCycle}>{i + 1}</Text>
+            <Text style={styles.clusterCycle}>{cycleLabel}</Text>
             <View style={styles.clusterCell}>
               {r.a ? (
                 <Text style={styles.clusterCellText}>
@@ -815,7 +846,8 @@ function ClusterBlock({
               <Text style={styles.setCheck}>✓</Text>
             )}
           </View>
-        ))
+          );
+        })
       )}
     </View>
   );
