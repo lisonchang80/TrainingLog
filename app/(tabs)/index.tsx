@@ -2460,19 +2460,10 @@ function ExerciseCard({
                         key: 'delete',
                         label: '刪除',
                         color: '#dc3545',
-                        onPress: () =>
-                          Alert.alert(
-                            '刪除這組？',
-                            undefined,
-                            [
-                              { text: '取消', style: 'cancel' },
-                              {
-                                text: '刪除',
-                                style: 'destructive',
-                                onPress: () => onDeleteSet(s.id),
-                              },
-                            ],
-                          ),
+                        // overnight #46 第 2 點 — solo set 級別 swipe-delete
+                        // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
+                        // exercise card 級 / cluster 整 row 級 confirm 不動。
+                        onPress: () => onDeleteSet(s.id),
                       },
                     ]}
                     swipeRightActions={[
