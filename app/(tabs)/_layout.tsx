@@ -79,15 +79,6 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="prototype"
-        options={{
-          title: 'Prototype',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paintbrush" color={color} />
-          ),
-        }}
-      />
     </Tabs>
   );
 }
