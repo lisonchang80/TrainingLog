@@ -2305,7 +2305,6 @@ function ExerciseCard({
       weight_kg: s.weight_kg,
       reps: s.reps,
     })),
-    planRow.planned_sets,
   );
   return (
     <View style={[styles.exerciseCard, isExpanded && styles.exerciseCardExpanded]}>

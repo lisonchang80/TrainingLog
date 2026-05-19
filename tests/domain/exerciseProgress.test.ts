@@ -19,9 +19,8 @@ function mk(
 
 describe('computeExerciseProgress', () => {
   it('empty input → zero counts', () => {
-    expect(computeExerciseProgress([], 3)).toEqual({
+    expect(computeExerciseProgress([])).toEqual({
       workingDone: 0,
-      plannedTotal: 3,
       volumeDone: 0,
       volumeTotal: 0,
     });
@@ -33,7 +32,7 @@ describe('computeExerciseProgress', () => {
       mk('working', 0, 70, 8), // not logged → excluded
       mk('working', 1, 75, 8),
     ];
-    const out = computeExerciseProgress(sets, 3);
+    const out = computeExerciseProgress(sets);
     expect(out.workingDone).toBe(2);
   });
 
@@ -42,7 +41,7 @@ describe('computeExerciseProgress', () => {
       mk('warmup', 1, 40, 12), // skipped
       mk('working', 1, 60, 10),
     ];
-    const out = computeExerciseProgress(sets, 1);
+    const out = computeExerciseProgress(sets);
     expect(out.workingDone).toBe(1);
     expect(out.volumeDone).toBe(600);
     expect(out.volumeTotal).toBe(600); // warmup excluded from total too
@@ -53,7 +52,7 @@ describe('computeExerciseProgress', () => {
       mk('working', 1, 60, 10), // working +
       mk('dropset', 1, 45, 8), // dropset head — logged, contributes to volume but not workingDone
     ];
-    const out = computeExerciseProgress(sets, 1);
+    const out = computeExerciseProgress(sets);
     expect(out.workingDone).toBe(1); // only the working one
     expect(out.volumeDone).toBe(600); // dropset is_logged doesn't add to volumeDone (per current rule: working only)
     expect(out.volumeTotal).toBe(60 * 10 + 45 * 8); // both non-warmup
@@ -64,14 +63,9 @@ describe('computeExerciseProgress', () => {
       mk('working', 1, null, 10),
       mk('working', 1, 60, null),
     ];
-    const out = computeExerciseProgress(sets, 2);
+    const out = computeExerciseProgress(sets);
     expect(out.workingDone).toBe(2);
     expect(out.volumeDone).toBe(0); // both contributed 0 to volume
-  });
-
-  it('plannedTotal is passed through verbatim (not derived)', () => {
-    expect(computeExerciseProgress([], 5).plannedTotal).toBe(5);
-    expect(computeExerciseProgress([], 0).plannedTotal).toBe(0);
   });
 
   it('mixed sequence: 1 warmup + 2 working (one logged) + 1 dropset head', () => {
@@ -81,9 +75,8 @@ describe('computeExerciseProgress', () => {
       mk('working', 0, 65, 10),
       mk('dropset', 0, 45, 8),
     ];
-    const out = computeExerciseProgress(sets, 3);
+    const out = computeExerciseProgress(sets);
     expect(out.workingDone).toBe(1);
-    expect(out.plannedTotal).toBe(3);
     expect(out.volumeDone).toBe(600);
     expect(out.volumeTotal).toBe(60 * 10 + 65 * 10 + 45 * 8);
   });

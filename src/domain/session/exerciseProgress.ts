@@ -33,8 +33,6 @@ export interface ExerciseProgressInput {
 export interface ExerciseProgress {
   /** Count of is_logged=1 AND set_kind='working' rows. */
   workingDone: number;
-  /** Total working sets planned (from session_exercise.planned_sets). */
-  plannedTotal: number;
   /** Volume (Σ weight×reps) for completed working sets. */
   volumeDone: number;
   /** Volume (Σ weight×reps) for ALL non-warmup recorded sets (working +
@@ -45,7 +43,6 @@ export interface ExerciseProgress {
 
 export function computeExerciseProgress(
   sets: ExerciseProgressInput[],
-  plannedTotal: number,
 ): ExerciseProgress {
   let workingDone = 0;
   let volumeDone = 0;
@@ -62,5 +59,5 @@ export function computeExerciseProgress(
       volumeDone += vol;
     }
   }
-  return { workingDone, plannedTotal, volumeDone, volumeTotal };
+  return { workingDone, volumeDone, volumeTotal };
 }
