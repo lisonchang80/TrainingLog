@@ -68,6 +68,7 @@ import {
   incrementUseCount,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManager';
+import { computeTemplateClusterStat } from '@/src/domain/template/clusterStat';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
@@ -1203,6 +1204,16 @@ export default function TemplateEditorView() {
         );
       }
       const isExpanded = expandedExId === parent.id;
+      // overnight #48 第 1 點：cluster header 也顯示「{warmup}熱+{working}組」、
+      // 但用 cycle 概念算（A.sets[i] 配 B.sets[i]），不是 A+B 兩側合計，避免雙倍
+      // 計數。Cycle 分類詳見 `computeTemplateClusterStat` JSDoc：「working cycle =
+      // 至少一側 working/dropset」、「warmup cycle = 沒任一側 working/dropset
+      // 且至少一側 warmup」。2-side rule → 只取 children[0] (mirror runtime
+      // groupClusterSides). 為空 cluster → 0熱+0組.
+      const clusterStat = computeTemplateClusterStat(
+        parent.sets.map((s) => ({ kind: s.kind })),
+        (children[0]?.sets ?? []).map((s) => ({ kind: s.kind })),
+      );
       // overnight #45 第 1 點：mirror session cluster-card.tsx:216-224 layout
       // — 「超」chip 獨佔行 1 + 標題分行（兩動作名 + 「 + 」連接）獨佔行 2。
       // template 無 progress bar 概念，故只兩行（session 是三行 — chip / 標題 / progress）。
@@ -1230,6 +1241,9 @@ export default function TemplateEditorView() {
                 </Text>
               </View>
               <View style={styles.flexFill} />
+              <Text style={styles.exSummary}>
+                {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
+              </Text>
               {isExpanded ? <Text style={styles.exChevron}>▼</Text> : null}
             </Pressable>
             {parent.notes && parent.notes.trim().length > 0 ? (
