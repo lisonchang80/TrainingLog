@@ -104,6 +104,47 @@ export async function listDistinctSubTagsByProgram(
 }
 
 /**
+ * NULL-safe lookup of a template by its (name, program_id, sub_tag) identity
+ * triple (ADR-0003). Returns the matching row's `{ id }` or `null` when no
+ * match exists.
+ *
+ * Used by round 38 polish — `templates.tsx::onStart` lookup-or-spawn rule:
+ * when the user picks a (program, sub_tag) that doesn't match the sheet
+ * template's own triple, we first probe for an existing sibling under that
+ * triple (e.g. the clone #37 spawned earlier) before falling back to a fresh
+ * `cloneTemplateWithSubTag`. Without this lookup, picking an EXISTING
+ * sub_tag chip would still send `startSessionFromTemplate` at the source
+ * row and a later「儲存模板」 would silently overwrite the source.
+ *
+ * NULL handling: both `program_id` and `sub_tag` are nullable per schema; the
+ * SQL applies the standard `(col IS NULL AND ? IS NULL) OR col = ?` idiom to
+ * each so binding NULL on either column matches an actual NULL row (SQL `=`
+ * never matches NULL otherwise).
+ */
+export async function findTemplateByTriple(
+  db: Database,
+  args: {
+    name: string;
+    program_id: string | null;
+    sub_tag: string | null;
+  }
+): Promise<{ id: string } | null> {
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template
+      WHERE name = ?
+        AND ((program_id IS NULL AND ? IS NULL) OR program_id = ?)
+        AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
+      LIMIT 1`,
+    args.name,
+    args.program_id,
+    args.program_id,
+    args.sub_tag,
+    args.sub_tag
+  );
+  return row ?? null;
+}
+
+/**
  * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
  * (name, program_id, sub_tag) triple becomes the Template's new identity.
  * Caller should ensure (name, program_id, sub_tag) is unique within the DB.
