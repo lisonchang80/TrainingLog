@@ -113,6 +113,7 @@ describe('getSessionLinkedTemplateTriple (5/19 polish #43)', () => {
     expect(result).toEqual({
       template_id: 'tpl-push',
       template_name: 'Push Day',
+      program_id: 'prog-1',
       program_name: '增肌-Q1',
       sub_tag: '5x5',
     });
@@ -170,6 +171,7 @@ describe('getSessionLinkedTemplateTriple (5/19 polish #43)', () => {
     expect(result).toEqual({
       template_id: 'tpl-smoke',
       template_name: 'Smoke Day',
+      program_id: 'prog-2',
       program_name: 'Smoke',
       sub_tag: 'TEST-4',
     });
@@ -227,6 +229,7 @@ describe('getSessionLinkedTemplateTriple (5/19 polish #43)', () => {
     expect(result?.template_id).toBe('tpl-major');
     expect(result?.template_name).toBe('Major');
     // Major has no program / sub_tag attached.
+    expect(result?.program_id).toBeNull();
     expect(result?.program_name).toBeNull();
     expect(result?.sub_tag).toBeNull();
   });
@@ -255,6 +258,7 @@ describe('getSessionLinkedTemplateTriple (5/19 polish #43)', () => {
     expect(result).toEqual({
       template_id: 'tpl-orphan',
       template_name: 'Orphan',
+      program_id: null,
       program_name: null,
       sub_tag: null,
     });

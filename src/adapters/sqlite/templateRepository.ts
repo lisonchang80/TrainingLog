@@ -233,6 +233,7 @@ export async function getSessionLinkedTemplateTriple(
 ): Promise<{
   template_id: string;
   template_name: string;
+  program_id: string | null;
   program_name: string | null;
   sub_tag: string | null;
 } | null> {
@@ -249,13 +250,19 @@ export async function getSessionLinkedTemplateTriple(
   );
   if (!head) return null;
 
-  // Step 2: hydrate (template_name, program_name, sub_tag).
+  // Step 2: hydrate (template_name, program_id, program_name, sub_tag).
+  // 2026-05-20 overnight #55 (slice 10c 另存模板 prefill): include `program_id`
+  // so callers building a sheet's program-picker initial state can match
+  // against the existing programs list. The Today banner caller only uses
+  // `program_name` for display; adding `program_id` is backwards-compatible.
   const row = await db.getFirstAsync<{
     template_name: string;
+    program_id: string | null;
     program_name: string | null;
     sub_tag: string | null;
   }>(
     `SELECT t.name AS template_name,
+            t.program_id AS program_id,
             p.name AS program_name,
             t.sub_tag AS sub_tag
        FROM template t
@@ -267,6 +274,7 @@ export async function getSessionLinkedTemplateTriple(
   return {
     template_id: head.template_id,
     template_name: row.template_name,
+    program_id: row.program_id ?? null,
     program_name: row.program_name ?? null,
     sub_tag: row.sub_tag ?? null,
   };
@@ -1200,6 +1208,25 @@ export async function convertSessionToTemplate(
   const newTemplateId = isUpdatingExisting
     ? (linkedTemplateId as string)
     : args.uuid();
+
+  // 2026-05-20 overnight #55 (slice 10c 另存模板): dup-triple guard for the
+  // create path (and update-fallback-to-create when no linked template
+  // existed). Mirrors `cloneTemplateWithSubTag`'s pattern — if a template row
+  // already exists with the same (name, program_id, sub_tag) triple we throw
+  // `DUPLICATE_TEMPLATE_TRIPLE` so the UI can surface an Alert and keep the
+  // sheet open for inline rename + retry. Updating an existing template (when
+  // `isUpdatingExisting` is true) skips this — we're overwriting the linked
+  // row in place, so the dup check would falsely match the same row.
+  if (!isUpdatingExisting) {
+    const existing = await findTemplateByTriple(db, {
+      name: args.template_name,
+      program_id: createProgramId,
+      sub_tag: createSubTag,
+    });
+    if (existing) {
+      throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+    }
+  }
 
   // Step 3: pre-compute new template_exercise ids + parent_id remap.
   const idByOldSe = new Map<string, string>(); // old session_exercise.id → new template_exercise.id

@@ -649,4 +649,109 @@ describe('convertSessionToTemplate', () => {
     expect(row?.program_id).toBe('prog-bar');
     expect(row?.sub_tag).toBe('肌耐力');
   });
+
+  // 2026-05-20 overnight #55 (slice 10c 另存模板 dup-triple guard):
+  // create mode (and update-fallback-to-create) now refuses to INSERT a new
+  // template row when a row already exists with the same (name, program_id,
+  // sub_tag) triple — mirrors `cloneTemplateWithSubTag`'s pattern. UI surfaces
+  // the throw as an Alert so user can rename + retry inline.
+  describe('create-mode dup-triple guard (overnight #55)', () => {
+    it('throws DUPLICATE_TEMPLATE_TRIPLE when (name, program_id, sub_tag) already exists (all non-null)', async () => {
+      await setupSession({ session_id: 'sess-dup1', template_id: null });
+
+      // First save succeeds.
+      await convertSessionToTemplate(db, {
+        session_id: 'sess-dup1',
+        template_name: 'Dup Name',
+        mode: 'create',
+        program_id: 'prog-x',
+        sub_tag: '5x5',
+        uuid,
+        now,
+      });
+
+      // Second save with the same triple → throws.
+      await expect(
+        convertSessionToTemplate(db, {
+          session_id: 'sess-dup1',
+          template_name: 'Dup Name',
+          mode: 'create',
+          program_id: 'prog-x',
+          sub_tag: '5x5',
+          uuid,
+          now,
+        })
+      ).rejects.toThrow('DUPLICATE_TEMPLATE_TRIPLE');
+    });
+
+    it('throws DUPLICATE_TEMPLATE_TRIPLE for NULL/NULL collisions (free template)', async () => {
+      await setupSession({ session_id: 'sess-dup2', template_id: null });
+
+      await convertSessionToTemplate(db, {
+        session_id: 'sess-dup2',
+        template_name: 'Free Dup',
+        mode: 'create',
+        uuid,
+        now,
+      });
+
+      await expect(
+        convertSessionToTemplate(db, {
+          session_id: 'sess-dup2',
+          template_name: 'Free Dup',
+          mode: 'create',
+          uuid,
+          now,
+        })
+      ).rejects.toThrow('DUPLICATE_TEMPLATE_TRIPLE');
+    });
+
+    it('allows same name under a different (program, sub_tag) — siblings via ADR-0003 三元組 identity', async () => {
+      await setupSession({ session_id: 'sess-sib', template_id: null });
+
+      await convertSessionToTemplate(db, {
+        session_id: 'sess-sib',
+        template_name: 'Push Day',
+        mode: 'create',
+        program_id: 'prog-a',
+        sub_tag: '5x5',
+        uuid,
+        now,
+      });
+
+      // Same name, different sub_tag → allowed (sibling).
+      const sibId = await convertSessionToTemplate(db, {
+        session_id: 'sess-sib',
+        template_name: 'Push Day',
+        mode: 'create',
+        program_id: 'prog-a',
+        sub_tag: '10x3',
+        uuid,
+        now,
+      });
+      const sib = await getTemplateFull(db, sibId);
+      expect(sib).not.toBeNull();
+    });
+
+    it('update mode does NOT trigger the dup guard (overwrites the linked row in place)', async () => {
+      // Pre-create the target template + link it via session_exercise rows.
+      await createTemplate(db, { id: 'tpl-target', name: 'Existing', now });
+      await setupSession({ session_id: 'sess-upd', template_id: 'tpl-target' });
+
+      // Pre-create ANOTHER template with the SAME name we're about to write
+      // (NULL/NULL triple). If the dup guard fired, this would block update.
+      await createTemplate(db, { id: 'tpl-other', name: 'New Name', now });
+
+      // Update should succeed — guards out via isUpdatingExisting=true.
+      await expect(
+        convertSessionToTemplate(db, {
+          session_id: 'sess-upd',
+          template_name: 'New Name',
+          mode: 'update',
+          uuid,
+          now: () => NOW + 5000,
+        })
+      ).resolves.toBe('tpl-target');
+    });
+  });
 });
