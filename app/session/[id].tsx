@@ -769,10 +769,19 @@ function ClusterBlock({
         styles.clusterCard,
         { borderColor: color, backgroundColor: hexAlpha(color, 0.08) },
       ]}>
+      {/*
+        overnight #47 第 3 點: 灰圓點 → 紫底「超」chip 上行，標題分行 2 行。
+        Mirror in-session cluster-card.tsx 的 header pattern (row 1 chip,
+        row 2 title with " + " separator).
+      */}
       <View style={styles.clusterHeader}>
-        <View style={[styles.clusterDot, { backgroundColor: color }]} />
+        <View style={styles.clusterTagRow}>
+          <Text style={styles.supersetTag}>超</Text>
+        </View>
         <Text style={styles.clusterLabel}>
-          {cluster.parent.exercise_name} · {cluster.child.exercise_name}
+          {cluster.parent.exercise_name}
+          <Text style={styles.clusterPlus}> + </Text>
+          {cluster.child.exercise_name}
         </Text>
       </View>
       {rows.length === 0 ? (
@@ -922,14 +931,31 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 8,
   },
+  // overnight #47 第 3 點: cluster header 改 vertical stack — row 1 chip /
+  // row 2 title (mirror in-session cluster-card.tsx pattern).
   clusterHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexDirection: 'column',
+    gap: 4,
     marginBottom: 8,
   },
-  clusterDot: { width: 10, height: 10, borderRadius: 5 },
+  clusterTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // 「超」 chip — mirror cluster-card.tsx::supersetTag (iOS system indigo).
+  supersetTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    backgroundColor: '#5856D6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+  },
   clusterLabel: { fontSize: 14, fontWeight: '600' },
+  clusterPlus: { fontSize: 14, opacity: 0.5 },
   clusterPairRow: {
     flexDirection: 'row',
     alignItems: 'center',
