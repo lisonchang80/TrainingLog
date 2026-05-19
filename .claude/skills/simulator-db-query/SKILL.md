@@ -129,7 +129,7 @@ COMMIT;"
 - 告訴用戶 reload simulator 才會看到效果
 
 **Dangling FK 風險案例（slice 10c）**：
-- 刪 template row 沒清 `session_exercise.template_id` → `convertSessionToTemplate` mode='update' linkedTemplateId lookup 撈到 ghost id 後 `getTemplate(id)` return null → 邏輯 fallback 到 create，但用戶可能困惑
+- 刪 template row 沒清 `session_exercise.template_id` → `convertSessionToTemplate` mode='update' linkedTemplateId lookup 撈到 ghost id 後 `getTemplate(id)` return null → 邏輯 fallback 到 create，但用戶可能困惑。**已修 2026-05-19 #44**：`deleteTemplate(db, id)` (templateRepository.ts:364) 已改 4-step transaction (UPDATE session_exercise.template_id=NULL 排除 active session → DELETE template_set → DELETE template_exercise → DELETE template)，**走此 path 自動 cascade safe**。手動 sqlite3 cleanup 仍要依本 SOP。
 - 刪 superset row 沒清 `superset_exercise` link rows → list query 仍 join 撈到 partial data，UI render 出 broken card
 - 刪 exercise row（**不要做**）→ 大量 set / template_exercise / superset_exercise 變 orphan，破壞性極大
 - 刪 program 或 template 沒清 `app_settings` sticky → `start_dialog_last_program_id` / `start_dialog_last_sub_tag` 仍指 ghost id；start sheet resolveDefaults 把不存在的 id 帶進 sticky pre-select，UI 顯示「(最後使用)」標 ghost。**清理 SQL**：`DELETE FROM app_settings WHERE key IN ('start_dialog_last_program_id','start_dialog_last_sub_tag');` 或 value 比對指定 id。2026-05-19 slice 10c TEST cleanup 踩過一次
