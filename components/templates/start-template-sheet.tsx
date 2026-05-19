@@ -130,7 +130,7 @@ type StartTemplateSheetProps = {
   onCloneTemplateWithNewSubTag: (
     sub_tag: string,
     program_id: string
-  ) => Promise<{ template_id: string }>;
+  ) => Promise<void>;
   onCancel: () => void;
 };
 

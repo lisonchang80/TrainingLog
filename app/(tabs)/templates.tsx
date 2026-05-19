@@ -189,11 +189,11 @@ export default function TemplatesScreen() {
   const handleCloneTemplateWithNewSubTag = async (
     sub_tag: string,
     program_id: string,
-  ): Promise<{ template_id: string }> => {
+  ): Promise<void> => {
     if (!sheetTemplate) {
       throw new Error('NO_SHEET_TEMPLATE');
     }
-    const newId = await cloneTemplateWithSubTag(db, {
+    await cloneTemplateWithSubTag(db, {
       source_template_id: sheetTemplate.id,
       new_program_id: program_id,
       new_sub_tag: sub_tag,
@@ -202,7 +202,6 @@ export default function TemplatesScreen() {
     // Refresh the templates list so the clone shows up in the tab. We don't
     // re-open the sheet — the sheet itself owns the active pointer now.
     await load();
-    return { template_id: newId };
   };
 
   const persistSticky = async (
