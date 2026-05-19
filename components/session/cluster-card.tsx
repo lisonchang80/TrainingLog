@@ -581,25 +581,6 @@ export function ClusterCard({
   );
 }
 
-/**
- * Format a set's primary cell — same shape as the solo card's set row
- * (weight × reps). Null defensives degrade gracefully:
- *   - null weight + reps → "—"
- *   - null weight, reps  → "× R"   (bodyweight-ish)
- *   - weight, null reps → "W kg"
- */
-function formatSetCell(set: {
-  weight_kg: number | null;
-  reps: number | null;
-}): string {
-  const w = set.weight_kg;
-  const r = set.reps;
-  if (w == null && r == null) return '—';
-  if (w == null) return `× ${r}`;
-  if (r == null) return `${w} kg`;
-  return `${w} × ${r}`;
-}
-
 /** Adapt SessionSet → SetRowItem shape (SetRowContent needs non-null fields). */
 function toSetRowItem(s: SessionSetWithExercise): SetRowItem {
   return {
