@@ -210,15 +210,15 @@ export default function TemplatesScreen() {
 
   /**
    * [編輯模板] handler — closes sheet, persists sticky selection, then opens
-   * the editor. Round 37 polish: `selection.template_id` comes from the
-   * sheet's `activeTemplateId` (= tapped row's id by default, or a freshly-
-   * spawned clone after the user added a new sub_tag inline), so the editor
-   * loads the right row.
+   * the editor on the sheet's source template. Round 38 polish: edit still
+   * targets the source row (no lookup-or-spawn) — editing under a different
+   * (program, sub_tag) doesn't make sense without first deciding whether
+   * the user intends to edit the source or a sibling; we route to source by
+   * default and rely on the user to navigate from there.
    */
   const onEdit = async (selection: {
     period_id: string;
     intensity_id: string | null;
-    template_id: string;
   }) => {
     if (!sheetTemplate) return;
     closeSheet();
@@ -227,23 +227,22 @@ export default function TemplatesScreen() {
     } catch {
       // Sticky persistence is best-effort — don't block the edit flow.
     }
-    router.push(`/template/${selection.template_id}`);
+    router.push(`/template/${sheetTemplate.id}`);
   };
 
   /**
-   * [開始訓練] handler — start a session from the (possibly-cloned) template,
+   * [開始訓練] handler — start a session from the sheet's source template,
    * persist sticky, then navigate to Today. Refuses if a session is already
    * in progress (mirrors template editor's onStartSession guard).
    *
-   * Round 37 polish: uses `selection.template_id` (sheet's `activeTemplateId`)
-   * — when the user added a new sub_tag inline, this is the spawned clone,
-   * not the originally-tapped row, so the session links to the new row and
-   * the source template stays untouched on later「儲存模板」overwrite.
+   * Round 38 polish (commit 3 / interim — final lookup-or-spawn lands in
+   * commit 4): the sheet no longer threads a `template_id`; this handler
+   * still routes to `sheetTemplate.id` for now. Picking an existing sub_tag
+   * chip thus still hits the source row — that's the bug commit 4 fixes.
    */
   const onStart = async (selection: {
     period_id: string;
     intensity_id: string | null;
-    template_id: string;
   }) => {
     if (!sheetTemplate) return;
     setBusy(true);
@@ -261,7 +260,7 @@ export default function TemplatesScreen() {
       // session's planned set rows can be prefilled from matching history
       // (priority tree: exact triple → P+通用 → P+any sub_tag → empty).
       await startSessionFromTemplate(db, {
-        template_id: selection.template_id,
+        template_id: sheetTemplate.id,
         uuid: randomUUID,
         program_id: selection.period_id,
         sub_tag: selection.intensity_id,
@@ -323,7 +322,6 @@ export default function TemplatesScreen() {
       <StartTemplateSheet
         visible={sheetTemplate != null}
         templateName={sheetTemplate?.name ?? ''}
-        templateId={sheetTemplate?.id ?? ''}
         programs={programs}
         subTags={subTags}
         lastUsedProgramId={lastUsedProgramId}
