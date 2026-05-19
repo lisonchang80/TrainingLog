@@ -291,25 +291,39 @@ export default function TemplatesScreen() {
   );
 
   /**
-   * [編輯模板] handler — closes sheet, persists sticky selection, then opens
-   * the editor on the sheet's source template. Round 38 polish: edit still
-   * targets the source row (no lookup-or-spawn) — editing under a different
-   * (program, sub_tag) doesn't make sense without first deciding whether
-   * the user intends to edit the source or a sibling; we route to source by
-   * default and rely on the user to navigate from there.
+   * [編輯模板] handler — round 42 polish: lookup-or-spawn rule, symmetric
+   * with onStart. Without this, list dedupe (round 41) makes the sheet's
+   * representative row stand in for every sibling, so tapping a row and
+   * picking any (計劃, 強度) would always open the representative's editor
+   * regardless of the selection.
+   *
+   * Race-resilient via shared `resolveTargetTemplateId`. We defer
+   * `closeSheet()` until after the lookup so a thrown error keeps the sheet
+   * open (no editor opens, no orphaned UI). `setBusy(true)` locks the UI
+   * for the spawn duration, mirroring onStart.
    */
   const onEdit = async (selection: {
     period_id: string;
     intensity_id: string | null;
   }) => {
     if (!sheetTemplate) return;
-    closeSheet();
+    setBusy(true);
     try {
       await persistSticky(selection.period_id, selection.intensity_id);
-    } catch {
-      // Sticky persistence is best-effort — don't block the edit flow.
+      const targetTemplateId = await resolveTargetTemplateId(
+        sheetTemplate,
+        selection,
+      );
+      closeSheet();
+      router.push(`/template/${targetTemplateId}`);
+    } catch (e) {
+      Alert.alert(
+        '無法開啟編輯器',
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
     }
-    router.push(`/template/${sheetTemplate.id}`);
   };
 
   /**
