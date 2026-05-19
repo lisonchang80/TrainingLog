@@ -51,6 +51,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
+import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
 import {
@@ -67,6 +68,7 @@ import {
 } from '@/src/adapters/sqlite/supersetRepository';
 import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManager';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
+import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
 import { cycleSetKindAcrossExercises } from '@/src/domain/template/templateOps';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
@@ -118,6 +120,7 @@ export default function TemplateEditorView() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
   const [exerciseLibrary, setExerciseLibrary] = useState<Exercise[]>([]);
+  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [noteEditing, setNoteEditing] = useState<
     | {
         target:
@@ -141,9 +144,10 @@ export default function TemplateEditorView() {
         return;
       }
       try {
-        const [tpl, lib] = await Promise.all([
+        const [tpl, lib, progs] = await Promise.all([
           getTemplateFull(db, id),
           listExercises(db),
+          listPrograms(db),
         ]);
         if (cancelled) return;
         if (!tpl) {
@@ -154,6 +158,7 @@ export default function TemplateEditorView() {
         setCommitted(tpl);
         setDraft(cloneTemplate(tpl));
         setExerciseLibrary(lib);
+        setPrograms(progs);
         setLoaded(true);
       } catch (e) {
         if (cancelled) return;
@@ -1355,6 +1360,14 @@ export default function TemplateEditorView() {
               />
               <Text style={styles.metaText}>per name 配色（同名連動）</Text>
             </View>
+            <Text style={styles.tripleText}>
+              {formatTemplateTriple(
+                draft.program_id
+                  ? programs.find((p) => p.id === draft.program_id)?.name ?? '通用'
+                  : null,
+                draft.sub_tag ?? null,
+              )}
+            </Text>
           </View>
           <Pressable
             onPress={onSave}
@@ -1965,6 +1978,7 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   colorSwatch: { width: 14, height: 14, borderRadius: 7 },
   metaText: { fontSize: 11, color: '#6B7280' },
+  tripleText: { fontSize: 12, color: '#6b7280' },
   body: { padding: 12, gap: 8, paddingBottom: 80 },
   sectionHeader: {
     flexDirection: 'row',
