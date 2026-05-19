@@ -1,29 +1,14 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import {
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useDatabase } from '@/components/database-provider';
-import { listSessions } from '@/src/adapters/sqlite/sessionRepository';
-import { listSetsBySession } from '@/src/adapters/sqlite/setRepository';
-import type { Session } from '@/src/domain/session/types';
 import { StatsPanel } from '@/components/stats-panel';
 import { AchievementsPanel } from '@/components/achievements-panel';
-
-interface SessionRowVM {
-  session: Session;
-  setCount: number;
-  exerciseCount: number;
-}
+import MonthGridView from '@/src/components/history/MonthGridView';
+import ListView from '@/src/components/history/ListView';
 
 type SubTab = 'history' | 'stats' | 'achievements';
+type HistoryMode = 'calendar' | 'list';
 
 const SUB_TABS: readonly { key: SubTab; label: string }[] = [
   { key: 'history', label: '歷史' },
@@ -31,14 +16,26 @@ const SUB_TABS: readonly { key: SubTab; label: string }[] = [
   { key: 'achievements', label: '獎章' },
 ];
 
+const HISTORY_MODES: readonly { key: HistoryMode; label: string }[] = [
+  { key: 'calendar', label: '月曆' },
+  { key: 'list', label: '表列' },
+];
+
 /**
- * History tab — three sub-tab structure (slice 9 / ADR-0009).
- *   歷史:   existing Session list, newest first
+ * History tab — three-level structure (slice 9 / ADR-0009 / ADR-0015).
+ *   歷史 (default):  inner segmented [月曆 | 表列]
+ *     - 月曆 (default): traditional calendar-month grid with per-template
+ *       color and +N indicator (ADR-0015).
+ *     - 表列 (escape hatch): denser list view (ADR-0015 § Sub-tab toggle).
  *   統計:   per-period heatmap + capacity bars + duration metrics
  *   獎章:   255 system-seeded achievement grid (locked / unlocked)
+ *
+ * The previous flat list (`HistoryListPanel`) is gone — Agent B's
+ * `ListView` carries the dense escape-hatch table now.
  */
 export default function HistoryScreen() {
   const [tab, setTab] = useState<SubTab>('history');
+  const [mode, setMode] = useState<HistoryMode>('calendar');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -51,82 +48,41 @@ export default function HistoryScreen() {
               style={[styles.subTabBtn, tab === t.key && styles.subTabBtnActive]}
               onPress={() => setTab(t.key)}>
               <Text
-                style={[styles.subTabBtnText, tab === t.key && styles.subTabBtnTextActive]}>
+                style={[
+                  styles.subTabBtnText,
+                  tab === t.key && styles.subTabBtnTextActive,
+                ]}>
                 {t.label}
               </Text>
             </Pressable>
           ))}
         </View>
+        {tab === 'history' ? (
+          <View style={styles.modeRow}>
+            {HISTORY_MODES.map((m) => (
+              <Pressable
+                key={m.key}
+                style={[styles.modeBtn, mode === m.key && styles.modeBtnActive]}
+                onPress={() => setMode(m.key)}>
+                <Text
+                  style={[
+                    styles.modeBtnText,
+                    mode === m.key && styles.modeBtnTextActive,
+                  ]}>
+                  {m.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
-      {tab === 'history' ? <HistoryListPanel /> : null}
+      {tab === 'history' ? (
+        mode === 'calendar' ? <MonthGridView /> : <ListView />
+      ) : null}
       {tab === 'stats' ? <StatsPanel /> : null}
       {tab === 'achievements' ? <AchievementsPanel /> : null}
     </SafeAreaView>
   );
-}
-
-function HistoryListPanel() {
-  const db = useDatabase();
-  const router = useRouter();
-  const [rows, setRows] = useState<SessionRowVM[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback(async () => {
-    const sessions = await listSessions(db);
-    const enriched: SessionRowVM[] = await Promise.all(
-      sessions.map(async (session) => {
-        const sets = await listSetsBySession(db, session.id);
-        const exerciseCount = new Set(sets.map((s) => s.exercise_id)).size;
-        return { session, setCount: sets.length, exerciseCount };
-      })
-    );
-    setRows(enriched);
-  }, [db]);
-
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  }, [load]);
-
-  return (
-    <FlatList
-      data={rows}
-      keyExtractor={(item) => item.session.id}
-      contentContainerStyle={
-        rows.length === 0 ? styles.emptyContent : styles.listContent
-      }
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      ListEmptyComponent={
-        <Text style={styles.emptyText}>No sessions yet — start one in the Today tab.</Text>
-      }
-      renderItem={({ item }) => (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push(`/session/${item.session.id}`)}
-          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-          <Text style={styles.rowTime}>{formatTimestamp(item.session.started_at)}</Text>
-          <Text style={styles.rowDetails}>
-            {item.exerciseCount} exercise{item.exerciseCount === 1 ? '' : 's'} ·{' '}
-            {item.setCount} set{item.setCount === 1 ? '' : 's'}
-          </Text>
-          <Text style={styles.rowStatus}>
-            {item.session.ended_at == null ? '⏱ in progress' : '✓ ended'}
-          </Text>
-        </Pressable>
-      )}
-    />
-  );
-}
-
-function formatTimestamp(ms: number): string {
-  return new Date(ms).toLocaleString();
 }
 
 const styles = StyleSheet.create({
@@ -149,23 +105,21 @@ const styles = StyleSheet.create({
   subTabBtnActive: { backgroundColor: '#fff' },
   subTabBtnText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
   subTabBtnTextActive: { color: '#111827', fontWeight: '700' },
-  listContent: { paddingHorizontal: 24, paddingBottom: 24, gap: 8 },
-  emptyContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  emptyText: { fontSize: 15, opacity: 0.6, textAlign: 'center' },
-  row: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+  modeRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
     backgroundColor: 'rgba(127,127,127,0.12)',
+    borderRadius: 8,
+    padding: 3,
     gap: 4,
   },
-  rowPressed: { opacity: 0.85 },
-  rowTime: { fontSize: 16, fontWeight: '600' },
-  rowDetails: { fontSize: 14 },
-  rowStatus: { fontSize: 12, opacity: 0.6 },
+  modeBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 18,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  modeBtnActive: { backgroundColor: '#fff' },
+  modeBtnText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  modeBtnTextActive: { color: '#111827', fontWeight: '700' },
 });
