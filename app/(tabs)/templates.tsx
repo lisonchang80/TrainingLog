@@ -17,6 +17,7 @@ import { StartTemplateSheet } from '@/components/templates/start-template-sheet'
 import {
   cloneTemplateWithSubTag,
   createTemplate,
+  findTemplateByTriple,
   listDistinctSubTags,
   listTemplates,
   type TemplateSummary,
@@ -25,6 +26,7 @@ import {
   createProgram,
   listPrograms,
 } from '@/src/adapters/sqlite/programRepository';
+import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 import {
   getSetting,
@@ -231,14 +233,33 @@ export default function TemplatesScreen() {
   };
 
   /**
-   * [開始訓練] handler — start a session from the sheet's source template,
-   * persist sticky, then navigate to Today. Refuses if a session is already
-   * in progress (mirrors template editor's onStartSession guard).
+   * [開始訓練] handler — round 38 polish: lookup-or-spawn rule (the final
+   * piece replacing round 37's sheet-local `activeTemplateId`).
    *
-   * Round 38 polish (commit 3 / interim — final lookup-or-spawn lands in
-   * commit 4): the sheet no longer threads a `template_id`; this handler
-   * still routes to `sheetTemplate.id` for now. Picking an existing sub_tag
-   * chip thus still hits the source row — that's the bug commit 4 fixes.
+   * Rule, given (sheetTemplate, period_id, intensity_id):
+   *   - If (period_id, intensity_id) matches the sheet template's own triple
+   *     → start session from `sheetTemplate.id` (no spawn, no lookup).
+   *   - Else if period_id === RESERVED_NONE_PROGRAM_ID (通用 program) →
+   *     start from `sheetTemplate.id` (no spawn — we don't proliferate 通用
+   *     variants; the triple-uniqueness boundary stays inside real programs).
+   *   - Else probe `findTemplateByTriple(name, program_id, sub_tag)`:
+   *       - hit  → start from the sibling's id (e.g. the clone spawned via
+   *               「+ 新增強度」 inline earlier in this sheet open, or any
+   *               pre-existing sibling under the same triple)
+   *       - miss → `cloneTemplateWithSubTag` to spawn a fresh sibling, then
+   *               refresh the templates list, then start from the new id.
+   *
+   * Why route picking an EXISTING sub_tag chip through lookup too: without
+   * this, picking 「TEST-1」 from Smoke (program=A) would still send the
+   * session at Smoke's row, and the later 「儲存模板」 would silently
+   * overwrite Smoke — exactly the regression #37 left open.
+   *
+   * Race-resilient: if findTemplateByTriple misses but cloneTemplateWithSubTag
+   * throws DUPLICATE_TEMPLATE_TRIPLE (concurrent insert), we re-probe once
+   * before bubbling — the second probe almost always hits.
+   *
+   * Refuses if a session is already in progress (mirrors template editor's
+   * onStartSession guard).
    */
   const onStart = async (selection: {
     period_id: string;
@@ -256,11 +277,68 @@ export default function TemplatesScreen() {
         return;
       }
       await persistSticky(selection.period_id, selection.intensity_id);
+
+      // Lookup-or-spawn the target template.
+      let targetTemplateId = sheetTemplate.id;
+      const sourceProgramId = sheetTemplate.program_id ?? null;
+      const sourceSubTag = sheetTemplate.sub_tag ?? null;
+      const isNoneProgram = selection.period_id === RESERVED_NONE_PROGRAM_ID;
+      const wantedProgramId = isNoneProgram ? null : selection.period_id;
+      const wantedSubTag = selection.intensity_id;
+
+      const matchesSelf =
+        sourceProgramId === wantedProgramId && sourceSubTag === wantedSubTag;
+
+      if (!matchesSelf && !isNoneProgram && wantedProgramId !== null) {
+        const found = await findTemplateByTriple(db, {
+          name: sheetTemplate.name,
+          program_id: wantedProgramId,
+          sub_tag: wantedSubTag,
+        });
+        if (found) {
+          targetTemplateId = found.id;
+        } else {
+          try {
+            targetTemplateId = await cloneTemplateWithSubTag(db, {
+              source_template_id: sheetTemplate.id,
+              new_program_id: wantedProgramId,
+              new_sub_tag: wantedSubTag,
+              uuid: randomUUID,
+            });
+            // Refresh the templates list so the new clone shows up under
+            // the Templates tab right after the session starts.
+            await load();
+          } catch (cloneErr) {
+            // Race: findTemplateByTriple just missed but the dup guard
+            // fired anyway (concurrent insert). Re-probe once before
+            // bubbling so the user isn't blocked on a transient collision.
+            const message =
+              cloneErr instanceof Error
+                ? cloneErr.message
+                : String(cloneErr);
+            if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+              const retry = await findTemplateByTriple(db, {
+                name: sheetTemplate.name,
+                program_id: wantedProgramId,
+                sub_tag: wantedSubTag,
+              });
+              if (retry) {
+                targetTemplateId = retry.id;
+              } else {
+                throw cloneErr;
+              }
+            } else {
+              throw cloneErr;
+            }
+          }
+        }
+      }
+
       // Round 35 — thread the (program, sub_tag) selection through so the
       // session's planned set rows can be prefilled from matching history
       // (priority tree: exact triple → P+通用 → P+any sub_tag → empty).
       await startSessionFromTemplate(db, {
-        template_id: sheetTemplate.id,
+        template_id: targetTemplateId,
         uuid: randomUUID,
         program_id: selection.period_id,
         sub_tag: selection.intensity_id,
