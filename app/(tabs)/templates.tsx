@@ -225,11 +225,11 @@ export default function TemplatesScreen() {
    *
    *   - matchesSelf → sheetTpl.id (no DB work)
    *   - findTemplateByTriple hit → sibling's id
-   *   - miss + 通用 (wanted_program_id=NULL) → fallback to sheetTpl.id +
-   *     Alert「通用變體尚未建立」(memory ledger #38 規則: 通用 program
-   *     略過 spawn 避免擴散)
-   *   - miss + 非通用 → cloneTemplateWithSubTag spawn + load() refresh
-   *   - DUPLICATE_TEMPLATE_TRIPLE race → re-probe once
+   *   - miss (any case, 通用 or 非通用) → fallback to sheetTpl.id +
+   *     Alert「尚未建立模板、啟用最新模板」(#50 simplification, was
+   *     spawn-on-miss for 非通用 pre-#50)
+   *   - spawn 新 variant 改由 sheet「+新增強度 / +新增計畫」inline
+   *     「建立」明示觸發 (`handleCloneTemplateWithNewSubTag`)
    *
    * Why route picking an EXISTING sub_tag chip through lookup too: without
    * this, picking 「TEST-1」 from Smoke (program=A) would still target
@@ -292,40 +292,9 @@ export default function TemplatesScreen() {
           return { template_id: plan.template_id };
         case 'fallback_with_alert':
           return { template_id: plan.template_id, alert: plan.alert };
-        case 'spawn': {
-          try {
-            const spawnedId = await cloneTemplateWithSubTag(db, {
-              source_template_id: plan.source_id,
-              new_program_id: plan.new_program_id,
-              new_sub_tag: plan.new_sub_tag,
-              uuid: randomUUID,
-            });
-            // Refresh the templates list so the new clone shows up under the
-            // Templates tab right after the caller navigates away.
-            await load();
-            return { template_id: spawnedId };
-          } catch (cloneErr) {
-            // Race: findTemplateByTriple just missed but the dup guard fired
-            // anyway (concurrent insert). Re-probe once before bubbling so
-            // the user isn't blocked on a transient collision.
-            const message =
-              cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
-            if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-              const retry = await findTemplateByTriple(db, {
-                name: sheetTpl.name,
-                program_id: plan.new_program_id,
-                sub_tag: plan.new_sub_tag,
-              });
-              if (retry) {
-                return { template_id: retry.id };
-              }
-            }
-            throw cloneErr;
-          }
-        }
       }
     },
-    [db, load],
+    [db],
   );
 
   /**

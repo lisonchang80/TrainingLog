@@ -1,6 +1,7 @@
 /**
- * Pure decision tree for "lookup-or-spawn" used by `app/(tabs)/templates.tsx`
- * onStart + onEdit (start-template-sheet 兩按鈕). overnight #48 第 2 點.
+ * Pure decision tree for "lookup-or-fallback" used by `app/(tabs)/templates.tsx`
+ * onStart + onEdit (start-template-sheet 兩按鈕). overnight #48 第 2 點、
+ * #50 簡化拍板。
  *
  * **Background**: ADR-0003 三元組 (name, program_id, sub_tag) identity 保留、
  * #41 UI 層 dedupe by name 後一個 name 只有一 representative row。當用戶在
@@ -10,22 +11,21 @@
  *   1. 若 selection 三元組 === sheetTpl 自身 → 用 sheetTpl.id 直接走
  *   2. 否則先 `findTemplateByTriple(name, P, S)` 查 sibling：
  *      - hit → 用 sibling.id（無論 P/S 是否為 NULL）
- *      - miss + 通用 case (P=NULL) → fallback to sheetTpl.id + flag Alert
- *        告知用戶「通用變體尚未建立、開啟最近編輯的變體」(memory #38 規則：
- *        通用 case 略過 spawn 避免擴散)
- *      - miss + 非通用 case → 'spawn'（caller 執行 cloneTemplateWithSubTag）
+ *      - miss → fallback to sheetTpl.id (representative, MAX(updated_at)) +
+ *        flag Alert「尚未建立模板，啟用最新模板」(不分通用/非通用)
  *
- * **Bug fixed**: #48 之前 `wantedProgramId === null` 直接 short-circuit 返回
- * representative.id，跳過 lookup。導致用戶選通用 radio 時永遠開到 representative
- * 那個變體（e.g. 選 Smoke 通用 → 開 (Smoke, TEST_id, TEST-4) 而非
- * (Smoke, NULL, NULL)）。修法：通用 case 也做 lookup、只在 miss 時 fallback。
+ * **#50 簡化**: pre-#50 非通用 miss 會 auto-spawn (`cloneTemplateWithSubTag`
+ * +「立即新增該變體」)。用戶反饋簡化：所有 miss 都走 fallback、不 spawn。
+ * 建立新 sibling 路徑改成只由 sheet「+新增強度 / +新增計畫」inline 按
+ * 「建立」明示觸發（`handleCloneTemplateWithNewSubTag`），本 planner 只
+ * 處理「lookup-or-fallback」。
  *
- * 為什麼通用 case miss 不 spawn：memory ledger #38 拍板「通用 program 略過
- * spawn 避免擴散」。通用 variants 不該無限增生—一個 (name, NULL, *) sibling
- * 就夠。Fallback to representative + Alert 讓用戶知道狀況、可手動編輯後存。
+ * **#48 bug fixed**: #48 之前 `wantedProgramId === null` 直接 short-circuit
+ * 返回 representative.id、跳過 lookup。導致用戶選通用 radio 時永遠開到
+ * representative。修法：所有 miss 都做 lookup、然後 fallback。
  *
  * **Pure**: 本檔不 import DB / router。Caller 提供 lookup 結果 (sibling? id),
- * 本檔回 Plan 描述「下一步做什麼」。Caller 執行 effect (router.push / spawn DB)。
+ * 本檔回 Plan 描述「下一步做什麼」。Caller 執行 effect (router.push)。
  */
 
 /** Input identity of the row currently focused in start-template-sheet
@@ -61,23 +61,16 @@ export type ResolveTargetPlan =
       template_id: string;
     }
   | {
-      /** 通用 case (wanted_program_id === NULL) AND no sibling found —
-       *  fall back to sheet template's representative id AND signal Alert
-       *  so the UI can tell the user the 通用 variant doesn't yet exist. */
+      /** No sibling found — fall back to sheet template's representative id
+       *  (MAX updated_at sibling, post-#41 dedupe) AND signal Alert so the UI
+       *  can tell the user the requested variant doesn't yet exist.
+       *  Applies to BOTH 通用 and 非通用 cases (#50 simplification). */
       kind: 'fallback_with_alert';
       template_id: string;
       alert: {
         title: string;
         body: string;
       };
-    }
-  | {
-      /** Non-通用 case + no sibling — caller should spawn a new sibling
-       *  via `cloneTemplateWithSubTag`. */
-      kind: 'spawn';
-      source_id: string;
-      new_program_id: string;
-      new_sub_tag: string | null;
     };
 
 /**
@@ -108,23 +101,14 @@ export function planResolveTarget(
     return { kind: 'use_sibling', template_id: sibling_lookup_result.id };
   }
 
-  // No sibling found. Branch on 通用 case.
-  if (selection.wanted_program_id === null) {
-    return {
-      kind: 'fallback_with_alert',
-      template_id: source.id,
-      alert: {
-        title: '通用變體尚未建立',
-        body: `(計畫=通用, 強度=${selection.wanted_sub_tag ?? '通用'}) 的變體尚未建立，開啟最近編輯的變體。如需建立，請在編輯器中另存。`,
-      },
-    };
-  }
-
-  // Non-通用 case + miss → spawn.
+  // No sibling found — uniform fallback (#50 simplification, was branched
+  // on 通用/非通用 with spawn for the latter pre-#50).
   return {
-    kind: 'spawn',
-    source_id: source.id,
-    new_program_id: selection.wanted_program_id,
-    new_sub_tag: selection.wanted_sub_tag,
+    kind: 'fallback_with_alert',
+    template_id: source.id,
+    alert: {
+      title: '尚未建立模板',
+      body: '啟用最新模板',
+    },
   };
 }

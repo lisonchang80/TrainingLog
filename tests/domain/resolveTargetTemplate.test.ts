@@ -92,12 +92,12 @@ describe('planResolveTarget', () => {
     expect(plan.kind).toBe('fallback_with_alert');
     if (plan.kind !== 'fallback_with_alert') throw new Error('narrow');
     expect(plan.template_id).toBe('tpl-rep');
-    expect(plan.alert.title).toBe('通用變體尚未建立');
-    expect(plan.alert.body).toContain('通用');
-    expect(plan.alert.body).toContain('TEST-1');
+    // #50 simplification: unified Alert text regardless of 通用/非通用.
+    expect(plan.alert.title).toBe('尚未建立模板');
+    expect(plan.alert.body).toBe('啟用最新模板');
   });
 
-  it('case 3b: !matchesSelf + lookup miss + 通用 + sub_tag NULL → fallback alert mentions 通用', () => {
+  it('case 3b: !matchesSelf + lookup miss + 通用 + sub_tag NULL → fallback to rep + Alert', () => {
     const sel: TargetTemplateSelection = {
       wanted_program_id: null,
       wanted_sub_tag: null,
@@ -106,51 +106,47 @@ describe('planResolveTarget', () => {
     expect(plan.kind).toBe('fallback_with_alert');
     if (plan.kind !== 'fallback_with_alert') throw new Error('narrow');
     expect(plan.template_id).toBe('tpl-rep');
-    expect(plan.alert.body).toContain('通用');
+    expect(plan.alert.title).toBe('尚未建立模板');
+    expect(plan.alert.body).toBe('啟用最新模板');
   });
 
-  it('case 4: !matchesSelf + lookup miss + 非通用 → spawn', () => {
+  it('case 4: !matchesSelf + lookup miss + 非通用 → fallback (#50 simplification, was spawn)', () => {
     const sel: TargetTemplateSelection = {
       wanted_program_id: 'PROG_B',
       wanted_sub_tag: 'TEST-1',
     };
     const plan = planResolveTarget(SHEET_TPL_REP, sel, null);
     expect(plan).toEqual<ResolveTargetPlan>({
-      kind: 'spawn',
-      source_id: 'tpl-rep',
-      new_program_id: 'PROG_B',
-      new_sub_tag: 'TEST-1',
+      kind: 'fallback_with_alert',
+      template_id: 'tpl-rep',
+      alert: {
+        title: '尚未建立模板',
+        body: '啟用最新模板',
+      },
     });
   });
 
-  it('case 4b: !matchesSelf + lookup miss + 非通用 + sub_tag NULL → spawn with NULL sub_tag', () => {
+  it('case 4b: !matchesSelf + lookup miss + 非通用 + sub_tag NULL → fallback', () => {
     const sel: TargetTemplateSelection = {
       wanted_program_id: 'PROG_B',
       wanted_sub_tag: null,
     };
     const plan = planResolveTarget(SHEET_TPL_REP, sel, null);
-    expect(plan).toEqual<ResolveTargetPlan>({
-      kind: 'spawn',
-      source_id: 'tpl-rep',
-      new_program_id: 'PROG_B',
-      new_sub_tag: null,
-    });
+    expect(plan.kind).toBe('fallback_with_alert');
+    if (plan.kind !== 'fallback_with_alert') throw new Error('narrow');
+    expect(plan.template_id).toBe('tpl-rep');
   });
 
-  it('regression: source has program but selection sub_tag changes → spawn (existing onStart parity)', () => {
+  it('regression: source has program but selection sub_tag changes → fallback (#50, was spawn)', () => {
     // (Smoke, TEST_id, TEST-4) source, selection (TEST_id, TEST-5) — same
-    // program different sub_tag. Pre-#48 behavior already handled this via
-    // findTemplateByTriple. Test ensures the new branch doesn't regress.
+    // program different sub_tag. #50 拍板簡化：所有 miss 走 fallback、不 spawn。
     const sel: TargetTemplateSelection = {
       wanted_program_id: 'TEST_id',
       wanted_sub_tag: 'TEST-5',
     };
     const plan = planResolveTarget(SHEET_TPL_REP, sel, null);
-    expect(plan).toEqual<ResolveTargetPlan>({
-      kind: 'spawn',
-      source_id: 'tpl-rep',
-      new_program_id: 'TEST_id',
-      new_sub_tag: 'TEST-5',
-    });
+    expect(plan.kind).toBe('fallback_with_alert');
+    if (plan.kind !== 'fallback_with_alert') throw new Error('narrow');
+    expect(plan.template_id).toBe('tpl-rep');
   });
 });
