@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@/components/database-provider';
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import {
+  cloneTemplateWithSubTag,
   createTemplate,
   listDistinctSubTags,
   listTemplates,
@@ -163,6 +164,40 @@ export default function TemplatesScreen() {
     return { id, name };
   };
 
+  /**
+   * Round 37 — spawn-on-create handler for the sheet's「新增強度」inline CTA.
+   * Clones the currently-tapped template under (program_id, new sub_tag) and
+   * returns the new id. The sheet then re-aims its `activeTemplateId` at the
+   * clone so [編輯模板] / [開始訓練] hits the new row.
+   *
+   * Why clone-on-create rather than rename-on-finish: round 35 surfaced a
+   * subtle bug where overwriting a session's linked template ignored the
+   * user's mid-session sub_tag change and silently overwrote the original
+   * (e.g. 「通用」). Spawning at sub_tag-add time aligns the linked-template
+   * pointer with the user's intent up front.
+   *
+   * After spawning we refetch the templates list so the new row appears in
+   * the Templates tab right away.
+   */
+  const handleCloneTemplateWithNewSubTag = async (
+    sub_tag: string,
+    program_id: string,
+  ): Promise<{ template_id: string }> => {
+    if (!sheetTemplate) {
+      throw new Error('NO_SHEET_TEMPLATE');
+    }
+    const newId = await cloneTemplateWithSubTag(db, {
+      source_template_id: sheetTemplate.id,
+      new_program_id: program_id,
+      new_sub_tag: sub_tag,
+      uuid: randomUUID,
+    });
+    // Refresh the templates list so the clone shows up in the tab. We don't
+    // re-open the sheet — the sheet itself owns the active pointer now.
+    await load();
+    return { template_id: newId };
+  };
+
   const persistSticky = async (
     program_id: string,
     sub_tag: string | null,
@@ -175,38 +210,42 @@ export default function TemplatesScreen() {
 
   /**
    * [編輯模板] handler — closes sheet, persists sticky selection, then opens
-   * the editor for the tapped template's id. Per Q9.2 E1 spec the intended
-   * target is the (name, period, intensity) triple's matching Template
-   * entity (create empty sibling when missing); slice 10c ships the simpler
-   * "edit the tapped row's template" — sibling-resolution lands in the next
-   * slice once the picker also gains 「+ 新增週期/強度」 affordances.
+   * the editor. Round 37 polish: `selection.template_id` comes from the
+   * sheet's `activeTemplateId` (= tapped row's id by default, or a freshly-
+   * spawned clone after the user added a new sub_tag inline), so the editor
+   * loads the right row.
    */
   const onEdit = async (selection: {
     period_id: string;
     intensity_id: string | null;
+    template_id: string;
   }) => {
     if (!sheetTemplate) return;
-    const template_id = sheetTemplate.id;
     closeSheet();
     try {
       await persistSticky(selection.period_id, selection.intensity_id);
     } catch {
       // Sticky persistence is best-effort — don't block the edit flow.
     }
-    router.push(`/template/${template_id}`);
+    router.push(`/template/${selection.template_id}`);
   };
 
   /**
-   * [開始訓練] handler — start a session from the tapped template, persist
-   * sticky, then navigate to Today. Refuses if a session is already in
-   * progress (mirrors template editor's onStartSession guard).
+   * [開始訓練] handler — start a session from the (possibly-cloned) template,
+   * persist sticky, then navigate to Today. Refuses if a session is already
+   * in progress (mirrors template editor's onStartSession guard).
+   *
+   * Round 37 polish: uses `selection.template_id` (sheet's `activeTemplateId`)
+   * — when the user added a new sub_tag inline, this is the spawned clone,
+   * not the originally-tapped row, so the session links to the new row and
+   * the source template stays untouched on later「儲存模板」overwrite.
    */
   const onStart = async (selection: {
     period_id: string;
     intensity_id: string | null;
+    template_id: string;
   }) => {
     if (!sheetTemplate) return;
-    const template_id = sheetTemplate.id;
     setBusy(true);
     try {
       const active = await getActiveSession(db);
@@ -222,7 +261,7 @@ export default function TemplatesScreen() {
       // session's planned set rows can be prefilled from matching history
       // (priority tree: exact triple → P+通用 → P+any sub_tag → empty).
       await startSessionFromTemplate(db, {
-        template_id,
+        template_id: selection.template_id,
         uuid: randomUUID,
         program_id: selection.period_id,
         sub_tag: selection.intensity_id,
@@ -284,6 +323,7 @@ export default function TemplatesScreen() {
       <StartTemplateSheet
         visible={sheetTemplate != null}
         templateName={sheetTemplate?.name ?? ''}
+        templateId={sheetTemplate?.id ?? ''}
         programs={programs}
         subTags={subTags}
         lastUsedProgramId={lastUsedProgramId}
@@ -291,6 +331,7 @@ export default function TemplatesScreen() {
         onEdit={onEdit}
         onStart={onStart}
         onCreateProgram={handleCreateProgram}
+        onCloneTemplateWithNewSubTag={handleCloneTemplateWithNewSubTag}
         onCancel={closeSheet}
       />
     </SafeAreaView>
