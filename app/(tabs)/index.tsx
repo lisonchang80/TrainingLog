@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -87,7 +87,12 @@ import {
   displaySetLabel,
 } from '@/src/domain/set/workingSetOrdinal';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
-import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
+import {
+  getSessionLinkedTemplateTriple,
+  listTemplates,
+  type TemplateSummary,
+} from '@/src/adapters/sqlite/templateRepository';
+import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import {
   latestPerMetric,
   validateBodyMetric,
@@ -212,6 +217,18 @@ export default function TodayScreen() {
     exercise_name: string;
   } | null>(null);
   const [restTimerTrigger, setRestTimerTrigger] = useState<number>(0);
+  /**
+   * Today banner (5/19 polish #43): during an in-progress session the banner
+   * mirrors the session's linked template (name + program · sub_tag) instead
+   * of the user's active Program. `null` while loading or for freestyle
+   * sessions (no row carries a non-null template_id) — caller renders
+   * 「自由訓練」. Refreshed by a useEffect keyed on session status + id below.
+   */
+  const [sessionTemplateInfo, setSessionTemplateInfo] = useState<{
+    template_name: string;
+    program_name: string | null;
+    sub_tag: string | null;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms, popup] = await Promise.all([
@@ -264,6 +281,37 @@ export default function TodayScreen() {
       setPrSnapshotById({});
     }
   }, [db]);
+
+  // 5/19 polish #43 — banner mirror session linked template. Fetches the
+  // (template_name, program_name, sub_tag) triple from the most-common
+  // non-null `session_exercise.template_id` while the session is in_progress.
+  // Resets to null otherwise (idle / ended) so the idle branch falls back to
+  // its existing active-program banner unaffected.
+  const sessionIdForBanner =
+    sessionState.status === 'in_progress' ? getSessionId(sessionState) : null;
+  useEffect(() => {
+    if (!sessionIdForBanner) {
+      setSessionTemplateInfo(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const info = await getSessionLinkedTemplateTriple(db, sessionIdForBanner);
+      if (cancelled) return;
+      setSessionTemplateInfo(
+        info
+          ? {
+              template_name: info.template_name,
+              program_name: info.program_name,
+              sub_tag: info.sub_tag,
+            }
+          : null,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, sessionIdForBanner]);
 
   // Re-fetch on every focus so returning from the detail screen resets us.
   // Also drain the picker mailbox here (per template editor convention) for
@@ -1418,22 +1466,52 @@ export default function TodayScreen() {
   const todayTemplate = programCellToday?.template_id
     ? templatesById[programCellToday.template_id] ?? null
     : null;
-  const programBanner = activeProgram ? (
-    <View style={styles.programBanner}>
-      <Text style={styles.programBannerName} numberOfLines={1}>
-        {resolveProgramLabel(activeProgram.program)}
-        {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
-      </Text>
-      {programCellToday ? (
-        <Text style={styles.programBannerCell}>
-          今天：{todayTemplate ? todayTemplate.name : '休息日'}
-          {programCellToday.sub_tag ? ` · ${programCellToday.sub_tag}` : ''}
+  // 5/19 polish #43 — banner branches on session status. In-progress sessions
+  // mirror the session's linked template (or「自由訓練」for freestyle);
+  // idle / ended fall through to the existing active-program banner.
+  let programBanner: ReactNode = null;
+  if (sessionState.status === 'in_progress') {
+    if (sessionTemplateInfo) {
+      programBanner = (
+        <View style={styles.programBanner}>
+          <Text style={styles.programBannerName} numberOfLines={1}>
+            {sessionTemplateInfo.template_name}
+          </Text>
+          <Text style={styles.programBannerCell}>
+            {formatTemplateTriple(
+              sessionTemplateInfo.program_name,
+              sessionTemplateInfo.sub_tag,
+            )}
+          </Text>
+        </View>
+      );
+    } else {
+      programBanner = (
+        <View style={styles.programBanner}>
+          <Text style={styles.programBannerName} numberOfLines={1}>
+            自由訓練
+          </Text>
+        </View>
+      );
+    }
+  } else if (activeProgram) {
+    programBanner = (
+      <View style={styles.programBanner}>
+        <Text style={styles.programBannerName} numberOfLines={1}>
+          {resolveProgramLabel(activeProgram.program)}
+          {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
         </Text>
-      ) : (
-        <Text style={styles.programBannerCell}>今天不在 Program 範圍內</Text>
-      )}
-    </View>
-  ) : null;
+        {programCellToday ? (
+          <Text style={styles.programBannerCell}>
+            今天：{todayTemplate ? todayTemplate.name : '休息日'}
+            {programCellToday.sub_tag ? ` · ${programCellToday.sub_tag}` : ''}
+          </Text>
+        ) : (
+          <Text style={styles.programBannerCell}>今天不在 Program 範圍內</Text>
+        )}
+      </View>
+    );
+  }
 
   if (sessionState.status === 'idle') {
     const latest = latestPerMetric(bodyMetrics);

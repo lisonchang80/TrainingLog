@@ -184,6 +184,66 @@ export async function findTemplateByTriple(
 }
 
 /**
+ * Resolve a session's "linked template" identity (name + program + sub_tag)
+ * for the Today banner during an in-progress session (5/19 polish #43).
+ *
+ * "Linked template" = the most common non-null `session_exercise.template_id`
+ * among the session's rows; tie-break by earliest `ordering` for determinism
+ * (mirrors `convertSessionToTemplate`'s `linkedTemplateId` resolution, with
+ * the tie-break tightened so the order of identically-counted templates is
+ * stable). Returns `null` for a freestyle session (no row carries a non-null
+ * template_id) — caller renders 「自由訓練」.
+ *
+ * The second SELECT joins `program` to resolve `program.name` (may be NULL
+ * when the template lives under the「通用」program or none); `template.sub_tag`
+ * is read directly.
+ */
+export async function getSessionLinkedTemplateTriple(
+  db: Database,
+  session_id: string
+): Promise<{
+  template_id: string;
+  template_name: string;
+  program_name: string | null;
+  sub_tag: string | null;
+} | null> {
+  // Step 1: most-common non-null template_id; tie-break by earliest ordering
+  // for deterministic ordering when two templates share the same row count.
+  const head = await db.getFirstAsync<{ template_id: string }>(
+    `SELECT template_id
+       FROM session_exercise
+      WHERE session_id = ? AND template_id IS NOT NULL
+      GROUP BY template_id
+      ORDER BY COUNT(*) DESC, MIN(ordering) ASC
+      LIMIT 1`,
+    session_id
+  );
+  if (!head) return null;
+
+  // Step 2: hydrate (template_name, program_name, sub_tag).
+  const row = await db.getFirstAsync<{
+    template_name: string;
+    program_name: string | null;
+    sub_tag: string | null;
+  }>(
+    `SELECT t.name AS template_name,
+            p.name AS program_name,
+            t.sub_tag AS sub_tag
+       FROM template t
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE t.id = ?`,
+    head.template_id
+  );
+  if (!row) return null;
+  return {
+    template_id: head.template_id,
+    template_name: row.template_name,
+    program_name: row.program_name ?? null,
+    sub_tag: row.sub_tag ?? null,
+  };
+}
+
+/**
  * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
  * (name, program_id, sub_tag) triple becomes the Template's new identity.
  * Caller should ensure (name, program_id, sub_tag) is unique within the DB.
