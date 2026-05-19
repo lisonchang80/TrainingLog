@@ -218,6 +218,8 @@ Verify 時也要堅持用 tsc，不要被 LSP diagnostics 影響判斷。
 - ❌ 連跑 6-8 overnight 沒 `/cp` → context 爆掉
 - ❌ Prompt 沒提 LSP false positive → agent 浪費 attempts 跟 noise 鬥
 - ❌ 不寫 stop conditions → agent 卡死也不停
+- ❌ **跳過 agent 標的「留尾」/「dead code candidate」**→ 那條通常會 bite back（用戶 reload smoke 就踩到）。2026-05-19 slice 10c wave #37 落地時 agent 標「留尾 #1：既有 sub_tag-pick path mismatch 未解」+「onEdit 沒做 lookup-or-spawn」；當下沒立即處理 → #38 用戶 reload 又報 bug，加 #41/#42 才補完。**規則**：每輪 agent report 收尾時，把「留尾」list 跟用戶 review 一次，決定是否併入下一輪 scope 而非等到 user 抱怨。
+- ❌ **多 wave 同一 feature evolve 沒鎖 ADR/glossary**→ 規格隨用戶 feedback 漂移、回頭 implement 已動的 code 三次（#37 spawn-on-create → #38 lookup-or-spawn → #39 revert spawn → #41 dedupe+revert revert → #42 onEdit parity）。**規則**：每 2-3 wave 後若同 feature 仍在演化，stop 跑一輪 grill 把核心 spec / ADR amendment 鎖住再續 launch。
 
 ## Related skills
 
