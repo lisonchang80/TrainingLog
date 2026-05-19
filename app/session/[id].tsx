@@ -30,7 +30,10 @@ import {
   type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
-import { convertSessionToTemplate } from '@/src/adapters/sqlite/templateRepository';
+import {
+  convertSessionToTemplate,
+  getSessionLinkedTemplateTriple,
+} from '@/src/adapters/sqlite/templateRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
 import {
@@ -89,6 +92,16 @@ export default function SessionDetailScreen() {
   const [templateMetaSheetOpen, setTemplateMetaSheetOpen] = useState(false);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [templateMetaBusy, setTemplateMetaBusy] = useState(false);
+  // 2026-05-20 overnight #55: prefill from the session's linked template if any.
+  // Freestyle session → all three null (sheet opens blank, default name only).
+  // Template-based session → linked template's (name, program_id, sub_tag)
+  // pre-populate so user can either rename (creates an independent template)
+  // or change (program, sub_tag) to spawn a sibling under ADR-0003 三元組 identity.
+  const [templateMetaPrefill, setTemplateMetaPrefill] = useState<{
+    name: string;
+    program_id: string | null;
+    sub_tag: string | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -200,10 +213,27 @@ export default function SessionDetailScreen() {
       // (name + program_id + sub_tag)。update mode (儲存模板) 維持原本
       // Alert.prompt 改名流程 — update 不需要 3 元組，inherit linked
       // template 既有的 program/sub_tag。
+      //
+      // 2026-05-20 overnight #55: pre-fill the sheet from the session's
+      // linked template (if any) so a template-based session can quickly
+      // spawn a sibling under a different (program, sub_tag) without
+      // retyping. Freestyle session → null prefill, sheet opens blank.
       if (mode === 'create') {
         try {
-          const progs = await listPrograms(db);
+          const [progs, linked] = await Promise.all([
+            listPrograms(db),
+            getSessionLinkedTemplateTriple(db, id!),
+          ]);
           setPrograms(progs);
+          setTemplateMetaPrefill(
+            linked
+              ? {
+                  name: linked.template_name,
+                  program_id: linked.program_id,
+                  sub_tag: linked.sub_tag,
+                }
+              : null,
+          );
         } catch (e) {
           Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
           return;
@@ -301,7 +331,20 @@ export default function SessionDetailScreen() {
         setTemplateMetaSheetOpen(false);
         Alert.alert('已另存', `模板「${finalName}」已建立。`);
       } catch (e) {
-        Alert.alert('失敗', e instanceof Error ? e.message : String(e));
+        // 2026-05-20 overnight #55: dup-triple guard surfaces as a specific
+        // Alert + keep sheet open (don't setTemplateMetaSheetOpen(false)) so
+        // user can rename inline or pick a different (program, sub_tag)
+        // without re-opening the sheet. Mirrors the inline retry UX used for
+        // DUPLICATE_PROGRAM_NAME / DUPLICATE_TEMPLATE_TRIPLE upstream.
+        const message = e instanceof Error ? e.message : String(e);
+        if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+          Alert.alert(
+            '變體已存在',
+            `「${finalName}」+ 該計畫 + 該強度的組合已存在。請改名或選不同變體。`,
+          );
+        } else {
+          Alert.alert('失敗', message);
+        }
       } finally {
         setTemplateMetaBusy(false);
       }
@@ -448,11 +491,19 @@ export default function SessionDetailScreen() {
       </View>
 
       {/* 另存模板 bottom sheet (2026-05-18) */}
+      {/*
+        2026-05-20 overnight #55: prefill from session's linked template if
+        any (template-based session). Freestyle session → prefill is null →
+        sheet opens with the date-stamped default name and 通用/通用 chips.
+      */}
       <TemplateMetaSheet
         visible={templateMetaSheetOpen}
         defaultName={
-          session ? `Session ${formatDateLabel(session.started_at)}` : 'Session'
+          templateMetaPrefill?.name ??
+          (session ? `Session ${formatDateLabel(session.started_at)}` : 'Session')
         }
+        defaultProgramId={templateMetaPrefill?.program_id ?? null}
+        defaultSubTag={templateMetaPrefill?.sub_tag ?? null}
         programs={programs}
         onCancel={() => setTemplateMetaSheetOpen(false)}
         onConfirm={handleTemplateMetaConfirm}

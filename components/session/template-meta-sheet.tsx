@@ -61,6 +61,17 @@ export interface TemplateMetaSheetProps {
   visible: boolean;
   /** Default fallback used when user leaves name blank. */
   defaultName: string;
+  /**
+   * Pre-selected program_id when the sheet opens. Used by the session detail
+   * 另存模板 flow to prefill from the session's linked template (2026-05-20
+   * overnight #55) — template-based session opens with the linked template's
+   * (name, program, sub_tag); freestyle session opens with all three blank
+   * (`undefined`/`null` here, blank `defaultName` over there). `undefined`
+   * means "no prefill" (existing call sites; behave as before).
+   */
+  defaultProgramId?: string | null;
+  /** Pre-selected sub_tag when the sheet opens. See `defaultProgramId`. */
+  defaultSubTag?: string | null;
   /** Existing programs from listPrograms (excludes the reserved 「無」 row). */
   programs: ProgramSummary[];
   onCancel: () => void;
@@ -76,6 +87,8 @@ export interface TemplateMetaSheetProps {
 export function TemplateMetaSheet({
   visible,
   defaultName,
+  defaultProgramId,
+  defaultSubTag,
   programs,
   onCancel,
   onConfirm,
@@ -83,8 +96,10 @@ export function TemplateMetaSheet({
 }: TemplateMetaSheetProps) {
   const db = useDatabase();
   const [name, setName] = useState(defaultName);
-  const [programId, setProgramId] = useState<string | null>(null);
-  const [subTag, setSubTag] = useState<string | null>(null);
+  const [programId, setProgramId] = useState<string | null>(
+    defaultProgramId ?? null,
+  );
+  const [subTag, setSubTag] = useState<string | null>(defaultSubTag ?? null);
   const [customSubTag, setCustomSubTag] = useState('');
   const [customMode, setCustomMode] = useState(false);
   /** Per-program distinct sub_tags, re-fetched whenever programId changes. */
@@ -108,25 +123,37 @@ export function TemplateMetaSheet({
   const [customProgramName, setCustomProgramName] = useState('');
   const [creatingProgram, setCreatingProgram] = useState(false);
 
-  // Reset state on each open so the sheet is fresh.
+  // Reset state on each open so the sheet is fresh. 2026-05-20 overnight #55:
+  // honor `defaultProgramId` / `defaultSubTag` for prefill (template-based
+  // session uses linked template's identity). When `defaultSubTag` is set,
+  // seed it into `localSubTags` so the chip renders immediately — the
+  // per-program DB fetch below appends to that set (dedup happens via the
+  // [...subTags, ...localSubTags] render path).
   useEffect(() => {
     if (visible) {
       setName(defaultName);
-      setProgramId(null);
-      setSubTag(null);
+      setProgramId(defaultProgramId ?? null);
+      setSubTag(defaultSubTag ?? null);
       setCustomSubTag('');
       setCustomMode(false);
       setSubTags([]);
-      setLocalSubTags([]);
+      setLocalSubTags(defaultSubTag ? [defaultSubTag] : []);
       setProgramList(programs);
       setCustomProgramMode(false);
       setCustomProgramName('');
       setCreatingProgram(false);
     }
-  }, [visible, defaultName, programs]);
+  }, [visible, defaultName, defaultProgramId, defaultSubTag, programs]);
 
   // Re-fetch per-program sub_tags when the user changes program selection.
   // null program → no fetch, section is hidden entirely.
+  //
+  // 2026-05-20 overnight #55: when the sheet opens with a prefilled `subTag`
+  // that may not appear in the DB-fetched list (e.g. the linked template's
+  // sub_tag was the only row with that value), we keep it in `localSubTags`
+  // so the chip renders + stays active. Stale tags from a previous program
+  // are dropped via `keepTags` filter (only keep the currently-selected one
+  // if any).
   useEffect(() => {
     let cancelled = false;
     if (!visible) return;
@@ -140,11 +167,25 @@ export function TemplateMetaSheet({
       return;
     }
     // Switching to a different program → drop the previous program's in-session
-    // tags so they don't bleed across programs.
-    setLocalSubTags([]);
+    // tags so they don't bleed across programs. Preserve only the currently
+    // active prefill subTag (if any) so its chip survives across the fetch.
+    setLocalSubTags((prev) =>
+      subTag != null && prev.includes(subTag) ? [subTag] : [],
+    );
     listDistinctSubTagsByProgram(db, programId)
       .then((tags) => {
-        if (!cancelled) setSubTags(tags);
+        if (cancelled) return;
+        setSubTags(tags);
+        // If the prefilled subTag isn't already in the DB-fetched list, keep
+        // it in localSubTags so the chip remains visible + active.
+        if (subTag != null && !tags.includes(subTag)) {
+          setLocalSubTags((prev) =>
+            prev.includes(subTag) ? prev : [...prev, subTag],
+          );
+        } else if (subTag != null && tags.includes(subTag)) {
+          // The DB already has it — drop the duplicate from localSubTags.
+          setLocalSubTags((prev) => prev.filter((t) => t !== subTag));
+        }
       })
       .catch(() => {
         if (!cancelled) setSubTags([]);
@@ -152,6 +193,12 @@ export function TemplateMetaSheet({
     return () => {
       cancelled = true;
     };
+    // We intentionally exclude `subTag` from the dep array — `subTag` is
+    // driven BY this effect's results in the prefill case, so adding it would
+    // cause a re-fetch loop on user chip-tap. The prefill path runs once on
+    // open (programId changes from null → prefilled) and reads `subTag` from
+    // the closure of that first run, which is exactly what we want.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, programId, db]);
 
   const handleConfirmNewProgram = async () => {
