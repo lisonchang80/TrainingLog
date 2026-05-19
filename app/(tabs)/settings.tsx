@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import type { UnitPreference } from '@/src/domain/body/types';
  */
 export default function SettingsScreen() {
   const db = useDatabase();
+  const router = useRouter();
   const [unit, setUnit] = useState<UnitPreference>('kg');
 
   const refresh = useCallback(async () => {
@@ -55,6 +56,21 @@ export default function SettingsScreen() {
         </View>
         <Text style={styles.hint}>
           顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。
+        </Text>
+
+        <Text style={styles.section}>數據</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/body')}
+          style={({ pressed }) => [
+            styles.linkRow,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.linkLabel}>身體數據</Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </Pressable>
+        <Text style={styles.hint}>
+          體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。
         </Text>
 
         <Text style={styles.section}>備份 / 還原</Text>
@@ -108,4 +124,14 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, opacity: 0.6 },
   placeholder: { fontSize: 14, opacity: 0.6 },
   btnPressed: { opacity: 0.85 },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+  },
+  linkLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
+  linkChevron: { fontSize: 22, fontWeight: '300', opacity: 0.5 },
 });

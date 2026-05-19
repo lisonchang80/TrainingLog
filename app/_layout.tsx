@@ -72,6 +72,13 @@ export default function RootLayout() {
           {/* Slice 10c — /superset-history and /superset-chart were folded into
               /exercise-history + /exercise-chart with a `clusterMode=cluster_only`
               param (3-段 segmented control replaces the standalone pages). */}
+          {/* Slice 10c — body tab moved out of tab bar to a stack route under
+              Settings entry. Today 頁 BodyDataSheet 仍是快速輸入入口；
+              /body 頁是「看趨勢 / 看歷史」deep dive 入口. */}
+          <Stack.Screen
+            name="body"
+            options={{ title: '身體數據' }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
