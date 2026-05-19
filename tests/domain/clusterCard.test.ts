@@ -1,7 +1,8 @@
 import {
-  groupClusterSides,
+  computeClusterCycleProgress,
   computeClusterCycles,
   computeClusterVolume,
+  groupClusterSides,
   type ClusterExerciseInput,
   type ClusterSetInput,
 } from '../../src/domain/session/clusterCard';
@@ -398,5 +399,103 @@ describe('computeClusterVolume', () => {
     const vol = computeClusterVolume(group);
     expect(vol.numerator).toBe(2 * (60 * 10) + 2 * (40 * 8));
     expect(vol.denominator).toBe(3 * (60 * 10) + 2 * (40 * 8));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeClusterCycleProgress — slice 10c overnight #46 第 3 點
+// ---------------------------------------------------------------------------
+
+describe('computeClusterCycleProgress', () => {
+  it('all working cycles: total = cycle count, done counts both_logged', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('p2', 'p', 2, { set_kind: 'working', is_logged: 1 }),
+      mkSet('p3', 'p', 3, { set_kind: 'working', is_logged: 0 }),
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f2', 'f', 2, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f3', 'f', 3, { set_kind: 'working', is_logged: 0 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 2, total: 3 });
+  });
+
+  it('warmup cycles excluded from both numerator and denominator', () => {
+    // 用戶 #46 截圖場景 — cluster card「0/250」warmup 虛胖 denominator
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      // cycle 1: warmup (both logged) → 不算
+      mkSet('p1', 'p', 1, { set_kind: 'warmup', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'warmup', is_logged: 1 }),
+      // cycle 2: working (both logged) → done + total
+      mkSet('p2', 'p', 2, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f2', 'f', 2, { set_kind: 'working', is_logged: 1 }),
+      // cycle 3: working (not logged) → total only
+      mkSet('p3', 'p', 3, { set_kind: 'working', is_logged: 0 }),
+      mkSet('f3', 'f', 3, { set_kind: 'working', is_logged: 0 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 2 });
+  });
+
+  it('dropset cycles excluded (mirror solo: solo bar only counts working)', () => {
+    // Solo card bar 也排除 dropset (`sets.filter(s => s.set_kind === 'working')`)
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('p2', 'p', 2, { set_kind: 'dropset', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f2', 'f', 2, { set_kind: 'dropset', is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 1 });
+  });
+
+  it('mixed cycle (A=warmup, B=working): counted (at least one side working)', () => {
+    // 任一側 working 即算工作 cycle — practically rare but defined.
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'warmup', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 1 });
+  });
+
+  it('asymmetric A=working, B=null: counted; both_logged=false', () => {
+    // Asymmetric short-side (ADR-0019 Q8 (d) AS1) — A 側 working、B 側 null
+    // 計入 total，但 both_logged=false (B 不存在) 所以 done=0.
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('p2', 'p', 2, { set_kind: 'working', is_logged: 1 }),
+      // B 側只有 1 row → cycle 2 b_set=null
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    // cycle 1: both working both logged → done+total
+    // cycle 2: A=working logged, B=null → total only (both_logged false)
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 2 });
+  });
+
+  it('empty cluster: 0/0', () => {
+    expect(computeClusterCycleProgress([])).toEqual({ done: 0, total: 0 });
+  });
+
+  it('all-warmup cluster: 0/0 (zero working cycles)', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'warmup', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'warmup', is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 0, total: 0 });
   });
 });

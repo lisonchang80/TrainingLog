@@ -197,6 +197,42 @@ export function computeClusterCycles<
 }
 
 /**
+ * Slice 10c overnight #46 第 3 點 — cluster progress bar count (mirror solo).
+ *
+ * Solo card 的 progress bar 只計入 `set_kind === 'working'` 的 row
+ * (見 `app/(tabs)/index.tsx::SoloExerciseCard`：
+ *   `workingRowCount = sets.filter(s => s.set_kind === 'working').length`)
+ * — 熱身與 dropset 都不算入「總計畫」。
+ *
+ * Cluster 對齊：一個 cycle 算「working cycle」當且僅當 **至少一側非 null 且
+ * `set_kind === 'working'`**。涵蓋：
+ *   - 兩側 warmup → 不算（排除 — 用戶 #46 抱怨「熱身組虛胖 denominator」）
+ *   - 兩側 working → 算 (well-formed cluster 主體)
+ *   - 一側 warmup 一側 working → 算 (任一側做真 working 就算工作 cycle)
+ *   - 一側 working 一側 null (asymmetric AS1) → 算
+ *   - 兩側 dropset → 不算 (mirror solo 排除 dropset)
+ *
+ * `done` 算「working cycle 中兩側都 is_logged=1」(asymmetric short-side 那
+ * 側不存在所以不算)。
+ *
+ * Returns 0/0 for an empty / all-warmup / all-dropset cluster.
+ */
+export function computeClusterCycleProgress<S extends ClusterSetInput>(
+  cycles: ClusterCycle<S>[],
+): { done: number; total: number } {
+  let done = 0;
+  let total = 0;
+  for (const c of cycles) {
+    const aWorking = c.a_set !== null && c.a_set.set_kind === 'working';
+    const bWorking = c.b_set !== null && c.b_set.set_kind === 'working';
+    if (!aWorking && !bWorking) continue; // exclude warmup + dropset cycles
+    total += 1;
+    if (c.both_logged) done += 1;
+  }
+  return { done, total };
+}
+
+/**
  * Aggregated 容量 for a cluster header (ADR-0019 Q15.5 ledger + Q16 pull-
  * forward). Formula identical to `computeSessionVolume`:
  *

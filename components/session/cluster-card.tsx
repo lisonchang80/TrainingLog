@@ -50,6 +50,7 @@ import {
 } from '@/components/shared/set-row-content';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
+  computeClusterCycleProgress,
   computeClusterCycles,
   computeClusterVolume,
   type ClusterCycle,
@@ -179,12 +180,14 @@ export function ClusterCard({
   // 「legacy dropset → working → warmup → working round-trip」.)
   const aOrdinalMap = computeWorkingSetOrdinals(group.a.sets);
   const bOrdinalMap = computeWorkingSetOrdinals(group.b.sets);
-  // "done" cycles = atomic both_logged. Non-warmup cycles count toward the
-  // progress bar denominator (mirrors solo card's planned_sets semantic at
-  // the cycle granularity — every cycle row, regardless of cycle's set_kind
-  // composition, is one progress unit).
-  const completedCycles = cycles.filter((c) => c.both_logged).length;
-  const totalCycles = cycles.length;
+  // Progress bar count — overnight #46 第 3 點: mirror solo card 只算 working
+  // cycle (任一側 set_kind === 'working' 即算)。熱身 / dropset cycle 排除於
+  // numerator 與 denominator (solo 用 `sets.filter(s => s.set_kind === 'working')
+  // .length`)。原本 `cycles.length` 會把熱身 cycle 也算入 denominator —
+  // 用戶反映 cluster card 進度條「denominator 包熱身組虛胖」。
+  const progress = computeClusterCycleProgress(cycles);
+  const completedCycles = progress.done;
+  const totalCycles = progress.total;
 
   // ADR-0019 Q8 (c) H1 — left vertical bar in RS color. Threaded prop
   // overrides the neutral fallback baked into styles.clusterCard.
