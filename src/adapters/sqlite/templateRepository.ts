@@ -9,6 +9,7 @@ import type {
   TemplateSet,
 } from '../../domain/template/types';
 import type { MemoryCandidate } from '../../domain/template/templateMemory';
+import { colorForTemplateName } from '../../domain/template/templateColor';
 
 /**
  * Persistence layer for Templates and their exercise rows.
@@ -364,16 +365,34 @@ export async function getTemplate(
   return { id: tpl.id, name: tpl.name, exercises };
 }
 
+/**
+ * Create a new Template row.
+ *
+ * `color_hex` is optional — when omitted or passed as an empty string we
+ * auto-derive a deterministic color via `colorForTemplateName(name)` so the
+ * new history calendar view (ADR-0015 § Storage 設計) always has a non-empty
+ * color to render. Existing callers that don't pass `color_hex` are
+ * unaffected at the type level (the field is optional) and now silently
+ * receive a name-hashed color instead of the v009 `DEFAULT ''` sentinel.
+ *
+ * Callers that pass an explicit non-empty `color_hex` (e.g. when cloning a
+ * sibling and wanting to share its color) keep their value verbatim.
+ */
 export async function createTemplate(
   db: Database,
-  args: { id: string; name: string; now?: () => number }
+  args: { id: string; name: string; color_hex?: string; now?: () => number }
 ): Promise<void> {
   const ts = (args.now ?? Date.now)();
+  const color =
+    args.color_hex !== undefined && args.color_hex !== ''
+      ? args.color_hex
+      : colorForTemplateName(args.name);
   await db.runAsync(
-    `INSERT INTO template (id, name, created_at, updated_at)
-     VALUES (?, ?, ?, ?)`,
+    `INSERT INTO template (id, name, color_hex, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
     args.id,
     args.name,
+    color,
     ts,
     ts
   );
