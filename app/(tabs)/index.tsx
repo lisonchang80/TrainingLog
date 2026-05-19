@@ -1888,20 +1888,11 @@ export default function TodayScreen() {
                         (s.session_exercise_id == null &&
                           s.exercise_id === p.exercise_id),
                     );
-                    // Per ADR-0019 Q4: "done" reflects completed sets
-                    // (is_logged=1), not just recorded ones. Warmup
-                    // exclusion is handled in Phase 3's progress bar.
-                    const done = setsForExercise.filter(
-                      (s) => s.is_logged === 1,
-                    ).length;
-                    const complete = done >= p.planned_sets;
                     const isExpanded = expandedExerciseId === p.id;
                     out.push(
                       <ExerciseCard
                         key={p.id}
                         planRow={p}
-                        done={done}
-                        complete={complete}
                         isExpanded={isExpanded}
                         sets={setsForExercise}
                         busy={busy}
@@ -2240,8 +2231,6 @@ function formatPRDeltaValue(
  */
 function ExerciseCard({
   planRow,
-  done,
-  complete,
   isExpanded,
   sets,
   busy,
@@ -2261,8 +2250,6 @@ function ExerciseCard({
   onConfirmReorderSets,
 }: {
   planRow: SessionExerciseRowWithName;
-  done: number;
-  complete: boolean;
   isExpanded: boolean;
   sets: SessionSetWithExercise[];
   busy: boolean;
