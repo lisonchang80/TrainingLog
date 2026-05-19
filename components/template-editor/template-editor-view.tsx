@@ -773,55 +773,45 @@ export default function TemplateEditorView() {
 
   const deleteExercise = (ex: TemplateExercise) => {
     if (!draft) return;
-    Alert.alert(
-      '確認刪除？',
-      `將刪除「${ex.name ?? '(動作)'}」及其所有 sets。`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '刪除',
-          style: 'destructive',
-          onPress: () => {
-            setDraft({
-              ...draft,
-              exercises: draft.exercises.filter(
-                (e) => e.id !== ex.id && e.parent_id !== ex.id,
-              ),
-            });
-          },
+    // overnight #45 第 2 點 — cluster (rs_id NOT NULL) parent row 觸發
+    // ⚙️ 刪除 → cascade-delete A+B 整 cluster（mirror session #18 behavior）。
+    // 既有 filter 已正確處理（parent_id === ex.id 的 children 一併刪），
+    // 只是 alert copy 要點明刪超級組以對齊 session UX。
+    const isCluster = draft.exercises.some((e) => e.parent_id === ex.id);
+    const title = isCluster ? '刪除超級組？' : '確認刪除？';
+    const body = isCluster
+      ? `將刪除超級組「${ex.name ?? '(動作)'}」及配對動作的所有 sets。`
+      : `將刪除「${ex.name ?? '(動作)'}」及其所有 sets。`;
+    Alert.alert(title, body, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '刪除',
+        style: 'destructive',
+        onPress: () => {
+          setDraft({
+            ...draft,
+            exercises: draft.exercises.filter(
+              (e) => e.id !== ex.id && e.parent_id !== ex.id,
+            ),
+          });
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const openGearMenu = (ex: TemplateExercise) => {
-    // Reusable cluster lock (ADR-0016 amendment / slice 9.8b grill Q5):
-    // rs_id NOT NULL → 動作組合鎖死, the only ⚙-menu actions are toggling
-    // the section (cluster moves as a pair via existing groupHeadId logic)
-    // and deleting the whole cluster. Notes / rest_seconds / 移動 are
-    // intentionally hidden because they imply per-row mutation that breaks
-    // the locked-pair invariant.
-    if (ex.reusable_superset_id !== null) {
-      const options = [
-        ex.section === 'general' ? '設為常設運動' : '設為一般運動',
-        '刪除',
-        '取消',
-      ];
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: ex.name ?? undefined,
-          options,
-          destructiveButtonIndex: 1,
-          cancelButtonIndex: 2,
-        },
-        (idx) => {
-          if (idx === 0) toggleSection(ex.id);
-          else if (idx === 1) deleteExercise(ex);
-        },
-      );
-      return;
-    }
-
+    // overnight #45 第 2 點 — 補 cluster gear menu 3 項 (新增/編輯備註、
+    // 休息時間、移動動作)。原設計把 rs_id NOT NULL 的 cluster metadata
+    // 全鎖死（ADR-0016 amendment / slice 9.8b grill Q5）— 該鎖過嚴。正解：
+    // cluster 內 A+B 兩動作「配對不可拆」是要保的（不能把 A 拆出 cluster
+    // 變 solo），但 cluster **外層位置可動**、cluster level metadata
+    // (parent 的 notes/rest_seconds) 也應可設，mirror session cluster card
+    // (app/(tabs)/index.tsx:1156-1164 cluster gear)。
+    //
+    // notes 是 per-Exercise GLOBAL（ADR-0017 amendment）— 透過 parent 的
+    // exercise_id 寫到 exercise.notes（A 側），mirror session 行為（session
+    // 也是用 parent.exercise_id 寫 exercise.notes）。rest_seconds 寫在
+    // template_exercise parent row 上、不 leak 到 children rows。
     const hasNotes = (ex.notes ?? '').trim().length > 0;
     const restLabel = `休息時間（${ex.rest_seconds ?? 90}s）`;
     const options = [
@@ -842,8 +832,7 @@ export default function TemplateEditorView() {
       (idx) => {
         if (idx === 0) openExerciseNoteEditor(ex);
         else if (idx === 1) openRestEditor(ex);
-        else if (idx === 2)
-          Alert.alert('移動動作', '尚未實作（v1 ship 階段補）。');
+        else if (idx === 2) showReorderPlaceholder();
         else if (idx === 3) toggleSection(ex.id);
         else if (idx === 4) deleteExercise(ex);
       },
