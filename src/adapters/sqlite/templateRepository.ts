@@ -62,6 +62,45 @@ export async function listTemplates(db: Database): Promise<TemplateSummary[]> {
 }
 
 /**
+ * Templates list view — dedupes by `name`, keeping the most-recent-edited
+ * variant as the representative. Mirrors `listTemplates` shape but groups
+ * by ADR-0003 three-tuple identity's name component. Used by Templates tab
+ * UI (一個 name 一條 row); other callers (today / program / wizard) still
+ * use `listTemplates` to see every variant.
+ *
+ * Rationale (round 41 polish, Q1 = B): ADR-0003 三元組 identity 保留現況 —
+ * same name + different (program, sub_tag) IS a distinct template row. But
+ * the Templates tab's list view was getting visually swamped (e.g. 4 same-
+ * named clones after picking 4 different sub_tags). Dedupe collapses each
+ * name to ONE row; the user re-picks the (計劃, 強度) inside the start sheet
+ * via `findTemplateByTriple` lookup-or-spawn. The non-list callers (today
+ * panel / program editor / wizard) keep using `listTemplates` because they
+ * legitimately need every variant.
+ *
+ * Representative selection (Q1 = B): the sibling with the highest
+ * `updated_at`. SQL pattern: correlated subquery `t.updated_at = (SELECT
+ * MAX(t2.updated_at) FROM template t2 WHERE t2.name = t.name)`. Stable
+ * across re-renders because edits bump `updated_at` and the latest edit
+ * naturally wins. No variant-count badge (Q2 = B).
+ */
+export async function listTemplateGroupsByName(
+  db: Database
+): Promise<TemplateSummary[]> {
+  return db.getAllAsync<TemplateSummary>(
+    `SELECT t.id, t.name, t.created_at, t.updated_at,
+            t.program_id, t.sub_tag,
+            COUNT(te.id) AS exerciseCount
+       FROM template t
+       LEFT JOIN template_exercise te ON te.template_id = t.id
+      WHERE t.updated_at = (
+        SELECT MAX(t2.updated_at) FROM template t2 WHERE t2.name = t.name
+      )
+      GROUP BY t.id
+      ORDER BY t.updated_at DESC`
+  );
+}
+
+/**
  * Distinct non-null `template.sub_tag` values across all templates, sorted
  * ascending. Feeds the 強度 picker in the start-template bottom sheet
  * (ADR-0019 §Q9.1a). Empty list when no template has a sub_tag yet — the
