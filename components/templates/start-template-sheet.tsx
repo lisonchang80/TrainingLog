@@ -111,26 +111,6 @@ type StartTemplateSheetProps = {
    * keep the inline input visible so user can edit + retry).
    */
   onCreateProgram: (name: string) => Promise<{ id: string; name: string }>;
-  /**
-   * Spawn a deep clone of the source template under (programId, new sub_tag)
-   * — round 37 inline-add polish (round 38 narrowed scope: only fires when
-   * the user creates a brand-new sub_tag via「+ 新增強度」, so the templates
-   * list reflects the new row immediately). Picking an EXISTING sub_tag chip
-   * does NOT trigger this — that path is now covered by the caller's
-   * `onStart` lookup-or-spawn (round 38). The helper returns the new
-   * template id; the sheet ignores it (since session-start uses caller-side
-   * lookup) but the parent's templates list is refreshed so the user sees
-   * the new chip immediately.
-   *
-   * On throw, the sheet inspects `err.message`:
-   *   - `'DUPLICATE_TEMPLATE_TRIPLE'` → user-facing Alert + keep inline open
-   *     so user can rename + retry.
-   *   - other → silent console.warn.
-   */
-  onCloneTemplateWithNewSubTag: (
-    sub_tag: string,
-    program_id: string
-  ) => Promise<{ template_id: string }>;
   onCancel: () => void;
 };
 
@@ -156,7 +136,6 @@ export function StartTemplateSheet({
   onEdit,
   onStart,
   onCreateProgram,
-  onCloneTemplateWithNewSubTag,
   onCancel,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
@@ -170,15 +149,6 @@ export function StartTemplateSheet({
 
   const [periodId, setPeriodId] = useState<string>(RESERVED_NONE_PROGRAM_ID);
   const [intensityId, setIntensityId] = useState<string | null>(null);
-
-  /**
-   * In-flight flag for the「+ 新增強度」inline confirm — disables the 建立
-   * button while the parent's `onCloneTemplateWithNewSubTag` resolves so the
-   * user can't double-tap. Round 38 polish: sheet no longer maintains an
-   * `activeTemplateId` — the parent's `onStart` handles lookup-or-spawn so
-   * picking an EXISTING sub_tag also lands on the right row.
-   */
-  const [cloningSubTag, setCloningSubTag] = useState(false);
 
   /**
    * Inline「新增計畫」TextInput state — mirror template-meta-sheet's
@@ -235,7 +205,6 @@ export function StartTemplateSheet({
     setCustomSubTag('');
     setLocalSubTags([]);
     setProgramSubTags([]);
-    setCloningSubTag(false);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + raw inputs.
@@ -286,22 +255,19 @@ export function StartTemplateSheet({
   /**
    * Confirm an in-session new sub_tag from the inline TextInput.
    *
-   * Spawns a clone via `onCloneTemplateWithNewSubTag` so the new sub_tag chip
-   * is backed by a real template row immediately (the parent refreshes its
-   * templates list, so the row appears under the Templates tab without
-   * waiting for session-start). Round 38 polish: the sheet no longer tracks
-   * a local `activeTemplateId` — picking this new chip and tapping「開始訓練」
-   * triggers the parent's `onStart` lookup-or-spawn, which finds the clone
-   * we just spawned via `findTemplateByTriple` and uses its id.
+   * Round 39 polish: pure in-session — appends the new tag to `localSubTags`
+   * + selects it via `setIntensityId`. No db write at this point. The actual
+   * template-clone (lookup-or-spawn) happens when the user taps「開始訓練」,
+   * routed through the parent's `onStart` (round 38). Tapping「建立」 alone
+   * therefore does not proliferate template rows — fixes the round 37
+   * regression where every「+ 新增強度」 tap spawned a duplicate clone.
    *
    * Local dup guard (case-insensitive in `[programSubTags, localSubTags]`)
-   * runs first — if the user types a tag that's already a radio option we
-   * just activate it (no clone needed, no db write). Past the local dup
-   * guard we await the parent's clone helper; the helper's own dup-triple
-   * guard surfaces as `Error('DUPLICATE_TEMPLATE_TRIPLE')` → user-facing
-   * Alert + inline state preserved for rename + retry.
+   * stays — if the user types a tag that's already a radio option we Alert
+   * and ask them to rename rather than silently activating it, matching the
+   * round 38 contract.
    */
-  const handleConfirmNewSubTag = async () => {
+  const handleConfirmNewSubTag = () => {
     const trimmed = customSubTag.trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
@@ -315,31 +281,15 @@ export function StartTemplateSheet({
     if (isNoneSelected) {
       // Defensive — 通用 (RESERVED_NONE_PROGRAM_ID) hides the intensity
       // section so this code path should be unreachable. If it ever fires,
-      // surface a hint rather than spawning a clone under the reserved
+      // surface a hint rather than silently appending under the reserved
       // program.
       Alert.alert('無法新增強度', '請先選擇一個計畫。');
       return;
     }
-    setCloningSubTag(true);
-    try {
-      await onCloneTemplateWithNewSubTag(trimmed, periodId);
-      setLocalSubTags((prev) => [...prev, trimmed]);
-      setIntensityId(trimmed);
-      setCustomSubTagMode(false);
-      setCustomSubTag('');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-        Alert.alert(
-          '無法建立 template',
-          '已有相同名稱 + 計畫 + 強度的 template，請改用別的強度名稱。'
-        );
-      } else {
-        console.warn('[StartTemplateSheet] cloneTemplate failed:', err);
-      }
-    } finally {
-      setCloningSubTag(false);
-    }
+    setLocalSubTags((prev) => [...prev, trimmed]);
+    setIntensityId(trimmed);
+    setCustomSubTagMode(false);
+    setCustomSubTag('');
   };
 
   const handleConfirmNewProgram = async () => {
@@ -544,23 +494,18 @@ export function StartTemplateSheet({
                       onChangeText={setCustomSubTag}
                       placeholder="輸入新強度標籤（如 5x5、最大力量）"
                       placeholderTextColor="#9ca3af"
-                      editable={!cloningSubTag}
                     />
                     <Pressable
                       onPress={handleConfirmNewSubTag}
                       hitSlop={8}
-                      disabled={
-                        cloningSubTag || customSubTag.trim().length === 0
-                      }
+                      disabled={customSubTag.trim().length === 0}
                       style={[
                         styles.inlineConfirm,
-                        (cloningSubTag || customSubTag.trim().length === 0) &&
+                        customSubTag.trim().length === 0 &&
                           styles.inlineConfirmDisabled,
                       ]}
                     >
-                      <Text style={styles.inlineConfirmText}>
-                        {cloningSubTag ? '建立中…' : '建立'}
-                      </Text>
+                      <Text style={styles.inlineConfirmText}>建立</Text>
                     </Pressable>
                   </View>
                 ) : null}

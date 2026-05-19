@@ -166,40 +166,6 @@ export default function TemplatesScreen() {
     return { id, name };
   };
 
-  /**
-   * Round 37 — spawn-on-create handler for the sheet's「新增強度」inline CTA.
-   * Clones the currently-tapped template under (program_id, new sub_tag) and
-   * returns the new id. The sheet then re-aims its `activeTemplateId` at the
-   * clone so [編輯模板] / [開始訓練] hits the new row.
-   *
-   * Why clone-on-create rather than rename-on-finish: round 35 surfaced a
-   * subtle bug where overwriting a session's linked template ignored the
-   * user's mid-session sub_tag change and silently overwrote the original
-   * (e.g. 「通用」). Spawning at sub_tag-add time aligns the linked-template
-   * pointer with the user's intent up front.
-   *
-   * After spawning we refetch the templates list so the new row appears in
-   * the Templates tab right away.
-   */
-  const handleCloneTemplateWithNewSubTag = async (
-    sub_tag: string,
-    program_id: string,
-  ): Promise<{ template_id: string }> => {
-    if (!sheetTemplate) {
-      throw new Error('NO_SHEET_TEMPLATE');
-    }
-    const newId = await cloneTemplateWithSubTag(db, {
-      source_template_id: sheetTemplate.id,
-      new_program_id: program_id,
-      new_sub_tag: sub_tag,
-      uuid: randomUUID,
-    });
-    // Refresh the templates list so the clone shows up in the tab. We don't
-    // re-open the sheet — the sheet itself owns the active pointer now.
-    await load();
-    return { template_id: newId };
-  };
-
   const persistSticky = async (
     program_id: string,
     sub_tag: string | null,
@@ -407,7 +373,6 @@ export default function TemplatesScreen() {
         onEdit={onEdit}
         onStart={onStart}
         onCreateProgram={handleCreateProgram}
-        onCloneTemplateWithNewSubTag={handleCloneTemplateWithNewSubTag}
         onCancel={closeSheet}
       />
     </SafeAreaView>
