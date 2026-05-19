@@ -1196,7 +1196,13 @@ export async function cloneTemplateWithSubTag(
   args: {
     source_template_id: string;
     new_program_id: string;
-    new_sub_tag: string;
+    /**
+     * Target sub_tag for the new clone. May be `null` to spawn a 通用-sub_tag
+     * variant under a specific program (round 38 polish — `onStart`
+     * lookup-or-spawn invokes this when the user picks (some program, 通用)
+     * and no existing sibling has that triple yet).
+     */
+    new_sub_tag: string | null;
     uuid: () => string;
     now?: () => number;
   }
@@ -1212,15 +1218,20 @@ export async function cloneTemplateWithSubTag(
     throw new Error('SOURCE_TEMPLATE_NOT_FOUND');
   }
 
-  // Step 2: dup guard against (name, program_id, sub_tag) triple. Both
-  // program_id and sub_tag are required non-null strings per the signature,
-  // so an exact `=` match suffices (no IS-NULL-safe needed).
+  // Step 2: dup guard against (name, program_id, sub_tag) triple. `program_id`
+  // is required non-null per signature, but `new_sub_tag` may be null (round
+  // 38 polish — 通用-sub_tag spawn) so the sub_tag predicate uses the
+  // IS-NULL-safe idiom; otherwise SQL `=` would never match an actual NULL
+  // row and the dup guard would silently leak past a NULL/NULL collision.
   const existing = await db.getFirstAsync<{ id: string }>(
     `SELECT id FROM template
-      WHERE name = ? AND program_id = ? AND sub_tag = ?
+      WHERE name = ?
+        AND program_id = ?
+        AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
       LIMIT 1`,
     source.name,
     args.new_program_id,
+    args.new_sub_tag,
     args.new_sub_tag
   );
   if (existing) {

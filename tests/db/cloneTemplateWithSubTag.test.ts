@@ -409,6 +409,36 @@ describe('cloneTemplateWithSubTag (round 37 polish)', () => {
     ).rejects.toThrow('DUPLICATE_TEMPLATE_TRIPLE');
   });
 
+  it('allows new_sub_tag = null (round 38 polish — 通用-sub_tag spawn under a program)', async () => {
+    const srcId = await seedSourceTemplate();
+    // Source has sub_tag = null + prog-A — to spawn a 通用 variant under a
+    // DIFFERENT program (prog-B) we pass new_sub_tag = null.
+    const newId = await cloneTemplateWithSubTag(db, {
+      source_template_id: srcId,
+      new_program_id: 'prog-B',
+      new_sub_tag: null,
+      uuid: makeUuidGen('cN'),
+    });
+    const row = await db.getFirstAsync<{
+      program_id: string | null;
+      sub_tag: string | null;
+    }>(`SELECT program_id, sub_tag FROM template WHERE id = ?`, newId);
+    expect(row).not.toBeNull();
+    expect(row!.program_id).toBe('prog-B');
+    expect(row!.sub_tag).toBeNull();
+
+    // Dup guard with NULL sub_tag should fire on a second spawn under same
+    // (name, prog-B, null) — verifies the IS-NULL-safe predicate.
+    await expect(
+      cloneTemplateWithSubTag(db, {
+        source_template_id: srcId,
+        new_program_id: 'prog-B',
+        new_sub_tag: null,
+        uuid: makeUuidGen('cN2'),
+      })
+    ).rejects.toThrow('DUPLICATE_TEMPLATE_TRIPLE');
+  });
+
   it('allows same sub_tag under a different program (different identity triple)', async () => {
     const srcId = await seedSourceTemplate();
     const idA = await cloneTemplateWithSubTag(db, {
