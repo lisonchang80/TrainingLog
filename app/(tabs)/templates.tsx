@@ -215,6 +215,82 @@ export default function TemplatesScreen() {
   };
 
   /**
+   * Lookup-or-spawn rule shared by onStart + onEdit. Returns the template_id
+   * of the sibling matching (sheetTpl.name, period_id, intensity_id). Caller
+   * decides what to do with it (startSessionFromTemplate vs router.push).
+   *
+   *   - matchesSelf or 通用 program → sheetTpl.id (no work)
+   *   - findTemplateByTriple hit → sibling's id
+   *   - miss → cloneTemplateWithSubTag spawn + load() refresh
+   *   - DUPLICATE_TEMPLATE_TRIPLE race → re-probe once
+   *
+   * Why route picking an EXISTING sub_tag chip through lookup too: without
+   * this, picking 「TEST-1」 from Smoke (program=A) would still target
+   * Smoke's row, and downstream 「儲存模板」 would silently overwrite Smoke
+   * — exactly the regression #37 left open. Round 42 makes onEdit symmetric:
+   * the same drift bites the editor route too once list dedupes by name.
+   */
+  const resolveTargetTemplateId = useCallback(
+    async (
+      sheetTpl: TemplateSummary,
+      selection: { period_id: string; intensity_id: string | null },
+    ): Promise<string> => {
+      const sourceProgramId = sheetTpl.program_id ?? null;
+      const sourceSubTag = sheetTpl.sub_tag ?? null;
+      const isNoneProgram = selection.period_id === RESERVED_NONE_PROGRAM_ID;
+      const wantedProgramId = isNoneProgram ? null : selection.period_id;
+      const wantedSubTag = selection.intensity_id;
+
+      const matchesSelf =
+        sourceProgramId === wantedProgramId && sourceSubTag === wantedSubTag;
+
+      if (matchesSelf || isNoneProgram || wantedProgramId === null) {
+        return sheetTpl.id;
+      }
+
+      const found = await findTemplateByTriple(db, {
+        name: sheetTpl.name,
+        program_id: wantedProgramId,
+        sub_tag: wantedSubTag,
+      });
+      if (found) {
+        return found.id;
+      }
+
+      try {
+        const spawnedId = await cloneTemplateWithSubTag(db, {
+          source_template_id: sheetTpl.id,
+          new_program_id: wantedProgramId,
+          new_sub_tag: wantedSubTag,
+          uuid: randomUUID,
+        });
+        // Refresh the templates list so the new clone shows up under the
+        // Templates tab right after the caller navigates away.
+        await load();
+        return spawnedId;
+      } catch (cloneErr) {
+        // Race: findTemplateByTriple just missed but the dup guard fired
+        // anyway (concurrent insert). Re-probe once before bubbling so the
+        // user isn't blocked on a transient collision.
+        const message =
+          cloneErr instanceof Error ? cloneErr.message : String(cloneErr);
+        if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+          const retry = await findTemplateByTriple(db, {
+            name: sheetTpl.name,
+            program_id: wantedProgramId,
+            sub_tag: wantedSubTag,
+          });
+          if (retry) {
+            return retry.id;
+          }
+        }
+        throw cloneErr;
+      }
+    },
+    [db, load],
+  );
+
+  /**
    * [編輯模板] handler — closes sheet, persists sticky selection, then opens
    * the editor on the sheet's source template. Round 38 polish: edit still
    * targets the source row (no lookup-or-spawn) — editing under a different
@@ -238,7 +314,9 @@ export default function TemplatesScreen() {
 
   /**
    * [開始訓練] handler — round 38 polish: lookup-or-spawn rule (the final
-   * piece replacing round 37's sheet-local `activeTemplateId`).
+   * piece replacing round 37's sheet-local `activeTemplateId`). Round 42
+   * extracts the lookup-or-spawn body into `resolveTargetTemplateId` so
+   * onEdit can share the same rule.
    *
    * Rule, given (sheetTemplate, period_id, intensity_id):
    *   - If (period_id, intensity_id) matches the sheet template's own triple
@@ -252,15 +330,6 @@ export default function TemplatesScreen() {
    *               pre-existing sibling under the same triple)
    *       - miss → `cloneTemplateWithSubTag` to spawn a fresh sibling, then
    *               refresh the templates list, then start from the new id.
-   *
-   * Why route picking an EXISTING sub_tag chip through lookup too: without
-   * this, picking 「TEST-1」 from Smoke (program=A) would still send the
-   * session at Smoke's row, and the later 「儲存模板」 would silently
-   * overwrite Smoke — exactly the regression #37 left open.
-   *
-   * Race-resilient: if findTemplateByTriple misses but cloneTemplateWithSubTag
-   * throws DUPLICATE_TEMPLATE_TRIPLE (concurrent insert), we re-probe once
-   * before bubbling — the second probe almost always hits.
    *
    * Refuses if a session is already in progress (mirrors template editor's
    * onStartSession guard).
@@ -282,61 +351,10 @@ export default function TemplatesScreen() {
       }
       await persistSticky(selection.period_id, selection.intensity_id);
 
-      // Lookup-or-spawn the target template.
-      let targetTemplateId = sheetTemplate.id;
-      const sourceProgramId = sheetTemplate.program_id ?? null;
-      const sourceSubTag = sheetTemplate.sub_tag ?? null;
-      const isNoneProgram = selection.period_id === RESERVED_NONE_PROGRAM_ID;
-      const wantedProgramId = isNoneProgram ? null : selection.period_id;
-      const wantedSubTag = selection.intensity_id;
-
-      const matchesSelf =
-        sourceProgramId === wantedProgramId && sourceSubTag === wantedSubTag;
-
-      if (!matchesSelf && !isNoneProgram && wantedProgramId !== null) {
-        const found = await findTemplateByTriple(db, {
-          name: sheetTemplate.name,
-          program_id: wantedProgramId,
-          sub_tag: wantedSubTag,
-        });
-        if (found) {
-          targetTemplateId = found.id;
-        } else {
-          try {
-            targetTemplateId = await cloneTemplateWithSubTag(db, {
-              source_template_id: sheetTemplate.id,
-              new_program_id: wantedProgramId,
-              new_sub_tag: wantedSubTag,
-              uuid: randomUUID,
-            });
-            // Refresh the templates list so the new clone shows up under
-            // the Templates tab right after the session starts.
-            await load();
-          } catch (cloneErr) {
-            // Race: findTemplateByTriple just missed but the dup guard
-            // fired anyway (concurrent insert). Re-probe once before
-            // bubbling so the user isn't blocked on a transient collision.
-            const message =
-              cloneErr instanceof Error
-                ? cloneErr.message
-                : String(cloneErr);
-            if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-              const retry = await findTemplateByTriple(db, {
-                name: sheetTemplate.name,
-                program_id: wantedProgramId,
-                sub_tag: wantedSubTag,
-              });
-              if (retry) {
-                targetTemplateId = retry.id;
-              } else {
-                throw cloneErr;
-              }
-            } else {
-              throw cloneErr;
-            }
-          }
-        }
-      }
+      const targetTemplateId = await resolveTargetTemplateId(
+        sheetTemplate,
+        selection,
+      );
 
       // Round 35 — thread the (program, sub_tag) selection through so the
       // session's planned set rows can be prefilled from matching history
