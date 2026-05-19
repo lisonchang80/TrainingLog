@@ -1418,21 +1418,29 @@ export default function TemplateEditorView() {
             <Text style={styles.topBtnText}>取消</Text>
           </Pressable>
           <View style={styles.topCenter}>
-            <TextInput
-              value={draft.name}
-              onChangeText={updateName}
-              style={styles.nameInput}
-              placeholder="Template 名稱"
-            />
-            <View style={styles.metaRow}>
+            {/*
+              overnight #45 第 4 點 — 標題欄精簡。原 3 行 (name / [swatch] +
+              「per name 配色（同名連動）」/ triple)，精簡為 2 行：
+                row 1: [swatch] [name input]
+                row 2: triple (program · sub_tag)
+              刪「per name 配色（同名連動）」 — swatch 點開既有 colorPicker
+              modal，UX 一目了然不需註解。
+            */}
+            <View style={styles.nameRow}>
               <Pressable
                 onPress={() => setShowColorPicker(true)}
                 style={[
                   styles.colorSwatch,
                   { backgroundColor: colorForTemplate(draft) },
                 ]}
+                hitSlop={6}
               />
-              <Text style={styles.metaText}>per name 配色（同名連動）</Text>
+              <TextInput
+                value={draft.name}
+                onChangeText={updateName}
+                style={styles.nameInput}
+                placeholder="Template 名稱"
+              />
             </View>
             <Text style={styles.tripleText}>
               {formatTemplateTriple(
@@ -2053,6 +2061,9 @@ const styles = StyleSheet.create({
   topBtnTextDisabled: { color: '#9CA3AF' },
   topBtnSave: { fontWeight: '700' },
   topCenter: { flex: 1, gap: 4, alignItems: 'center' },
+  // overnight #45 第 4 點 — name row: [swatch][nameInput] horizontal layout.
+  // swatch 縮成 12px、靠左貼 nameInput；nameInput 仍 center-aligned 文字。
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameInput: {
     fontSize: 17,
     fontWeight: '700',
@@ -2060,9 +2071,7 @@ const styles = StyleSheet.create({
     minWidth: 140,
     paddingVertical: 2,
   },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   colorSwatch: { width: 14, height: 14, borderRadius: 7 },
-  metaText: { fontSize: 11, color: '#6B7280' },
   tripleText: { fontSize: 12, color: '#6b7280' },
   body: { padding: 12, gap: 8, paddingBottom: 80 },
   sectionHeader: {
