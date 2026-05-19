@@ -71,7 +71,10 @@ import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManage
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
-import { cycleSetKindAcrossExercises } from '@/src/domain/template/templateOps';
+import {
+  cycleSetKindAcrossExercises,
+  reorderTemplateExercises,
+} from '@/src/domain/template/templateOps';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
 import type {
@@ -82,6 +85,7 @@ import type {
 } from '@/src/domain/template/types';
 
 import { PALETTE, hashColor } from './palette';
+import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 
@@ -135,6 +139,9 @@ export default function TemplateEditorView() {
     ex_id: string;
     draft: number;
   } | null>(null);
+  // overnight #45 第 3 點 — 排序動作 modal 開關（mirror app/(tabs)/index.tsx
+  // 的 reorderSheetOpen pattern；長按卡片 header + ⚙️「移動動作」共用入口）。
+  const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -678,11 +685,43 @@ export default function TemplateEditorView() {
     });
   };
 
+  // overnight #45 第 3 點 — 排序動作 modal handler。Mirror session pattern
+  // (app/(tabs)/index.tsx:2092 ReorderExercisesSheet)：長按 ex 卡 header
+  // 或 ⚙️「移動動作」打開 modal、用戶長按列拖拽 → 完成 commit 新 ordering。
+  // template editor 為 draft-based 編輯模型，不直寫 DB；改 draft.exercises
+  // 的 ordering（parents 重排 + children 留在 parent 旁、保留 parent_id 對），
+  // 等用戶按右上「儲存」走 commitTemplateDraft path（既有邏輯會 UPDATE
+  // template_exercise.ordering）。
   const showReorderPlaceholder = () => {
-    Alert.alert(
-      '長按拖排序',
-      '尚未實作（v1 ship 階段補）。',
-    );
+    setReorderSheetOpen(true);
+  };
+
+  // Build the parent-row list for the reorder modal: 1 row per parent
+  // (solo or cluster-parent). Cluster 顯示 "A + B" 名稱 (mirror header
+  // layout)。Children rows 不出現 — sheet 只動 parent ordering；A+B 配對
+  // 不可拆是 cluster 不變式。
+  const reorderParents = useMemo(() => {
+    if (!draft) return [];
+    return draft.exercises
+      .filter((e) => e.parent_id == null)
+      .map((parent) => {
+        const childNames = draft.exercises
+          .filter((c) => c.parent_id === parent.id)
+          .map((c) => c.name ?? '(動作)');
+        const name = childNames.length === 0
+          ? parent.name ?? '(動作)'
+          : [parent.name ?? '(動作)', ...childNames].join(' + ');
+        return { id: parent.id, name };
+      });
+  }, [draft]);
+
+  const onConfirmReorder = (orderedParentIds: string[]) => {
+    setReorderSheetOpen(false);
+    if (!draft) return;
+    // Pure-domain helper handles rebuild + ordering re-key + safety guard
+    // (missing parents appended). Exercised by tests in templateOps.test.ts.
+    const rebuilt = reorderTemplateExercises(draft.exercises, orderedParentIds);
+    setDraft({ ...draft, exercises: rebuilt });
   };
 
   const showExerciseHistory = (ex: TemplateExercise) => {
@@ -1152,6 +1191,7 @@ export default function TemplateEditorView() {
                 addClusterAfter(parent.id, head_id)
               }
               onLongPressRow={showReorderPlaceholder}
+              onLongPressHeader={() => setReorderSheetOpen(true)}
               onShowHistory={() => showExerciseHistory(parent)}
               onGearTap={() => openGearMenu(parent)}
               onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
@@ -1170,6 +1210,8 @@ export default function TemplateEditorView() {
           <View style={styles.exHeader}>
             <Pressable
               onPress={() => toggleExpanded(parent.id)}
+              onLongPress={() => setReorderSheetOpen(true)}
+              delayLongPress={400}
               style={styles.exHeaderTapZone}
               hitSlop={4}>
               <View style={styles.clusterText}>
@@ -1574,6 +1616,13 @@ export default function TemplateEditorView() {
           </Pressable>
         </Modal>
 
+        <ReorderExercisesSheet
+          visible={reorderSheetOpen}
+          initialItems={reorderParents}
+          onConfirm={onConfirmReorder}
+          onCancel={() => setReorderSheetOpen(false)}
+        />
+
         <Modal
           visible={restEditing != null}
           transparent
@@ -1703,6 +1752,11 @@ type ExerciseBodyProps = {
   onDeleteCluster: (head_set_id: string) => void;
   onAddClusterAfter: (head_set_id: string) => void;
   onLongPressRow: () => void;
+  /**
+   * overnight #45 第 3 點 — 長按 card header 開啟「排序動作」modal
+   * (mirror session exercise-card pattern, app/(tabs)/index.tsx:2328).
+   */
+  onLongPressHeader: () => void;
   onShowHistory: () => void;
   onGearTap: () => void;
   onShowSetNote: (set: TemplateSet) => void;
@@ -1724,6 +1778,7 @@ function ExerciseBody({
   onDeleteCluster,
   onAddClusterAfter,
   onLongPressRow,
+  onLongPressHeader,
   onShowHistory,
   onGearTap,
   onShowSetNote,
@@ -1740,6 +1795,8 @@ function ExerciseBody({
       <View style={[styles.exHeader, compact && styles.exHeaderCompact]}>
         <Pressable
           onPress={onToggle}
+          onLongPress={onLongPressHeader}
+          delayLongPress={400}
           style={styles.exHeaderTapZone}
           hitSlop={4}>
           <Text

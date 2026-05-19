@@ -473,3 +473,66 @@ export function addClusterAfter(
   ];
   return { ...ex, sets: normalizePositions(next) };
 }
+
+/**
+ * Slice 10c overnight #45 第 3 點 — parent-level reorder (pure).
+ *
+ * The template editor 排序動作 modal returns `orderedParentIds` (1 row per
+ * parent_id === null exercise). This helper rebuilds the flat exercises
+ * array so:
+ *   - parents appear in the new order
+ *   - each parent's children (parent_id === parent.id) stay adjacent to
+ *     their parent in their original child order — A+B cluster pair is
+ *     never split
+ *   - `ordering` is reassigned 0..N contiguous matching the array order
+ *     (mirrors getTemplateFull's positional re-key on read; commitTemplateDraft
+ *     writes these values back via UPDATE template_exercise.ordering)
+ *
+ * Safety: any parent_id not present in `orderedParentIds` is appended at
+ * the end (with its children) so a sheet bug can never silently drop
+ * exercises.
+ */
+export function reorderTemplateExercises(
+  exercises: TemplateExercise[],
+  orderedParentIds: readonly string[],
+): TemplateExercise[] {
+  const parentById = new Map<string, TemplateExercise>();
+  const childrenByParent = new Map<string, TemplateExercise[]>();
+  for (const ex of exercises) {
+    if (ex.parent_id == null) {
+      parentById.set(ex.id, ex);
+      if (!childrenByParent.has(ex.id)) childrenByParent.set(ex.id, []);
+    }
+  }
+  for (const ex of exercises) {
+    if (ex.parent_id != null) {
+      const arr = childrenByParent.get(ex.parent_id) ?? [];
+      arr.push(ex);
+      childrenByParent.set(ex.parent_id, arr);
+    }
+  }
+  const out: TemplateExercise[] = [];
+  let ord = 0;
+  const seen = new Set<string>();
+  for (const pid of orderedParentIds) {
+    const p = parentById.get(pid);
+    if (!p || seen.has(pid)) continue;
+    seen.add(pid);
+    out.push({ ...p, ordering: ord++ });
+    const kids = childrenByParent.get(pid) ?? [];
+    for (const k of kids) {
+      out.push({ ...k, ordering: ord++ });
+    }
+  }
+  // Safety: append any missing parents at the end so we never silently
+  // drop exercises (sheet bug guard).
+  for (const [pid, p] of parentById) {
+    if (seen.has(pid)) continue;
+    out.push({ ...p, ordering: ord++ });
+    const kids = childrenByParent.get(pid) ?? [];
+    for (const k of kids) {
+      out.push({ ...k, ordering: ord++ });
+    }
+  }
+  return out;
+}

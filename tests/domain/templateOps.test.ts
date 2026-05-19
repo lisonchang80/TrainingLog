@@ -3,6 +3,7 @@ import {
   updateSet,
   deleteSet,
   reorderSets,
+  reorderTemplateExercises,
   cycleSetKind,
   cycleSetKindAcrossExercises,
   deleteSupersetRowAt,
@@ -632,5 +633,59 @@ describe('templateOps — isClusterFollower', () => {
       isClusterFollower(makeSet({ id: 'x', kind: 'dropset', parent_set_id: null }))
     ).toBe(false);
     expect(isClusterFollower(makeSet({ id: 'x', kind: 'working' }))).toBe(false);
+  });
+});
+
+// overnight #45 第 3 點 — parent-level reorder helper (used by the editor's
+// 排序動作 modal onConfirm path). Pure-domain tests: solo↔solo swap, cluster
+// keep paired, safety guard for missing parents.
+describe('templateOps — reorderTemplateExercises', () => {
+  it('simple swap: solo↔solo reorders parents + reassigns ordering 0..N', () => {
+    const ex1 = makeEx({ id: 'p1', ordering: 0 });
+    const ex2 = makeEx({ id: 'p2', ordering: 1 });
+    const ex3 = makeEx({ id: 'p3', ordering: 2 });
+    const out = reorderTemplateExercises([ex1, ex2, ex3], ['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.id)).toEqual(['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
+  });
+
+  it('cluster keeps A+B paired: parent at new position, child stays adjacent', () => {
+    // Layout: [solo S1, cluster (parent P + child C), solo S2]
+    const s1 = makeEx({ id: 's1', ordering: 0 });
+    const p = makeEx({
+      id: 'p',
+      ordering: 1,
+      reusable_superset_id: 'rs-1',
+    });
+    const c = makeEx({
+      id: 'c',
+      ordering: 2,
+      parent_id: 'p',
+      reusable_superset_id: 'rs-1',
+    });
+    const s2 = makeEx({ id: 's2', ordering: 3 });
+    // User reorders parents: [cluster, S2, S1] → child must follow cluster
+    // parent (not split).
+    const out = reorderTemplateExercises([s1, p, c, s2], ['p', 's2', 's1']);
+    expect(out.map((e) => e.id)).toEqual(['p', 'c', 's2', 's1']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2, 3]);
+    // Verify parent_id linkage preserved + reusable_superset_id intact (cluster
+    // pair invariant).
+    expect(out[0].reusable_superset_id).toBe('rs-1');
+    expect(out[1].parent_id).toBe('p');
+    expect(out[1].reusable_superset_id).toBe('rs-1');
+  });
+
+  it('safety: missing parent ids appended at end (no silent drops)', () => {
+    // orderedParentIds omits 'p2' — must still appear in output (appended).
+    const p1 = makeEx({ id: 'p1', ordering: 0 });
+    const p2 = makeEx({ id: 'p2', ordering: 1 });
+    const p3 = makeEx({ id: 'p3', ordering: 2 });
+    const out = reorderTemplateExercises([p1, p2, p3], ['p3', 'p1']);
+    // p2 appended at end; full set of parent ids preserved.
+    expect(out.map((e) => e.id).sort()).toEqual(['p1', 'p2', 'p3']);
+    // Specified ones come first in given order, missing appended.
+    expect(out.map((e) => e.id)).toEqual(['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
   });
 });
