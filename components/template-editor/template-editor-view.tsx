@@ -120,9 +120,31 @@ function colorForTemplate(t: Template): string {
 }
 
 export default function TemplateEditorView() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `dpid` / `dst` = display program_id / display sub_tag (#50 C1):
+  // 用戶當初在 start-template-sheet 選的 (P, S)；fallback 路徑下 editor 載入
+  // representative 但 header 仍顯示 user's pick。sentinel `__none__` 表
+  // explicitly NULL (通用 program / no intensity)，param 不存在 = no override
+  // → fallback to actual draft.program_id / draft.sub_tag。
+  const { id, dpid, dst } = useLocalSearchParams<{
+    id: string;
+    dpid?: string;
+    dst?: string;
+  }>();
   const db = useDatabase();
   const router = useRouter();
+
+  /** Display override resolver — undefined = no override; null = 通用 / no
+   *  intensity; string = explicit value. */
+  const displayProgramOverride: string | null | undefined = dpid === undefined
+    ? undefined
+    : dpid === '__none__'
+      ? null
+      : decodeURIComponent(dpid);
+  const displaySubTagOverride: string | null | undefined = dst === undefined
+    ? undefined
+    : dst === '__none__'
+      ? null
+      : decodeURIComponent(dst);
 
   const [committed, setCommitted] = useState<Template | null>(null);
   const [draft, setDraft] = useState<Template | null>(null);
@@ -1575,12 +1597,29 @@ export default function TemplateEditorView() {
               />
             </View>
             <Text style={styles.tripleText}>
-              {formatTemplateTriple(
-                draft.program_id
-                  ? programs.find((p) => p.id === draft.program_id)?.name ?? '通用'
-                  : null,
-                draft.sub_tag ?? null,
-              )}
+              {/* #50 C1 — display override prefers URL query (user's pick in
+                  start-template-sheet) over actual draft.program_id/sub_tag.
+                  Fallback path (#50): editor loads representative but shows
+                  user's selection here. undefined = no override = use draft.
+                  Resolves program_id → program_name via local lookup. */}
+              {(() => {
+                const programIdForDisplay =
+                  displayProgramOverride === undefined
+                    ? draft.program_id ?? null
+                    : displayProgramOverride;
+                const subTagForDisplay =
+                  displaySubTagOverride === undefined
+                    ? draft.sub_tag ?? null
+                    : displaySubTagOverride;
+                const programNameForDisplay = programIdForDisplay
+                  ? programs.find((p) => p.id === programIdForDisplay)?.name ??
+                    '通用'
+                  : null;
+                return formatTemplateTriple(
+                  programNameForDisplay,
+                  subTagForDisplay,
+                );
+              })()}
             </Text>
           </View>
           <Pressable

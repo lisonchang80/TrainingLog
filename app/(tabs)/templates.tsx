@@ -319,12 +319,27 @@ export default function TemplatesScreen() {
       await persistSticky(selection.period_id, selection.intensity_id);
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       closeSheet();
-      // #48: 通用-miss 路徑 fallback to representative + 提示用戶（變體尚未建立）。
-      // 編輯器仍開啟、讓用戶在編輯器內按「另存」自行建立通用變體。
+      // #50 — fallback 路徑（任 miss 都走 fallback to representative + Alert）。
+      // 編輯器仍開啟、讓用戶在編輯器內按「另存」自行建立該變體。
       if (resolved.alert) {
         Alert.alert(resolved.alert.title, resolved.alert.body);
       }
-      router.push(`/template/${resolved.template_id}`);
+      // #50 C1 — editor header 顯示用戶選的 (P, S) 而非 actual template 的 triple。
+      // fallback 路徑下 editor 載入 representative 但 header 仍顯示用戶選擇，避免
+      // 「我選通用、卻看到 representative 的 (Smoke, TEST-4)」的視覺錯位。
+      // Sentinel `__none__` 區分「explicitly NULL」vs「no override」(undefined)；
+      // RESERVED_NONE_PROGRAM_ID 已映射成 NULL，這裡再 encode 進 query。
+      const dpidParam =
+        selection.period_id === RESERVED_NONE_PROGRAM_ID
+          ? '__none__'
+          : encodeURIComponent(selection.period_id);
+      const dstParam =
+        selection.intensity_id === null
+          ? '__none__'
+          : encodeURIComponent(selection.intensity_id);
+      router.push(
+        `/template/${resolved.template_id}?dpid=${dpidParam}&dst=${dstParam}`,
+      );
     } catch (e) {
       Alert.alert(
         '無法開啟編輯器',
