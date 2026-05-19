@@ -1354,7 +1354,9 @@ export default function TemplateEditorView() {
           </View>
           {isExpanded ? (
             <>
-              <View style={styles.exSuperRow}>
+              <View style={[styles.exSuperRow, styles.exSuperCycleRow]}>
+                {/* Leading spacer matching shared `#` btn column width (28). */}
+                <View style={styles.exClusterSharedLabelSpacer} />
                 <View style={styles.exSuperCol}>
                   <Text style={styles.supersetColName} numberOfLines={1}>
                     {parent.name ?? '(動作)'}
@@ -1421,6 +1423,7 @@ export default function TemplateEditorView() {
                         set={s}
                         setLabel={meta.setLabels[i]}
                         compact
+                        hideLabel
                         isDropsetFollower={isDropsetFollower}
                         isClusterLast={isClusterLast}
                         minusDisabled={minusDisabled}
@@ -1508,6 +1511,53 @@ export default function TemplateEditorView() {
                                 styles.exSuperCycleRow,
                                 isActive && styles.dragActiveRow,
                               ]}>
+                              {/*
+                                Shared `#` button at row start — mirror session
+                                cluster-card.tsx pattern (overnight #52 follow-up):
+                                A+B 共用一個 label，避免 row 內出現兩個 #。Tap
+                                觸發 cycleSetKindAcrossExercises（透過 cycleSetKind
+                                wrapper），cluster path 內自動 mirror 到對側、A 跟
+                                B 兩側 set_kind atomic flip。
+                                Disabled if both A and B sides have no set at idx i.
+                              */}
+                              {(() => {
+                                const sharedLabelSrc =
+                                  parent.sets[i] ?? children[0]?.sets[i] ?? null;
+                                const sharedLabel = sharedLabelSrc
+                                  ? parent.sets[i]
+                                    ? parentMeta.setLabels[i]
+                                    : childMetas[0]?.setLabels[i] ?? ''
+                                  : '';
+                                const disabled = sharedLabelSrc === null;
+                                return (
+                                  <Pressable
+                                    onPress={() => {
+                                      if (disabled || !sharedLabelSrc) return;
+                                      // Tap A side first (parent); if A empty, tap B side.
+                                      // cycleSetKindAcrossExercises auto-mirrors to the
+                                      // other side regardless of which is tapped.
+                                      const tapEx = parent.sets[i]
+                                        ? parent
+                                        : children[0];
+                                      cycleSetKind(tapEx.id, sharedLabelSrc.id);
+                                    }}
+                                    disabled={disabled}
+                                    hitSlop={6}
+                                    style={({ pressed }) => [
+                                      styles.exClusterSharedLabel,
+                                      pressed &&
+                                        !disabled &&
+                                        styles.exClusterSharedLabelPressed,
+                                      disabled &&
+                                        styles.exClusterSharedLabelDisabled,
+                                    ]}
+                                  >
+                                    <Text style={styles.exClusterSharedLabelText}>
+                                      {sharedLabel}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })()}
                               <View style={styles.exSuperCol}>
                                 {renderCell(parent, parentMeta, i)}
                               </View>
@@ -2382,6 +2432,58 @@ const styles = StyleSheet.create({
     gap: 6,
     alignItems: 'center',
   },
+  // Shared `#` button — mirror session cluster-card.tsx::sharedLabelBtn (28×22 fs:11).
+  // A+B 共用一個 label，tap 觸發 atomic A+B set_kind cycle (cycleSetKindAcrossExercises
+  // 自動 mirror). 視覺對齊 set-row-content.tsx `setLabelBtnCompact`.
+  exClusterSharedLabel: {
+    width: 28,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#f3f4f6',
+    borderLeftColor: '#d1d5db',
+    borderRightColor: '#9ca3af',
+    borderBottomColor: '#6b7280',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  exClusterSharedLabelPressed: {
+    backgroundColor: '#e5e7eb',
+    borderTopWidth: 2,
+    borderBottomWidth: 1,
+    borderTopColor: '#6b7280',
+    borderLeftColor: '#9ca3af',
+    borderRightColor: '#d1d5db',
+    borderBottomColor: '#f3f4f6',
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 1 }],
+  },
+  exClusterSharedLabelDisabled: {
+    backgroundColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  exClusterSharedLabelText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  // Column-header spacer matching shared `#` btn column width.
+  exClusterSharedLabelSpacer: { width: 28 },
   exSuperCol: { flex: 1, minWidth: 0 },
   exSuperColWithLeftPad: { paddingLeft: 6 },
   exSuperDivider: {
