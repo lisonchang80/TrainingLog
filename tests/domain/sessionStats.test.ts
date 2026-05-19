@@ -4,6 +4,7 @@ import {
   computeSessionVolume,
   formatDurationHHMM,
   formatSessionDuration,
+  formatTrainingDuration,
   formatVolumeShort,
   type SessionStatsSetInput,
   type SessionVolumeInput,
@@ -302,5 +303,33 @@ describe('formatVolumeShort', () => {
   it('>= 1000 shows 1 decimal k', () => {
     expect(formatVolumeShort(1234)).toBe('1.2k');
     expect(formatVolumeShort(12_500)).toBe('12.5k');
+  });
+});
+
+// ── formatTrainingDuration — overnight #47 第 4 點 ────────────────────────────
+
+describe('formatTrainingDuration (overnight #47)', () => {
+  it('0 seconds → 0\' 00"', () => {
+    expect(formatTrainingDuration(0)).toBe(`0' 00"`);
+  });
+
+  it('5 seconds → 0\' 05" (seconds zero-padded)', () => {
+    expect(formatTrainingDuration(5)).toBe(`0' 05"`);
+  });
+
+  it('65 seconds → 1\' 05" (sub-hour, minutes unpadded)', () => {
+    expect(formatTrainingDuration(65)).toBe(`1' 05"`);
+  });
+
+  it('1425 seconds (23:45) → 23\' 45"', () => {
+    expect(formatTrainingDuration(1425)).toBe(`23' 45"`);
+  });
+
+  it('3600 seconds (exactly 1 hr) → 1 hr 0\' 00"', () => {
+    expect(formatTrainingDuration(3600)).toBe(`1 hr 0' 00"`);
+  });
+
+  it('7325 seconds (2hr 2:05) → 2 hr 2\' 05"', () => {
+    expect(formatTrainingDuration(7325)).toBe(`2 hr 2' 05"`);
   });
 });

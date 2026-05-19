@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import {
   computeSessionStats,
-  formatSessionDuration,
+  formatTrainingDuration,
   formatVolumeShort,
   type SessionStatsSetInput,
 } from '@/src/domain/session/sessionStats';
@@ -55,7 +55,7 @@ export function SessionStatsPanel({
   return (
     <View style={styles.container}>
       <Tile
-        big={formatSessionDuration(stats.duration_ms)}
+        big={formatTrainingDuration(Math.floor(stats.duration_ms / 1000))}
         label="訓練時間"
       />
       <Tile big={formatVolumeShort(stats.volume_kg)} label="容量" />

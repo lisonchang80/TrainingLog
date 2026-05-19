@@ -154,3 +154,35 @@ export function formatVolumeShort(volume_kg: number): string {
   if (volume_kg >= 1000) return `${(volume_kg / 1000).toFixed(1)}k`;
   return String(Math.round(volume_kg));
 }
+
+/**
+ * Format training duration (input: seconds) for both the session detail
+ * page 4-tile stats and the Today screen in-session stats panel.
+ * Overnight #47 第 4 點 — unified format across both screens.
+ *
+ * Rules (per user spec examples 2026-05-19):
+ *   - `H hr` prefix ONLY when >= 1 hour (hours unpadded)
+ *   - `M' SS"` always present; minutes unpadded, seconds zero-padded to
+ *     two digits
+ *
+ * Examples:
+ *   - 0     → `0' 00"`
+ *   - 5     → `0' 05"`
+ *   - 65    → `1' 05"`
+ *   - 1425  → `23' 45"`
+ *   - 3600  → `1 hr 0' 00"`
+ *   - 7325  → `2 hr 2' 05"`
+ *
+ * Negative / non-finite input clamps to 0 (`0' 00"`).
+ */
+export function formatTrainingDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return `0' 00"`;
+  }
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mmss = `${m}' ${String(s).padStart(2, '0')}"`;
+  return h > 0 ? `${h} hr ${mmss}` : mmss;
+}

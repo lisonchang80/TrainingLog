@@ -35,7 +35,7 @@ import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types'
 import type { Session } from '@/src/domain/session/types';
 import {
   computeDetailPageStats,
-  formatDurationHHMM,
+  formatTrainingDuration,
 } from '@/src/domain/session/sessionStats';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 
@@ -366,7 +366,7 @@ export default function SessionDetailScreen() {
             <View style={styles.statsRow}>
               <Stat
                 label="訓練時間"
-                value={formatDurationHHMM(stats.durationMs)}
+                value={formatTrainingDuration(Math.floor(stats.durationMs / 1000))}
               />
               <Stat label="容量" value={formatVolume(stats.volume)} />
               <Stat label="動作數" value={String(stats.exerciseCount)} />
