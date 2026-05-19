@@ -2789,7 +2789,8 @@ const styles = StyleSheet.create({
   exerciseCardBody: {
     paddingHorizontal: 12,
     paddingBottom: 12,
-    gap: 6,
+    // overnight #52 — solo row 間距加大 (規格 A、setsBox gap 8→12)
+    gap: 12,
   },
   exerciseCardEmpty: {
     fontSize: 13,
@@ -2800,8 +2801,9 @@ const styles = StyleSheet.create({
   exerciseCardSetRowWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
+    // overnight #52 — 規格 A (solo): gap 8→12, paddingVertical 4→8
+    gap: 12,
+    paddingVertical: 8,
     // Transparent — let the card's translucent gray (exerciseCard backgroundColor)
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },

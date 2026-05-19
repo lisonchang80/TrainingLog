@@ -1505,6 +1505,7 @@ export default function TemplateEditorView() {
                             <View
                               style={[
                                 styles.exSuperRow,
+                                styles.exSuperCycleRow,
                                 isActive && styles.dragActiveRow,
                               ]}>
                               <View style={styles.exSuperCol}>
@@ -2213,7 +2214,11 @@ function ExerciseBody({
                     swipeLeftActions={swipeLeftActions}
                     swipeRightActions={swipeRightActions}
                     onLongPress={drag}>
-                    <View style={isActive ? styles.dragActiveRow : undefined}>
+                    <View
+                      style={[
+                        styles.setRowWrapper,
+                        isActive && styles.dragActiveRow,
+                      ]}>
                       <SetRowContent
                         set={head}
                         setLabel={setLabels[g.headIdx]}
@@ -2370,6 +2375,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
   },
+  // overnight #52 — cycle row wrapper (規格 B): paddingVertical 8 + gap 8。
+  // 與 session cluster-card `cycleRow` 對齊；column-header 用 exSuperRow 不加。
+  exSuperCycleRow: {
+    paddingVertical: 8,
+    gap: 8,
+    alignItems: 'center',
+  },
   exSuperCol: { flex: 1, minWidth: 0 },
   exSuperColWithLeftPad: { paddingLeft: 6 },
   exSuperDivider: {
@@ -2400,14 +2412,27 @@ const styles = StyleSheet.create({
   setsBox: {
     paddingHorizontal: 12,
     paddingBottom: 10,
-    gap: 4,
+    // overnight #52 — 規格 A: solo row 間距 gap 4→12（setsBox standard）
+    gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(127,127,127,0.15)',
     paddingTop: 8,
   },
-  setsBoxCompact: { paddingHorizontal: 8, paddingBottom: 8, paddingTop: 6 },
-  setRowPlaceholder: { height: 32 },
-  clusterStack: { gap: 4 },
+  // overnight #52 — 規格 B (cluster): cycle gap 4→8
+  setsBoxCompact: {
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 6,
+    gap: 8,
+  },
+  // overnight #52 — placeholder 配合 compact row 增高 (label 24 + padV 8×2 ≈ 40)
+  setRowPlaceholder: { height: 40 },
+  // overnight #52 — solo set row wrapper（line 2216 bare <View> 取代用）
+  // 規格 A: paddingVertical 8（與 session exerciseCardSetRowWrapper 對齊）
+  setRowWrapper: { paddingVertical: 8 },
+  // dropset cluster head + followers 群組：spec A 內 paddingVertical 套在 wrapper、
+  // 群組內 head/follower 不再加（避免雙重 padding 撐爆 cluster）。
+  clusterStack: { gap: 4, paddingVertical: 8 },
   // overnight #49 follow-up — drag-active visual feedback for inline reorder
   // (set / cycle row 長按拖曳啟動時)。Mirror session 端
   // `exerciseCardSetRowDragActive` / `cycleRowDragActive` 模式，用戶要求「跟

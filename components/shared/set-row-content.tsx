@@ -239,11 +239,15 @@ export function SetRowContent<S extends SetRowItem>({
 }
 
 const styles = StyleSheet.create({
-  setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  setRowCompact: { gap: 4 },
+  // overnight #52 — 統一 set/cycle row sizing 規格 A/B:
+  //   spec A (compact=false / solo)  : gap 12, label 40×32 fs:16, input min 60 padH 12 padV 6 fs:16
+  //   spec B (compact=true  / cluster): gap  8, label 32×24 fs:13, input min 44 padH  8 padV 4 fs:13
+  // 數值由 caller wrapper paddingVertical / gap 配合（4→8 / 8→12 / 4→8）。
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  setRowCompact: { gap: 8 },
   setLabelBtn: {
-    width: 32,
-    height: 24,
+    width: 40,
+    height: 32,
     borderRadius: 6,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
@@ -263,8 +267,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   setLabelBtnCompact: {
-    width: 22,
-    height: 18,
+    width: 32,
+    height: 24,
     borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
@@ -304,36 +308,37 @@ const styles = StyleSheet.create({
     elevation: 0,
     transform: [{ translateY: 1 }],
   },
-  setLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 10 },
+  setLabelText: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  setLabelTextCompact: { fontSize: 13 },
   setLabelTextDisabled: { color: '#9ca3af' },
   setInput: {
-    minWidth: 48,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    minWidth: 60,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 6,
     backgroundColor: '#fff',
-    fontSize: 13,
+    fontSize: 16,
     textAlign: 'center',
     alignItems: 'center',
     justifyContent: 'center',
   },
   setInputCompact: {
-    minWidth: 28,
-    paddingHorizontal: 3,
-    paddingVertical: 2,
-    fontSize: 11,
+    minWidth: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 13,
   },
   setInputText: {
-    fontSize: 13,
+    fontSize: 16,
     color: '#111827',
     textAlign: 'center',
   },
   setInputTextCompact: {
-    fontSize: 11,
+    fontSize: 13,
   },
-  setUnit: { fontSize: 12, color: '#6B7280' },
-  setUnitCompact: { fontSize: 10 },
+  // overnight #52 — kg / × separator fontSize 對齊新 cell fontSize 避免視覺錯位
+  setUnit: { fontSize: 16, color: '#6B7280' },
+  setUnitCompact: { fontSize: 13 },
   setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
   setNoteIndicatorText: { fontSize: 14 },
   // overnight #5 第 4 點: 沒備註留 placeholder 同寬 (4+4 padding + ~16 emoji + 4 marginLeft)

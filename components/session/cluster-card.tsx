@@ -725,7 +725,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   // Leading spacer matching shared `#` btn column (point 7 alignment).
-  sideLabelLead: { width: 24 },
+  // overnight #52 — sharedLabelBtn 24→32, lead spacer 對齊
+  sideLabelLead: { width: 32 },
   // Divider spacer matching cycleDivider column.
   sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
   // Trailing spacer matching note slot (20) + completeBtn (28) + row gap.
@@ -740,8 +741,9 @@ const styles = StyleSheet.create({
   cycleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
+    // overnight #52 — 規格 B (cluster): gap 4→8, paddingVertical 6→8
+    gap: 8,
+    paddingVertical: 8,
   },
   // Shared note indicator slot — sits between B-side cell and ✓ button
   // (per overnight #3 第 4 點). Compact width to keep cluster row inside
@@ -772,9 +774,10 @@ const styles = StyleSheet.create({
   // Shared `#` button at row start — replaces per-side label buttons.
   // Visual style matches `setLabelBtnCompact` in set-row-content so the
   // affordance reads as "cluster row's set_kind toggle".
+  // overnight #52 — 規格 B: 32×24, fs:13（與 setLabelBtnCompact 同步放大）
   sharedLabelBtn: {
-    width: 24,
-    height: 20,
+    width: 32,
+    height: 24,
     borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
@@ -808,7 +811,7 @@ const styles = StyleSheet.create({
   sharedLabelBtnDisabled: {
     opacity: 0.35,
   },
-  sharedLabelText: { fontSize: 10, fontWeight: '600', color: '#374151' },
+  sharedLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   cycleSide: {
     flex: 1,
     flexDirection: 'row',
