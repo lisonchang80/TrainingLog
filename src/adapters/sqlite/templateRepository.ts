@@ -101,6 +101,35 @@ export async function listTemplateGroupsByName(
 }
 
 /**
+ * Slice 10c overnight #54 — list every same-name template variant (every
+ * ADR-0003 三元組 sibling sharing `name`). Used by the Templates tab list
+ * swipe-to-delete entry: the list is dedupe-by-name (`listTemplateGroupsByName`)
+ * so a single row represents a whole name group, but the actual delete must
+ * cascade across every variant under that name. The confirm Alert also
+ * enumerates each variant's triple so the user sees what they're nuking.
+ *
+ * Returned rows mirror `TemplateRow` (id + name + timestamps + program_id +
+ * sub_tag) — no `exerciseCount` since the caller doesn't need per-variant
+ * counts, just the triple identity for the Alert + the id to feed `deleteTemplate`.
+ *
+ * Ordered by `updated_at DESC` so the most-recent-edited variant lists first
+ * in the Alert body (matches `listTemplateGroupsByName`'s representative-
+ * picking — the user sees the same row they swiped first).
+ */
+export async function listTemplateVariantsByName(
+  db: Database,
+  name: string
+): Promise<TemplateRow[]> {
+  return db.getAllAsync<TemplateRow>(
+    `SELECT id, name, created_at, updated_at, program_id, sub_tag
+       FROM template
+      WHERE name = ?
+      ORDER BY updated_at DESC`,
+    name
+  );
+}
+
+/**
  * Distinct non-null `template.sub_tag` values across all templates, sorted
  * ascending. Feeds the 強度 picker in the start-template bottom sheet
  * (ADR-0019 §Q9.1a). Empty list when no template has a sub_tag yet — the
