@@ -241,10 +241,13 @@ export function SetRowContent<S extends SetRowItem>({
 const styles = StyleSheet.create({
   // overnight #52 — 統一 set/cycle row sizing 規格 A/B:
   //   spec A (compact=false / solo)  : gap 12, label 40×32 fs:16, input min 60 padH 12 padV 6 fs:16
-  //   spec B (compact=true  / cluster): gap  8, label 32×24 fs:13, input min 44 padH  8 padV 4 fs:13
-  // 數值由 caller wrapper paddingVertical / gap 配合（4→8 / 8→12 / 4→8）。
+  //   spec B (compact=true  / cluster): gap  6, label 28×22 fs:11, input min 32 padH  5 padV 3 fs:12
+  // 規格 B fine-tune (#52 follow-up): 初版 cluster 數值 (label 32×24 fs:13 / input 44 padH 8 fs:13 /
+  // gap 8) 撐爆 iPhone row 寬度 (4 個 input + 兩個 kg/× + 兩個 label + ✓ + note slot 過寬)，
+  // 導致 cell 互相重疊。縮回較保守值仍比舊版 (28 padH 3 fs:11) 略大 — 字體可讀、cell 易點，
+  // 但 row total 在 iPhone 標準寬度內。
   setRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  setRowCompact: { gap: 8 },
+  setRowCompact: { gap: 6 },
   setLabelBtn: {
     width: 40,
     height: 32,
@@ -267,8 +270,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   setLabelBtnCompact: {
-    width: 32,
-    height: 24,
+    width: 28,
+    height: 22,
     borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
@@ -309,7 +312,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 1 }],
   },
   setLabelText: { fontSize: 16, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 13 },
+  setLabelTextCompact: { fontSize: 11 },
   setLabelTextDisabled: { color: '#9ca3af' },
   setInput: {
     minWidth: 60,
@@ -323,10 +326,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   setInputCompact: {
-    minWidth: 44,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 13,
+    minWidth: 32,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    fontSize: 12,
   },
   setInputText: {
     fontSize: 16,
@@ -334,11 +337,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   setInputTextCompact: {
-    fontSize: 13,
+    fontSize: 12,
   },
   // overnight #52 — kg / × separator fontSize 對齊新 cell fontSize 避免視覺錯位
   setUnit: { fontSize: 16, color: '#6B7280' },
-  setUnitCompact: { fontSize: 13 },
+  setUnitCompact: { fontSize: 12 },
   setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
   setNoteIndicatorText: { fontSize: 14 },
   // overnight #5 第 4 點: 沒備註留 placeholder 同寬 (4+4 padding + ~16 emoji + 4 marginLeft)

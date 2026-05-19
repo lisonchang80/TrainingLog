@@ -2375,11 +2375,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
   },
-  // overnight #52 — cycle row wrapper (規格 B): paddingVertical 8 + gap 8。
-  // 與 session cluster-card `cycleRow` 對齊；column-header 用 exSuperRow 不加。
+  // overnight #52 follow-up — cycle row wrapper (規格 B): paddingVertical 8 + gap 6
+  // (撐爆 fine-tune)。與 session cluster-card `cycleRow` 對齊；column-header 用 exSuperRow。
   exSuperCycleRow: {
     paddingVertical: 8,
-    gap: 8,
+    gap: 6,
     alignItems: 'center',
   },
   exSuperCol: { flex: 1, minWidth: 0 },

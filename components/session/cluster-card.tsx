@@ -725,8 +725,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   // Leading spacer matching shared `#` btn column (point 7 alignment).
-  // overnight #52 — sharedLabelBtn 24→32, lead spacer 對齊
-  sideLabelLead: { width: 32 },
+  // overnight #52 follow-up — sharedLabelBtn 32→28 (cluster row 撐爆 fine-tune)
+  sideLabelLead: { width: 28 },
   // Divider spacer matching cycleDivider column.
   sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
   // Trailing spacer matching note slot (20) + completeBtn (28) + row gap.
@@ -741,8 +741,8 @@ const styles = StyleSheet.create({
   cycleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // overnight #52 — 規格 B (cluster): gap 4→8, paddingVertical 6→8
-    gap: 8,
+    // overnight #52 follow-up — 規格 B (cluster): gap 8→6 (撐爆 fine-tune)、paddingVertical 8
+    gap: 6,
     paddingVertical: 8,
   },
   // Shared note indicator slot — sits between B-side cell and ✓ button
@@ -774,10 +774,10 @@ const styles = StyleSheet.create({
   // Shared `#` button at row start — replaces per-side label buttons.
   // Visual style matches `setLabelBtnCompact` in set-row-content so the
   // affordance reads as "cluster row's set_kind toggle".
-  // overnight #52 — 規格 B: 32×24, fs:13（與 setLabelBtnCompact 同步放大）
+  // overnight #52 follow-up — 規格 B: 28×22 fs:11 (cluster row 撐爆 fine-tune)
   sharedLabelBtn: {
-    width: 32,
-    height: 24,
+    width: 28,
+    height: 22,
     borderRadius: 4,
     backgroundColor: '#fafafa',
     borderTopWidth: 1,
@@ -811,7 +811,7 @@ const styles = StyleSheet.create({
   sharedLabelBtnDisabled: {
     opacity: 0.35,
   },
-  sharedLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  sharedLabelText: { fontSize: 11, fontWeight: '600', color: '#374151' },
   cycleSide: {
     flex: 1,
     flexDirection: 'row',
