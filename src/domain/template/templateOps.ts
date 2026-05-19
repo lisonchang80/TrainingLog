@@ -1,4 +1,24 @@
 /**
+ * Slice 10c overnight #46 第 1 點 — template deletability gate.
+ *
+ * 「通用」變體（program_id IS NULL OR sub_tag IS NULL）是 3-tier prefill
+ * resolver 的 base fallback（ADR-0019 Q9.2 / slice 10c #35 prefill tree
+ * Tier B「P + 通用 + E」與 Tier C「P + 任一 + E」的兜底層），不可刪除 —
+ * 刪了會讓「新增強度」走 lookup-or-spawn 時找不到 source 可以 clone。
+ *
+ * Editor ⋯ ActionSheet 的「刪除模板」按鈕用此 helper 決定是否 disable
+ * (passed to `disabledButtonIndices`). 點到 disabled 項 = native noop.
+ *
+ * 不影響「另存模板」（留尾、未來決定）— 該選項繼續可點。
+ */
+export function isTemplateDeletable(template: {
+  program_id: string | null;
+  sub_tag: string | null;
+}): boolean {
+  return template.program_id !== null && template.sub_tag !== null;
+}
+
+/**
  * Slice 9.5 per-set template ops — pure logic, no DB, no React.
  *
  * Covers (per ADR-0016 + issue #28 acceptance criteria):

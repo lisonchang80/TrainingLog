@@ -10,6 +10,7 @@ import {
   cloneSupersetRowAt,
   addClusterAfter,
   isClusterFollower,
+  isTemplateDeletable,
 } from '../../src/domain/template/templateOps';
 import type {
   TemplateExercise,
@@ -687,5 +688,28 @@ describe('templateOps — reorderTemplateExercises', () => {
     // Specified ones come first in given order, missing appended.
     expect(out.map((e) => e.id)).toEqual(['p3', 'p1', 'p2']);
     expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isTemplateDeletable — slice 10c overnight #46 第 1 點
+// ---------------------------------------------------------------------------
+
+describe('isTemplateDeletable', () => {
+  it('returns false when both program_id and sub_tag are null', () => {
+    expect(isTemplateDeletable({ program_id: null, sub_tag: null })).toBe(false);
+  });
+
+  it('returns false when only sub_tag is null (program set)', () => {
+    // 截圖場景: 用戶看到「刪除模板」可點但其實是「通用強度」base — 不可刪
+    expect(isTemplateDeletable({ program_id: 'p1', sub_tag: null })).toBe(false);
+  });
+
+  it('returns false when only program_id is null (sub_tag set)', () => {
+    expect(isTemplateDeletable({ program_id: null, sub_tag: 'hiit' })).toBe(false);
+  });
+
+  it('returns true when both program_id and sub_tag are set', () => {
+    expect(isTemplateDeletable({ program_id: 'p1', sub_tag: 'hiit' })).toBe(true);
   });
 });

@@ -73,6 +73,7 @@ import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
 import {
   cycleSetKindAcrossExercises,
+  isTemplateDeletable,
   reorderTemplateExercises,
 } from '@/src/domain/template/templateOps';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
@@ -1493,13 +1494,21 @@ export default function TemplateEditorView() {
           </Pressable>
           <Pressable
             style={styles.actionBtn}
-            onPress={() =>
+            onPress={() => {
+              // overnight #46 第 1 點 — 「通用」變體（program_id IS NULL OR
+              // sub_tag IS NULL）是 3-tier prefill resolver 的 base fallback、
+              // 不可刪。disabledButtonIndices = [1] 讓「刪除模板」灰字 + 點到 noop.
+              const canDelete = isTemplateDeletable({
+                program_id: draft.program_id ?? null,
+                sub_tag: draft.sub_tag ?? null,
+              });
               ActionSheetIOS.showActionSheetWithOptions(
                 {
                   title: draft.name,
                   options: ['另存模板', '刪除模板', '取消'],
                   destructiveButtonIndex: 1,
                   cancelButtonIndex: 2,
+                  disabledButtonIndices: canDelete ? [] : [1],
                 },
                 (idx) => {
                   if (idx === 0)
@@ -1507,10 +1516,10 @@ export default function TemplateEditorView() {
                       '另存模板',
                       'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
                     );
-                  else if (idx === 1) onDeleteTemplate();
+                  else if (idx === 1 && canDelete) onDeleteTemplate();
                 },
-              )
-            }>
+              );
+            }}>
             <Text style={styles.actionBtnText}>⋯</Text>
           </Pressable>
         </View>
