@@ -1227,8 +1227,21 @@ export default function TemplateEditorView() {
               style={styles.exHeaderTapZone}
               hitSlop={4}>
               <View style={styles.clusterText}>
+                {/*
+                  Row 1: 「超」chip + 「X熱+X組」+ ▼ 同列。把 stat 從標題列搬上來
+                  —— 標題往往被兩個動作名 + " + " 連接撐長到 3 行（如
+                  「Cable Crossover + Chest Dip」），同列再塞 stat / chevron
+                  會壓縮標題空間。用戶反饋：移走後標題拿到 row 2 full-width。
+                */}
                 <View style={styles.clusterTagRow}>
                   <Text style={styles.supersetTag}>超</Text>
+                  <View style={styles.flexFill} />
+                  <Text style={styles.exSummary}>
+                    {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
+                  </Text>
+                  {isExpanded ? (
+                    <Text style={styles.exChevron}>▼</Text>
+                  ) : null}
                 </View>
                 <Text style={styles.clusterName}>
                   {parent.name ?? '(動作)'}
@@ -1240,11 +1253,6 @@ export default function TemplateEditorView() {
                   ))}
                 </Text>
               </View>
-              <View style={styles.flexFill} />
-              <Text style={styles.exSummary}>
-                {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
-              </Text>
-              {isExpanded ? <Text style={styles.exChevron}>▼</Text> : null}
             </Pressable>
             {parent.notes && parent.notes.trim().length > 0 ? (
               <Pressable
