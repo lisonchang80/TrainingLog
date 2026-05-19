@@ -26,6 +26,8 @@ export function cloneTemplate(t: Template): Template {
     id: t.id,
     name: t.name,
     color_hex: t.color_hex,
+    program_id: t.program_id ?? null,
+    sub_tag: t.sub_tag ?? null,
     exercises: t.exercises.map((ex) => ({
       ...ex,
       sets: ex.sets.map((s) => ({ ...s })),

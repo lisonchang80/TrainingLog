@@ -413,7 +413,12 @@ export async function getTemplateFull(
     id: string;
     name: string;
     color_hex: string;
-  }>(`SELECT id, name, color_hex FROM template WHERE id = ?`, id);
+    program_id: string | null;
+    sub_tag: string | null;
+  }>(
+    `SELECT id, name, color_hex, program_id, sub_tag FROM template WHERE id = ?`,
+    id
+  );
   if (!tpl) return null;
 
   // Notes is sourced from `exercise.notes` (per-Exercise global) per
@@ -446,7 +451,14 @@ export async function getTemplateFull(
   );
 
   if (exRows.length === 0) {
-    return { id: tpl.id, name: tpl.name, color_hex: tpl.color_hex, exercises: [] };
+    return {
+      id: tpl.id,
+      name: tpl.name,
+      color_hex: tpl.color_hex,
+      program_id: tpl.program_id ?? null,
+      sub_tag: tpl.sub_tag ?? null,
+      exercises: [],
+    };
   }
 
   const setRows = await db.getAllAsync<{
@@ -501,6 +513,8 @@ export async function getTemplateFull(
     id: tpl.id,
     name: tpl.name,
     color_hex: tpl.color_hex,
+    program_id: tpl.program_id ?? null,
+    sub_tag: tpl.sub_tag ?? null,
     exercises,
   };
 }
