@@ -70,6 +70,16 @@ type StartTemplateSheetProps = {
   visible: boolean;
   /** Tapped Template's name — shown in the top bar. */
   templateName: string;
+  /**
+   * Tapped Template's id — the「source」template that subsequent clone-on-
+   * create operations branch off. Round 37 polish: when the user adds a new
+   * sub_tag inline, we spawn a clone bound to (programId, new sub_tag) and
+   * redirect `onStart` / `onEdit` to that clone so the upcoming session links
+   * to the new row instead of the source. The sheet tracks the「active」
+   * template id in internal state; this prop is the initial value (reset on
+   * every visible+templateId change).
+   */
+  templateId: string;
   /** Programs from `listPrograms(db)` — caller filters; we prepend 「通用」 here. */
   programs: ProgramOption[];
   /**
@@ -85,9 +95,17 @@ type StartTemplateSheetProps = {
   /** Sticky last-used sub_tag (from app_settings). */
   lastUsedSubTag: string | null;
   /** [編輯模板] handler — caller resolves the (name, period, intensity) triple's editor route. */
-  onEdit: (selection: { period_id: string; intensity_id: string | null }) => void;
+  onEdit: (selection: {
+    period_id: string;
+    intensity_id: string | null;
+    template_id: string;
+  }) => void;
   /** [開始訓練] handler — caller calls startSessionFromTemplate + persists sticky. */
-  onStart: (selection: { period_id: string; intensity_id: string | null }) => void;
+  onStart: (selection: {
+    period_id: string;
+    intensity_id: string | null;
+    template_id: string;
+  }) => void;
   /**
    * Create a brand-new Program from the inline「新增計畫」CTA. Caller persists
    * the row + refreshes its own `programs` state, then returns the new
@@ -95,6 +113,23 @@ type StartTemplateSheetProps = {
    * keep the inline input visible so user can edit + retry).
    */
   onCreateProgram: (name: string) => Promise<{ id: string; name: string }>;
+  /**
+   * Spawn a deep clone of the active template under (programId, new sub_tag)
+   * — round 37 polish. Caller invokes `cloneTemplateWithSubTag` in db and
+   * returns the new template id; the sheet then re-aims its `activeTemplateId`
+   * at the clone so the upcoming start/edit hits the new row instead of the
+   * source. On throw, the sheet inspects `err.message`:
+   *   - `'DUPLICATE_TEMPLATE_TRIPLE'` → user-facing Alert + keep inline open
+   *     so user can rename + retry.
+   *   - other → silent console.warn.
+   *
+   * `program_id` is passed back from the sheet because the picker owns that
+   * state; the caller doesn't know which period the user has selected.
+   */
+  onCloneTemplateWithNewSubTag: (
+    sub_tag: string,
+    program_id: string
+  ) => Promise<{ template_id: string }>;
   onCancel: () => void;
 };
 
@@ -113,6 +148,7 @@ const NONE_OPTION: ProgramOption = {
 export function StartTemplateSheet({
   visible,
   templateName,
+  templateId,
   programs,
   subTags,
   lastUsedProgramId,
@@ -120,6 +156,7 @@ export function StartTemplateSheet({
   onEdit,
   onStart,
   onCreateProgram,
+  onCloneTemplateWithNewSubTag,
   onCancel,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
@@ -133,6 +170,20 @@ export function StartTemplateSheet({
 
   const [periodId, setPeriodId] = useState<string>(RESERVED_NONE_PROGRAM_ID);
   const [intensityId, setIntensityId] = useState<string | null>(null);
+
+  /**
+   * Round 37 polish — active template id pointer. Starts as the tapped row's
+   * id (the `templateId` prop) and may be swapped to a freshly-spawned clone
+   * when the user adds a new sub_tag inline. `onStart` / `onEdit` callbacks
+   * always emit `activeTemplateId` so the parent links to the right row.
+   *
+   * Reset back to the original `templateId` whenever the sheet opens OR the
+   * user changes the period (period switch invalidates the prior clone — it
+   * was bound to the old program; pretending the clone is still valid would
+   * leak an orphan into the new selection).
+   */
+  const [activeTemplateId, setActiveTemplateId] = useState<string>(templateId);
+  const [cloningSubTag, setCloningSubTag] = useState(false);
 
   /**
    * Inline「新增計畫」TextInput state — mirror template-meta-sheet's
@@ -189,11 +240,14 @@ export function StartTemplateSheet({
     setCustomSubTag('');
     setLocalSubTags([]);
     setProgramSubTags([]);
+    // Round 37 — reset clone pointer back to the source on every open.
+    setActiveTemplateId(templateId);
+    setCloningSubTag(false);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + raw inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, lastUsedProgramId, lastUsedSubTag, subTags.join('|'), programs.length]);
+  }, [visible, templateId, lastUsedProgramId, lastUsedSubTag, subTags.join('|'), programs.length]);
 
   /**
    * Re-fetch per-program sub_tags whenever the user changes period selection
@@ -206,6 +260,11 @@ export function StartTemplateSheet({
   useEffect(() => {
     let cancelled = false;
     if (!visible) return;
+    // Round 37 — period change invalidates any spawned clone (clone was bound
+    // to the previous program). Reset activeTemplateId back to the source so
+    // the user doesn't accidentally edit/start the orphan under a different
+    // program selection.
+    setActiveTemplateId(templateId);
     if (periodId === RESERVED_NONE_PROGRAM_ID) {
       setProgramSubTags([]);
       setLocalSubTags([]);
@@ -230,21 +289,27 @@ export function StartTemplateSheet({
     return () => {
       cancelled = true;
     };
-  }, [visible, periodId, db]);
+  }, [visible, periodId, db, templateId]);
 
   const isNoneSelected = periodId === RESERVED_NONE_PROGRAM_ID;
   // When 無 is selected, force intensity to null on confirm (hidden picker).
   const effectiveIntensity = isNoneSelected ? null : intensityId;
 
   /**
-   * Confirm an in-session new sub_tag from the inline TextInput. Pure local
-   * state — no db write.
+   * Confirm an in-session new sub_tag from the inline TextInput. Round 37
+   * polish: also spawn a template clone bound to (current periodId, new
+   * sub_tag) via `onCloneTemplateWithNewSubTag` and re-aim `activeTemplateId`
+   * at the clone. Subsequent [編輯模板] / [開始訓練] then hits the clone
+   * (not the source) so overwrites land on the new row.
    *
-   * Dup guard (case-insensitive): collide against db-loaded `subTags` +
-   * in-session `localSubTags` → Alert + keep inline input open for retry.
-   * Casing preserved on append (we store the original trimmed input).
+   * Local dup guard (case-insensitive in `[programSubTags, localSubTags]`)
+   * runs first — if the user types a tag that's already a radio option, we
+   * just activate it (no clone needed, no db write). Past the local dup
+   * guard we await the parent's clone helper; the helper's own dup-triple
+   * guard surfaces as `Error('DUPLICATE_TEMPLATE_TRIPLE')` → user-facing
+   * Alert + inline state preserved for rename + retry.
    */
-  const handleConfirmNewSubTag = () => {
+  const handleConfirmNewSubTag = async () => {
     const trimmed = customSubTag.trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
@@ -255,10 +320,38 @@ export function StartTemplateSheet({
       Alert.alert('無法新增強度', '強度名稱已存在，請改用別的名稱。');
       return;
     }
-    setLocalSubTags((prev) => [...prev, trimmed]);
-    setIntensityId(trimmed);
-    setCustomSubTagMode(false);
-    setCustomSubTag('');
+    if (isNoneSelected) {
+      // Defensive — 通用 (RESERVED_NONE_PROGRAM_ID) hides the intensity
+      // section so this code path should be unreachable. If it ever fires,
+      // surface a hint rather than spawning a clone under the reserved
+      // program.
+      Alert.alert('無法新增強度', '請先選擇一個計畫。');
+      return;
+    }
+    setCloningSubTag(true);
+    try {
+      const { template_id: newId } = await onCloneTemplateWithNewSubTag(
+        trimmed,
+        periodId
+      );
+      setActiveTemplateId(newId);
+      setLocalSubTags((prev) => [...prev, trimmed]);
+      setIntensityId(trimmed);
+      setCustomSubTagMode(false);
+      setCustomSubTag('');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+        Alert.alert(
+          '無法建立 template',
+          '已有相同名稱 + 計畫 + 強度的 template，請改用別的強度名稱。'
+        );
+      } else {
+        console.warn('[StartTemplateSheet] cloneTemplate failed:', err);
+      }
+    } finally {
+      setCloningSubTag(false);
+    }
   };
 
   const handleConfirmNewProgram = async () => {
@@ -463,18 +556,23 @@ export function StartTemplateSheet({
                       onChangeText={setCustomSubTag}
                       placeholder="輸入新強度標籤（如 5x5、最大力量）"
                       placeholderTextColor="#9ca3af"
+                      editable={!cloningSubTag}
                     />
                     <Pressable
                       onPress={handleConfirmNewSubTag}
                       hitSlop={8}
-                      disabled={customSubTag.trim().length === 0}
+                      disabled={
+                        cloningSubTag || customSubTag.trim().length === 0
+                      }
                       style={[
                         styles.inlineConfirm,
-                        customSubTag.trim().length === 0 &&
+                        (cloningSubTag || customSubTag.trim().length === 0) &&
                           styles.inlineConfirmDisabled,
                       ]}
                     >
-                      <Text style={styles.inlineConfirmText}>建立</Text>
+                      <Text style={styles.inlineConfirmText}>
+                        {cloningSubTag ? '建立中…' : '建立'}
+                      </Text>
                     </Pressable>
                   </View>
                 ) : null}
@@ -485,7 +583,11 @@ export function StartTemplateSheet({
           <View style={styles.actionRow}>
             <Pressable
               onPress={() =>
-                onEdit({ period_id: periodId, intensity_id: effectiveIntensity })
+                onEdit({
+                  period_id: periodId,
+                  intensity_id: effectiveIntensity,
+                  template_id: activeTemplateId,
+                })
               }
               style={({ pressed }) => [
                 styles.actionBtn,
@@ -498,7 +600,11 @@ export function StartTemplateSheet({
             </Pressable>
             <Pressable
               onPress={() =>
-                onStart({ period_id: periodId, intensity_id: effectiveIntensity })
+                onStart({
+                  period_id: periodId,
+                  intensity_id: effectiveIntensity,
+                  template_id: activeTemplateId,
+                })
               }
               style={({ pressed }) => [
                 styles.actionBtn,
