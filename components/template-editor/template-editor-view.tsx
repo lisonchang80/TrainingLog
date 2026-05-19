@@ -1173,7 +1173,9 @@ export default function TemplateEditorView() {
         );
       }
       const isExpanded = expandedExId === parent.id;
-      const allNames = [parent.name ?? '(動作)', ...children.map((c) => c.name ?? '(動作)')].join(' + ');
+      // overnight #45 第 1 點：mirror session cluster-card.tsx:216-224 layout
+      // — 「超」chip 獨佔行 1 + 標題分行（兩動作名 + 「 + 」連接）獨佔行 2。
+      // template 無 progress bar 概念，故只兩行（session 是三行 — chip / 標題 / progress）。
       return (
         <View key={parent.id} style={styles.exCard}>
           <View style={styles.exHeader}>
@@ -1181,10 +1183,20 @@ export default function TemplateEditorView() {
               onPress={() => toggleExpanded(parent.id)}
               style={styles.exHeaderTapZone}
               hitSlop={4}>
-              <Text style={styles.supersetTag}>超級組</Text>
-              <Text style={styles.supersetNames} numberOfLines={2}>
-                {allNames}
-              </Text>
+              <View style={styles.clusterText}>
+                <View style={styles.clusterTagRow}>
+                  <Text style={styles.supersetTag}>超</Text>
+                </View>
+                <Text style={styles.clusterName}>
+                  {parent.name ?? '(動作)'}
+                  {children.map((c) => (
+                    <Fragment key={c.id}>
+                      <Text style={styles.clusterPlus}> + </Text>
+                      {c.name ?? '(動作)'}
+                    </Fragment>
+                  ))}
+                </Text>
+              </View>
               <View style={styles.flexFill} />
               {isExpanded ? <Text style={styles.exChevron}>▼</Text> : null}
             </Pressable>
@@ -2040,8 +2052,15 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     overflow: 'hidden',
+    alignSelf: 'flex-start',
   },
   supersetNames: { flex: 1, fontSize: 15, fontWeight: '600' },
+  // overnight #45 第 1 點 — cluster header mirror session layout (decoupled
+  // styles, own copy). Row 1: tag (alignSelf flex-start). Row 2: 標題分行。
+  clusterText: { flex: 1, gap: 4 },
+  clusterTagRow: { flexDirection: 'row', alignItems: 'center' },
+  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  clusterPlus: { fontSize: 14, opacity: 0.5 },
   supersetColName: {
     fontSize: 12,
     fontWeight: '600',
