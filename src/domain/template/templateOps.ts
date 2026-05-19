@@ -556,3 +556,156 @@ export function reorderTemplateExercises(
   }
   return out;
 }
+
+/**
+ * Slice 10c overnight #49 — inline long-press drag reorder for SETS within a
+ * solo exercise card. Mirror session pattern (`app/(tabs)/index.tsx:2428`
+ * `NestableDraggableFlatList`) but the unit of movement is a **group**:
+ *
+ *   - solo working / warmup set  → 1 group (id = set.id)
+ *   - dropset cluster (head + N followers) → 1 group (id = head.id);
+ *     followers never split from their head — the whole chain moves as one
+ *     contiguous block (per ADR-0016 dropset cluster invariant §B3).
+ *
+ * `orderedGroupIds` is the new order of group ids the user dropped. Caller
+ * (template-editor-view.tsx) extracts them from a `NestableDraggableFlatList`
+ * `onDragEnd` payload where each list item represents one group; the helper
+ * here re-flattens the sets array by walking `orderedGroupIds` in order and
+ * appending each group's members (head first, followers in original order).
+ *
+ * Safety / fault tolerance (mirror `reorderTemplateExercises`):
+ *   - any group id not present in `ex.sets` is silently skipped
+ *   - any **existing** head id missing from `orderedGroupIds` is appended at
+ *     the end (with its followers) so a list bug can never silently drop
+ *     sets
+ *   - `position` is re-normalised 0..N contiguous so the DB
+ *     UNIQUE(template_exercise_id, position) constraint never trips on commit
+ *
+ * Returns a new `TemplateExercise` (referentially distinct); `ex.sets` is
+ * never mutated.
+ */
+export function reorderTemplateSetsByGroups(
+  ex: TemplateExercise,
+  orderedGroupIds: readonly string[],
+): TemplateExercise {
+  // Build groups by walking `ex.sets`. A group head is either a solo
+  // (working/warmup) row OR a cluster head (dropset && parent_set_id===null).
+  // Followers (dropset && parent_set_id!==null) attach to their head.
+  const groups: TemplateSet[][] = [];
+  const headIdToGroupIdx = new Map<string, number>();
+  for (const s of ex.sets) {
+    if (isClusterFollower(s)) {
+      const headId = s.parent_set_id as string;
+      const gIdx = headIdToGroupIdx.get(headId);
+      if (gIdx !== undefined) {
+        groups[gIdx].push(s);
+      } else {
+        // Orphan follower (head missing) — treat as standalone so we never
+        // silently drop sets. Should be unreachable for well-formed input.
+        const newIdx = groups.length;
+        groups.push([s]);
+        headIdToGroupIdx.set(s.id, newIdx);
+      }
+    } else {
+      const newIdx = groups.length;
+      groups.push([s]);
+      headIdToGroupIdx.set(s.id, newIdx);
+    }
+  }
+
+  const seen = new Set<number>();
+  const outSets: TemplateSet[] = [];
+  for (const gid of orderedGroupIds) {
+    const gIdx = headIdToGroupIdx.get(gid);
+    if (gIdx === undefined || seen.has(gIdx)) continue;
+    seen.add(gIdx);
+    for (const m of groups[gIdx]) outSets.push(m);
+  }
+  // Safety: append any missing groups at the end (sheet bug guard).
+  for (let i = 0; i < groups.length; i++) {
+    if (seen.has(i)) continue;
+    for (const m of groups[i]) outSets.push(m);
+  }
+
+  return { ...ex, sets: normalizePositions(outSets) };
+}
+
+/**
+ * Slice 10c overnight #49 — inline long-press drag reorder for CYCLES of a
+ * reusable-superset cluster (A + B paired). Mirror session pattern
+ * (`components/session/cluster-card.tsx:291` `NestableDraggableFlatList` on
+ * `cycles`).
+ *
+ * Cluster invariant: A.sets[i] is paired with B.sets[i] (cycle i). Drag
+ * moves the **whole cycle** as one unit — A side and B side reorder in
+ * lockstep. The caller hands us the new cycle order as
+ * `orderedCycleKeys[i] = a_set.id ?? b_set.id` (same key extractor as
+ * cluster-card.tsx and session's `onConfirmReorderCycles`).
+ *
+ * Asymmetric handling (per ADR-0019 Q8 (d) AS1):
+ *   - A side has more cycles than B (or vice-versa) → the short side simply
+ *     has fewer entries; cycle keys for the long-side-only cycles use that
+ *     side's set id. Missing-side slots stay missing (we don't fabricate).
+ *
+ * Returns a fresh `{ exA, exB }` (both referentially distinct). Each side's
+ * `sets` are re-ordered to match the new cycle order and `position`
+ * normalised 0..N. Unknown cycle keys are skipped; any **existing** cycle
+ * keys missing from `orderedCycleKeys` are appended at the end (matched by
+ * the original order) so a drag-controller bug never silently drops sets.
+ */
+export function reorderTemplateClusterCycles(
+  exA: TemplateExercise,
+  exB: TemplateExercise,
+  orderedCycleKeys: readonly string[],
+): { exA: TemplateExercise; exB: TemplateExercise } {
+  // Compute the original cycle list — same shape as
+  // src/domain/session/clusterCard.ts::computeClusterCycles but inlined
+  // (template's `TemplateSet` has no `is_logged` — we don't need it here,
+  // just the pairing).
+  const aLen = exA.sets.length;
+  const bLen = exB.sets.length;
+  const total = Math.max(aLen, bLen);
+
+  interface Cycle {
+    key: string;
+    a: TemplateSet | null;
+    b: TemplateSet | null;
+  }
+  const cycles: Cycle[] = [];
+  for (let i = 0; i < total; i++) {
+    const a = i < aLen ? exA.sets[i] : null;
+    const b = i < bLen ? exB.sets[i] : null;
+    // Empty pair shouldn't exist (would mean total > both lengths); guard
+    // with a synthetic key so the list never crashes on it.
+    const key = a?.id ?? b?.id ?? `__missing_${i}__`;
+    cycles.push({ key, a, b });
+  }
+
+  const byKey = new Map<string, Cycle>(cycles.map((c) => [c.key, c]));
+  const seen = new Set<string>();
+  const ordered: Cycle[] = [];
+  for (const k of orderedCycleKeys) {
+    const c = byKey.get(k);
+    if (!c || seen.has(k)) continue;
+    seen.add(k);
+    ordered.push(c);
+  }
+  // Safety: append any missing cycles at the end so we never silently drop
+  // sets (sheet bug guard).
+  for (const c of cycles) {
+    if (seen.has(c.key)) continue;
+    ordered.push(c);
+  }
+
+  const newA: TemplateSet[] = [];
+  const newB: TemplateSet[] = [];
+  for (const c of ordered) {
+    if (c.a) newA.push(c.a);
+    if (c.b) newB.push(c.b);
+  }
+
+  return {
+    exA: { ...exA, sets: normalizePositions(newA) },
+    exB: { ...exB, sets: normalizePositions(newB) },
+  };
+}

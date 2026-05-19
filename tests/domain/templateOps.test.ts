@@ -4,6 +4,8 @@ import {
   deleteSet,
   reorderSets,
   reorderTemplateExercises,
+  reorderTemplateSetsByGroups,
+  reorderTemplateClusterCycles,
   cycleSetKind,
   cycleSetKindAcrossExercises,
   deleteSupersetRowAt,
@@ -711,5 +713,167 @@ describe('isTemplateDeletable', () => {
 
   it('returns true when both program_id and sub_tag are set', () => {
     expect(isTemplateDeletable({ program_id: 'p1', sub_tag: 'hiit' })).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderTemplateSetsByGroups — slice 10c overnight #49
+// ---------------------------------------------------------------------------
+
+describe('templateOps — reorderTemplateSetsByGroups', () => {
+  it('reorders 3 solo sets by group ids and re-keys position 0..N', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'a', position: 0 }),
+        makeSet({ id: 'b', position: 1 }),
+        makeSet({ id: 'c', position: 2 }),
+      ],
+    });
+    const out = reorderTemplateSetsByGroups(ex, ['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.id)).toEqual(['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('dropset cluster (head + followers) moves as one unit', () => {
+    // Layout: [head H + follower F1 + follower F2, solo S]
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'H', kind: 'dropset', parent_set_id: null, position: 0 }),
+        makeSet({ id: 'F1', kind: 'dropset', parent_set_id: 'H', position: 1 }),
+        makeSet({ id: 'F2', kind: 'dropset', parent_set_id: 'H', position: 2 }),
+        makeSet({ id: 'S', position: 3 }),
+      ],
+    });
+    // User drags so solo S goes first, then the whole cluster H+F1+F2 second.
+    // Followers must stay attached to head H in original order.
+    const out = reorderTemplateSetsByGroups(ex, ['S', 'H']);
+    expect(out.sets.map((s) => s.id)).toEqual(['S', 'H', 'F1', 'F2']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2, 3]);
+    // Follower parent_set_id linkage preserved.
+    expect(out.sets[2].parent_set_id).toBe('H');
+    expect(out.sets[3].parent_set_id).toBe('H');
+  });
+
+  it('safety: missing group id is appended at the end (no silent drops)', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'a', position: 0 }),
+        makeSet({ id: 'b', position: 1 }),
+        makeSet({ id: 'c', position: 2 }),
+      ],
+    });
+    // orderedGroupIds omits 'b' — full set must still appear.
+    const out = reorderTemplateSetsByGroups(ex, ['c', 'a']);
+    expect(out.sets.map((s) => s.id)).toEqual(['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderTemplateClusterCycles — slice 10c overnight #49
+// ---------------------------------------------------------------------------
+
+describe('templateOps — reorderTemplateClusterCycles', () => {
+  it('symmetric 3 cycles: cycle order [c3, c1, c2] reorders both sides in lockstep', () => {
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // Cycle keys = a_set.id (A side present everywhere).
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1', 'a2']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
+    expect(out.exA.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('asymmetric A=3 / B=2: long-side-only cycle key is A.id, both sides reorder without cross-contamination', () => {
+    // A has 3 sets, B has 2 → cycles = [(a1,b1),(a2,b2),(a3,null)].
+    // Key for cycle 3 falls back to a3.id.
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+      ],
+    });
+    // Move the A-only cycle (cycle 3) to the front.
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1', 'a2']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    // B side: cycle 3 had no b_set → skipped; b1 then b2 retain pairing.
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b1', 'b2']);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1]);
+  });
+
+  it('asymmetric A=2 / B=3: B-only short-side cycle key is B.id, both sides reorder without cross-contamination', () => {
+    // A=2, B=3 → cycles = [(a1,b1),(a2,b2),(null,b3)]. Key for cycle 3 = b3.
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // Move the B-only cycle 3 to the front.
+    const out = reorderTemplateClusterCycles(exA, exB, ['b3', 'a1', 'a2']);
+    // A side: cycle 3 had no a_set → skipped; a1 then a2.
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a1', 'a2']);
+    // B side: b3 first, b1, b2.
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('safety: missing cycle keys appended at end (no silent drops)', () => {
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // orderedCycleKeys only mentions 2 of 3 cycles — third must be appended.
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
   });
 });

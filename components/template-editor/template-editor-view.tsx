@@ -47,6 +47,11 @@ import {
   View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
@@ -75,7 +80,9 @@ import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemor
 import {
   cycleSetKindAcrossExercises,
   isTemplateDeletable,
+  reorderTemplateClusterCycles,
   reorderTemplateExercises,
+  reorderTemplateSetsByGroups,
 } from '@/src/domain/template/templateOps';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
@@ -726,6 +733,58 @@ export default function TemplateEditorView() {
     setDraft({ ...draft, exercises: rebuilt });
   };
 
+  // overnight #49 — inline 長按拖曳 reorder for SETS within a solo card.
+  // Mirror session pattern (app/(tabs)/index.tsx:2432 onDragEnd path), but
+  // works on draft (no DB write — commitTemplateDraft on 儲存 will UPDATE
+  // template_set.position). Pure helper `reorderTemplateSetsByGroups` handles
+  // dropset cluster cohesion (head + followers stay contiguous as 1 group).
+  const onConfirmReorderSets = useCallback(
+    (ex_id: string, orderedGroupIds: string[]) => {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          exercises: prev.exercises.map((e) =>
+            e.id === ex_id
+              ? reorderTemplateSetsByGroups(e, orderedGroupIds)
+              : e,
+          ),
+        };
+      });
+    },
+    [],
+  );
+
+  // overnight #49 — inline 長按拖曳 reorder for cluster CYCLES (A+B paired).
+  // Mirror session pattern (components/session/cluster-card.tsx:291 + the
+  // session-level onConfirmReorderCycles handler at app/(tabs)/index.tsx:1825).
+  // Pure helper `reorderTemplateClusterCycles` walks both sides in lockstep so
+  // a cycle drag never breaks the A.sets[i] ↔ B.sets[i] pairing.
+  const onConfirmReorderClusterCycles = useCallback(
+    (
+      parent_id: string,
+      child_id: string,
+      orderedCycleKeys: string[],
+    ) => {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const exA = prev.exercises.find((e) => e.id === parent_id);
+        const exB = prev.exercises.find((e) => e.id === child_id);
+        if (!exA || !exB) return prev;
+        const next = reorderTemplateClusterCycles(exA, exB, orderedCycleKeys);
+        return {
+          ...prev,
+          exercises: prev.exercises.map((e) => {
+            if (e.id === parent_id) return next.exA;
+            if (e.id === child_id) return next.exB;
+            return e;
+          }),
+        };
+      });
+    },
+    [],
+  );
+
   const showExerciseHistory = (ex: TemplateExercise) => {
     Alert.alert(
       `${ex.name ?? '(動作)'}· 動作歷史`,
@@ -1192,13 +1251,15 @@ export default function TemplateEditorView() {
               onAddClusterAfter={(head_id) =>
                 addClusterAfter(parent.id, head_id)
               }
-              onLongPressRow={showReorderPlaceholder}
               onLongPressHeader={() => setReorderSheetOpen(true)}
               onShowHistory={() => showExerciseHistory(parent)}
               onGearTap={() => openGearMenu(parent)}
               onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
               onShowExerciseNote={() => openExerciseNoteEditor(parent)}
               onCycleLabel={(s) => cycleSetKind(parent.id, s.id)}
+              onConfirmReorderSets={(orderedGroupIds) =>
+                onConfirmReorderSets(parent.id, orderedGroupIds)
+              }
             />
           </View>
         );
@@ -1292,13 +1353,35 @@ export default function TemplateEditorView() {
               </View>
               <View style={[styles.setsBox, styles.setsBoxCompact]}>
                 {(() => {
+                  // overnight #49 — cluster cycle inline drag. Two-side rule
+                  // (children[0]) mirrors session cluster-card.tsx::groupClusterSides
+                  // (slice 10c #45 amendment §A: cluster 內 A+B 配對不可拆).
+                  // Build cycle[] (paired rows) and feed NestableDraggableFlatList;
+                  // onDragEnd extracts key per cycle (a_set?.id ?? b_set?.id) and
+                  // delegates to pure helper `reorderTemplateClusterCycles`.
                   const parentMeta = computeExMeta(parent);
                   const childMetas = children.map((c) => computeExMeta(c));
-                  const maxSets = Math.max(
-                    parent.sets.length,
-                    ...children.map((c) => c.sets.length),
-                  );
                   const childIds = children.map((c) => c.id);
+                  const sideB = children[0] ?? null;
+                  const aLen = parent.sets.length;
+                  const bLen = sideB?.sets.length ?? 0;
+                  const maxSets = Math.max(aLen, bLen);
+
+                  interface CycleItem {
+                    key: string;
+                    cycle_idx: number; // = original index i (0-based)
+                  }
+                  const cycles: CycleItem[] = Array.from(
+                    { length: maxSets },
+                    (_, i) => ({
+                      key:
+                        parent.sets[i]?.id ??
+                        sideB?.sets[i]?.id ??
+                        `cycle-${i}`,
+                      cycle_idx: i,
+                    }),
+                  );
+
                   const renderCell = (
                     ex: TemplateExercise,
                     meta: ReturnType<typeof computeExMeta>,
@@ -1336,76 +1419,102 @@ export default function TemplateEditorView() {
                       />
                     );
                   };
-                  return Array.from({ length: maxSets }, (_, i) => {
-                    const parentSet = parent.sets[i];
-                    const rowHasNote = !!(
-                      parentSet?.notes && parentSet.notes.trim().length > 0
-                    );
-                    return (
-                      <SwipeableSetRow
-                        key={i}
-                        swipeLeftActions={[
-                          {
-                            key: 'del-superset-row',
-                            label: '刪',
-                            color: '#FF3B30',
-                            onPress: () =>
-                              deleteSupersetRowAt(parent.id, childIds, i),
-                          },
-                        ]}
-                        swipeRightActions={[
-                          {
-                            key: 'clone-superset-row',
-                            label: '加',
-                            color: '#34C759',
-                            onPress: () =>
-                              cloneSupersetRowAt(parent.id, childIds, i),
-                          },
-                          {
-                            key: 'note-superset-row',
-                            label: '備註',
-                            color: '#007AFF',
-                            onPress: () => {
-                              if (parentSet)
-                                openSetNoteEditor(parent.id, parentSet);
-                            },
-                          },
-                        ]}
-                        onLongPress={showReorderPlaceholder}>
-                        <View style={styles.exSuperRow}>
-                          <View style={styles.exSuperCol}>
-                            {renderCell(parent, parentMeta, i)}
-                          </View>
-                          {children.map((child, ci) => (
-                            <Fragment key={child.id}>
-                              <View style={styles.exSuperDivider} />
-                              <View
-                                style={[
-                                  styles.exSuperCol,
-                                  styles.exSuperColWithLeftPad,
-                                ]}>
-                                {renderCell(child, childMetas[ci], i)}
-                              </View>
-                            </Fragment>
-                          ))}
-                          <View style={styles.supersetRowNoteSlot}>
-                            {rowHasNote ? (
-                              <Pressable
-                                onPress={() => {
+
+                  if (cycles.length === 0) return null;
+                  return (
+                    <NestableDraggableFlatList
+                      data={cycles}
+                      keyExtractor={(c) => c.key}
+                      activationDistance={20}
+                      onDragEnd={({ data }) => {
+                        const newKeys = data.map((c) => c.key);
+                        const oldKeys = cycles.map((c) => c.key);
+                        const changed = newKeys.some(
+                          (k, idx) => k !== oldKeys[idx],
+                        );
+                        if (changed && sideB) {
+                          onConfirmReorderClusterCycles(
+                            parent.id,
+                            sideB.id,
+                            newKeys,
+                          );
+                        }
+                      }}
+                      renderItem={({
+                        item: c,
+                        drag,
+                      }: RenderItemParams<CycleItem>) => {
+                        const i = c.cycle_idx;
+                        const parentSet = parent.sets[i];
+                        const rowHasNote = !!(
+                          parentSet?.notes && parentSet.notes.trim().length > 0
+                        );
+                        return (
+                          <SwipeableSetRow
+                            swipeLeftActions={[
+                              {
+                                key: 'del-superset-row',
+                                label: '刪',
+                                color: '#FF3B30',
+                                onPress: () =>
+                                  deleteSupersetRowAt(parent.id, childIds, i),
+                              },
+                            ]}
+                            swipeRightActions={[
+                              {
+                                key: 'clone-superset-row',
+                                label: '加',
+                                color: '#34C759',
+                                onPress: () =>
+                                  cloneSupersetRowAt(parent.id, childIds, i),
+                              },
+                              {
+                                key: 'note-superset-row',
+                                label: '備註',
+                                color: '#007AFF',
+                                onPress: () => {
                                   if (parentSet)
                                     openSetNoteEditor(parent.id, parentSet);
-                                }}
-                                hitSlop={6}>
-                                <Text style={styles.setNoteIndicatorText}>
-                                  📝
-                                </Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
-                        </View>
-                      </SwipeableSetRow>
-                    );
-                  });
+                                },
+                              },
+                            ]}
+                            onLongPress={drag}>
+                            <View style={styles.exSuperRow}>
+                              <View style={styles.exSuperCol}>
+                                {renderCell(parent, parentMeta, i)}
+                              </View>
+                              {children.map((child, ci) => (
+                                <Fragment key={child.id}>
+                                  <View style={styles.exSuperDivider} />
+                                  <View
+                                    style={[
+                                      styles.exSuperCol,
+                                      styles.exSuperColWithLeftPad,
+                                    ]}>
+                                    {renderCell(child, childMetas[ci], i)}
+                                  </View>
+                                </Fragment>
+                              ))}
+                              <View style={styles.supersetRowNoteSlot}>
+                                {rowHasNote ? (
+                                  <Pressable
+                                    onPress={() => {
+                                      if (parentSet)
+                                        openSetNoteEditor(parent.id, parentSet);
+                                    }}
+                                    hitSlop={6}>
+                                    <Text style={styles.setNoteIndicatorText}>
+                                      📝
+                                    </Text>
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            </View>
+                          </SwipeableSetRow>
+                        );
+                      }}
+                    />
+                  );
                 })()}
               </View>
               <View style={styles.supersetFooter}>
@@ -1489,13 +1598,19 @@ export default function TemplateEditorView() {
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
+        {/*
+          overnight #49 — set/cycle 改 inline 長按拖曳。
+          外層 ScrollView 必須換成 NestableScrollContainer 才能讓 cluster /
+          solo body 內巢狀的 NestableDraggableFlatList 正確接住手勢 (mirror
+          session app/(tabs)/index.tsx:1648).
+        */}
+        <NestableScrollContainer contentContainerStyle={styles.body}>
           <SectionHeader label={SECTION_LABEL.general} />
           {renderSection('general', '（無一般動作）')}
 
           <SectionHeader label={SECTION_LABEL.evergreen} />
           {renderSection('evergreen', '（無常設動作）')}
-        </ScrollView>
+        </NestableScrollContainer>
 
         <View style={styles.actionBar}>
           <Pressable
@@ -1790,7 +1905,6 @@ type ExerciseBodyProps = {
   onCloneSetAfter: (set_id: string) => void;
   onDeleteCluster: (head_set_id: string) => void;
   onAddClusterAfter: (head_set_id: string) => void;
-  onLongPressRow: () => void;
   /**
    * overnight #45 第 3 點 — 長按 card header 開啟「排序動作」modal
    * (mirror session exercise-card pattern, app/(tabs)/index.tsx:2328).
@@ -1801,6 +1915,13 @@ type ExerciseBodyProps = {
   onShowSetNote: (set: TemplateSet) => void;
   onShowExerciseNote: () => void;
   onCycleLabel: (set: TemplateSet) => void;
+  /**
+   * overnight #49 — set inline drag confirm. orderedGroupIds is the new
+   * order of group heads (solo set id OR cluster head id); the helper in
+   * `templateOps.reorderTemplateSetsByGroups` rebuilds the sets array so
+   * dropset followers stay attached to their head as one contiguous group.
+   */
+  onConfirmReorderSets: (orderedGroupIds: string[]) => void;
   compact?: boolean;
 };
 
@@ -1816,18 +1937,90 @@ function ExerciseBody({
   onCloneSetAfter,
   onDeleteCluster,
   onAddClusterAfter,
-  onLongPressRow,
   onLongPressHeader,
   onShowHistory,
   onGearTap,
   onShowSetNote,
   onShowExerciseNote,
   onCycleLabel,
+  onConfirmReorderSets,
   compact,
 }: ExerciseBodyProps) {
   const warmups = exercise.sets.filter((s) => s.kind === 'warmup').length;
   const workings = exercise.sets.filter((s) => s.kind !== 'warmup').length;
   const { setLabels } = computeExMeta(exercise);
+
+  // overnight #49 — build groups for inline drag. A group = 1 solo set OR
+  // 1 dropset cluster (head + N followers). Each group renders as ONE
+  // draggable list item; followers never split from their head (cluster B3
+  // invariant). The id used as the drag key is the group's head id
+  // (= solo set id OR cluster head id) — same id space `reorderTemplateSetsByGroups`
+  // consumes.
+  interface SetGroup {
+    headId: string;
+    headIdx: number; // index of head row in exercise.sets
+    head: TemplateSet;
+    followers: TemplateSet[];
+    followerIndices: number[]; // for setLabels[i] lookup
+  }
+  const groups: SetGroup[] = (() => {
+    const out: SetGroup[] = [];
+    let i = 0;
+    while (i < exercise.sets.length) {
+      const s = exercise.sets[i];
+      const isDropset = s.kind === 'dropset';
+      const isFollower =
+        isDropset && (s.parent_set_id ?? null) !== null;
+      const isHead = isDropset && !isFollower;
+      if (isHead) {
+        const followers: TemplateSet[] = [];
+        const followerIndices: number[] = [];
+        let j = i + 1;
+        while (j < exercise.sets.length) {
+          const next = exercise.sets[j];
+          if (
+            next.kind === 'dropset' &&
+            next.parent_set_id === s.id
+          ) {
+            followers.push(next);
+            followerIndices.push(j);
+            j++;
+          } else {
+            break;
+          }
+        }
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers,
+          followerIndices,
+        });
+        i = j;
+      } else if (isFollower) {
+        // Orphan follower — should be unreachable. Treat as standalone so
+        // we never silently drop a row.
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers: [],
+          followerIndices: [],
+        });
+        i++;
+      } else {
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers: [],
+          followerIndices: [],
+        });
+        i++;
+      }
+    }
+    return out;
+  })();
 
   return (
     <>
@@ -1863,85 +2056,75 @@ function ExerciseBody({
       </View>
       {expanded ? (
         <View style={[styles.setsBox, compact && styles.setsBoxCompact]}>
-          {(() => {
-            const items: React.ReactNode[] = [];
-            let i = 0;
-            while (i < exercise.sets.length) {
-              const s = exercise.sets[i];
-              const isDropset = s.kind === 'dropset';
-              const isFollower =
-                isDropset && (s.parent_set_id ?? null) !== null;
-              const isHead = isDropset && !isFollower;
-
-              if (isHead) {
-                const headIdx = i;
-                const followerIndices: number[] = [];
-                let j = i + 1;
-                while (j < exercise.sets.length) {
-                  const next = exercise.sets[j];
-                  if (
-                    next.kind === 'dropset' &&
-                    next.parent_set_id === s.id
-                  ) {
-                    followerIndices.push(j);
-                    j++;
-                  } else {
-                    break;
-                  }
-                }
-                const clusterSize = 1 + followerIndices.length;
-                const swipeLeftActions: SwipeAction[] = [
-                  {
-                    key: 'delete-cluster',
-                    label: '刪',
-                    color: '#FF3B30',
-                    onPress: () => onDeleteCluster(s.id),
-                  },
-                ];
-                const swipeRightActions: SwipeAction[] = [
-                  {
-                    key: 'add-cluster',
-                    label: '加',
-                    color: '#34C759',
-                    onPress: () => onAddClusterAfter(s.id),
-                  },
-                  {
-                    key: 'note-cluster',
-                    label: '備註',
-                    color: '#007AFF',
-                    onPress: () => onShowSetNote(s),
-                  },
-                ];
-                items.push(
-                  <SwipeableSetRow
-                    key={s.id}
-                    swipeLeftActions={swipeLeftActions}
-                    swipeRightActions={swipeRightActions}
-                    onLongPress={onLongPressRow}>
-                    <View style={styles.clusterStack}>
-                      <SetRowContent
-                        set={s}
-                        setLabel={setLabels[headIdx]}
-                        compact={compact}
-                        isDropsetFollower={false}
-                        isClusterLast={false}
-                        minusDisabled={false}
-                        onUpdateSet={onUpdateSet}
-                        onShowSetNote={onShowSetNote}
-                        onRemoveDropsetRow={onRemoveDropsetRow}
-                        onAddDropsetRow={onAddDropsetRow}
-                        onCycleLabel={onCycleLabel}
-                      />
-                      {followerIndices.map((fi, fIdx) => {
-                        const fset = exercise.sets[fi];
-                        return (
+          {groups.length === 0 ? null : (
+            <NestableDraggableFlatList
+              data={groups}
+              keyExtractor={(g) => g.headId}
+              activationDistance={20}
+              onDragEnd={({ data }) => {
+                const newIds = data.map((g) => g.headId);
+                const oldIds = groups.map((g) => g.headId);
+                const changed = newIds.some((id, idx) => id !== oldIds[idx]);
+                if (changed) onConfirmReorderSets(newIds);
+              }}
+              renderItem={({
+                item: g,
+                drag,
+              }: RenderItemParams<SetGroup>) => {
+                const head = g.head;
+                const isCluster =
+                  head.kind === 'dropset' && head.parent_set_id === null;
+                if (isCluster) {
+                  const clusterSize = 1 + g.followers.length;
+                  const swipeLeftActions: SwipeAction[] = [
+                    {
+                      key: 'delete-cluster',
+                      label: '刪',
+                      color: '#FF3B30',
+                      onPress: () => onDeleteCluster(head.id),
+                    },
+                  ];
+                  const swipeRightActions: SwipeAction[] = [
+                    {
+                      key: 'add-cluster',
+                      label: '加',
+                      color: '#34C759',
+                      onPress: () => onAddClusterAfter(head.id),
+                    },
+                    {
+                      key: 'note-cluster',
+                      label: '備註',
+                      color: '#007AFF',
+                      onPress: () => onShowSetNote(head),
+                    },
+                  ];
+                  return (
+                    <SwipeableSetRow
+                      swipeLeftActions={swipeLeftActions}
+                      swipeRightActions={swipeRightActions}
+                      onLongPress={drag}>
+                      <View style={styles.clusterStack}>
+                        <SetRowContent
+                          set={head}
+                          setLabel={setLabels[g.headIdx]}
+                          compact={compact}
+                          isDropsetFollower={false}
+                          isClusterLast={false}
+                          minusDisabled={false}
+                          onUpdateSet={onUpdateSet}
+                          onShowSetNote={onShowSetNote}
+                          onRemoveDropsetRow={onRemoveDropsetRow}
+                          onAddDropsetRow={onAddDropsetRow}
+                          onCycleLabel={onCycleLabel}
+                        />
+                        {g.followers.map((fset, fIdx) => (
                           <SetRowContent
                             key={fset.id}
                             set={fset}
-                            setLabel={setLabels[fi]}
+                            setLabel={setLabels[g.followerIndices[fIdx]]}
                             compact={compact}
                             isDropsetFollower
-                            isClusterLast={fIdx === followerIndices.length - 1}
+                            isClusterLast={fIdx === g.followers.length - 1}
                             minusDisabled={clusterSize <= 2}
                             onUpdateSet={onUpdateSet}
                             onShowSetNote={onShowSetNote}
@@ -1949,37 +2132,17 @@ function ExerciseBody({
                             onAddDropsetRow={onAddDropsetRow}
                             onCycleLabel={onCycleLabel}
                           />
-                        );
-                      })}
-                    </View>
-                  </SwipeableSetRow>,
-                );
-                i = j;
-              } else if (isFollower) {
-                items.push(
-                  <SetRowContent
-                    key={s.id}
-                    set={s}
-                    setLabel={setLabels[i]}
-                    compact={compact}
-                    isDropsetFollower
-                    isClusterLast
-                    minusDisabled
-                    onUpdateSet={onUpdateSet}
-                    onShowSetNote={onShowSetNote}
-                    onRemoveDropsetRow={onRemoveDropsetRow}
-                    onAddDropsetRow={onAddDropsetRow}
-                    onCycleLabel={onCycleLabel}
-                  />,
-                );
-                i++;
-              } else {
+                        ))}
+                      </View>
+                    </SwipeableSetRow>
+                  );
+                }
                 const swipeLeftActions: SwipeAction[] = [
                   {
                     key: 'delete-set',
                     label: '刪',
                     color: '#FF3B30',
-                    onPress: () => onDeleteSet(s.id),
+                    onPress: () => onDeleteSet(head.id),
                   },
                 ];
                 const swipeRightActions: SwipeAction[] = [
@@ -1987,24 +2150,23 @@ function ExerciseBody({
                     key: 'clone-set',
                     label: '加',
                     color: '#34C759',
-                    onPress: () => onCloneSetAfter(s.id),
+                    onPress: () => onCloneSetAfter(head.id),
                   },
                   {
                     key: 'note',
                     label: '備註',
                     color: '#007AFF',
-                    onPress: () => onShowSetNote(s),
+                    onPress: () => onShowSetNote(head),
                   },
                 ];
-                items.push(
+                return (
                   <SwipeableSetRow
-                    key={s.id}
                     swipeLeftActions={swipeLeftActions}
                     swipeRightActions={swipeRightActions}
-                    onLongPress={onLongPressRow}>
+                    onLongPress={drag}>
                     <SetRowContent
-                      set={s}
-                      setLabel={setLabels[i]}
+                      set={head}
+                      setLabel={setLabels[g.headIdx]}
                       compact={compact}
                       isDropsetFollower={false}
                       isClusterLast={false}
@@ -2015,13 +2177,11 @@ function ExerciseBody({
                       onAddDropsetRow={onAddDropsetRow}
                       onCycleLabel={onCycleLabel}
                     />
-                  </SwipeableSetRow>,
+                  </SwipeableSetRow>
                 );
-                i++;
-              }
-            }
-            return items;
-          })()}
+              }}
+            />
+          )}
           <View
             style={[
               styles.exFooterBtns,
