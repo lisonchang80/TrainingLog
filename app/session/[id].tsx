@@ -38,6 +38,7 @@ import {
   formatTrainingDuration,
 } from '@/src/domain/session/sessionStats';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
+import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
 
 /**
  * Session detail page — ADR-0019 Q10 final layout (slice 10c session detail).
@@ -141,7 +142,9 @@ export default function SessionDetailScreen() {
         ended_at: session.ended_at,
         kcal: session.kcal,
       },
-      exerciseCount: sessionExercises.length,
+      // overnight #47 第 5 點: dedup by exercise_id（兩個 cluster + 1 solo 共 5
+      // session_exercise row 但只算 unique 集合大小）。
+      exerciseCount: countUniqueExercises(sessionExercises),
       sets: sets.map((s) => ({
         set_kind: s.set_kind,
         is_logged: s.is_logged,

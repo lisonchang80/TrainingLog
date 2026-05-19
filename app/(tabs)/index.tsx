@@ -72,6 +72,7 @@ import {
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
+import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { BodyDataSheet } from '@/components/session/body-data-sheet';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
@@ -1658,7 +1659,7 @@ export default function TodayScreen() {
                 reps: s.reps,
                 weight_kg: s.weight_kg,
               }))}
-              exercise_count={plan.length}
+              exercise_count={countUniqueExercises(plan)}
               started_at_ms={sessionState.started_at}
             />
           ) : null}
