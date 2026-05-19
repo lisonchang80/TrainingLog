@@ -1465,6 +1465,7 @@ export default function TemplateEditorView() {
                       renderItem={({
                         item: c,
                         drag,
+                        isActive,
                       }: RenderItemParams<CycleItem>) => {
                         const i = c.cycle_idx;
                         const parentSet = parent.sets[i];
@@ -1501,7 +1502,11 @@ export default function TemplateEditorView() {
                               },
                             ]}
                             onLongPress={drag}>
-                            <View style={styles.exSuperRow}>
+                            <View
+                              style={[
+                                styles.exSuperRow,
+                                isActive && styles.dragActiveRow,
+                              ]}>
                               <View style={styles.exSuperCol}>
                                 {renderCell(parent, parentMeta, i)}
                               </View>
@@ -2109,6 +2114,7 @@ function ExerciseBody({
               renderItem={({
                 item: g,
                 drag,
+                isActive,
               }: RenderItemParams<SetGroup>) => {
                 const head = g.head;
                 const isCluster =
@@ -2142,7 +2148,11 @@ function ExerciseBody({
                       swipeLeftActions={swipeLeftActions}
                       swipeRightActions={swipeRightActions}
                       onLongPress={drag}>
-                      <View style={styles.clusterStack}>
+                      <View
+                        style={[
+                          styles.clusterStack,
+                          isActive && styles.dragActiveRow,
+                        ]}>
                         <SetRowContent
                           set={head}
                           setLabel={setLabels[g.headIdx]}
@@ -2203,19 +2213,21 @@ function ExerciseBody({
                     swipeLeftActions={swipeLeftActions}
                     swipeRightActions={swipeRightActions}
                     onLongPress={drag}>
-                    <SetRowContent
-                      set={head}
-                      setLabel={setLabels[g.headIdx]}
-                      compact={compact}
-                      isDropsetFollower={false}
-                      isClusterLast={false}
-                      minusDisabled={false}
-                      onUpdateSet={onUpdateSet}
-                      onShowSetNote={onShowSetNote}
-                      onRemoveDropsetRow={onRemoveDropsetRow}
-                      onAddDropsetRow={onAddDropsetRow}
-                      onCycleLabel={onCycleLabel}
-                    />
+                    <View style={isActive ? styles.dragActiveRow : undefined}>
+                      <SetRowContent
+                        set={head}
+                        setLabel={setLabels[g.headIdx]}
+                        compact={compact}
+                        isDropsetFollower={false}
+                        isClusterLast={false}
+                        minusDisabled={false}
+                        onUpdateSet={onUpdateSet}
+                        onShowSetNote={onShowSetNote}
+                        onRemoveDropsetRow={onRemoveDropsetRow}
+                        onAddDropsetRow={onAddDropsetRow}
+                        onCycleLabel={onCycleLabel}
+                      />
+                    </View>
                   </SwipeableSetRow>
                 );
               }}
@@ -2396,6 +2408,21 @@ const styles = StyleSheet.create({
   setsBoxCompact: { paddingHorizontal: 8, paddingBottom: 8, paddingTop: 6 },
   setRowPlaceholder: { height: 32 },
   clusterStack: { gap: 4 },
+  // overnight #49 follow-up — drag-active visual feedback for inline reorder
+  // (set / cycle row 長按拖曳啟動時)。Mirror session 端
+  // `exerciseCardSetRowDragActive` / `cycleRowDragActive` 模式，用戶要求「跟
+  // session 一樣，長按可拖曳時變白色」。Background `#ffffff` 比 session 的
+  // `#f3f4f6` 更白，因為 template editor cluster card 內已是淡彩色 tinted 底，
+  // pure white 對比更明顯。
+  dragActiveRow: {
+    backgroundColor: '#ffffff',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    borderRadius: 8,
+  },
   supersetRowNoteSlot: {
     width: 28,
     alignItems: 'center',
