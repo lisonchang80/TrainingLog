@@ -866,8 +866,12 @@ const styles = StyleSheet.create({
   section: { fontSize: 14, fontWeight: '600', marginTop: 12, color: '#6B7280' },
 
   exCard: {
+    // overnight #47 第 2 點: 細灰 border + 白底，mirror cluster card 外框
+    // style 對齊。原本淺灰底 0.08 alpha → 純白 + hairline border。
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
+    backgroundColor: '#fff',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(127,127,127,0.3)',
     overflow: 'hidden',
     marginTop: 8,
   },
