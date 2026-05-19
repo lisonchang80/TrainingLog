@@ -19,7 +19,7 @@ import {
   createTemplate,
   findTemplateByTriple,
   listDistinctSubTags,
-  listTemplates,
+  listTemplateGroupsByName,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import {
@@ -72,7 +72,11 @@ export default function TemplatesScreen() {
   const [lastUsedSubTag, setLastUsedSubTag] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const list = await listTemplates(db);
+    // Round 41 polish (Q1 = B): Templates tab list view dedupes by name —
+    // 一個 name 一條 row，視覺不再被 4 個同名 (program, sub_tag) clone 霸占。
+    // 用戶 tap row 進 start sheet 後再透過 (計劃, 強度) radio 選具體 identity，
+    // onStart 的 lookup-or-spawn (round 38) 接住具體 sibling。
+    const list = await listTemplateGroupsByName(db);
     setRows(list);
   }, [db]);
 
