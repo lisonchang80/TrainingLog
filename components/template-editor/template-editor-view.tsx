@@ -58,6 +58,7 @@ import {
   applyRecolorSiblings,
   applyRenameSiblings,
   commitTemplateDraft,
+  deleteTemplate,
   getTemplateFull,
   queryMemoryCandidates,
   queryReusableSupersetMemory,
@@ -249,6 +250,36 @@ export default function TemplateEditorView() {
       setBusy(false);
     }
   }, [dirty, draft, busy, persistDraft, id, db]);
+
+  const onDeleteTemplate = useCallback(() => {
+    if (!id || !draft || busy) return;
+    const programName = draft.program_id
+      ? programs.find((p) => p.id === draft.program_id)?.name ?? '通用'
+      : null;
+    const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
+    Alert.alert(
+      '刪除模板？',
+      `將永久刪除「${draft.name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '刪除',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await deleteTemplate(db, id);
+              router.back();
+            } catch (e) {
+              Alert.alert('刪除失敗', e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [id, draft, busy, db, programs, router]);
 
   const onStartSession = useCallback(async () => {
     if (!id || !draft || busy) return;
@@ -1425,11 +1456,7 @@ export default function TemplateEditorView() {
                       '另存模板',
                       'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
                     );
-                  else if (idx === 1)
-                    Alert.alert(
-                      '刪除模板',
-                      '請從 Templates list 進入 swipe-to-delete（slice 9.5 暫不實作 inline 刪除）。',
-                    );
+                  else if (idx === 1) onDeleteTemplate();
                 },
               )
             }>

@@ -356,14 +356,48 @@ export async function updateTemplateName(
 }
 
 /**
- * Permanently remove a Template and all its exercise rows. Past Sessions
- * snapshotted from this template are NOT touched (their `session_exercise`
- * rows still hold a stale `template_id` reference; we never join back from
- * Session → Template, so a dangling pointer is harmless).
+ * Permanently remove a Template along with its full child cascade (per
+ * simulator-db-query SKILL Step 4): template_set → template_exercise →
+ * template. We also clean up `session_exercise.template_id` dangling
+ * pointers so 5/19 morning wave's `lookup-or-spawn` flow (#38/#42) cannot
+ * bite a ghost id — ENDED sessions get their pointer set to NULL while
+ * ACTIVE sessions (`ended_at IS NULL`) are left untouched (an in-progress
+ * session keeps its 'started from this template' link until it finishes).
+ *
+ * Session history is unaffected: `session_exercise` rows remain with their
+ * full snapshot of name/ordering/sets so the session detail page still
+ * renders as before; only the back-pointer to the now-deleted template is
+ * cleared.
+ *
+ * Wrapped in a single transaction so a mid-cascade failure rolls back
+ * cleanly and the three template tables stay consistent.
  */
 export async function deleteTemplate(db: Database, id: string): Promise<void> {
   await db.withTransactionAsync(async () => {
+    // 1. Dangling pointer cleanup on session_exercise.template_id, excluding
+    //    active sessions (ended_at IS NULL) per simulator-db-query SOP.
+    await db.runAsync(
+      `UPDATE session_exercise
+          SET template_id = NULL
+        WHERE template_id = ?
+          AND session_id NOT IN (
+            SELECT id FROM session WHERE ended_at IS NULL
+          )`,
+      id
+    );
+    // 2. template_set is referenced from template_exercise; drop it first so
+    //    the cascade is explicit and tests don't have to rely on
+    //    foreign_keys=ON ON DELETE CASCADE.
+    await db.runAsync(
+      `DELETE FROM template_set
+        WHERE template_exercise_id IN (
+          SELECT id FROM template_exercise WHERE template_id = ?
+        )`,
+      id
+    );
+    // 3. template_exercise.
     await db.runAsync(`DELETE FROM template_exercise WHERE template_id = ?`, id);
+    // 4. template row itself.
     await db.runAsync(`DELETE FROM template WHERE id = ?`, id);
   });
 }
