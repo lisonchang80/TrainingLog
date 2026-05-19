@@ -12,14 +12,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { useDatabase } from '@/components/database-provider';
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import {
   cloneTemplateWithSubTag,
   createTemplate,
+  deleteTemplate,
   findTemplateByTriple,
   listDistinctSubTags,
   listTemplateGroupsByName,
+  listTemplateVariantsByName,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import {
@@ -29,6 +32,8 @@ import {
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
+import { formatTemplateTriple } from '@/src/domain/template/templateManager';
+import { isTemplateDeletable } from '@/src/domain/template/templateOps';
 import {
   getSetting,
   setSetting,
@@ -142,6 +147,111 @@ export default function TemplatesScreen() {
   };
 
   const closeSheet = () => setSheetTemplate(null);
+
+  /**
+   * Slice 10c overnight #54 — swipe-to-delete handler for the Templates tab
+   * list. Because the list dedupes by name (`listTemplateGroupsByName` round
+   * 41), one row stands in for an entire ADR-0003 三元組 sibling group. The
+   * UX「左滑刪除一行」expects to nuke the whole group, not just the
+   * representative — partial deletion would leave orphans visible only via
+   * the start-sheet's lookup-or-spawn, surprising the user.
+   *
+   * Gate (mirrors #46 isTemplateDeletable rule): if ANY sibling in the group
+   * is a 通用 variant (program_id IS NULL OR sub_tag IS NULL), the whole
+   * group is non-deletable from this entry point — those variants are the
+   * 3-tier prefill resolver's base fallback (slice 10c #35) and we don't
+   * want them silently disappearing as collateral. The user can still drill
+   * into the editor for a concrete sibling and use the editor menu path
+   * (#44) which targets a single triple variant.
+   *
+   * Confirm Alert enumerates every variant's triple (mirror #44 editor
+   * menu UX) so the user sees exactly what will be deleted. On confirm we
+   * await each `deleteTemplate(db, id)` sequentially — each one already
+   * runs its own transaction (template_set → template_exercise → template
+   * + session_exercise.template_id NULL cleanup for ENDED sessions).
+   */
+  const onSwipeDeleteGroup = async (item: TemplateSummary) => {
+    setBusy(true);
+    let variants: Awaited<ReturnType<typeof listTemplateVariantsByName>> = [];
+    let programOptions: ProgramOption[] = [];
+    try {
+      const [variantList, programSummaries] = await Promise.all([
+        listTemplateVariantsByName(db, item.name),
+        listPrograms(db),
+      ]);
+      variants = variantList;
+      programOptions = programSummaries.map((p) => ({ id: p.id, name: p.name }));
+    } catch (e) {
+      setBusy(false);
+      Alert.alert(
+        '無法讀取模板',
+        e instanceof Error ? e.message : String(e),
+      );
+      return;
+    } finally {
+      setBusy(false);
+    }
+
+    if (variants.length === 0) {
+      // Defensive: list row exists but DB query found nothing (race with
+      // another delete). Just refresh the list so the row disappears.
+      await load();
+      return;
+    }
+
+    // Gate — any 通用 variant in the group blocks the swipe delete. We
+    // already disabled the swipe at the row level, but double-check here
+    // in case a sibling was added between list load and tap.
+    const groupHasUniversal = variants.some(
+      (v) => !isTemplateDeletable({ program_id: v.program_id, sub_tag: v.sub_tag })
+    );
+    if (groupHasUniversal) {
+      Alert.alert(
+        '無法刪除',
+        '此模板有「通用」變體（計畫或強度未指定），是歷史 prefill 的兜底層、不可刪。\n\n若需刪除個別非通用變體，請點該 row 進入編輯器、從 ⋯ 選單刪除。',
+      );
+      return;
+    }
+
+    const tripleLines = variants
+      .map((v) => {
+        const programName = v.program_id
+          ? programOptions.find((p) => p.id === v.program_id)?.name ?? '通用'
+          : null;
+        return `  • ${formatTemplateTriple(programName, v.sub_tag)}`;
+      })
+      .join('\n');
+    const body =
+      variants.length === 1
+        ? `將永久刪除「${item.name}」(${tripleLines.trim().replace(/^•\s*/, '')})。此操作無法復原。\n\n歷史 session 紀錄不受影響。`
+        : `將永久刪除「${item.name}」的全部 ${variants.length} 個變體：\n${tripleLines}\n\n此操作無法復原。歷史 session 紀錄不受影響。`;
+
+    Alert.alert(`刪除「${item.name}」？`, body, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '刪除',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            for (const v of variants) {
+              await deleteTemplate(db, v.id);
+            }
+            await load();
+          } catch (e) {
+            Alert.alert(
+              '刪除失敗',
+              e instanceof Error ? e.message : String(e),
+            );
+            // Best-effort reload so partial successes are reflected.
+            await load();
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
 
   /**
    * Inline「新增計畫」handler — creates a minimal Program (name + ADR-0004
@@ -443,17 +553,35 @@ export default function TemplatesScreen() {
           </Text>
         }
         renderItem={({ item }) => (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onRowPress(item)}
-            disabled={busy}
-            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-            <Text style={styles.rowName}>{item.name}</Text>
-            <Text style={styles.rowDetails}>
-              {item.exerciseCount} exercise{item.exerciseCount === 1 ? '' : 's'} ·{' '}
-              edited {formatTimestamp(item.updated_at)}
-            </Text>
-          </Pressable>
+          // overnight #54 — wrap each row in SwipeableSetRow (shared with
+          // session set + cluster + template editor set, see ADR-0019 Q9).
+          // Left swipe reveals 刪除; the handler enumerates variants + gates
+          // 通用 groups + cascades via deleteTemplate. Representative-row gate
+          // (item.program_id / item.sub_tag) is a cheap fast-path; the
+          // handler re-verifies against the full sibling set so a sibling
+          // added between load + tap can't sneak past.
+          <SwipeableSetRow
+            enabled={!busy}
+            swipeLeftActions={[
+              {
+                key: 'delete',
+                label: '刪除',
+                color: '#dc2626',
+                onPress: () => onSwipeDeleteGroup(item),
+              },
+            ]}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onRowPress(item)}
+              disabled={busy}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+              <Text style={styles.rowName}>{item.name}</Text>
+              <Text style={styles.rowDetails}>
+                {item.exerciseCount} exercise{item.exerciseCount === 1 ? '' : 's'} ·{' '}
+                edited {formatTimestamp(item.updated_at)}
+              </Text>
+            </Pressable>
+          </SwipeableSetRow>
         )}
       />
       <StartTemplateSheet
