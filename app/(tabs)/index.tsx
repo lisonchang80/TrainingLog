@@ -68,6 +68,10 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
 import {
+  buildSessionReorderRows,
+  expandClusterIds,
+} from '@/src/domain/session/reorderSessionItems';
+import {
   NestableScrollContainer,
   NestableDraggableFlatList,
   type RenderItemParams,
@@ -2189,16 +2193,23 @@ export default function TodayScreen() {
         }}
         onCancel={() => setKeypadTarget(null)}
       />
+      {(() => {
+        // 同 session 詳情頁編輯模式：cluster parent + child collapse 成單列「A + B」、
+        // children 不獨立顯示；confirm 時 expandClusterIds 把 child id 塞回 parent id 後面。
+        const { rows: reorderRows, childByParent } =
+          buildSessionReorderRows(plan);
+        return (
       <ReorderExercisesSheet
         visible={reorderSheetOpen}
-        initialItems={plan.map((p) => ({
-          id: p.id,
-          name: p.exercise_name,
-        }))}
-        onConfirm={async (orderedIds) => {
+        initialItems={reorderRows}
+        onConfirm={async (orderedParentIds) => {
           setReorderSheetOpen(false);
           const session_id = getSessionId(sessionState);
           if (!session_id) return;
+          const orderedIds = expandClusterIds(
+            orderedParentIds,
+            childByParent,
+          );
           try {
             await reorderSessionExercises(db, {
               session_id,
@@ -2214,6 +2225,8 @@ export default function TodayScreen() {
         }}
         onCancel={() => setReorderSheetOpen(false)}
       />
+        );
+      })()}
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
         initialValue={exerciseNoteTarget?.initial ?? null}

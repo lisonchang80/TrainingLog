@@ -34,6 +34,10 @@ import {
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
+import {
+  buildSessionReorderRows,
+  expandClusterIds,
+} from '@/src/domain/session/reorderSessionItems';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import {
@@ -1789,27 +1793,40 @@ export default function SessionDetailScreen() {
         }}
         onCancel={() => setKeypadTarget(null)}
       />
-      <ReorderExercisesSheet
-        visible={reorderSheetOpen}
-        initialItems={sessionExercises.map((p) => ({
-          id: p.id,
-          name: p.exercise_name,
-        }))}
-        onConfirm={async (orderedIds) => {
-          setReorderSheetOpen(false);
-          if (!id) return;
-          try {
-            await reorderSessionExercises(db, { session_id: id, orderedIds });
-            await load();
-          } catch (e) {
-            Alert.alert(
-              '排序失敗',
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-        }}
-        onCancel={() => setReorderSheetOpen(false)}
-      />
+      {(() => {
+        // Cluster (parent + child) collapse 成單列「A + B」、children 不獨立顯示。
+        // onConfirm 時用 expandClusterIds 把 child id 塞回 parent id 後面，
+        // 保 reorderSessionExercises 的 1..N 連續 ordering 中 cluster A↔B 緊鄰。
+        const { rows: reorderRows, childByParent } =
+          buildSessionReorderRows(sessionExercises);
+        return (
+          <ReorderExercisesSheet
+            visible={reorderSheetOpen}
+            initialItems={reorderRows}
+            onConfirm={async (orderedParentIds) => {
+              setReorderSheetOpen(false);
+              if (!id) return;
+              const orderedIds = expandClusterIds(
+                orderedParentIds,
+                childByParent,
+              );
+              try {
+                await reorderSessionExercises(db, {
+                  session_id: id,
+                  orderedIds,
+                });
+                await load();
+              } catch (e) {
+                Alert.alert(
+                  '排序失敗',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }}
+            onCancel={() => setReorderSheetOpen(false)}
+          />
+        );
+      })()}
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
         initialValue={exerciseNoteTarget?.initial ?? null}
