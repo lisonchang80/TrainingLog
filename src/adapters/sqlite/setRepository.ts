@@ -90,8 +90,25 @@ export async function insertSessionSet(
  * references `set.id` (PR replay / achievements run on copies / derived
  * state). Caller should ensure session is still in_progress.
  */
+/**
+ * Delete a set row. Cascades into the dropset chain when the target row is a
+ * dropset HEAD: all rows with `parent_set_id = set_id` are deleted in the
+ * same transaction so no follower is left orphaned (parent_set_id pointing
+ * to a nonexistent head) — symptom user saw 2026-05-20 after swipe-deleting
+ * a dropset head: 2 empty-label rows remained on the card with no D1 head.
+ *
+ * For non-dropset rows OR dropset followers, the cascade DELETE is a no-op
+ * (only dropset heads accumulate followers), so the function is safe to
+ * call from every existing delete path.
+ */
 export async function deleteSet(db: Database, set_id: string): Promise<void> {
-  await db.runAsync(`DELETE FROM "set" WHERE id = ?`, set_id);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `DELETE FROM "set" WHERE parent_set_id = ?`,
+      set_id
+    );
+    await db.runAsync(`DELETE FROM "set" WHERE id = ?`, set_id);
+  });
 }
 
 export async function listAllSets(db: Database): Promise<SetRow[]> {
