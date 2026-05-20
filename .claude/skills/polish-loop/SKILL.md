@@ -80,6 +80,8 @@ Don't write prompt blind. Confirm exact file paths + line numbers. Spot existing
 ## 規則
 - 每點 commit + push，commit message 結尾加：
   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+- **commit-not-push 變體**：parent 收尾用 cherry-pick 整合時、每點仍 commit、最後 parent push（agent 自己不 push）
+- **強制每步 commit、不要 batch end-of-task**：agent stream watchdog 可能在 final-report 階段 timeout、未 commit 的工作全失（2026-05-20 night Agent B 真實踩到、517s 0 commits 重 launch）。寫完一個 file / 修完一個 bug → 立刻 commit。Pre-report 強制 `git status` 確認 working tree clean
 - `npm test` 每 commit 前綠（XXX+ → 目標只升不降）
 - `npx tsc --noEmit` clean
 - LSP false positive (Text/View/String/Number/Date/Promise) **忽略**，tsc 為準
