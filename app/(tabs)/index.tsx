@@ -526,6 +526,29 @@ export default function TodayScreen() {
     );
     const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
 
+    // 2026-05-20 fix — 「新增 1 組」 should extend the EXISTING last group:
+    // if exercise ends in a dropset chain, append another follower (mirror
+    // the inline `+` button + right-swipe routing). Without this, the new
+    // row was always set_kind='working' and appeared as a new D1 + a
+    // working row below the chain, contradicting「新增最後一組」semantics.
+    if (lastSetInSession?.set_kind === 'dropset') {
+      setBusy(true);
+      try {
+        await addSessionDropsetRow(db, {
+          session_id,
+          after_set_id: lastSetInSession.id,
+          uuid: randomUUID,
+        });
+        const sets = await listSetsBySession(db, session_id);
+        setSetsInSession(sets);
+      } catch (e) {
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     let weight_kg = 0;
     let repsNum = 10; // Starter default for true first-time exercises
 

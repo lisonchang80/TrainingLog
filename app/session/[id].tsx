@@ -442,6 +442,26 @@ export default function SessionDetailScreen() {
       );
       const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
 
+      // 2026-05-20 fix — 「新增 1 組」 extends an existing dropset chain
+      // instead of inserting a new working set after it (mirror Today
+      // app/(tabs)/index.tsx). 「最後一組」對應到 chain 尾的下一格 = follower。
+      if (lastSetInSession?.set_kind === 'dropset') {
+        setBusy(true);
+        try {
+          await addSessionDropsetRow(db, {
+            session_id: id,
+            after_set_id: lastSetInSession.id,
+            uuid: randomUUID,
+          });
+          await load();
+        } catch (e) {
+          Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+
       let weight_kg = 0;
       let repsNum = 10;
       if (lastSetInSession) {
