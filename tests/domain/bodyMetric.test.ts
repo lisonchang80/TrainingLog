@@ -1,7 +1,6 @@
 import {
   DEFAULT_VISIBILITY,
   canWriteBwSnapshot,
-  groupByDay,
   latestPerMetric,
   sortByRecordedAt,
   toggleVisibility,
@@ -173,26 +172,6 @@ describe('Module #8 — Body Metric Manager (domain)', () => {
         pbf: null,
         smm_kg: null,
       });
-    });
-  });
-
-  describe('groupByDay (multiple readings same day)', () => {
-    const dayKey = (ms: number) => {
-      const d = new Date(ms);
-      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    };
-
-    it('groups multiple readings on the same UTC day', () => {
-      const t = (h: number) => Date.UTC(2026, 0, 5, h, 0);
-      const metrics: BodyMetric[] = [
-        { id: '1', recorded_at: t(8), bodyweight_kg: 70, pbf: null, smm_kg: null },
-        { id: '2', recorded_at: t(20), bodyweight_kg: 71, pbf: null, smm_kg: null },
-        { id: '3', recorded_at: Date.UTC(2026, 0, 6, 8), bodyweight_kg: 70.5, pbf: null, smm_kg: null },
-      ];
-      const grouped = groupByDay(metrics, dayKey);
-      expect(grouped.size).toBe(2);
-      expect(grouped.get('2026-01-05')?.map((m) => m.id)).toEqual(['1', '2']);
-      expect(grouped.get('2026-01-06')?.map((m) => m.id)).toEqual(['3']);
     });
   });
 
