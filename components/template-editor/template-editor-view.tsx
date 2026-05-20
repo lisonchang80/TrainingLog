@@ -807,16 +807,31 @@ export default function TemplateEditorView() {
     [],
   );
 
+  // Template editor 「動作歷史」 button → exercise-history page (slice 9.5 stub
+  // 落地, 2026-05-21 wave 13 mini wave). Template editor is design-time so we
+  // don't have a `session_exercise_id` to pass — caller pattern mirrors
+  // `app/superset/[id].tsx::FooterButton` (no `currentSeId*` params).
+  //
+  // Solo card → clusterMode=exclude_cluster (mirror session detail page solo
+  // card at app/session/[id].tsx:1547).
+  // Cluster card → clusterMode=cluster_only + partner + side=A (mirror session
+  // detail page cluster card at app/session/[id].tsx:1437). For manual clusters
+  // with N>1 children, treat children[0] as B side (matches how the cluster
+  // header reads pair info in `computeTemplateClusterStat`).
   const showExerciseHistory = (ex: TemplateExercise) => {
-    Alert.alert(
-      `${ex.name ?? '(動作)'}· 動作歷史`,
-      'production 會跳到動作歷史頁。slice 9.5 暫顯示對話框。',
-    );
+    router.push(`/exercise-history/${ex.exercise_id}?clusterMode=exclude_cluster`);
   };
 
   const showSupersetHistory = (parent: TemplateExercise, children: TemplateExercise[]) => {
-    const names = [parent.name ?? '(動作)', ...children.map((c) => c.name ?? '(動作)')].join(' + ');
-    Alert.alert(`${names} · 動作歷史`, 'production 整 superset 跨動作歷史。');
+    const b = children[0];
+    if (!b) {
+      // Defensive: no B side → fall back to solo view.
+      router.push(`/exercise-history/${parent.exercise_id}?clusterMode=exclude_cluster`);
+      return;
+    }
+    router.push(
+      `/exercise-history/${parent.exercise_id}?clusterMode=cluster_only&partner=${b.exercise_id}&side=A`,
+    );
   };
 
   const openExerciseNoteEditor = (ex: TemplateExercise) => {
