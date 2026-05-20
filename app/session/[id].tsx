@@ -93,11 +93,7 @@ import {
   parseSameDayIds,
   siblingId,
 } from '@/src/domain/session/sameDayNav';
-import {
-  computeDetailPageStats,
-  formatTrainingDuration,
-} from '@/src/domain/session/sessionStats';
-import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
+import { computeDetailPageStats } from '@/src/domain/session/sessionStats';
 import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 
@@ -1473,7 +1469,17 @@ export default function SessionDetailScreen() {
 
       {/* Header — back btn + title */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.headerBackBtn}>
+        <Pressable
+          onPress={() => {
+            // 編輯模式下，「返回」先退出編輯模式而不是離開詳情頁；
+            // 否則才走 router.back() 回到上一頁（日曆 / 表列 / 另一個 session）。
+            if (editMode) {
+              setEditMode(false);
+            } else {
+              router.back();
+            }
+          }}
+          style={styles.headerBackBtn}>
           <Text style={styles.headerBackText}>‹ 返回</Text>
         </Pressable>
         <Text style={styles.headerTitle}>{titleText}</Text>
@@ -1912,43 +1918,77 @@ function formatTimestamp(ms: number): string {
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Filter unchecked (is_logged !== 1) sets from a solo exercise card.
- * Returns `null` when every set is unchecked (caller hides the whole card).
+ * Resolve a set's "effective is_logged": for dropset followers, walk up to
+ * the head and use the head's is_logged. Followers themselves are not
+ * separately toggleable in UI — the head's ✓ represents the whole chain.
  */
-function filterUncheckedSolo<T extends { is_logged: number }>(
-  sets: T[],
-): T[] | null {
-  const visible = sets.filter((s) => s.is_logged === 1);
+function resolveEffectiveLogged<
+  T extends {
+    id: string;
+    is_logged: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+  },
+>(set: T, byId: Map<string, T>): number {
+  if (set.set_kind === 'dropset' && set.parent_set_id != null) {
+    const head = byId.get(set.parent_set_id);
+    if (head) return head.is_logged;
+  }
+  return set.is_logged;
+}
+
+/**
+ * Filter unchecked (effective is_logged !== 1) sets from a solo exercise card.
+ * Dropset chains are treated as one unit — if head is logged, all followers
+ * stay visible (chain integrity). Returns `null` when every set is unchecked
+ * (caller hides the whole card).
+ */
+function filterUncheckedSolo<
+  T extends {
+    id: string;
+    is_logged: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+  },
+>(sets: T[]): T[] | null {
+  const byId = new Map(sets.map((s) => [s.id, s] as const));
+  const visible = sets.filter((s) => resolveEffectiveLogged(s, byId) === 1);
   if (sets.length > 0 && visible.length === 0) return null;
   return visible;
 }
 
 /**
  * Pair-aligned filter for cluster cycles: hide a cycle only when BOTH the
- * A side and B side of that cycle are unchecked. This preserves cycle pairing
- * (sides must remain index-aligned for ClusterCard's cycle math). Returns
- * `null` when every paired cycle is fully unchecked.
+ * A side and B side of that cycle are (effectively) unchecked. Dropset
+ * followers inherit their head's logged state so the whole chain travels
+ * together. Returns `null` when every paired cycle is fully unchecked.
  */
-function filterUncheckedClusterPair<T extends { is_logged: number }>(
-  setsA: T[],
-  setsB: T[],
-): { setsA: T[]; setsB: T[] } | null {
+function filterUncheckedClusterPair<
+  T extends {
+    id: string;
+    is_logged: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+  },
+>(setsA: T[], setsB: T[]): { setsA: T[]; setsB: T[] } | null {
+  const byIdA = new Map(setsA.map((s) => [s.id, s] as const));
+  const byIdB = new Map(setsB.map((s) => [s.id, s] as const));
   const n = Math.min(setsA.length, setsB.length);
   const outA: T[] = [];
   const outB: T[] = [];
   for (let i = 0; i < n; i++) {
-    const aUnchecked = setsA[i].is_logged !== 1;
-    const bUnchecked = setsB[i].is_logged !== 1;
-    if (aUnchecked && bUnchecked) continue;
+    const aLogged = resolveEffectiveLogged(setsA[i], byIdA) === 1;
+    const bLogged = resolveEffectiveLogged(setsB[i], byIdB) === 1;
+    if (!aLogged && !bLogged) continue;
     outA.push(setsA[i]);
     outB.push(setsB[i]);
   }
   // Leftover (defensive — sides usually equal length): drop unchecked tail sets.
   for (let i = n; i < setsA.length; i++) {
-    if (setsA[i].is_logged === 1) outA.push(setsA[i]);
+    if (resolveEffectiveLogged(setsA[i], byIdA) === 1) outA.push(setsA[i]);
   }
   for (let i = n; i < setsB.length; i++) {
-    if (setsB[i].is_logged === 1) outB.push(setsB[i]);
+    if (resolveEffectiveLogged(setsB[i], byIdB) === 1) outB.push(setsB[i]);
   }
   if (
     (setsA.length > 0 || setsB.length > 0) &&
@@ -1979,17 +2019,19 @@ function SoloExerciseBlock({
   exercise: SessionExerciseRowWithName;
   sets: SessionSetWithExercise[];
 }) {
-  // overnight #47 第 1 點: reuse history page's label helper so
-  // warmup→「熱」、working→「1/2/3」、dropset→「D1/D2」.
+  // Session 詳情頁 read mode：用 computeSessionSetLayout，dropset chain
+  // 只在 head 顯示 `D{N}`、follower 留空（mirror active session / edit mode）。
+  // 避免出現 D1..D12 把整條 chain 每個 row 都當獨立 D 算的問題。
   const labelMap = useMemo(
     () =>
-      computeHistorySetLabels(
+      computeSessionSetLayout(
         sets.map((s) => ({
           id: s.id,
           set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
           ordering: s.ordering,
         }))
-      ),
+      ).labels,
     [sets]
   );
   return (
@@ -2123,26 +2165,30 @@ function ClusterBlock({
     a: cluster.setsA[i] ?? null,
     b: cluster.setsB[i] ?? null,
   }));
+  // 與 SoloExerciseBlock 同理：cluster 兩側各自用 computeSessionSetLayout
+  // 讓 dropset chain 的 D{N} 只標在 head row、follower 留空。
   const labelsA = useMemo(
     () =>
-      computeHistorySetLabels(
+      computeSessionSetLayout(
         cluster.setsA.map((s) => ({
           id: s.id,
           set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
           ordering: s.ordering,
         })),
-      ),
+      ).labels,
     [cluster.setsA],
   );
   const labelsB = useMemo(
     () =>
-      computeHistorySetLabels(
+      computeSessionSetLayout(
         cluster.setsB.map((s) => ({
           id: s.id,
           set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
           ordering: s.ordering,
         })),
-      ),
+      ).labels,
     [cluster.setsB],
   );
   return (
