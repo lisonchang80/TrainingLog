@@ -211,6 +211,11 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  // Detail 頁的 stats / time editor 永遠 frozen — 不該因為 session.ended_at 為
+  // null（in-progress 邊角情況）而觸發 SessionStatsPanel 的 1-sec tick 或
+  // SessionTimeEditorSheet 在 prop 漂移時 reset state。capture-once 在 mount 當
+  // 下，作為任何 null ended_at 的 stable fallback (2026-05-20 fix)。
+  const [viewOpenedAtMs] = useState(() => Date.now());
   // ADR-0019 Q3 single-expanded card — only used in edit mode (mirror Today).
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(
     null,
@@ -1426,7 +1431,7 @@ export default function SessionDetailScreen() {
                   }))}
                   exercise_count={countUniqueExercises(sessionExercises)}
                   started_at_ms={session.started_at}
-                  ended_at_ms={session.ended_at}
+                  ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={
                     session.ended_at != null
                       ? () => setTimeEditorOpen(true)
@@ -1476,7 +1481,7 @@ export default function SessionDetailScreen() {
                   }))}
                   exercise_count={countUniqueExercises(sessionExercises)}
                   started_at_ms={session.started_at}
-                  ended_at_ms={session.ended_at}
+                  ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={
                     session.ended_at != null
                       ? () => setTimeEditorOpen(true)
@@ -1689,8 +1694,8 @@ export default function SessionDetailScreen() {
           we only navigate here after endSession). */}
       <SessionTimeEditorSheet
         visible={timeEditorOpen}
-        started_at_ms={session?.started_at ?? 0}
-        ended_at_ms={session?.ended_at ?? Date.now()}
+        started_at_ms={session?.started_at ?? viewOpenedAtMs}
+        ended_at_ms={session?.ended_at ?? viewOpenedAtMs}
         onSave={handleTimeSave}
         onClose={() => setTimeEditorOpen(false)}
       />
