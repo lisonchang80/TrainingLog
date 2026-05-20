@@ -137,40 +137,7 @@ export function SetRowContent<S extends SetRowItem>({
 
   return (
     <View style={[styles.setRow, compact && styles.setRowCompact]}>
-      {hideLabel ? null : isDropsetFollower ? (
-        // Dropset follower: -/+ button group occupies the label slot.
-        // − always shown (with disabled state when chain at minimum 2 rows).
-        // + only on the chain-last follower (isClusterLast).
-        <View style={styles.dropsetLeftGroup}>
-          <Pressable
-            onPress={() => onRemoveDropsetRow(set.id)}
-            disabled={minusDisabled}
-            hitSlop={6}
-            style={[
-              styles.dropsetInlineBtn,
-              minusDisabled && styles.dropsetTailBtnDisabled,
-            ]}>
-            <Text
-              style={[
-                styles.dropsetInlineBtnText,
-                minusDisabled && styles.dropsetTailBtnTextDisabled,
-              ]}>
-              −
-            </Text>
-          </Pressable>
-          {isClusterLast ? (
-            <Pressable
-              onPress={() => onAddDropsetRow(set.id)}
-              hitSlop={6}
-              style={styles.dropsetInlineBtn}>
-              <Text style={styles.dropsetInlineBtnText}>+</Text>
-            </Pressable>
-          ) : (
-            // Reserve slot for + so single-button rows still align with two-button rows.
-            <View style={styles.dropsetInlineBtnPlaceholder} />
-          )}
-        </View>
-      ) : (
+      {hideLabel ? null : (
         <Pressable
           onPress={() => {
             if (!isDropsetFollower) onCycleLabel(set);
@@ -226,6 +193,41 @@ export function SetRowContent<S extends SetRowItem>({
           keyboardType="number-pad"
         />
       )}
+      {/* Dropset follower −/+ — directly after reps, before note slot
+          (2026-05-20 user request: 「請放在次數的右邊」). − always shown
+          (minusDisabled state when chain at minimum 2 rows); + only on
+          chain-last follower; placeholder reserves + slot on non-last
+          followers so input columns stay aligned across all rows. */}
+      {isDropsetFollower ? (
+        <View style={styles.dropsetLeftGroup}>
+          <Pressable
+            onPress={() => onRemoveDropsetRow(set.id)}
+            disabled={minusDisabled}
+            hitSlop={6}
+            style={[
+              styles.dropsetInlineBtn,
+              minusDisabled && styles.dropsetTailBtnDisabled,
+            ]}>
+            <Text
+              style={[
+                styles.dropsetInlineBtnText,
+                minusDisabled && styles.dropsetTailBtnTextDisabled,
+              ]}>
+              −
+            </Text>
+          </Pressable>
+          {isClusterLast ? (
+            <Pressable
+              onPress={() => onAddDropsetRow(set.id)}
+              hitSlop={6}
+              style={styles.dropsetInlineBtn}>
+              <Text style={styles.dropsetInlineBtnText}>+</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.dropsetInlineBtnPlaceholder} />
+          )}
+        </View>
+      ) : null}
       {/*
         overnight #5 第 4 點: note slot 永遠保留 column (沒備註 placeholder 同寬)
         — 避免欄位 shift, 三排 set rows 嚴格 column-aligned.
