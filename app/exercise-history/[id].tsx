@@ -69,10 +69,18 @@ const PR_LABEL: Record<PRKey, string> = {
 interface PRSnapshotWithDate {
   key: PRKey;
   weight_best: number | null;
+  /** Raw input weight (in kg) for the weight-PR set. For load_type='assisted'
+   *  this is the assistance amount (machine help); for 'loaded' / 'bodyweight'
+   *  this equals weight_best. Threaded so the UI can show both effective +
+   *  raw in the assisted case (user reload 2026-05-20: 「60 X 12 怎麼在歷史
+   *  變成 3 X 12」— answer: 63 − 60 = 3 effective; show both for clarity). */
+  weight_best_raw: number | null;
   weight_best_reps: number | null;
   weight_best_at: number | null;
   volume_best: number | null;
   volume_best_weight: number | null;
+  /** Raw input weight for the volume-PR set (assisted-only meaningful). */
+  volume_best_raw_weight: number | null;
   volume_best_reps: number | null;
   volume_best_at: number | null;
 }
@@ -1021,14 +1029,14 @@ function HeaderCard({
             <View key={pr.key} style={styles.prRow}>
               <Text style={styles.prBucket}>{PR_LABEL[pr.key]}</Text>
               <Text style={styles.prValue}>
-                重量 {formatPRWeight(pr.weight_best, unit)}
+                重量 {formatHistoryWeight(pr.weight_best, pr.weight_best_raw, header.load_type, unit)}
                 {pr.weight_best_reps != null ? ` × ${pr.weight_best_reps}` : ''}
                 {pr.weight_best_at != null ? `（${formatDate(pr.weight_best_at)}）` : ''}
               </Text>
               <Text style={styles.prValue}>
                 容量 {formatVolume(pr.volume_best, unit)}
                 {pr.volume_best_weight != null && pr.volume_best_reps != null
-                  ? ` (${formatPRWeight(pr.volume_best_weight, unit)} × ${pr.volume_best_reps})`
+                  ? ` (${formatHistoryWeight(pr.volume_best_weight, pr.volume_best_raw_weight, header.load_type, unit)} × ${pr.volume_best_reps})`
                   : ''}
                 {pr.volume_best_at != null ? `（${formatDate(pr.volume_best_at)}）` : ''}
               </Text>
@@ -1047,10 +1055,12 @@ function computePRs(
   const empty = (key: PRKey): PRSnapshotWithDate => ({
     key,
     weight_best: null,
+    weight_best_raw: null,
     weight_best_reps: null,
     weight_best_at: null,
     volume_best: null,
     volume_best_weight: null,
+    volume_best_raw_weight: null,
     volume_best_reps: null,
     volume_best_at: null,
   });
@@ -1063,16 +1073,27 @@ function computePRs(
     endurance: empty('endurance'),
   };
 
-  const update = (key: PRKey, eff: number, reps: number, v: number, at: number) => {
+  // 2026-05-20: track raw alongside eff so assisted display can render
+  //「<eff> kg（助力 <raw> kg）」(user reload feedback).
+  const update = (
+    key: PRKey,
+    eff: number,
+    raw: number,
+    reps: number,
+    v: number,
+    at: number,
+  ) => {
     const snap = acc[key];
     if (snap.weight_best == null || eff > snap.weight_best) {
       snap.weight_best = eff;
+      snap.weight_best_raw = raw;
       snap.weight_best_reps = reps;
       snap.weight_best_at = at;
     }
     if (snap.volume_best == null || v > snap.volume_best) {
       snap.volume_best = v;
       snap.volume_best_weight = eff;
+      snap.volume_best_raw_weight = raw;
       snap.volume_best_reps = reps;
       snap.volume_best_at = at;
     }
@@ -1099,8 +1120,8 @@ function computePRs(
       const bucket = classifyBucket(s.reps);
       const at = sess.session_started_at;
 
-      update('all', eff, s.reps, v, at);
-      if (bucket) update(bucket, eff, s.reps, v, at);
+      update('all', eff, s.weight_kg, s.reps, v, at);
+      if (bucket) update(bucket, eff, s.weight_kg, s.reps, v, at);
     }
   }
 
@@ -1288,7 +1309,7 @@ function SessionRow({
       </View>
       {topSet ? (
         <Text style={styles.topSetLine}>
-          頂組：{formatPRWeight(topSet.eff, unit)} × {topSet.set.reps}
+          頂組：{formatHistoryWeight(topSet.eff, topSet.set.weight_kg ?? null, loadType, unit)} × {topSet.set.reps}
           {topSet.set.reps != null ? `（${bucketLabel(classifyBucket(topSet.set.reps) ?? 'endurance')}）` : ''}
         </Text>
       ) : null}
@@ -1312,7 +1333,7 @@ function SessionRow({
                   {labelMap.get(set.set_id) ?? '—'}
                 </Text>
                 <Text style={styles.setText}>
-                  {formatPRWeight(eff, unit)} × {set.reps ?? '—'}
+                  {formatHistoryWeight(eff, set.weight_kg, loadType, unit)} × {set.reps ?? '—'}
                 </Text>
                 <Text style={styles.setBucket}>
                   {bucket ? bucketLabel(bucket) : '—'}
@@ -1349,6 +1370,31 @@ function SessionRow({
 function formatPRWeight(kgValue: number | null, unit: UnitPreference): string {
   if (kgValue == null || !Number.isFinite(kgValue)) return '—';
   return formatWeight(kgValue, unit);
+}
+
+/**
+ * History weight formatter — wraps `formatPRWeight` with an assisted-only
+ * suffix「（助力 <raw> kg）」so users see both effective load (what they
+ * actually lifted) AND raw input (what they typed into the assistance
+ * field). For loaded / bodyweight exercises, raw === eff so we render only
+ * the effective value (no suffix needed). NULL raw on assisted (defensive,
+ * shouldn't happen in production but possible for PR snapshots predating
+ * the raw-tracking) falls back to eff-only.
+ *
+ * User reload feedback (2026-05-20): 「60 X 12 怎麼在歷史變成 3 X 12」—
+ * answer: 63 (bw) − 60 (assistance) = 3 effective. Show both for clarity.
+ */
+function formatHistoryWeight(
+  effKg: number | null,
+  rawKg: number | null,
+  loadType: LoadType,
+  unit: UnitPreference,
+): string {
+  if (effKg == null || !Number.isFinite(effKg)) return '—';
+  const effStr = formatWeight(effKg, unit);
+  if (loadType !== 'assisted') return effStr;
+  if (rawKg == null || !Number.isFinite(rawKg)) return effStr;
+  return `${effStr}（助力 ${formatWeight(rawKg, unit)}）`;
 }
 
 function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
