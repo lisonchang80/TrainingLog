@@ -1225,8 +1225,6 @@ export default function SessionDetailScreen() {
   const handleSaveTemplate = useCallback(
     async (mode: 'update' | 'create') => {
       if (!session) return;
-      const dateLabel = formatDateLabel(session.started_at);
-      const defaultName = `Session ${dateLabel}`;
 
       if (mode === 'create') {
         try {
@@ -1252,63 +1250,41 @@ export default function SessionDetailScreen() {
         return;
       }
 
-      if (typeof Alert.prompt === 'function') {
-        Alert.prompt(
-          '儲存模板',
-          '將本場訓練結構覆寫到連結的模板（無連結則新建並綁定）',
-          [
-            { text: '取消', style: 'cancel' },
-            {
-              text: '儲存',
-              onPress: async (name?: string) => {
-                const trimmed = (name ?? '').trim() || defaultName;
-                try {
-                  await convertSessionToTemplate(db, {
-                    session_id: id!,
-                    template_name: trimmed,
-                    mode,
-                    uuid: randomUUID,
-                  });
-                  Alert.alert('已儲存', `模板「${trimmed}」已更新。`);
-                } catch (e) {
-                  Alert.alert(
-                    '失敗',
-                    e instanceof Error ? e.message : String(e)
-                  );
-                }
-              },
-            },
-          ],
-          'plain-text',
-          defaultName
-        );
-      } else {
+      // mode === 'update' (儲存模板):
+      //   Direct overwrite of the linked template — no name prompt. Button
+      //   is dimmed/disabled when isFreestyle, so we expect a linked template
+      //   to exist; if it was deleted between session start and now we tell
+      //   the user to use 另存模板 instead (rather than silently fall through
+      //   to a create-mode dialog they didn't ask for).
+      //   User-facing change (2026-05-20): the prompt asking for a name was
+      //   counter-intuitive — template-based session 已經知道要寫哪個模板，
+      //   不該再問名稱。
+      let linked: Awaited<
+        ReturnType<typeof getSessionLinkedTemplateTriple>
+      >;
+      try {
+        linked = await getSessionLinkedTemplateTriple(db, id!);
+      } catch (e) {
+        Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
+        return;
+      }
+      if (!linked) {
         Alert.alert(
-          '儲存模板',
-          `將以預設名稱「${defaultName}」儲存？`,
-          [
-            { text: '取消', style: 'cancel' },
-            {
-              text: '確定',
-              onPress: async () => {
-                try {
-                  await convertSessionToTemplate(db, {
-                    session_id: id!,
-                    template_name: defaultName,
-                    mode,
-                    uuid: randomUUID,
-                  });
-                  Alert.alert('已儲存', `模板「${defaultName}」已更新。`);
-                } catch (e) {
-                  Alert.alert(
-                    '失敗',
-                    e instanceof Error ? e.message : String(e)
-                  );
-                }
-              },
-            },
-          ]
+          '找不到原模板',
+          '此 session 沒有連結的模板，或原模板已被刪除。請改用「另存模板」建立新的。',
         );
+        return;
+      }
+      try {
+        await convertSessionToTemplate(db, {
+          session_id: id!,
+          template_name: linked.template_name,
+          mode: 'update',
+          uuid: randomUUID,
+        });
+        Alert.alert('已儲存', `模板「${linked.template_name}」已更新。`);
+      } catch (e) {
+        Alert.alert('失敗', e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, session]
