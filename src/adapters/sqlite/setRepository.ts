@@ -82,15 +82,6 @@ export async function insertSessionSet(
 }
 
 /**
- * Hard-delete one set row by id. Slice 10c Phase 2 commit 7a uses this
- * to cascade-strip dropset followers when the head cycles back to
- * working (per `cycleSessionSetKind` op type 'delete').
- *
- * No referential checks: the `set` table is a leaf — nothing in the schema
- * references `set.id` (PR replay / achievements run on copies / derived
- * state). Caller should ensure session is still in_progress.
- */
-/**
  * Delete a set row. Cascades into the dropset chain when the target row is a
  * dropset HEAD: all rows with `parent_set_id = set_id` are deleted in the
  * same transaction so no follower is left orphaned (parent_set_id pointing
@@ -100,9 +91,23 @@ export async function insertSessionSet(
  * For non-dropset rows OR dropset followers, the cascade DELETE is a no-op
  * (only dropset heads accumulate followers), so the function is safe to
  * call from every existing delete path.
+ *
+ * Achievement back-ref handling (2026-05-20 night fix): `achievement_unlock.set_id`
+ * has an FK to `set.id` (v008 schema, no ON DELETE clause), so deleting a logged
+ * set that earned a PR achievement trips `FOREIGN KEY constraint failed`. We NULL
+ * the back-ref BEFORE the DELETE — the achievement record stays unlocked, only the
+ * pointer to the originating set is severed. Same treatment for any cascade
+ * follower's unlock row, scoped by subquery.
  */
 export async function deleteSet(db: Database, set_id: string): Promise<void> {
   await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id = ?
+           OR set_id IN (SELECT id FROM "set" WHERE parent_set_id = ?)`,
+      set_id,
+      set_id
+    );
     await db.runAsync(
       `DELETE FROM "set" WHERE parent_set_id = ?`,
       set_id
@@ -315,10 +320,19 @@ export async function deleteClusterCycle(
   args: { a_set_id: string | null; b_set_id: string | null }
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
+    // 同 deleteSet：清 achievement_unlock 的 back-ref 避免 FK 違反。
     if (args.a_set_id) {
+      await db.runAsync(
+        `UPDATE achievement_unlock SET set_id = NULL WHERE set_id = ?`,
+        args.a_set_id,
+      );
       await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.a_set_id);
     }
     if (args.b_set_id) {
+      await db.runAsync(
+        `UPDATE achievement_unlock SET set_id = NULL WHERE set_id = ?`,
+        args.b_set_id,
+      );
       await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.b_set_id);
     }
   });
@@ -1153,7 +1167,13 @@ export async function removeSessionDropsetRow(
     throw new Error('DROPSET_CHAIN_TOO_SHORT');
   }
 
-  await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.set_id);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL WHERE set_id = ?`,
+      args.set_id,
+    );
+    await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.set_id);
+  });
 }
 
 /**
@@ -1377,6 +1397,14 @@ export async function replayCardSetsFromHistoricalSession(
     // isolation). Mirrors deleteSessionExerciseAndSets' set-DELETE clause
     // but keeps the parent session_exercise row alive (we're replacing
     // sets, not deleting the card).
+    // 清 achievement_unlock back-ref 防 FK 違反 (同 deleteSet 註解)。
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (
+          SELECT id FROM "set" WHERE session_exercise_id = ?
+        )`,
+      args.current_se_id
+    );
     await db.runAsync(
       `DELETE FROM "set" WHERE session_exercise_id = ?`,
       args.current_se_id
@@ -1544,6 +1572,16 @@ export async function replayClusterCardSetsFromHistoricalSession(
     // Wipe both sides first so the ordering base reflects only OTHER
     // cards' sets in the session (the deleted current-cluster sets
     // shouldn't claim any new slot).
+    // 同 deleteSet 註解：清 achievement_unlock back-ref 防 FK 違反。
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (
+          SELECT id FROM "set"
+           WHERE session_exercise_id IN (?, ?)
+        )`,
+      args.current_se_id_a,
+      args.current_se_id_b
+    );
     await db.runAsync(
       `DELETE FROM "set" WHERE session_exercise_id = ?`,
       args.current_se_id_a

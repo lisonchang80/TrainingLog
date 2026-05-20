@@ -232,20 +232,37 @@ export async function deleteSessionExerciseAndSets(
   db: Database,
   args: { session_id: string; exercise_id: string; session_exercise_id: string }
 ): Promise<void> {
-  await db.runAsync(
-    `DELETE FROM "set"
-      WHERE session_exercise_id = ?
-         OR (session_exercise_id IS NULL
-             AND session_id = ?
-             AND exercise_id = ?)`,
-    args.session_exercise_id,
-    args.session_id,
-    args.exercise_id
-  );
-  await db.runAsync(
-    `DELETE FROM session_exercise WHERE id = ?`,
-    args.session_exercise_id
-  );
+  await db.withTransactionAsync(async () => {
+    // 清 achievement_unlock 的 set_id back-ref，避免被刪 set 撞 FK constraint。
+    // (v008 schema: `achievement_unlock.set_id TEXT REFERENCES "set"(id)`、無 ON DELETE)
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (
+          SELECT id FROM "set"
+           WHERE session_exercise_id = ?
+              OR (session_exercise_id IS NULL
+                  AND session_id = ?
+                  AND exercise_id = ?)
+        )`,
+      args.session_exercise_id,
+      args.session_id,
+      args.exercise_id
+    );
+    await db.runAsync(
+      `DELETE FROM "set"
+        WHERE session_exercise_id = ?
+           OR (session_exercise_id IS NULL
+               AND session_id = ?
+               AND exercise_id = ?)`,
+      args.session_exercise_id,
+      args.session_id,
+      args.exercise_id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE id = ?`,
+      args.session_exercise_id
+    );
+  });
 }
 
 /**
