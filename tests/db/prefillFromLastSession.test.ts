@@ -174,4 +174,143 @@ describe('prefillSessionExerciseFromLastSession', () => {
 
     expect(count).toBe(0);
   });
+
+  /**
+   * Regression (2026-05-20 wave 12 bite-back): When the previous session's
+   * sets for the picked exercise included a dropset chain (head + followers
+   * linked via `parent_set_id`), prefill used to null out parent_set_id on
+   * every copied row. The chain decomposed into a sequence of orphan dropset
+   * "heads" — UI showed two "D1" rows each with its own ✓ slot (instead of
+   * one D1 + D2 follower row chained together). Fix remaps source.id →
+   * new.id and threads remapped parent_set_id through the insert.
+   *
+   * User-facing symptom: Today [+動作] → Assisted Dip (whose last session was
+   * a dropset chain) showed two parallel rows that didn't behave as a chain.
+   */
+  describe('dropset chain preservation on prefill', () => {
+    it('preserves D1 head + D2 follower chain (parent_set_id remap)', async () => {
+      await createSession('past', 1_000_000);
+      // Head row in source session (orphan, parent_set_id NULL).
+      await addSet('pH', 'past', exA, 1, 60, 12, 'dropset', 1_100_000);
+      // Follower row — parent_set_id points at head 'pH'. Insert via
+      // insertSessionSet directly so we can set parent_set_id (the local
+      // addSet helper hardcodes NULL).
+      await insertSessionSet(db, {
+        id: 'pF',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 40,
+        reps: 10,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: 1_200_000,
+        set_kind: 'dropset',
+        parent_set_id: 'pH',
+      });
+      await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id IN ('pH','pF')`);
+
+      await createSession('current', 2_000_000);
+      const count = await prefillSessionExerciseFromLastSession(db, {
+        session_id: 'current',
+        exercise_id: exA,
+        uuid: randomUUID,
+      });
+      expect(count).toBe(2);
+
+      const rows = await listSetsBySession(db, 'current');
+      expect(rows).toHaveLength(2);
+      // ordering ASC: head first, follower second.
+      const [head, follower] = rows;
+      expect(head.set_kind).toBe('dropset');
+      expect(follower.set_kind).toBe('dropset');
+      // Head is orphan, follower's parent_set_id points at the NEW head id
+      // (not the source 'pH' which doesn't exist in current session).
+      expect(head.parent_set_id).toBeNull();
+      expect(follower.parent_set_id).toBe(head.id);
+      // Sanity: the source id 'pH' should NOT appear in current session.
+      expect(rows.map((r) => r.id)).not.toContain('pH');
+    });
+
+    it('preserves a 3-deep dropset chain (D1 → D2 → D3)', async () => {
+      await createSession('past', 1_000_000);
+      await addSet('h', 'past', exA, 1, 60, 12, 'dropset', 1_100_000);
+      await insertSessionSet(db, {
+        id: 'f1',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 40,
+        reps: 10,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: 1_200_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      await insertSessionSet(db, {
+        id: 'f2',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 25,
+        reps: 8,
+        is_skipped: 0,
+        ordering: 3,
+        created_at: 1_300_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      await db.runAsync(
+        `UPDATE "set" SET is_logged = 1 WHERE id IN ('h','f1','f2')`,
+      );
+
+      await createSession('current', 2_000_000);
+      await prefillSessionExerciseFromLastSession(db, {
+        session_id: 'current',
+        exercise_id: exA,
+        uuid: randomUUID,
+      });
+      const rows = await listSetsBySession(db, 'current');
+      expect(rows).toHaveLength(3);
+      const [head, fol1, fol2] = rows;
+      expect(head.parent_set_id).toBeNull();
+      expect(fol1.parent_set_id).toBe(head.id);
+      expect(fol2.parent_set_id).toBe(head.id);
+    });
+
+    it('working + dropset mixed: warmup keeps NULL, dropset chain stays linked', async () => {
+      await createSession('past', 1_000_000);
+      await addSet('w1', 'past', exA, 1, 30, 15, 'warmup', 1_050_000);
+      await addSet('h', 'past', exA, 2, 60, 12, 'dropset', 1_100_000);
+      await insertSessionSet(db, {
+        id: 'f1',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 40,
+        reps: 10,
+        is_skipped: 0,
+        ordering: 3,
+        created_at: 1_200_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      await db.runAsync(
+        `UPDATE "set" SET is_logged = 1 WHERE id IN ('w1','h','f1')`,
+      );
+
+      await createSession('current', 2_000_000);
+      await prefillSessionExerciseFromLastSession(db, {
+        session_id: 'current',
+        exercise_id: exA,
+        uuid: randomUUID,
+      });
+      const rows = await listSetsBySession(db, 'current');
+      expect(rows).toHaveLength(3);
+      const [warmup, head, follower] = rows;
+      expect(warmup.set_kind).toBe('warmup');
+      expect(warmup.parent_set_id).toBeNull();
+      expect(head.set_kind).toBe('dropset');
+      expect(head.parent_set_id).toBeNull();
+      expect(follower.set_kind).toBe('dropset');
+      expect(follower.parent_set_id).toBe(head.id);
+    });
+  });
 });

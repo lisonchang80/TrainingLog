@@ -655,12 +655,20 @@ export async function prefillSessionExerciseFromLastSession(
   // ordering (preserves warmup-before-working flow). is_logged=1 filter is
   // load-bearing for the same reason as the lookup above: a partially-logged
   // prior session must only contribute the sets the user actually ticked.
+  //
+  // Dropset chain preservation (2026-05-20 wave 12 bite-back fix): SELECT
+  // `id` and `parent_set_id` so we can remap follower → new-head id below.
+  // Pre-fix the loop nulled parent_set_id, which silently exploded a D1+D2
+  // chain into two orphan "D1" heads on prefill (user-reported via Today
+  // [+動作] picker on Assisted Dip whose last session was a dropset chain).
   const sourceSets = await db.getAllAsync<{
+    id: string;
     weight_kg: number | null;
     reps: number | null;
     set_kind: SetKind;
+    parent_set_id: string | null;
   }>(
-    `SELECT weight_kg, reps, set_kind
+    `SELECT id, weight_kg, reps, set_kind, parent_set_id
        FROM "set"
       WHERE session_id = ? AND exercise_id = ?
         AND is_skipped = 0
@@ -681,10 +689,22 @@ export async function prefillSessionExerciseFromLastSession(
   const now = args.now ?? Date.now;
   const ts = now();
   await db.withTransactionAsync(async () => {
+    // Remap source.id → new.id so dropset followers' parent_set_id points
+    // at the newly-inserted head (not the source head id which exists only
+    // in history). Forward sweep is safe because sourceSets is ordered by
+    // `ordering ASC` and dropset followers always have ordering greater
+    // than their head's. Same pattern as `replayCardSetsFromHistoricalSession`.
+    const idMap = new Map<string, string>();
     for (let i = 0; i < sourceSets.length; i++) {
       const src = sourceSets[i];
+      const new_id = args.uuid();
+      idMap.set(src.id, new_id);
+      const remapped_parent =
+        src.parent_set_id != null
+          ? idMap.get(src.parent_set_id) ?? null
+          : null;
       await insertSessionSet(db, {
-        id: args.uuid(),
+        id: new_id,
         session_id: args.session_id,
         exercise_id: args.exercise_id,
         weight_kg: src.weight_kg ?? 0,
@@ -693,7 +713,7 @@ export async function prefillSessionExerciseFromLastSession(
         ordering: baseOrdering + i + 1,
         created_at: ts,
         set_kind: src.set_kind,
-        parent_set_id: null, // Don't carry over cluster pairing on prefill.
+        parent_set_id: remapped_parent,
         session_exercise_id: args.session_exercise_id ?? null,
       });
     }
