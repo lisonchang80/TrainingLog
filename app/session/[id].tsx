@@ -47,14 +47,18 @@ import {
 import {
   appendReusableSupersetToSession,
   appendSessionExercise,
+  captureSessionSnapshot,
   deleteSessionExerciseAndSets,
   discardSession,
   getSession,
   listSessionExercisesWithName,
   reorderSessionExercises,
+  restoreSessionFromSnapshot,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
+  type SessionSnapshot,
 } from '@/src/adapters/sqlite/sessionRepository';
+import { sessionSnapshotDirty } from '@/src/domain/session/sessionSnapshotDirty';
 import {
   addClusterCycleAtEnd,
   addSessionDropsetCluster,
@@ -212,6 +216,11 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  // 進入 edit mode 時拍 snapshot；按「完成」commit (清掉)、按「返回」若有
+  // 變更 alert 確認後 restore；無變更則 silent exit。
+  const [editSnapshot, setEditSnapshot] = useState<SessionSnapshot | null>(
+    null,
+  );
   // Detail 頁的 stats / time editor 永遠 frozen — 不該因為 session.ended_at 為
   // null（in-progress 邊角情況）而觸發 SessionStatsPanel 的 1-sec tick 或
   // SessionTimeEditorSheet 在 prop 漂移時 reset state。capture-once 在 mount 當
@@ -314,6 +323,126 @@ export default function SessionDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // ── Edit mode 進入 / 提交 / 捨棄 三條 path（2026-05-20 night transactional fix）──
+  // 用戶反映「修改後按返回未按完成編輯仍然被記錄」。Snapshot/restore approach:
+  // 進入 edit mode 時 snapshot session 全狀態、所有 edit op 仍直寫 DB、退出時
+  // 用「完成」commit (drop snapshot) 或「返回」discard (restore snapshot)。
+  const enterEditMode = useCallback(async () => {
+    if (!id) return;
+    try {
+      const snap = await captureSessionSnapshot(db, id);
+      if (!snap) {
+        Alert.alert('編輯失敗', 'Session not found.');
+        return;
+      }
+      setEditSnapshot(snap);
+      setEditMode(true);
+    } catch (e) {
+      Alert.alert('編輯失敗', e instanceof Error ? e.message : String(e));
+    }
+  }, [db, id]);
+
+  const commitEditMode = useCallback(() => {
+    // Edit ops 已陸續直寫 DB；commit 等同清掉 snapshot 即可。
+    setEditSnapshot(null);
+    setEditMode(false);
+  }, []);
+
+  // attemptExitEditMode：return true 表示「已 (或將) 退出 edit mode」、false
+  // 表示「使用者選擇繼續編輯，沒退出」。caller 可依此決定要不要繼續做後續事
+  // (例如 router.back 在 header 「返回」上仍要等退出 edit mode 才執行)。
+  // 為了讓 alert 的非同步 confirm 也能 route 後續動作，傳 onExited callback。
+  const attemptExitEditMode = useCallback(
+    (onExited: () => void) => {
+      if (!editSnapshot) {
+        setEditMode(false);
+        onExited();
+        return;
+      }
+      const currentState = {
+        session: {
+          started_at: session?.started_at ?? editSnapshot.session.started_at,
+          ended_at: session?.ended_at ?? editSnapshot.session.ended_at,
+        },
+        sessionExercises: sessionExercises.map((se) => ({
+          id: se.id,
+          ordering: se.ordering,
+          parent_id: se.parent_id,
+          rest_sec: se.rest_sec ?? null,
+        })),
+        sets: sets.map((s) => ({
+          id: s.id,
+          weight_kg: s.weight_kg,
+          reps: s.reps,
+          is_skipped: s.is_skipped,
+          ordering: s.ordering,
+          set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
+          is_logged: s.is_logged,
+          notes: s.notes,
+          session_exercise_id: s.session_exercise_id,
+        })),
+      };
+      const snapState = {
+        session: {
+          started_at: editSnapshot.session.started_at,
+          ended_at: editSnapshot.session.ended_at,
+        },
+        sessionExercises: editSnapshot.sessionExercises.map((se) => ({
+          id: se.id,
+          ordering: se.ordering,
+          parent_id: se.parent_id,
+          rest_sec: se.rest_sec,
+        })),
+        sets: editSnapshot.sets.map((s) => ({
+          id: s.id,
+          weight_kg: s.weight_kg,
+          reps: s.reps,
+          is_skipped: s.is_skipped,
+          ordering: s.ordering,
+          set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
+          is_logged: s.is_logged,
+          notes: s.notes,
+          session_exercise_id: s.session_exercise_id,
+        })),
+      };
+      if (!sessionSnapshotDirty(currentState, snapState)) {
+        setEditSnapshot(null);
+        setEditMode(false);
+        onExited();
+        return;
+      }
+      Alert.alert(
+        '捨棄修改？',
+        '離開將還原為進入編輯前的狀態，所有變更會消失。',
+        [
+          { text: '繼續編輯', style: 'cancel' },
+          {
+            text: '捨棄修改',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await restoreSessionFromSnapshot(db, editSnapshot);
+                await load();
+              } catch (e) {
+                Alert.alert(
+                  '還原失敗',
+                  e instanceof Error ? e.message : String(e),
+                );
+                return;
+              }
+              setEditSnapshot(null);
+              setEditMode(false);
+              onExited();
+            },
+          },
+        ],
+      );
+    },
+    [editSnapshot, session, sessionExercises, sets, db, load],
+  );
 
   // Drain picker mailbox on focus — when [+ 動作] flow returns from
   // /exercise-picker, append the selected exercises / RS templates to
@@ -1471,14 +1600,15 @@ export default function SessionDetailScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Header — back btn + title */}
+      {/* Header — back btn + title + (edit mode) 完成 btn */}
       <View style={styles.header}>
         <Pressable
           onPress={() => {
-            // 編輯模式下，「返回」先退出編輯模式而不是離開詳情頁；
-            // 否則才走 router.back() 回到上一頁（日曆 / 表列 / 另一個 session）。
             if (editMode) {
-              setEditMode(false);
+              // 編輯模式下，「返回」走 transactional discard path：
+              // 若有變更 alert 確認、確認後 restore；無變更則 silent 退出。
+              // onExited 在退出 edit mode 後不再做事（停在詳情頁）。
+              attemptExitEditMode(() => {});
             } else {
               router.back();
             }
@@ -1487,7 +1617,16 @@ export default function SessionDetailScreen() {
           <Text style={styles.headerBackText}>‹ 返回</Text>
         </Pressable>
         <Text style={styles.headerTitle}>{titleText}</Text>
-        <View style={styles.headerSpacer} />
+        {editMode ? (
+          <Pressable
+            onPress={commitEditMode}
+            style={styles.headerDoneBtn}
+            accessibilityRole="button">
+            <Text style={styles.headerDoneText}>完成</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
       </View>
 
       {/*
@@ -1699,10 +1838,12 @@ export default function SessionDetailScreen() {
         )}
       </GestureDetector>
 
-      {/* Bottom sticky action bar — edit mode adds [+ 動作] above the
-          standard 4-button row to mirror Today's bottom add-exercise CTA. */}
-      {editMode ? (
-        <View style={styles.editAddBar}>
+      {/* Bottom sticky action bar — 4 buttons.
+          Read mode: [編輯訓練][儲存模板][另存模板][刪除]
+          Edit mode: [+ 動作][儲存模板][另存模板][刪除]
+          完成 button 搬到 header 右上 (用戶 2026-05-20 night 要求)。 */}
+      <View style={styles.actionBar}>
+        {editMode ? (
           <Pressable
             accessibilityRole="button"
             onPress={() =>
@@ -1710,27 +1851,22 @@ export default function SessionDetailScreen() {
             }
             disabled={busy}
             style={({ pressed }) => [
-              styles.editAddBtn,
+              styles.actionBtn,
+              styles.actionBtnPrimary,
               busy && styles.actionBtnDisabled,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.editAddBtnText}>+ 動作</Text>
+            <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>
+              + 動作
+            </Text>
           </Pressable>
-        </View>
-      ) : null}
-
-      <View style={styles.actionBar}>
-        <Pressable
-          style={[styles.actionBtn, editMode && styles.actionBtnActive]}
-          onPress={() => setEditMode((v) => !v)}>
-          <Text
-            style={[
-              styles.actionBtnText,
-              editMode && styles.actionBtnTextActive,
-            ]}>
-            {editMode ? '完成編輯' : '編輯訓練'}
-          </Text>
-        </Pressable>
+        ) : (
+          <Pressable
+            style={styles.actionBtn}
+            onPress={enterEditMode}>
+            <Text style={styles.actionBtnText}>編輯訓練</Text>
+          </Pressable>
+        )}
         <Pressable
           style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
           disabled={isFreestyle}
@@ -2686,6 +2822,13 @@ const styles = StyleSheet.create({
   headerBackText: { fontSize: 15, color: '#007AFF' },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   headerSpacer: { width: 60 },
+  headerDoneBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minWidth: 60,
+    alignItems: 'flex-end',
+  },
+  headerDoneText: { fontSize: 15, color: '#007AFF', fontWeight: '700' },
 
   // Same-day switcher sub-row.
   sameDayBar: {
@@ -2972,28 +3115,6 @@ const styles = StyleSheet.create({
    */
   completeBtnSpacer: { width: 28, height: 28 },
 
-  // ── Edit-mode [+ 動作] add bar (sits above the 4-button sticky bar) ──
-  editAddBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
-  },
-  editAddBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-  },
-  editAddBtnText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
   // ── Bottom 4-button sticky action bar ───────────────────────────────
   actionBar: {
     flexDirection: 'row',
@@ -3013,8 +3134,10 @@ const styles = StyleSheet.create({
   },
   actionBtnActive: { backgroundColor: 'rgba(0,122,255,0.25)' },
   actionBtnDisabled: { opacity: 0.4 },
+  actionBtnPrimary: { backgroundColor: '#0a7ea4' },
   actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
   actionBtnTextActive: { color: '#0050B3' },
+  actionBtnTextPrimary: { color: 'white', fontWeight: '700' },
   actionBtnTextDestructive: { color: '#FF3B30' },
 
   btnPressed: { opacity: 0.85 },

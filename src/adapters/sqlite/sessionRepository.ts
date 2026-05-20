@@ -701,3 +701,203 @@ export async function linkSessionToTemplate(
     args.session_id
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Session snapshot / restore — transactional edit mode (2026-05-20 night)
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * 在進入歷史 session 詳情頁的「編輯訓練」模式時 snapshot 整個 session 的可變
+ * 狀態（session.started_at / ended_at + 所有 session_exercise + 所有 set
+ * + achievement_unlock 對該 session 的 back-ref）。`restoreSessionFromSnapshot`
+ * 可用此 snapshot 在使用者按「返回（捨棄修改）」時還原。
+ *
+ * 為什麼不單純走 SQLite BEGIN TRANSACTION + ROLLBACK：UI 期間 session 仍要
+ * 被其他 query 讀取（畫面渲染、stats、PR）、長期持有交易會把 DB lock 起來、
+ * expo-sqlite 也不支援跨 async 邊界的手動交易。snapshot-restore 用獨立交易
+ * 在 commit 點觸發、不影響中間的 read。
+ *
+ * 為什麼也 snapshot achievement_unlock：fix(set-delete) wave 之後刪除登錄
+ * 過的 set 會 UPDATE achievement_unlock SET set_id = NULL，這個副作用必須
+ * 也能還原 — 不然 restore 後 set 回來、unlock 對應仍是 NULL 不一致。
+ */
+export interface SessionSnapshot {
+  session: {
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+  };
+  sessionExercises: ReadonlyArray<{
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    ordering: number;
+    planned_sets: number;
+    planned_reps: number | null;
+    planned_weight_kg: number | null;
+    template_id: string | null;
+    is_evergreen: number;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+  }>;
+  sets: ReadonlyArray<{
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    is_skipped: number;
+    ordering: number;
+    created_at: number;
+    set_kind: string;
+    parent_set_id: string | null;
+    is_logged: number;
+    notes: string | null;
+    session_exercise_id: string | null;
+  }>;
+  achievementUnlocks: ReadonlyArray<{ id: number; set_id: string }>;
+}
+
+export async function captureSessionSnapshot(
+  db: Database,
+  session_id: string
+): Promise<SessionSnapshot | null> {
+  const session = await db.getFirstAsync<{
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+  }>(
+    `SELECT id, started_at, ended_at FROM session WHERE id = ?`,
+    session_id
+  );
+  if (!session) return null;
+
+  const sessionExercises = await db.getAllAsync<
+    SessionSnapshot['sessionExercises'][number]
+  >(
+    `SELECT id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id, is_evergreen, parent_id,
+            reusable_superset_id, rest_sec
+       FROM session_exercise
+      WHERE session_id = ?`,
+    session_id
+  );
+
+  const sets = await db.getAllAsync<SessionSnapshot['sets'][number]>(
+    `SELECT id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering,
+            created_at, set_kind, parent_set_id, is_logged, notes,
+            session_exercise_id
+       FROM "set"
+      WHERE session_id = ?`,
+    session_id
+  );
+
+  const achievementUnlocks = await db.getAllAsync<{
+    id: number;
+    set_id: string;
+  }>(
+    `SELECT id, set_id FROM achievement_unlock
+      WHERE set_id IS NOT NULL
+        AND set_id IN (SELECT id FROM "set" WHERE session_id = ?)`,
+    session_id
+  );
+
+  return { session, sessionExercises, sets, achievementUnlocks };
+}
+
+/**
+ * Atomic 還原：把 session 的 (session row 時間欄位 + 所有 session_exercise
+ * + 所有 set + 該 session 範圍內的 achievement_unlock 反向指標) 還原到
+ * snapshot 拍照時的狀態。Edit mode 「返回 → 捨棄修改」走這條 path。
+ *
+ * 流程：
+ *   1. 清掉當前 session 範圍內 achievement_unlock.set_id back-ref（避免
+ *      被刪的 set 撞 FK；同 fix(set-delete) 註解）
+ *   2. DELETE 當前 session 的 set + session_exercise
+ *   3. UPDATE session.started_at / ended_at 還原（DateTimePickerSheet 改的）
+ *   4. 重新 INSERT snapshot 的 session_exercise rows
+ *   5. 重新 INSERT snapshot 的 set rows（含 is_logged / notes / parent_set_id
+ *      等所有欄位、保留原 id）
+ *   6. 重連 achievement_unlock.set_id back-ref（snapshot 拍的時候 set 還在
+ *      原 id、restore 後 set 用相同 id 回來、所以 back-ref 可恢復）
+ */
+export async function restoreSessionFromSnapshot(
+  db: Database,
+  snapshot: SessionSnapshot
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (SELECT id FROM "set" WHERE session_id = ?)`,
+      snapshot.session.id
+    );
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_id = ?`,
+      snapshot.session.id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE session_id = ?`,
+      snapshot.session.id
+    );
+
+    await db.runAsync(
+      `UPDATE session SET started_at = ?, ended_at = ? WHERE id = ?`,
+      snapshot.session.started_at,
+      snapshot.session.ended_at,
+      snapshot.session.id
+    );
+
+    for (const se of snapshot.sessionExercises) {
+      await db.runAsync(
+        `INSERT INTO session_exercise
+           (id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id, is_evergreen, parent_id,
+            reusable_superset_id, rest_sec)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        se.id,
+        se.session_id,
+        se.exercise_id,
+        se.ordering,
+        se.planned_sets,
+        se.planned_reps,
+        se.planned_weight_kg,
+        se.template_id,
+        se.is_evergreen,
+        se.parent_id,
+        se.reusable_superset_id,
+        se.rest_sec
+      );
+    }
+
+    for (const s of snapshot.sets) {
+      await db.runAsync(
+        `INSERT INTO "set"
+           (id, session_id, exercise_id, weight_kg, reps, is_skipped,
+            ordering, created_at, set_kind, parent_set_id, is_logged,
+            notes, session_exercise_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        s.id,
+        s.session_id,
+        s.exercise_id,
+        s.weight_kg,
+        s.reps,
+        s.is_skipped,
+        s.ordering,
+        s.created_at,
+        s.set_kind,
+        s.parent_set_id,
+        s.is_logged,
+        s.notes,
+        s.session_exercise_id
+      );
+    }
+
+    for (const unlock of snapshot.achievementUnlocks) {
+      await db.runAsync(
+        `UPDATE achievement_unlock SET set_id = ? WHERE id = ?`,
+        unlock.set_id,
+        unlock.id
+      );
+    }
+  });
+}
