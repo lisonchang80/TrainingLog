@@ -756,14 +756,28 @@ export default function TodayScreen() {
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
     try {
-      // Use insertSessionSetAfter so the new row lands DIRECTLY below the
-      // swiped row (not at end of session). Repo func handles the ordering
-      // shift + mirrors source's set_kind / weight / reps automatically.
-      await insertSessionSetAfter(db, {
-        session_id,
-        source_set_id,
-        uuid: randomUUID,
-      });
+      // 2026-05-20 fix — dropset cluster +1 swipe: route to
+      // addSessionDropsetRow so the new row joins the existing chain
+      // (parent_set_id = head) instead of inserting a foreign HEAD into
+      // the middle of the chain (which previously broke grouping and
+      // surfaced as orphan-like rows after my prior fix).
+      const source = setsInSession.find((s) => s.id === source_set_id);
+      if (source?.set_kind === 'dropset') {
+        await addSessionDropsetRow(db, {
+          session_id,
+          after_set_id: source_set_id,
+          uuid: randomUUID,
+        });
+      } else {
+        // Use insertSessionSetAfter so the new row lands DIRECTLY below the
+        // swiped row (not at end of session). Repo func handles the ordering
+        // shift + mirrors source's set_kind / weight / reps automatically.
+        await insertSessionSetAfter(db, {
+          session_id,
+          source_set_id,
+          uuid: randomUUID,
+        });
+      }
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
       // PR detection moved to onToggleLogged — new rows start unlogged.

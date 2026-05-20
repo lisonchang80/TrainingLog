@@ -612,11 +612,23 @@ export default function SessionDetailScreen() {
       if (!id) return;
       setBusy(true);
       try {
-        await insertSessionSetAfter(db, {
-          session_id: id,
-          source_set_id,
-          uuid: randomUUID,
-        });
+        // 2026-05-20 fix — dropset cluster +1 swipe: route to
+        // addSessionDropsetRow so the new row joins the existing chain
+        // (parent_set_id = head). Mirror Today (app/(tabs)/index.tsx).
+        const source = sets.find((s) => s.id === source_set_id);
+        if (source?.set_kind === 'dropset') {
+          await addSessionDropsetRow(db, {
+            session_id: id,
+            after_set_id: source_set_id,
+            uuid: randomUUID,
+          });
+        } else {
+          await insertSessionSetAfter(db, {
+            session_id: id,
+            source_set_id,
+            uuid: randomUUID,
+          });
+        }
         await load();
       } catch (e) {
         Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
@@ -624,7 +636,7 @@ export default function SessionDetailScreen() {
         setBusy(false);
       }
     },
-    [db, id, load],
+    [db, id, sets, load],
   );
 
   /**
