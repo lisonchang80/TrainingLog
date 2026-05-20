@@ -2053,7 +2053,12 @@ function ClusterBlock({
         <View style={styles.clusterTagRow}>
           <Text style={styles.supersetTag}>超</Text>
         </View>
-        {/* Column-aligned exercise name headers: cycle slot + A column +
+        <Text style={styles.clusterLabel}>
+          {cluster.parent.exercise_name}
+          <Text style={styles.clusterPlus}> + </Text>
+          {cluster.child.exercise_name}
+        </Text>
+        {/* Column-aligned exercise name sub-headers: cycle slot + A column +
             B column + check slot (mirrors the data row structure so names
             sit directly above their values). */}
         <View style={styles.clusterPairRow}>
