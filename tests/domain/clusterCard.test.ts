@@ -42,6 +42,9 @@ function mkSet(
     session_exercise_id?: string | null;
     /** Override exercise_id (default: `ex-${parent_token}`). */
     exercise_id?: string;
+    /** Dropset chain back-ref. NULL = chain head / working / warmup.
+     *  Set to the head's id to mark this row as a dropset follower. */
+    parent_set_id?: string | null;
   } = {},
 ): ClusterSetInput {
   return {
@@ -57,6 +60,7 @@ function mkSet(
     // Use `in opts` to distinguish "not set" (defaults to 50) vs explicit null.
     weight_kg: 'weight_kg' in opts ? (opts.weight_kg as number | null) : 50,
     reps: 'reps' in opts ? (opts.reps as number | null) : 8,
+    parent_set_id: opts.parent_set_id ?? null,
   };
 }
 
@@ -441,18 +445,68 @@ describe('computeClusterCycleProgress', () => {
     expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 2 });
   });
 
-  it('dropset cycles excluded (mirror solo: solo bar only counts working)', () => {
-    // Solo card bar 也排除 dropset (`sets.filter(s => s.set_kind === 'working')`)
+  it('dropset HEAD cycle included (wave 12 dropset 納入 mirror solo)', () => {
+    // Wave 12 (2026-05-20): dropset chain HEAD on either side promotes the
+    // cycle to a "set unit", mirroring solo `computeExerciseProgress`. Pre-fix
+    // this test asserted dropset cycles were excluded — the regression-friendly
+    // rewrite below covers the new spec.
     const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
     const sets = [
+      // Cycle 1: working pair (logged) → counts toward done + total
       mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
-      mkSet('p2', 'p', 2, { set_kind: 'dropset', is_logged: 1 }),
       mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+      // Cycle 2: dropset HEAD pair (logged) → counts toward done + total
+      mkSet('p2', 'p', 2, { set_kind: 'dropset', is_logged: 1 }),
       mkSet('f2', 'f', 2, { set_kind: 'dropset', is_logged: 1 }),
     ];
     const group = groupClusterSides(exs, sets)[0];
     const cycles = computeClusterCycles(group);
-    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 1 });
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 2, total: 2 });
+  });
+
+  it('dropset FOLLOWER-only cycles do NOT count (rolled into head cycle)', () => {
+    // After #61 cluster dropset: adding D2 onto a 4-row working block clones
+    // the entire 4-row shape, so the cluster now has 4 working cycles + 4
+    // dropset cycles. Cycle 5 is the HEAD pair (parent_set_id=null on both
+    // sides); cycles 6-8 are followers chained back to cycle 5. Only the
+    // head cycle counts toward total.
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      // Working cycles 1-2 (skip 3-4 for brevity)
+      mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('p2', 'p', 2, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f2', 'f', 2, { set_kind: 'working', is_logged: 1 }),
+      // Dropset HEAD cycle 3 — parent_set_id NULL on both sides
+      mkSet('p3', 'p', 3, { set_kind: 'dropset', is_logged: 1 }),
+      mkSet('f3', 'f', 3, { set_kind: 'dropset', is_logged: 1 }),
+      // Dropset FOLLOWER cycle 4 — parent_set_id points at head (p3/f3)
+      mkSet('p4', 'p', 4, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        parent_set_id: 'p3',
+      }),
+      mkSet('f4', 'f', 4, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        parent_set_id: 'f3',
+      }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    // Expected: cycles 1-3 count (2 working + 1 dropset head); cycle 4 doesn't
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 3, total: 3 });
+  });
+
+  it('dropset HEAD cycle with head unlogged → in total, not in done', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, { set_kind: 'dropset', is_logged: 0 }), // head unlogged
+      mkSet('f1', 'f', 1, { set_kind: 'dropset', is_logged: 0 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(computeClusterCycleProgress(cycles)).toEqual({ done: 0, total: 1 });
   });
 
   it('mixed cycle (A=warmup, B=working): counted (at least one side working)', () => {

@@ -60,6 +60,11 @@ export interface ClusterSetInput {
   is_logged: number; // 0/1
   weight_kg: number | null;
   reps: number | null;
+  /** NULL for working / warmup / dropset chain head; points at head id for
+   *  dropset followers. Used by `computeClusterCycleProgress` (wave 12 dropset
+   *  納入 fix) to count "1 dropset chain = 1 cycle" instead of counting every
+   *  follower row as a separate cycle. */
+  parent_set_id: string | null;
 }
 
 export interface ClusterSide<E extends ClusterExerciseInput, S extends ClusterSetInput> {
@@ -199,34 +204,48 @@ export function computeClusterCycles<
 /**
  * Slice 10c overnight #46 第 3 點 — cluster progress bar count (mirror solo).
  *
- * Solo card 的 progress bar 只計入 `set_kind === 'working'` 的 row
- * (見 `app/(tabs)/index.tsx::SoloExerciseCard`：
- *   `workingRowCount = sets.filter(s => s.set_kind === 'working').length`)
- * — 熱身與 dropset 都不算入「總計畫」。
+ * Wave 12 update (2026-05-20) — dropset 納入計算 mirror solo
+ * `computeExerciseProgress`. A cycle counts toward total when at least one
+ * side is a "set unit" (working OR dropset chain HEAD). Dropset followers
+ * (parent_set_id != null) don't count — they're part of the head's unit.
  *
- * Cluster 對齊：一個 cycle 算「working cycle」當且僅當 **至少一側非 null 且
- * `set_kind === 'working'`**。涵蓋：
  *   - 兩側 warmup → 不算（排除 — 用戶 #46 抱怨「熱身組虛胖 denominator」）
  *   - 兩側 working → 算 (well-formed cluster 主體)
  *   - 一側 warmup 一側 working → 算 (任一側做真 working 就算工作 cycle)
  *   - 一側 working 一側 null (asymmetric AS1) → 算
- *   - 兩側 dropset → 不算 (mirror solo 排除 dropset)
+ *   - 至少一側 dropset HEAD (parent_set_id IS NULL) → 算 (NEW wave 12)
+ *   - 兩側都 dropset FOLLOWER → 不算 (rolled into the head cycle)
  *
- * `done` 算「working cycle 中兩側都 is_logged=1」(asymmetric short-side 那
- * 側不存在所以不算)。
+ * `done` 算「cycle 中兩側 effective is_logged=1」— dropset 的 effective
+ * is_logged 由 chain head 提供 (UI tap-✓ 只動 head)。Asymmetric short-side
+ * 那側不存在所以不算。
  *
- * Returns 0/0 for an empty / all-warmup / all-dropset cluster.
+ * Returns 0/0 for an empty cluster.
  */
 export function computeClusterCycleProgress<S extends ClusterSetInput>(
   cycles: ClusterCycle<S>[],
 ): { done: number; total: number } {
+  // "Set unit" side detector — mirrors solo `computeExerciseProgress`. A side
+  // qualifies as a unit when it's a working row OR a dropset chain HEAD
+  // (parent_set_id IS NULL). Followers don't count (they're rolled into the
+  // head's cycle).
+  const isUnitSide = (s: S | null): boolean => {
+    if (s === null) return false;
+    if (s.set_kind === 'working') return true;
+    if (s.set_kind === 'dropset' && s.parent_set_id == null) return true;
+    return false;
+  };
+
   let done = 0;
   let total = 0;
   for (const c of cycles) {
-    const aWorking = c.a_set !== null && c.a_set.set_kind === 'working';
-    const bWorking = c.b_set !== null && c.b_set.set_kind === 'working';
-    if (!aWorking && !bWorking) continue; // exclude warmup + dropset cycles
+    if (!isUnitSide(c.a_set) && !isUnitSide(c.b_set)) continue;
     total += 1;
+    // `both_logged` from `computeClusterCycles` already returns false on
+    // asymmetric AS1 cycles (the missing side can't be "logged"), so this
+    // preserves the original AS1 spec: a cycle with one side null never
+    // counts as done. For dropset HEAD cycles, the head's own is_logged
+    // reflects the user's tap-✓ correctly (the UI toggles head only).
     if (c.both_logged) done += 1;
   }
   return { done, total };

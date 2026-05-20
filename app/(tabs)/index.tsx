@@ -2425,10 +2425,12 @@ function ExerciseCard({
   const setsById = new Map(sets.map((s) => [s.id, s] as const));
   const progress = computeExerciseProgress(
     sets.map((s) => ({
+      id: s.id,
       set_kind: s.set_kind,
       is_logged: s.is_logged,
       weight_kg: s.weight_kg,
       reps: s.reps,
+      parent_set_id: s.parent_set_id,
     })),
   );
   return (
@@ -2450,21 +2452,17 @@ function ExerciseCard({
               </Text>
             </View>
             {(() => {
-              // Bar 分段 = 實際 working set row 數（drop plannedTotal — user
-              // 反映 chip 100% 但 bar 1/3 不一致；template plannedTotal
-              // 跟 body 實際 row 數脫節）。0 row 不渲染（per user「沒組時
-              // 不要有進度條」）。
-              // 容量 chip 搬到 progress bar row 右側 (overnight #5 第 1 點)
-              const workingRowCount = sets.filter(
-                (s) => s.set_kind === 'working',
-              ).length;
-              if (workingRowCount <= 0) return null;
+              // Bar 分段 = setsTotal (working count + dropset chain head count
+              // per `computeExerciseProgress`). Dropset 納入 wave 12 2026-05-20
+              // — pre-fix only counted working, leaving a logged dropset
+              // chain showing 0/3 on a pure-dropset card.
+              if (progress.setsTotal <= 0) return null;
               return (
                 <View style={styles.exerciseCardProgressRow}>
                   <View style={styles.exerciseCardProgressBarFill}>
                     <SegmentedProgressBar
-                      done={progress.workingDone}
-                      total={workingRowCount}
+                      done={progress.setsDone}
+                      total={progress.setsTotal}
                     />
                   </View>
                   {progress.volumeTotal > 0 ? (

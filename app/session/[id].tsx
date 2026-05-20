@@ -2515,15 +2515,16 @@ function EditableExerciseCard({
     () =>
       computeExerciseProgress(
         sets.map((s) => ({
+          id: s.id,
           set_kind: s.set_kind,
           is_logged: s.is_logged,
           weight_kg: s.weight_kg,
           reps: s.reps,
+          parent_set_id: s.parent_set_id,
         })),
       ),
     [sets],
   );
-  const workingRowCount = sets.filter((s) => s.set_kind === 'working').length;
   // No PR snapshot — detail page edit mode skips PR ceremony (just like
   // Today does post-toggle, but here we don't have the in-session helpers).
   // If demand emerges, easy to add via listPriorSetsForExercise + computePRSnapshot.
@@ -2548,12 +2549,12 @@ function EditableExerciseCard({
                 {planRow.exercise_name}
               </Text>
             </View>
-            {workingRowCount > 0 ? (
+            {progress.setsTotal > 0 ? (
               <View style={styles.exerciseCardProgressRow}>
                 <View style={styles.exerciseCardProgressBarFill}>
                   <SegmentedProgressBar
-                    done={progress.workingDone}
-                    total={workingRowCount}
+                    done={progress.setsDone}
+                    total={progress.setsTotal}
                   />
                 </View>
                 {progress.volumeTotal > 0 ? (
