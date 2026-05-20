@@ -651,32 +651,47 @@ export async function prefillSessionExerciseFromLastSession(
   );
   if (!lastSession) return 0;
 
-  // Pull that session's full LOGGED set list for this exercise, sorted ASC by
-  // ordering (preserves warmup-before-working flow). is_logged=1 filter is
-  // load-bearing for the same reason as the lookup above: a partially-logged
-  // prior session must only contribute the sets the user actually ticked.
+  // Pull that session's full set list for this exercise, sorted ASC by
+  // ordering (preserves warmup-before-working flow). is_logged filter is
+  // chain-aware — applied in JS below instead of SQL — so dropset followers
+  // (whose DB is_logged stays 0 because the UI tap-✓ only writes the head)
+  // inherit their head's logged state. Without this, a session of 3 chains
+  // × 3 rows each would prefill 3 orphan heads with no followers (user-
+  // reported 2026-05-20 night: 「重新建立動作的歷史後 遞減 cluster 還是出
+  // 不來」).
   //
-  // Dropset chain preservation (2026-05-20 wave 12 bite-back fix): SELECT
-  // `id` and `parent_set_id` so we can remap follower → new-head id below.
-  // Pre-fix the loop nulled parent_set_id, which silently exploded a D1+D2
-  // chain into two orphan "D1" heads on prefill (user-reported via Today
-  // [+動作] picker on Assisted Dip whose last session was a dropset chain).
-  const sourceSets = await db.getAllAsync<{
+  // Dropset chain preservation (`138cc0a` fix): SELECT `id` and
+  // `parent_set_id` so we can remap follower → new-head id in the loop.
+  const allSourceSets = await db.getAllAsync<{
     id: string;
     weight_kg: number | null;
     reps: number | null;
     set_kind: SetKind;
     parent_set_id: string | null;
+    is_logged: number;
   }>(
-    `SELECT id, weight_kg, reps, set_kind, parent_set_id
+    `SELECT id, weight_kg, reps, set_kind, parent_set_id, is_logged
        FROM "set"
       WHERE session_id = ? AND exercise_id = ?
         AND is_skipped = 0
-        AND is_logged = 1
       ORDER BY ordering ASC`,
     lastSession.session_id,
     args.exercise_id
   );
+  // Chain-aware is_logged filter:
+  //   - working / warmup / dropset HEAD: own is_logged must be 1
+  //   - dropset FOLLOWER: head's is_logged must be 1 (follower's own stays 0)
+  // ordering ASC + forward sweep => head is visited before follower, so the
+  // map is populated by the time we check parent.
+  const sourceById = new Map(allSourceSets.map((s) => [s.id, s]));
+  const sourceSets = allSourceSets.filter((s) => {
+    if (s.is_logged === 1) return true;
+    if (s.set_kind === 'dropset' && s.parent_set_id != null) {
+      const head = sourceById.get(s.parent_set_id);
+      return head?.is_logged === 1;
+    }
+    return false;
+  });
   if (sourceSets.length === 0) return 0;
 
   // Current session MAX ordering — new rows append after.

@@ -276,6 +276,114 @@ describe('prefillSessionExerciseFromLastSession', () => {
       expect(fol2.parent_set_id).toBe(head.id);
     });
 
+    /**
+     * Regression (2026-05-20 night bite-back, sibling of `138cc0a`):
+     * `prefillSessionExerciseFromLastSession` originally filtered source
+     * sets with `WHERE is_logged = 1` in SQL. Dropset followers' DB
+     * is_logged stays 0 (UI tap-✓ writes the head only; followers inherit
+     * via chain-aware filter at render time), so the SELECT excluded
+     * followers entirely. Prefill brought in heads only — the chain
+     * shape was lost even though `parent_set_id` got carried through.
+     * User reload-reported: prefill showed 3 lone "D1/D2/D3 heads" with
+     * no follower rows on a session where the source had 3 chains × 3
+     * rows each.
+     *
+     * Fix: SELECT all non-skipped rows, then filter in JS so a follower
+     * passes when its head's is_logged === 1.
+     */
+    it('pulls dropset followers when head is_logged=1 (follower DB is_logged stays 0 — chain-aware filter)', async () => {
+      await createSession('past', 1_000_000);
+      // Head logged via tap-✓; followers stay is_logged=0 in DB (UI inherits
+      // via chain-aware filter at render — same applies to prefill source).
+      await addSet('h', 'past', exA, 1, 60, 12, 'dropset', 1_100_000, 1);
+      await insertSessionSet(db, {
+        id: 'f1',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 30,
+        reps: 12,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: 1_200_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      await insertSessionSet(db, {
+        id: 'f2',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 15,
+        reps: 12,
+        is_skipped: 0,
+        ordering: 3,
+        created_at: 1_300_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      // f1 + f2 DELIBERATELY stay is_logged=0 (mirror production behavior).
+
+      await createSession('current', 2_000_000);
+      const count = await prefillSessionExerciseFromLastSession(db, {
+        session_id: 'current',
+        exercise_id: exA,
+        uuid: randomUUID,
+      });
+      expect(count).toBe(3);
+
+      const rows = await listSetsBySession(db, 'current');
+      expect(rows).toHaveLength(3);
+      const [head, fol1, fol2] = rows;
+      // Chain is intact: head + 2 followers all dropset, weights cascading.
+      expect(head.set_kind).toBe('dropset');
+      expect(head.parent_set_id).toBeNull();
+      expect(head.weight_kg).toBe(60);
+      expect(fol1.set_kind).toBe('dropset');
+      expect(fol1.parent_set_id).toBe(head.id);
+      expect(fol1.weight_kg).toBe(30);
+      expect(fol2.set_kind).toBe('dropset');
+      expect(fol2.parent_set_id).toBe(head.id);
+      expect(fol2.weight_kg).toBe(15);
+      // All copied rows start unticked (user re-ticks in new session).
+      expect(rows.every((r) => r.is_logged === 0)).toBe(true);
+    });
+
+    it('does NOT pull followers whose head is UNLOGGED (partial-log invariant)', async () => {
+      // Source session: head is_logged=0 (user partially logged), followers
+      // is_logged=0 → entire chain excluded. Mirrors solo working-set rule
+      // ("a partially-logged prior session must only contribute the sets
+      // the user actually ticked").
+      await createSession('past', 1_000_000);
+      // Logged working set to anchor the lookup.
+      await addSet('wk', 'past', exA, 1, 80, 5, 'working', 1_100_000, 1);
+      // Unlogged dropset chain (head + 2 followers, NONE is_logged).
+      await addSet('h', 'past', exA, 2, 60, 12, 'dropset', 1_200_000, 0);
+      await insertSessionSet(db, {
+        id: 'f1',
+        session_id: 'past',
+        exercise_id: exA,
+        weight_kg: 30,
+        reps: 12,
+        is_skipped: 0,
+        ordering: 3,
+        created_at: 1_300_000,
+        set_kind: 'dropset',
+        parent_set_id: 'h',
+      });
+      // f1.is_logged=0 by default.
+
+      await createSession('current', 2_000_000);
+      await prefillSessionExerciseFromLastSession(db, {
+        session_id: 'current',
+        exercise_id: exA,
+        uuid: randomUUID,
+      });
+      const rows = await listSetsBySession(db, 'current');
+      // Only `wk` carried over; unlogged chain stays out.
+      expect(rows).toHaveLength(1);
+      expect(rows[0].weight_kg).toBe(80);
+      expect(rows[0].set_kind).toBe('working');
+    });
+
     it('working + dropset mixed: warmup keeps NULL, dropset chain stays linked', async () => {
       await createSession('past', 1_000_000);
       await addSet('w1', 'past', exA, 1, 30, 15, 'warmup', 1_050_000);
