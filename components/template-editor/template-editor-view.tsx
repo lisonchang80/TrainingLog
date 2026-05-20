@@ -1287,15 +1287,20 @@ export default function TemplateEditorView() {
         );
       }
       const isExpanded = expandedExId === parent.id;
-      // overnight #48 第 1 點：cluster header 也顯示「{warmup}熱+{working}組」、
-      // 但用 cycle 概念算（A.sets[i] 配 B.sets[i]），不是 A+B 兩側合計，避免雙倍
-      // 計數。Cycle 分類詳見 `computeTemplateClusterStat` JSDoc：「working cycle =
-      // 至少一側 working/dropset」、「warmup cycle = 沒任一側 working/dropset
-      // 且至少一側 warmup」。2-side rule → 只取 children[0] (mirror runtime
-      // groupClusterSides). 為空 cluster → 0熱+0組.
+      // overnight #48 第 1 點 / wave 12 dropset 納入修正 (2026-05-20):
+      // cluster header 顯示「{warmup}熱+{working}組」用 cycle 概念算。1 chain =
+      // 1 unit — dropset HEAD 算 1 組、follower-only cycle 不另計。詳見
+      // `computeTemplateClusterStat` JSDoc。2-side rule → 只取 children[0]
+      // (mirror runtime groupClusterSides). 為空 cluster → 0熱+0組.
       const clusterStat = computeTemplateClusterStat(
-        parent.sets.map((s) => ({ kind: s.kind })),
-        (children[0]?.sets ?? []).map((s) => ({ kind: s.kind })),
+        parent.sets.map((s) => ({
+          kind: s.kind,
+          parent_set_id: s.parent_set_id ?? null,
+        })),
+        (children[0]?.sets ?? []).map((s) => ({
+          kind: s.kind,
+          parent_set_id: s.parent_set_id ?? null,
+        })),
       );
       // overnight #45 第 1 點：mirror session cluster-card.tsx:216-224 layout
       // — 「超」chip 獨佔行 1 + 標題分行（兩動作名 + 「 + 」連接）獨佔行 2。
@@ -2041,8 +2046,17 @@ function ExerciseBody({
   onConfirmReorderSets,
   compact,
 }: ExerciseBodyProps) {
+  // 「{warmup}熱+{working}組」— 對齊 wave 12 (2026-05-20) 的「1 chain = 1
+  // unit」進度條規則：每個 working row 算 1 組、每條 dropset chain HEAD 算
+  // 1 組、follower row 不另計（被 head 吸收）。pre-fix 用 `kind !== 'warmup'`
+  // 把整 chain 的每個 row 都當 1 組計、4×3 chain 顯示「12組」實際只有 4 個
+  // unit（用戶 reload 反映）。
   const warmups = exercise.sets.filter((s) => s.kind === 'warmup').length;
-  const workings = exercise.sets.filter((s) => s.kind !== 'warmup').length;
+  const workings = exercise.sets.filter(
+    (s) =>
+      s.kind === 'working' ||
+      (s.kind === 'dropset' && (s.parent_set_id ?? null) === null),
+  ).length;
   const { setLabels } = computeExMeta(exercise);
 
   // overnight #49 — build groups for inline drag. A group = 1 solo set OR
