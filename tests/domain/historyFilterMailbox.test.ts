@@ -1,7 +1,6 @@
 import {
   EMPTY_FILTER,
   clearFilter,
-  isEmptyFilter,
   peekFilter,
   submitFilter,
   type HistoryFilterState,
@@ -49,58 +48,4 @@ describe('historyFilterMailbox', () => {
     expect(peekFilter()).toBeNull();
   });
 
-  it('isEmptyFilter true when no buckets / no program / no subtags / clusterMode default', () => {
-    expect(isEmptyFilter(EMPTY_FILTER)).toBe(true);
-    expect(
-      isEmptyFilter({
-        buckets: new Set(),
-        programId: null,
-        subTags: new Set(),
-        clusterMode: 'all',
-      })
-    ).toBe(true);
-  });
-
-  it('isEmptyFilter false when any field non-empty (incl. non-default clusterMode)', () => {
-    expect(
-      isEmptyFilter({
-        buckets: new Set(['strength']),
-        programId: null,
-        subTags: new Set(),
-        clusterMode: 'all',
-      })
-    ).toBe(false);
-    expect(
-      isEmptyFilter({
-        buckets: new Set(),
-        programId: 'p1',
-        subTags: new Set(),
-        clusterMode: 'all',
-      })
-    ).toBe(false);
-    expect(
-      isEmptyFilter({
-        buckets: new Set(),
-        programId: null,
-        subTags: new Set(['推一']),
-        clusterMode: 'all',
-      })
-    ).toBe(false);
-    expect(
-      isEmptyFilter({
-        buckets: new Set(),
-        programId: null,
-        subTags: new Set(),
-        clusterMode: 'cluster_only',
-      })
-    ).toBe(false);
-    expect(
-      isEmptyFilter({
-        buckets: new Set(),
-        programId: null,
-        subTags: new Set(),
-        clusterMode: 'exclude_cluster',
-      })
-    ).toBe(false);
-  });
 });

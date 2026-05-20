@@ -55,16 +55,3 @@ export function peekFilter(): HistoryFilterState | null {
 export function clearFilter(): void {
   current = null;
 }
-
-/**
- * Convenience: is this filter equivalent to no-filter (default)?
- * Used to know whether to show「篩選中」 indicator on the page.
- */
-export function isEmptyFilter(state: HistoryFilterState): boolean {
-  return (
-    state.buckets.size === 0 &&
-    state.programId == null &&
-    state.subTags.size === 0 &&
-    state.clusterMode === DEFAULT_CLUSTER_MODE
-  );
-}
