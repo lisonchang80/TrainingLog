@@ -851,6 +851,168 @@ export async function insertSessionSetAfter(
 }
 
 /**
+ * Append one new follower row to an existing dropset chain (slice 10c
+ * overnight #61 — wire the `+` button on the cluster-last follower in the
+ * active session / session detail edit mode, mirroring template editor's
+ * `addDropsetRow` at template-editor-view.tsx lines 443-474).
+ *
+ * `after_set_id` may be the chain HEAD or any existing follower. Either
+ * way the new row gets `parent_set_id = headId` (the chain head), so the
+ * chain stays flat (no follower-of-follower). The new row's
+ * `set_kind = 'dropset'`, weight / reps mirror the source row, and
+ * `session_exercise_id` (v019) is inherited from the source so cluster
+ * isolation invariants stay intact (RS A side never leaks to a coincidentally-
+ * same-exercise solo card).
+ *
+ * Ordering: shift all `set` rows with `ordering >= source.ordering + 1` by
+ * +1 to free the slot directly after `after_set_id`, then INSERT at that
+ * slot. Mirrors `insertSessionSetAfter` (same transaction-wrapped shift
+ * pattern, lines 823-847) so the new row appears IMMEDIATELY below the
+ * tapped one, not at the end of the chain.
+ *
+ * Throws if `after_set_id` is not in the session OR is not a dropset row.
+ */
+export async function addSessionDropsetRow(
+  db: Database,
+  args: {
+    session_id: string;
+    after_set_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ set_id: string; ordering: number; created_at: number }> {
+  const src = await db.getFirstAsync<{
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    weight_kg: number | null;
+    reps: number | null;
+    set_kind: SetKind;
+    parent_set_id: string | null;
+    session_exercise_id: string | null;
+  }>(
+    `SELECT id, exercise_id, ordering, weight_kg, reps, set_kind,
+            parent_set_id, session_exercise_id
+       FROM "set" WHERE id = ? AND session_id = ?`,
+    args.after_set_id,
+    args.session_id
+  );
+  if (!src) {
+    throw new Error(
+      `addSessionDropsetRow: source set "${args.after_set_id}" not found in session "${args.session_id}"`
+    );
+  }
+  if (src.set_kind !== 'dropset') {
+    throw new Error(
+      `addSessionDropsetRow: source set "${args.after_set_id}" is not a dropset row (set_kind="${src.set_kind}")`
+    );
+  }
+
+  const headId = src.parent_set_id ?? src.id;
+  const new_set_id = args.uuid();
+  const now = args.now ?? Date.now;
+  const ts = now();
+  const new_ordering = src.ordering + 1;
+
+  await db.withTransactionAsync(async () => {
+    // Shift everything from new_ordering onwards down by 1 to free the slot.
+    await db.runAsync(
+      `UPDATE "set" SET ordering = ordering + 1
+        WHERE session_id = ? AND ordering >= ?`,
+      args.session_id,
+      new_ordering
+    );
+    // Insert new follower in the freed slot, attached to chain head.
+    await insertSessionSet(db, {
+      id: new_set_id,
+      session_id: args.session_id,
+      exercise_id: src.exercise_id,
+      weight_kg: src.weight_kg ?? 0,
+      reps: src.reps ?? 0,
+      is_skipped: 0,
+      ordering: new_ordering,
+      created_at: ts,
+      set_kind: 'dropset',
+      parent_set_id: headId,
+      session_exercise_id: src.session_exercise_id,
+    });
+  });
+
+  return { set_id: new_set_id, ordering: new_ordering, created_at: ts };
+}
+
+/**
+ * Remove one follower row from a dropset chain (slice 10c overnight #61 —
+ * wire the `−` button on dropset followers in active session / session
+ * detail edit mode, mirroring template editor's `removeDropsetRow` at
+ * template-editor-view.tsx lines 476-504).
+ *
+ * Refuses to delete if the chain (head + followers) would shrink below 2
+ * rows — a dropset chain must always have at least head + 1 follower to
+ * be a meaningful chain. To delete the entire chain, caller should swipe-
+ * delete the HEAD instead (or use `deleteSet` on the head from this
+ * function's POV but `deleteSet` doesn't cascade — separate concern).
+ *
+ * Throws `DROPSET_CHAIN_TOO_SHORT` when the guard fires (callers
+ * Alert.alert the user). Also throws if `set_id` is not a dropset FOLLOWER
+ * — passing in the head is a programming error (use `deleteSet` for the
+ * head).
+ *
+ * No ordering compaction here — `deleteSet` leaves the gap in the global
+ * `set.ordering` space and that's fine (subsequent sets stay in their
+ * existing ASC order; only `<` / `>` matter, not contiguous integers).
+ * Same convention as `deleteSet` at lines 93-95.
+ */
+export async function removeSessionDropsetRow(
+  db: Database,
+  args: { session_id: string; set_id: string }
+): Promise<void> {
+  const row = await db.getFirstAsync<{
+    id: string;
+    set_kind: SetKind;
+    parent_set_id: string | null;
+  }>(
+    `SELECT id, set_kind, parent_set_id
+       FROM "set" WHERE id = ? AND session_id = ?`,
+    args.set_id,
+    args.session_id
+  );
+  if (!row) {
+    throw new Error(
+      `removeSessionDropsetRow: set "${args.set_id}" not found in session "${args.session_id}"`
+    );
+  }
+  if (row.set_kind !== 'dropset') {
+    throw new Error(
+      `removeSessionDropsetRow: set "${args.set_id}" is not a dropset row`
+    );
+  }
+  if ((row.parent_set_id ?? null) === null) {
+    // Head — caller should use deleteSet (full chain delete) instead.
+    throw new Error(
+      `removeSessionDropsetRow: set "${args.set_id}" is a dropset HEAD; use deleteSet to remove the chain`
+    );
+  }
+
+  const headId = row.parent_set_id as string;
+  // Chain size = head row (id = headId) + all followers (parent_set_id = headId).
+  const chainCount = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM "set"
+      WHERE session_id = ?
+        AND (id = ? OR parent_set_id = ?)`,
+    args.session_id,
+    headId,
+    headId
+  );
+  const chainSize = chainCount?.n ?? 0;
+  if (chainSize <= 2) {
+    throw new Error('DROPSET_CHAIN_TOO_SHORT');
+  }
+
+  await db.runAsync(`DELETE FROM "set" WHERE id = ?`, args.set_id);
+}
+
+/**
  * Reorder sets WITHIN a single (session, exercise) without disturbing other
  * exercises' set orderings (slice 10c Phase 2 commit 9 留尾 — set-row long-press
  * reorder modal, mirrored from `reorderSessionExercises` in sessionRepository).
