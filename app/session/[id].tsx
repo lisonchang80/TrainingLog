@@ -1,35 +1,66 @@
 import { randomUUID } from 'expo-crypto';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import {
   Gesture,
   GestureDetector,
 } from 'react-native-gesture-handler';
+import {
+  NestableScrollContainer,
+  NestableDraggableFlatList,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
+import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
+import { ClusterCard } from '@/components/session/cluster-card';
+import {
+  SetRowContent,
+  type SetRowItem,
+} from '@/components/shared/set-row-content';
+import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
+import { SetNoteSheet } from '@/components/shared/set-note-sheet';
+import { ReorderExercisesSheet } from '@/components/shared/reorder-exercises-sheet';
+import { NumericKeypad } from '@/components/shared/numeric-keypad';
+import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import {
   listPrograms,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import {
+  appendReusableSupersetToSession,
+  appendSessionExercise,
+  deleteSessionExerciseAndSets,
   discardSession,
   getSession,
   listSessionExercisesWithName,
+  reorderSessionExercises,
+  updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
+  addClusterCycleAtEnd,
+  deleteClusterCycle,
+  deleteSet,
+  insertSessionSet,
+  insertSessionSetAfter,
   listSetsBySession,
+  prefillReusableSupersetFromLastSession,
+  prefillSessionExerciseFromLastSession,
+  recordSetInSession,
+  reorderSessionSetsForExercise,
   updateSetFields,
   type SessionSetWithExercise,
 } from '@/src/adapters/sqlite/setRepository';
@@ -38,6 +69,22 @@ import {
   convertSessionToTemplate,
   getSessionLinkedTemplateTriple,
 } from '@/src/adapters/sqlite/templateRepository';
+import {
+  getExerciseNotes,
+  updateExerciseNotes,
+} from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { consumePick } from '@/src/domain/exercise/pickerBridge';
+import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import {
+  groupClusterSides,
+  type ClusterGroup,
+} from '@/src/domain/session/clusterCard';
+import {
+  computeWorkingSetOrdinals,
+  displaySetLabel,
+} from '@/src/domain/set/workingSetOrdinal';
+import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
+import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
 import {
@@ -51,34 +98,41 @@ import {
 } from '@/src/domain/session/sessionStats';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
+import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 
 /**
  * Session detail page — ADR-0019 Q10 final layout (slice 10c session detail).
  *
  * Mirrors the Template editor's chrome pattern (header + scroll body +
- * sticky bottom action bar) but in read-mode by default. Reached from:
+ * sticky bottom action bar). Reached from:
  *   - Today screen on End Session (router.push immediately after closing)
  *   - History tab on row tap (already-ended sessions, identical view)
  *
  * Layout (ADR-0019 Q10):
  *   - Header: title (session name or date fallback) + back button
- *   - 4-tile stats in Chinese: 訓練時間 / 容量 / 動作數 / 大卡
- *   - 動作清單: exercises + sets, read-only display by default; an
- *     [編輯訓練] toggle flips weight/reps into TextInputs and persists via
- *     updateSetFields on commit (blur).
+ *   - 3-tile SessionStatsPanel (frozen mode — ended_at - started_at + tap to edit)
+ *   - 動作清單: in read mode = SoloExerciseBlock / ClusterBlock simple display
+ *     in edit mode = FULL active-session UI parity (ClusterCard + ExerciseCard
+ *     mirrors with cluster CRUD + picker + drag + ⚙️ menu + swipe-delete +
+ *     set_kind cycling + add cycle/dropset — minus rest timer + body data
+ *     entry which are session-only).
  *   - 4-button sticky action bar:
- *       [編輯訓練] toggle edit mode
- *       [儲存模板] convertSessionToTemplate(mode='update') — overwrites
- *           the session's linked template if any, else creates + links.
- *       [另存模板] convertSessionToTemplate(mode='create') — always new
- *           template; doesn't touch any existing links.
+ *       [編輯訓練/完成編輯] toggle
+ *       [儲存模板] convertSessionToTemplate(mode='update')
+ *       [另存模板] convertSessionToTemplate(mode='create') → TemplateMetaSheet
  *       [刪除] confirm Alert → discardSession → router.back()
  *
- * Both 儲存模板 and 另存模板 prompt the user for a name via Alert.prompt
- * (iOS-only — on Android falls back to a default name based on date).
+ * Edit-mode-specific differences from Today screen (overnight #59):
+ *   - SessionStatsPanel rendered in frozen mode (ended_at - started_at,
+ *     no live tick) + 訓練時間 tile tappable → SessionTimeEditorSheet.
+ *   - tap-✓ on set toggles is_logged via updateSetFields but does NOT
+ *     trigger RestTimerModal (no rest_timer state at all on this page).
+ *   - No BodyDataSheet (already absent — kept removed).
  *
- * Cluster rendering preserved from the prior implementation
- * (ADR-0018 v014 / buildClusters helper at bottom of file).
+ * Note: the detail page intentionally DROPS the 大卡 tile that the prior
+ * 4-tile implementation rendered. SessionStatsPanel is 3-tile, and kcal
+ * is HealthKit-only data (deferred to slice 13). If the user complains
+ * later, easy to add a 4th tile prop to SessionStatsPanel.
  */
 export default function SessionDetailScreen() {
   // 2026-05-20 overnight #58 — ADR-0015 § Tap 日格行為: history calendar tap
@@ -157,6 +211,39 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  // ADR-0019 Q3 single-expanded card — only used in edit mode (mirror Today).
+  const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+
+  // Per-set notes editor sheet — `null` means closed.
+  const [noteSheetTarget, setNoteSheetTarget] =
+    useState<{ set_id: string; initial: string | null } | null>(null);
+  // Numeric keypad modal — `null` means closed (ADR-0019 Q6).
+  const [keypadTarget, setKeypadTarget] = useState<{
+    set_id: string;
+    field: 'reps' | 'weight';
+    current: number;
+  } | null>(null);
+  // Rest-sec keypad target — reuses NumericKeypad with a different field.
+  const [restSecTarget, setRestSecTarget] = useState<{
+    session_exercise_id: string;
+    current: number;
+    exercise_name: string;
+  } | null>(null);
+  // Exercise-level notes sheet target (📝 menu path). Reuses SetNoteSheet
+  // with a custom title; the Exercise.notes column is global (per-Exercise,
+  // not per-Session) per ADR-0017.
+  const [exerciseNoteTarget, setExerciseNoteTarget] = useState<{
+    exercise_id: string;
+    exercise_name: string;
+    initial: string | null;
+  } | null>(null);
+  // 🔃 reorder-exercises modal open flag.
+  const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
+  // Tap-訓練時間 → time editor sheet (overnight #59).
+  const [timeEditorOpen, setTimeEditorOpen] = useState(false);
 
   // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次 programs
   // 給 picker 用；sub_tags 由 sheet 內依選擇 program 動態查 (5/18 polish round 30).
@@ -218,6 +305,69 @@ export default function SessionDetailScreen() {
     load();
   }, [load]);
 
+  // Drain picker mailbox on focus — when [+ 動作] flow returns from
+  // /exercise-picker, append the selected exercises / RS templates to
+  // THIS session. Mirrors the Today screen's flow but routed to the
+  // session detail screen.
+  useFocusEffect(
+    useCallback(() => {
+      const payload = consumePick();
+      if (
+        !payload ||
+        (payload.exerciseIds.length === 0 &&
+          payload.reusableSupersetIds.length === 0)
+      ) {
+        return;
+      }
+      if (!id) return;
+      void (async () => {
+        try {
+          // Reusable supersets FIRST (per pickerBridge convention) — each
+          // explodes into a cluster pair (A + B session_exercise rows
+          // linked via parent_id + reusable_superset_id).
+          for (const rs_id of payload.reusableSupersetIds) {
+            const { a_id, b_id } = await appendReusableSupersetToSession(
+              db,
+              {
+                session_id: id,
+                reusable_superset_id: rs_id,
+                uuid: randomUUID,
+              },
+            );
+            await prefillReusableSupersetFromLastSession(db, {
+              current_session_id: id,
+              reusable_superset_id: rs_id,
+              new_a_session_exercise_id: a_id,
+              new_b_session_exercise_id: b_id,
+              uuid: randomUUID,
+            });
+          }
+          // Solo exercises after.
+          for (const exercise_id of payload.exerciseIds) {
+            const newSeId = randomUUID();
+            await appendSessionExercise(db, {
+              id: newSeId,
+              session_id: id,
+              exercise_id,
+            });
+            await prefillSessionExerciseFromLastSession(db, {
+              session_id: id,
+              exercise_id,
+              uuid: randomUUID,
+              session_exercise_id: newSeId,
+            });
+          }
+          await load();
+        } catch (e) {
+          Alert.alert(
+            '加入動作失敗',
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      })();
+    }, [db, id, load]),
+  );
+
   const stats = useMemo(() => {
     if (!session) return null;
     return computeDetailPageStats({
@@ -246,7 +396,7 @@ export default function SessionDetailScreen() {
   // Build a unified ordered list of "items" for the 動作清單 section: each
   // item is either a solo session_exercise or a cluster block. Cluster
   // followers (parent_id NOT NULL) are absorbed into their parent's block
-  // so we don't render them twice.
+  // so we don't render them twice. (Read-mode rendering path.)
   const orderedItems = useMemo(
     () => buildOrderedItems(sessionExercises, clusters, sets),
     [sessionExercises, clusters, sets]
@@ -260,19 +410,578 @@ export default function SessionDetailScreen() {
     [sessionExercises]
   );
 
-  const handleSetFieldChange = useCallback(
-    async (set_id: string, patch: { weight_kg?: number; reps?: number }) => {
+  // ── Edit-mode CRUD callbacks (mirror Today, minus rest_timer) ──────────────
+
+  /**
+   * Append one set to a specific exercise within this session. Mirrors
+   * Today's `onAddSet` minus the canRecordSet guard (detail page only
+   * lands here when the session exists — `id` is checked at top of file).
+   *
+   * Defaults priority chain (ADR-0012/0016 動作記憶):
+   *   1. Last set in CURRENT session for this card (same-session continuity)
+   *   2. Last set in HISTORY across all prior sessions (cross-session memory)
+   *   3. Sensible starter defaults (weight=0, reps=10)
+   */
+  const onAddSet = useCallback(
+    async (exercise_id: string, session_exercise_id: string) => {
+      if (!id) return;
+      // v019 isolation: filter by session_exercise_id (the card) — not bare
+      // exercise_id — so an RS A-side card doesn't pick up "last set" from
+      // a coincidentally-same-exercise solo card sitting elsewhere.
+      const priorInSession = sets.filter(
+        (s) => s.session_exercise_id === session_exercise_id,
+      );
+      const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
+
+      let weight_kg = 0;
+      let repsNum = 10;
+      if (lastSetInSession) {
+        weight_kg = lastSetInSession.weight_kg ?? 0;
+        repsNum = lastSetInSession.reps ?? repsNum;
+      } else {
+        try {
+          const historicalPriors = await listPriorSetsForExercise(
+            db,
+            exercise_id,
+            Date.now() + 1,
+          );
+          if (historicalPriors.length > 0) {
+            const mostRecent = historicalPriors[0];
+            weight_kg = mostRecent.weight_kg ?? 0;
+            repsNum = mostRecent.reps ?? repsNum;
+          }
+        } catch {
+          // History query failure → starter defaults.
+        }
+      }
+      if (!Number.isInteger(repsNum) || repsNum <= 0) repsNum = 10;
+
+      const err = validateRecordSet({
+        exercise_id,
+        weight_kg,
+        reps: repsNum,
+      });
+      if (err) {
+        Alert.alert('Invalid input', err);
+        return;
+      }
+      setBusy(true);
       try {
-        await updateSetFields(db, set_id, patch);
-        // Re-read sets to reflect the change.
-        const refreshed = await listSetsBySession(db, id!);
-        setSets(refreshed);
+        await recordSetInSession(db, {
+          session_id: id,
+          input: { exercise_id, weight_kg, reps: repsNum },
+          uuid: randomUUID,
+          session_exercise_id,
+        });
+        await load();
       } catch (e) {
-        Alert.alert('更新失敗', e instanceof Error ? e.message : String(e));
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
       }
     },
-    [db, id]
+    [db, id, sets, load],
   );
+
+  /**
+   * Persist a partial update to one set (weight_kg / reps) and refresh
+   * the in-memory sets. Mirrors Today's onUpdateSet.
+   */
+  const onUpdateSet = useCallback(
+    async (
+      set_id: string,
+      patch: { reps?: number; weight?: number },
+    ) => {
+      const dbPatch: { weight_kg?: number; reps?: number } = {};
+      if (patch.reps !== undefined) dbPatch.reps = patch.reps;
+      if (patch.weight !== undefined) dbPatch.weight_kg = patch.weight;
+      try {
+        await updateSetFields(db, set_id, dbPatch);
+        setSets((curr) =>
+          curr.map((s) =>
+            s.id === set_id
+              ? {
+                  ...s,
+                  weight_kg: patch.weight ?? s.weight_kg,
+                  reps: patch.reps ?? s.reps,
+                }
+              : s,
+          ),
+        );
+      } catch (e) {
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db],
+  );
+
+  /**
+   * Apply a tap-label cycle (warmup ↔ working ↔ dropset) to one set
+   * within one card. Mirrors Today's onCycleSetKind.
+   */
+  const onCycleSetKind = useCallback(
+    async (
+      exercise_id: string,
+      set_id: string,
+      is_in_cluster: boolean = false,
+    ) => {
+      if (!id) return;
+      const target = sets.find((s) => s.id === set_id);
+      const targetSeId = target?.session_exercise_id ?? null;
+      const setsForExercise = sets.filter((s) =>
+        targetSeId
+          ? s.session_exercise_id === targetSeId
+          : s.exercise_id === exercise_id,
+      );
+      const ops = cycleSessionSetKindClusterAware(
+        setsForExercise.map((s) => ({
+          id: s.id,
+          set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
+          reps: s.reps,
+          weight_kg: s.weight_kg,
+        })),
+        set_id,
+        randomUUID(),
+        is_in_cluster,
+      );
+      if (ops.length === 0) return;
+      try {
+        const maxOrdering = sets.reduce(
+          (m, s) => Math.max(m, s.ordering),
+          0,
+        );
+        let appendOffset = 1;
+        for (const op of ops) {
+          if (op.type === 'update') {
+            await updateSetFields(db, op.set_id, op.patch);
+          } else if (op.type === 'delete') {
+            await deleteSet(db, op.set_id);
+          } else {
+            // insertFollower — inherit head's session_exercise_id so the
+            // dropset follower stays on the same card as its parent.
+            const head = sets.find((s) => s.id === op.parent_set_id);
+            await insertSessionSet(db, {
+              id: op.new_set_id,
+              session_id: id,
+              exercise_id,
+              weight_kg: op.weight_kg,
+              reps: op.reps,
+              is_skipped: 0,
+              ordering: maxOrdering + appendOffset,
+              created_at: Date.now(),
+              set_kind: 'dropset',
+              parent_set_id: op.parent_set_id,
+              session_exercise_id: head?.session_exercise_id ?? null,
+            });
+            appendOffset += 1;
+          }
+        }
+        await load();
+      } catch (e) {
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, sets, load],
+  );
+
+  const onDeleteSet = useCallback(
+    async (set_id: string) => {
+      if (!id) return;
+      try {
+        await deleteSet(db, set_id);
+        await load();
+      } catch (e) {
+        Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, load],
+  );
+
+  const onAddSetAfter = useCallback(
+    async (source_set_id: string) => {
+      if (!id) return;
+      setBusy(true);
+      try {
+        await insertSessionSetAfter(db, {
+          session_id: id,
+          source_set_id,
+          uuid: randomUUID,
+        });
+        await load();
+      } catch (e) {
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [db, id, load],
+  );
+
+  /**
+   * Flip is_logged on a set. Edit-history mode (overnight #59): NO rest
+   * timer trigger — this is the key difference from Today's `onToggleLogged`.
+   */
+  const onToggleLogged = useCallback(
+    async (set_id: string, currentlyLogged: boolean) => {
+      const nextLogged = currentlyLogged ? 0 : 1;
+      try {
+        await updateSetFields(db, set_id, { is_logged: nextLogged });
+        setSets((curr) =>
+          curr.map((s) =>
+            s.id === set_id ? { ...s, is_logged: nextLogged } : s,
+          ),
+        );
+      } catch (e) {
+        console.warn('[toggle is_logged] failed:', e);
+      }
+      // INTENTIONAL: no PR detection, no rest timer trigger. Detail page
+      // is for editing logged history; the user has already finished and
+      // PR / timer side-effects don't apply.
+    },
+    [db],
+  );
+
+  /**
+   * Atomic cluster cycle ✓ tap (ADR-0019 Q16). Edit-history mode: NO
+   * rest timer trigger (different from Today's `onToggleClusterCycle`).
+   */
+  const onToggleClusterCycle = useCallback(
+    async (args: {
+      a_set_id: string;
+      b_set_id: string;
+      currentlyLogged: boolean;
+    }) => {
+      const nextLogged = args.currentlyLogged ? 0 : 1;
+      try {
+        // Use updateSetFields per side directly — detail page doesn't need
+        // the atomic markClusterCycleLogged repo path because there's no
+        // concurrent in-flight write to race against (no rest timer side-
+        // effect). Two sequential UPDATEs are good enough; both committed
+        // before the next render.
+        await updateSetFields(db, args.a_set_id, { is_logged: nextLogged });
+        await updateSetFields(db, args.b_set_id, { is_logged: nextLogged });
+        setSets((curr) =>
+          curr.map((s) => {
+            if (s.id === args.a_set_id || s.id === args.b_set_id) {
+              return { ...s, is_logged: nextLogged };
+            }
+            return s;
+          }),
+        );
+      } catch (e) {
+        console.warn('[cluster cycle ✓] failed:', e);
+      }
+    },
+    [db],
+  );
+
+  const onDeleteClusterCycle = useCallback(
+    async (args: { a_set_id: string | null; b_set_id: string | null }) => {
+      if (!id) return;
+      try {
+        await deleteClusterCycle(db, args);
+        await load();
+      } catch (e) {
+        Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, load],
+  );
+
+  const onCloneClusterCycle = useCallback(
+    async (args: { a_set_id: string | null; b_set_id: string | null }) => {
+      if (!id) return;
+      try {
+        if (args.a_set_id) {
+          await insertSessionSetAfter(db, {
+            session_id: id,
+            source_set_id: args.a_set_id,
+            uuid: randomUUID,
+          });
+        }
+        if (args.b_set_id) {
+          await insertSessionSetAfter(db, {
+            session_id: id,
+            source_set_id: args.b_set_id,
+            uuid: randomUUID,
+          });
+        }
+        await load();
+      } catch (e) {
+        Alert.alert('Clone failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, load],
+  );
+
+  const onAddClusterCycle = useCallback(
+    async (
+      group: ClusterGroup<SessionExerciseRowWithName, SessionSetWithExercise>,
+    ) => {
+      if (!id) return;
+      const pickDefaults = async (
+        exercise_id: string,
+        session_exercise_id: string,
+      ) => {
+        const inSession = sets
+          .filter((s) => s.session_exercise_id === session_exercise_id)
+          .slice(-1)[0];
+        if (inSession) {
+          return {
+            weight_kg: inSession.weight_kg ?? 0,
+            reps: inSession.reps ?? 10,
+          };
+        }
+        try {
+          const historical = await listPriorSetsForExercise(
+            db,
+            exercise_id,
+            Date.now() + 1,
+          );
+          if (historical.length > 0) {
+            return {
+              weight_kg: historical[0].weight_kg ?? 0,
+              reps: historical[0].reps ?? 10,
+            };
+          }
+        } catch {
+          // ignore
+        }
+        return { weight_kg: 0, reps: 10 };
+      };
+      try {
+        const aDefaults = await pickDefaults(
+          group.a.exercise.exercise_id,
+          group.a.exercise.id,
+        );
+        const bDefaults = await pickDefaults(
+          group.b.exercise.exercise_id,
+          group.b.exercise.id,
+        );
+        await addClusterCycleAtEnd(db, {
+          session_id: id,
+          a: {
+            exercise_id: group.a.exercise.exercise_id,
+            new_set_id: randomUUID(),
+            weight_kg: aDefaults.weight_kg,
+            reps: aDefaults.reps,
+            session_exercise_id: group.a.exercise.id,
+          },
+          b: {
+            exercise_id: group.b.exercise.exercise_id,
+            new_set_id: randomUUID(),
+            weight_kg: bDefaults.weight_kg,
+            reps: bDefaults.reps,
+            session_exercise_id: group.b.exercise.id,
+          },
+        });
+        await load();
+      } catch (e) {
+        Alert.alert('Add cycle failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, sets, load],
+  );
+
+  const onUpdateNotes = useCallback(
+    async (set_id: string, notes: string | null) => {
+      try {
+        await updateSetFields(db, set_id, { notes });
+        setSets((curr) =>
+          curr.map((s) => (s.id === set_id ? { ...s, notes } : s)),
+        );
+      } catch (e) {
+        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db],
+  );
+
+  /**
+   * ⚙️ menu — mirror Today's onSettingsPress, minus the never-applicable
+   * cluster context history navigation arguments (cluster ⚙️ history
+   * entries still work because we wire partnerExerciseId/Id from the
+   * cluster render path identically to Today).
+   */
+  const onSettingsPress = useCallback(
+    (
+      planRow: SessionExerciseRowWithName,
+      options?: {
+        partnerExerciseId?: string;
+        partnerSessionExerciseId?: string;
+      },
+    ) => {
+      const partnerExerciseId = options?.partnerExerciseId;
+      const partnerSessionExerciseId = options?.partnerSessionExerciseId;
+      const isCluster = !!partnerExerciseId && !!partnerSessionExerciseId;
+      const menuOptions: string[] = isCluster
+        ? [
+            '取消',
+            '📝 編輯備註',
+            '⏱️ 休息秒數',
+            '📖 動作歷史 (A)',
+            '📖 動作歷史 (B)',
+            '🗑️ 刪除動作',
+            '🔃 排序動作',
+          ]
+        : [
+            '取消',
+            '📝 編輯備註',
+            '⏱️ 休息秒數',
+            '🗑️ 刪除動作',
+            '🔃 排序動作',
+          ];
+      const destructiveButtonIndex = isCluster ? 5 : 3;
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: planRow.exercise_name,
+          options: menuOptions,
+          cancelButtonIndex: 0,
+          destructiveButtonIndex,
+        },
+        (idx) => {
+          if (idx === 0) return;
+          const label = menuOptions[idx];
+          if (label === '📝 編輯備註') {
+            (async () => {
+              try {
+                const initial = await getExerciseNotes(db, planRow.exercise_id);
+                setExerciseNoteTarget({
+                  exercise_id: planRow.exercise_id,
+                  exercise_name: planRow.exercise_name,
+                  initial,
+                });
+              } catch (e) {
+                Alert.alert(
+                  '讀取失敗',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            })();
+          } else if (label === '⏱️ 休息秒數') {
+            setRestSecTarget({
+              session_exercise_id: planRow.id,
+              current: planRow.rest_sec ?? 60,
+              exercise_name: planRow.exercise_name,
+            });
+          } else if (label === '📖 動作歷史 (A)') {
+            router.push(
+              `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A&currentSeIdA=${planRow.id}&currentSeIdB=${partnerSessionExerciseId}`,
+            );
+          } else if (label === '📖 動作歷史 (B)') {
+            router.push(
+              `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B&currentSeIdA=${partnerSessionExerciseId}&currentSeIdB=${planRow.id}`,
+            );
+          } else if (label === '🔃 排序動作') {
+            setReorderSheetOpen(true);
+          } else if (label === '🗑️ 刪除動作') {
+            if (isCluster && partnerSessionExerciseId) {
+              const partnerPlan = sessionExercises.find(
+                (p) => p.id === partnerSessionExerciseId,
+              );
+              const partnerName = partnerPlan?.exercise_name ?? '(未知動作)';
+              const setsForCluster = sets.filter(
+                (s) =>
+                  s.session_exercise_id === planRow.id ||
+                  s.session_exercise_id === partnerSessionExerciseId,
+              );
+              const loggedCount = setsForCluster.filter(
+                (s) => s.is_logged === 1,
+              ).length;
+              const totalSets = setsForCluster.length;
+              const warningSuffix =
+                loggedCount > 0
+                  ? `\n\n將連同 ${totalSets} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                  : totalSets > 0
+                    ? `\n\n將連同 ${totalSets} 組未完成記錄一起刪除。`
+                    : '';
+              Alert.alert(
+                '刪除超級組？',
+                `要從這次訓練中移除整個超級組「${planRow.exercise_name} + ${partnerName}」？${warningSuffix}`,
+                [
+                  { text: '取消', style: 'cancel' },
+                  {
+                    text: '刪除',
+                    style: 'destructive',
+                    onPress: async () => {
+                      if (!id) return;
+                      try {
+                        await deleteSessionExerciseAndSets(db, {
+                          session_id: id,
+                          exercise_id: planRow.exercise_id,
+                          session_exercise_id: planRow.id,
+                        });
+                        await deleteSessionExerciseAndSets(db, {
+                          session_id: id,
+                          exercise_id: partnerPlan?.exercise_id ?? '',
+                          session_exercise_id: partnerSessionExerciseId,
+                        });
+                        await load();
+                      } catch (e) {
+                        Alert.alert(
+                          '刪除失敗',
+                          e instanceof Error ? e.message : String(e),
+                        );
+                        await load();
+                      }
+                    },
+                  },
+                ],
+              );
+              return;
+            }
+            // Solo path
+            const setsForExercise = sets.filter(
+              (s) =>
+                s.session_exercise_id === planRow.id ||
+                (s.session_exercise_id == null &&
+                  s.exercise_id === planRow.exercise_id),
+            );
+            const loggedCount = setsForExercise.filter(
+              (s) => s.is_logged === 1,
+            ).length;
+            const warningSuffix =
+              loggedCount > 0
+                ? `\n\n⚠️ 將連同此動作的 ${setsForExercise.length} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                : setsForExercise.length > 0
+                  ? `\n\n將連同此動作的 ${setsForExercise.length} 組未完成記錄一起刪除。`
+                  : '';
+            Alert.alert(
+              '刪除動作？',
+              `要從這次訓練中移除「${planRow.exercise_name}」？${warningSuffix}`,
+              [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '刪除',
+                  style: 'destructive',
+                  onPress: async () => {
+                    if (!id) return;
+                    try {
+                      await deleteSessionExerciseAndSets(db, {
+                        session_id: id,
+                        exercise_id: planRow.exercise_id,
+                        session_exercise_id: planRow.id,
+                      });
+                      await load();
+                    } catch (e) {
+                      Alert.alert(
+                        'Delete failed',
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    }
+                  },
+                },
+              ],
+            );
+          }
+        },
+      );
+    },
+    [db, id, sessionExercises, sets, router, load],
+  );
+
+  // ── Top-level handlers ────────────────────────────────────────────────────
 
   const handleSaveTemplate = useCallback(
     async (mode: 'update' | 'create') => {
@@ -280,15 +989,6 @@ export default function SessionDetailScreen() {
       const dateLabel = formatDateLabel(session.started_at);
       const defaultName = `Session ${dateLabel}`;
 
-      // 2026-05-18: create mode (另存模板) → TemplateMetaSheet 引導 3 元組
-      // (name + program_id + sub_tag)。update mode (儲存模板) 維持原本
-      // Alert.prompt 改名流程 — update 不需要 3 元組，inherit linked
-      // template 既有的 program/sub_tag。
-      //
-      // 2026-05-20 overnight #55: pre-fill the sheet from the session's
-      // linked template (if any) so a template-based session can quickly
-      // spawn a sibling under a different (program, sub_tag) without
-      // retyping. Freestyle session → null prefill, sheet opens blank.
       if (mode === 'create') {
         try {
           const [progs, linked] = await Promise.all([
@@ -313,8 +1013,6 @@ export default function SessionDetailScreen() {
         return;
       }
 
-      // mode === 'update' — 原本 Alert.prompt 流程不變。
-      // Alert.prompt is iOS-only; on Android we fall back to the default name.
       if (typeof Alert.prompt === 'function') {
         Alert.prompt(
           '儲存模板',
@@ -346,8 +1044,6 @@ export default function SessionDetailScreen() {
           defaultName
         );
       } else {
-        // Android: skip prompt, use default name (UI lib could add a Modal
-        // later; keep scope minimal for v1).
         Alert.alert(
           '儲存模板',
           `將以預設名稱「${defaultName}」儲存？`,
@@ -402,11 +1098,6 @@ export default function SessionDetailScreen() {
         setTemplateMetaSheetOpen(false);
         Alert.alert('已另存', `模板「${finalName}」已建立。`);
       } catch (e) {
-        // 2026-05-20 overnight #55: dup-triple guard surfaces as a specific
-        // Alert + keep sheet open (don't setTemplateMetaSheetOpen(false)) so
-        // user can rename inline or pick a different (program, sub_tag)
-        // without re-opening the sheet. Mirrors the inline retry UX used for
-        // DUPLICATE_PROGRAM_NAME / DUPLICATE_TEMPLATE_TRIPLE upstream.
         const message = e instanceof Error ? e.message : String(e);
         if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
           Alert.alert(
@@ -445,10 +1136,205 @@ export default function SessionDetailScreen() {
     );
   }, [db, id, router]);
 
+  /**
+   * Persist new started_at / ended_at via direct UPDATE. Used by tap on
+   * 訓練時間 tile → SessionTimeEditorSheet → save.
+   */
+  const handleTimeSave = useCallback(
+    async (args: { started_at_ms: number; ended_at_ms: number }) => {
+      if (!id) return;
+      try {
+        await db.runAsync(
+          `UPDATE session SET started_at = ?, ended_at = ? WHERE id = ?`,
+          args.started_at_ms,
+          args.ended_at_ms,
+          id,
+        );
+        setTimeEditorOpen(false);
+        await load();
+      } catch (e) {
+        Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [db, id, load],
+  );
+
   const titleText = useMemo(() => {
     if (!session) return 'Session';
     return formatDateLabel(session.started_at);
   }, [session]);
+
+  // Edit mode body — full active session UI parity.
+  const renderEditBody = () => {
+    if (!session) return null;
+    const clusterGroups = groupClusterSides(sessionExercises, sets);
+    const clusterMemberIds = new Set<string>();
+    for (const g of clusterGroups) {
+      clusterMemberIds.add(g.a.exercise.id);
+      clusterMemberIds.add(g.b.exercise.id);
+    }
+    const clusterByParentId = new Map(
+      clusterGroups.map((g) => [g.a.exercise.id, g] as const),
+    );
+
+    const out: React.ReactNode[] = [];
+    for (const p of sessionExercises) {
+      // Cluster follower → skip (parent owns the render).
+      if (p.parent_id !== null && clusterMemberIds.has(p.id)) continue;
+
+      const group = clusterByParentId.get(p.id);
+      if (group) {
+        const isExpanded = expandedExerciseId === p.id;
+        out.push(
+          <ClusterCard
+            key={p.id}
+            group={group}
+            isExpanded={isExpanded}
+            colorHex={p.reusable_superset_color_hex}
+            onToggleExpand={() =>
+              setExpandedExerciseId(isExpanded ? null : p.id)
+            }
+            onToggleCycleLogged={(args) => onToggleClusterCycle(args)}
+            onAddCycle={() => onAddClusterCycle(group)}
+            onDeleteCycle={onDeleteClusterCycle}
+            onCloneCycle={onCloneClusterCycle}
+            onShowCycleNote={(parent_set_id) => {
+              const parent = sets.find((s) => s.id === parent_set_id);
+              setNoteSheetTarget({
+                set_id: parent_set_id,
+                initial: parent?.notes ?? null,
+              });
+            }}
+            onOpenHistory={() =>
+              router.push(
+                `/exercise-history/${group.a.exercise.exercise_id}?clusterMode=cluster_only&partner=${group.b.exercise.exercise_id}&side=A&currentSeIdA=${group.a.exercise.id}&currentSeIdB=${group.b.exercise.id}`,
+              )
+            }
+            onSettingsPress={() =>
+              onSettingsPress(p, {
+                partnerExerciseId: group.b.exercise.exercise_id,
+                partnerSessionExerciseId: group.b.exercise.id,
+              })
+            }
+            onUpdateClusterSet={(set_id, patch) => onUpdateSet(set_id, patch)}
+            onTapClusterNumber={(set_id, field, current) =>
+              setKeypadTarget({ set_id, field, current })
+            }
+            onCycleClusterSetKind={(set_id) => {
+              const s = sets.find((x) => x.id === set_id);
+              if (s) onCycleSetKind(s.exercise_id, set_id, true);
+            }}
+            onCycleClusterCycleSetKind={async (args) => {
+              const a = args.a_set_id
+                ? sets.find((x) => x.id === args.a_set_id)
+                : null;
+              const b = args.b_set_id
+                ? sets.find((x) => x.id === args.b_set_id)
+                : null;
+              if (a) await onCycleSetKind(a.exercise_id, a.id, true);
+              if (b) await onCycleSetKind(b.exercise_id, b.id, true);
+            }}
+            onShowClusterSetNote={(set_id, current) =>
+              setNoteSheetTarget({ set_id, initial: current })
+            }
+            onConfirmReorderCycles={async (newOrder) => {
+              if (!id) return;
+              const aOrderedIds = newOrder
+                .map((c) => c.a_set?.id)
+                .filter(
+                  (x): x is string => typeof x === 'string' && x.length > 0,
+                );
+              const bOrderedIds = newOrder
+                .map((c) => c.b_set?.id)
+                .filter(
+                  (x): x is string => typeof x === 'string' && x.length > 0,
+                );
+              try {
+                if (aOrderedIds.length > 0) {
+                  await reorderSessionSetsForExercise(db, {
+                    session_id: id,
+                    exercise_id: group.a.exercise.exercise_id,
+                    orderedIds: aOrderedIds,
+                    session_exercise_id: group.a.exercise.id,
+                  });
+                }
+                if (bOrderedIds.length > 0) {
+                  await reorderSessionSetsForExercise(db, {
+                    session_id: id,
+                    exercise_id: group.b.exercise.exercise_id,
+                    orderedIds: bOrderedIds,
+                    session_exercise_id: group.b.exercise.id,
+                  });
+                }
+                await load();
+              } catch (e) {
+                Alert.alert(
+                  '排序失敗',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }}
+          />,
+        );
+        continue;
+      }
+
+      // Solo path
+      const setsForExercise = sets.filter(
+        (s) =>
+          s.session_exercise_id === p.id ||
+          (s.session_exercise_id == null && s.exercise_id === p.exercise_id),
+      );
+      const isExpanded = expandedExerciseId === p.id;
+      out.push(
+        <EditableExerciseCard
+          key={p.id}
+          planRow={p}
+          isExpanded={isExpanded}
+          sets={setsForExercise}
+          busy={busy}
+          onToggleExpand={() => setExpandedExerciseId(isExpanded ? null : p.id)}
+          onAddSet={() => onAddSet(p.exercise_id, p.id)}
+          onUpdateSet={onUpdateSet}
+          onCycleSetKind={(set_id) => onCycleSetKind(p.exercise_id, set_id)}
+          onDeleteSet={onDeleteSet}
+          onAddSetAfter={(set_id) => onAddSetAfter(set_id)}
+          onToggleLogged={onToggleLogged}
+          onShowSetNote={(set_id, current) =>
+            setNoteSheetTarget({ set_id, initial: current })
+          }
+          onTapNumber={(set_id, field, current) =>
+            setKeypadTarget({ set_id, field, current })
+          }
+          onOpenHistory={() =>
+            router.push(
+              `/exercise-history/${p.exercise_id}?clusterMode=exclude_cluster&currentSeId=${p.id}`,
+            )
+          }
+          onSettingsPress={() => onSettingsPress(p)}
+          onLongPressHeader={() => setReorderSheetOpen(true)}
+          onConfirmReorderSets={async (orderedIds) => {
+            if (!id) return;
+            try {
+              await reorderSessionSetsForExercise(db, {
+                session_id: id,
+                exercise_id: p.exercise_id,
+                orderedIds,
+                session_exercise_id: p.id,
+              });
+              await load();
+            } catch (e) {
+              Alert.alert(
+                '排序失敗',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }}
+        />,
+      );
+    }
+    return out;
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -466,8 +1352,7 @@ export default function SessionDetailScreen() {
       {/*
         Same-day session switcher (ADR-0015 § Tap 日格行為). Renders only when
         the history tab embedded `?sameDayIds=<csv>` AND the list contains
-        more than one entry. Sub-row design (under the title bar) so it
-        doesn't fight the existing back-btn/title/spacer layout.
+        more than one entry.
       */}
       {navState.total > 1 ? (
         <View style={styles.sameDayBar}>
@@ -510,73 +1395,150 @@ export default function SessionDetailScreen() {
       ) : null}
 
       <GestureDetector gesture={swipeGesture}>
-      <ScrollView contentContainerStyle={styles.body}>
-        {loading ? (
-          <Text style={styles.muted}>Loading…</Text>
-        ) : error ? (
-          <Text style={styles.error}>{error}</Text>
-        ) : !session || !stats ? (
-          <Text style={styles.muted}>No data.</Text>
-        ) : (
-          <>
-            <Text style={styles.timestamp}>
-              {formatTimestamp(session.started_at)}
-              {session.ended_at != null
-                ? ` ~ ${formatTimestamp(session.ended_at)}`
-                : ''}
-            </Text>
-
-            {/* 4-tile stats row */}
-            <View style={styles.statsRow}>
-              <Stat
-                label="訓練時間"
-                value={formatTrainingDuration(Math.floor(stats.durationMs / 1000))}
-              />
-              <Stat label="容量" value={formatVolume(stats.volume)} />
-              <Stat label="動作數" value={String(stats.exerciseCount)} />
-              <Stat
-                label="大卡"
-                value={stats.kcal == null ? '—' : String(Math.round(stats.kcal))}
-              />
-            </View>
-
-            <Text style={styles.section}>動作清單</Text>
-            {orderedItems.length === 0 ? (
-              <Text style={styles.muted}>No exercises.</Text>
+        {editMode ? (
+          // Edit mode — NestableScrollContainer + draggable lists for full
+          // active-session UI parity (including drag-reorder per row).
+          <NestableScrollContainer
+            contentContainerStyle={styles.body}
+            keyboardShouldPersistTaps="handled"
+          >
+            {loading ? (
+              <Text style={styles.muted}>Loading…</Text>
+            ) : error ? (
+              <Text style={styles.error}>{error}</Text>
+            ) : !session || !stats ? (
+              <Text style={styles.muted}>No data.</Text>
             ) : (
-              orderedItems.map((item) => {
-                if (item.kind === 'cluster') {
-                  return (
-                    <ClusterBlock
-                      key={item.cluster.parent.id}
-                      cluster={item.cluster}
-                      rs={
-                        item.cluster.parent.reusable_superset_id
-                          ? rsById.get(
-                              item.cluster.parent.reusable_superset_id
-                            ) ?? null
-                          : null
-                      }
-                    />
-                  );
-                }
-                return (
-                  <SoloExerciseBlock
-                    key={item.exercise.id}
-                    exercise={item.exercise}
-                    sets={item.sets}
-                    editMode={editMode}
-                    onSetFieldChange={handleSetFieldChange}
-                  />
-                );
-              })
+              <>
+                <Text style={styles.timestamp}>
+                  {formatTimestamp(session.started_at)}
+                  {session.ended_at != null
+                    ? ` ~ ${formatTimestamp(session.ended_at)}`
+                    : ''}
+                </Text>
+
+                <SessionStatsPanel
+                  sets={sets.map((s) => ({
+                    set_kind: s.set_kind,
+                    is_logged: s.is_logged,
+                    reps: s.reps,
+                    weight_kg: s.weight_kg,
+                  }))}
+                  exercise_count={countUniqueExercises(sessionExercises)}
+                  started_at_ms={session.started_at}
+                  ended_at_ms={session.ended_at}
+                  onTapDuration={
+                    session.ended_at != null
+                      ? () => setTimeEditorOpen(true)
+                      : undefined
+                  }
+                />
+
+                <Text style={styles.section}>動作清單</Text>
+                {sessionExercises.length === 0 ? (
+                  <View style={styles.emptyPlanBlock}>
+                    <Text style={styles.emptyPlanTitle}>尚未加入動作</Text>
+                    <Text style={styles.emptyPlanBody}>
+                      點下方「+ 動作」開始記錄這次訓練。
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.planList}>{renderEditBody()}</View>
+                )}
+              </>
             )}
-          </>
+          </NestableScrollContainer>
+        ) : (
+          // Read mode — original SoloExerciseBlock / ClusterBlock simple
+          // read-only display in a plain ScrollView.
+          <ScrollView contentContainerStyle={styles.body}>
+            {loading ? (
+              <Text style={styles.muted}>Loading…</Text>
+            ) : error ? (
+              <Text style={styles.error}>{error}</Text>
+            ) : !session || !stats ? (
+              <Text style={styles.muted}>No data.</Text>
+            ) : (
+              <>
+                <Text style={styles.timestamp}>
+                  {formatTimestamp(session.started_at)}
+                  {session.ended_at != null
+                    ? ` ~ ${formatTimestamp(session.ended_at)}`
+                    : ''}
+                </Text>
+
+                <SessionStatsPanel
+                  sets={sets.map((s) => ({
+                    set_kind: s.set_kind,
+                    is_logged: s.is_logged,
+                    reps: s.reps,
+                    weight_kg: s.weight_kg,
+                  }))}
+                  exercise_count={countUniqueExercises(sessionExercises)}
+                  started_at_ms={session.started_at}
+                  ended_at_ms={session.ended_at}
+                  onTapDuration={
+                    session.ended_at != null
+                      ? () => setTimeEditorOpen(true)
+                      : undefined
+                  }
+                />
+
+                <Text style={styles.section}>動作清單</Text>
+                {orderedItems.length === 0 ? (
+                  <Text style={styles.muted}>No exercises.</Text>
+                ) : (
+                  orderedItems.map((item) => {
+                    if (item.kind === 'cluster') {
+                      return (
+                        <ClusterBlock
+                          key={item.cluster.parent.id}
+                          cluster={item.cluster}
+                          rs={
+                            item.cluster.parent.reusable_superset_id
+                              ? rsById.get(
+                                  item.cluster.parent.reusable_superset_id,
+                                ) ?? null
+                              : null
+                          }
+                        />
+                      );
+                    }
+                    return (
+                      <SoloExerciseBlock
+                        key={item.exercise.id}
+                        exercise={item.exercise}
+                        sets={item.sets}
+                      />
+                    );
+                  })
+                )}
+              </>
+            )}
+          </ScrollView>
         )}
-      </ScrollView>
       </GestureDetector>
 
-      {/* Bottom sticky 4-button action bar */}
+      {/* Bottom sticky action bar — edit mode adds [+ 動作] above the
+          standard 4-button row to mirror Today's bottom add-exercise CTA. */}
+      {editMode ? (
+        <View style={styles.editAddBar}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              router.push(`/exercise-picker?mode=picker&sessionId=${id}`)
+            }
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.editAddBtn,
+              busy && styles.actionBtnDisabled,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.editAddBtnText}>+ 動作</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.actionBar}>
         <Pressable
           style={[styles.actionBtn, editMode && styles.actionBtnActive]}
@@ -610,11 +1572,6 @@ export default function SessionDetailScreen() {
       </View>
 
       {/* 另存模板 bottom sheet (2026-05-18) */}
-      {/*
-        2026-05-20 overnight #55: prefill from session's linked template if
-        any (template-based session). Freestyle session → prefill is null →
-        sheet opens with the date-stamped default name and 通用/通用 chips.
-      */}
       <TemplateMetaSheet
         visible={templateMetaSheetOpen}
         defaultName={
@@ -627,6 +1584,115 @@ export default function SessionDetailScreen() {
         onCancel={() => setTemplateMetaSheetOpen(false)}
         onConfirm={handleTemplateMetaConfirm}
         busy={templateMetaBusy}
+      />
+
+      {/* Edit-mode shared sheets (mirror Today). */}
+      <SetNoteSheet
+        visible={noteSheetTarget !== null}
+        initialValue={noteSheetTarget?.initial ?? null}
+        onConfirm={(notes) => {
+          if (noteSheetTarget) onUpdateNotes(noteSheetTarget.set_id, notes);
+          setNoteSheetTarget(null);
+        }}
+        onCancel={() => setNoteSheetTarget(null)}
+      />
+      <NumericKeypad
+        visible={keypadTarget !== null}
+        initialValue={keypadTarget?.current ?? 0}
+        label={keypadTarget?.field === 'weight' ? '重量 (kg)' : '次數'}
+        mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
+        onConfirm={(value) => {
+          if (keypadTarget) {
+            const patch =
+              keypadTarget.field === 'weight'
+                ? { weight: value }
+                : { reps: value };
+            onUpdateSet(keypadTarget.set_id, patch);
+          }
+          setKeypadTarget(null);
+        }}
+        onCancel={() => setKeypadTarget(null)}
+      />
+      <ReorderExercisesSheet
+        visible={reorderSheetOpen}
+        initialItems={sessionExercises.map((p) => ({
+          id: p.id,
+          name: p.exercise_name,
+        }))}
+        onConfirm={async (orderedIds) => {
+          setReorderSheetOpen(false);
+          if (!id) return;
+          try {
+            await reorderSessionExercises(db, { session_id: id, orderedIds });
+            await load();
+          } catch (e) {
+            Alert.alert(
+              '排序失敗',
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        }}
+        onCancel={() => setReorderSheetOpen(false)}
+      />
+      <SetNoteSheet
+        visible={exerciseNoteTarget !== null}
+        initialValue={exerciseNoteTarget?.initial ?? null}
+        title={`📝 ${exerciseNoteTarget?.exercise_name ?? ''} 備註`}
+        placeholder="例：握距、發力重點、易犯錯誤..."
+        onConfirm={async (notes) => {
+          if (exerciseNoteTarget) {
+            try {
+              await updateExerciseNotes(
+                db,
+                exerciseNoteTarget.exercise_id,
+                notes,
+              );
+            } catch (e) {
+              Alert.alert(
+                'Save failed',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }
+          setExerciseNoteTarget(null);
+        }}
+        onCancel={() => setExerciseNoteTarget(null)}
+      />
+      <NumericKeypad
+        visible={restSecTarget !== null}
+        initialValue={restSecTarget?.current ?? 60}
+        label={`⏱️ 休息秒數 · ${restSecTarget?.exercise_name ?? ''}`}
+        mode="integer"
+        onConfirm={async (value) => {
+          if (restSecTarget) {
+            try {
+              await updateSessionExerciseRestSec(
+                db,
+                restSecTarget.session_exercise_id,
+                value,
+              );
+              await load();
+            } catch (e) {
+              Alert.alert(
+                'Save failed',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }
+          setRestSecTarget(null);
+        }}
+        onCancel={() => setRestSecTarget(null)}
+      />
+
+      {/* Tap 訓練時間 → SessionTimeEditorSheet (overnight #59).
+          Only when ended_at is non-null (always true on detail page since
+          we only navigate here after endSession). */}
+      <SessionTimeEditorSheet
+        visible={timeEditorOpen}
+        started_at_ms={session?.started_at ?? 0}
+        ended_at_ms={session?.ended_at ?? Date.now()}
+        onSave={handleTimeSave}
+        onClose={() => setTimeEditorOpen(false)}
       />
     </SafeAreaView>
   );
@@ -667,15 +1733,6 @@ async function loadHealthkitColumns(
   }
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
 }
@@ -688,35 +1745,19 @@ function formatDateLabel(ms: number): string {
   return `${y}-${mo}-${day}`;
 }
 
-function formatVolume(volume: number): string {
-  // Round to int; if > 9999 show k-style (e.g. 12.4k).
-  if (volume >= 10000) {
-    return `${(volume / 1000).toFixed(1)}k`;
-  }
-  return String(Math.round(volume));
-}
-
 // ─────────────────────────────────────────────────────────────────────────
-// Solo exercise block (read-only / edit-mode)
+// Solo exercise block — READ MODE rendering
 // ─────────────────────────────────────────────────────────────────────────
 
 function SoloExerciseBlock({
   exercise,
   sets,
-  editMode,
-  onSetFieldChange,
 }: {
   exercise: SessionExerciseRowWithName;
   sets: SessionSetWithExercise[];
-  editMode: boolean;
-  onSetFieldChange: (
-    set_id: string,
-    patch: { weight_kg?: number; reps?: number }
-  ) => void;
 }) {
   // overnight #47 第 1 點: reuse history page's label helper so
-  // warmup→「熱」、working→「1/2/3」、dropset→「D1/D2」 — and drop the
-  // leading `#` from the rendered ordering column.
+  // warmup→「熱」、working→「1/2/3」、dropset→「D1/D2」.
   const labelMap = useMemo(
     () =>
       computeHistorySetLabels(
@@ -738,13 +1779,11 @@ function SoloExerciseBlock({
       ) : (
         <View style={styles.setsBox}>
           {sets.map((s) => (
-            <SetRow
+            <ReadOnlySetRow
               key={s.id}
               label={labelMap.get(s.id) ?? ''}
               setRow={s}
               loadType={exercise.exercise_load_type}
-              editMode={editMode}
-              onSetFieldChange={onSetFieldChange}
             />
           ))}
         </View>
@@ -753,94 +1792,26 @@ function SoloExerciseBlock({
   );
 }
 
-function SetRow({
+function ReadOnlySetRow({
   label,
   setRow,
   loadType,
-  editMode,
-  onSetFieldChange,
 }: {
   label: string;
   setRow: SessionSetWithExercise;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
-  editMode: boolean;
-  onSetFieldChange: (
-    set_id: string,
-    patch: { weight_kg?: number; reps?: number }
-  ) => void;
 }) {
-  const [weightDraft, setWeightDraft] = useState<string>(
-    setRow.weight_kg == null ? '' : String(setRow.weight_kg)
-  );
-  const [repsDraft, setRepsDraft] = useState<string>(
-    setRow.reps == null ? '' : String(setRow.reps)
-  );
-
-  // Sync local draft state when the row changes underneath us (e.g. after a
-  // commit re-reads from DB).
-  useEffect(() => {
-    setWeightDraft(setRow.weight_kg == null ? '' : String(setRow.weight_kg));
-    setRepsDraft(setRow.reps == null ? '' : String(setRow.reps));
-  }, [setRow.weight_kg, setRow.reps]);
-
-  const commitWeight = useCallback(() => {
-    const n = Number(weightDraft);
-    if (Number.isFinite(n) && n !== setRow.weight_kg) {
-      onSetFieldChange(setRow.id, { weight_kg: n });
-    }
-  }, [weightDraft, setRow.weight_kg, setRow.id, onSetFieldChange]);
-
-  const commitReps = useCallback(() => {
-    const n = Number(repsDraft);
-    if (Number.isFinite(n) && Number.isInteger(n) && n !== setRow.reps) {
-      onSetFieldChange(setRow.id, { reps: n });
-    }
-  }, [repsDraft, setRow.reps, setRow.id, onSetFieldChange]);
-
-  if (editMode) {
-    return (
-      <View style={styles.setRow}>
-        <Text style={styles.setOrdering}>{label}</Text>
-        <View style={styles.setEditFields}>
-          {loadType !== 'bodyweight' && (
-            <>
-              <TextInput
-                value={weightDraft}
-                onChangeText={setWeightDraft}
-                onBlur={commitWeight}
-                keyboardType="numeric"
-                style={styles.setInput}
-              />
-              <Text style={styles.setUnit}>kg</Text>
-            </>
-          )}
-          <TextInput
-            value={repsDraft}
-            onChangeText={setRepsDraft}
-            onBlur={commitReps}
-            keyboardType="numeric"
-            style={styles.setInput}
-          />
-          <Text style={styles.setUnit}>reps</Text>
-        </View>
-        {setRow.is_logged === 1 && <Text style={styles.setCheck}>✓</Text>}
-      </View>
-    );
-  }
-
   return (
     <View style={styles.setRow}>
       <Text style={styles.setOrdering}>{label}</Text>
-      <Text style={styles.setText}>
-        {formatSetCell(setRow, loadType)}
-      </Text>
+      <Text style={styles.setText}>{formatSetCell(setRow, loadType)}</Text>
       {setRow.is_logged === 1 && <Text style={styles.setCheck}>✓</Text>}
     </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Cluster grouping (ADR-0018 v014) — preserved from prior implementation
+// Cluster grouping (ADR-0018 v014) — READ MODE rendering
 // ─────────────────────────────────────────────────────────────────────────
 
 interface ClusterRow {
@@ -865,9 +1836,6 @@ function buildClusters(
     if (!parentIds.has(parent.id)) continue;
     const child = sessionExercises.find((e) => e.parent_id === parent.id);
     if (!child) continue;
-    // v019 isolation (slice 10c #17): scope per cluster card via
-    // session_exercise_id when present; fall back to legacy exercise_id
-    // for pre-v019 untagged rows.
     const setsA = sets
       .filter((s) =>
         s.session_exercise_id === parent.id ||
@@ -902,16 +1870,12 @@ function buildOrderedItems(
   }
   const out: OrderedItem[] = [];
   for (const ex of sessionExercises) {
-    // Skip cluster followers — they're rendered as part of their parent block.
     if (clusterChildIds.has(ex.id)) continue;
     const cluster = clusterByParentId.get(ex.id);
     if (cluster) {
       out.push({ kind: 'cluster', cluster });
       continue;
     }
-    // Solo exercise.
-    // v019 isolation (slice 10c #17): scope per card via session_exercise_id
-    // so two cards sharing an exercise_id don't mirror each other's rows.
     const exSets = sets
       .filter((s) =>
         s.session_exercise_id === ex.id ||
@@ -936,10 +1900,6 @@ function ClusterBlock({
     a: cluster.setsA[i] ?? null,
     b: cluster.setsB[i] ?? null,
   }));
-  // overnight #47 第 1 點 follow-up — cluster cycle label also goes through
-  // `computeHistorySetLabels` so warmup→「熱」/ working→「1/2/3」/ dropset→
-  // 「D1/D2」 matches the solo card. Compute per side (A and B may have
-  // mismatched set_kind in rare cases — A takes precedence, B is fallback).
   const labelsA = useMemo(
     () =>
       computeHistorySetLabels(
@@ -968,11 +1928,6 @@ function ClusterBlock({
         styles.clusterCard,
         { borderColor: color, backgroundColor: hexAlpha(color, 0.08) },
       ]}>
-      {/*
-        overnight #47 第 3 點: 灰圓點 → 紫底「超」chip 上行，標題分行 2 行。
-        Mirror in-session cluster-card.tsx 的 header pattern (row 1 chip,
-        row 2 title with " + " separator).
-      */}
       <View style={styles.clusterHeader}>
         <View style={styles.clusterTagRow}>
           <Text style={styles.supersetTag}>超</Text>
@@ -992,30 +1947,30 @@ function ClusterBlock({
             (r.b ? labelsB.get(r.b.id) : undefined) ??
             String(i + 1);
           return (
-          <View key={i} style={styles.clusterPairRow}>
-            <Text style={styles.clusterCycle}>{cycleLabel}</Text>
-            <View style={styles.clusterCell}>
-              {r.a ? (
-                <Text style={styles.clusterCellText}>
-                  A: {formatSetCell(r.a, cluster.parent.exercise_load_type)}
-                </Text>
-              ) : (
-                <Text style={styles.clusterCellEmpty}>A: —</Text>
+            <View key={i} style={styles.clusterPairRow}>
+              <Text style={styles.clusterCycle}>{cycleLabel}</Text>
+              <View style={styles.clusterCell}>
+                {r.a ? (
+                  <Text style={styles.clusterCellText}>
+                    A: {formatSetCell(r.a, cluster.parent.exercise_load_type)}
+                  </Text>
+                ) : (
+                  <Text style={styles.clusterCellEmpty}>A: —</Text>
+                )}
+              </View>
+              <View style={styles.clusterCell}>
+                {r.b ? (
+                  <Text style={styles.clusterCellText}>
+                    B: {formatSetCell(r.b, cluster.child.exercise_load_type)}
+                  </Text>
+                ) : (
+                  <Text style={styles.clusterCellEmpty}>B: —</Text>
+                )}
+              </View>
+              {(r.a?.is_logged === 1 || r.b?.is_logged === 1) && (
+                <Text style={styles.setCheck}>✓</Text>
               )}
             </View>
-            <View style={styles.clusterCell}>
-              {r.b ? (
-                <Text style={styles.clusterCellText}>
-                  B: {formatSetCell(r.b, cluster.child.exercise_load_type)}
-                </Text>
-              ) : (
-                <Text style={styles.clusterCellEmpty}>B: —</Text>
-              )}
-            </View>
-            {(r.a?.is_logged === 1 || r.b?.is_logged === 1) && (
-              <Text style={styles.setCheck}>✓</Text>
-            )}
-          </View>
           );
         })
       )}
@@ -1041,6 +1996,301 @@ function hexAlpha(hex: string, alpha: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// EditableExerciseCard — EDIT MODE solo card (mirror Today's ExerciseCard)
+// ─────────────────────────────────────────────────────────────────────────
+
+type EditableExerciseCardProps = {
+  planRow: SessionExerciseRowWithName;
+  isExpanded: boolean;
+  sets: SessionSetWithExercise[];
+  busy: boolean;
+  onToggleExpand: () => void;
+  onAddSet: () => void;
+  onUpdateSet: (
+    set_id: string,
+    patch: { reps?: number; weight?: number },
+  ) => void;
+  onCycleSetKind: (set_id: string) => void;
+  onDeleteSet: (set_id: string) => void;
+  onAddSetAfter: (set_id: string) => void;
+  onToggleLogged: (set_id: string, currentlyLogged: boolean) => void;
+  onShowSetNote: (set_id: string, currentNotes: string | null) => void;
+  onTapNumber: (
+    set_id: string,
+    field: 'reps' | 'weight',
+    current: number,
+  ) => void;
+  onOpenHistory: () => void;
+  onSettingsPress: () => void;
+  onLongPressHeader: () => void;
+  onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
+};
+
+function EditableExerciseCard({
+  planRow,
+  isExpanded,
+  sets,
+  busy,
+  onToggleExpand,
+  onAddSet,
+  onUpdateSet,
+  onCycleSetKind,
+  onDeleteSet,
+  onAddSetAfter,
+  onToggleLogged,
+  onShowSetNote,
+  onTapNumber,
+  onOpenHistory,
+  onSettingsPress,
+  onLongPressHeader,
+  onConfirmReorderSets,
+}: EditableExerciseCardProps) {
+  const ordinalMap = useMemo(
+    () =>
+      computeWorkingSetOrdinals(
+        sets.map((s) => ({
+          id: s.id,
+          set_kind: s.set_kind,
+          ordering: s.ordering,
+        })),
+      ),
+    [sets],
+  );
+  const progress = useMemo(
+    () =>
+      computeExerciseProgress(
+        sets.map((s) => ({
+          set_kind: s.set_kind,
+          is_logged: s.is_logged,
+          weight_kg: s.weight_kg,
+          reps: s.reps,
+        })),
+      ),
+    [sets],
+  );
+  const workingRowCount = sets.filter((s) => s.set_kind === 'working').length;
+  // No PR snapshot — detail page edit mode skips PR ceremony (just like
+  // Today does post-toggle, but here we don't have the in-session helpers).
+  // If demand emerges, easy to add via listPriorSetsForExercise + computePRSnapshot.
+  return (
+    <View
+      style={[styles.exerciseCard, isExpanded && styles.exerciseCardExpanded]}
+    >
+      <View style={styles.exerciseCardHeader}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onToggleExpand}
+          onLongPress={onLongPressHeader}
+          delayLongPress={400}
+          style={({ pressed }) => [
+            styles.exerciseCardHeaderMain,
+            pressed && styles.btnPressed,
+          ]}
+        >
+          <View style={styles.planText}>
+            <View style={styles.exerciseCardTitleRow}>
+              <Text style={styles.planName} numberOfLines={1}>
+                {planRow.exercise_name}
+              </Text>
+            </View>
+            {workingRowCount > 0 ? (
+              <View style={styles.exerciseCardProgressRow}>
+                <View style={styles.exerciseCardProgressBarFill}>
+                  <SegmentedProgressBar
+                    done={progress.workingDone}
+                    total={workingRowCount}
+                  />
+                </View>
+                {progress.volumeTotal > 0 ? (
+                  <Text style={styles.exerciseCardVolumeChip}>
+                    {Math.round(progress.volumeDone)}/
+                    {Math.round(progress.volumeTotal)}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.exerciseCardChevron}>
+            {isExpanded ? '▼' : '▶'}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="動作設定"
+          onPress={onSettingsPress}
+          style={({ pressed }) => [
+            styles.exerciseCardGear,
+            pressed && styles.btnPressed,
+          ]}
+        >
+          <Text style={styles.exerciseCardGearText}>⚙️</Text>
+        </Pressable>
+      </View>
+      {isExpanded && (
+        <View style={styles.exerciseCardBody}>
+          {sets.length === 0 ? (
+            <Text style={styles.exerciseCardEmpty}>
+              還沒有 set — 按下方「+ 新增 1 組」開始記錄
+            </Text>
+          ) : (
+            <NestableDraggableFlatList
+              data={sets}
+              keyExtractor={(s) => s.id}
+              activationDistance={20}
+              onDragEnd={async ({ data }) => {
+                const newIds = data.map((s) => s.id);
+                const oldIds = sets.map((s) => s.id);
+                const changed = newIds.some((id, idx) => id !== oldIds[idx]);
+                if (changed) await onConfirmReorderSets(newIds);
+              }}
+              renderItem={({
+                item: s,
+                drag,
+                isActive,
+              }: RenderItemParams<SessionSetWithExercise>) => {
+                const row: SetRowItem = {
+                  id: s.id,
+                  reps: s.reps ?? 0,
+                  weight: s.weight_kg ?? 0,
+                  notes: s.notes,
+                };
+                const isDropsetFollower =
+                  s.set_kind === 'dropset' && s.parent_set_id !== null;
+                const logged = s.is_logged === 1;
+                return (
+                  <SwipeableSetRow
+                    enabled={!isDropsetFollower}
+                    onLongPress={drag}
+                    swipeLeftActions={[
+                      {
+                        key: 'delete',
+                        label: '刪除',
+                        color: '#dc3545',
+                        onPress: () => onDeleteSet(s.id),
+                      },
+                    ]}
+                    swipeRightActions={[
+                      {
+                        key: 'add',
+                        label: '+1',
+                        color: '#28a745',
+                        onPress: () => onAddSetAfter(s.id),
+                      },
+                      {
+                        key: 'note',
+                        label: '備註',
+                        color: '#007AFF',
+                        onPress: () => onShowSetNote(s.id, s.notes),
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.exerciseCardSetRowWrapper,
+                        isActive && styles.exerciseCardSetRowDragActive,
+                      ]}
+                    >
+                      <View style={styles.exerciseCardSetRowContent}>
+                        <SetRowContent
+                          set={row}
+                          setLabel={
+                            isDropsetFollower
+                              ? ''
+                              : displaySetLabel(
+                                  { id: s.id, set_kind: s.set_kind },
+                                  ordinalMap,
+                                )
+                          }
+                          isDropsetFollower={isDropsetFollower}
+                          isClusterLast={false}
+                          minusDisabled={true}
+                          hideNoteIndicator={false}
+                          onUpdateSet={(set_id, patch) =>
+                            onUpdateSet(set_id, patch)
+                          }
+                          onShowSetNote={(target) =>
+                            onShowSetNote(target.id, target.notes)
+                          }
+                          onTapNumber={(target, field, current) =>
+                            onTapNumber(target.id, field, current)
+                          }
+                          onRemoveDropsetRow={() => {
+                            // Dropset row delete = same as set delete from
+                            // user perspective; the cycle helper would
+                            // collapse W → working when the last D follower
+                            // is removed, but for parity with Today's stub
+                            // we keep this minimal. Future polish.
+                          }}
+                          onAddDropsetRow={() => {
+                            // Mirror Today's stub — add dropset row UX is
+                            // also unimplemented in the active session UI.
+                          }}
+                          onCycleLabel={(target) => onCycleSetKind(target.id)}
+                        />
+                      </View>
+                      <Pressable
+                        onPress={() => onToggleLogged(s.id, logged)}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={logged ? '取消完成' : '標為完成'}
+                        style={({ pressed }) => [
+                          styles.completeBtn,
+                          logged && styles.completeBtnDone,
+                          pressed && styles.btnPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.completeBtnText,
+                            logged && styles.completeBtnTextDone,
+                          ]}
+                        >
+                          {logged ? '✓' : '○'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </SwipeableSetRow>
+                );
+              }}
+            />
+          )}
+          <View style={styles.exerciseCardFooter}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onAddSet}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.exerciseCardFooterBtn,
+                styles.exerciseCardFooterBtnPrimary,
+                busy && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}
+            >
+              <Text style={styles.exerciseCardFooterBtnTextPrimary}>
+                新增 1 組
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onOpenHistory}
+              style={({ pressed }) => [
+                styles.exerciseCardFooterBtn,
+                styles.exerciseCardFooterBtnSecondary,
+                pressed && styles.btnPressed,
+              ]}
+            >
+              <Text style={styles.exerciseCardFooterBtnTextSecondary}>
+                動作歷史
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1060,8 +2310,7 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   headerSpacer: { width: 60 },
 
-  // Same-day switcher sub-row (ADR-0015 § Tap 日格行為). Only rendered when
-  // the history tab embedded `?sameDayIds=<csv>` AND the list contains > 1.
+  // Same-day switcher sub-row.
   sameDayBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1093,27 +2342,23 @@ const styles = StyleSheet.create({
   },
   body: { padding: 16, gap: 12, paddingBottom: 100 },
   timestamp: { fontSize: 13, opacity: 0.65 },
-
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginVertical: 8,
-  },
-  stat: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    alignItems: 'center',
-  },
-  statValue: { fontSize: 18, fontWeight: '700' },
-  statLabel: { fontSize: 11, opacity: 0.65, marginTop: 4 },
   section: { fontSize: 14, fontWeight: '600', marginTop: 12, color: '#6B7280' },
 
+  // Empty-state placeholder (mirror Today's emptyPlanBlock).
+  emptyPlanBlock: {
+    padding: 24,
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(127,127,127,0.06)',
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  emptyPlanTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  emptyPlanBody: { fontSize: 13, color: '#6B7280', textAlign: 'center' },
+  planList: { gap: 8, marginTop: 8 },
+
+  // ── Read-mode solo card ──────────────────────────────────────────────
   exCard: {
-    // overnight #47 第 2 點: 細灰 border + 白底，mirror cluster card 外框
-    // style 對齊。原本淺灰底 0.08 alpha → 純白 + hairline border。
     borderRadius: 10,
     backgroundColor: '#fff',
     borderWidth: StyleSheet.hairlineWidth,
@@ -1142,34 +2387,15 @@ const styles = StyleSheet.create({
   },
   setOrdering: { fontSize: 13, opacity: 0.6, width: 28 },
   setText: { flex: 1, fontSize: 14 },
-  setEditFields: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  setInput: {
-    minWidth: 50,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(127,127,127,0.4)',
-    fontSize: 14,
-  },
-  setUnit: { fontSize: 12, opacity: 0.6 },
   setCheck: { fontSize: 16, color: '#34C759', fontWeight: '600' },
 
-  // Cluster block (preserved from prior I1/I6 visual decisions)
+  // ── Read-mode cluster card ───────────────────────────────────────────
   clusterCard: {
     borderWidth: 1.5,
     borderRadius: 12,
     padding: 12,
     marginTop: 8,
   },
-  // overnight #47 第 3 點: cluster header 改 vertical stack — row 1 chip /
-  // row 2 title (mirror in-session cluster-card.tsx pattern).
   clusterHeader: {
     flexDirection: 'column',
     gap: 4,
@@ -1179,7 +2405,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  // 「超」 chip — mirror cluster-card.tsx::supersetTag (iOS system indigo).
   supersetTag: {
     fontSize: 11,
     fontWeight: '700',
@@ -1204,7 +2429,155 @@ const styles = StyleSheet.create({
   clusterCellText: { fontSize: 13 },
   clusterCellEmpty: { fontSize: 13, opacity: 0.3 },
 
-  // Bottom sticky 4-button action bar (mirrors template-editor pattern)
+  // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
+  exerciseCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(127,127,127,0.3)',
+    overflow: 'hidden',
+  },
+  exerciseCardExpanded: {
+    borderColor: 'rgba(0,122,255,0.45)',
+  },
+  exerciseCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  exerciseCardHeaderMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  planText: { flex: 1, gap: 4 },
+  exerciseCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  planName: { fontSize: 15, fontWeight: '600' },
+  exerciseCardProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  exerciseCardProgressBarFill: { flex: 1 },
+  exerciseCardVolumeChip: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.7,
+    minWidth: 76,
+    textAlign: 'right',
+  },
+  exerciseCardChevron: {
+    fontSize: 14,
+    opacity: 0.5,
+    width: 18,
+    textAlign: 'right',
+  },
+  exerciseCardGear: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseCardGearText: { fontSize: 18 },
+  exerciseCardBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 6,
+  },
+  exerciseCardEmpty: {
+    fontSize: 13,
+    opacity: 0.55,
+    fontStyle: 'italic',
+    paddingVertical: 8,
+  },
+  exerciseCardSetRowWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    gap: 8,
+  },
+  exerciseCardSetRowContent: {
+    flex: 1,
+  },
+  exerciseCardSetRowDragActive: {
+    backgroundColor: '#f3f4f6',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    borderRadius: 8,
+  },
+  exerciseCardFooter: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  exerciseCardFooterBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  exerciseCardFooterBtnPrimary: {
+    backgroundColor: '#0a7ea4',
+  },
+  exerciseCardFooterBtnSecondary: {
+    backgroundColor: 'rgba(127,127,127,0.18)',
+  },
+  exerciseCardFooterBtnTextPrimary: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  exerciseCardFooterBtnTextSecondary: {
+    color: '#0a7ea4',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  completeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(127,127,127,0.18)',
+  },
+  completeBtnDone: { backgroundColor: '#28a745' },
+  completeBtnText: { fontSize: 14, fontWeight: '700', color: '#6b7280' },
+  completeBtnTextDone: { color: 'white' },
+
+  // ── Edit-mode [+ 動作] add bar (sits above the 4-button sticky bar) ──
+  editAddBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(127,127,127,0.15)',
+  },
+  editAddBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#0a7ea4',
+    alignItems: 'center',
+  },
+  editAddBtnText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  // ── Bottom 4-button sticky action bar ───────────────────────────────
   actionBar: {
     flexDirection: 'row',
     paddingHorizontal: 8,
@@ -1226,6 +2599,9 @@ const styles = StyleSheet.create({
   actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
   actionBtnTextActive: { color: '#0050B3' },
   actionBtnTextDestructive: { color: '#FF3B30' },
+
+  btnPressed: { opacity: 0.85 },
+  btnDisabled: { opacity: 0.45 },
 
   muted: { fontSize: 14, opacity: 0.6 },
   error: { fontSize: 14, color: '#dc3545' },
