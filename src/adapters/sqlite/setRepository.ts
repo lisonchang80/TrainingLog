@@ -980,6 +980,91 @@ export async function addSessionDropsetRow(
  * existing ASC order; only `<` / `>` matter, not contiguous integers).
  * Same convention as `deleteSet` at lines 93-95.
  */
+/**
+ * Append a NEW dropset cluster (head + 1 follower) after `after_set_id`.
+ * Used by 「新增 1 組」 button + 右滑 +1 when the exercise's last set is
+ * already a dropset — user wants D2 (a new cluster) below the existing D1,
+ * NOT another follower attached to D1. Inline +/- buttons inside the chain
+ * still call `addSessionDropsetRow` to extend D1.
+ *
+ * 2 new rows inserted in one transaction with ordering shift; both inherit
+ * weight/reps/exercise_id/session_exercise_id from `after_set_id`. The
+ * follower's `parent_set_id` points to the newly-minted head id.
+ */
+export async function addSessionDropsetCluster(
+  db: Database,
+  args: {
+    session_id: string;
+    after_set_id: string;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<{ head_id: string; follower_id: string }> {
+  const src = await db.getFirstAsync<{
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    weight_kg: number | null;
+    reps: number | null;
+    session_exercise_id: string | null;
+  }>(
+    `SELECT id, exercise_id, ordering, weight_kg, reps, session_exercise_id
+       FROM "set" WHERE id = ? AND session_id = ?`,
+    args.after_set_id,
+    args.session_id
+  );
+  if (!src) {
+    throw new Error(
+      `addSessionDropsetCluster: source set "${args.after_set_id}" not found in session "${args.session_id}"`
+    );
+  }
+
+  const head_id = args.uuid();
+  const follower_id = args.uuid();
+  const now = args.now ?? Date.now;
+  const ts = now();
+  const head_ordering = src.ordering + 1;
+  const follower_ordering = src.ordering + 2;
+
+  await db.withTransactionAsync(async () => {
+    // Free 2 ordering slots directly after `after_set_id`.
+    await db.runAsync(
+      `UPDATE "set" SET ordering = ordering + 2
+        WHERE session_id = ? AND ordering >= ?`,
+      args.session_id,
+      head_ordering
+    );
+    await insertSessionSet(db, {
+      id: head_id,
+      session_id: args.session_id,
+      exercise_id: src.exercise_id,
+      weight_kg: src.weight_kg ?? 0,
+      reps: src.reps ?? 0,
+      is_skipped: 0,
+      ordering: head_ordering,
+      created_at: ts,
+      set_kind: 'dropset',
+      parent_set_id: null,
+      session_exercise_id: src.session_exercise_id,
+    });
+    await insertSessionSet(db, {
+      id: follower_id,
+      session_id: args.session_id,
+      exercise_id: src.exercise_id,
+      weight_kg: src.weight_kg ?? 0,
+      reps: src.reps ?? 0,
+      is_skipped: 0,
+      ordering: follower_ordering,
+      created_at: ts,
+      set_kind: 'dropset',
+      parent_set_id: head_id,
+      session_exercise_id: src.session_exercise_id,
+    });
+  });
+
+  return { head_id, follower_id };
+}
+
 export async function removeSessionDropsetRow(
   db: Database,
   args: { session_id: string; set_id: string }

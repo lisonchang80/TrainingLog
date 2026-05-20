@@ -53,6 +53,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
   addClusterCycleAtEnd,
+  addSessionDropsetCluster,
   addSessionDropsetRow,
   deleteClusterCycle,
   deleteSet,
@@ -442,13 +443,13 @@ export default function SessionDetailScreen() {
       );
       const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
 
-      // 2026-05-20 fix — 「新增 1 組」 extends an existing dropset chain
-      // instead of inserting a new working set after it (mirror Today
-      // app/(tabs)/index.tsx). 「最後一組」對應到 chain 尾的下一格 = follower。
+      // 2026-05-20 (revised) — 「新增 1 組」 adds a NEW dropset cluster D2
+      // (head + 1 follower) after the existing D1 chain. Mirror Today.
+      // priorInSession sorted ASC by ordering → [last] is end of chain.
       if (lastSetInSession?.set_kind === 'dropset') {
         setBusy(true);
         try {
-          await addSessionDropsetRow(db, {
+          await addSessionDropsetCluster(db, {
             session_id: id,
             after_set_id: lastSetInSession.id,
             uuid: randomUUID,
@@ -576,20 +577,24 @@ export default function SessionDetailScreen() {
       );
       if (ops.length === 0) return;
       try {
-        const maxOrdering = sets.reduce(
-          (m, s) => Math.max(m, s.ordering),
-          0,
-        );
-        let appendOffset = 1;
         for (const op of ops) {
           if (op.type === 'update') {
             await updateSetFields(db, op.set_id, op.patch);
           } else if (op.type === 'delete') {
             await deleteSet(db, op.set_id);
           } else {
-            // insertFollower — inherit head's session_exercise_id so the
-            // dropset follower stays on the same card as its parent.
+            // insertFollower — 2026-05-20 fix mirror Today: insert at
+            // head.ordering+1 with shift, not end-of-session, so the
+            // chain stays contiguous.
             const head = sets.find((s) => s.id === op.parent_set_id);
+            const headOrdering = head?.ordering ?? 0;
+            const newOrdering = headOrdering + 1;
+            await db.runAsync(
+              `UPDATE "set" SET ordering = ordering + 1
+                WHERE session_id = ? AND ordering >= ?`,
+              id,
+              newOrdering,
+            );
             await insertSessionSet(db, {
               id: op.new_set_id,
               session_id: id,
@@ -597,13 +602,12 @@ export default function SessionDetailScreen() {
               weight_kg: op.weight_kg,
               reps: op.reps,
               is_skipped: 0,
-              ordering: maxOrdering + appendOffset,
+              ordering: newOrdering,
               created_at: Date.now(),
               set_kind: 'dropset',
               parent_set_id: op.parent_set_id,
               session_exercise_id: head?.session_exercise_id ?? null,
             });
-            appendOffset += 1;
           }
         }
         await load();
@@ -632,14 +636,21 @@ export default function SessionDetailScreen() {
       if (!id) return;
       setBusy(true);
       try {
-        // 2026-05-20 fix — dropset cluster +1 swipe: route to
-        // addSessionDropsetRow so the new row joins the existing chain
-        // (parent_set_id = head). Mirror Today (app/(tabs)/index.tsx).
+        // 2026-05-20 (revised) — dropset +1 swipe creates a NEW D2 cluster
+        // BELOW the existing D1 chain (head + follower). Mirror Today.
         const source = sets.find((s) => s.id === source_set_id);
         if (source?.set_kind === 'dropset') {
-          await addSessionDropsetRow(db, {
+          const headId = source.parent_set_id ?? source.id;
+          const chainSets = sets.filter(
+            (s) => s.id === headId || s.parent_set_id === headId,
+          );
+          const lastInChain = chainSets.reduce(
+            (a, b) => (a.ordering > b.ordering ? a : b),
+            source,
+          );
+          await addSessionDropsetCluster(db, {
             session_id: id,
-            after_set_id: source_set_id,
+            after_set_id: lastInChain.id,
             uuid: randomUUID,
           });
         } else {

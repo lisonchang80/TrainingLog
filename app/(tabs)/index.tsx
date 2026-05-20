@@ -42,6 +42,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { getSetting, getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
+  addSessionDropsetCluster,
   addSessionDropsetRow,
   deleteSet,
   insertSessionSet,
@@ -526,15 +527,16 @@ export default function TodayScreen() {
     );
     const lastSetInSession = priorInSession[priorInSession.length - 1] ?? null;
 
-    // 2026-05-20 fix — 「新增 1 組」 should extend the EXISTING last group:
-    // if exercise ends in a dropset chain, append another follower (mirror
-    // the inline `+` button + right-swipe routing). Without this, the new
-    // row was always set_kind='working' and appeared as a new D1 + a
-    // working row below the chain, contradicting「新增最後一組」semantics.
+    // 2026-05-20 (revised) — 「新增 1 組」 should add a NEW dropset cluster
+    // when the exercise ends in dropset, NOT extend the existing chain.
+    // 「最後一組」for dropset = 下一個同類 cluster (D2)，所以 head + follower
+    // 一起加在 D1 chain 之後。
     if (lastSetInSession?.set_kind === 'dropset') {
       setBusy(true);
       try {
-        await addSessionDropsetRow(db, {
+        // priorInSession is sorted ASC by ordering (listSetsBySession order),
+        // so [length-1] is already the END of the chain.
+        await addSessionDropsetCluster(db, {
           session_id,
           after_set_id: lastSetInSession.id,
           uuid: randomUUID,
@@ -702,25 +704,28 @@ export default function TodayScreen() {
     );
     if (ops.length === 0) return;
     try {
-      // Compute the ordering for any insertFollower op once, up front, by
-      // grabbing the current max ordering. Same trick recordSetInSession
-      // uses — we don't expect concurrent writes in the same session.
-      const maxOrdering = setsInSession.reduce(
-        (m, s) => Math.max(m, s.ordering),
-        0,
-      );
-      let appendOffset = 1;
       for (const op of ops) {
         if (op.type === 'update') {
           await updateSetFields(db, op.set_id, op.patch);
         } else if (op.type === 'delete') {
           await deleteSet(db, op.set_id);
         } else {
-          // insertFollower — v019 isolation fix: inherit the head set's
-          // session_exercise_id so the dropset follower stays on the
-          // same card as its parent (matters when two cards share
-          // exercise_id; #17).
+          // insertFollower — 2026-05-20 fix: insert RIGHT AFTER the head
+          // (head.ordering + 1) with subsequent sets shifted by +1.
+          // Previously assigned maxOrdering+offset (end of session) which
+          // broke chain contiguity when other sets sat between head and
+          // the appended follower → computeSessionSetLayout flagged the
+          // later follower as orphan (empty label, dangling row).
+          // v019 isolation: inherit head's session_exercise_id.
           const head = setsInSession.find((s) => s.id === op.parent_set_id);
+          const headOrdering = head?.ordering ?? 0;
+          const newOrdering = headOrdering + 1;
+          await db.runAsync(
+            `UPDATE "set" SET ordering = ordering + 1
+              WHERE session_id = ? AND ordering >= ?`,
+            session_id,
+            newOrdering,
+          );
           await insertSessionSet(db, {
             id: op.new_set_id,
             session_id,
@@ -728,13 +733,12 @@ export default function TodayScreen() {
             weight_kg: op.weight_kg,
             reps: op.reps,
             is_skipped: 0,
-            ordering: maxOrdering + appendOffset,
+            ordering: newOrdering,
             created_at: Date.now(),
             set_kind: 'dropset',
             parent_set_id: op.parent_set_id,
             session_exercise_id: head?.session_exercise_id ?? null,
           });
-          appendOffset += 1;
         }
       }
       const sets = await listSetsBySession(db, session_id);
@@ -779,16 +783,26 @@ export default function TodayScreen() {
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
     try {
-      // 2026-05-20 fix — dropset cluster +1 swipe: route to
-      // addSessionDropsetRow so the new row joins the existing chain
-      // (parent_set_id = head) instead of inserting a foreign HEAD into
-      // the middle of the chain (which previously broke grouping and
-      // surfaced as orphan-like rows after my prior fix).
+      // 2026-05-20 (revised) — dropset cluster +1 swipe: add a NEW D2
+      // cluster (head + 1 follower) AFTER the entire D1 chain, not
+      // extending D1. User intent: 「+1」 = 新增最後一組 = 同種類的下一個。
+      // Inline +/- buttons inside the chain still extend the same chain
+      // (addSessionDropsetRow); +1 swipe creates a sibling cluster.
       const source = setsInSession.find((s) => s.id === source_set_id);
       if (source?.set_kind === 'dropset') {
-        await addSessionDropsetRow(db, {
+        // Find the end of the chain (after_set_id passed to helper) so the
+        // new D2 cluster lands BELOW D1's last follower, not in the middle.
+        const headId = source.parent_set_id ?? source.id;
+        const chainSets = setsInSession.filter(
+          (s) => s.id === headId || s.parent_set_id === headId,
+        );
+        const lastInChain = chainSets.reduce(
+          (a, b) => (a.ordering > b.ordering ? a : b),
+          source,
+        );
+        await addSessionDropsetCluster(db, {
           session_id,
-          after_set_id: source_set_id,
+          after_set_id: lastInChain.id,
           uuid: randomUUID,
         });
       } else {
