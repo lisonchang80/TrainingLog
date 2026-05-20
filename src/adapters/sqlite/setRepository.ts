@@ -981,15 +981,22 @@ export async function addSessionDropsetRow(
  * Same convention as `deleteSet` at lines 93-95.
  */
 /**
- * Append a NEW dropset cluster (head + 1 follower) after `after_set_id`.
- * Used by 「新增 1 組」 button + 右滑 +1 when the exercise's last set is
- * already a dropset — user wants D2 (a new cluster) below the existing D1,
- * NOT another follower attached to D1. Inline +/- buttons inside the chain
- * still call `addSessionDropsetRow` to extend D1.
+ * Append a NEW dropset cluster after `after_set_id`, cloning the source
+ * chain's structure (same number of rows). Used by 「新增 1 組」 + 右滑 +1
+ * when the exercise's last set is already a dropset — user intent is
+ * 「複製 D1 結構」: if D1 had head + 3 followers (4 rows), the new D2 also
+ * gets head + 3 followers. Inline +/- buttons in the chain still extend
+ * the same chain via `addSessionDropsetRow`.
  *
- * 2 new rows inserted in one transaction with ordering shift; both inherit
- * weight/reps/exercise_id/session_exercise_id from `after_set_id`. The
- * follower's `parent_set_id` points to the newly-minted head id.
+ * Chain detection: resolve the source row's chain head (its
+ * `parent_set_id` if follower, else itself), then count
+ * `id = headId OR parent_set_id = headId`. New cluster gets the same count
+ * of rows: 1 head + (count - 1) followers. All rows inherit weight/reps
+ * row-by-row from the source chain in order (head→follower1→follower2…),
+ * so a varied-weight drop schedule replicates verbatim.
+ *
+ * All rows transactioned with ordering shift; session_exercise_id inherited
+ * from source for v019 isolation.
  */
 export async function addSessionDropsetCluster(
   db: Database,
@@ -999,16 +1006,19 @@ export async function addSessionDropsetCluster(
     uuid: () => string;
     now?: () => number;
   }
-): Promise<{ head_id: string; follower_id: string }> {
+): Promise<{ head_id: string; follower_ids: string[] }> {
   const src = await db.getFirstAsync<{
     id: string;
     exercise_id: string;
     ordering: number;
     weight_kg: number | null;
     reps: number | null;
+    set_kind: SetKind;
+    parent_set_id: string | null;
     session_exercise_id: string | null;
   }>(
-    `SELECT id, exercise_id, ordering, weight_kg, reps, session_exercise_id
+    `SELECT id, exercise_id, ordering, weight_kg, reps, set_kind,
+            parent_set_id, session_exercise_id
        FROM "set" WHERE id = ? AND session_id = ?`,
     args.after_set_id,
     args.session_id
@@ -1019,27 +1029,55 @@ export async function addSessionDropsetCluster(
     );
   }
 
+  // Resolve source chain HEAD id and fetch all chain rows ordered ASC so we
+  // can clone weight/reps row-by-row (preserves any per-row drop schedule).
+  const sourceHeadId = src.parent_set_id ?? src.id;
+  const chainRows = await db.getAllAsync<{
+    id: string;
+    ordering: number;
+    weight_kg: number | null;
+    reps: number | null;
+  }>(
+    `SELECT id, ordering, weight_kg, reps
+       FROM "set"
+      WHERE session_id = ?
+        AND (id = ? OR parent_set_id = ?)
+      ORDER BY ordering ASC`,
+    args.session_id,
+    sourceHeadId,
+    sourceHeadId
+  );
+  if (chainRows.length === 0) {
+    throw new Error(
+      `addSessionDropsetCluster: source chain head "${sourceHeadId}" had no rows`
+    );
+  }
+
+  // Find last row of source chain — new cluster lands AFTER this row.
+  const lastInChain = chainRows[chainRows.length - 1];
   const head_id = args.uuid();
-  const follower_id = args.uuid();
+  const follower_ids = chainRows.slice(1).map(() => args.uuid());
+  const totalNewRows = chainRows.length; // 1 head + N followers, same count as source
   const now = args.now ?? Date.now;
   const ts = now();
-  const head_ordering = src.ordering + 1;
-  const follower_ordering = src.ordering + 2;
+  const head_ordering = lastInChain.ordering + 1;
 
   await db.withTransactionAsync(async () => {
-    // Free 2 ordering slots directly after `after_set_id`.
+    // Free `totalNewRows` ordering slots directly after the source chain.
     await db.runAsync(
-      `UPDATE "set" SET ordering = ordering + 2
+      `UPDATE "set" SET ordering = ordering + ?
         WHERE session_id = ? AND ordering >= ?`,
+      totalNewRows,
       args.session_id,
       head_ordering
     );
+    // Insert new HEAD (cloned from source head's weight/reps).
     await insertSessionSet(db, {
       id: head_id,
       session_id: args.session_id,
       exercise_id: src.exercise_id,
-      weight_kg: src.weight_kg ?? 0,
-      reps: src.reps ?? 0,
+      weight_kg: chainRows[0].weight_kg ?? 0,
+      reps: chainRows[0].reps ?? 0,
       is_skipped: 0,
       ordering: head_ordering,
       created_at: ts,
@@ -1047,22 +1085,26 @@ export async function addSessionDropsetCluster(
       parent_set_id: null,
       session_exercise_id: src.session_exercise_id,
     });
-    await insertSessionSet(db, {
-      id: follower_id,
-      session_id: args.session_id,
-      exercise_id: src.exercise_id,
-      weight_kg: src.weight_kg ?? 0,
-      reps: src.reps ?? 0,
-      is_skipped: 0,
-      ordering: follower_ordering,
-      created_at: ts,
-      set_kind: 'dropset',
-      parent_set_id: head_id,
-      session_exercise_id: src.session_exercise_id,
-    });
+    // Insert followers (cloned from source followers, in order).
+    for (let i = 0; i < follower_ids.length; i++) {
+      const srcRow = chainRows[i + 1];
+      await insertSessionSet(db, {
+        id: follower_ids[i],
+        session_id: args.session_id,
+        exercise_id: src.exercise_id,
+        weight_kg: srcRow.weight_kg ?? 0,
+        reps: srcRow.reps ?? 0,
+        is_skipped: 0,
+        ordering: head_ordering + 1 + i,
+        created_at: ts,
+        set_kind: 'dropset',
+        parent_set_id: head_id,
+        session_exercise_id: src.session_exercise_id,
+      });
+    }
   });
 
-  return { head_id, follower_id };
+  return { head_id, follower_ids };
 }
 
 export async function removeSessionDropsetRow(
