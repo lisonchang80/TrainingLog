@@ -1,11 +1,25 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { DatabaseProvider } from '@/components/database-provider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+// Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
+// `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
+// src/components/NestableDraggableFlatList.tsx line 60). The lib calls
+// `containerRef.current.measureLayout(nodeHandle, ...)` against `Animated.View`
+// from reanimated 3 which doesn't expose `measureLayout` directly; RN prints
+// the warning but the lib's own `onFail` callback handles the failure path
+// (just logs). Drag-and-drop still works correctly. Same approach the lib
+// already takes internally to suppress its other VirtualizedLists warning.
+// Latest 4.0.3 still hits this — no upstream fix available yet.
+LogBox.ignoreLogs([
+  'ref.measureLayout must be called with a ref to a native component.',
+]);
 
 export const unstable_settings = {
   anchor: '(tabs)',
