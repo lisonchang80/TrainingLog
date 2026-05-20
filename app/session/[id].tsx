@@ -2552,7 +2552,7 @@ const styles = StyleSheet.create({
   clusterHeader: {
     flexDirection: 'column',
     gap: 4,
-    marginBottom: 8,
+    marginBottom: 0,
   },
   clusterTagRow: {
     flexDirection: 'row',
@@ -2569,8 +2569,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignSelf: 'flex-start',
   },
-  clusterLabel: { fontSize: 14, fontWeight: '600' },
-  clusterPlus: { fontSize: 14, opacity: 0.5 },
+  // Main title matches solo exName (fontSize 15 / weight 600).
+  clusterLabel: { fontSize: 15, fontWeight: '600' },
+  clusterPlus: { fontSize: 15, opacity: 0.5 },
   clusterPairRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2585,11 +2586,13 @@ const styles = StyleSheet.create({
   // ✓ checkmark is shown (else flex:1 cells absorb the extra width and
   // B drifts right when no logged set in that cycle).
   clusterCheckSlot: { width: 16, alignItems: 'center' },
-  clusterColumnHeader: { fontSize: 14, fontWeight: '700' },
+  // Column sub-header — smaller than main title, sits tight above the rows.
+  clusterColumnHeader: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
   clusterDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(0,0,0,0.18)',
-    marginVertical: 6,
+    marginTop: 2,
+    marginBottom: 4,
   },
 
   // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
