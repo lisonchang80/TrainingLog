@@ -455,12 +455,44 @@ export async function appendReusableSupersetToSession(
  * session row itself in one transaction. No undo; caller must confirm.
  *
  * Slice 10c Phase 5 commit 26.
+ *
+ * Achievement back-ref handling (2026-05-20 wave 12 完工):
+ *   v008 schema declares `achievement_unlock.session_id NOT NULL REFERENCES
+ *   session(id)` and `achievement_unlock.set_id REFERENCES "set"(id)` — both
+ *   FKs lack `ON DELETE` actions. Naively deleting the session's rows trips
+ *   FOREIGN KEY constraint failed whenever a PR / first-combo unlocked during
+ *   the session.
+ *
+ *   Semantic decision: discardSession means "this session never happened",
+ *   so unlocks earned within it are revoked (the `achievement_definition_id
+ *   UNIQUE` constraint allows re-unlocking in a future session — no leak).
+ *
+ *   Order of operations (all inside the existing transaction):
+ *     1. NULL `set_id` on any unlock OUTSIDE this session that happens to
+ *        point at a set inside this session (defensive — production
+ *        achievementRepository writes session_id+set_id from the same
+ *        context so this should be a no-op, but the schema doesn't enforce
+ *        the invariant).
+ *     2. DELETE all unlocks for this session (handles both back-refs in
+ *        one shot since their session_id matches).
+ *     3-5. Original cascade: sets → session_exercise → session.
  */
 export async function discardSession(
   db: Database,
   session_id: string
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+         WHERE set_id IN (SELECT id FROM "set" WHERE session_id = ?)
+           AND session_id != ?`,
+      session_id,
+      session_id
+    );
+    await db.runAsync(
+      `DELETE FROM achievement_unlock WHERE session_id = ?`,
+      session_id
+    );
     await db.runAsync(
       `DELETE FROM "set" WHERE session_id = ?`,
       session_id
