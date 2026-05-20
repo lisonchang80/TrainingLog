@@ -2053,12 +2053,25 @@ function ClusterBlock({
         <View style={styles.clusterTagRow}>
           <Text style={styles.supersetTag}>超</Text>
         </View>
-        <Text style={styles.clusterLabel}>
-          {cluster.parent.exercise_name}
-          <Text style={styles.clusterPlus}> + </Text>
-          {cluster.child.exercise_name}
-        </Text>
+        {/* Column-aligned exercise name headers: cycle slot + A column +
+            B column + check slot (mirrors the data row structure so names
+            sit directly above their values). */}
+        <View style={styles.clusterPairRow}>
+          <View style={styles.clusterCycle} />
+          <View style={styles.clusterCell}>
+            <Text style={styles.clusterColumnHeader} numberOfLines={1}>
+              {cluster.parent.exercise_name}
+            </Text>
+          </View>
+          <View style={styles.clusterCell}>
+            <Text style={styles.clusterColumnHeader} numberOfLines={1}>
+              {cluster.child.exercise_name}
+            </Text>
+          </View>
+          <View style={styles.clusterCheckSlot} />
+        </View>
       </View>
+      <View style={styles.clusterDivider} />
       {rows.length === 0 ? (
         <Text style={styles.muted}>No sets recorded.</Text>
       ) : (
@@ -2073,24 +2086,26 @@ function ClusterBlock({
               <View style={styles.clusterCell}>
                 {r.a ? (
                   <Text style={styles.clusterCellText}>
-                    A: {formatSetCell(r.a, cluster.parent.exercise_load_type)}
+                    {formatSetCell(r.a, cluster.parent.exercise_load_type)}
                   </Text>
                 ) : (
-                  <Text style={styles.clusterCellEmpty}>A: —</Text>
+                  <Text style={styles.clusterCellEmpty}>—</Text>
                 )}
               </View>
               <View style={styles.clusterCell}>
                 {r.b ? (
                   <Text style={styles.clusterCellText}>
-                    B: {formatSetCell(r.b, cluster.child.exercise_load_type)}
+                    {formatSetCell(r.b, cluster.child.exercise_load_type)}
                   </Text>
                 ) : (
-                  <Text style={styles.clusterCellEmpty}>B: —</Text>
+                  <Text style={styles.clusterCellEmpty}>—</Text>
                 )}
               </View>
-              {(r.a?.is_logged === 1 || r.b?.is_logged === 1) && (
-                <Text style={styles.setCheck}>✓</Text>
-              )}
+              <View style={styles.clusterCheckSlot}>
+                {r.a?.is_logged === 1 || r.b?.is_logged === 1 ? (
+                  <Text style={styles.setCheck}>✓</Text>
+                ) : null}
+              </View>
             </View>
           );
         })
@@ -2561,6 +2576,16 @@ const styles = StyleSheet.create({
   clusterCell: { flex: 1 },
   clusterCellText: { fontSize: 13 },
   clusterCellEmpty: { fontSize: 13, opacity: 0.3 },
+  // Fixed-width slot keeps A/B columns aligned regardless of whether the
+  // ✓ checkmark is shown (else flex:1 cells absorb the extra width and
+  // B drifts right when no logged set in that cycle).
+  clusterCheckSlot: { width: 16, alignItems: 'center' },
+  clusterColumnHeader: { fontSize: 14, fontWeight: '700' },
+  clusterDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    marginVertical: 6,
+  },
 
   // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
   exerciseCard: {
