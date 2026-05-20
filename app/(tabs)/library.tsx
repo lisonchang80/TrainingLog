@@ -71,8 +71,17 @@ import {
 export default function LibraryScreen() {
   const db = useDatabase();
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; sessionId?: string }>();
   const isPickerMode = params.mode === 'picker';
+  // 2026-05-20 edit-parity audit: when picker is opened from session detail
+  // edit mode, the URL carries `?sessionId=<id>` so the dim layer can target
+  // THAT session (possibly an ended one) instead of falling back to
+  // `getActiveSession`. Empty / missing param keeps original Today-screen
+  // behaviour (active session lookup).
+  const pickerSessionIdParam =
+    typeof params.sessionId === 'string' && params.sessionId.length > 0
+      ? params.sessionId
+      : null;
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
@@ -172,15 +181,25 @@ export default function LibraryScreen() {
       // #20 — only in picker mode do we look up "already in this session"
       // for the dim/disable layer. Browse mode keeps both sets empty so
       // the library tab never dims anything.
+      //
+      // 2026-05-20 edit-parity audit: prefer explicit `?sessionId=<id>` URL
+      // param (session detail edit mode) over `getActiveSession` so the dim
+      // layer reflects the SESSION BEING EDITED rather than whatever is
+      // currently active. Falls back to active session when no param —
+      // preserves the Today-screen picker flow.
       if (isPickerMode) {
         void (async () => {
-          const active = await getActiveSession(db);
-          if (!active) {
+          let targetSessionId: string | null = pickerSessionIdParam;
+          if (!targetSessionId) {
+            const active = await getActiveSession(db);
+            targetSessionId = active?.id ?? null;
+          }
+          if (!targetSessionId) {
             setDisabledExerciseIds(new Set());
             setDisabledSupersetIds(new Set());
             return;
           }
-          const used = await listSessionUsedExercises(db, active.id);
+          const used = await listSessionUsedExercises(db, targetSessionId);
           setDisabledExerciseIds(used.solo_exercise_ids);
           setDisabledSupersetIds(used.rs_template_ids);
         })();
@@ -188,7 +207,7 @@ export default function LibraryScreen() {
         setDisabledExerciseIds(new Set());
         setDisabledSupersetIds(new Set());
       }
-    }, [refresh, isPickerMode, db])
+    }, [refresh, isPickerMode, db, pickerSessionIdParam])
   );
 
   const subMuscles = useMemo(() => {
