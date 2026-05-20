@@ -75,6 +75,18 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
     );
   }
 
+  /**
+   * Test-helper smell warning (Agent B audit 2026-05-21):
+   * `is_logged` defaults to **1** here for legacy reasons, but in production
+   * dropset chain FOLLOWER rows always have DB `is_logged=0` (only the
+   * head's flag flips on ✓ tap, per ADR-0019 chain semantics). When
+   * authoring new fixtures that exercise chain-aware code paths, pass
+   * `is_logged: 0` explicitly for follower rows — otherwise you may
+   * accidentally mask a `WHERE is_logged = 1` SQL bug.
+   *
+   * See `dropset-chain-semantics` skill § Known wave-12-misses for context
+   * on the bugs this default hid (replayCardSets / replayClusterCardSets).
+   */
   async function addSet(
     id: string,
     session_id: string,
@@ -146,6 +158,8 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
 
   it('Case 2 — dropset chain: parent_set_id remapped to NEW head id', async () => {
     // Source: 1 head set + 1 dropset follower pointing at head.
+    // NOTE: this case is the "remap correctness" guard. For the production-
+    // faithful "follower is_logged=0" scenario see Case 2b below.
     await mkSession('src', 1_000_000);
     await mkSE('src-seA', 'src', exA, 1);
     await addSet('src-head', 'src', exA, 'src-seA', 1, 100, 5);
@@ -176,6 +190,46 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
     // at the NEW head, NOT the stale src-head id.
     expect(newDrop!.parent_set_id).toBe(newHead!.id);
     expect(newDrop!.parent_set_id).not.toBe('src-head');
+  });
+
+  // Case 2b: Agent B audit fix (2026-05-21). Production-faithful — follower's
+  // DB is_logged=0. Pre-fix the SQL `WHERE is_logged = 1` would have dropped
+  // the follower row entirely → only head copied → orphan chain head with no
+  // followers. Post-fix the JS chain-aware filter resolves through the head.
+  it('Case 2b — chain with follower is_logged=0: both head and follower copied', async () => {
+    await mkSession('src', 1_000_000);
+    await mkSE('src-seA', 'src', exA, 1);
+    // Head: dropset HEAD, is_logged=1
+    await addSet('src-head', 'src', exA, 'src-seA', 1, 100, 5, 'dropset', null, 1);
+    // Follower: dropset, is_logged=0 (production shape)
+    await addSet('src-drop', 'src', exA, 'src-seA', 2, 80, 6, 'dropset', 'src-head', 0);
+
+    await mkActiveSession('cur', 2_000_000);
+    await mkSE('cur-seA', 'cur', exA, 1);
+
+    const result = await replayCardSetsFromHistoricalSession(db, {
+      current_session_id: 'cur',
+      current_se_id: 'cur-seA',
+      source_session_id: 'src',
+      source_session_exercise_id: 'src-seA',
+      source_exercise_id: exA,
+      uuid: randomUUID,
+    });
+
+    expect(result.inserted).toBe(2);
+    const rows = await listSetsBySession(db, 'cur');
+    expect(rows.length).toBe(2);
+    const head = rows.find((r) => r.parent_set_id === null);
+    const drop = rows.find((r) => r.parent_set_id !== null);
+    expect(head).toBeTruthy();
+    expect(drop).toBeTruthy();
+    // Follower's parent_set_id remaps to the new head's id.
+    expect(drop!.parent_set_id).toBe(head!.id);
+    // Copy preserves shape (kind / weight / reps).
+    expect(head!.set_kind).toBe('dropset');
+    expect(drop!.set_kind).toBe('dropset');
+    expect(head!.weight_kg).toBe(100);
+    expect(drop!.weight_kg).toBe(80);
   });
 
   it('Case 3 — cluster replay: both A and B sides cleared and refilled', async () => {
@@ -259,6 +313,54 @@ describe('replayCardSetsFromHistoricalSession (solo + cluster)', () => {
     const bRows = rows.filter((r) => r.session_exercise_id === 'cur-B');
     expect(aRows.length).toBe(2);
     expect(bRows.length).toBe(0); // wiped, not preserved
+  });
+
+  // Case 4b: Agent B audit fix (2026-05-21). A side has a dropset chain
+  // where the follower's DB is_logged=0; B side has working rows. Pre-fix
+  // the SQL `WHERE is_logged = 1` would have dropped the A-side follower
+  // → A reduced to orphan head, B unaffected. Post-fix the per-side
+  // chain-aware JS filter resolves follower through its head.
+  it('Case 4b — cluster A side has chain with follower is_logged=0: both sides copy in full', async () => {
+    await mkSession('src', 1_000_000);
+    await mkSE('src-A', 'src', exA, 1);
+    await mkSE('src-B', 'src', exB, 2, 'src-A');
+    // A side: dropset HEAD logged + 2 followers DB is_logged=0
+    await addSet('sA-h', 'src', exA, 'src-A', 1, 100, 5, 'dropset', null, 1);
+    await addSet('sA-f1', 'src', exA, 'src-A', 2, 80, 6, 'dropset', 'sA-h', 0);
+    await addSet('sA-f2', 'src', exA, 'src-A', 3, 60, 8, 'dropset', 'sA-h', 0);
+    // B side: 2 working rows logged
+    await addSet('sB1', 'src', exB, 'src-B', 11, 40, 12);
+    await addSet('sB2', 'src', exB, 'src-B', 12, 40, 12);
+
+    await mkActiveSession('cur', 2_000_000);
+    await mkSE('cur-A', 'cur', exA, 1);
+    await mkSE('cur-B', 'cur', exB, 2, 'cur-A');
+
+    const result = await replayClusterCardSetsFromHistoricalSession(db, {
+      current_session_id: 'cur',
+      current_se_id_a: 'cur-A',
+      current_se_id_b: 'cur-B',
+      source_session_id: 'src',
+      source_session_exercise_id_a: 'src-A',
+      source_session_exercise_id_b: 'src-B',
+      source_exercise_id_a: exA,
+      source_exercise_id_b: exB,
+      uuid: randomUUID,
+    });
+
+    // Pre-fix: inserted_a would have been 1 (head only). Post-fix: 3 (full chain).
+    expect(result.inserted_a).toBe(3);
+    expect(result.inserted_b).toBe(2);
+
+    const rows = await listSetsBySession(db, 'cur');
+    const aRows = rows.filter((r) => r.session_exercise_id === 'cur-A');
+    expect(aRows.length).toBe(3);
+    const aHead = aRows.find((r) => r.parent_set_id === null);
+    const aFollowers = aRows.filter((r) => r.parent_set_id !== null);
+    expect(aHead).toBeTruthy();
+    expect(aFollowers.length).toBe(2);
+    // Both followers point at the new head id (NOT the stale sA-h).
+    expect(aFollowers.every((r) => r.parent_set_id === aHead!.id)).toBe(true);
   });
 
   it('Case 5 — same-card replay (source == current): source captured before DELETE, card ends with its own sets re-inserted', async () => {

@@ -255,12 +255,15 @@ export function computeClusterCycleProgress<S extends ClusterSetInput>(
  * Aggregated 容量 for a cluster header (ADR-0019 Q15.5 ledger + Q16 pull-
  * forward). Formula identical to `computeSessionVolume`:
  *
- *   numerator   = Σ weight × reps  where is_logged=1 AND set_kind!='warmup'
- *   denominator = Σ weight × reps  where                set_kind!='warmup'
+ *   numerator   = Σ weight × reps  where effective is_logged=1 AND set_kind!='warmup'
+ *   denominator = Σ weight × reps  where                          set_kind!='warmup'
  *
  * Iterated over BOTH A+B sides combined (Phase 7 precheck rule). Dropset
- * is_logged=1 contributes (non-warmup). Null weight/reps contribute 0
- * (defensive — same convention as session-wide volume).
+ * follower contributes when its CHAIN HEAD's is_logged=1 (followers'
+ * own DB is_logged stays at 0 per ADR-0019 chain semantics — Agent B
+ * audit fix 2026-05-21; wave 12 `8e2b82d` fixed the sibling
+ * `computeClusterCycleProgress` but missed this function). Null weight/reps
+ * contribute 0 (defensive — same convention as session-wide volume).
  *
  * Returns 0/0 for an empty cluster (both sides empty) and N/0 is structurally
  * impossible (numerator <= denominator by definition).
@@ -269,16 +272,26 @@ export function computeClusterVolume<
   E extends ClusterExerciseInput,
   S extends ClusterSetInput,
 >(group: ClusterGroup<E, S>): { numerator: number; denominator: number } {
+  // Build per-side id → set lookup so dropset followers can resolve their
+  // chain head's is_logged. Chains never cross sides (A-side chain head's
+  // followers are all A-side; same for B), so a per-side map is correct
+  // and slightly cheaper than a combined one.
   let num = 0;
   let den = 0;
   for (const side of [group.a, group.b]) {
+    const byId = new Map<string, S>(side.sets.map((s) => [s.id, s]));
     for (const s of side.sets) {
       if (s.set_kind === 'warmup') continue;
       const w = s.weight_kg ?? 0;
       const r = s.reps ?? 0;
       const vol = w * r;
       den += vol;
-      if (s.is_logged === 1) num += vol;
+      // Effective is_logged: chain follower defers to head.
+      let effLogged = s.is_logged;
+      if (s.set_kind === 'dropset' && s.parent_set_id != null) {
+        effLogged = byId.get(s.parent_set_id)?.is_logged ?? 0;
+      }
+      if (effLogged === 1) num += vol;
     }
   }
   return { numerator: num, denominator: den };

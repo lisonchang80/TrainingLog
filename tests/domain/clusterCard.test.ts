@@ -404,6 +404,70 @@ describe('computeClusterVolume', () => {
     expect(vol.numerator).toBe(2 * (60 * 10) + 2 * (40 * 8));
     expect(vol.denominator).toBe(3 * (60 * 10) + 2 * (40 * 8));
   });
+
+  // Chain-aware: Agent B audit fix 2026-05-21 — followers' DB is_logged
+  // stays at 0 per ADR-0019 chain semantics; the effective is_logged for
+  // a follower resolves through its head.
+  it('A side dropset chain logged head + followers: full chain volume in numerator', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      // A side chain: head logged (is_logged=1), 2 followers DB is_logged=0
+      mkSet('p1', 'p', 1, {
+        set_kind: 'dropset',
+        is_logged: 1,
+        weight_kg: 60,
+        reps: 10,
+      }),
+      mkSet('p2', 'p', 2, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        weight_kg: 40,
+        reps: 8,
+        parent_set_id: 'p1',
+      }),
+      mkSet('p3', 'p', 3, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        weight_kg: 20,
+        reps: 6,
+        parent_set_id: 'p1',
+      }),
+      // B side: one logged working row
+      mkSet('f1', 'f', 1, { weight_kg: 50, reps: 8, is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const vol = computeClusterVolume(group);
+    // Pre-fix: numerator would have been only 60*10 + 50*8 (head + B) → 1000.
+    // Post-fix: followers inherit head's is_logged → full chain counted.
+    const expected = 60 * 10 + 40 * 8 + 20 * 6 + 50 * 8;
+    expect(vol.numerator).toBe(expected);
+    expect(vol.denominator).toBe(expected);
+  });
+
+  it('dropset chain with head NOT logged: chain entirely excluded from numerator', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p1', 'p', 1, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        weight_kg: 60,
+        reps: 10,
+      }),
+      mkSet('p2', 'p', 2, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        weight_kg: 40,
+        reps: 8,
+        parent_set_id: 'p1',
+      }),
+      mkSet('f1', 'f', 1, { weight_kg: 50, reps: 8, is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const vol = computeClusterVolume(group);
+    // Head unlogged → followers also unlogged effectively. Only B contributes.
+    expect(vol.numerator).toBe(50 * 8);
+    expect(vol.denominator).toBe(60 * 10 + 40 * 8 + 50 * 8);
+  });
 });
 
 // ---------------------------------------------------------------------------

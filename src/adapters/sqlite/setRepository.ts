@@ -1385,8 +1385,15 @@ export async function replayCardSetsFromHistoricalSession(
   // (session_id, exercise_id) match — historically broken behaviour, but
   // preserved transiently so the type is non-breaking. Removed once all
   // callers pass the new field.
+  // Chain-aware is_logged filter (Agent B audit fix, 2026-05-21):
+  // SQL was `AND is_logged = 1` which silently dropped dropset followers
+  // (followers carry DB is_logged=0 per ADR-0019 chain semantics; only the
+  // head's flag flips when user taps ✓). Match the canonical pattern in
+  // `prefillSessionExerciseFromLastSession` — SELECT all non-skipped rows,
+  // then JS-filter with chain-aware `effectiveIsLogged` using a Map<id, set>
+  // lookup. Forward sweep safe because head's ordering < follower's ordering.
   const useIsolation = args.source_session_exercise_id != null;
-  const sourceSets = useIsolation
+  const allSourceSets = useIsolation
     ? await db.getAllAsync<{
         id: string;
         weight_kg: number | null;
@@ -1394,15 +1401,15 @@ export async function replayCardSetsFromHistoricalSession(
         set_kind: SetKind;
         parent_set_id: string | null;
         ordering: number;
+        is_logged: number;
       }>(
-        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering, is_logged
            FROM "set"
           WHERE session_id = ?
             AND (session_exercise_id = ?
                  OR (session_exercise_id IS NULL
                      AND exercise_id = ?))
             AND is_skipped = 0
-            AND is_logged = 1
           ORDER BY ordering ASC`,
         args.source_session_id,
         args.source_session_exercise_id!,
@@ -1415,17 +1422,26 @@ export async function replayCardSetsFromHistoricalSession(
         set_kind: SetKind;
         parent_set_id: string | null;
         ordering: number;
+        is_logged: number;
       }>(
-        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+        `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering, is_logged
            FROM "set"
           WHERE session_id = ?
             AND exercise_id = ?
             AND is_skipped = 0
-            AND is_logged = 1
           ORDER BY ordering ASC`,
         args.source_session_id,
         args.source_exercise_id,
       );
+  const sourceById = new Map(allSourceSets.map((s) => [s.id, s]));
+  const sourceSets = allSourceSets.filter((s) => {
+    if (s.is_logged === 1) return true;
+    if (s.set_kind === 'dropset' && s.parent_set_id != null) {
+      const head = sourceById.get(s.parent_set_id);
+      return head?.is_logged === 1;
+    }
+    return false;
+  });
 
   await db.withTransactionAsync(async () => {
     // Wipe current card's sets — scope by session_exercise_id (#17
@@ -1550,50 +1566,65 @@ export async function replayClusterCardSetsFromHistoricalSession(
   // Source isolation (#27): scope by `session_exercise_id` first; fall back
   // to `exercise_id` only for pre-v019 untagged rows OR when the optional
   // SE param hasn't been wired through yet by a legacy caller.
+  // Chain-aware is_logged filter (Agent B audit fix, 2026-05-21):
+  // Same SQL `AND is_logged = 1` bug as the solo helper above — drops
+  // dropset followers in either A or B side. Each side's chain is
+  // self-contained inside its own fetch result, so we filter each side
+  // independently with its own Map<id, set>.
   const fetchSource = async (
     exercise_id: string,
     source_session_exercise_id: string | undefined,
-  ) =>
-    source_session_exercise_id != null
-      ? db.getAllAsync<{
+  ) => {
+    const rows = source_session_exercise_id != null
+      ? await db.getAllAsync<{
           id: string;
           weight_kg: number | null;
           reps: number | null;
           set_kind: SetKind;
           parent_set_id: string | null;
           ordering: number;
+          is_logged: number;
         }>(
-          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering, is_logged
              FROM "set"
             WHERE session_id = ?
               AND (session_exercise_id = ?
                    OR (session_exercise_id IS NULL
                        AND exercise_id = ?))
               AND is_skipped = 0
-              AND is_logged = 1
             ORDER BY ordering ASC`,
           args.source_session_id,
           source_session_exercise_id,
           exercise_id,
         )
-      : db.getAllAsync<{
+      : await db.getAllAsync<{
           id: string;
           weight_kg: number | null;
           reps: number | null;
           set_kind: SetKind;
           parent_set_id: string | null;
           ordering: number;
+          is_logged: number;
         }>(
-          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering
+          `SELECT id, weight_kg, reps, set_kind, parent_set_id, ordering, is_logged
              FROM "set"
             WHERE session_id = ?
               AND exercise_id = ?
               AND is_skipped = 0
-              AND is_logged = 1
             ORDER BY ordering ASC`,
           args.source_session_id,
           exercise_id,
         );
+    const byId = new Map(rows.map((s) => [s.id, s]));
+    return rows.filter((s) => {
+      if (s.is_logged === 1) return true;
+      if (s.set_kind === 'dropset' && s.parent_set_id != null) {
+        const head = byId.get(s.parent_set_id);
+        return head?.is_logged === 1;
+      }
+      return false;
+    });
+  };
   const sourceA = await fetchSource(
     args.source_exercise_id_a,
     args.source_session_exercise_id_a,
