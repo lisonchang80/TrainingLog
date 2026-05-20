@@ -123,38 +123,6 @@ export function createReusableSuperset(
   return { superset, links };
 }
 
-/**
- * Rename a superset. Pair lock means exercises are NOT mutable here
- * (ADR-0017 Q10 「動作組合鎖死」— to change exercises, delete + recreate).
- */
-export function renameReusableSuperset(
-  s: ReusableSuperset,
-  name: string,
-  now: () => number
-): ReusableSuperset {
-  return { ...s, name: name.trim(), updated_at: now() };
-}
-
-export function recolorReusableSuperset(
-  s: ReusableSuperset,
-  color_hex: string | null,
-  now: () => number
-): ReusableSuperset {
-  return { ...s, color_hex, updated_at: now() };
-}
-
-/**
- * Increment `use_count` by 1 (called when explode-into-Template /
- * add-to-Session succeeds). `updated_at` bumps so the library grid sort
- * by "recently used" stays meaningful.
- */
-export function bumpUseCount(
-  s: ReusableSuperset,
-  now: () => number
-): ReusableSuperset {
-  return { ...s, use_count: s.use_count + 1, updated_at: now() };
-}
-
 export interface ExplodeSupersetArgs {
   /** Reusable superset entity (only `id` consulted; rest is for caller readability). */
   superset: ReusableSuperset;
