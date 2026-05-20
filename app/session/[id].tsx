@@ -217,10 +217,10 @@ export default function SessionDetailScreen() {
   // SessionTimeEditorSheet 在 prop 漂移時 reset state。capture-once 在 mount 當
   // 下，作為任何 null ended_at 的 stable fallback (2026-05-20 fix)。
   const [viewOpenedAtMs] = useState(() => Date.now());
-  // 動作清單「隱藏已打勾」開關 (2026-05-20)：on 時，set rows 中 is_logged=1
-  // 整體隱藏；cluster cycle 兩側皆 logged 才隱藏整個 cycle (保 pair 對齊)；
-  // 若整個動作 / cluster 過濾後沒剩 set → 整張卡也不 render。
-  const [hideLogged, setHideLogged] = useState(false);
+  // 動作清單「隱藏未打勾」開關 (2026-05-20)：on 時，set rows 中 is_logged!=1
+  // (尚未打勾) 整體隱藏；cluster cycle 兩側皆未 logged 才隱藏整個 cycle
+  // (保 pair 對齊)；若整個動作 / cluster 過濾後沒剩 set → 整張卡也不 render。
+  const [hideUnchecked, setHideUnchecked] = useState(false);
   // ADR-0019 Q3 single-expanded card — only used in edit mode (mirror Today).
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(
     null,
@@ -1194,11 +1194,11 @@ export default function SessionDetailScreen() {
 
       const group = clusterByParentId.get(p.id);
       if (group) {
-        // 隱藏已打勾：cluster cycle 兩側皆 logged 才跳過；整 cluster 全 logged
+        // 隱藏未打勾：cluster cycle 兩側皆 logged 才跳過；整 cluster 全 logged
         // 則整張卡也不 render。
         let renderGroup = group;
-        if (hideLogged) {
-          const filtered = filterLoggedClusterPair(group.a.sets, group.b.sets);
+        if (hideUnchecked) {
+          const filtered = filterUncheckedClusterPair(group.a.sets, group.b.sets);
           if (filtered === null) continue;
           renderGroup = {
             ...group,
@@ -1307,10 +1307,10 @@ export default function SessionDetailScreen() {
           s.session_exercise_id === p.id ||
           (s.session_exercise_id == null && s.exercise_id === p.exercise_id),
       );
-      // 隱藏已打勾：filter logged sets; whole card hidden when all logged.
+      // 隱藏未打勾：filter logged sets; whole card hidden when all logged.
       let setsForExercise = setsForExerciseRaw;
-      if (hideLogged) {
-        const filtered = filterLoggedSolo(setsForExerciseRaw);
+      if (hideUnchecked) {
+        const filtered = filterUncheckedSolo(setsForExerciseRaw);
         if (filtered === null) continue;
         setsForExercise = filtered;
       }
@@ -1465,11 +1465,11 @@ export default function SessionDetailScreen() {
 
                 <View style={styles.sectionRow}>
                   <Text style={styles.section}>動作清單</Text>
-                  <View style={styles.hideLoggedToggle}>
-                    <Text style={styles.hideLoggedLabel}>隱藏已打勾</Text>
+                  <View style={styles.hideUncheckedToggle}>
+                    <Text style={styles.hideUncheckedLabel}>隱藏未打勾</Text>
                     <Switch
-                      value={hideLogged}
-                      onValueChange={setHideLogged}
+                      value={hideUnchecked}
+                      onValueChange={setHideUnchecked}
                     />
                   </View>
                 </View>
@@ -1524,11 +1524,11 @@ export default function SessionDetailScreen() {
 
                 <View style={styles.sectionRow}>
                   <Text style={styles.section}>動作清單</Text>
-                  <View style={styles.hideLoggedToggle}>
-                    <Text style={styles.hideLoggedLabel}>隱藏已打勾</Text>
+                  <View style={styles.hideUncheckedToggle}>
+                    <Text style={styles.hideUncheckedLabel}>隱藏未打勾</Text>
                     <Switch
-                      value={hideLogged}
-                      onValueChange={setHideLogged}
+                      value={hideUnchecked}
+                      onValueChange={setHideUnchecked}
                     />
                   </View>
                 </View>
@@ -1539,8 +1539,8 @@ export default function SessionDetailScreen() {
                     .map((item) => {
                       if (item.kind === 'cluster') {
                         let renderCluster = item.cluster;
-                        if (hideLogged) {
-                          const filtered = filterLoggedClusterPair(
+                        if (hideUnchecked) {
+                          const filtered = filterUncheckedClusterPair(
                             item.cluster.setsA,
                             item.cluster.setsB,
                           );
@@ -1566,8 +1566,8 @@ export default function SessionDetailScreen() {
                         );
                       }
                       let renderSets = item.sets;
-                      if (hideLogged) {
-                        const filtered = filterLoggedSolo(item.sets);
+                      if (hideUnchecked) {
+                        const filtered = filterUncheckedSolo(item.sets);
                         if (filtered === null) return null;
                         renderSets = filtered;
                       }
@@ -1806,26 +1806,28 @@ function formatTimestamp(ms: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 隱藏已打勾 filter helpers (2026-05-20)
+// 隱藏未打勾 filter helpers (2026-05-20)
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Filter logged (is_logged === 1) sets from a solo exercise card.
- * Returns `null` when every set is logged (caller hides the whole card).
+ * Filter unchecked (is_logged !== 1) sets from a solo exercise card.
+ * Returns `null` when every set is unchecked (caller hides the whole card).
  */
-function filterLoggedSolo<T extends { is_logged: number }>(sets: T[]): T[] | null {
-  const visible = sets.filter((s) => s.is_logged !== 1);
+function filterUncheckedSolo<T extends { is_logged: number }>(
+  sets: T[],
+): T[] | null {
+  const visible = sets.filter((s) => s.is_logged === 1);
   if (sets.length > 0 && visible.length === 0) return null;
   return visible;
 }
 
 /**
  * Pair-aligned filter for cluster cycles: hide a cycle only when BOTH the
- * A side and B side of that cycle are logged. This preserves cycle pairing
+ * A side and B side of that cycle are unchecked. This preserves cycle pairing
  * (sides must remain index-aligned for ClusterCard's cycle math). Returns
- * `null` when every paired cycle is logged.
+ * `null` when every paired cycle is fully unchecked.
  */
-function filterLoggedClusterPair<T extends { is_logged: number }>(
+function filterUncheckedClusterPair<T extends { is_logged: number }>(
   setsA: T[],
   setsB: T[],
 ): { setsA: T[]; setsB: T[] } | null {
@@ -1833,18 +1835,18 @@ function filterLoggedClusterPair<T extends { is_logged: number }>(
   const outA: T[] = [];
   const outB: T[] = [];
   for (let i = 0; i < n; i++) {
-    const aLogged = setsA[i].is_logged === 1;
-    const bLogged = setsB[i].is_logged === 1;
-    if (aLogged && bLogged) continue;
+    const aUnchecked = setsA[i].is_logged !== 1;
+    const bUnchecked = setsB[i].is_logged !== 1;
+    if (aUnchecked && bUnchecked) continue;
     outA.push(setsA[i]);
     outB.push(setsB[i]);
   }
-  // Leftover (defensive — sides usually equal length): drop logged tail sets.
+  // Leftover (defensive — sides usually equal length): drop unchecked tail sets.
   for (let i = n; i < setsA.length; i++) {
-    if (setsA[i].is_logged !== 1) outA.push(setsA[i]);
+    if (setsA[i].is_logged === 1) outA.push(setsA[i]);
   }
   for (let i = n; i < setsB.length; i++) {
-    if (setsB[i].is_logged !== 1) outB.push(setsB[i]);
+    if (setsB[i].is_logged === 1) outB.push(setsB[i]);
   }
   if (
     (setsA.length > 0 || setsB.length > 0) &&
@@ -2468,12 +2470,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 12,
   },
-  hideLoggedToggle: {
+  hideUncheckedToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  hideLoggedLabel: { fontSize: 13, color: '#6B7280' },
+  hideUncheckedLabel: { fontSize: 13, color: '#6B7280' },
 
   // Empty-state placeholder (mirror Today's emptyPlanBlock).
   emptyPlanBlock: {
