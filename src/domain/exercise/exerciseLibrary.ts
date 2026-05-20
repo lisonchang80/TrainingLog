@@ -185,23 +185,6 @@ export function validateCustomExerciseDraft(
 }
 
 /**
- * Group muscle links by role. Helper for UI rendering.
- *
- * Returns sorted arrays preserving the input link order for stability.
- */
-export function partitionMuscleLinksByRole(
-  links: ExerciseMuscleLink[]
-): { primary: string[]; secondary: string[] } {
-  const primary: string[] = [];
-  const secondary: string[] = [];
-  for (const l of links) {
-    if (l.role === 'primary') primary.push(l.muscle_id);
-    else if (l.role === 'secondary') secondary.push(l.muscle_id);
-  }
-  return { primary, secondary };
-}
-
-/**
  * For the body diagram: given an exercise's muscle activation, return a map
  * `muscle_id → role` so the SVG renderer can pick a fill color per path.
  *
