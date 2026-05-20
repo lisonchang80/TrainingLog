@@ -42,12 +42,3 @@ export function setVolume(input: VolumeInput): number | null {
   return eff * reps;
 }
 
-/** Sum-of-volumes helper for an array of sets; nulls are skipped. */
-export function sumVolume(sets: readonly VolumeInput[]): number {
-  let total = 0;
-  for (const s of sets) {
-    const v = setVolume(s);
-    if (v != null) total += v;
-  }
-  return total;
-}

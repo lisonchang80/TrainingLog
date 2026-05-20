@@ -1,4 +1,4 @@
-import { setVolume, sumVolume } from '../../src/domain/pr/volumeEngine';
+import { setVolume } from '../../src/domain/pr/volumeEngine';
 
 describe('Module #3 — Volume Engine (load_type asymmetry)', () => {
   describe('A loaded', () => {
@@ -77,19 +77,4 @@ describe('Module #3 — Volume Engine (load_type asymmetry)', () => {
     });
   });
 
-  describe('sumVolume', () => {
-    it('skips null entries', () => {
-      const total = sumVolume([
-        { weight_kg: 80, reps: 10, load_type: 'loaded' }, // 800
-        { weight_kg: 30, reps: 8, load_type: 'assisted', bw_snapshot_kg: null }, // null → skip
-        { weight_kg: 0, reps: 10, load_type: 'bodyweight' }, // 0
-        { weight_kg: 10, reps: 8, load_type: 'bodyweight' }, // 80
-      ]);
-      expect(total).toBe(880);
-    });
-
-    it('empty array → 0', () => {
-      expect(sumVolume([])).toBe(0);
-    });
-  });
 });
