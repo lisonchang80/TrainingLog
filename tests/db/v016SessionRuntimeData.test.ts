@@ -7,11 +7,17 @@ import { v016_session_runtime_data } from '../../src/db/schema/v016_session_runt
  * settings seed (slice 10a foundation per ADR-0019 Q2 + Q9 + 留尾 Q3 拍板).
  *
  * Coverage:
- *   - template_exercise.rest_sec + session_exercise.rest_sec added (INTEGER, nullable)
+ *   - session_exercise.rest_sec added (INTEGER, nullable) — canonical
+ *     session-side column, widely read by app/sessionRepository
  *   - session.healthkit_workout_uuid (TEXT) / avg_hr_bpm (REAL) / kcal (REAL) added, all nullable
  *   - app_settings 'auto_popup_rest_timer' seed = '1'
  *   - INSERT OR IGNORE doesn't duplicate seed on re-run
- *   - Re-running migration is no-op
+ *   - Re-running v016 in isolation is no-op (idempotent ADD COLUMN guards)
+ *
+ * Note: v016 also added `template_exercise.rest_sec`, but that column was an
+ * orphan (slice 10b declared v009's `rest_seconds` canonical) and was dropped
+ * in v021. The historical ADD COLUMN behavior is verified in isolation below
+ * — the post-`migrate(db)` schema no longer contains it.
  */
 describe('v016 session runtime data migration', () => {
   let db: BetterSqliteDatabase;
@@ -24,15 +30,18 @@ describe('v016 session runtime data migration', () => {
     db.close();
   });
 
-  it('adds template_exercise.rest_sec INTEGER nullable', async () => {
+  it('does NOT leave template_exercise.rest_sec on the migrated schema (v021 dropped the orphan)', async () => {
+    // v016 added a `template_exercise.rest_sec` orphan that v021 later dropped
+    // (slice 10b declared v009's `rest_seconds` canonical). Post-migrate, the
+    // column must be absent — the canonical column lives on as
+    // `template_exercise.rest_seconds` (v009).
     await migrate(db);
-    const cols = await db.getAllAsync<{ name: string; type: string; notnull: number }>(
+    const cols = await db.getAllAsync<{ name: string }>(
       `PRAGMA table_info(template_exercise)`,
     );
-    const col = cols.find((c) => c.name === 'rest_sec');
-    expect(col).toBeDefined();
-    expect(col!.type).toBe('INTEGER');
-    expect(col!.notnull).toBe(0);
+    const names = cols.map((c) => c.name);
+    expect(names).not.toContain('rest_sec');
+    expect(names).toContain('rest_seconds');
   });
 
   it('adds session_exercise.rest_sec INTEGER nullable', async () => {
@@ -88,22 +97,26 @@ describe('v016 session runtime data migration', () => {
     expect(rows).toHaveLength(1);
   });
 
-  it('is idempotent — re-running v016 on migrated DB is a no-op', async () => {
+  it('is idempotent — re-running v016 on migrated DB does not throw', async () => {
     await migrate(db);
+    // Re-running v016 directly after a full migrate is benign. The session
+    // HK columns / seed are still present (guards skip), and session_exercise
+    // .rest_sec is also still present (guard skips). The template_exercise
+    // .rest_sec orphan was dropped by v021; v016's guard then re-adds it —
+    // that's an artefact of re-running an already-superseded migration in
+    // isolation, NOT something the `migrate()` runner would ever do (it's
+    // gated by PRAGMA user_version).
     await expect(v016_session_runtime_data(db)).resolves.not.toThrow();
 
-    // Verify columns still single-occurrence (no duplicate ADD COLUMN)
+    // Verify session-level columns still single-occurrence (no duplicate ADD COLUMN)
     const sCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(session)`);
     const sNames = sCols.map((c) => c.name);
     expect(sNames.filter((n) => n === 'healthkit_workout_uuid')).toHaveLength(1);
     expect(sNames.filter((n) => n === 'avg_hr_bpm')).toHaveLength(1);
     expect(sNames.filter((n) => n === 'kcal')).toHaveLength(1);
 
-    const teCols = await db.getAllAsync<{ name: string }>(
-      `PRAGMA table_info(template_exercise)`,
-    );
-    expect(teCols.map((c) => c.name).filter((n) => n === 'rest_sec')).toHaveLength(1);
-
+    // session_exercise.rest_sec is the canonical session-side column — must
+    // remain present and single-occurrence.
     const seCols = await db.getAllAsync<{ name: string }>(
       `PRAGMA table_info(session_exercise)`,
     );
