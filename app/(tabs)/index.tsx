@@ -42,6 +42,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { getSetting, getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import {
+  addSessionDropsetRow,
   deleteSet,
   insertSessionSet,
   listSetsBySession,
@@ -53,6 +54,7 @@ import {
   prefillReusableSupersetFromLastSession,
   prefillSessionExerciseFromLastSession,
   recordSetInSession,
+  removeSessionDropsetRow,
   reorderSessionSetsForExercise,
   updateSetFields,
   type SessionSetWithExercise,
@@ -83,10 +85,7 @@ import {
   type PRSnapshot,
 } from '@/src/domain/pr/prQuery';
 import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRepository';
-import {
-  computeWorkingSetOrdinals,
-  displaySetLabel,
-} from '@/src/domain/set/workingSetOrdinal';
+import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
   getSessionLinkedTemplateTriple,
@@ -772,6 +771,62 @@ export default function TodayScreen() {
       Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Slice 10c overnight #61 — `+` button on cluster-last follower in a
+   * dropset chain (solo card). Appends a new follower attached to the
+   * chain HEAD via `addSessionDropsetRow`. Source row may be the head or
+   * any existing follower — the repo helper resolves the head id internally.
+   * Mirrors template editor's `addDropsetRow` UX, but persisted.
+   */
+  const onAddDropsetRow = async (after_set_id: string) => {
+    const session_id = getSessionId(sessionState);
+    if (!canRecordSet(sessionState) || !session_id) return;
+    setBusy(true);
+    try {
+      await addSessionDropsetRow(db, {
+        session_id,
+        after_set_id,
+        uuid: randomUUID,
+      });
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      Alert.alert('新增 dropset 失敗', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Slice 10c overnight #61 — `−` button on a dropset follower. Deletes
+   * the follower row via `removeSessionDropsetRow`. Refuses to shrink
+   * a chain below head + 1 follower (DROPSET_CHAIN_TOO_SHORT) — UI shows
+   * an Alert explaining the user must delete the whole chain via the
+   * head row if they want to remove all followers.
+   */
+  const onRemoveDropsetRow = async (set_id: string) => {
+    const session_id = getSessionId(sessionState);
+    if (!session_id) return;
+    try {
+      await removeSessionDropsetRow(db, {
+        session_id,
+        set_id,
+      });
+      const sets = await listSetsBySession(db, session_id);
+      setSetsInSession(sets);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('DROPSET_CHAIN_TOO_SHORT')) {
+        Alert.alert(
+          '無法刪除',
+          'Dropset 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 head 那一列。',
+        );
+      } else {
+        Alert.alert('刪除失敗', msg);
+      }
     }
   };
 
@@ -1908,6 +1963,8 @@ export default function TodayScreen() {
                         onAddSetAfter={(set_id) =>
                           onAddSetAfter(p.exercise_id, set_id)
                         }
+                        onAddDropsetRow={onAddDropsetRow}
+                        onRemoveDropsetRow={onRemoveDropsetRow}
                         onToggleLogged={onToggleLogged}
                         onShowSetNote={(set_id, current) =>
                           setNoteSheetTarget({ set_id, initial: current })
@@ -2240,6 +2297,8 @@ function ExerciseCard({
   onCycleSetKind,
   onDeleteSet,
   onAddSetAfter,
+  onAddDropsetRow,
+  onRemoveDropsetRow,
   onToggleLogged,
   onShowSetNote,
   onTapNumber,
@@ -2262,6 +2321,8 @@ function ExerciseCard({
   onCycleSetKind: (set_id: string) => void;
   onDeleteSet: (set_id: string) => void;
   onAddSetAfter: (set_id: string) => void;
+  onAddDropsetRow: (after_set_id: string) => void;
+  onRemoveDropsetRow: (set_id: string) => void;
   onToggleLogged: (set_id: string, currentlyLogged: boolean) => void;
   onShowSetNote: (set_id: string, currentNotes: string | null) => void;
   onTapNumber: (
@@ -2281,23 +2342,23 @@ function ExerciseCard({
    */
   onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
 }): React.ReactElement {
-  // Slice 10c overnight #7 第 1 點: `#` 改顯示 working set ordinal —
-  // build per-id map (only working rows present) and feed into the
-  // shared `displaySetLabel` helper per render (per-id lookup avoids
-  // positional brittleness when the drag-flat-list re-renders rows
-  // mid-hover with a different index).
-  const ordinalMap = computeWorkingSetOrdinals(
+  // Slice 10c overnight #61 — labels + groups via single helper. Replaces
+  // the prior `displaySetLabel`-based path (which collapsed dropset → 'D').
+  // Now dropset HEAD renders `D{N}` and follower renders '' (mirror
+  // template editor `computeExMeta` lines 1957-1989). Groups bundle each
+  // dropset chain (head + followers) for single-swipe-unit rendering
+  // (mirror template editor lines 2197-2237).
+  const layout = computeSessionSetLayout(
     sets.map((s) => ({
       id: s.id,
       set_kind: s.set_kind,
+      parent_set_id: s.parent_set_id,
       ordering: s.ordering,
     })),
   );
-  const notImplementedAlert = (what: string) =>
-    Alert.alert(
-      what,
-      'Coming in slice 10c Phase 2 commit 7+ (5-gesture / 備註 sheet)。',
-    );
+  const { labels, groups } = layout;
+  // Per-id lookup for raw SessionSetWithExercise → used inside group render.
+  const setsById = new Map(sets.map((s) => [s.id, s] as const));
   const progress = computeExerciseProgress(
     sets.map((s) => ({
       set_kind: s.set_kind,
@@ -2412,35 +2473,45 @@ function ExerciseCard({
             </Text>
           ) : (
             <NestableDraggableFlatList
-              data={sets}
-              keyExtractor={(s) => s.id}
+              data={groups}
+              keyExtractor={(g) => g.head.id}
               activationDistance={20}
               onDragEnd={async ({ data }) => {
-                // Commit only if order actually changed (drop-in-place no-op).
-                const newIds = data.map((s) => s.id);
+                // Slice 10c overnight #61 — drag is group-based now. Flatten
+                // new group order into a flat set-id sequence (head followed
+                // by its followers) so the existing reorder helper still
+                // works on flat ordering. Dropset followers stay contiguous
+                // with their head — the user can never split a chain via
+                // drag (mirror template editor invariant).
+                const newIds = data.flatMap((g) => [
+                  g.head.id,
+                  ...g.followers.map((f) => f.id),
+                ]);
                 const oldIds = sets.map((s) => s.id);
                 const changed = newIds.some((id, idx) => id !== oldIds[idx]);
                 if (changed) await onConfirmReorderSets(newIds);
               }}
               renderItem={({
-                item: s,
+                item: g,
                 drag,
                 isActive,
-              }: RenderItemParams<SessionSetWithExercise>) => {
+              }: RenderItemParams<(typeof groups)[number]>) => {
                 // Per-id ordinal lookup (slice 10c overnight #7 第 1 點)
                 // — survives drag re-renders where positional index drifts.
-                const row: SetRowItem = {
-                  id: s.id,
-                  reps: s.reps ?? 0,
-                  weight: s.weight_kg ?? 0,
-                  notes: s.notes,
+                const head = setsById.get(g.head.id)!;
+                const isDropsetCluster =
+                  head.set_kind === 'dropset' && g.followers.length > 0;
+                const clusterSize = 1 + g.followers.length;
+                const followerMinusDisabled = clusterSize <= 2;
+                const headRow: SetRowItem = {
+                  id: head.id,
+                  reps: head.reps ?? 0,
+                  weight: head.weight_kg ?? 0,
+                  notes: head.notes,
                 };
-                const isDropsetFollower =
-                  s.set_kind === 'dropset' && s.parent_set_id !== null;
-                const logged = s.is_logged === 1;
+                const headLogged = head.is_logged === 1;
                 return (
                   <SwipeableSetRow
-                    enabled={!isDropsetFollower}
                     onLongPress={drag}
                     swipeLeftActions={[
                       {
@@ -2450,7 +2521,15 @@ function ExerciseCard({
                         // overnight #46 第 2 點 — solo set 級別 swipe-delete
                         // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
                         // exercise card 級 / cluster 整 row 級 confirm 不動。
-                        onPress: () => onDeleteSet(s.id),
+                        //
+                        // Slice 10c overnight #61: when this is a dropset
+                        // chain HEAD, deleting cascades the whole chain
+                        // (followers' parent_set_id points at this head;
+                        // deleteSet on the head leaves orphans, but the
+                        // reload pulls them too and they render as
+                        // standalone — TODO ADR for cascade semantics).
+                        // For now match prior behavior: just delete the head.
+                        onPress: () => onDeleteSet(head.id),
                       },
                     ]}
                     swipeRightActions={[
@@ -2458,80 +2537,139 @@ function ExerciseCard({
                         key: 'add',
                         label: '+1',
                         color: '#28a745',
-                        onPress: () => onAddSetAfter(s.id),
+                        onPress: () => onAddSetAfter(head.id),
                       },
                       {
                         key: 'note',
                         label: '備註',
                         color: '#007AFF',
-                        onPress: () => onShowSetNote(s.id, s.notes),
+                        onPress: () => onShowSetNote(head.id, head.notes),
                       },
                     ]}
                   >
                     <View
                       style={[
-                        styles.exerciseCardSetRowWrapper,
+                        isDropsetCluster
+                          ? styles.exerciseCardDropsetClusterStack
+                          : null,
                         isActive && styles.exerciseCardSetRowDragActive,
                       ]}
                     >
-                      <View style={styles.exerciseCardSetRowContent}>
-                        <SetRowContent
-                          set={row}
-                          setLabel={
-                            // dropset follower 維持隱藏 (空字串)；其餘走
-                            // displaySetLabel: working → ordinal / warmup → 熱 /
-                            // dropset head → D (overnight #7 第 1 點).
-                            isDropsetFollower
-                              ? ''
-                              : displaySetLabel(
-                                  { id: s.id, set_kind: s.set_kind },
-                                  ordinalMap,
-                                )
+                      {/* HEAD row */}
+                      <View style={styles.exerciseCardSetRowWrapper}>
+                        <View style={styles.exerciseCardSetRowContent}>
+                          <SetRowContent
+                            set={headRow}
+                            setLabel={labels.get(head.id) ?? ''}
+                            isDropsetFollower={false}
+                            isClusterLast={false}
+                            minusDisabled={false}
+                            hideNoteIndicator={false}
+                            onUpdateSet={(set_id, patch) =>
+                              onUpdateSet(set_id, patch)
+                            }
+                            onShowSetNote={(target) =>
+                              onShowSetNote(target.id, target.notes)
+                            }
+                            onTapNumber={(target, field, current) =>
+                              onTapNumber(target.id, field, current)
+                            }
+                            onRemoveDropsetRow={(set_id) =>
+                              onRemoveDropsetRow(set_id)
+                            }
+                            onAddDropsetRow={(set_id) =>
+                              onAddDropsetRow(set_id)
+                            }
+                            onCycleLabel={(target) =>
+                              onCycleSetKind(target.id)
+                            }
+                          />
+                        </View>
+                        <Pressable
+                          onPress={() => onToggleLogged(head.id, headLogged)}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            headLogged ? '取消完成' : '標為完成'
                           }
-                          isDropsetFollower={isDropsetFollower}
-                          isClusterLast={false}
-                          minusDisabled={true}
-                          hideNoteIndicator={false}
-                          onUpdateSet={(set_id, patch) =>
-                            onUpdateSet(set_id, patch)
-                          }
-                          onShowSetNote={(target) =>
-                            onShowSetNote(target.id, target.notes)
-                          }
-                          onTapNumber={(target, field, current) =>
-                            onTapNumber(target.id, field, current)
-                          }
-                          onRemoveDropsetRow={() =>
-                            notImplementedAlert('− 移除 dropset 一列')
-                          }
-                          onAddDropsetRow={() =>
-                            notImplementedAlert('+ 新增 dropset 一列')
-                          }
-                          onCycleLabel={(target) =>
-                            onCycleSetKind(target.id)
-                          }
-                        />
-                      </View>
-                      <Pressable
-                        onPress={() => onToggleLogged(s.id, logged)}
-                        hitSlop={6}
-                        accessibilityRole="button"
-                        accessibilityLabel={logged ? '取消完成' : '標為完成'}
-                        style={({ pressed }) => [
-                          styles.completeBtn,
-                          logged && styles.completeBtnDone,
-                          pressed && styles.btnPressed,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.completeBtnText,
-                            logged && styles.completeBtnTextDone,
+                          style={({ pressed }) => [
+                            styles.completeBtn,
+                            headLogged && styles.completeBtnDone,
+                            pressed && styles.btnPressed,
                           ]}
                         >
-                          {logged ? '✓' : '○'}
-                        </Text>
-                      </Pressable>
+                          <Text
+                            style={[
+                              styles.completeBtnText,
+                              headLogged && styles.completeBtnTextDone,
+                            ]}
+                          >
+                            {headLogged ? '✓' : '○'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      {/*
+                        Slice 10c overnight #61 — dropset chain followers.
+                        Each follower:
+                          - empty label (head owns D{N})
+                          - shows − button (disabled when chain shrunk to 2)
+                          - last follower shows + button to extend chain
+                          - NO ✓ tap target (head owns logged state)
+                          - shares the parent's SwipeableSetRow (single
+                            swipe unit — head + followers travel together)
+                      */}
+                      {g.followers.map((fset, fIdx) => {
+                        const f = setsById.get(fset.id)!;
+                        const fRow: SetRowItem = {
+                          id: f.id,
+                          reps: f.reps ?? 0,
+                          weight: f.weight_kg ?? 0,
+                          notes: f.notes,
+                        };
+                        return (
+                          <View
+                            key={f.id}
+                            style={styles.exerciseCardSetRowWrapper}
+                          >
+                            <View style={styles.exerciseCardSetRowContent}>
+                              <SetRowContent
+                                set={fRow}
+                                setLabel=""
+                                isDropsetFollower
+                                isClusterLast={
+                                  fIdx === g.followers.length - 1
+                                }
+                                minusDisabled={followerMinusDisabled}
+                                hideNoteIndicator={false}
+                                onUpdateSet={(set_id, patch) =>
+                                  onUpdateSet(set_id, patch)
+                                }
+                                onShowSetNote={(target) =>
+                                  onShowSetNote(target.id, target.notes)
+                                }
+                                onTapNumber={(target, field, current) =>
+                                  onTapNumber(target.id, field, current)
+                                }
+                                onRemoveDropsetRow={(set_id) =>
+                                  onRemoveDropsetRow(set_id)
+                                }
+                                onAddDropsetRow={(set_id) =>
+                                  onAddDropsetRow(set_id)
+                                }
+                                onCycleLabel={(target) =>
+                                  onCycleSetKind(target.id)
+                                }
+                              />
+                            </View>
+                            {/*
+                              NO ✓ button for followers (head owns chain
+                              logged state). Spacer keeps SetRowContent
+                              column-aligned with the head row.
+                            */}
+                            <View style={styles.completeBtnSpacer} />
+                          </View>
+                        );
+                      })}
                     </View>
                   </SwipeableSetRow>
                 );
@@ -2805,6 +2943,17 @@ const styles = StyleSheet.create({
   exerciseCardSetRowContent: {
     flex: 1,
   },
+  /**
+   * Slice 10c overnight #61 — dropset chain cluster stack. Head + all
+   * followers render inside ONE SwipeableSetRow (single swipe unit),
+   * stacked vertically via this container. Mirrors template editor's
+   * `clusterStack` style usage at template-editor-view.tsx lines 2197-2237.
+   * No backgroundColor / borders — visual grouping comes from the row
+   * indent and the `D{N}` HEAD label vs the follower's blank label slot.
+   */
+  exerciseCardDropsetClusterStack: {
+    flexDirection: 'column',
+  },
   completeBtn: {
     width: 28,
     height: 28,
@@ -2824,6 +2973,13 @@ const styles = StyleSheet.create({
   completeBtnTextDone: {
     color: 'white',
   },
+  /**
+   * Slice 10c overnight #61 — same width as completeBtn so dropset
+   * follower rows keep their SetRowContent column-aligned with the
+   * head row (head has ✓, follower has nothing). Width 28 matches
+   * `completeBtn.width`.
+   */
+  completeBtnSpacer: { width: 28, height: 28 },
   exerciseCardFooter: {
     flexDirection: 'row',
     gap: 8,
