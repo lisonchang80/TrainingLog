@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -216,6 +217,10 @@ export default function SessionDetailScreen() {
   // SessionTimeEditorSheet 在 prop 漂移時 reset state。capture-once 在 mount 當
   // 下，作為任何 null ended_at 的 stable fallback (2026-05-20 fix)。
   const [viewOpenedAtMs] = useState(() => Date.now());
+  // 動作清單「隱藏已打勾」開關 (2026-05-20)：on 時，set rows 中 is_logged=1
+  // 整體隱藏；cluster cycle 兩側皆 logged 才隱藏整個 cycle (保 pair 對齊)；
+  // 若整個動作 / cluster 過濾後沒剩 set → 整張卡也不 render。
+  const [hideLogged, setHideLogged] = useState(false);
   // ADR-0019 Q3 single-expanded card — only used in edit mode (mirror Today).
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(
     null,
@@ -1189,11 +1194,23 @@ export default function SessionDetailScreen() {
 
       const group = clusterByParentId.get(p.id);
       if (group) {
+        // 隱藏已打勾：cluster cycle 兩側皆 logged 才跳過；整 cluster 全 logged
+        // 則整張卡也不 render。
+        let renderGroup = group;
+        if (hideLogged) {
+          const filtered = filterLoggedClusterPair(group.a.sets, group.b.sets);
+          if (filtered === null) continue;
+          renderGroup = {
+            ...group,
+            a: { ...group.a, sets: filtered.setsA },
+            b: { ...group.b, sets: filtered.setsB },
+          };
+        }
         const isExpanded = expandedExerciseId === p.id;
         out.push(
           <ClusterCard
             key={p.id}
-            group={group}
+            group={renderGroup}
             isExpanded={isExpanded}
             colorHex={p.reusable_superset_color_hex}
             onToggleExpand={() =>
@@ -1285,11 +1302,18 @@ export default function SessionDetailScreen() {
       }
 
       // Solo path
-      const setsForExercise = sets.filter(
+      const setsForExerciseRaw = sets.filter(
         (s) =>
           s.session_exercise_id === p.id ||
           (s.session_exercise_id == null && s.exercise_id === p.exercise_id),
       );
+      // 隱藏已打勾：filter logged sets; whole card hidden when all logged.
+      let setsForExercise = setsForExerciseRaw;
+      if (hideLogged) {
+        const filtered = filterLoggedSolo(setsForExerciseRaw);
+        if (filtered === null) continue;
+        setsForExercise = filtered;
+      }
       const isExpanded = expandedExerciseId === p.id;
       out.push(
         <EditableExerciseCard
@@ -1439,7 +1463,16 @@ export default function SessionDetailScreen() {
                   }
                 />
 
-                <Text style={styles.section}>動作清單</Text>
+                <View style={styles.sectionRow}>
+                  <Text style={styles.section}>動作清單</Text>
+                  <View style={styles.hideLoggedToggle}>
+                    <Text style={styles.hideLoggedLabel}>隱藏已打勾</Text>
+                    <Switch
+                      value={hideLogged}
+                      onValueChange={setHideLogged}
+                    />
+                  </View>
+                </View>
                 {sessionExercises.length === 0 ? (
                   <View style={styles.emptyPlanBlock}>
                     <Text style={styles.emptyPlanTitle}>尚未加入動作</Text>
@@ -1489,34 +1522,64 @@ export default function SessionDetailScreen() {
                   }
                 />
 
-                <Text style={styles.section}>動作清單</Text>
+                <View style={styles.sectionRow}>
+                  <Text style={styles.section}>動作清單</Text>
+                  <View style={styles.hideLoggedToggle}>
+                    <Text style={styles.hideLoggedLabel}>隱藏已打勾</Text>
+                    <Switch
+                      value={hideLogged}
+                      onValueChange={setHideLogged}
+                    />
+                  </View>
+                </View>
                 {orderedItems.length === 0 ? (
                   <Text style={styles.muted}>No exercises.</Text>
                 ) : (
-                  orderedItems.map((item) => {
-                    if (item.kind === 'cluster') {
+                  orderedItems
+                    .map((item) => {
+                      if (item.kind === 'cluster') {
+                        let renderCluster = item.cluster;
+                        if (hideLogged) {
+                          const filtered = filterLoggedClusterPair(
+                            item.cluster.setsA,
+                            item.cluster.setsB,
+                          );
+                          if (filtered === null) return null;
+                          renderCluster = {
+                            ...item.cluster,
+                            setsA: filtered.setsA,
+                            setsB: filtered.setsB,
+                          };
+                        }
+                        return (
+                          <ClusterBlock
+                            key={item.cluster.parent.id}
+                            cluster={renderCluster}
+                            rs={
+                              item.cluster.parent.reusable_superset_id
+                                ? rsById.get(
+                                    item.cluster.parent.reusable_superset_id,
+                                  ) ?? null
+                                : null
+                            }
+                          />
+                        );
+                      }
+                      let renderSets = item.sets;
+                      if (hideLogged) {
+                        const filtered = filterLoggedSolo(item.sets);
+                        if (filtered === null) return null;
+                        renderSets = filtered;
+                      }
                       return (
-                        <ClusterBlock
-                          key={item.cluster.parent.id}
-                          cluster={item.cluster}
-                          rs={
-                            item.cluster.parent.reusable_superset_id
-                              ? rsById.get(
-                                  item.cluster.parent.reusable_superset_id,
-                                ) ?? null
-                              : null
-                          }
+                        <SoloExerciseBlock
+                          key={item.exercise.id}
+                          exercise={item.exercise}
+                          sets={renderSets}
                         />
                       );
-                    }
-                    return (
-                      <SoloExerciseBlock
-                        key={item.exercise.id}
-                        exercise={item.exercise}
-                        sets={item.sets}
-                      />
-                    );
-                  })
+                    })
+                    .filter((node) => node !== null)
                 )}
               </>
             )}
@@ -1740,6 +1803,57 @@ async function loadHealthkitColumns(
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 隱藏已打勾 filter helpers (2026-05-20)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Filter logged (is_logged === 1) sets from a solo exercise card.
+ * Returns `null` when every set is logged (caller hides the whole card).
+ */
+function filterLoggedSolo<T extends { is_logged: number }>(sets: T[]): T[] | null {
+  const visible = sets.filter((s) => s.is_logged !== 1);
+  if (sets.length > 0 && visible.length === 0) return null;
+  return visible;
+}
+
+/**
+ * Pair-aligned filter for cluster cycles: hide a cycle only when BOTH the
+ * A side and B side of that cycle are logged. This preserves cycle pairing
+ * (sides must remain index-aligned for ClusterCard's cycle math). Returns
+ * `null` when every paired cycle is logged.
+ */
+function filterLoggedClusterPair<T extends { is_logged: number }>(
+  setsA: T[],
+  setsB: T[],
+): { setsA: T[]; setsB: T[] } | null {
+  const n = Math.min(setsA.length, setsB.length);
+  const outA: T[] = [];
+  const outB: T[] = [];
+  for (let i = 0; i < n; i++) {
+    const aLogged = setsA[i].is_logged === 1;
+    const bLogged = setsB[i].is_logged === 1;
+    if (aLogged && bLogged) continue;
+    outA.push(setsA[i]);
+    outB.push(setsB[i]);
+  }
+  // Leftover (defensive — sides usually equal length): drop logged tail sets.
+  for (let i = n; i < setsA.length; i++) {
+    if (setsA[i].is_logged !== 1) outA.push(setsA[i]);
+  }
+  for (let i = n; i < setsB.length; i++) {
+    if (setsB[i].is_logged !== 1) outB.push(setsB[i]);
+  }
+  if (
+    (setsA.length > 0 || setsB.length > 0) &&
+    outA.length === 0 &&
+    outB.length === 0
+  ) {
+    return null;
+  }
+  return { setsA: outA, setsB: outB };
 }
 
 function formatDateLabel(ms: number): string {
@@ -2347,7 +2461,19 @@ const styles = StyleSheet.create({
   },
   body: { padding: 16, gap: 12, paddingBottom: 100 },
   timestamp: { fontSize: 13, opacity: 0.65 },
-  section: { fontSize: 14, fontWeight: '600', marginTop: 12, color: '#6B7280' },
+  section: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  hideLoggedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  hideLoggedLabel: { fontSize: 13, color: '#6B7280' },
 
   // Empty-state placeholder (mirror Today's emptyPlanBlock).
   emptyPlanBlock: {
