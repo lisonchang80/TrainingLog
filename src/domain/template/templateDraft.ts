@@ -345,18 +345,3 @@ export function computeTemplateDiff(args: {
   };
 }
 
-/**
- * True iff `diff` would result in zero DB writes. Equivalent to
- * `templatesEqual(committed, draft)` but faster on small diffs.
- */
-export function diffIsEmpty(d: TemplateDiff): boolean {
-  return (
-    d.templatePatch === null &&
-    d.exerciseInserts.length === 0 &&
-    d.exerciseUpdates.length === 0 &&
-    d.exerciseDeletes.length === 0 &&
-    d.setInserts.length === 0 &&
-    d.setUpdates.length === 0 &&
-    d.setDeletes.length === 0
-  );
-}
