@@ -14,12 +14,27 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 // `containerRef.current.measureLayout(nodeHandle, ...)` against `Animated.View`
 // from reanimated 3 which doesn't expose `measureLayout` directly; RN prints
 // the warning but the lib's own `onFail` callback handles the failure path
-// (just logs). Drag-and-drop still works correctly. Same approach the lib
-// already takes internally to suppress its other VirtualizedLists warning.
-// Latest 4.0.3 still hits this — no upstream fix available yet.
-LogBox.ignoreLogs([
-  'ref.measureLayout must be called with a ref to a native component.',
-]);
+// (just logs). Drag-and-drop still works correctly. Latest 4.0.3 still hits
+// this — no upstream fix available yet.
+//
+// Two-layer suppression:
+//   1. `LogBox.ignoreLogs` filters the in-app LogBox red/yellow overlay.
+//   2. Monkey-patch `console.error` filters the Metro/CLI console output.
+//      `LogBox.ignoreLogs` does NOT touch Metro console (per RN docs:
+//      "ignoreLogs does not affect logs printed to the system console").
+const __DRAG_LIST_WARNING_PATTERN =
+  'ref.measureLayout must be called with a ref to a native component.';
+LogBox.ignoreLogs([__DRAG_LIST_WARNING_PATTERN]);
+const __origConsoleError = console.error.bind(console);
+console.error = (...args: unknown[]) => {
+  if (
+    typeof args[0] === 'string' &&
+    args[0].includes(__DRAG_LIST_WARNING_PATTERN)
+  ) {
+    return;
+  }
+  __origConsoleError(...args);
+};
 
 export const unstable_settings = {
   anchor: '(tabs)',
