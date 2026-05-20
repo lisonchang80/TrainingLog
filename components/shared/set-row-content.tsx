@@ -137,7 +137,40 @@ export function SetRowContent<S extends SetRowItem>({
 
   return (
     <View style={[styles.setRow, compact && styles.setRowCompact]}>
-      {hideLabel ? null : (
+      {hideLabel ? null : isDropsetFollower ? (
+        // Dropset follower: -/+ button group occupies the label slot.
+        // − always shown (with disabled state when chain at minimum 2 rows).
+        // + only on the chain-last follower (isClusterLast).
+        <View style={styles.dropsetLeftGroup}>
+          <Pressable
+            onPress={() => onRemoveDropsetRow(set.id)}
+            disabled={minusDisabled}
+            hitSlop={6}
+            style={[
+              styles.dropsetInlineBtn,
+              minusDisabled && styles.dropsetTailBtnDisabled,
+            ]}>
+            <Text
+              style={[
+                styles.dropsetInlineBtnText,
+                minusDisabled && styles.dropsetTailBtnTextDisabled,
+              ]}>
+              −
+            </Text>
+          </Pressable>
+          {isClusterLast ? (
+            <Pressable
+              onPress={() => onAddDropsetRow(set.id)}
+              hitSlop={6}
+              style={styles.dropsetInlineBtn}>
+              <Text style={styles.dropsetInlineBtnText}>+</Text>
+            </Pressable>
+          ) : (
+            // Reserve slot for + so single-button rows still align with two-button rows.
+            <View style={styles.dropsetInlineBtnPlaceholder} />
+          )}
+        </View>
+      ) : (
         <Pressable
           onPress={() => {
             if (!isDropsetFollower) onCycleLabel(set);
@@ -208,32 +241,7 @@ export function SetRowContent<S extends SetRowItem>({
       ) : (
         <View style={styles.setNoteIndicatorPlaceholder} />
       )}
-      {isDropsetFollower ? (
-        <Pressable
-          onPress={() => onRemoveDropsetRow(set.id)}
-          disabled={minusDisabled}
-          style={[
-            styles.dropsetInlineBtn,
-            minusDisabled && styles.dropsetTailBtnDisabled,
-          ]}
-          hitSlop={6}>
-          <Text
-            style={[
-              styles.dropsetInlineBtnText,
-              minusDisabled && styles.dropsetTailBtnTextDisabled,
-            ]}>
-            −
-          </Text>
-        </Pressable>
-      ) : null}
-      {isDropsetFollower && isClusterLast ? (
-        <Pressable
-          onPress={() => onAddDropsetRow(set.id)}
-          style={styles.dropsetInlineBtn}
-          hitSlop={6}>
-          <Text style={styles.dropsetInlineBtnText}>+</Text>
-        </Pressable>
-      ) : null}
+      {/* dropset −/+ buttons rendered at LEFT (label slot) above (2026-05-20). */}
     </View>
   );
 }
@@ -353,9 +361,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,149,0,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 2,
   },
+  // Reserved width matches dropsetInlineBtn so single-button rows keep the
+  // weight/reps inputs aligned across all follower rows in the chain.
+  dropsetInlineBtnPlaceholder: { width: 22, height: 22 },
   dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: '#FF9500' },
   dropsetTailBtnDisabled: { opacity: 0.35 },
   dropsetTailBtnTextDisabled: { color: '#9CA3AF' },
+  // Container for the -/+ pair occupying the label-slot position on the
+  // left of a dropset follower row (2026-05-20 — user request to move
+  // these buttons from the row's right end onto the empty label slot).
+  dropsetLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
 });
