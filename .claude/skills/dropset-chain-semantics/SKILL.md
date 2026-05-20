@@ -167,13 +167,47 @@ Mirror UX rule #1: head visible as labeled row, followers visible as indented ro
 | `207c3c9`  | template editor 顯示「12 組」(3 chain × 3 row)                    | `s.kind !== 'warmup'` counted every row                              |
 | (multiple) | `D1..D12` in history read mode                                   | `computeHistorySetLabels` counted every row                          |
 
+## Wave 12 missed (Agent B audit 2026-05-21 surfaced)
+
+| Commit     | Bug                                                              | Root cause                                                           |
+|------------|------------------------------------------------------------------|----------------------------------------------------------------------|
+| `aaebdb0`  | ↻ 再次訓練 solo → only HEAD copied, follower dropped              | `replayCardSetsFromHistoricalSession` SQL `WHERE is_logged = 1` — same shape as `8d3734e` but in sibling helper |
+| `aaebdb0`  | ↻ 再次訓練 cluster A side chain → only HEAD copied                | `replayClusterCardSetsFromHistoricalSession` same SQL bug; same fix; also leaks via `prefillReusableSupersetFromLastSession` |
+| `aaebdb0`  | Cluster 容量 chip 卡 stuck-low on dropset-heavy clusters          | `computeClusterVolume` used naive `s.is_logged === 1` — wave 12 `8e2b82d` touched sibling `computeClusterCycleProgress` but missed this function in same file |
+
+**Audit-friendly grep that would have caught all 3 wave-12 misses**:
+```bash
+grep -rn "is_logged = 1\|is_logged=1" src/adapters/sqlite/
+grep -rn "s\.is_logged === 1" src/domain/
+```
+After every chain-aware fix, sweep these patterns across all reader sites
+— don't trust that "the bug only existed in the one helper".
+
+## Test fixture smell — production-faithful follower is_logged
+
+When writing fixtures for dropset chains, **default the follower row's
+`is_logged` to `0`** (matches production — UI tap-✓ writes head only, per
+DB invariant #2). A follower fixture with `is_logged=1` is non-
+representative and will silently mask `WHERE is_logged = 1` SQL bugs.
+
+Concrete pointer that hid 2 bugs (Agent B audit 2026-05-21):
+- `tests/db/replayCardSets.test.ts:88` `addSet` helper defaulted
+  `is_logged: 0 | 1 = 1`. Existing tests passed pre-fix because both
+  HEAD and follower had `is_logged=1`, so the bad SQL filter kept both.
+  Fix: comment the helper's default with a warning, add Case 2b
+  (solo chain follower is_logged=0) + Case 4b (cluster A side chain
+  follower is_logged=0) — these are the production-faithful tests that
+  exercise the actual bug.
+
 ## Files that already follow these rules (reference implementations)
 
 - `src/domain/session/exerciseProgress.ts` — solo progress (setsDone/setsTotal, volumeDone chain-aware)
 - `src/domain/session/clusterCard.ts::computeClusterCycleProgress` — cluster progress
+- `src/domain/session/clusterCard.ts::computeClusterVolume` — cluster volume (chain-aware after `aaebdb0`)
 - `src/domain/template/clusterStat.ts::classifyClusterCycle` — template cluster stat
 - `src/adapters/sqlite/setRepository.ts::prefillSessionExerciseFromLastSession` — prefill chain-aware
-- `src/adapters/sqlite/setRepository.ts::replayCardSetsFromHistoricalSession` — replay with parent remap
+- `src/adapters/sqlite/setRepository.ts::replayCardSetsFromHistoricalSession` — replay with parent remap + chain-aware filter (after `aaebdb0`)
+- `src/adapters/sqlite/setRepository.ts::replayClusterCardSetsFromHistoricalSession` — cluster replay (after `aaebdb0`)
 - `app/session/[id].tsx::resolveEffectiveLogged` — hide-unchecked filter
 - `components/template-editor/template-editor-view.tsx` line ~2044 — solo `workings` count
 
@@ -185,3 +219,5 @@ Mirror UX rule #1: head visible as labeled row, followers visible as indented ro
 - [ ] Does this copy sets to another location? → remap `parent_set_id` via id Map
 - [ ] Does this render dropset labels? → use `computeSessionSetLayout` (head-only `D{N}`)
 - [ ] Does this classify a cluster cycle? → follower-only cycles return null (skip)
+- [ ] **Audit-sweep regression-prone patterns**: after fixing any chain-aware bug, also run `grep -rn "is_logged = 1\|is_logged=1" src/adapters/sqlite/` and `grep -rn "s\.is_logged === 1" src/domain/` — same bug shape often exists in sibling helpers (Agent B audit 2026-05-21 found 3 missed by wave 12)
+- [ ] **Test fixture sanity**: any new test exercising a chain MUST set follower `is_logged: 0` explicitly. Defaults of `1` mask SQL filter bugs.
