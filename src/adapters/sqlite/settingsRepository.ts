@@ -10,6 +10,7 @@ import type { UnitPreference } from '../../domain/body/types';
  */
 
 const UNIT_KEY = 'unit_preference';
+const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
 export async function getSetting<T>(
   db: Database,
@@ -53,4 +54,33 @@ export async function setUnitPreference(
   unit: UnitPreference
 ): Promise<void> {
   await setSetting<UnitPreference>(db, UNIT_KEY, unit);
+}
+
+/**
+ * Read the `auto_popup_rest_timer` app setting (ADR-0019 Q2.3 a, slice 10d).
+ *
+ * v016 migration seeds the key with raw string `"1"` (not JSON-encoded),
+ * so we tolerate both shapes here:
+ *   - JSON-encoded `1` / `true` → ON
+ *   - Raw `"1"` (v016 seed shape) → ON
+ *   - JSON `0` / `false` / missing → OFF
+ *
+ * Default ON when the key is missing — matches the v016 seed intent and
+ * keeps fresh installs aligned with the ADR-0019 § Q2.3 (a) "預設 ON" rule.
+ */
+export async function getAutoPopupRestTimer(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, AUTO_POPUP_REST_TIMER_KEY);
+  // null/undefined → ON (default for fresh installs).
+  if (v == null) return true;
+  return v === 1 || v === true;
+}
+
+export async function setAutoPopupRestTimer(
+  db: Database,
+  enabled: boolean
+): Promise<void> {
+  // Store as numeric 1/0 so the v016 raw-seed (`"1"`) and any JSON.parse
+  // round-trip stay consistent. JSON.stringify(1) = "1" — same wire form
+  // as the seed, so a Settings toggle never produces a divergent shape.
+  await setSetting<number>(db, AUTO_POPUP_REST_TIMER_KEY, enabled ? 1 : 0);
 }

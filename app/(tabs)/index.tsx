@@ -40,7 +40,10 @@ import {
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
-import { getSetting, getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
+import {
+  getAutoPopupRestTimer,
+  getUnitPreference,
+} from '@/src/adapters/sqlite/settingsRepository';
 import {
   addSessionDropsetCluster,
   addSessionDropsetRow,
@@ -243,16 +246,16 @@ export default function TodayScreen() {
       listTemplates(db),
       getUnitPreference(db),
       listBodyMetrics(db),
-      // v016 seeds auto_popup_rest_timer = '1' (raw string, JSON-parses to 1).
-      // null / 0 / undefined → autoPopup off.
-      getSetting<number | boolean>(db, 'auto_popup_rest_timer'),
+      // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
+      // key to ON (matches v016 seed intent + the new Settings Switch).
+      getAutoPopupRestTimer(db),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
     setBodyMetrics(bms);
-    setAutoPopupTimer(popup === 1 || popup === true);
+    setAutoPopupTimer(popup);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);

@@ -1,6 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
+  type AppStateStatus,
   Modal,
   Pressable,
   StyleSheet,
@@ -108,6 +110,28 @@ export function RestTimerModal({
     }, 1000);
     return () => clearInterval(id);
   }, [visible, state.status]);
+
+  // BG2 (ADR-0019 § slice 10d Q4): wall-clock self-correct on app
+  // foreground. iOS suspends JS setInterval while the app is backgrounded,
+  // so the running modal's countdown freezes from the user's perspective.
+  // When the app returns to 'active', we re-derive `remaining_ms` against
+  // the wall clock — if the deadline already passed, tickTimer transitions
+  // to 'finished' on the spot (which then fires the haptic + auto-dismiss
+  // via the existing effect below).
+  //
+  // Known v1 limitation (slice 13+ may revisit): if iOS hard-kills the app
+  // (low-memory background eviction) the modal's React state is lost
+  // entirely. No local notification fallback ships in slice 10d — Q2.3 (c)
+  // F1 '短音' is also deferred there.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') {
+        setState((s) => tickTimer(s, Date.now()));
+      }
+    });
+    return () => sub.remove();
+  }, [visible]);
 
   // Fire haptic on the running → finished edge (once).
   useEffect(() => {

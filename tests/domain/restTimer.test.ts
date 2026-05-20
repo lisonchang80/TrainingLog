@@ -123,3 +123,56 @@ describe('flow', () => {
     expect(state.end_at_ms).toBe(100_000);
   });
 });
+
+/**
+ * ADR-0019 § slice 10d BG2 — AppState wall-clock self-correct.
+ *
+ * The modal hooks `AppState.addEventListener('change', ...)` and re-ticks
+ * with `Date.now()` when the app returns to 'active'. iOS suspends the JS
+ * `setInterval` while the app is backgrounded, so on resume the next
+ * tickTimer call sees a `now` value that has jumped forward by however
+ * long the user was away. These tests verify the state machine produces
+ * the correct transitions for those jumps.
+ */
+describe('BG2 — wall-clock resume', () => {
+  it('foreground-resume mid-countdown → still running with correct remaining', () => {
+    // User starts a 60s timer at t=0, backgrounds at t=10s,
+    // returns to foreground at t=25s (15s elapsed in background).
+    const start = startTimer(60, 0);
+    const onResume = tickTimer(start, 25_000);
+    expect(onResume.status).toBe('running');
+    expect(onResume.remaining_ms).toBe(35_000); // 60 - 25 = 35s left
+    // end_at_ms is wall-clock anchored — unchanged across the background gap.
+    expect(onResume.end_at_ms).toBe(60_000);
+  });
+
+  it('foreground-resume after deadline passed → transitions to finished', () => {
+    // User starts a 60s timer at t=0, backgrounds at t=30s,
+    // returns at t=90s (60s past deadline).
+    const start = startTimer(60, 0);
+    const onResume = tickTimer(start, 90_000);
+    expect(onResume.status).toBe('finished');
+    expect(onResume.remaining_ms).toBe(0);
+    // end_at_ms preserved so downstream UI can still report it if desired.
+    expect(onResume.end_at_ms).toBe(60_000);
+  });
+
+  it('foreground-resume exactly at deadline → transitions to finished', () => {
+    const start = startTimer(60, 0);
+    const onResume = tickTimer(start, 60_000);
+    expect(onResume.status).toBe('finished');
+    expect(onResume.remaining_ms).toBe(0);
+  });
+
+  it('repeated foreground-resume in finished state → idempotent (returns same reference)', () => {
+    // Modal effect could fire AppState 'active' multiple times in quick
+    // succession (e.g. iOS sends 'inactive' → 'active' transitions during
+    // Control Center). Once finished, additional ticks must be no-ops so
+    // the haptic effect ref isn't re-fired.
+    const start = startTimer(60, 0);
+    const first = tickTimer(start, 60_000);
+    expect(first.status).toBe('finished');
+    const second = tickTimer(first, 90_000);
+    expect(second).toBe(first); // reference equality — same object
+  });
+});

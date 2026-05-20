@@ -1,11 +1,20 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import {
+  getAutoPopupRestTimer,
   getUnitPreference,
+  setAutoPopupRestTimer,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -18,10 +27,21 @@ export default function SettingsScreen() {
   const db = useDatabase();
   const router = useRouter();
   const [unit, setUnit] = useState<UnitPreference>('kg');
+  /**
+   * Rest timer auto-popup toggle (ADR-0019 § slice 10d S1).
+   *
+   * Backed by `app_settings.auto_popup_rest_timer` (v016 seed default `1`).
+   * Read on focus, persisted optimistically on toggle. `null` = loading.
+   */
+  const [autoPopup, setAutoPopup] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
-    const u = await getUnitPreference(db);
+    const [u, popup] = await Promise.all([
+      getUnitPreference(db),
+      getAutoPopupRestTimer(db),
+    ]);
     setUnit(u);
+    setAutoPopup(popup);
   }, [db]);
 
   useFocusEffect(
@@ -34,6 +54,14 @@ export default function SettingsScreen() {
     if (next === unit) return;
     setUnit(next);
     await setUnitPreference(db, next);
+  };
+
+  const onToggleAutoPopup = async (next: boolean) => {
+    // Optimistic — UI updates first so the Switch feels snappy. DB write
+    // races against the next render but Switch is idempotent (write the
+    // same boolean twice = no-op).
+    setAutoPopup(next);
+    await setAutoPopupRestTimer(db, next);
   };
 
   return (
@@ -57,6 +85,21 @@ export default function SettingsScreen() {
         <Text style={styles.hint}>
           顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。
         </Text>
+
+        <Text style={styles.section}>訓練偏好</Text>
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={styles.switchLabel}>自動跳出休息倒數</Text>
+            <Text style={styles.hint}>
+              打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。
+            </Text>
+          </View>
+          <Switch
+            value={autoPopup ?? true}
+            onValueChange={onToggleAutoPopup}
+            disabled={autoPopup === null}
+          />
+        </View>
 
         <Text style={styles.section}>數據</Text>
         <Pressable
@@ -134,4 +177,15 @@ const styles = StyleSheet.create({
   },
   linkLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
   linkChevron: { fontSize: 22, fontWeight: '300', opacity: 0.5 },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    gap: 12,
+  },
+  switchLabelGroup: { flex: 1, gap: 2 },
+  switchLabel: { fontSize: 16, fontWeight: '500' },
 });
