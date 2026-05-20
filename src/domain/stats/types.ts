@@ -27,18 +27,6 @@ export interface StatsSetRecord {
   is_logged: boolean;
 }
 
-/** Duration aggregation for the period. */
-export interface DurationStats {
-  /** Total ms across all sessions with non-null ended_at. */
-  total_ms: number;
-  /** Mean ms per session (only counting sessions with ended_at). */
-  avg_ms: number;
-  /** Longest single session in ms. 0 when no sessions. */
-  longest_ms: number;
-  /** Number of distinct sessions counted. */
-  session_count: number;
-}
-
 /** Result of percentile bucketing — one bucket index per input value. */
 export type PercentileBucket = 0 | 1 | 2 | 3 | 4;
 

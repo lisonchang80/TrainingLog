@@ -16,7 +16,6 @@
 import type {
   CapacityBucket,
   DurationBucket,
-  DurationStats,
   PercentileBucket,
   PeriodBucketBoundary,
   PeriodScale,
@@ -46,56 +45,6 @@ export function mgFrequencyOverPeriod(
   const out = new Map<string, number>();
   for (const [mg, sessions] of acc) out.set(mg, sessions.size);
   return out;
-}
-
-/**
- * Per-MG sum of volume across logged sets. Sets with `volume == null`
- * (e.g. assisted with no bw_snapshot) are skipped.
- */
-export function mgCapacityOverPeriod(
-  records: readonly StatsSetRecord[]
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const r of records) {
-    if (!r.is_logged || r.mg_id == null || r.volume == null) continue;
-    out.set(r.mg_id, (out.get(r.mg_id) ?? 0) + r.volume);
-  }
-  return out;
-}
-
-/**
- * Duration stats over the period.
- *
- * Source priority per ADR-0009: iPhone session.ended_at − started_at is
- * primary. HKWorkout.duration fallback isn't wired in v1 (Watch lands later).
- *
- * Sessions with ended_at == null (still in-progress) are excluded.
- * Sessions with non-positive duration (clock skew / mis-recorded) are excluded.
- */
-export function durationStatsOverPeriod(
-  records: readonly StatsSetRecord[]
-): DurationStats {
-  // Build session_id → duration map (one duration per session).
-  const seen = new Map<string, number>();
-  for (const r of records) {
-    if (seen.has(r.session_id)) continue;
-    if (r.session_ended_at == null) continue;
-    const dur = r.session_ended_at - r.session_started_at;
-    if (dur <= 0) continue;
-    seen.set(r.session_id, dur);
-  }
-  const durations = Array.from(seen.values());
-  if (durations.length === 0) {
-    return { total_ms: 0, avg_ms: 0, longest_ms: 0, session_count: 0 };
-  }
-  const total = durations.reduce((s, d) => s + d, 0);
-  const longest = Math.max(...durations);
-  return {
-    total_ms: total,
-    avg_ms: Math.round(total / durations.length),
-    longest_ms: longest,
-    session_count: durations.length,
-  };
 }
 
 // ---- 6-period histogram helpers (slice 9 smoke #5/#6) -----------------------
