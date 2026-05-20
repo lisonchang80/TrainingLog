@@ -57,11 +57,6 @@ export function isClusterFollower(s: TemplateSet): boolean {
   return s.kind === 'dropset' && s.parent_set_id !== null;
 }
 
-/** Resolve the cluster head id for any cluster member (head returns itself). */
-function clusterHeadIdOf(s: TemplateSet): string {
-  return s.parent_set_id ?? s.id;
-}
-
 /** All members of the cluster anchored at `head_id` (head + followers). */
 function clusterMembers(sets: TemplateSet[], head_id: string): TemplateSet[] {
   return sets.filter((s) => s.id === head_id || s.parent_set_id === head_id);
@@ -204,34 +199,6 @@ export function deleteSet(
       ex.sets.filter((s) => s.id !== headId && s.parent_set_id !== headId)
     ),
   };
-}
-
-/**
- * Move the set with id `set_id` to `to_index`. Cluster members move as a
- * unit (head + followers stay contiguous); if `set_id` is a follower the
- * whole cluster moves anchored on its head.
- *
- * `to_index` is clamped to `[0, sets.length - cluster_size]`. Returns `ex`
- * unchanged if the id is unknown.
- */
-export function reorderSets(
-  ex: TemplateExercise,
-  set_id: string,
-  to_index: number
-): TemplateExercise {
-  const found = ex.sets.find((s) => s.id === set_id);
-  if (!found) return ex;
-  const headId = found.kind === 'dropset' ? clusterHeadIdOf(found) : found.id;
-  const moving = ex.sets.filter(
-    (s) => s.id === headId || s.parent_set_id === headId
-  );
-  const rest = ex.sets.filter(
-    (s) => s.id !== headId && s.parent_set_id !== headId
-  );
-  const maxStart = rest.length;
-  const start = Math.max(0, Math.min(to_index, maxStart));
-  const next = [...rest.slice(0, start), ...moving, ...rest.slice(start)];
-  return { ...ex, sets: normalizePositions(next) };
 }
 
 // ---------------------------------------------------------------------------

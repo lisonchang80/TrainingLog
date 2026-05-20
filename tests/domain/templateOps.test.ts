@@ -2,7 +2,6 @@ import {
   addSet,
   updateSet,
   deleteSet,
-  reorderSets,
   reorderTemplateExercises,
   reorderTemplateSetsByGroups,
   reorderTemplateClusterCycles,
@@ -211,49 +210,6 @@ describe('templateOps — deleteSet', () => {
     const out = deleteSet(ex, 'f1');
     expect(out.sets.map((s) => s.id)).toEqual(['h1', 'f2']);
     expect(out.sets.map((s) => s.position)).toEqual([0, 1]);
-  });
-});
-
-describe('templateOps — reorderSets', () => {
-  it('moves a single working set to the new index', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 's1', position: 0 }),
-        makeSet({ id: 's2', position: 1 }),
-        makeSet({ id: 's3', position: 2 }),
-      ],
-    });
-    const out = reorderSets(ex, 's1', 2);
-    expect(out.sets.map((s) => s.id)).toEqual(['s2', 's3', 's1']);
-    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
-  });
-
-  it('moves a cluster as one unit (head + followers stay contiguous)', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 'w1', position: 0, kind: 'working' }),
-        makeSet({ id: 'h1', position: 1, kind: 'dropset' }),
-        makeSet({ id: 'f1', position: 2, kind: 'dropset', parent_set_id: 'h1' }),
-        makeSet({ id: 'w2', position: 3, kind: 'working' }),
-      ],
-    });
-    const out = reorderSets(ex, 'h1', 0);
-    expect(out.sets.map((s) => s.id)).toEqual(['h1', 'f1', 'w1', 'w2']);
-  });
-
-  it('moves the whole cluster even when target is a follower', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 'w1', position: 0, kind: 'working' }),
-        makeSet({ id: 'h1', position: 1, kind: 'dropset' }),
-        makeSet({ id: 'f1', position: 2, kind: 'dropset', parent_set_id: 'h1' }),
-      ],
-    });
-    const out = reorderSets(ex, 'f1', 0);
-    expect(out.sets.map((s) => s.id)).toEqual(['h1', 'f1', 'w1']);
   });
 });
 
