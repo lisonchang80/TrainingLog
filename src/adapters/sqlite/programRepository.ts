@@ -542,6 +542,157 @@ export async function applyTagToRow(
 }
 
 /**
+ * Wave 17 (2026-05-21) — update a program's `start_date` in place. Used by
+ * the edit-mode 「起始日」 dropdown (Q1c) so user can shift the entire grid
+ * forward / backward in time without re-running the wizard.
+ *
+ * Cells are NOT moved — they stay at their (cycle_index, day_index)
+ * positions; only their displayed date labels shift (computed from the new
+ * start_date via `cellDate` in the renderer).
+ *
+ * `start_date` MUST be a valid `YYYY-MM-DD` string. SQLite doesn't enforce
+ * this at the column level (TEXT NOT NULL with default 'today'); caller is
+ * responsible for validating before calling.
+ *
+ * No-op when the program doesn't exist.
+ */
+export async function updateProgramStartDate(
+  db: Database,
+  args: {
+    program_id: string;
+    start_date: string;
+    now?: () => number;
+  },
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.runAsync(
+    `UPDATE program SET start_date = ?, updated_at = ? WHERE id = ?`,
+    args.start_date,
+    ts,
+    args.program_id,
+  );
+}
+
+/**
+ * Wave 17 (2026-05-21) — atomic swap of (template_id, sub_tag) between two
+ * cells at (cycle_a, day_a) and (cycle_b, day_b) within the same program.
+ * Used by edit-mode long-press-drag-swap (Q1 (a) — single-cell swap, dates
+ * stay fixed).
+ *
+ * The schema is sparse — missing rows render as 「休息」. So the four cases:
+ *   1. Both rows exist → UPDATE A.content ← B.content, UPDATE B.content ← A.content
+ *   2. Only A row exists → INSERT new row at B with A's content; DELETE A
+ *      (keep table sparse — empty cells don't get filler rows)
+ *   3. Only B row exists → mirror of case 2
+ *   4. Neither row exists → no-op (rest ↔ rest is still rest)
+ *
+ * No-op if (cycle_a, day_a) === (cycle_b, day_b) — swapping a cell with
+ * itself does nothing.
+ *
+ * sub_tag dictionary (`program_sub_tag`, v022) is auto-registered for any
+ * non-null sub_tag landing in either destination — though in practice both
+ * tags are already in the dictionary since they came from existing cells.
+ */
+export async function swapProgramCells(
+  db: Database,
+  args: {
+    program_id: string;
+    a: { cycle_index: number; day_index: number };
+    b: { cycle_index: number; day_index: number };
+    uuid: () => string;
+    now?: () => number;
+  },
+): Promise<void> {
+  if (
+    args.a.cycle_index === args.b.cycle_index &&
+    args.a.day_index === args.b.day_index
+  ) {
+    return;
+  }
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    const cellA = await db.getFirstAsync<{
+      id: string;
+      template_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT id, template_id, sub_tag FROM program_cell
+        WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+      args.program_id,
+      args.a.cycle_index,
+      args.a.day_index,
+    );
+    const cellB = await db.getFirstAsync<{
+      id: string;
+      template_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT id, template_id, sub_tag FROM program_cell
+        WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+      args.program_id,
+      args.b.cycle_index,
+      args.b.day_index,
+    );
+    if (cellA && cellB) {
+      // Both exist — straight swap of content.
+      await db.runAsync(
+        `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+        cellB.template_id,
+        cellB.sub_tag,
+        cellA.id,
+      );
+      await db.runAsync(
+        `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+        cellA.template_id,
+        cellA.sub_tag,
+        cellB.id,
+      );
+    } else if (cellA && !cellB) {
+      // A has content, B is rest — move A's content to B, DELETE A so
+      // the table stays sparse (empty cells aren't persisted).
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        args.uuid(),
+        args.program_id,
+        args.b.cycle_index,
+        args.b.day_index,
+        cellA.template_id,
+        cellA.sub_tag,
+      );
+      await db.runAsync(`DELETE FROM program_cell WHERE id = ?`, cellA.id);
+    } else if (!cellA && cellB) {
+      // Mirror of case 2.
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        args.uuid(),
+        args.program_id,
+        args.a.cycle_index,
+        args.a.day_index,
+        cellB.template_id,
+        cellB.sub_tag,
+      );
+      await db.runAsync(`DELETE FROM program_cell WHERE id = ?`, cellB.id);
+    }
+    // Both missing → no-op
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id,
+    );
+    // Re-register sub_tags in the dictionary (mostly no-op; defensive in
+    // case a stale label slipped through earlier wave migrations).
+    const subA = cellA?.sub_tag ?? null;
+    const subB = cellB?.sub_tag ?? null;
+    if (subA != null) await recordProgramSubTag(db, args.program_id, subA, args.now);
+    if (subB != null) await recordProgramSubTag(db, args.program_id, subB, args.now);
+  });
+}
+
+/**
  * Update a single cell's `template_id` / `sub_tag`. Used by post-wizard cell
  * edits (e.g. "I want Day 3 of cycle 2 to use template X with sub_tag '8RM'
  * instead"). No-op if the cell doesn't exist.

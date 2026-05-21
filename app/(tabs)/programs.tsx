@@ -11,7 +11,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 
 import { useDatabase } from '@/components/database-provider';
 import {
@@ -24,6 +28,8 @@ import {
   listPrograms,
   resizeProgram,
   setActiveProgram,
+  swapProgramCells,
+  updateProgramStartDate,
   upsertCell,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
@@ -79,7 +85,8 @@ const SUB_TAG_NEW_KEY = '__new__';
 type SimplePickerKind =
   | { kind: 'program' }
   | { kind: 'cycle_length' }
-  | { kind: 'cycle_count' };
+  | { kind: 'cycle_count' }
+  | { kind: 'start_date' };
 
 type TemplatePickerKind =
   | { kind: 'template_for_column'; day_index: number }
@@ -124,6 +131,27 @@ export default function ProgramsScreen() {
   const [templateSubTagsForProgram, setTemplateSubTagsForProgram] = useState<
     string[]
   >([]);
+
+  // ── Wave 17 (2026-05-21) — long-press-drag swap state ──────────────
+  // Edit mode only: long-press 300ms on any cell → enter drag mode →
+  // floating preview follows finger → release on target cell → swap
+  // (template_id, sub_tag) between source and target. Dates stay fixed.
+  // Hit-test uses absolute screen coords from `e.absoluteX/Y` against each
+  // cell's `measureInWindow` rect stored in `cellLayoutsRef`.
+  const [draggedSrc, setDraggedSrc] = useState<{
+    cycle: number;
+    day: number;
+  } | null>(null);
+  const [dragFinger, setDragFinger] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const [hoverTarget, setHoverTarget] = useState<{
+    cycle: number;
+    day: number;
+  } | null>(null);
+  const cellLayoutsRef = useRef<
+    Map<string, { x: number; y: number; w: number; h: number }>
+  >(new Map());
 
   const refresh = useCallback(async () => {
     // - `tsAll` (all variants) → templatesById map so cells with any
@@ -308,6 +336,82 @@ export default function ProgramsScreen() {
 
   const closePicker = () => setPicker(null);
 
+  // ── Wave 17 — drag-swap handlers ───────────────────────────────────
+  const registerCellLayout = useCallback(
+    (
+      c: number,
+      d: number,
+      rect: { x: number; y: number; w: number; h: number } | null,
+    ) => {
+      const key = `${c},${d}`;
+      if (rect == null) cellLayoutsRef.current.delete(key);
+      else cellLayoutsRef.current.set(key, rect);
+    },
+    [],
+  );
+
+  const hitTest = useCallback(
+    (absX: number, absY: number): { cycle: number; day: number } | null => {
+      for (const [key, layout] of cellLayoutsRef.current) {
+        if (
+          absX >= layout.x &&
+          absX < layout.x + layout.w &&
+          absY >= layout.y &&
+          absY < layout.y + layout.h
+        ) {
+          const [cStr, dStr] = key.split(',');
+          return { cycle: Number(cStr), day: Number(dStr) };
+        }
+      }
+      return null;
+    },
+    [],
+  );
+
+  const onDragStart = useCallback((c: number, d: number) => {
+    setDraggedSrc({ cycle: c, day: d });
+  }, []);
+
+  const onDragUpdate = useCallback(
+    (absX: number, absY: number) => {
+      setDragFinger({ x: absX, y: absY });
+      setHoverTarget(hitTest(absX, absY));
+    },
+    [hitTest],
+  );
+
+  const onDragEnd = useCallback(
+    async (absX: number, absY: number) => {
+      const src = draggedSrc;
+      const target = hitTest(absX, absY);
+      // Always clear drag state first — Pan onFinalize may fire after onEnd
+      // and re-enter this with stale src.
+      setDraggedSrc(null);
+      setDragFinger(null);
+      setHoverTarget(null);
+      if (!src || !shown) return;
+      if (!target) return;
+      if (target.cycle === src.cycle && target.day === src.day) return;
+      try {
+        await swapProgramCells(db, {
+          program_id: shown.program.id,
+          a: { cycle_index: src.cycle, day_index: src.day },
+          b: { cycle_index: target.cycle, day_index: target.day },
+          uuid: randomUUID,
+        });
+        await refresh();
+      } catch (e) {
+        Alert.alert(
+          '無法交換',
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    },
+    [db, shown, draggedSrc, hitTest, refresh],
+  );
+
+  const isDragging = draggedSrc != null;
+
   const onNew = () => router.push('/program-wizard/new');
 
   const onToggleEdit = () => {
@@ -340,6 +444,16 @@ export default function ProgramsScreen() {
       new_cycle_length: shown.program.cycle_length,
       new_cycle_count: new_count,
     });
+  };
+
+  const onPickStartDate = async (new_iso: string) => {
+    closePicker();
+    if (!shown || new_iso === shown.program.start_date) return;
+    await updateProgramStartDate(db, {
+      program_id: shown.program.id,
+      start_date: new_iso,
+    });
+    await refresh();
   };
 
   const applyResize = useCallback(
@@ -610,7 +724,9 @@ export default function ProgramsScreen() {
           </Pressable>
         </View>
       </View>
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        scrollEnabled={!isDragging}>
         <Text style={styles.programName}>
           {shown.program.name}
           {shown.program.is_active === 1 ? null : (
@@ -640,6 +756,11 @@ export default function ProgramsScreen() {
               value={String(shown.program.cycle_count)}
               onPress={() => setPicker({ kind: 'cycle_count' })}
             />
+            <DropdownButton
+              label="起始日"
+              value={formatCellDateLabel(shown.program.start_date)}
+              onPress={() => setPicker({ kind: 'start_date' })}
+            />
           </View>
         ) : null}
 
@@ -647,6 +768,13 @@ export default function ProgramsScreen() {
           program={shown}
           templatesById={templatesById}
           editing={editing}
+          isDragging={isDragging}
+          draggedSrc={draggedSrc}
+          hoverTarget={hoverTarget}
+          registerCellLayout={registerCellLayout}
+          onDragStart={onDragStart}
+          onDragUpdate={onDragUpdate}
+          onDragEnd={onDragEnd}
           onColumnApply={(d) =>
             setPicker({ kind: 'template_for_column', day_index: d })
           }
@@ -658,6 +786,52 @@ export default function ProgramsScreen() {
           onTapRestCell={onTapRestCell}
         />
       </ScrollView>
+
+      {/* Wave 17 — floating drag preview (above ScrollView so scrolling
+          doesn't clip it). Rendered only while dragging. The preview
+          mirrors the source cell's visible content (template name + 強度,
+          or 「休息」) at the finger position so the user sees what's
+          being moved. */}
+      {isDragging && draggedSrc != null && dragFinger != null ? (() => {
+        const srcCell = shown.cells.find(
+          (cc) =>
+            cc.cycle_index === draggedSrc.cycle &&
+            cc.day_index === draggedSrc.day,
+        );
+        const isRest = srcCell == null || srcCell.template_id == null;
+        const tpl =
+          srcCell?.template_id != null
+            ? templatesById[srcCell.template_id]
+            : null;
+        return (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.dragPreview,
+              {
+                left: dragFinger.x - 36,
+                top: dragFinger.y - 28,
+              },
+            ]}>
+            {isRest ? (
+              <Text style={styles.dragPreviewRest}>休息</Text>
+            ) : (
+              <>
+                <Text
+                  style={styles.dragPreviewTpl}
+                  numberOfLines={1}>
+                  {tpl?.name ?? '?'}
+                </Text>
+                <Text
+                  style={styles.dragPreviewTag}
+                  numberOfLines={1}>
+                  {srcCell?.sub_tag ?? '—'}
+                </Text>
+              </>
+            )}
+          </View>
+        );
+      })() : null}
 
       {/* ── Simple pickers (program / cycle_length / cycle_count) ─── */}
       <PickerModal
@@ -691,6 +865,12 @@ export default function ProgramsScreen() {
           active: n === shown.program.cycle_count,
         }))}
         onPick={(key) => onPickCycleCount(Number(key))}
+        onClose={closePicker}
+      />
+      <StartDateModal
+        visible={picker?.kind === 'start_date'}
+        initialIso={shown.program.start_date}
+        onPick={onPickStartDate}
         onClose={closePicker}
       />
 
@@ -836,6 +1016,13 @@ function ProgramGrid({
   program,
   templatesById,
   editing,
+  isDragging,
+  draggedSrc,
+  hoverTarget,
+  registerCellLayout,
+  onDragStart,
+  onDragUpdate,
+  onDragEnd,
   onColumnApply,
   onRowApply,
   onTapCellTemplate,
@@ -845,6 +1032,17 @@ function ProgramGrid({
   program: ProgramWithCells;
   templatesById: Record<string, TemplateSummary>;
   editing: boolean;
+  isDragging: boolean;
+  draggedSrc: { cycle: number; day: number } | null;
+  hoverTarget: { cycle: number; day: number } | null;
+  registerCellLayout: (
+    c: number,
+    d: number,
+    rect: { x: number; y: number; w: number; h: number } | null,
+  ) => void;
+  onDragStart: (c: number, d: number) => void;
+  onDragUpdate: (absX: number, absY: number) => void;
+  onDragEnd: (absX: number, absY: number) => void;
   onColumnApply: (day_index: number) => void;
   onRowApply: (cycle_index: number) => void;
   onTapCellTemplate: (cycle_index: number, day_index: number) => void;
@@ -910,18 +1108,38 @@ function ProgramGrid({
               cell?.template_id != null
                 ? templatesById[cell.template_id]
                 : null;
+            const isDraggedHere =
+              draggedSrc?.cycle === c && draggedSrc?.day === d;
+            const isHoverHere =
+              hoverTarget?.cycle === c &&
+              hoverTarget?.day === d &&
+              !isDraggedHere;
+            // Inner Pressables are disabled while ANY cell is dragging so a
+            // long-press → release-without-move doesn't double-fire onPress
+            // (Pressable's touch-up handler is independent of the gesture).
+            const tapsEnabled = editing && !isDragging;
             return (
-              <View key={d} style={styles.cell}>
+              <CellWrapper
+                key={d}
+                c={c}
+                d={d}
+                enabled={editing}
+                isDragged={isDraggedHere}
+                isHover={isHoverHere}
+                registerLayout={registerCellLayout}
+                onDragStart={onDragStart}
+                onDragUpdate={onDragUpdate}
+                onDragEnd={onDragEnd}>
                 <View style={styles.cellDate}>
                   <Text style={styles.cellDateText}>{dateLabel}</Text>
                 </View>
                 {isRest ? (
                   <Pressable
-                    onPress={editing ? () => onTapRestCell(c, d) : undefined}
-                    disabled={!editing}
+                    onPress={tapsEnabled ? () => onTapRestCell(c, d) : undefined}
+                    disabled={!tapsEnabled}
                     style={({ pressed }) => [
                       styles.cellRest,
-                      editing && pressed && styles.cellPressed,
+                      tapsEnabled && pressed && styles.cellPressed,
                     ]}>
                     <Text style={styles.cellRestText}>休息</Text>
                   </Pressable>
@@ -929,12 +1147,12 @@ function ProgramGrid({
                   <>
                     <Pressable
                       onPress={
-                        editing ? () => onTapCellTemplate(c, d) : undefined
+                        tapsEnabled ? () => onTapCellTemplate(c, d) : undefined
                       }
-                      disabled={!editing}
+                      disabled={!tapsEnabled}
                       style={({ pressed }) => [
                         styles.cellTemplate,
-                        editing && pressed && styles.cellPressed,
+                        tapsEnabled && pressed && styles.cellPressed,
                       ]}>
                       <Text style={styles.cellTemplateText} numberOfLines={1}>
                         {tpl?.name ?? '?'}
@@ -942,15 +1160,15 @@ function ProgramGrid({
                     </Pressable>
                     <Pressable
                       onPress={
-                        editing && cell?.template_id != null
+                        tapsEnabled && cell?.template_id != null
                           ? () =>
                               onTapCellSubTag(c, d, cell.template_id as string)
                           : undefined
                       }
-                      disabled={!editing}
+                      disabled={!tapsEnabled || cell?.template_id == null}
                       style={({ pressed }) => [
                         styles.cellTag,
-                        editing && pressed && styles.cellPressed,
+                        tapsEnabled && pressed && styles.cellPressed,
                       ]}>
                       <Text style={styles.cellTagText} numberOfLines={1}>
                         {cell?.sub_tag ?? '—'}
@@ -958,12 +1176,125 @@ function ProgramGrid({
                     </Pressable>
                   </>
                 )}
-              </View>
+              </CellWrapper>
             );
           })}
         </View>
       ))}
     </View>
+  );
+}
+
+/**
+ * Wave 17 (2026-05-21) — single cell wrapper used by ProgramGrid. Owns the
+ * long-press-drag-swap gesture for one grid cell.
+ *
+ * Responsibilities:
+ *   1. Measure self via `measureInWindow` (absolute screen coords) on every
+ *      layout, register into the parent's `cellLayoutsRef` so hit-test can
+ *      resolve any finger position back to (cycle, day).
+ *   2. Wrap children in `GestureDetector` with a Pan gesture that activates
+ *      after 300ms long-press. `runOnJS(true)` means callbacks run on the
+ *      JS thread → direct setState in parent handlers.
+ *   3. Apply visual feedback styles (dragged source = opacity 0.3, hover
+ *      target = highlighted border).
+ *
+ * Cleanup: on unmount, deregister the layout entry so stale rects don't
+ * survive a program switch / grid resize.
+ *
+ * `enabled=false` skips the GestureDetector entirely (read mode + the
+ * 「無」 placeholder render).
+ */
+function CellWrapper({
+  c,
+  d,
+  enabled,
+  isDragged,
+  isHover,
+  registerLayout,
+  onDragStart,
+  onDragUpdate,
+  onDragEnd,
+  children,
+}: {
+  c: number;
+  d: number;
+  enabled: boolean;
+  isDragged: boolean;
+  isHover: boolean;
+  registerLayout: (
+    c: number,
+    d: number,
+    rect: { x: number; y: number; w: number; h: number } | null,
+  ) => void;
+  onDragStart: (c: number, d: number) => void;
+  onDragUpdate: (absX: number, absY: number) => void;
+  onDragEnd: (absX: number, absY: number) => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<View>(null);
+  const measure = useCallback(() => {
+    if (!ref.current) return;
+    ref.current.measureInWindow((x, y, w, h) => {
+      // Guard against NaN that can sneak in on first layout pass.
+      if (
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        Number.isFinite(w) &&
+        Number.isFinite(h)
+      ) {
+        registerLayout(c, d, { x, y, w, h });
+      }
+    });
+  }, [c, d, registerLayout]);
+
+  useEffect(() => {
+    return () => {
+      registerLayout(c, d, null);
+    };
+  }, [c, d, registerLayout]);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(300)
+        .runOnJS(true)
+        .onStart(() => {
+          onDragStart(c, d);
+        })
+        .onUpdate((e) => {
+          onDragUpdate(e.absoluteX, e.absoluteY);
+        })
+        .onEnd((e) => {
+          onDragEnd(e.absoluteX, e.absoluteY);
+        })
+        .onFinalize((e, success) => {
+          // If onEnd didn't fire (gesture cancelled / failed) still reset.
+          if (!success) onDragEnd(e.absoluteX, e.absoluteY);
+        }),
+    [c, d, onDragStart, onDragUpdate, onDragEnd],
+  );
+
+  const cellStyle = [
+    styles.cell,
+    isDragged && styles.cellDragged,
+    isHover && styles.cellHover,
+  ];
+
+  if (!enabled) {
+    return (
+      <View ref={ref} onLayout={measure} style={cellStyle}>
+        {children}
+      </View>
+    );
+  }
+
+  return (
+    <GestureDetector gesture={pan}>
+      <View ref={ref} onLayout={measure} style={cellStyle}>
+        {children}
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -1260,6 +1591,108 @@ function SubTagPicker({
   );
 }
 
+/**
+ * Wave 17 (2026-05-21) — 起始日 picker modal (Q1c). iOS spinner-style
+ * DateTimePicker inline; confirm / cancel pattern lets the user scroll
+ * through dates without each tick firing a DB write.
+ *
+ * `start_date` is stored as `YYYY-MM-DD` ISO with no timezone. We parse it
+ * into a local-time Date so the spinner shows the same calendar date the
+ * user typed, and format back using local getters so timezone doesn't
+ * silently shift the chosen day across midnight.
+ */
+function parseIsoToLocalDate(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (
+    !Number.isFinite(y) ||
+    !Number.isFinite(m) ||
+    !Number.isFinite(d)
+  ) {
+    return new Date();
+  }
+  return new Date(y, m - 1, d);
+}
+
+function formatLocalDateToIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+function StartDateModal({
+  visible,
+  initialIso,
+  onPick,
+  onClose,
+}: {
+  visible: boolean;
+  initialIso: string;
+  onPick: (iso: string) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Date>(() => parseIsoToLocalDate(initialIso));
+
+  // Reset draft every time the sheet opens so cancel-then-reopen shows the
+  // current prop value instead of a stale spin.
+  useEffect(() => {
+    if (visible) {
+      setDraft(parseIsoToLocalDate(initialIso));
+    }
+  }, [visible, initialIso]);
+
+  const onChange = (_e: DateTimePickerEvent, picked?: Date) => {
+    if (picked) setDraft(picked);
+  };
+
+  const onConfirm = () => {
+    onPick(formatLocalDateToIso(draft));
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable
+          style={styles.modalCard}
+          onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.modalTitle}>選擇起始日</Text>
+          <View style={styles.startDatePickerWrap}>
+            <DateTimePicker
+              value={draft}
+              mode="date"
+              display="spinner"
+              themeVariant="light"
+              onChange={onChange}
+            />
+          </View>
+          <View style={styles.startDateButtons}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.startDateBtnCancel,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={onClose}>
+              <Text style={styles.startDateBtnCancelText}>取消</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.startDateBtnConfirm,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={onConfirm}>
+              <Text style={styles.startDateBtnConfirmText}>確認</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // Unused legacy keys — keep exported as constants for potential future
 // migration logic if we add a dedicated 「none」 sentinel row.
 void SUB_TAG_NONE_KEY;
@@ -1466,5 +1899,79 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     opacity: 0.5,
   },
+  // ── Wave 17 — drag-swap visual feedback ────────────────────────────
+  cellDragged: {
+    opacity: 0.3,
+  },
+  cellHover: {
+    borderWidth: 2,
+    borderColor: '#0a7ea4',
+    backgroundColor: 'rgba(10,126,164,0.15)',
+  },
+  dragPreview: {
+    position: 'absolute',
+    width: 72,
+    height: 56,
+    borderRadius: 6,
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#0a7ea4',
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+    // Slight scale by margins (avoid transform: scale to keep coords simple).
+  },
+  dragPreviewRest: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    opacity: 0.5,
+  },
+  dragPreviewTpl: {
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  dragPreviewTag: {
+    fontSize: 9,
+    opacity: 0.7,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  // ── Wave 17 — start date picker modal ──────────────────────────────
+  startDatePickerWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  startDateButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.1)',
+  },
+  startDateBtnCancel: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(127,127,127,0.10)',
+    alignItems: 'center',
+  },
+  startDateBtnCancelText: { fontSize: 14, fontWeight: '600', opacity: 0.7 },
+  startDateBtnConfirm: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 6,
+    backgroundColor: '#0a7ea4',
+    alignItems: 'center',
+  },
+  startDateBtnConfirmText: { fontSize: 14, fontWeight: '700', color: 'white' },
   btnPressed: { opacity: 0.85 },
 });
