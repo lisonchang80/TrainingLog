@@ -112,6 +112,11 @@ import {
   switcherArrowDisabled,
   type ClusterSide,
 } from '@/src/domain/exercise/clusterSwitcher';
+import {
+  canReplayRow,
+  classifyRowClusterShape,
+  type ReplayTarget,
+} from '@/src/domain/exercise/replayGate';
 
 /**
  * Exercise History — cross-Template, cross-Program aggregate (ADR-0006).
@@ -168,6 +173,20 @@ export default function ExerciseHistoryScreen() {
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
   );
+  // Wave 14 (2026-05-21) — when the caller (cluster card / solo card) passed
+  // an explicit `clusterMode` in the URL, treat that as the caller's intent
+  // and DO NOT let the persisted mailbox value overwrite it on hydration.
+  // Library / chart-page round-trip / template-editor history (which omits
+  // the param entirely) still falls back to mailbox.
+  //
+  // Rationale: user requirement —「以超級組打開動作歷史預設只含超級組 /
+  // 以一般組打開預設不含超級組」. Pre-wave-14, opening from a solo card
+  // could land on cluster_only because the previous superset visit had
+  // persisted that mode into the mailbox.
+  const hasExplicitClusterMode = useMemo(() => {
+    const v = Array.isArray(clusterModeParam) ? clusterModeParam[0] : clusterModeParam;
+    return v === 'exclude_cluster' || v === 'all' || v === 'cluster_only';
+  }, [clusterModeParam]);
 
   // Partner-name lookup lives at the shell level so both PageContents
   // can render the body-title switcher consistently (each side shows
@@ -227,6 +246,7 @@ export default function ExerciseHistoryScreen() {
           nameA={selfName}
           nameB={partnerName}
           initialClusterMode={initialClusterMode}
+          hasExplicitClusterMode={hasExplicitClusterMode}
           db={db}
           currentSeId={currentSeIdParam ?? null}
           currentSeIdA={currentSeIdAParam ?? null}
@@ -240,6 +260,7 @@ export default function ExerciseHistoryScreen() {
           partnerName={partnerName}
           selfName={selfName}
           initialClusterMode={initialClusterMode}
+          hasExplicitClusterMode={hasExplicitClusterMode}
           showSwitcher={false}
           currentSide="A"
           onRequestSwap={undefined}
@@ -263,6 +284,7 @@ function PagingShell({
   nameA,
   nameB,
   initialClusterMode,
+  hasExplicitClusterMode,
   db,
   currentSeId,
   currentSeIdA,
@@ -274,6 +296,7 @@ function PagingShell({
   nameA: string | null;
   nameB: string | null;
   initialClusterMode: ClusterFilterMode;
+  hasExplicitClusterMode: boolean;
   db: Database;
   // Slice 10c overnight #21 — passed through verbatim to both PageContents
   // so each side's SessionRow can mount the「再次訓練」button. Both pages
@@ -355,6 +378,7 @@ function PagingShell({
           partnerName={nameB}
           selfName={nameA}
           initialClusterMode={initialClusterMode}
+          hasExplicitClusterMode={hasExplicitClusterMode}
           showSwitcher={true}
           currentSide={currentSide}
           onRequestSwap={onRequestSwap}
@@ -371,6 +395,7 @@ function PagingShell({
           partnerName={nameA}
           selfName={nameB}
           initialClusterMode={initialClusterMode}
+          hasExplicitClusterMode={hasExplicitClusterMode}
           showSwitcher={true}
           currentSide={currentSide}
           onRequestSwap={onRequestSwap}
@@ -395,6 +420,7 @@ function HistoryPageContent({
   partnerName,
   selfName: _selfName,
   initialClusterMode,
+  hasExplicitClusterMode,
   showSwitcher,
   currentSide,
   onRequestSwap,
@@ -408,6 +434,14 @@ function HistoryPageContent({
   partnerName: string | null;
   selfName: string | null;
   initialClusterMode: ClusterFilterMode;
+  /**
+   * Wave 14 (2026-05-21): true when the caller's URL contained an explicit
+   * `clusterMode=...` param (cluster card / solo card / superset detail
+   * page / template editor — all pass a value). When true, the mailbox
+   * hydrate logic skips overwriting `clusterMode` so the caller's intent
+   * wins. False for library / 解剖頁 entry which omits the param.
+   */
+  hasExplicitClusterMode: boolean;
   showSwitcher: boolean;
   currentSide: ClusterSide;
   onRequestSwap: (() => void) | undefined;
@@ -456,6 +490,11 @@ function HistoryPageContent({
   // singleton across both sides — first PageContent to mount on focus
   // wins, the other will overwrite the same data. Acceptable because
   // mailbox is "user's last intent" not "this side's filter".
+  //
+  // Wave 14 (2026-05-21) — `hasExplicitClusterMode` skips mailbox
+  // overwrite of cluster mode so the caller's URL value wins. Other
+  // mailbox fields (buckets / programId / subTags) still hydrate because
+  // they aren't caller-driven.
   useFocusEffect(
     useCallback(() => {
       refresh();
@@ -464,12 +503,14 @@ function HistoryPageContent({
         setBucketFilters(new Set(f.buckets));
         setProgramId(f.programId);
         setSubTagFilters(new Set(f.subTags));
-        setClusterMode(f.clusterMode);
+        if (!hasExplicitClusterMode) {
+          setClusterMode(f.clusterMode);
+        }
         if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
           setAdvancedOpen(true);
         }
       }
-    }, [refresh])
+    }, [refresh, hasExplicitClusterMode])
   );
 
   const persistFilter = useCallback(
@@ -607,8 +648,26 @@ function HistoryPageContent({
   // The two flags are mutually exclusive in practice (cluster callsites
   // never pass currentSeId, solo callsites never pass the A/B pair) but
   // we treat cluster as taking precedence if both happen to be passed.
+  //
+  // Wave 14 (2026-05-21) — gating is now per-row (not page-level). The
+  // `replayTarget` object below describes the target shape; each
+  // SessionRow classifies its own cluster shape and combines them via
+  // `canReplayRow` (src/domain/exercise/replayGate.ts). Pre-wave-14 a
+  // global `canReplay` lit up every row uniformly, allowing the user to
+  // tap ↻ on a solo source row even though the target was a cluster
+  // (and vice versa) — that path errored mid-replay ("找不到該超級組 B 側
+  // 來源卡") instead of being blocked at the UI.
   const isClusterReplay = currentSeIdA != null && currentSeIdB != null;
-  const canReplay = isClusterReplay || currentSeId != null;
+  const replayTarget: ReplayTarget = isClusterReplay
+    ? {
+        kind: 'cluster',
+        currentSeIdA: currentSeIdA!,
+        currentSeIdB: currentSeIdB!,
+        partnerExerciseId: partnerExerciseId ?? '',
+      }
+    : currentSeId != null
+      ? { kind: 'solo', currentSeId }
+      : { kind: 'none' };
 
   // Slice 10c overnight #21 Commit 4 —「再次訓練」live handler.
   //
@@ -882,18 +941,25 @@ function HistoryPageContent({
               {filteredSessions.length === 0 ? (
                 <Text style={styles.empty}>篩選條件下沒有紀錄。</Text>
               ) : (
-                filteredSessions.map((sess) => (
-                  <SessionRow
-                    key={sess.session_id}
-                    session={sess}
-                    expanded={expanded.has(sess.session_id)}
-                    onToggle={() => toggleExpand(sess.session_id)}
-                    loadType={header.load_type}
-                    unit={unit}
-                    canReplay={canReplay}
-                    onReplay={() => onReplay(sess)}
-                  />
-                ))
+                filteredSessions.map((sess) => {
+                  const rowShape = classifyRowClusterShape(sess.sets);
+                  const rowIsCluster =
+                    rowShape.kind === 'cluster' || rowShape.kind === 'cluster_mixed';
+                  const rowCanReplay = canReplayRow(rowShape, replayTarget);
+                  return (
+                    <SessionRow
+                      key={sess.session_id}
+                      session={sess}
+                      expanded={expanded.has(sess.session_id)}
+                      onToggle={() => toggleExpand(sess.session_id)}
+                      loadType={header.load_type}
+                      unit={unit}
+                      canReplay={rowCanReplay}
+                      rowIsCluster={rowIsCluster}
+                      onReplay={() => onReplay(sess)}
+                    />
+                  );
+                })
               )}
             </View>
           </View>
@@ -1243,6 +1309,7 @@ function SessionRow({
   loadType,
   unit,
   canReplay,
+  rowIsCluster,
   onReplay,
 }: {
   session: ExerciseHistorySession;
@@ -1250,12 +1317,20 @@ function SessionRow({
   onToggle: () => void;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
   unit: UnitPreference;
-  // Slice 10c overnight #21 —「再次訓練」button affordance. canReplay is
-  // computed at the parent level (HistoryPageContent) from the URL params
-  // — true only when a current-card context is wired (solo currentSeId OR
-  // both cluster currentSeIdA + currentSeIdB). Library / RS detail browse
-  // paths leave canReplay=false and the button is not rendered.
+  // Slice 10c overnight #21 —「再次訓練」button affordance.
+  //
+  // Wave 14 (2026-05-21): now per-row, not page-level. True iff the row's
+  // cluster shape is compatible with the page's replay target (see
+  // `canReplayRow` in `src/domain/exercise/replayGate.ts`). Library / RS
+  // detail browse paths still leave this false uniformly (target.kind='none').
   canReplay: boolean;
+  /**
+   * True iff this session row contains at least one cluster set (after
+   * `clusterMode` filtering). Drives the `[超]` prefix on the date line
+   * — user requirement, wave 14: cluster rows should be visually
+   * distinguishable from solo rows on the same list.
+   */
+  rowIsCluster: boolean;
   onReplay: () => void;
 }) {
   const topSet = session.sets
@@ -1302,7 +1377,15 @@ function SessionRow({
   return (
     <Pressable onPress={onToggle} style={styles.sessionCard}>
       <View style={styles.sessionRowHeader}>
-        <Text style={styles.sessionDate}>{dateLabel}</Text>
+        <View style={styles.sessionDateRow}>
+          {/* Wave 14 (2026-05-21) — purple「超」chip marks cluster session
+              rows. Mirror styling from session/cluster-card.tsx's
+              `supersetTag` palette (#5856D6 bg, white text, 4px corners,
+              fontSize 11) so cluster identity reads consistently across
+              session card / template editor / history list. */}
+          {rowIsCluster ? <Text style={styles.supersetTag}>超</Text> : null}
+          <Text style={styles.sessionDate}>{dateLabel}</Text>
+        </View>
         <Text style={styles.sessionMeta}>
           {session.sets.length} 組 · 容量 {formatVolume(totalVolume, unit)}
         </Text>
@@ -1540,9 +1623,28 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(127,127,127,0.08)',
     gap: 4,
   },
-  sessionRowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
+  sessionRowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sessionDateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sessionDate: { fontSize: 14, fontWeight: '600' },
   sessionMeta: { fontSize: 12, opacity: 0.7 },
+  // Wave 14 (2026-05-21) — purple「超」chip on cluster session rows.
+  // Palette mirrors components/session/cluster-card.tsx::supersetTag
+  // (#5856D6 iOS system indigo/purple, white text, 4px corners). Keep
+  // these in sync if either palette changes.
+  supersetTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    backgroundColor: '#5856D6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
   topSetLine: { fontSize: 13 },
   expandedBox: {
     marginTop: 6,

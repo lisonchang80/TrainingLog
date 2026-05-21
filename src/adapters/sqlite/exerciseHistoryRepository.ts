@@ -55,6 +55,21 @@ export interface ExerciseHistorySet {
    * `domain/exercise/clusterFilter.ts`.
    */
   is_in_cluster: boolean;
+  /**
+   * The cluster partner's `exercise_id` if this set's `session_exercise`
+   * belongs to a cluster, NULL otherwise (solo row).
+   *
+   * - A side (this `session_exercise` is the parent): partner = its child's `exercise_id`
+   * - B side (this `session_exercise.parent_id != NULL`): partner = parent's `exercise_id`
+   * - solo: NULL
+   *
+   * Surfaced 2026-05-21 wave 14 to gate the「↻ 再次訓練」button on
+   * source/target shape compatibility (solo→solo / cluster→same-partner cluster).
+   * Source row with a different partner means the cluster replay helper
+   * wouldn't find a B-side source row anyway — pre-emptive UI gate avoids
+   * the「找不到該超級組 B 側來源卡」alert.
+   */
+  cluster_partner_exercise_id: string | null;
 }
 
 /**
@@ -117,7 +132,18 @@ export async function listExerciseHistorySets(
                  WHERE se2.parent_id = se.id
               ) THEN 1
               ELSE 0
-            END AS is_in_cluster
+            END AS is_in_cluster,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN (
+                SELECT seP.exercise_id FROM session_exercise seP
+                 WHERE seP.id = se.parent_id
+              )
+              ELSE (
+                SELECT seC.exercise_id FROM session_exercise seC
+                 WHERE seC.parent_id = se.id
+                 LIMIT 1
+              )
+            END AS cluster_partner_exercise_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
@@ -176,7 +202,18 @@ export async function listExerciseHistoryBySession(
                  WHERE se2.parent_id = se.id
               ) THEN 1
               ELSE 0
-            END AS is_in_cluster
+            END AS is_in_cluster,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN (
+                SELECT seP.exercise_id FROM session_exercise seP
+                 WHERE seP.id = se.parent_id
+              )
+              ELSE (
+                SELECT seC.exercise_id FROM session_exercise seC
+                 WHERE seC.parent_id = se.id
+                 LIMIT 1
+              )
+            END AS cluster_partner_exercise_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id

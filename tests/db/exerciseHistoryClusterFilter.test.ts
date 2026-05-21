@@ -551,6 +551,29 @@ describe('queryExerciseHistory / listExerciseHistoryBySession — session_exerci
     expect(bySetId.get('set-rs-bench')!.is_in_cluster).toBe(true);
   });
 
+  it('listExerciseHistoryBySession surfaces cluster_partner_exercise_id (wave 14 replay gate)', async () => {
+    // bench is A side, squat is B side in the RS.
+    await seedSameSessionSoloAndRsBench();
+
+    // Query from A side — partner should be the B-side exercise (squat).
+    const benchSessions = await listExerciseHistoryBySession(db, ex.bench);
+    const benchSets = benchSessions[0].sets;
+    const bySetId = new Map(benchSets.map((s) => [s.set_id, s]));
+    expect(bySetId.get('set-solo-1')!.cluster_partner_exercise_id).toBeNull();
+    expect(bySetId.get('set-solo-2')!.cluster_partner_exercise_id).toBeNull();
+    expect(bySetId.get('set-solo-3')!.cluster_partner_exercise_id).toBeNull();
+    expect(bySetId.get('set-rs-bench')!.cluster_partner_exercise_id).toBe(ex.squat);
+
+    // Query from B side — partner should be the A-side exercise (bench).
+    const squatSessions = await listExerciseHistoryBySession(db, ex.squat);
+    const squatSets = squatSessions[0]?.sets ?? [];
+    // We seeded set-rs-squat with weight=120 reps=10 ordering=4 in
+    // seedSameSessionSoloAndRsBench; assert that row carries bench as partner.
+    const squatClusterRow = squatSets.find((s) => s.set_id === 'set-rs-squat');
+    expect(squatClusterRow).toBeDefined();
+    expect(squatClusterRow!.cluster_partner_exercise_id).toBe(ex.bench);
+  });
+
   it('legacy NULL session_exercise_id rows still resolve via (session_id, exercise_id) fallback', async () => {
     // Pre-v019 — only one card per (session, exercise) so fallback is safe.
     await createSession(db, { id: 'sess-legacy', started_at: NOW_MS });
