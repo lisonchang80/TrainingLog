@@ -208,6 +208,253 @@ export async function deleteProgram(db: Database, id: string): Promise<void> {
 }
 
 /**
+ * Wave 15 (2026-05-21) — count of cells with `template_id != null` that
+ * would be lost if the program were resized to `(new_cycle_length,
+ * new_cycle_count)`. Cells with NULL template_id are 「休息」 = no
+ * meaningful content, so they don't count toward the "this will erase
+ * content" warning shown by the edit-mode resize Alert.
+ */
+export async function countFilledCellsOutsideBounds(
+  db: Database,
+  args: {
+    program_id: string;
+    new_cycle_length: number;
+    new_cycle_count: number;
+  }
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM program_cell
+      WHERE program_id = ?
+        AND (cycle_index >= ? OR day_index >= ?)
+        AND template_id IS NOT NULL`,
+    args.program_id,
+    args.new_cycle_count,
+    args.new_cycle_length
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Wave 15 (2026-05-21) — atomic resize of a program's grid dimensions.
+ * Updates `cycle_length` / `cycle_count` on the program row and DELETEs
+ * any `program_cell` rows that fall outside the new bounds.
+ *
+ * New positions (within new bounds, no existing row) are NOT inserted —
+ * the renderer treats missing rows as 「休息」 and any subsequent edit
+ * (column-apply / row-apply / single-cell edit) uses `upsertCell` to
+ * lazily INSERT when content first lands. Keeping the table sparse keeps
+ * `getProgram` quick on large programs.
+ *
+ * `cycle_length` is CHECK 3-14 per ADR-0004 (v005 schema); `cycle_count`
+ * is CHECK >= 1. Caller is responsible for validating the user input
+ * before calling — the SQLite CHECK will throw but the message won't be
+ * friendly to surface.
+ */
+export async function resizeProgram(
+  db: Database,
+  args: {
+    program_id: string;
+    new_cycle_length: number;
+    new_cycle_count: number;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `DELETE FROM program_cell
+        WHERE program_id = ?
+          AND (cycle_index >= ? OR day_index >= ?)`,
+      args.program_id,
+      args.new_cycle_count,
+      args.new_cycle_length
+    );
+    await db.runAsync(
+      `UPDATE program
+         SET cycle_length = ?,
+             cycle_count = ?,
+             updated_at = ?
+       WHERE id = ?`,
+      args.new_cycle_length,
+      args.new_cycle_count,
+      ts,
+      args.program_id
+    );
+  });
+}
+
+/**
+ * Wave 15 (2026-05-21) — upsert by (program_id, cycle_index, day_index).
+ * Used by edit-mode column/row apply + single-cell edits (Phase 3-4).
+ *
+ * Behaviour:
+ *   - If a `program_cell` exists at this position → UPDATE template_id +
+ *     sub_tag in place.
+ *   - Else → INSERT a new row with a caller-provided `uuid` (kept out of
+ *     the helper to preserve the same pattern as createProgram).
+ *
+ * Returns the cell's id (existing or newly-inserted). `now` defaults to
+ * Date.now and ticks program.updated_at so listPrograms ordering stays
+ * correct.
+ */
+export async function upsertCell(
+  db: Database,
+  args: {
+    program_id: string;
+    cycle_index: number;
+    day_index: number;
+    template_id: string | null;
+    sub_tag: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM program_cell
+      WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+    args.program_id,
+    args.cycle_index,
+    args.day_index
+  );
+  let cell_id: string;
+  if (existing) {
+    cell_id = existing.id;
+    await db.runAsync(
+      `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+      args.template_id,
+      args.sub_tag,
+      cell_id
+    );
+  } else {
+    cell_id = args.uuid();
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      cell_id,
+      args.program_id,
+      args.cycle_index,
+      args.day_index,
+      args.template_id,
+      args.sub_tag
+    );
+  }
+  await db.runAsync(
+    `UPDATE program SET updated_at = ? WHERE id = ?`,
+    ts,
+    args.program_id
+  );
+  return cell_id;
+}
+
+/**
+ * Wave 15 (2026-05-21) — bulk apply a template (or 休息) to an entire
+ * column (day_index axis). For every cycle_index in [0, cycle_count) the
+ * cell at (cycle_index, day_index) is upserted.
+ *
+ * Per user spec Q3:
+ *   - `template_id = X`: set template, preserve each row's existing
+ *     sub_tag. Cells that don't exist yet get sub_tag=NULL.
+ *   - `template_id = null` (休息): clear both template_id AND sub_tag
+ *     since rest occupies both visual slots.
+ */
+export async function applyTemplateToColumn(
+  db: Database,
+  args: {
+    program_id: string;
+    day_index: number;
+    template_id: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  const prog = await db.getFirstAsync<{ cycle_count: number }>(
+    `SELECT cycle_count FROM program WHERE id = ?`,
+    args.program_id
+  );
+  if (!prog) return;
+  const isRest = args.template_id == null;
+  await db.withTransactionAsync(async () => {
+    for (let c = 0; c < prog.cycle_count; c++) {
+      const existing = await db.getFirstAsync<{
+        id: string;
+        sub_tag: string | null;
+      }>(
+        `SELECT id, sub_tag FROM program_cell
+          WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+        args.program_id,
+        c,
+        args.day_index
+      );
+      const new_sub_tag = isRest ? null : (existing?.sub_tag ?? null);
+      if (existing) {
+        await db.runAsync(
+          `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+          args.template_id,
+          new_sub_tag,
+          existing.id
+        );
+      } else if (!isRest) {
+        // Don't INSERT a sparse rest row when applying rest to an empty
+        // position — the renderer treats missing rows as rest already.
+        await db.runAsync(
+          `INSERT INTO program_cell
+             (id, program_id, cycle_index, day_index, template_id, sub_tag)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          args.uuid(),
+          args.program_id,
+          c,
+          args.day_index,
+          args.template_id,
+          new_sub_tag
+        );
+      }
+    }
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id
+    );
+  });
+}
+
+/**
+ * Wave 15 (2026-05-21) — bulk apply a sub_tag to an entire row
+ * (cycle_index axis). Only cells with `template_id != NULL` are touched —
+ * rest cells skip per user spec Q3「避開休息」.
+ */
+export async function applyTagToRow(
+  db: Database,
+  args: {
+    program_id: string;
+    cycle_index: number;
+    sub_tag: string | null;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE program_cell
+          SET sub_tag = ?
+        WHERE program_id = ?
+          AND cycle_index = ?
+          AND template_id IS NOT NULL`,
+      args.sub_tag,
+      args.program_id,
+      args.cycle_index
+    );
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id
+    );
+  });
+}
+
+/**
  * Update a single cell's `template_id` / `sub_tag`. Used by post-wizard cell
  * edits (e.g. "I want Day 3 of cycle 2 to use template X with sub_tag '8RM'
  * instead"). No-op if the cell doesn't exist.
