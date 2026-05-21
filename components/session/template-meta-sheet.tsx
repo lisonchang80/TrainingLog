@@ -53,12 +53,27 @@ import { useDatabase } from '@/components/database-provider';
 import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
 import {
   createProgram,
+  listPrograms,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 
 export interface TemplateMetaSheetProps {
   visible: boolean;
+  /**
+   * Top-bar title. Defaults to '另存模板' (session detail caller). Template
+   * editor caller passes '儲存模板' instead (round 15 polish, programs tab
+   * 「+ 建立新模板」flow — same sheet used to confirm program + sub_tag at
+   * save time inside the template editor).
+   */
+  title?: string;
+  /**
+   * Hide the 名稱 input row entirely. Used by template editor caller where
+   * the name already lives in the editor body — the sheet only needs to
+   * confirm program + sub_tag. The defaultName is still passed through to
+   * onConfirm.name unchanged.
+   */
+  omitName?: boolean;
   /** Default fallback used when user leaves name blank. */
   defaultName: string;
   /**
@@ -72,6 +87,20 @@ export interface TemplateMetaSheetProps {
   defaultProgramId?: string | null;
   /** Pre-selected sub_tag when the sheet opens. See `defaultProgramId`. */
   defaultSubTag?: string | null;
+  /**
+   * Round 15 polish — when set, the inline 「+ 新增計畫」 helper seeds the new
+   * Program with these dimensions / start_date instead of the minimal
+   * defaults (cycle_length=3 / cycle_count=1 / start_date=today). Used by
+   * the template-editor caller in import mode so a freshly-created program
+   * inherits the originating cell's program shape, avoiding the "原循環天數
+   * 跑掉了" UX surprise. `undefined` = keep minimal defaults (session-detail
+   * caller's existing behavior).
+   */
+  defaultProgramDimensions?: {
+    cycle_length: number;
+    cycle_count: number;
+    start_date: string;
+  };
   /** Existing programs from listPrograms (excludes the reserved 「無」 row). */
   programs: ProgramSummary[];
   onCancel: () => void;
@@ -86,9 +115,12 @@ export interface TemplateMetaSheetProps {
 
 export function TemplateMetaSheet({
   visible,
+  title = '另存模板',
+  omitName = false,
   defaultName,
   defaultProgramId,
   defaultSubTag,
+  defaultProgramDimensions,
   programs,
   onCancel,
   onConfirm,
@@ -129,21 +161,47 @@ export function TemplateMetaSheet({
   // seed it into `localSubTags` so the chip renders immediately — the
   // per-program DB fetch below appends to that set (dedup happens via the
   // [...subTags, ...localSubTags] render path).
+  //
+  // Round 15 polish: preserve inline-typed state across sheet re-opens
+  //   (`localSubTags`, `customSubTag`, `customMode`, `customProgramMode`,
+  //   `customProgramName`) so accidental backdrop-tap doesn't lose the
+  //   user's typed-but-unsaved chips. `programList` is re-fetched from DB
+  //   on every open via the secondary effect below so freshly-created
+  //   programs (already persisted) reappear without parent involvement.
   useEffect(() => {
     if (visible) {
       setName(defaultName);
       setProgramId(defaultProgramId ?? null);
       setSubTag(defaultSubTag ?? null);
-      setCustomSubTag('');
-      setCustomMode(false);
       setSubTags([]);
-      setLocalSubTags(defaultSubTag ? [defaultSubTag] : []);
-      setProgramList(programs);
-      setCustomProgramMode(false);
-      setCustomProgramName('');
+      // localSubTags / customSubTag / customMode / customProgramMode /
+      // customProgramName intentionally NOT reset here — preserves inline
+      // user input across sheet open/close pairs within the same parent
+      // session. They're cleared individually by handleConfirm /
+      // handleConfirmNewSubTag / handleConfirmNewProgram on success.
       setCreatingProgram(false);
     }
-  }, [visible, defaultName, defaultProgramId, defaultSubTag, programs]);
+  }, [visible, defaultName, defaultProgramId, defaultSubTag]);
+
+  // Round 15 polish: re-fetch the programs list on every open so an
+  // inline-created program (already persisted via `createProgram` in
+  // handleConfirmNewProgram) reappears as a chip after the sheet is
+  // dismissed and re-opened. Otherwise the sheet inherits the parent's
+  // potentially-stale `programs` prop which doesn't include the new one.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    listPrograms(db)
+      .then((progs) => {
+        if (!cancelled) setProgramList(progs);
+      })
+      .catch(() => {
+        if (!cancelled) setProgramList(programs);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, db, programs]);
 
   // Re-fetch per-program sub_tags when the user changes program selection.
   // null program → no fetch, section is hidden entirely.
@@ -208,22 +266,22 @@ export function TemplateMetaSheet({
     try {
       const newId = randomUUID();
       const today = utcMsToIsoDate(Date.now());
-      // Reasonable defaults for a "just give me a name" minimal Program:
-      //   - main_tag = null (no 週期 tag)
-      //   - cycle_length = 3 (ADR-0004 minimum 合法值; programManager.validateProgram
-      //     enforces [3, 14] — we can't go lower)
-      //   - cycle_count = 1 (single cycle)
-      //   - start_date = today (yyyy-mm-dd)
-      //   - is_active = 0 (createProgram forces this internally)
-      // User can edit cycle structure later from the Program editor page.
+      // Inherit dimensions from caller-provided default (round 15 polish —
+      // programs tab "+ 建立新模板" import caller passes the originating
+      // cell's program shape so the new program isn't forced to 1×3).
+      // Falls back to ADR-0004-minimum 3×1 today when caller doesn't set it
+      // (session-detail 另存模板 caller's existing UX).
+      const seedLength = defaultProgramDimensions?.cycle_length ?? 3;
+      const seedCount = defaultProgramDimensions?.cycle_count ?? 1;
+      const seedStart = defaultProgramDimensions?.start_date ?? today;
       await createProgram(db, {
         program: {
           id: newId,
           name: trimmedName,
           main_tag: null,
-          cycle_length: 3,
-          cycle_count: 1,
-          start_date: today,
+          cycle_length: seedLength,
+          cycle_count: seedCount,
+          start_date: seedStart,
           is_active: 0,
         },
       });
@@ -233,9 +291,9 @@ export function TemplateMetaSheet({
         id: newId,
         name: trimmedName,
         main_tag: null,
-        cycle_length: 3,
-        cycle_count: 1,
-        start_date: today,
+        cycle_length: seedLength,
+        cycle_count: seedCount,
+        start_date: seedStart,
         is_active: 0,
         cellCount: 0,
       };
@@ -322,7 +380,7 @@ export function TemplateMetaSheet({
                 取消
               </Text>
             </Pressable>
-            <Text style={styles.topBarTitle}>另存模板</Text>
+            <Text style={styles.topBarTitle}>{title}</Text>
             <Pressable onPress={handleConfirm} hitSlop={8} disabled={busy}>
               <Text
                 style={[
@@ -337,17 +395,21 @@ export function TemplateMetaSheet({
           </View>
 
           <ScrollView contentContainerStyle={styles.body}>
-            {/* 名稱 */}
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>名稱</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder={defaultName}
-                placeholderTextColor="#9ca3af"
-              />
-            </View>
+            {/* 名稱 — hidden when omitName=true (template editor caller, where
+                name lives in the editor body inline). defaultName still goes
+                to onConfirm.name unchanged via the `name` state. */}
+            {omitName ? null : (
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>名稱</Text>
+                <TextInput
+                  style={styles.input}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder={defaultName}
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+            )}
 
             {/* 歸屬計畫 */}
             <View style={styles.field}>
@@ -482,9 +544,13 @@ export function TemplateMetaSheet({
             ) : null}
 
             <Text style={styles.hint}>
-              {programId === null
-                ? '名稱必填、計畫選「通用」時不指定強度（= 自由模板）。'
-                : '名稱必填、強度可選「通用」或新增。'}
+              {omitName
+                ? programId === null
+                  ? '計畫選「通用」時不指定強度（= 自由模板）。'
+                  : '強度可選「通用」或新增。'
+                : programId === null
+                  ? '名稱必填、計畫選「通用」時不指定強度（= 自由模板）。'
+                  : '名稱必填、強度可選「通用」或新增。'}
             </Text>
           </ScrollView>
         </Pressable>

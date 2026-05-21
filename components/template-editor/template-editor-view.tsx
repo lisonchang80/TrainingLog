@@ -55,6 +55,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
@@ -62,8 +63,10 @@ import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
 import {
   applyRecolorSiblings,
   applyRenameSiblings,
+  attachTemplateToProgram,
   commitTemplateDraft,
   deleteTemplate,
+  findTemplateByTriple,
   getTemplateFull,
   queryMemoryCandidates,
   queryReusableSupersetMemory,
@@ -125,11 +128,39 @@ export default function TemplateEditorView() {
   // representative 但 header 仍顯示 user's pick。sentinel `__none__` 表
   // explicitly NULL (通用 program / no intensity)，param 不存在 = no override
   // → fallback to actual draft.program_id / draft.sub_tag。
-  const { id, dpid, dst } = useLocalSearchParams<{
+  const {
+    id,
+    dpid,
+    dst,
+    fromProgram,
+    fromKind,
+    fromCycle,
+    fromDay,
+    fromSubTag,
+  } = useLocalSearchParams<{
     id: string;
     dpid?: string;
     dst?: string;
+    // Programs tab "+ 建立新模板" import context (round 15 polish).
+    // When present the editor enters "import mode": top-right action becomes
+    // 「建立並導入」, draft.program_id pre-fills to fromProgram, and tap-save
+    // redirects to /(tabs)/programs with apply params instead of staying.
+    fromProgram?: string;
+    fromKind?: 'cell' | 'column';
+    fromCycle?: string;
+    fromDay?: string;
+    fromSubTag?: string;
   }>();
+  const importMode =
+    fromProgram != null && fromKind != null && fromDay != null;
+  const importFromProgramId = fromProgram
+    ? decodeURIComponent(fromProgram)
+    : null;
+  const importFromSubTag = fromSubTag
+    ? decodeURIComponent(fromSubTag)
+    : null;
+  const importFromCycle = fromCycle != null ? Number(fromCycle) : null;
+  const importFromDay = fromDay != null ? Number(fromDay) : null;
   const db = useDatabase();
   const router = useRouter();
 
@@ -173,6 +204,13 @@ export default function TemplateEditorView() {
   // overnight #45 第 3 點 — 排序動作 modal 開關（mirror app/(tabs)/index.tsx
   // 的 reorderSheetOpen pattern；長按卡片 header + ⚙️「移動動作」共用入口）。
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
+  // Round 15 polish — 儲存 / 建立並導入 都先跳 TemplateMetaSheet 讓使用者選
+  // (program, sub_tag)。`saveSheetMode` 為 null = 不跳；'save' = 跑完
+  // persistDraft + Alert 留在編輯器；'import' = 跑完 persistDraft + router.replace
+  // 回 programs tab 帶 apply context。
+  const [saveSheetMode, setSaveSheetMode] = useState<'save' | 'import' | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -195,7 +233,21 @@ export default function TemplateEditorView() {
           return;
         }
         setCommitted(tpl);
-        setDraft(cloneTemplate(tpl));
+        // Import mode pre-fill (round 15 polish, programs tab "+ 建立新模板"):
+        // a brand-new template loaded here has program_id=null + sub_tag=null
+        // from createTemplate. If the user entered via the programs picker,
+        // hydrate program_id from the cell's program so the new template
+        // auto-attaches to it (Q3a). User can still change it in the editor
+        // — final draft.program_id wins at import time.
+        const initialDraft = cloneTemplate(tpl);
+        if (
+          importMode &&
+          tpl.program_id == null &&
+          importFromProgramId != null
+        ) {
+          initialDraft.program_id = importFromProgramId;
+        }
+        setDraft(initialDraft);
         setExerciseLibrary(lib);
         setPrograms(progs);
         setLoaded(true);
@@ -270,24 +322,178 @@ export default function TemplateEditorView() {
     return true;
   }, [committed, draft, db]);
 
-  const onSave = useCallback(async () => {
+  // Open TemplateMetaSheet — both 儲存 and 建立並導入 routes go through it
+  // so the user can confirm / change (program, sub_tag) before commit.
+  // saveSheetMode determines the post-confirm behaviour.
+  const onSave = useCallback(() => {
     if (!dirty || !draft || busy) return;
-    setBusy(true);
-    try {
-      await persistDraft();
-      // Re-hydrate to pick up DB-side timestamps / cascaded sibling changes.
-      const refreshed = id ? await getTemplateFull(db, id) : null;
-      if (refreshed) {
-        setCommitted(refreshed);
-        setDraft(cloneTemplate(refreshed));
+    setSaveSheetMode('save');
+  }, [dirty, draft, busy]);
+
+  const onCreateAndImport = useCallback(() => {
+    if (!draft || busy || !importMode) return;
+    setSaveSheetMode('import');
+  }, [draft, busy, importMode]);
+
+  /**
+   * TemplateMetaSheet 確認 — 套用 (program_id, sub_tag) 進 draft 後跑 commit。
+   * 兩種模式：
+   *   - 'save'   → persistDraft + Alert「已儲存」+ 留在編輯器
+   *   - 'import' → persistDraft + router.replace 回 programs tab 帶 apply params
+   *
+   * 「建立並導入」允許 !dirty commit (使用者可能完全沒改、純粹按 import 把
+   * 預設 (program, sub_tag) 寫回 cell)。「儲存」沿用 dirty guard。
+   */
+  const onSaveSheetConfirm = useCallback(
+    async (args: {
+      name: string;
+      program_id: string | null;
+      sub_tag: string | null;
+    }) => {
+      if (!draft || busy) return;
+      const mode = saveSheetMode;
+      if (!mode) return;
+      setBusy(true);
+      try {
+        // Apply sheet's (name, program_id, sub_tag) to draft. We mutate the
+        // working draft directly via setDraft so persistDraft sees the new
+        // values; the next render shows them in the header label too.
+        const patchedDraft: Template = {
+          ...draft,
+          name: args.name || draft.name,
+          program_id: args.program_id,
+          sub_tag: args.sub_tag,
+        };
+        setDraft(patchedDraft);
+        // Dup-triple guard: changing (name, program_id, sub_tag) must not
+        // collide with an existing sibling. Mirror convertSessionToTemplate
+        // pattern (findTemplateByTriple + throw DUPLICATE_TEMPLATE_TRIPLE).
+        const classificationChanging =
+          patchedDraft.name !== committed?.name ||
+          patchedDraft.program_id !== committed?.program_id ||
+          patchedDraft.sub_tag !== committed?.sub_tag;
+        if (classificationChanging) {
+          const existing = await findTemplateByTriple(db, {
+            name: patchedDraft.name,
+            program_id: patchedDraft.program_id ?? null,
+            sub_tag: patchedDraft.sub_tag ?? null,
+          });
+          if (existing && existing.id !== patchedDraft.id) {
+            throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+          }
+        }
+
+        // persistDraft reads `draft` from closure — pass an inline commit
+        // using the patched draft directly via commitTemplateDraft to avoid
+        // a stale-closure race. We replicate the rename-siblings + commit +
+        // use_count bump dance with patchedDraft. `now` is a function thunk
+        // per the repo helper signatures (() => Date.now()).
+        const now = () => Date.now();
+        if (committed && patchedDraft.name !== committed.name) {
+          await applyRenameSiblings(db, {
+            oldName: committed.name,
+            newName: patchedDraft.name,
+            now,
+          });
+        }
+        // ★ commitTemplateDraft 只寫 name / color_hex / updated_at + exercises,
+        // 不寫 program_id / sub_tag。identity 三元組改動必須走
+        // attachTemplateToProgram（同一個 UPDATE template SET program_id=?,
+        // sub_tag=?, updated_at=? 的 helper）。在 commit 之前先 attach 確保
+        // re-hydrate 的 row 帶到新的 classification。
+        if (classificationChanging) {
+          await attachTemplateToProgram(db, {
+            template_id: patchedDraft.id,
+            program_id: patchedDraft.program_id ?? null,
+            sub_tag: patchedDraft.sub_tag ?? null,
+            now,
+          });
+        }
+        if (committed) {
+          await commitTemplateDraft(db, {
+            committed,
+            draft: patchedDraft,
+            now,
+          });
+          const committedIds = new Set(committed.exercises.map((e) => e.id));
+          const bumps = patchedDraft.exercises.filter(
+            (e) =>
+              !committedIds.has(e.id) &&
+              e.parent_id === null &&
+              e.reusable_superset_id !== null,
+          );
+          for (const row of bumps) {
+            await incrementUseCount(db, row.reusable_superset_id as string, now);
+          }
+        }
+        // Re-hydrate so any DB-side cascade lands in committed.
+        const refreshed = id ? await getTemplateFull(db, id) : null;
+        if (refreshed) {
+          setCommitted(refreshed);
+          setDraft(cloneTemplate(refreshed));
+        }
+        if (mode === 'save') {
+          setSaveSheetMode(null);
+          Alert.alert('已儲存', '', [{ text: 'OK' }]);
+        } else {
+          // import mode — redirect with apply params.
+          const finalProgramId =
+            refreshed?.program_id ?? patchedDraft.program_id ?? null;
+          const finalSubTag =
+            refreshed?.sub_tag ?? patchedDraft.sub_tag ?? null;
+          const params = new URLSearchParams();
+          params.set('applyTpl', encodeURIComponent(id));
+          params.set(
+            'applyProgram',
+            finalProgramId == null
+              ? '__none__'
+              : encodeURIComponent(finalProgramId),
+          );
+          params.set(
+            'applySubTag',
+            finalSubTag == null
+              ? '__none__'
+              : encodeURIComponent(finalSubTag),
+          );
+          params.set('applyKind', fromKind!);
+          params.set('applyDay', String(importFromDay!));
+          if (fromKind === 'cell' && importFromCycle != null) {
+            params.set('applyCycle', String(importFromCycle));
+          }
+          if (importFromSubTag != null && finalSubTag == null) {
+            params.set('applySubTag', encodeURIComponent(importFromSubTag));
+          }
+          setSaveSheetMode(null);
+          router.replace(`/(tabs)/programs?${params.toString()}`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
+          Alert.alert(
+            '同三元組已存在',
+            '已有「相同名稱 + 計畫 + 強度」的模板，請換個強度或計畫。',
+          );
+        } else {
+          Alert.alert('儲存失敗', msg);
+        }
+      } finally {
+        setBusy(false);
       }
-      Alert.alert('已儲存', '', [{ text: 'OK' }]);
-    } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [dirty, draft, busy, persistDraft, id, db]);
+    },
+    [
+      draft,
+      busy,
+      saveSheetMode,
+      committed,
+      db,
+      id,
+      fromKind,
+      importFromCycle,
+      importFromDay,
+      importFromSubTag,
+      router,
+    ],
+  );
 
   const onDeleteTemplate = useCallback(() => {
     if (!id || !draft || busy) return;
@@ -1698,17 +1904,27 @@ export default function TemplateEditorView() {
               })()}
             </Text>
           </View>
+          {/*
+            Import mode (programs tab "+ 建立新模板"): top-right action becomes
+            「建立並導入」 + always enabled (even when !dirty) — user may keep
+            defaults and still want to bind the (just-created) template back
+            into the originating programs cell/column.
+          */}
           <Pressable
-            onPress={onSave}
-            disabled={!dirty || busy}
-            style={[styles.topBtn, (!dirty || busy) && styles.topBtnDisabled]}>
+            onPress={importMode ? onCreateAndImport : onSave}
+            disabled={importMode ? busy : !dirty || busy}
+            style={[
+              styles.topBtn,
+              (importMode ? busy : !dirty || busy) && styles.topBtnDisabled,
+            ]}>
             <Text
               style={[
                 styles.topBtnText,
-                (!dirty || busy) && styles.topBtnTextDisabled,
+                (importMode ? busy : !dirty || busy) &&
+                  styles.topBtnTextDisabled,
                 styles.topBtnSave,
               ]}>
-              {busy ? '...' : '儲存'}
+              {busy ? '...' : importMode ? '建立並導入' : '儲存'}
             </Text>
           </Pressable>
         </View>
@@ -1890,6 +2106,45 @@ export default function TemplateEditorView() {
           initialItems={reorderParents}
           onConfirm={onConfirmReorder}
           onCancel={() => setReorderSheetOpen(false)}
+        />
+
+        {/*
+          儲存 / 建立並導入 — round 15 polish (programs tab "+ 建立新模板").
+          The sheet confirms (program_id, sub_tag) at commit time; name is
+          edited inline in the editor body so we pass omitName=true. Title
+          adapts to mode so user sees which flow they're confirming.
+        */}
+        {/*
+          `defaultProgramDimensions` — import mode 才傳，讓 sheet 內的「+ 新增
+          計畫」inline helper 繼承 fromProgram 的 cycle dimensions / start_date，
+          避免新建 program 落回 1×3 預設值（round 15 bug fix）。session-detail
+          caller 不受影響（沒傳 = 保留既有最小預設）。
+        */}
+        <TemplateMetaSheet
+          visible={saveSheetMode != null}
+          title={saveSheetMode === 'import' ? '建立並導入' : '儲存模板'}
+          omitName
+          defaultName={draft?.name ?? ''}
+          defaultProgramId={draft?.program_id ?? null}
+          defaultSubTag={draft?.sub_tag ?? null}
+          defaultProgramDimensions={(() => {
+            if (saveSheetMode !== 'import' || !importFromProgramId) {
+              return undefined;
+            }
+            const fromProg = programs.find(
+              (p) => p.id === importFromProgramId,
+            );
+            if (!fromProg) return undefined;
+            return {
+              cycle_length: fromProg.cycle_length,
+              cycle_count: fromProg.cycle_count,
+              start_date: fromProg.start_date,
+            };
+          })()}
+          programs={programs}
+          busy={busy}
+          onCancel={() => setSaveSheetMode(null)}
+          onConfirm={onSaveSheetConfirm}
         />
 
         <Modal

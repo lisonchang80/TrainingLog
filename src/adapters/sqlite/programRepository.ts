@@ -297,6 +297,51 @@ export async function resizeProgram(
  * Date.now and ticks program.updated_at so listPrograms ordering stays
  * correct.
  */
+/**
+ * Round 15 polish — record a (program_id, sub_tag) pair in the persistent
+ * `program_sub_tag` label dictionary. INSERT OR IGNORE so duplicates are
+ * silent no-ops. The picker reads from this table so 強度 labels persist
+ * across overwrite cycles (e.g. row swapped from II-2 → II-1; user can
+ * still see II-2 as a chip option to swap back).
+ *
+ * No-op when `sub_tag` is null / empty — only meaningful labels are
+ * registered. Safe to call inside a transaction (single statement).
+ */
+export async function recordProgramSubTag(
+  db: Database,
+  program_id: string,
+  sub_tag: string | null,
+  now?: () => number,
+): Promise<void> {
+  if (sub_tag == null || sub_tag.length === 0) return;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
+       VALUES (?, ?, ?)`,
+    program_id,
+    sub_tag,
+    (now ?? Date.now)(),
+  );
+}
+
+/**
+ * Round 15 polish — list every (program_id, sub_tag) that's ever been
+ * registered for this program, sorted alphabetically. Used by the Programs
+ * tab row apply picker so user-typed labels persist even after no cell or
+ * template currently references them.
+ */
+export async function listProgramSubTags(
+  db: Database,
+  program_id: string,
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT sub_tag FROM program_sub_tag
+      WHERE program_id = ?
+      ORDER BY sub_tag ASC`,
+    program_id,
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
 export async function upsertCell(
   db: Database,
   args: {
@@ -345,6 +390,9 @@ export async function upsertCell(
     ts,
     args.program_id
   );
+  // Register sub_tag in the persistent per-program label dictionary so it
+  // survives overwrite cycles (round 15 fix).
+  await recordProgramSubTag(db, args.program_id, args.sub_tag, args.now);
   return cell_id;
 }
 
@@ -358,6 +406,17 @@ export async function upsertCell(
  *     sub_tag. Cells that don't exist yet get sub_tag=NULL.
  *   - `template_id = null` (休息): clear both template_id AND sub_tag
  *     since rest occupies both visual slots.
+ *
+ * Round 15 polish (2026-05-21) — optional `sub_tag_override` (discriminated
+ * via presence on the args object so `null` ≠ `undefined`):
+ *   - omitted → preserve per-row sub_tag (Q3 default, used by the existing
+ *     ▼ picker → "pick existing template" path).
+ *   - present (string OR null) → write this value to every row in the
+ *     column, overriding whatever was there. Used by the programs tab
+ *     "+ 建立新模板" → 「建立並導入」 path (column kind) so the freshly-
+ *     created template's sub_tag propagates to all cells in the column —
+ *     otherwise the new sub_tag never lands anywhere and the row picker
+ *     stays empty for newly-created programs.
  */
 export async function applyTemplateToColumn(
   db: Database,
@@ -365,6 +424,8 @@ export async function applyTemplateToColumn(
     program_id: string;
     day_index: number;
     template_id: string | null;
+    /** Present in args = override every row's sub_tag (even with null). */
+    sub_tag_override?: string | null;
     uuid: () => string;
     now?: () => number;
   }
@@ -376,6 +437,11 @@ export async function applyTemplateToColumn(
   );
   if (!prog) return;
   const isRest = args.template_id == null;
+  // Detect "key present" vs absent so callers can pass null to clear.
+  const hasOverride = Object.prototype.hasOwnProperty.call(
+    args,
+    'sub_tag_override',
+  );
   await db.withTransactionAsync(async () => {
     for (let c = 0; c < prog.cycle_count; c++) {
       const existing = await db.getFirstAsync<{
@@ -388,7 +454,11 @@ export async function applyTemplateToColumn(
         c,
         args.day_index
       );
-      const new_sub_tag = isRest ? null : (existing?.sub_tag ?? null);
+      const new_sub_tag = isRest
+        ? null
+        : hasOverride
+          ? (args.sub_tag_override ?? null)
+          : (existing?.sub_tag ?? null);
       if (existing) {
         await db.runAsync(
           `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
@@ -417,6 +487,18 @@ export async function applyTemplateToColumn(
       ts,
       args.program_id
     );
+    // Register the override sub_tag in the persistent label dictionary so
+    // it survives subsequent overwrite (round 15 fix). Only applies when
+    // caller passed an explicit override (otherwise per-row sub_tags are
+    // preserved per cell and individually registered via upsertCell).
+    if (hasOverride && args.sub_tag_override != null) {
+      await recordProgramSubTag(
+        db,
+        args.program_id,
+        args.sub_tag_override,
+        args.now,
+      );
+    }
   });
 }
 
@@ -451,6 +533,11 @@ export async function applyTagToRow(
       ts,
       args.program_id
     );
+    // Register the row-apply sub_tag in the persistent label dictionary so
+    // it survives later swap to another sub_tag (round 15 fix). Even if
+    // applyTagToRow updates 0 rows (row was all-rest), the label still
+    // lands in the dictionary for future picker chip listing.
+    await recordProgramSubTag(db, args.program_id, args.sub_tag, args.now);
   });
 }
 

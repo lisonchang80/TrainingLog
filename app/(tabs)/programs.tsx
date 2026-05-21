@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -20,6 +20,7 @@ import {
   countFilledCellsOutsideBounds,
   getActiveProgram,
   getProgram,
+  listProgramSubTags,
   listPrograms,
   resizeProgram,
   setActiveProgram,
@@ -27,6 +28,8 @@ import {
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import {
+  createTemplate,
+  listTemplateGroupsByName,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -115,27 +118,46 @@ export default function ProgramsScreen() {
   >({});
   const [editing, setEditing] = useState(false);
   const [picker, setPicker] = useState<PickerState>(null);
+  // Round 15 polish — picker 的強度 chip 列同時讀「cells 用過的強度」+「this
+  // program 下所有 templates 的 sub_tag」。原本只看 cells，建立並導入剛寫進
+  // template.sub_tag 但還沒套到 cell 的強度就不會出現在 picker。
+  const [templateSubTagsForProgram, setTemplateSubTagsForProgram] = useState<
+    string[]
+  >([]);
 
   const refresh = useCallback(async () => {
-    const [activeOrNull, all, ts] = await Promise.all([
+    // - `tsAll` (all variants) → templatesById map so cells with any
+    //   template_id (including non-representative siblings) can resolve their
+    //   display name.
+    // - `tsGrouped` (dedupe-by-name representative) → picker list so users
+    //   only see distinct template names (mirror Templates tab list pattern).
+    const [activeOrNull, all, tsAll, tsGrouped] = await Promise.all([
       getActiveProgram(db),
       listPrograms(db),
       listTemplates(db),
+      listTemplateGroupsByName(db),
     ]);
     const map: Record<string, TemplateSummary> = {};
-    for (const t of ts) map[t.id] = t;
+    for (const t of tsAll) map[t.id] = t;
     setTemplatesById(map);
     setAllPrograms(all);
-    setAllTemplates(ts);
+    setAllTemplates(tsGrouped);
+    let resolvedShown: ProgramWithCells | null = null;
     if (activeOrNull) {
-      setShown(activeOrNull);
-      return;
+      resolvedShown = activeOrNull;
+    } else if (all.length > 0) {
+      resolvedShown = await getProgram(db, all[0].id);
     }
-    if (all.length > 0) {
-      const fallback = await getProgram(db, all[0].id);
-      setShown(fallback);
+    setShown(resolvedShown);
+    // Round 15 polish — load the persistent label dictionary for this
+    // program (`program_sub_tag` table, v022). The picker shows every
+    // 強度 ever registered, including ones no cell currently uses (so
+    // user can swap back to a prior label without re-typing).
+    if (resolvedShown) {
+      const tags = await listProgramSubTags(db, resolvedShown.program.id);
+      setTemplateSubTagsForProgram(tags);
     } else {
-      setShown(null);
+      setTemplateSubTagsForProgram([]);
     }
   }, [db]);
 
@@ -144,6 +166,145 @@ export default function ProgramsScreen() {
       refresh();
     }, [refresh])
   );
+
+  /**
+   * Import-from-template-editor consume (round 15 polish).
+   *
+   * After 「+ 建立新模板」 → editor → 「建立並導入」, the editor pushes us back
+   * here with apply* params. We:
+   *   1. Switch active program if applyProgram differs from current shown
+   *      (modifies 「計劃」 dropdown — Q1a).
+   *   2. Cell case: upsertCell at (cycle, day) with template_id + sub_tag.
+   *      Column case: applyTemplateToColumn (preserves per-row sub_tag,
+   *      mirrors the existing ▼ ▸ pick behaviour).
+   *   3. Force edit mode on (user was editing when they triggered the
+   *      import; user-quoted phrase 「回到編輯計劃」).
+   *   4. Clear apply* params via router.setParams to prevent re-firing on
+   *      re-render / re-focus.
+   *
+   * `appliedRef` guards against double-application — useFocusEffect refresh
+   * runs separately and may re-render with the same params before clear
+   * lands. We key the ref by the apply-tpl id; once consumed, ignore.
+   */
+  const applyParams = useLocalSearchParams<{
+    applyTpl?: string;
+    applyProgram?: string;
+    applySubTag?: string;
+    applyKind?: 'cell' | 'column';
+    applyCycle?: string;
+    applyDay?: string;
+  }>();
+  const appliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const applyTpl = applyParams.applyTpl
+      ? decodeURIComponent(applyParams.applyTpl)
+      : null;
+    if (!applyTpl) return;
+    // Wait for `shown` to load so we know the current program (to compare
+    // against applyProgram for the program-switch step).
+    if (!shown) return;
+    if (appliedRef.current === applyTpl) return;
+
+    const applyProgram = applyParams.applyProgram
+      ? applyParams.applyProgram === '__none__'
+        ? null
+        : decodeURIComponent(applyParams.applyProgram)
+      : null;
+    const applySubTag = applyParams.applySubTag
+      ? applyParams.applySubTag === '__none__'
+        ? null
+        : decodeURIComponent(applyParams.applySubTag)
+      : null;
+    const applyKind = applyParams.applyKind ?? null;
+    const applyDay =
+      applyParams.applyDay != null ? Number(applyParams.applyDay) : null;
+    const applyCycle =
+      applyParams.applyCycle != null ? Number(applyParams.applyCycle) : null;
+
+    if (!applyKind || applyDay == null) {
+      appliedRef.current = applyTpl;
+      router.setParams({
+        applyTpl: undefined,
+        applyProgram: undefined,
+        applySubTag: undefined,
+        applyKind: undefined,
+        applyCycle: undefined,
+        applyDay: undefined,
+      });
+      return;
+    }
+
+    appliedRef.current = applyTpl;
+    (async () => {
+      try {
+        // Step 1: program switch (if needed). Setting active + re-loading
+        // shown brings the grid into the template's program.
+        let workingProgramId = shown.program.id;
+        if (applyProgram != null && applyProgram !== workingProgramId) {
+          await setActiveProgram(db, { id: applyProgram });
+          const switched = await getProgram(db, applyProgram);
+          if (switched) {
+            setShown(switched);
+            workingProgramId = switched.program.id;
+          }
+        }
+        // Step 2: bind. Clamp the day_index / cycle_index against the
+        // (possibly switched) program's dimensions — out-of-bounds positions
+        // would silently no-op otherwise.
+        const target = await getProgram(db, workingProgramId);
+        if (!target) return;
+        const safeDay = Math.min(applyDay, target.program.cycle_length - 1);
+        if (applyKind === 'cell' && applyCycle != null) {
+          const safeCycle = Math.min(
+            applyCycle,
+            target.program.cycle_count - 1
+          );
+          await upsertCell(db, {
+            program_id: workingProgramId,
+            cycle_index: safeCycle,
+            day_index: safeDay,
+            template_id: applyTpl,
+            sub_tag: applySubTag,
+            uuid: randomUUID,
+          });
+        } else if (applyKind === 'column') {
+          // Pass `sub_tag_override` (round 15 fix) so the new template's
+          // sub_tag propagates to all rows in the column. Without this the
+          // ▼-based "+建立新模板" path leaves every cell with sub_tag=null
+          // even when the user explicitly picked a sub_tag in the sheet —
+          // distinctSubTagsInProgram then returns [] and the row picker
+          // shows no chips.
+          await applyTemplateToColumn(db, {
+            program_id: workingProgramId,
+            day_index: safeDay,
+            template_id: applyTpl,
+            sub_tag_override: applySubTag,
+            uuid: randomUUID,
+          });
+        }
+        // Step 3: refresh to pick up the new cell binding + force edit mode
+        // so user lands back where they were.
+        await refresh();
+        setEditing(true);
+      } catch (e) {
+        Alert.alert(
+          '導入失敗',
+          e instanceof Error ? e.message : String(e)
+        );
+      } finally {
+        // Step 4: clear params so a focus re-render doesn't re-apply.
+        router.setParams({
+          applyTpl: undefined,
+          applyProgram: undefined,
+          applySubTag: undefined,
+          applyKind: undefined,
+          applyCycle: undefined,
+          applyDay: undefined,
+        });
+      }
+    })();
+  }, [applyParams, shown, db, refresh, router]);
 
   const closePicker = () => setPicker(null);
 
@@ -235,6 +396,20 @@ export default function ProgramsScreen() {
   ) => {
     closePicker();
     if (!shown) return;
+    // Defensive: applyTagToRow writes only to cells with template_id != NULL.
+    // If the row is entirely 休息 (no row, or all cells.template_id IS NULL),
+    // the UPDATE matches 0 rows → silent no-op → 「強度無法保存」 confusion.
+    // Surface an Alert so the user knows to bind templates first.
+    const hasFilledCell = shown.cells.some(
+      (c) => c.cycle_index === cycle_index && c.template_id != null,
+    );
+    if (!hasFilledCell) {
+      Alert.alert(
+        '此 row 沒有 template',
+        '先在格子點選 template，再回來套用強度。\n（強度只能掛在有 template 的格子上）',
+      );
+      return;
+    }
     await applyTagToRow(db, {
       program_id: shown.program.id,
       cycle_index,
@@ -552,6 +727,51 @@ export default function ProgramsScreen() {
             );
           }
         }}
+        onCreateNew={async () => {
+          // Spawn a blank template, then push the editor in "import mode" —
+          // the editor's top-right action becomes 「建立並導入」 (Create &
+          // Import). After save, the editor redirects back here with apply
+          // params so the originating picker context (cell or column) gets
+          // bound to the new template.
+          //
+          // Pre-fill the new template's program_id with the current shown
+          // program (Q3a) so the new template auto-attaches to this program
+          // unless the user picks a different one in the editor.
+          //
+          // URL params:
+          //   fromProgram = current shown program_id (for pre-fill + return)
+          //   fromKind    = 'cell' | 'column' (controls programs tab consume)
+          //   fromDay     = day_index from picker (both kinds)
+          //   fromCycle   = cycle_index (cell-tap only; column-apply omits)
+          //   fromSubTag  = preset sub_tag (cell-tap rest-convert only)
+          const pickerSnap = picker;
+          const shownProgramId = shown?.program.id ?? null;
+          closePicker();
+          if (!shownProgramId || !pickerSnap) return;
+          try {
+            const id = randomUUID();
+            await createTemplate(db, { id, name: 'New Template' });
+            const params = new URLSearchParams();
+            params.set('fromProgram', encodeURIComponent(shownProgramId));
+            if (pickerSnap.kind === 'template_for_cell') {
+              params.set('fromKind', 'cell');
+              params.set('fromCycle', String(pickerSnap.cycle_index));
+              params.set('fromDay', String(pickerSnap.day_index));
+              if (pickerSnap.preset_sub_tag != null) {
+                params.set('fromSubTag', encodeURIComponent(pickerSnap.preset_sub_tag));
+              }
+            } else if (pickerSnap.kind === 'template_for_column') {
+              params.set('fromKind', 'column');
+              params.set('fromDay', String(pickerSnap.day_index));
+            }
+            router.push(`/template/${id}?${params.toString()}`);
+          } catch (e) {
+            Alert.alert(
+              '無法建立模板',
+              e instanceof Error ? e.message : String(e)
+            );
+          }
+        }}
         onClose={closePicker}
       />
 
@@ -566,7 +786,19 @@ export default function ProgramsScreen() {
             ? '套用強度到此 row'
             : '選擇強度'
         }
-        existingSubTags={distinctSubTagsInProgram(shown.cells)}
+        existingSubTags={(() => {
+          // Union of (cells used a sub_tag) + (templates in this program have
+          // a sub_tag). The union de-dups + sorts alphabetically so the chip
+          // order is stable. Cell-derived ranking (frequency desc) is dropped
+          // in favour of a stable merged sort — templates' sub_tags don't have
+          // a frequency to weigh against.
+          const cellTags = distinctSubTagsInProgram(shown.cells);
+          const merged = Array.from(
+            new Set([...cellTags, ...templateSubTagsForProgram]),
+          );
+          merged.sort((a, b) => a.localeCompare(b));
+          return merged;
+        })()}
         activeSubTag={(() => {
           if (picker?.kind === 'sub_tag_for_cell') {
             const cell = shown.cells.find(
@@ -830,6 +1062,7 @@ function TemplatePicker({
   showRestOption,
   previewSubTag,
   onPick,
+  onCreateNew,
   onClose,
 }: {
   visible: boolean;
@@ -839,6 +1072,7 @@ function TemplatePicker({
   showRestOption: boolean;
   previewSubTag: string | null;
   onPick: (template_id: string | null) => void;
+  onCreateNew: () => void;
   onClose: () => void;
 }) {
   return (
@@ -867,6 +1101,18 @@ function TemplatePicker({
                 <Text style={styles.modalRowText}>休息（清空此列）</Text>
               </Pressable>
             ) : null}
+            {/* + 建立新模板 — creates a blank template and jumps to the editor.
+                The picker is closed by the parent (onCreateNew handler) so the
+                user lands directly on /template/[id]. They can come back to
+                programs tab later and re-open the picker to bind the cell. */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalRow,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={onCreateNew}>
+              <Text style={styles.modalRowTextAdd}>+ 建立新模板</Text>
+            </Pressable>
             {templates.length === 0 ? (
               <Text style={styles.empty}>沒有 template。先建一個再回來。</Text>
             ) : (
@@ -884,11 +1130,6 @@ function TemplatePicker({
                       activeTemplateId === t.id && styles.modalRowTextActive,
                     ]}>
                     {t.name}
-                    {t.sub_tag ? (
-                      <Text style={styles.modalRowSubtle}>
-                        {` · ${t.sub_tag}`}
-                      </Text>
-                    ) : null}
                   </Text>
                 </Pressable>
               ))
@@ -1202,7 +1443,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cellTemplateText: {
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -1212,7 +1453,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(127,127,127,0.05)',
   },
-  cellTagText: { fontSize: 10, opacity: 0.7, textAlign: 'center' },
+  cellTagText: { fontSize: 8, opacity: 0.7, textAlign: 'center' },
   cellRest: {
     flex: 1,
     paddingVertical: 8,

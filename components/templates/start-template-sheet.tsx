@@ -60,6 +60,7 @@ import {
 
 import { useDatabase } from '@/components/database-provider';
 import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
+import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
   resolveProgramDefaults,
   type ProgramOption,
@@ -259,16 +260,28 @@ export function StartTemplateSheet({
       return;
     }
     setLocalSubTags([]);
-    listDistinctSubTagsByProgram(db, periodId)
-      .then((tags) => {
+    // Round 15 polish — union of (templates classified under this program)
+    // + (program_sub_tag persistent dictionary, v022). The latter remembers
+    // any sub_tag the user ever introduced for this program, even if no
+    // current template/cell references it. So 「II-2」 typed once via row
+    // apply ▶ still shows as a chip option here for re-use.
+    Promise.all([
+      listDistinctSubTagsByProgram(db, periodId),
+      listProgramSubTags(db, periodId),
+    ])
+      .then(([templateTags, dictionaryTags]) => {
         if (cancelled) return;
-        setProgramSubTags(tags);
+        const merged = Array.from(
+          new Set([...templateTags, ...dictionaryTags]),
+        );
+        merged.sort((a, b) => a.localeCompare(b));
+        setProgramSubTags(merged);
         // If the previously-resolved intensityId is no longer present in this
         // program's sub_tags (e.g. user switched programs and the prior tag
         // doesn't apply), collapse to null = 通用 so the radio doesn't show
         // a phantom selection.
         setIntensityId((prev) =>
-          prev != null && !tags.includes(prev) ? null : prev
+          prev != null && !merged.includes(prev) ? null : prev
         );
       })
       .catch(() => {
