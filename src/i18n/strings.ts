@@ -1,0 +1,890 @@
+/**
+ * i18n strings — single source of truth for static (non-dynamic) UI text.
+ *
+ * Phase 3 of the i18n migration (see `/tmp/i18n-phase3-structure-proposal.md`).
+ *
+ * Design:
+ *   - Single file, namespaced (`common` / `domain` / `button` / `page` / `alert` /
+ *     `status` / `equipment` / `muscleGroup` / `loadType`).
+ *   - Locale defaults to `'zh'` and is module-level; Phase 5 wires
+ *     `expo-localization` + user toggle through `setLocale()`.
+ *   - `t('ns', 'key')` is type-safe — TypeScript locks namespace and key.
+ *   - Dynamic / interpolated strings live in `dynamic.ts` as functions, since
+ *     ES template literals don't fit the static `strings` tree shape.
+ *   - DB-stored zh strings (equipment / muscle / load_type) round-trip through
+ *     `tEquipment` / `tMuscleGroup` / `tLoadType` so the DB schema stays untouched.
+ *
+ * User translation decisions locked 2026-05-22:
+ *   強度 → Intensity, 通用 → Default, 熱 chip → W, 超 chip → SS,
+ *   講解 → Cues, 再次訓練 → Replay, 砍掉 → Discard, 徒手 → Unloaded.
+ *   Achievement strings (7 entries in `v008Achievements.ts`) are intentionally
+ *   deferred — they live in DB rows, require schema migration to translate.
+ */
+
+export type Locale = 'zh' | 'en';
+
+export const strings = {
+  zh: {
+    /** 跨頁面共用按鈕 / 選項 label。最高頻字串（取消 27 處、刪除 13 處等）。 */
+    common: {
+      cancel: '取消',
+      confirm: '確認',
+      done: '完成',
+      create: '建立',
+      delete: '刪除',
+      edit: '編輯',
+      save: '儲存',
+      saving: '儲存中…',
+      add: '新增',
+      back: '上一步',
+      next: '下一步',
+      apply: '套用',
+      select: '選擇',
+      all: '全部',
+      none: '無',
+      default: '通用',
+      yes: '是',
+      no: '否',
+      close: '關閉',
+      skip: '略過',
+      backArrow: '‹ 返回',
+      backPlain: '返回',
+      go: '前往',
+      open: '開啟',
+      ok: '確定',
+      noneParen: '(無)',
+      notSelected: '— 尚未選擇 —',
+      empty: '(未填)',
+      unknownExercise: '(未知動作)',
+      custom: '· 自訂',
+      inactive: '· 未啟用',
+      inProgress: '· 進行中',
+    },
+
+    /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
+    domain: {
+      program: '計畫',
+      template: '模板',
+      session: 'Session',
+      exercise: '動作',
+      cluster: '群組',
+      superset: '超級組',
+      cycle: '週期',
+      day: '天',
+      week: '週',
+      intensity: '強度',
+      warmup: '熱身',
+      workingSet: '正式組',
+      dropSet: 'Drop Set',
+      reps: '次數',
+      weight: '重量',
+      weightKg: '重量 (kg)',
+      volume: '容量',
+      strength: '力量',
+      maxStrength: '最大力量',
+      hypertrophy: '增肌',
+      endurance: '耐力',
+      muscularEndurance: '肌耐力',
+      bodyweight: '體重',
+      warmupChip: '熱',
+      supersetChip: '超',
+      freestyle: '自由訓練',
+      restDay: '休息日',
+      rest: '休息',
+      programSchedule: '計劃表',
+      cycleSetup: '週期設定',
+      cycleLengthDays: '循環天數',
+      cycleCount: '週期數',
+      programNameMain: 'Program 主',
+      mainTagPrefix: '主標籤',
+      history: '歷史',
+      chart: '圖表',
+      stats: '統計',
+      data: '數據',
+      calendar: '月曆',
+      achievements: '獎章',
+      trend: '趨勢',
+      maxWeight: '最大重量',
+      maxVolume: '最大容量',
+      oneRepMaxEstimate: '1RM 預測',
+      trainingVolume: '訓練容量',
+      trainingPreferences: '訓練偏好',
+      newTemplate: '新模板',
+      supersetName: '超級組名稱',
+      note: '備註',
+      startDate: '起始日',
+      // weekday short labels (CalendarGrid + program day cycle headers)
+      weekdaySun: '日',
+      weekdayMon: '一',
+      weekdayTue: '二',
+      weekdayWed: '三',
+      weekdayThu: '四',
+      weekdayFri: '五',
+      weekdaySat: '六',
+    },
+
+    /** UI button / CTA / action label。包括 wizard nav、cluster ⚙️ 選單 item。 */
+    button: {
+      loadProgram: '↓ 載入計劃',
+      combine: '組合',
+      cues: '講解',
+      replay: '↻ 再次訓練',
+      replayDescription: '再次訓練 — 覆蓋目前卡片的 sets',
+      useLatestTemplate: '啟用最新模板',
+      listView: '表列',
+      sideBySide: '並排',
+      newTemplate: '＋ 新建',
+      newCta: '新建',
+      newProgramTemplate: '+ 建立新模板',
+      addIntensity: '+ 新增強度',
+      addIntensityPlain: '新增強度',
+      addExercise: '+ 動作',
+      addExercisePlain: '新增動作',
+      addCustomExercise: '新增自訂動作',
+      addRecord: '新增記錄',
+      editExercise: '編輯動作',
+      editSession: '編輯訓練',
+      editSuperset: '編輯超級組',
+      editKeep: '繼續編輯',
+      discardChanges: '捨棄修改',
+      discardSession: '🚫 放棄訓練',
+      discardSimple: '放棄',
+      saveTemplate: '儲存模板',
+      saveAsTemplate: '另存模板',
+      deleteExercise: '刪除動作',
+      deleteSession: '刪除本訓練',
+      deleteSuperset: '刪除超級組',
+      uncheck: '取消完成',
+      clearFilter: '取消篩選',
+      markAsDone: '標為完成',
+      switchToChart: '轉圖表',
+      viewHistory: '看歷史',
+      viewCues: '查看動作要點',
+      viewExerciseDetails: '查看動作詳情',
+      viewSupersetDetails: '查看超級組詳情',
+      sendToWatch: '傳至手錶 ⌚',
+      createSuperset: '建立超級組',
+      applyTemplateToColumn: '套用 template 到此 column',
+      applyIntensityToRow: '套用強度到此 row',
+      restRowClear: '休息（清空此列）',
+      shrinkAndDiscard: '砍掉並縮小',
+      confirmCreate: '確認建立',
+      overwrite: '覆蓋',
+      manualRest: '手動休息',
+      manualRestStart: '手動開始休息倒數',
+      noteCta: '備註',
+      previous: '上一步',
+      next: '下一步',
+      // cluster action-sheet items (with emoji prefix preserved)
+      clusterRestSeconds: '⏱️ 休息秒數',
+      clusterEditNote: '📝 編輯備註',
+      clusterReorderExercises: '🔃 排序動作',
+      clusterDeleteExercise: '🗑️ 刪除動作',
+      clusterHistoryA: '📖 動作歷史 (A)',
+      clusterHistoryB: '📖 動作歷史 (B)',
+    },
+
+    /** 頁面標題 / step / section header / placeholder text。 */
+    page: {
+      programs: '計劃表',
+      session: 'Session',
+      library: '動作庫',
+      history: '訓練紀錄',
+      exerciseDetail: '動作詳情',
+      exerciseHistory: '動作歷史',
+      exerciseChart: '動作圖表',
+      exerciseList: '動作清單',
+      exerciseSettings: '動作設定',
+      bodyMetrics: '身體數據',
+      settings: '設定',
+      backupRestore: '備份 / 還原',
+      supersetDetails: '超級組詳情',
+      // wizard step titles (program-wizard/new.tsx)
+      wizardStep1: '計劃名稱 + 強度',
+      wizardStep2: '週期設定',
+      wizardStep3: '週期 1 每日內容',
+      wizardStep4: '各週期強度調整',
+      wizardStep5: '預覽日曆',
+      wizardStep6: '檢查無誤後按下方建立。',
+      wizardStep5Hint: '展開後的日曆 — 確認看起來對。',
+      // pickers / titles
+      selectProgram: '選擇 Program',
+      selectProgramAlt: '選擇計畫',
+      selectTemplate: '選擇 template',
+      selectIntensity: '選擇強度',
+      selectCycleLength: '選擇循環天數',
+      selectCycleCount: '選擇週期數',
+      selectMonth: '選擇月份',
+      selectStartDate: '選擇起始日',
+      selectProgramToLoad: '選擇要載入的計劃',
+      // placeholders
+      enterSupersetName: '請輸入超級組名稱',
+      enterSupersetNameShort: '輸入超級組名稱',
+      enterExerciseName: '請輸入動作名稱',
+      searchExercises: '輸入動作名字搜索',
+      programNamePlaceholder: '計劃名稱',
+      newIntensityName: '新強度名稱',
+      intensityPlaceholder: '強度（例：10-12RM）',
+      intensityOptionalMulti: '強度（可空，可多筆）',
+      cycleLengthInput: '循環天數（3-14 天）',
+      startDateInput: '起始日期 (yyyy-mm-dd)',
+      notePlaceholder: '例：握距、發力重點、易犯錯誤...',
+      intensityExample: '例：10-12RM、II-1',
+      programNameExample: '例：增肌-Q1',
+    },
+
+    /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
+    alert: {
+      programNameExists: '計畫名稱已存在',
+      programNameExistsWarning: '⚠️ 計劃名稱已存在',
+      programNameExistsMsg: '請換一個名稱再繼續。',
+      deleteSupersetQ: '刪除超級組？',
+      deleteExerciseQ: '刪除動作?',
+      templateNotCreated: '尚未建立模板',
+      reorderFailed: '排序失敗',
+      deleteFailed: '刪除失敗',
+      saveFailed: '儲存失敗',
+      readFailed: '讀取失敗',
+      loadFailed: '載入失敗',
+      restoreFailed: '還原失敗',
+      overwriteFailed: '覆蓋失敗',
+      importFailed: '導入失敗',
+      addDropsetFailed: '新增 dropset 失敗',
+      addExerciseFailed: '加入動作失敗',
+      editFailed: '編輯失敗',
+      cannotDelete: '無法刪除',
+      cannotSwap: '無法交換',
+      cannotOverwrite: '無法覆蓋',
+      cannotReadTemplate: '無法讀取模板',
+      cannotOpen: '無法開啟',
+      cannotOpenEditor: '無法開啟編輯器',
+      cannotStartSession: '無法開始訓練',
+      cannotCreateTemplate: '無法建立模板',
+      failed: '失敗',
+      noActiveSession: '找不到進行中的訓練 session。請先回 Today 頁開始一次訓練後再試。',
+      sessionAlreadyInProgress: '已有進行中的訓練',
+      endActiveSessionFirst: '請先在「今日」分頁結束目前的訓練再開始新的。',
+      exerciseNotFound: '找不到此動作。',
+      exerciseNotFoundOrArchived: '動作不存在或已封存。',
+      sourceCardNotFound: '找不到該動作來源卡。',
+      sourceCardASideNotFound: '找不到該超級組 A 側來源卡。',
+      sourceCardBSideNotFound: '找不到該超級組 B 側來源卡。',
+      originalTemplateNotFound: '找不到原模板',
+      sessionTemplateMissing: '此 session 沒有連結的模板，或原模板已被刪除。請改用「另存模板」建立新的。',
+      supersetNotFound: '超級組不存在或已刪除。',
+      builtinExerciseNoEdit: '內建動作目前無可編輯內容。',
+      builtinExerciseNoDelete: '內建動作無法刪除。',
+      dropsetMinimum: 'Dropset 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 head 那一列。',
+      duplicateExerciseName: '已有同名動作，請改個名字',
+      duplicateSupersetPair: '已有同樣動作組合的超級組',
+      openExistingSupersetQ: '是否前往編輯既有的超級組？',
+      supersetExactlyTwo: '超級組需要剛好 2 個動作',
+      supersetNoDuplicates: '超級組的兩個動作不可重複',
+      supersetNameMaxLen: '超級組名稱請少於 60 字元',
+      exerciseNameMaxLen: '動作名稱請少於 60 字元',
+      colorHexFormat: 'color_hex 必須是 #rrggbb 6 位 hex 或 null',
+      exerciseIdsNoEmpty: 'exercise_ids 不可有空值',
+      muscleGroupOverlap: '肌群不可同時為主要與次要',
+      pickCategoryFirst: '請選擇大分類',
+      pickEquipmentFirst: '請選擇用具分類',
+      pickTwoExercises: '請選 2 個動作',
+      replaySessionQ: '再次訓練？',
+      replaySessionSupersetQ: '再次訓練（超級組）？',
+      noTemplatePickFirst: '先在格子點選 template，再回來套用強度。\n（強度只能掛在有 template 的格子上）',
+      noTemplateOnRow: '此 row 沒有 template',
+      shrinkProgramQ: '縮小計劃表？',
+      noTemplatesYet: '沒有 template。先建一個再回來。',
+      noOptionsToSelect: '沒有可選項目。',
+      noProgramsAvailable: '沒有可用的 Program。',
+      noProgramsToLoad: '尚無計劃可載入',
+      programHasNoSubTag: '此 Program 無 sub_tag 紀錄。',
+      cannotUndo: '此操作無法復原。',
+      cannotUndoLong: '此操作不可復原 — 將刪除整個 session、所有動作及記錄。',
+      historyUnaffected: '歷史 session 紀錄不受影響。',
+      allLoggedSetsDeleted: '已記錄的 set 將全部刪除，無法復原。',
+      discardChangesQ: '捨棄修改？',
+      discardChangesLong: '離開將還原為進入編輯前的狀態，所有變更會消失。',
+      discardSessionQ: '放棄此次訓練？',
+      enterPositiveOrSkip: '請輸入正數，或選擇略過',
+      atLeastOneField: '至少輸入一個欄位且數值合理',
+      atLeastOneBodyField: '至少輸入一個欄位（體重 / PBF / SMM）',
+      mustBeWithin500Kg: '應為 0–500 kg 區間',
+      invalidBodyweight: '體重輸入無效',
+      invalidBodyweightLong: '體重數值不合理（應為 0–500 kg）',
+      invalidPbf: 'PBF 應為 0–100 %',
+      invalidSmm: 'SMM 數值不合理（應為 0–200 kg）',
+      invalidInput: '輸入無效',
+      variantExists: '變體已存在',
+      notEnoughDataPoints: '此時段資料點不足，至少需 2 次 Session。',
+      defaultVariantUndeletable:
+        '此模板有「通用」變體（計畫或強度未指定），是歷史 prefill 的兜底層、不可刪。\n\n若需刪除個別非通用變體，請點該 row 進入編輯器、從 ⋯ 選單刪除。',
+    },
+
+    /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
+    status: {
+      loading: '載入中…',
+      ending: '結束中…',
+      saved: '已儲存',
+      savedAsNew: '已另存',
+      selected: '已選擇',
+      noTrainingRecords: '還沒有訓練紀錄',
+      noRecords: '尚無記錄',
+      noExercisesAdded: '尚未加入動作',
+      noSupersetsYet: '尚未建立超級組',
+      noSupersetsHint: '點右上角「+」建立新的超級組',
+      noExercisesMatch: '沒有符合條件的動作',
+      noRecordsUnderFilter: '篩選條件下沒有紀錄。',
+      noIntensity: '無強度',
+      freestyle: '自由訓練',
+      restDay: '休息日',
+      inProgress: '· 進行中',
+      todayOutsideProgram: '今天不在 Program 範圍內',
+      hideUnchecked: '隱藏未打勾',
+      // cluster A/B switcher disabled hints
+      alreadyASide: '已是 A 側',
+      alreadyBSide: '已是 B 側',
+      // history filter chips (clusterFilter.ts)
+      excludeSupersets: '不含超級組',
+      includeSupersets: '包含超級組',
+      supersetsOnly: '只含超級組',
+      // exercise-chart axis hints
+      highestVolumePerSession: '（每次 Session 容量最大一組）',
+      heaviestSetPerSession: '（每次 Session 最重一組）',
+      maxEstimated1rmPerSession: '（每次 Session 預估 1RM 最大值）',
+      firstTime: '（第一次）',
+      // misc badges
+      allTimeWeightPr: '★ 全紀錄重量 PR',
+      allTimeVolumePr: '★ 全紀錄容量 PR',
+      // settings placeholder
+      autoShowRestCountdown: '自動跳出休息倒數',
+      backupComingSlice15: '於 slice 15 加入。',
+      // chart time-range chips
+      thisYear: '今年',
+      previousYear: '上一年',
+      nextYear: '下一年',
+      // exercise detail subtitle
+      missingExercise: '動作遺失',
+      // chart panel header
+      previousYearArrow: '上一年',
+    },
+
+    /**
+     * Equipment enum 8 個值。DB 用 zh literal 當 CHECK constraint value
+     * (見 v010_exercise_library_v2.ts:48)，UI 顯示走這層 mapping、DB 不動。
+     */
+    equipment: {
+      槓鈴: '槓鈴',
+      啞鈴: '啞鈴',
+      史密斯機: '史密斯機',
+      滑輪: '滑輪',
+      固定機械: '固定機械',
+      自重: '自重',
+      壺鈴: '壺鈴',
+      其他: '其他',
+    },
+
+    /**
+     * Muscle group + muscle name display label。
+     * 32 筆從 v010 schema (post-rename) + v006 seed legacy 名稱合併。
+     * Legacy 名稱 (前臂 / 二頭長頭 / 二頭短頭) 也保留 mapping，因為 v006 之前的
+     * DB 用戶 muscle 表還是舊字串，切英文時需要對到新版翻譯。
+     */
+    muscleGroup: {
+      // 13 主要肌群（v006 seed 順序）
+      胸: '胸',
+      背: '背',
+      腿: '腿',
+      臀: '臀',
+      肩: '肩',
+      斜方肌: '斜方肌',
+      二頭: '二頭',
+      三頭: '三頭',
+      小腿: '小腿',
+      小臂: '小臂',
+      核心: '核心',
+      手臂: '手臂',
+      側腹: '側腹',
+      // legacy aliases
+      前臂: '前臂',
+      // 19 細部位
+      上胸: '上胸',
+      中下胸: '中下胸',
+      背部: '背部',
+      下背: '下背',
+      股四: '股四',
+      膕繩: '膕繩',
+      上臀部: '上臀部',
+      下臀部: '下臀部',
+      前束: '前束',
+      中束: '中束',
+      後束: '後束',
+      內側二頭: '內側二頭',
+      外側二頭: '外側二頭',
+      // legacy aliases (pre-v010 names — kept so older DBs still resolve)
+      二頭長頭: '二頭長頭',
+      二頭短頭: '二頭短頭',
+      腹肌: '腹肌',
+    },
+
+    /**
+     * load_type label (NOT equipment) — paired with PR weight modifier.
+     * 「徒手」zh literal 保留、en 用 Unloaded（與 equipment 自重→Bodyweight 不撞）。
+     */
+    loadType: {
+      bodyweight: '徒手',
+      weighted: '加重',
+      assisted: '助力',
+    },
+  },
+
+  en: {
+    common: {
+      cancel: 'Cancel',
+      confirm: 'Confirm',
+      done: 'Done',
+      create: 'Create',
+      delete: 'Delete',
+      edit: 'Edit',
+      save: 'Save',
+      saving: 'Saving…',
+      add: 'Add',
+      back: 'Back',
+      next: 'Next',
+      apply: 'Apply',
+      select: 'Select',
+      all: 'All',
+      none: 'None',
+      default: 'Default',
+      yes: 'Yes',
+      no: 'No',
+      close: 'Close',
+      skip: 'Skip',
+      backArrow: '‹ Back',
+      backPlain: 'Back',
+      go: 'Go',
+      open: 'Open',
+      ok: 'OK',
+      noneParen: '(None)',
+      notSelected: '— Not selected —',
+      empty: '(empty)',
+      unknownExercise: '(unknown exercise)',
+      custom: '· Custom',
+      inactive: '· Inactive',
+      inProgress: '· In progress',
+    },
+
+    domain: {
+      program: 'Program',
+      template: 'Template',
+      session: 'Session',
+      exercise: 'Exercise',
+      cluster: 'Cluster',
+      superset: 'Superset',
+      cycle: 'Cycle',
+      day: 'Day',
+      week: 'Week',
+      intensity: 'Intensity',
+      warmup: 'Warm-up',
+      workingSet: 'Working Set',
+      dropSet: 'Drop Set',
+      reps: 'Reps',
+      weight: 'Weight',
+      weightKg: 'Weight (kg)',
+      volume: 'Volume',
+      strength: 'Strength',
+      maxStrength: 'Max Strength',
+      hypertrophy: 'Hypertrophy',
+      endurance: 'Endurance',
+      muscularEndurance: 'Muscular Endurance',
+      bodyweight: 'Bodyweight',
+      warmupChip: 'W',
+      supersetChip: 'SS',
+      freestyle: 'Freestyle',
+      restDay: 'Rest Day',
+      rest: 'Rest',
+      programSchedule: 'Programs',
+      cycleSetup: 'Cycle Setup',
+      cycleLengthDays: 'Cycle Length (days)',
+      cycleCount: 'Cycle Count',
+      programNameMain: 'Program',
+      mainTagPrefix: 'Main tag',
+      history: 'History',
+      chart: 'Chart',
+      stats: 'Stats',
+      data: 'Data',
+      calendar: 'Calendar',
+      achievements: 'Achievements',
+      trend: 'Trend',
+      maxWeight: 'Max Weight',
+      maxVolume: 'Max Volume',
+      oneRepMaxEstimate: '1RM Estimate',
+      trainingVolume: 'Training Volume',
+      trainingPreferences: 'Training Preferences',
+      newTemplate: 'New Template',
+      supersetName: 'Superset Name',
+      note: 'Note',
+      startDate: 'Start Date',
+      weekdaySun: 'Sun',
+      weekdayMon: 'Mon',
+      weekdayTue: 'Tue',
+      weekdayWed: 'Wed',
+      weekdayThu: 'Thu',
+      weekdayFri: 'Fri',
+      weekdaySat: 'Sat',
+    },
+
+    button: {
+      loadProgram: '↓ Load Program',
+      combine: 'Combine',
+      cues: 'Cues',
+      replay: '↻ Replay',
+      replayDescription: 'Replay — overwrite current card sets',
+      useLatestTemplate: 'Use Latest Template',
+      listView: 'List',
+      sideBySide: 'Side by Side',
+      newTemplate: '+ New',
+      newCta: 'New',
+      newProgramTemplate: '+ Create New Template',
+      addIntensity: '+ Add Intensity',
+      addIntensityPlain: 'Add Intensity',
+      addExercise: '+ Exercise',
+      addExercisePlain: 'Add Exercise',
+      addCustomExercise: 'Add Custom Exercise',
+      addRecord: 'Add Record',
+      editExercise: 'Edit Exercise',
+      editSession: 'Edit Session',
+      editSuperset: 'Edit Superset',
+      editKeep: 'Keep Editing',
+      discardChanges: 'Discard Changes',
+      discardSession: '🚫 Discard Session',
+      discardSimple: 'Discard',
+      saveTemplate: 'Save Template',
+      saveAsTemplate: 'Save as Template',
+      deleteExercise: 'Delete Exercise',
+      deleteSession: 'Delete This Session',
+      deleteSuperset: 'Delete Superset',
+      uncheck: 'Uncheck',
+      clearFilter: 'Clear Filter',
+      markAsDone: 'Mark as Done',
+      switchToChart: 'Switch to Chart',
+      viewHistory: 'View History',
+      viewCues: 'View Coaching Cues',
+      viewExerciseDetails: 'View Exercise Details',
+      viewSupersetDetails: 'View Superset Details',
+      sendToWatch: 'Send to Watch ⌚',
+      createSuperset: 'Create Superset',
+      applyTemplateToColumn: 'Apply template to this column',
+      applyIntensityToRow: 'Apply intensity to this row',
+      restRowClear: 'Rest (clear this row)',
+      shrinkAndDiscard: 'Shrink and Discard',
+      confirmCreate: 'Confirm Create',
+      overwrite: 'Overwrite',
+      manualRest: 'Manual Rest',
+      manualRestStart: 'Start Rest Countdown Manually',
+      noteCta: 'Note',
+      previous: 'Previous',
+      next: 'Next',
+      clusterRestSeconds: '⏱️ Rest Seconds',
+      clusterEditNote: '📝 Edit Note',
+      clusterReorderExercises: '🔃 Reorder Exercises',
+      clusterDeleteExercise: '🗑️ Delete Exercise',
+      clusterHistoryA: '📖 Exercise History (A)',
+      clusterHistoryB: '📖 Exercise History (B)',
+    },
+
+    page: {
+      programs: 'Programs',
+      session: 'Session',
+      library: 'Library',
+      history: 'History',
+      exerciseDetail: 'Exercise Details',
+      exerciseHistory: 'Exercise History',
+      exerciseChart: 'Exercise Chart',
+      exerciseList: 'Exercise List',
+      exerciseSettings: 'Exercise Settings',
+      bodyMetrics: 'Body Metrics',
+      settings: 'Settings',
+      backupRestore: 'Backup / Restore',
+      supersetDetails: 'Superset Details',
+      wizardStep1: 'Program Name + Intensity',
+      wizardStep2: 'Cycle Setup',
+      wizardStep3: 'Cycle 1 Daily Content',
+      wizardStep4: 'Per-Cycle Intensity',
+      wizardStep5: 'Calendar Preview',
+      wizardStep6: 'Review and tap Create below.',
+      wizardStep5Hint: 'Expanded calendar — verify it looks right.',
+      selectProgram: 'Select Program',
+      selectProgramAlt: 'Select Program',
+      selectTemplate: 'Select Template',
+      selectIntensity: 'Select Intensity',
+      selectCycleLength: 'Select Cycle Length',
+      selectCycleCount: 'Select Cycle Count',
+      selectMonth: 'Select Month',
+      selectStartDate: 'Select Start Date',
+      selectProgramToLoad: 'Select Program to Load',
+      enterSupersetName: 'Enter superset name',
+      enterSupersetNameShort: 'Enter superset name',
+      enterExerciseName: 'Enter exercise name',
+      searchExercises: 'Type to search exercises',
+      programNamePlaceholder: 'Program Name',
+      newIntensityName: 'New intensity name',
+      intensityPlaceholder: 'Intensity (e.g. 10-12RM)',
+      intensityOptionalMulti: 'Intensity (optional, multiple)',
+      cycleLengthInput: 'Cycle Length (3–14 days)',
+      startDateInput: 'Start Date (yyyy-mm-dd)',
+      notePlaceholder: 'e.g. grip width, force focus, common mistakes...',
+      intensityExample: 'e.g. 10-12RM, II-1',
+      programNameExample: 'e.g. Hypertrophy-Q1',
+    },
+
+    alert: {
+      programNameExists: 'Program name already exists',
+      programNameExistsWarning: '⚠️ Program name already exists',
+      programNameExistsMsg: 'Please pick a different name.',
+      deleteSupersetQ: 'Delete this superset?',
+      deleteExerciseQ: 'Delete exercise?',
+      templateNotCreated: 'Template not yet created',
+      reorderFailed: 'Reorder failed',
+      deleteFailed: 'Delete failed',
+      saveFailed: 'Save failed',
+      readFailed: 'Read failed',
+      loadFailed: 'Load failed',
+      restoreFailed: 'Restore failed',
+      overwriteFailed: 'Overwrite failed',
+      importFailed: 'Import failed',
+      addDropsetFailed: 'Failed to add dropset',
+      addExerciseFailed: 'Failed to add exercise',
+      editFailed: 'Edit failed',
+      cannotDelete: 'Cannot delete',
+      cannotSwap: 'Cannot swap',
+      cannotOverwrite: 'Cannot overwrite',
+      cannotReadTemplate: 'Cannot read template',
+      cannotOpen: 'Cannot open',
+      cannotOpenEditor: 'Cannot open editor',
+      cannotStartSession: 'Cannot start session',
+      cannotCreateTemplate: 'Cannot create template',
+      failed: 'Failed',
+      noActiveSession: 'No active session found. Return to Today and start a session, then try again.',
+      sessionAlreadyInProgress: 'A session is already in progress',
+      endActiveSessionFirst: 'End the current session in the "Today" tab before starting a new one.',
+      exerciseNotFound: 'Exercise not found.',
+      exerciseNotFoundOrArchived: 'Exercise does not exist or has been archived.',
+      sourceCardNotFound: 'Source card for this exercise not found.',
+      sourceCardASideNotFound: 'Source card for superset A side not found.',
+      sourceCardBSideNotFound: 'Source card for superset B side not found.',
+      originalTemplateNotFound: 'Original template not found',
+      sessionTemplateMissing:
+        'This session has no linked template, or the original was deleted. Use "Save as Template" to create a new one.',
+      supersetNotFound: 'Superset does not exist or has been deleted.',
+      builtinExerciseNoEdit: 'Built-in exercises have no editable fields right now.',
+      builtinExerciseNoDelete: 'Built-in exercises cannot be deleted.',
+      dropsetMinimum: 'Dropset needs at least 2 sets (head + 1 follower). To delete the whole chain, swipe the head row.',
+      duplicateExerciseName: 'An exercise with this name already exists. Please rename.',
+      duplicateSupersetPair: 'A superset with this exercise pair already exists',
+      openExistingSupersetQ: 'Open the existing superset for editing?',
+      supersetExactlyTwo: 'Superset must contain exactly 2 exercises',
+      supersetNoDuplicates: 'Superset cannot have duplicate exercises',
+      supersetNameMaxLen: 'Superset name must be under 60 characters',
+      exerciseNameMaxLen: 'Exercise name must be under 60 characters',
+      colorHexFormat: 'color_hex must be 6-digit hex (#rrggbb) or null',
+      exerciseIdsNoEmpty: 'exercise_ids must not contain empty values',
+      muscleGroupOverlap: 'A muscle group cannot be both primary and secondary',
+      pickCategoryFirst: 'Please select a category',
+      pickEquipmentFirst: 'Please select an equipment type',
+      pickTwoExercises: 'Please select 2 exercises',
+      replaySessionQ: 'Replay session?',
+      replaySessionSupersetQ: 'Replay session (superset)?',
+      noTemplatePickFirst:
+        'Pick a template in a cell first, then come back to apply intensity.\n(Intensity can only attach to cells that have a template.)',
+      noTemplateOnRow: 'This row has no template',
+      shrinkProgramQ: 'Shrink program schedule?',
+      noTemplatesYet: 'No templates. Create one first, then come back.',
+      noOptionsToSelect: 'No options to select.',
+      noProgramsAvailable: 'No available Programs.',
+      noProgramsToLoad: 'No programs available to load',
+      programHasNoSubTag: 'This Program has no intensity history.',
+      cannotUndo: 'This cannot be undone.',
+      cannotUndoLong: 'This cannot be undone — the entire session, exercises, and records will be deleted.',
+      historyUnaffected: 'Historical session records are unaffected.',
+      allLoggedSetsDeleted: 'All logged sets will be deleted. This cannot be undone.',
+      discardChangesQ: 'Discard changes?',
+      discardChangesLong: 'Leaving will revert to the state before editing. All changes will be lost.',
+      discardSessionQ: 'Discard this session?',
+      enterPositiveOrSkip: 'Enter a positive number or tap Skip',
+      atLeastOneField: 'Fill in at least one field with a reasonable value',
+      atLeastOneBodyField: 'Fill in at least one field (Bodyweight / PBF / SMM)',
+      mustBeWithin500Kg: 'Must be within 0–500 kg',
+      invalidBodyweight: 'Invalid bodyweight',
+      invalidBodyweightLong: 'Invalid bodyweight (must be 0–500 kg)',
+      invalidPbf: 'PBF must be 0–100 %',
+      invalidSmm: 'Invalid SMM (must be 0–200 kg)',
+      invalidInput: 'Invalid input',
+      variantExists: 'Variant already exists',
+      notEnoughDataPoints: 'Not enough data points for this period. At least 2 sessions are required.',
+      defaultVariantUndeletable:
+        'This template has a "Default" variant (no program or intensity specified). It serves as a fallback for history prefill and cannot be deleted.\n\nTo delete a non-default variant, tap that row to open the editor and delete from the ⋯ menu.',
+    },
+
+    status: {
+      loading: 'Loading…',
+      ending: 'Ending…',
+      saved: 'Saved',
+      savedAsNew: 'Saved as new',
+      selected: 'Selected',
+      noTrainingRecords: 'No training records yet',
+      noRecords: 'No records yet',
+      noExercisesAdded: 'No exercises added yet',
+      noSupersetsYet: 'No supersets yet',
+      noSupersetsHint: 'Tap the "+" in the top right to create a new superset',
+      noExercisesMatch: 'No exercises match',
+      noRecordsUnderFilter: 'No records under current filters.',
+      noIntensity: 'No intensity',
+      freestyle: 'Freestyle',
+      restDay: 'Rest Day',
+      inProgress: '· In progress',
+      todayOutsideProgram: 'Today is outside the Program range',
+      hideUnchecked: 'Hide unchecked',
+      alreadyASide: 'Already A side',
+      alreadyBSide: 'Already B side',
+      excludeSupersets: 'Exclude supersets',
+      includeSupersets: 'Include supersets',
+      supersetsOnly: 'Supersets only',
+      highestVolumePerSession: '(Highest-volume set per session)',
+      heaviestSetPerSession: '(Heaviest set per session)',
+      maxEstimated1rmPerSession: '(Max estimated 1RM per session)',
+      firstTime: '(First time)',
+      allTimeWeightPr: '★ All-time Weight PR',
+      allTimeVolumePr: '★ All-time Volume PR',
+      autoShowRestCountdown: 'Auto-show rest countdown',
+      backupComingSlice15: 'Coming in slice 15.',
+      thisYear: 'This Year',
+      previousYear: 'Previous Year',
+      nextYear: 'Next Year',
+      missingExercise: 'Exercise Missing',
+      previousYearArrow: 'Previous Year',
+    },
+
+    equipment: {
+      槓鈴: 'Barbell',
+      啞鈴: 'Dumbbell',
+      史密斯機: 'Smith Machine',
+      滑輪: 'Cable',
+      固定機械: 'Machine',
+      自重: 'Bodyweight',
+      壺鈴: 'Kettlebell',
+      其他: 'Other',
+    },
+
+    muscleGroup: {
+      胸: 'Chest',
+      背: 'Back',
+      腿: 'Legs',
+      臀: 'Glutes',
+      肩: 'Shoulders',
+      斜方肌: 'Traps',
+      二頭: 'Biceps',
+      三頭: 'Triceps',
+      小腿: 'Calves',
+      小臂: 'Forearms',
+      核心: 'Core',
+      手臂: 'Arms',
+      側腹: 'Obliques',
+      // legacy: 前臂 was renamed to 小臂 in v010 → both map to Forearms
+      前臂: 'Forearms',
+      上胸: 'Upper Chest',
+      中下胸: 'Lower Chest',
+      背部: 'Back',
+      下背: 'Lower Back',
+      股四: 'Quads',
+      膕繩: 'Hamstrings',
+      上臀部: 'Upper Glutes',
+      下臀部: 'Lower Glutes',
+      前束: 'Front Delt',
+      中束: 'Mid Delt',
+      後束: 'Rear Delt',
+      內側二頭: 'Inner Biceps',
+      外側二頭: 'Outer Biceps',
+      // legacy: 二頭長頭/短頭 were renamed to 外側/內側二頭 in v010
+      二頭長頭: 'Outer Biceps',
+      二頭短頭: 'Inner Biceps',
+      腹肌: 'Abs',
+    },
+
+    loadType: {
+      bodyweight: 'Unloaded',
+      weighted: 'Weighted',
+      assisted: 'Assisted',
+    },
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
+// Type machinery
+// ---------------------------------------------------------------------------
+
+export type StringsTree = typeof strings.zh;
+export type Namespace = keyof StringsTree;
+export type StringKey<NS extends Namespace> = keyof StringsTree[NS];
+
+// ---------------------------------------------------------------------------
+// Locale state (module-level singleton; Phase 5 wraps this in a Context)
+// ---------------------------------------------------------------------------
+
+let currentLocale: Locale = 'zh';
+
+export function getLocale(): Locale {
+  return currentLocale;
+}
+
+export function setLocale(locale: Locale): void {
+  currentLocale = locale;
+}
+
+// ---------------------------------------------------------------------------
+// Lookup helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Type-safe namespaced lookup.
+ *
+ * Falls back to zh if the current locale's namespace/key is missing
+ * (shouldn't happen because the shape invariant is enforced by tests).
+ *
+ * @example
+ *   t('common', 'cancel') // 'Cancel' if locale==='en', '取消' otherwise
+ */
+export function t<NS extends Namespace, K extends StringKey<NS>>(ns: NS, key: K): string {
+  const localeTree = strings[currentLocale] as StringsTree;
+  const fromLocale = localeTree[ns][key] as string | undefined;
+  if (fromLocale !== undefined) return fromLocale;
+  // defensive fallback to zh (shape-invariant test should keep this dead in practice)
+  return strings.zh[ns][key] as unknown as string;
+}
+
+/**
+ * Equipment enum DB value (zh literal) → display label.
+ * Unknown DB values pass through unchanged so we never crash on legacy rows.
+ */
+export function tEquipment(dbValue: string): string {
+  const tree = strings[currentLocale].equipment as Record<string, string>;
+  return tree[dbValue] ?? dbValue;
+}
+
+/**
+ * Muscle group / muscle name DB value → display label.
+ * Legacy zh names (前臂 / 二頭長頭 / 二頭短頭) round-trip via aliases so older
+ * DBs still resolve to the post-v010 English label.
+ */
+export function tMuscleGroup(dbValue: string): string {
+  const tree = strings[currentLocale].muscleGroup as Record<string, string>;
+  return tree[dbValue] ?? dbValue;
+}
+
+/**
+ * Load-type label (NOT equipment) — paired with PR weight modifier display.
+ * Distinct from `tEquipment('自重')`: 自重 (equipment) → 'Bodyweight', but
+ * load_type bodyweight → 'Unloaded' to avoid collision in PR readout.
+ */
+export function tLoadType(loadType: 'bodyweight' | 'weighted' | 'assisted'): string {
+  return strings[currentLocale].loadType[loadType];
+}
