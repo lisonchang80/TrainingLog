@@ -58,6 +58,31 @@ export async function loadStatsSetRecords(
     range.end_ms
   );
 
+  // Separate fetch for primary M-layer muscle mapping (m:n) — kept outside
+  // the main JOIN to avoid row multiplication. We pull every primary
+  // (exercise_id, muscle_id) row referenced by the result set in one query
+  // then build a Map<exercise_id, muscle_id[]> for O(1) attach.
+  const exIds = Array.from(new Set(rows.map((r) => r.exercise_id)));
+  const exToMIds = new Map<string, string[]>();
+  if (exIds.length > 0) {
+    const placeholders = exIds.map(() => '?').join(',');
+    const muscleRows = await db.getAllAsync<{ exercise_id: string; muscle_id: string }>(
+      `SELECT exercise_id, muscle_id
+         FROM exercise_muscle
+        WHERE role = 'primary'
+          AND exercise_id IN (${placeholders})`,
+      ...exIds
+    );
+    for (const mr of muscleRows) {
+      let list = exToMIds.get(mr.exercise_id);
+      if (!list) {
+        list = [];
+        exToMIds.set(mr.exercise_id, list);
+      }
+      list.push(mr.muscle_id);
+    }
+  }
+
   return rows.map((r) => {
     const isLogged =
       r.is_skipped === 0 &&
@@ -80,6 +105,7 @@ export async function loadStatsSetRecords(
       set_id: r.set_id,
       exercise_id: r.exercise_id,
       mg_id: r.mg_id,
+      m_ids: exToMIds.get(r.exercise_id) ?? [],
       volume,
       is_logged: isLogged,
     };

@@ -47,6 +47,39 @@ export function mgFrequencyOverPeriod(
   return out;
 }
 
+/**
+ * Per-Muscle (M-layer) count of distinct Sessions where at least one logged set
+ * hit that muscle as a PRIMARY mover. Mirrors `mgFrequencyOverPeriod` but
+ * iterates `r.m_ids[]` (m:n) instead of the single `r.mg_id`.
+ *
+ * Multiple sets within the same Session targeting the same muscle → still +1
+ * only. Sets with an empty `m_ids` array (custom exercises lacking muscle
+ * mapping) are ignored.
+ *
+ * Added overnight 5/23 to drive the M-level body heatmap (ADR-0010 muscle
+ * layer + ADR-0009 §人體部位圖).
+ */
+export function mFrequencyOverPeriod(
+  records: readonly StatsSetRecord[]
+): Map<string, number> {
+  // m_id → Set<session_id>
+  const acc = new Map<string, Set<string>>();
+  for (const r of records) {
+    if (!r.is_logged) continue;
+    for (const mId of r.m_ids) {
+      let s = acc.get(mId);
+      if (!s) {
+        s = new Set();
+        acc.set(mId, s);
+      }
+      s.add(r.session_id);
+    }
+  }
+  const out = new Map<string, number>();
+  for (const [m, sessions] of acc) out.set(m, sessions.size);
+  return out;
+}
+
 // ---- 6-period histogram helpers (slice 9 smoke #5/#6) -----------------------
 //
 // User wants per-period charts on the X-axis labelled -5..0 (5 periods ago →

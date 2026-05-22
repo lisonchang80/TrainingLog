@@ -25,6 +25,7 @@ import {
   bucketBoundaries,
   capacityHistogramByMg,
   durationHistogram,
+  mFrequencyOverPeriod,
   mgFrequencyOverPeriod,
   percentileBucketize,
 } from '@/src/domain/stats/statsEngine';
@@ -34,7 +35,7 @@ import type {
   PeriodScale,
   StatsSetRecord,
 } from '@/src/domain/stats/types';
-import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
+import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
 import { getLocale, t, tMuscleGroup } from '@/src/i18n';
 
 /**
@@ -164,12 +165,27 @@ export function StatsPanel() {
     nonZeroMgs.forEach((x, i) => out.set(x.mg, buckets[i] as Quintile));
     return out;
   }, [freqByMg]);
-  // P1 placeholder: M-level (細部位) heatmap maps. Real frequency wiring
-  // lands in P2 once StatsSetRecord gains an `m_ids[]` field and
-  // `mFrequencyOverPeriod` exists. Until then the heatmap renders the
-  // M-layer silhouette in zero-grey (no quintile colors).
-  const freqByM = useMemo(() => new Map<string, number>(), []);
-  const mQuintile = useMemo(() => new Map<string, Quintile>(), []);
+  // M-level (細部位) heatmap derivation — mirrors the MG-level logic above
+  // but iterates the M-layer (19 anatomical muscles per ADR-0010) instead of
+  // the 11 muscle groups. `StatsSetRecord.m_ids` is the primary-role muscle
+  // list per set, populated by the stats repository via the `exercise_muscle`
+  // m:n table.
+  const freqByM = useMemo(
+    () => mFrequencyOverPeriod(currentBucketRecords),
+    [currentBucketRecords]
+  );
+  const mQuintile = useMemo(() => {
+    const out = new Map<string, Quintile>();
+    const nonZeroMs: { m: string; count: number }[] = [];
+    for (const m of MUSCLE_SEEDS) {
+      const c = freqByM.get(m.id) ?? 0;
+      if (c > 0) nonZeroMs.push({ m: m.id, count: c });
+    }
+    if (nonZeroMs.length === 0) return out;
+    const buckets = percentileBucketize(nonZeroMs.map((x) => x.count));
+    nonZeroMs.forEach((x, i) => out.set(x.m, buckets[i] as Quintile));
+    return out;
+  }, [freqByM]);
   const totalSessionsCurrent = useMemo(() => {
     const s = new Set<string>();
     for (const r of currentBucketRecords) s.add(r.session_id);
