@@ -40,8 +40,7 @@ export function SetNoteSheet({
   onCancel,
 }: SetNoteSheetProps) {
   const resolvedTitle = title ?? t('domain', 'note');
-  // TODO(i18n): set-specific placeholder distinct from exercise notePlaceholder — needs new strings.ts key.
-  const resolvedPlaceholder = placeholder ?? '這組想留下什麼？（例：RPE 8、左肘有點緊）';
+  const resolvedPlaceholder = placeholder ?? t('page', 'setNotePlaceholder');
   const [draft, setDraft] = useState(initialValue ?? '');
 
   useEffect(() => {
