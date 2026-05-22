@@ -50,6 +50,8 @@ UPDATE session
 
 ### 按鈕 1：「儲存模板」（覆蓋既有 Template + sibling rename 連動）
 
+> **2026-05-18 wave 12 修訂**：4-branch 收斂為 silent overwrite linked template（無 diff prompt / 無 sibling rename）；Freestyle 升級改走「另存模板」(TemplateMetaSheet)。詳見 ADR-0019 翻盤 ledger 2026-05-18 row。
+
 依 session 來源 + title 是否手動改過，分四種行為：
 
 | Session 來源 | title 狀態 | 行為 |
@@ -85,6 +87,8 @@ UPDATE session
 **邏輯一致性 sanity check（跟 ADR-0012 set logger 對照）**：Q15 set logger 鎖定「無二次確認」是因為**單筆 set 可立刻 redo**（再記一遍 30 秒）；session 級刪除**不可 redo**（PR / 統計 / 月曆 / 1-2 hr 的記錄全沒了），所以這裡需要 confirmation；friction 與不可逆性匹配。
 
 ## Save-back 共存（跟 ADR-0002 分工）
+
+> **2026-05-18 wave 12 修訂**：Save-back dialog 整題砍除、Save-back domain/repo/screen pipeline 退場；模板入口移至詳情頁 sticky 4-button bar。詳見 ADR-0019 翻盤 ledger 2026-05-18 row。
 
 兩個 trigger 點正交分工：
 
