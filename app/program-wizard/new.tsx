@@ -643,11 +643,7 @@ function DayPatternPanel({
   const weekdayLabels = tWeekdayLabels();
   return (
     <View style={styles.panel}>
-      <Text style={styles.hint}>
-        {/* TODO(i18n): missing key for "每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；強度在下一步逐週期選擇。" - consider page.wizardStep3Hint */}
-        每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；
-        強度在下一步逐週期選擇。
-      </Text>
+      <Text style={styles.hint}>{t('page', 'wizardStep3Hint')}</Text>
       {days.map((d) => {
         const plan = planByDay.get(d);
         return (
@@ -851,11 +847,7 @@ function CycleSubTagsPanel({
 
   return (
     <View style={styles.panel}>
-      <Text style={styles.hint}>
-        {/* TODO(i18n): missing key for "每個週期選一個強度（套用到此週期內所有有模板的日子）。留「通用」即不套用。" - consider page.wizardStep4Hint */}
-        每個週期選一個強度（套用到此週期內所有有模板的日子）。
-        留「通用」即不套用。
-      </Text>
+      <Text style={styles.hint}>{t('page', 'wizardStep4Hint')}</Text>
       {Array.from({ length: state.draft.cycle_count }, (_, c) => {
         const pick = cyclePick(c);
         const customMode = isCustomCycle(c, pick);
@@ -921,8 +913,7 @@ function CycleSubTagsPanel({
                       styles.pillText,
                       customMode && styles.pillTextActive,
                     ]}>
-                    {/* TODO(i18n): missing key for "自訂" - consider common.customPlain (currently common.custom is "· 自訂" with dot prefix) */}
-                    自訂
+                    {t('common', 'customPlain')}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -1117,32 +1108,27 @@ function ConfirmPanel({
       {overwriteTarget ? <OverwriteBanner target={overwriteTarget} /> : null}
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "名稱：" - consider page.summaryName */}
-          名稱：{state.draft.name || t('common', 'empty')}
+          {t('page', 'summaryName')}
+          {state.draft.name || t('common', 'empty')}
         </Text>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "強度：" / "、" list separator - consider page.summaryIntensity */}
-          強度：
+          {t('page', 'summaryIntensity')}
           {state.draft.sub_tags.length === 0
             ? t('common', 'noneParen')
-            : state.draft.sub_tags.join('、')}
+            : state.draft.sub_tags.join(t('page', 'summarySeparator'))}
         </Text>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "週期：" - consider page.summaryCycle */}
-          週期：{state.draft.cycle_count} × {tNDays(state.draft.cycle_length)}
+          {`${t('page', 'summaryCycle')}${state.draft.cycle_count} × ${tNDays(state.draft.cycle_length)}`}
         </Text>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "起始：" - consider page.summaryStart */}
-          起始：{state.draft.start_date ?? t('common', 'empty')}
+          {t('page', 'summaryStart')}
+          {state.draft.start_date ?? t('common', 'empty')}
         </Text>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "已配置 Day：" + " 天" suffix - consider dynamic helper tConfiguredDays(n) */}
-          已配置 Day：
-          {state.draft.dayPlans.filter((dp) => dp.template_id).length} 天
+          {`${t('page', 'summaryConfiguredDays')}${state.draft.dayPlans.filter((dp) => dp.template_id).length}${t('page', 'summarySuffixDays')}`}
         </Text>
         <Text style={styles.summaryLine}>
-          {/* TODO(i18n): missing key for "強度覆寫：" + " 項" - consider dynamic helper tIntensityOverrideCount(n) */}
-          強度覆寫：{state.draft.overrides.length} 項
+          {`${t('page', 'summaryIntensityOverride')}${state.draft.overrides.length}${t('page', 'summarySuffixCount')}`}
         </Text>
       </View>
       {err ? <Text style={styles.errorLine}>⚠️ {err}</Text> : null}
