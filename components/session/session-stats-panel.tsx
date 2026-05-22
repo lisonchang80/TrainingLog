@@ -92,8 +92,7 @@ export function SessionStatsPanel({
         <Pressable
           onPress={onTapDuration}
           accessibilityRole="button"
-          // TODO(i18n): accessibilityLabel needs new strings.ts key.
-          accessibilityLabel="編輯訓練時間"
+          accessibilityLabel={t('status', 'editTrainingTimeA11y')}
           style={({ pressed }) => [
             styles.tile,
             styles.tileTappable,
@@ -101,19 +100,16 @@ export function SessionStatsPanel({
           ]}
         >
           <Text style={styles.bigText}>{durationBig}</Text>
-          {/* TODO(i18n): 訓練時間 tile label — needs new strings.ts key. */}
-          <Text style={styles.labelText}>訓練時間</Text>
+          <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
         </Pressable>
       ) : (
         <View style={styles.tile}>
           <Text style={styles.bigText}>{durationBig}</Text>
-          {/* TODO(i18n): 訓練時間 tile label — needs new strings.ts key. */}
-          <Text style={styles.labelText}>訓練時間</Text>
+          <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
         </View>
       )}
       <Tile big={formatVolumeShort(stats.volume_kg)} label={t('domain', 'volume')} />
-      {/* TODO(i18n): 動作數 tile label — needs new strings.ts key. */}
-      <Tile big={String(stats.exercise_count)} label="動作數" />
+      <Tile big={String(stats.exercise_count)} label={t('status', 'exerciseCountLabel')} />
     </View>
   );
 }
