@@ -642,6 +642,20 @@ function DayPatternPanel({
                   {t('domain', 'rest')}
                 </Text>
               </Pressable>
+              {/* Wave 18g (smoke-revision) — 「+新建」 sits right after 休息 so
+                  it's reachable without scrolling past every existing template
+                  on small screens. */}
+              <Pressable
+                onPress={onCreateNewTemplate}
+                style={({ pressed }) => [
+                  styles.pill,
+                  styles.pillCreate,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={[styles.pillText, styles.pillCreateText]}>
+                  {t('button', 'newTemplate')}
+                </Text>
+              </Pressable>
               {templates.map((tpl) => {
                 const active = plan?.template_id === tpl.id;
                 return (
@@ -660,17 +674,6 @@ function DayPatternPanel({
                   </Pressable>
                 );
               })}
-              <Pressable
-                onPress={onCreateNewTemplate}
-                style={({ pressed }) => [
-                  styles.pill,
-                  styles.pillCreate,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={[styles.pillText, styles.pillCreateText]}>
-                  {t('button', 'newTemplate')}
-                </Text>
-              </Pressable>
             </ScrollView>
             {/* sub_tag UI removed — picked per-cycle in Step 4 (wave 18d) */}
           </View>
