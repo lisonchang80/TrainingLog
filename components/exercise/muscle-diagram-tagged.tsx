@@ -31,7 +31,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import type { MuscleRole } from '@/src/domain/exercise/types';
-import { tMuscleGroup } from '@/src/i18n';
+import { t, tMuscleGroup } from '@/src/i18n';
 
 const COLOR_PRIMARY = '#F26B3A';
 const COLOR_SECONDARY = '#7CB6E0';
@@ -173,11 +173,10 @@ export function MuscleDiagramTagged({
           mode={mode}
         />
       </View>
-      {/* TODO(i18n): muscle-role legend labels (主要/次要/未活化) — no keys yet (would be muscleRole.primary/secondary/inactive) */}
       <View style={styles.legendRow}>
-        <LegendItem color={COLOR_PRIMARY} label="主要" />
-        <LegendItem color={COLOR_SECONDARY} label="次要" />
-        {mode === 'edit' && <LegendItem color={COLOR_INACTIVE} label="未活化" />}
+        <LegendItem color={COLOR_PRIMARY} label={t('status', 'muscleRolePrimary')} />
+        <LegendItem color={COLOR_SECONDARY} label={t('status', 'muscleRoleSecondary')} />
+        {mode === 'edit' && <LegendItem color={COLOR_INACTIVE} label={t('status', 'muscleRoleInactive')} />}
       </View>
     </View>
   );
