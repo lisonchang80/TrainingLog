@@ -313,7 +313,7 @@ function translateError(err: string): string {
     case 'SMM_OUT_OF_RANGE':
       return 'SMM 數值不合理（應為 0–200 kg）';
     default:
-      return '輸入有誤';
+      return '輸入無效';
   }
 }
 
