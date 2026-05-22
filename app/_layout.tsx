@@ -87,6 +87,20 @@ export default function RootLayout() {
             name="exercise-picker"
             options={{ headerShown: false }}
           />
+          {/* Wave 18g smoke fix — template editor route MUST register
+              `headerShown: false` statically here rather than inline via
+              `<Stack.Screen options={{ headerShown: false }} />` inside
+              the component body. The editor renders its own `<View
+              style={styles.topBar}>` so the OS Stack header must be off,
+              but setting it dynamically from inside the modal-wizard's
+              presentation context triggers expo-router's "Dynamically
+              changing header's visibility in modals will result in
+              remounting the screen" path → infinite remount loop when
+              navigated to via `wizard/new ＋新建`. */}
+          <Stack.Screen
+            name="template/[id]"
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name="superset/new"
             options={{ presentation: 'modal', headerShown: false }}

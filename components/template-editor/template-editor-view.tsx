@@ -29,7 +29,6 @@
 
 import { randomUUID } from 'expo-crypto';
 import {
-  Stack,
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
@@ -1450,10 +1449,15 @@ export default function TemplateEditorView() {
   // Render
   // -----------------------------------------------------------------------
 
+  // Wave 18g smoke fix — headerShown is set statically at the layout
+  // level (app/_layout.tsx Stack.Screen name="template/[id]"). Inline
+  // `<Stack.Screen options={{ headerShown: false }} />` here caused a
+  // remount loop when this route was opened from inside the modal-
+  // presentation wizard (expo-router treats inline option changes inside
+  // a modal context as a "rebuild screen" trigger).
   if (!loaded) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.muted}>{tt('status', 'loading')}</Text>
       </SafeAreaView>
     );
@@ -1461,7 +1465,6 @@ export default function TemplateEditorView() {
   if (missing || !draft || !committed) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.empty}>
           {/* TODO(i18n): 「找不到此 template」 — no key (would be alert.templateNotFound or similar). */}
           <Text style={styles.emptyText}>找不到此 template</Text>
@@ -1859,7 +1862,8 @@ export default function TemplateEditorView() {
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        {/* headerShown handled by layout (see app/_layout.tsx) — see comment
+            above the loading early-return for the modal-remount-loop context. */}
         <View style={styles.topBar}>
           <Pressable onPress={onCancel} style={styles.topBtn}>
             <Text style={styles.topBtnText}>{tt('common', 'cancel')}</Text>
