@@ -398,7 +398,11 @@ export default function ProgramWizardScreen() {
             />
           )}
           {state.step === 'CycleSubTags' && (
-            <CycleSubTagsPanel state={state} setState={setState} />
+            <CycleSubTagsPanel
+              state={state}
+              setState={setState}
+              overwriteTarget={overwriteTarget}
+            />
           )}
           {state.step === 'Preview' && (
             <PreviewPanel state={state} templates={templates} />
@@ -717,15 +721,21 @@ function DayPatternPanel({
 function CycleSubTagsPanel({
   state,
   setState,
+  overwriteTarget,
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
+  // Wave 18g smoke fix — when set, 自訂 確認 also persists the new chip
+  // into v022 `program_sub_tag` immediately (parity with Step 1 → Step 2
+  // transition's recordProgramSubTag loop).
+  overwriteTarget: ProgramSummary | null;
 }) {
+  const db = useDatabase();
   // wave 18d: per-cycle ONE sub_tag picker (was per-(cycle, day) override).
   // We keep the underlying `overrides[]` shape unchanged so expandWizardDraft
   // and domain tests don't change — when user picks 強度 X for cycle c, we
   // expand to one override entry per day-with-template in that cycle, all
-  // with sub_tag = X. 「無強度」 = clear all entries for that cycle.
+  // with sub_tag = X. 「通用」 = clear all entries for that cycle.
   const dayIndicesWithTemplate = useMemo(
     () =>
       state.draft.dayPlans
@@ -750,6 +760,26 @@ function CycleSubTagsPanel({
   // pattern; enabled either explicitly via「自訂」 chip or implicitly when the
   // existing pick isn't in Step 1's list (e.g. user navigated back).
   const [customCycles, setCustomCycles] = useState<Set<number>>(new Set());
+  // Wave 18g smoke fix — per-cycle pending text. Replaces the old on-every-
+  // keystroke `pickCycle` write so the user can type freely and explicitly
+  // confirm. Keyed by cycle index; "" or absent = empty.
+  const [customDrafts, setCustomDrafts] = useState<Map<number, string>>(
+    new Map(),
+  );
+  const getCustomDraft = (c: number): string => customDrafts.get(c) ?? '';
+  const setCustomDraft = (c: number, v: string) =>
+    setCustomDrafts((prev) => {
+      const next = new Map(prev);
+      next.set(c, v);
+      return next;
+    });
+  const clearCustomDraft = (c: number) =>
+    setCustomDrafts((prev) => {
+      if (!prev.has(c)) return prev;
+      const next = new Map(prev);
+      next.delete(c);
+      return next;
+    });
   const isCustomCycle = (c: number, pick: string | null | 'mixed') => {
     if (customCycles.has(c)) return true;
     if (pick == null || pick === 'mixed') return false;
@@ -783,18 +813,52 @@ function CycleSubTagsPanel({
     setState(updateDraft(state, { overrides: [...without, ...added] }));
   };
 
+  // Wave 18g smoke fix — explicit confirm path for 自訂 free-form input.
+  // Validates non-empty, appends to draft.sub_tags (so it appears in other
+  // cycles' chip rows too), updates this cycle's overrides, then mirrors
+  // Step 1 → Step 2's recordProgramSubTag write when overwriteTarget is
+  // set so the new label is visible to the rest of the app immediately.
+  const confirmCustom = async (c: number) => {
+    const trimmed = getCustomDraft(c).trim();
+    if (!trimmed) return;
+    const newSubTags = state.draft.sub_tags.includes(trimmed)
+      ? state.draft.sub_tags
+      : [...state.draft.sub_tags, trimmed];
+    const without = state.draft.overrides.filter((o) => o.cycle_index !== c);
+    const added = dayIndicesWithTemplate.map((day_index) => ({
+      cycle_index: c,
+      day_index,
+      sub_tag: trimmed,
+    }));
+    // Combined state update so both fields land in one render.
+    setState(
+      updateDraft(state, {
+        sub_tags: newSubTags,
+        overrides: [...without, ...added],
+      }),
+    );
+    if (overwriteTarget) {
+      await recordProgramSubTag(db, overwriteTarget.id, trimmed);
+    }
+    exitCustom(c);
+    clearCustomDraft(c);
+  };
+
+  const cancelCustom = (c: number) => {
+    exitCustom(c);
+    clearCustomDraft(c);
+  };
+
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
-        {/* TODO(i18n): missing key for "每個週期選一個強度（套用到此週期內所有有模板的日子）。留「無強度」即不套用。" - consider page.wizardStep4Hint */}
+        {/* TODO(i18n): missing key for "每個週期選一個強度（套用到此週期內所有有模板的日子）。留「通用」即不套用。" - consider page.wizardStep4Hint */}
         每個週期選一個強度（套用到此週期內所有有模板的日子）。
-        留「無強度」即不套用。
+        留「通用」即不套用。
       </Text>
       {Array.from({ length: state.draft.cycle_count }, (_, c) => {
         const pick = cyclePick(c);
         const customMode = isCustomCycle(c, pick);
-        const customValue =
-          customMode && pick != null && pick !== 'mixed' ? pick : '';
         return (
           <View key={c} style={styles.cycleBlock}>
             <Text style={styles.cycleHeader}>{tCycleN(c + 1)}</Text>
@@ -818,7 +882,7 @@ function CycleSubTagsPanel({
                       styles.pillText,
                       !customMode && pick == null && styles.pillTextActive,
                     ]}>
-                    {t('status', 'noIntensity')}
+                    {t('common', 'default')}
                   </Text>
                 </Pressable>
                 {state.draft.sub_tags.map((tag) => {
@@ -864,13 +928,50 @@ function CycleSubTagsPanel({
               </ScrollView>
             ) : null}
             {customMode || state.draft.sub_tags.length === 0 ? (
-              <TextInput
-                style={[styles.input, styles.subTagInput]}
-                value={customValue}
-                onChangeText={(v) => pickCycle(c, v.trim() || null)}
-                placeholder={t('page', 'intensityPlaceholder')}
-                placeholderTextColor="#999"
-              />
+              <View style={styles.customRow}>
+                <TextInput
+                  style={[styles.input, styles.customInput]}
+                  value={getCustomDraft(c)}
+                  onChangeText={(v) => setCustomDraft(c, v)}
+                  onSubmitEditing={() => {
+                    void confirmCustom(c);
+                  }}
+                  returnKeyType="done"
+                  placeholder={t('page', 'intensityPlaceholder')}
+                  placeholderTextColor="#999"
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('common', 'cancel')}
+                  onPress={() => cancelCustom(c)}
+                  style={({ pressed }) => [
+                    styles.customBtn,
+                    styles.customBtnSecondary,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.customBtnSecondaryText}>
+                    {t('common', 'cancel')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('common', 'confirm')}
+                  onPress={() => {
+                    void confirmCustom(c);
+                  }}
+                  disabled={getCustomDraft(c).trim().length === 0}
+                  style={({ pressed }) => [
+                    styles.customBtn,
+                    styles.customBtnPrimary,
+                    getCustomDraft(c).trim().length === 0 &&
+                      styles.btnDisabled,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.customBtnPrimaryText}>
+                    {t('common', 'confirm')}
+                  </Text>
+                </Pressable>
+              </View>
             ) : null}
           </View>
         );
@@ -1142,6 +1243,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   subTagInput: { marginTop: 6 },
+  // Wave 18g smoke fix — 自訂 free-form input + 確認/取消 buttons in Step 4.
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  customInput: { flex: 1 },
+  customBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  customBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
+  customBtnSecondaryText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  customBtnPrimary: { backgroundColor: '#0a7ea4' },
+  customBtnPrimaryText: { fontSize: 13, fontWeight: '700', color: 'white' },
   tagChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
