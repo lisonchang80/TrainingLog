@@ -430,6 +430,10 @@ Inline 修訂 marker + 文件最末加新 amendment section（詳細指引見本
 | 新增 key | `app_settings.auto_popup_rest_timer BOOLEAN` | Auto-popup 開關 | DEFAULT 1 |
 | 新增 seed | `program` 表 seed「無 Program」entity | Q9.2 N1 — 避免 NULL 特殊邏輯 | name = "無 Program" 或 "無"，slice ship 時定 |
 | 既有提及 | `session.title TEXT NOT NULL DEFAULT ''` | per ADR-0014 v010 已 ship | - |
+| v019 | `set.session_exercise_id TEXT NULL` | set 隔離（同 session 內多個 reusable cluster 共用同 exercise 不互染）；index + backfill ORDER BY ordering ASC | NULL = legacy fallback（cross-session aggregate query 不動）|
+| v020 | `template.color_hex` backfill | overnight #56 wave 56 ship；CalendarGrid 12 色 palette；既有 templates 按 name hash 從 palette 取色 | TEXT NOT NULL DEFAULT '' |
+| v021 | `template_exercise.rest_sec` DROP | wave 13c orphan column 清除（per-Exercise rest_sec 已不掛 template_exercise；只剩 session_exercise.rest_sec）| n/a (drop) |
+| v022 | `program_sub_tag` (program_id, sub_tag, created_at) | 持久化字典；backfill from `template.sub_tag` + `program_cell.sub_tag`；CASCADE on program delete；三 SQL write path 統一呼叫 `recordProgramSubTag` (INSERT OR IGNORE) — **詳見 ADR-0021 (待建)**| n/a |
 
 **雙欄 `rest_sec` 同步**：`snapshotForSession` 拓展現有 cluster snapshot 邏輯（per ADR-0018 v014 Q4.1）順帶複製 `rest_sec` 欄位；NULL → NULL 照抄（不在 snapshot 時 coalesce 預設 60s——預設值用「inherit NULL」這個 sentinel 表達，避免歷史 session 紀錄被未來改變的「系統預設」回溯影響）。
 
