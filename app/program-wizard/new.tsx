@@ -28,7 +28,7 @@ import {
 import {
   attachTemplateToProgram,
   createTemplate,
-  listTemplates,
+  listTemplateGroupsByName,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import {
@@ -88,7 +88,16 @@ export default function ProgramWizardScreen() {
     useState<ProgramSummary | null>(null);
 
   const refresh = useCallback(async () => {
-    const [ts, ps] = await Promise.all([listTemplates(db), listPrograms(db)]);
+    // Wave 18g (smoke-revision) — dedupe-by-name. ADR-0003 lets siblings
+    // share a name across different (program_id, sub_tag) triples; the
+    // Step 3 picker is "pick a template name to fan out", so duplicate
+    // names are redundant clutter. `listTemplateGroupsByName` collapses
+    // siblings to the MAX(updated_at) representative (same helper as
+    // Templates tab + Programs row picker).
+    const [ts, ps] = await Promise.all([
+      listTemplateGroupsByName(db),
+      listPrograms(db),
+    ]);
     setTemplates(ts);
     setPrograms(ps);
   }, [db]);
