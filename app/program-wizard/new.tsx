@@ -408,55 +408,20 @@ function DayPatternPanel({
 }) {
   const days = Array.from({ length: state.draft.cycle_length }, (_, i) => i);
   const planByDay = useMemo(() => {
-    const m = new Map<number, { template_id: string | null; sub_tag: string | null }>();
+    const m = new Map<number, { template_id: string | null }>();
     for (const dp of state.draft.dayPlans) {
-      m.set(dp.day_index, {
-        template_id: dp.template_id,
-        sub_tag: dp.sub_tag,
-      });
+      m.set(dp.day_index, { template_id: dp.template_id });
     }
     return m;
   }, [state.draft.dayPlans]);
 
-  // Per-day「自訂」 toggle for sub_tag — when on, render an inline TextInput
-  // for free-form strength; otherwise show the chip row from Step 1's
-  // `sub_tags` list. We also auto-treat a sub_tag that isn't in the chip list
-  // as 自訂 mode so the input reappears with the previously typed value.
-  const [customSubTagDays, setCustomSubTagDays] = useState<Set<number>>(
-    new Set()
-  );
-  const isCustomDay = (d: number, plan: { sub_tag: string | null } | undefined) => {
-    if (customSubTagDays.has(d)) return true;
-    if (plan?.sub_tag == null) return false;
-    return !state.draft.sub_tags.includes(plan.sub_tag);
-  };
-  const enterCustomMode = (d: number) => {
-    setCustomSubTagDays((prev) => {
-      const next = new Set(prev);
-      next.add(d);
-      return next;
-    });
-  };
-  const exitCustomMode = (d: number) => {
-    setCustomSubTagDays((prev) => {
-      if (!prev.has(d)) return prev;
-      const next = new Set(prev);
-      next.delete(d);
-      return next;
-    });
-  };
-
-  const updateDay = (
-    day_index: number,
-    patch: Partial<{ template_id: string | null; sub_tag: string | null }>
-  ) => {
-    const existing = planByDay.get(day_index) ?? {
-      template_id: null,
-      sub_tag: null,
-    };
-    const merged = { ...existing, ...patch };
+  // wave 18d: Step 3 captures template ONLY (no sub_tag). Strength is now
+  // picked per-cycle in Step 4. We keep `dayPlans[].sub_tag` in the schema
+  // but always write null here — expandWizardDraft + Step 4's per-cycle
+  // override expansion drives the final cell.sub_tag.
+  const setTemplate = (day_index: number, template_id: string | null) => {
     const next = state.draft.dayPlans.filter((dp) => dp.day_index !== day_index);
-    next.push({ day_index, ...merged });
+    next.push({ day_index, template_id, sub_tag: null });
     next.sort((a, b) => a.day_index - b.day_index);
     setState(updateDraft(state, { dayPlans: next }));
   };
@@ -465,12 +430,10 @@ function DayPatternPanel({
     <View style={styles.panel}>
       <Text style={styles.hint}>
         每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；
-        若各週期強度不同，下一步可逐週期調整。
+        強度在下一步逐週期選擇。
       </Text>
       {days.map((d) => {
         const plan = planByDay.get(d);
-        const showSubTagRow = plan?.template_id != null;
-        const customMode = isCustomDay(d, plan);
         return (
           <View key={d} style={styles.dayCard}>
             <Text style={styles.dayLabel}>
@@ -484,10 +447,7 @@ function DayPatternPanel({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.pillsRow}>
               <Pressable
-                onPress={() => {
-                  exitCustomMode(d);
-                  updateDay(d, { template_id: null, sub_tag: null });
-                }}
+                onPress={() => setTemplate(d, null)}
                 style={({ pressed }) => [
                   styles.pill,
                   plan?.template_id == null && styles.pillActive,
@@ -506,7 +466,7 @@ function DayPatternPanel({
                 return (
                   <Pressable
                     key={t.id}
-                    onPress={() => updateDay(d, { template_id: t.id })}
+                    onPress={() => setTemplate(d, t.id)}
                     style={({ pressed }) => [
                       styles.pill,
                       active && styles.pillActive,
@@ -531,97 +491,7 @@ function DayPatternPanel({
                 </Text>
               </Pressable>
             </ScrollView>
-            {showSubTagRow ? (
-              state.draft.sub_tags.length > 0 ? (
-                <>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.pillsRow}>
-                    <Pressable
-                      onPress={() => {
-                        exitCustomMode(d);
-                        updateDay(d, { sub_tag: null });
-                      }}
-                      style={({ pressed }) => [
-                        styles.pill,
-                        !customMode && plan?.sub_tag == null && styles.pillActive,
-                        pressed && styles.btnPressed,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.pillText,
-                          !customMode &&
-                            plan?.sub_tag == null &&
-                            styles.pillTextActive,
-                        ]}>
-                        無強度
-                      </Text>
-                    </Pressable>
-                    {state.draft.sub_tags.map((tag) => {
-                      const active = !customMode && plan?.sub_tag === tag;
-                      return (
-                        <Pressable
-                          key={tag}
-                          onPress={() => {
-                            exitCustomMode(d);
-                            updateDay(d, { sub_tag: tag });
-                          }}
-                          style={({ pressed }) => [
-                            styles.pill,
-                            active && styles.pillActive,
-                            pressed && styles.btnPressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.pillText,
-                              active && styles.pillTextActive,
-                            ]}>
-                            {tag}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                    <Pressable
-                      onPress={() => enterCustomMode(d)}
-                      style={({ pressed }) => [
-                        styles.pill,
-                        customMode && styles.pillActive,
-                        pressed && styles.btnPressed,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.pillText,
-                          customMode && styles.pillTextActive,
-                        ]}>
-                        自訂
-                      </Text>
-                    </Pressable>
-                  </ScrollView>
-                  {customMode ? (
-                    <TextInput
-                      style={[styles.input, styles.subTagInput]}
-                      value={plan?.sub_tag ?? ''}
-                      onChangeText={(v) =>
-                        updateDay(d, { sub_tag: v || null })
-                      }
-                      placeholder="強度（例：10-12RM）"
-                      placeholderTextColor="#999"
-                    />
-                  ) : null}
-                </>
-              ) : (
-                <TextInput
-                  style={[styles.input, styles.subTagInput]}
-                  value={plan?.sub_tag ?? ''}
-                  onChangeText={(v) =>
-                    updateDay(d, { sub_tag: v || null })
-                  }
-                  placeholder="強度（例：10-12RM）"
-                  placeholderTextColor="#999"
-                />
-              )
-            ) : null}
+            {/* sub_tag UI removed — picked per-cycle in Step 4 (wave 18d) */}
           </View>
         );
       })}
@@ -636,53 +506,158 @@ function CycleSubTagsPanel({
   state: WizardState;
   setState: (s: WizardState) => void;
 }) {
-  const dayPlansWithTemplate = state.draft.dayPlans.filter(
-    (dp) => dp.template_id != null
+  // wave 18d: per-cycle ONE sub_tag picker (was per-(cycle, day) override).
+  // We keep the underlying `overrides[]` shape unchanged so expandWizardDraft
+  // and domain tests don't change — when user picks 強度 X for cycle c, we
+  // expand to one override entry per day-with-template in that cycle, all
+  // with sub_tag = X. 「無強度」 = clear all entries for that cycle.
+  const dayIndicesWithTemplate = useMemo(
+    () =>
+      state.draft.dayPlans
+        .filter((dp) => dp.template_id != null)
+        .map((dp) => dp.day_index)
+        .sort((a, b) => a - b),
+    [state.draft.dayPlans]
   );
-  const overrideMap = new Map(
-    state.draft.overrides.map((o) => [`${o.cycle_index}:${o.day_index}`, o.sub_tag])
-  );
-  const update = (cycle_index: number, day_index: number, sub_tag: string | null) => {
-    const next = state.draft.overrides.filter(
-      (o) => !(o.cycle_index === cycle_index && o.day_index === day_index)
-    );
-    if (sub_tag != null) {
-      next.push({ cycle_index, day_index, sub_tag });
+
+  // Inspect overrides for cycle c → detect the cycle's current uniform pick
+  // (all days share the same sub_tag) or "mixed" (heterogeneous from legacy
+  // data — treated as nothing selected for UI feedback).
+  const cyclePick = (c: number): string | null | 'mixed' => {
+    const entries = state.draft.overrides.filter((o) => o.cycle_index === c);
+    if (entries.length === 0) return null;
+    const first = entries[0].sub_tag;
+    const uniform = entries.every((e) => e.sub_tag === first);
+    return uniform ? first : 'mixed';
+  };
+
+  // Custom-mode (free-form input) per cycle. Mirror Step-1's chip + 自訂
+  // pattern; enabled either explicitly via「自訂」 chip or implicitly when the
+  // existing pick isn't in Step 1's list (e.g. user navigated back).
+  const [customCycles, setCustomCycles] = useState<Set<number>>(new Set());
+  const isCustomCycle = (c: number, pick: string | null | 'mixed') => {
+    if (customCycles.has(c)) return true;
+    if (pick == null || pick === 'mixed') return false;
+    return !state.draft.sub_tags.includes(pick);
+  };
+  const enterCustom = (c: number) =>
+    setCustomCycles((prev) => {
+      const next = new Set(prev);
+      next.add(c);
+      return next;
+    });
+  const exitCustom = (c: number) =>
+    setCustomCycles((prev) => {
+      if (!prev.has(c)) return prev;
+      const next = new Set(prev);
+      next.delete(c);
+      return next;
+    });
+
+  const pickCycle = (c: number, sub_tag: string | null) => {
+    const without = state.draft.overrides.filter((o) => o.cycle_index !== c);
+    if (sub_tag == null) {
+      setState(updateDraft(state, { overrides: without }));
+      return;
     }
-    setState(updateDraft(state, { overrides: next }));
+    const added = dayIndicesWithTemplate.map((day_index) => ({
+      cycle_index: c,
+      day_index,
+      sub_tag,
+    }));
+    setState(updateDraft(state, { overrides: [...without, ...added] }));
   };
 
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
-        若各 cycle 強度相同，可直接 Skip。否則為每個 cycle 的特定 day
-        覆寫強度（留白＝沿用 Day 預設）。
+        每個週期選一個強度（套用到此週期內所有有模板的日子）。
+        留「無強度」即不套用。
       </Text>
-      {Array.from({ length: state.draft.cycle_count }, (_, c) => (
-        <View key={c} style={styles.cycleBlock}>
-          <Text style={styles.cycleHeader}>Cycle {c + 1}</Text>
-          {dayPlansWithTemplate.map((dp) => {
-            const key = `${c}:${dp.day_index}`;
-            const value = overrideMap.has(key)
-              ? overrideMap.get(key) ?? ''
-              : '';
-            return (
-              <View key={dp.day_index} style={styles.subTagRow}>
-                <Text style={styles.subTagDayLabel}>D{dp.day_index + 1}</Text>
-                <TextInput
-                  style={[styles.input, styles.subTagOverrideInput]}
-                  value={value}
-                  onChangeText={(v) =>
-                    update(c, dp.day_index, v ? v : null)
-                  }
-                  placeholder={dp.sub_tag ?? '（沿用 Day 預設）'}
-                  placeholderTextColor="#999"
-                />
-              </View>
-            );
-          })}
-        </View>
-      ))}
+      {Array.from({ length: state.draft.cycle_count }, (_, c) => {
+        const pick = cyclePick(c);
+        const customMode = isCustomCycle(c, pick);
+        const customValue =
+          customMode && pick != null && pick !== 'mixed' ? pick : '';
+        return (
+          <View key={c} style={styles.cycleBlock}>
+            <Text style={styles.cycleHeader}>週期 {c + 1}</Text>
+            {state.draft.sub_tags.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.pillsRow}>
+                <Pressable
+                  onPress={() => {
+                    exitCustom(c);
+                    pickCycle(c, null);
+                  }}
+                  style={({ pressed }) => [
+                    styles.pill,
+                    !customMode && pick == null && styles.pillActive,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.pillText,
+                      !customMode && pick == null && styles.pillTextActive,
+                    ]}>
+                    無強度
+                  </Text>
+                </Pressable>
+                {state.draft.sub_tags.map((tag) => {
+                  const active = !customMode && pick === tag;
+                  return (
+                    <Pressable
+                      key={tag}
+                      onPress={() => {
+                        exitCustom(c);
+                        pickCycle(c, tag);
+                      }}
+                      style={({ pressed }) => [
+                        styles.pill,
+                        active && styles.pillActive,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.pillText,
+                          active && styles.pillTextActive,
+                        ]}>
+                        {tag}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => enterCustom(c)}
+                  style={({ pressed }) => [
+                    styles.pill,
+                    customMode && styles.pillActive,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.pillText,
+                      customMode && styles.pillTextActive,
+                    ]}>
+                    自訂
+                  </Text>
+                </Pressable>
+              </ScrollView>
+            ) : null}
+            {customMode || state.draft.sub_tags.length === 0 ? (
+              <TextInput
+                style={[styles.input, styles.subTagInput]}
+                value={customValue}
+                onChangeText={(v) => pickCycle(c, v.trim() || null)}
+                placeholder="強度（例：10-12RM）"
+                placeholderTextColor="#999"
+              />
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 }
