@@ -22,6 +22,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import {
   attachTemplateToProgram,
+  createTemplate,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -71,6 +72,24 @@ export default function ProgramWizardScreen() {
       refresh();
     }, [refresh])
   );
+
+  // Wizard Step 3 entry point — pre-create a template with placeholder name
+  // and push to the template editor without any `fromX` params, so the editor
+  // runs in plain edit mode. On save the editor calls `router.back()`, which
+  // returns to this wizard with state intact; useFocusEffect re-fetches the
+  // templates list so the new template auto-appears as a selectable pill.
+  const onCreateNewTemplate = useCallback(async () => {
+    try {
+      const id = randomUUID();
+      await createTemplate(db, { id, name: '新模板' });
+      router.push(`/template/${id}`);
+    } catch (e) {
+      Alert.alert(
+        '無法建立模板',
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+  }, [db, router]);
 
   const onPrev = () => {
     if (isFirstStep(state.step)) {
@@ -160,6 +179,7 @@ export default function ProgramWizardScreen() {
               state={state}
               setState={setState}
               templates={templates}
+              onCreateNewTemplate={onCreateNewTemplate}
             />
           )}
           {state.step === 'CycleSubTags' && (
@@ -381,10 +401,12 @@ function DayPatternPanel({
   state,
   setState,
   templates,
+  onCreateNewTemplate,
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
   templates: TemplateSummary[];
+  onCreateNewTemplate: () => Promise<void>;
 }) {
   const days = Array.from({ length: state.draft.cycle_length }, (_, i) => i);
   const planByDay = useMemo(() => {
@@ -397,6 +419,34 @@ function DayPatternPanel({
     }
     return m;
   }, [state.draft.dayPlans]);
+
+  // Per-day「自訂」 toggle for sub_tag — when on, render an inline TextInput
+  // for free-form strength; otherwise show the chip row from Step 1's
+  // `sub_tags` list. We also auto-treat a sub_tag that isn't in the chip list
+  // as 自訂 mode so the input reappears with the previously typed value.
+  const [customSubTagDays, setCustomSubTagDays] = useState<Set<number>>(
+    new Set()
+  );
+  const isCustomDay = (d: number, plan: { sub_tag: string | null } | undefined) => {
+    if (customSubTagDays.has(d)) return true;
+    if (plan?.sub_tag == null) return false;
+    return !state.draft.sub_tags.includes(plan.sub_tag);
+  };
+  const enterCustomMode = (d: number) => {
+    setCustomSubTagDays((prev) => {
+      const next = new Set(prev);
+      next.add(d);
+      return next;
+    });
+  };
+  const exitCustomMode = (d: number) => {
+    setCustomSubTagDays((prev) => {
+      if (!prev.has(d)) return prev;
+      const next = new Set(prev);
+      next.delete(d);
+      return next;
+    });
+  };
 
   const updateDay = (
     day_index: number,
@@ -416,11 +466,13 @@ function DayPatternPanel({
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
-        每天選擇一個 Template（可留白為休息日）。Cycle 1 的選擇會 fan-out 到每個 cycle；
-        若各 cycle 強度不同，下一步可逐 cycle 調整。
+        每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；
+        若各週期強度不同，下一步可逐週期調整。
       </Text>
       {days.map((d) => {
         const plan = planByDay.get(d);
+        const showSubTagRow = plan?.template_id != null;
+        const customMode = isCustomDay(d, plan);
         return (
           <View key={d} style={styles.dayCard}>
             <Text style={styles.dayLabel}>
@@ -434,7 +486,10 @@ function DayPatternPanel({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.pillsRow}>
               <Pressable
-                onPress={() => updateDay(d, { template_id: null, sub_tag: null })}
+                onPress={() => {
+                  exitCustomMode(d);
+                  updateDay(d, { template_id: null, sub_tag: null });
+                }}
                 style={({ pressed }) => [
                   styles.pill,
                   plan?.template_id == null && styles.pillActive,
@@ -466,17 +521,108 @@ function DayPatternPanel({
                   </Pressable>
                 );
               })}
+              <Pressable
+                onPress={onCreateNewTemplate}
+                style={({ pressed }) => [
+                  styles.pill,
+                  styles.pillCreate,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={[styles.pillText, styles.pillCreateText]}>
+                  ＋ 新建
+                </Text>
+              </Pressable>
             </ScrollView>
-            {plan?.template_id ? (
-              <TextInput
-                style={[styles.input, styles.subTagInput]}
-                value={plan?.sub_tag ?? ''}
-                onChangeText={(v) =>
-                  updateDay(d, { sub_tag: v || null })
-                }
-                placeholder="強度（例：10-12RM）"
-                placeholderTextColor="#999"
-              />
+            {showSubTagRow ? (
+              state.draft.sub_tags.length > 0 ? (
+                <>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.pillsRow}>
+                    <Pressable
+                      onPress={() => {
+                        exitCustomMode(d);
+                        updateDay(d, { sub_tag: null });
+                      }}
+                      style={({ pressed }) => [
+                        styles.pill,
+                        !customMode && plan?.sub_tag == null && styles.pillActive,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.pillText,
+                          !customMode &&
+                            plan?.sub_tag == null &&
+                            styles.pillTextActive,
+                        ]}>
+                        無強度
+                      </Text>
+                    </Pressable>
+                    {state.draft.sub_tags.map((tag) => {
+                      const active = !customMode && plan?.sub_tag === tag;
+                      return (
+                        <Pressable
+                          key={tag}
+                          onPress={() => {
+                            exitCustomMode(d);
+                            updateDay(d, { sub_tag: tag });
+                          }}
+                          style={({ pressed }) => [
+                            styles.pill,
+                            active && styles.pillActive,
+                            pressed && styles.btnPressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.pillText,
+                              active && styles.pillTextActive,
+                            ]}>
+                            {tag}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    <Pressable
+                      onPress={() => enterCustomMode(d)}
+                      style={({ pressed }) => [
+                        styles.pill,
+                        customMode && styles.pillActive,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.pillText,
+                          customMode && styles.pillTextActive,
+                        ]}>
+                        自訂
+                      </Text>
+                    </Pressable>
+                  </ScrollView>
+                  {customMode ? (
+                    <TextInput
+                      style={[styles.input, styles.subTagInput]}
+                      value={plan?.sub_tag ?? ''}
+                      onChangeText={(v) =>
+                        updateDay(d, { sub_tag: v || null })
+                      }
+                      placeholder="強度（例：10-12RM）"
+                      placeholderTextColor="#999"
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <TextInput
+                  style={[styles.input, styles.subTagInput]}
+                  value={plan?.sub_tag ?? ''}
+                  onChangeText={(v) =>
+                    updateDay(d, { sub_tag: v || null })
+                  }
+                  placeholder="強度（例：10-12RM）"
+                  placeholderTextColor="#999"
+                />
+              )
             ) : null}
           </View>
         );
@@ -710,6 +856,13 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: '#0a7ea4' },
   pillText: { fontSize: 13, fontWeight: '500' },
   pillTextActive: { color: 'white' },
+  pillCreate: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#0a7ea4',
+    borderStyle: 'dashed',
+  },
+  pillCreateText: { color: '#0a7ea4', fontWeight: '600' },
   cycleBlock: {
     padding: 12,
     borderRadius: 10,
