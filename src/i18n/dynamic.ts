@@ -387,3 +387,70 @@ export function tOverwriteBlockedByActiveSession(programName: string): string {
     ? `"${programName}" has an in-progress session. Please finish or discard it first.`
     : `「${programName}」有進行中的 session，請先完成或捨棄。`;
 }
+
+// ---------------------------------------------------------------------------
+// Muscle (M layer) label translator — overnight 5/23 anatomy M-level heatmap.
+//
+// Maps the 18 stable M_* IDs from `src/db/seed/v006ExerciseLibrary.ts` to a
+// short display label suitable for body-heatmap callouts. zh literal mirrors
+// the MUSCLE_SEEDS `name` column (same source-of-truth as the DB seed); en
+// uses a short anatomical label tuned for the SVG label column width.
+//
+// Unknown IDs pass through unchanged so legacy / custom rows never crash.
+// ---------------------------------------------------------------------------
+
+const M_LABELS_ZH: Record<string, string> = {
+  'm-upper-chest': '上胸',
+  'm-lower-chest': '中下胸',
+  'm-back': '背部',
+  'm-lower-back': '下背',
+  'm-quad': '股四',
+  'm-hamstring': '膕繩',
+  'm-upper-glute': '上臀',
+  'm-lower-glute': '下臀',
+  'm-front-delt': '前束',
+  'm-mid-delt': '中束',
+  'm-rear-delt': '後束',
+  'm-trap': '斜方',
+  'm-bicep-long': '二頭外',
+  'm-bicep-short': '二頭內',
+  'm-tricep': '三頭',
+  'm-calf': '小腿',
+  'm-forearm': '小臂',
+  'm-oblique': '側腹',
+  'm-abs': '腹肌',
+};
+
+const M_LABELS_EN: Record<string, string> = {
+  'm-upper-chest': 'Upper Chest',
+  'm-lower-chest': 'Lower Chest',
+  'm-back': 'Back',
+  'm-lower-back': 'Lower Back',
+  'm-quad': 'Quads',
+  'm-hamstring': 'Hamstring',
+  'm-upper-glute': 'Upper Glute',
+  'm-lower-glute': 'Lower Glute',
+  'm-front-delt': 'Front Delt',
+  'm-mid-delt': 'Side Delt',
+  'm-rear-delt': 'Rear Delt',
+  'm-trap': 'Trap',
+  'm-bicep-long': 'Bicep Outer',
+  'm-bicep-short': 'Bicep Inner',
+  'm-tricep': 'Tricep',
+  'm-calf': 'Calf',
+  'm-forearm': 'Forearm',
+  'm-oblique': 'Obliques',
+  'm-abs': 'Abs',
+};
+
+/**
+ * Muscle (M layer) ID → localized short label. Unknown IDs pass through.
+ *
+ * @example
+ *   tMuscle('m-quad') // zh → '股四', en → 'Quads'
+ *   tMuscle('m-unknown') // 'm-unknown' (pass-through)
+ */
+export function tMuscle(mId: string): string {
+  const table = isEn() ? M_LABELS_EN : M_LABELS_ZH;
+  return table[mId] ?? mId;
+}

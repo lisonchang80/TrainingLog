@@ -322,6 +322,9 @@ export const strings = {
       newIntensityWithExamplePlaceholder: '輸入新強度標籤（如 5x5、最大力量）',
       noteEditorPlaceholder: '提示、cue、注意事項…',
       muscleTagHelper: '點標籤切換：未選 → 主要(橘) → 次要(藍) → 取消。空白時動作詳情頁不顯示解剖圖。',
+      // Body heatmap M-layer view column headers.
+      bodyFront: '正面',
+      bodyBack: '背面',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -884,6 +887,9 @@ export const strings = {
       newIntensityWithExamplePlaceholder: 'Enter new intensity tag (e.g. 5x5, Max Strength)',
       noteEditorPlaceholder: 'Tips, cues, reminders...',
       muscleTagHelper: 'Tap tags to cycle: unselected → primary (orange) → secondary (blue) → cleared. When empty, the anatomy diagram is hidden on the exercise detail page.',
+      // Body heatmap M-layer view column headers.
+      bodyFront: 'Front',
+      bodyBack: 'Back',
     },
 
     alert: {

@@ -164,6 +164,12 @@ export function StatsPanel() {
     nonZeroMgs.forEach((x, i) => out.set(x.mg, buckets[i] as Quintile));
     return out;
   }, [freqByMg]);
+  // P1 placeholder: M-level (細部位) heatmap maps. Real frequency wiring
+  // lands in P2 once StatsSetRecord gains an `m_ids[]` field and
+  // `mFrequencyOverPeriod` exists. Until then the heatmap renders the
+  // M-layer silhouette in zero-grey (no quintile colors).
+  const freqByM = useMemo(() => new Map<string, number>(), []);
+  const mQuintile = useMemo(() => new Map<string, Quintile>(), []);
   const totalSessionsCurrent = useMemo(() => {
     const s = new Set<string>();
     for (const r of currentBucketRecords) s.add(r.session_id);
@@ -272,7 +278,12 @@ export function StatsPanel() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('page', 'bodyOverview')} · {currentBucket.label}</Text>
         <Text style={styles.cardSubtitle}>{t('status', 'heatmapSubtitle')}</Text>
-        <BodyHeatmap mgQuintile={mgQuintile} mgCount={freqByMg} />
+        {/* P1 (overnight 5/23 anatomy M-level): BodyHeatmap props rename
+            mgQuintile→mQuintile + mgCount→mCount. Real M-level frequency
+            wiring lands in P2 (extends StatsSetRecord with m_ids[] +
+            mFrequencyOverPeriod). For now we pass empty maps so the heatmap
+            renders the anatomical M-level silhouette in zero-grey. */}
+        <BodyHeatmap mQuintile={mQuintile} mCount={freqByM} />
         <BodyHeatmapLegend />
         {totalSessionsCurrent === 0 ? (
           <Text style={styles.emptyText}>{t('status', 'noTrainingThisPeriod')}</Text>
