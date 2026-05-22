@@ -45,7 +45,23 @@ import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
-import { t, tAssistedEffective, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+import { getLocale, t, tAssistedEffective, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+
+/**
+ * Inline dynamic helpers — kept local rather than added to `src/i18n/dynamic.ts`
+ * (single-page usage; no callers outside this file).
+ */
+function tTotalSessionsLast7d(total: number, last7: number): string {
+  return getLocale() === 'en'
+    ? `${total} sessions · ${last7} in the last 7 days`
+    : `共 ${total} 次 Session · 最近 7 天 ${last7} 次`;
+}
+
+function tSessionSetCountAndVolume(setCount: number, volumeFormatted: string): string {
+  return getLocale() === 'en'
+    ? `${setCount} sets · ${t('domain', 'volume')} ${volumeFormatted}`
+    : `${setCount} 組 · ${t('domain', 'volume')} ${volumeFormatted}`;
+}
 
 /**
  * PR bucket labels come from `src/domain/pr/buckets.ts::bucketLabel` as raw
@@ -846,9 +862,8 @@ function HistoryPageContent({
               partnerName={partnerName}
               currentSide={currentSide}
             />
-            {/* TODO(i18n): no key for "還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。" empty-state copy */}
             <Text style={styles.empty}>
-              還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
+              {t('status', 'noHistoryYet')}
             </Text>
           </View>
         ) : (
@@ -893,8 +908,7 @@ function HistoryPageContent({
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
                 <Text style={styles.advancedHeaderText}>
-                  {/* TODO(i18n): no key for "進階篩選" advanced-filter header */}
-                  進階篩選 {advancedOpen ? '▲' : '▼'}
+                  {t('page', 'advancedFilter')} {advancedOpen ? '▲' : '▼'}
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
@@ -1101,13 +1115,11 @@ function HeaderCard({
       ) : (
         <Text style={styles.headerName}>{header.exercise_name}</Text>
       )}
-      {/* TODO(i18n): no key for "共 N 次 Session · 最近 7 天 M 次" subline template */}
       <Text style={styles.headerSubline}>
-        共 {header.total_sessions} 次 Session · 最近 7 天 {header.sessions_last_7_days} 次
+        {tTotalSessionsLast7d(header.total_sessions, header.sessions_last_7_days)}
       </Text>
-      {/* TODO(i18n): no key for "類型：" prefix; LOAD_TYPE_LABEL keys map to load_type values which are EN keys ('loaded'/'bodyweight'/'assisted'); use tLoadType for 'bodyweight'/'weighted'/'assisted' but 'loaded' label has no exact i18n key */}
       <Text style={styles.headerLoadType}>
-        類型：{loadTypeDisplay(header.load_type)}
+        {t('status', 'loadTypeLabel')}{loadTypeDisplay(header.load_type)}
       </Text>
       {prs.length === 0 ? null : (
         <View style={styles.prList}>
@@ -1411,15 +1423,13 @@ function SessionRow({
           {rowIsCluster ? <Text style={styles.supersetTag}>超</Text> : null}
           <Text style={styles.sessionDate}>{dateLabel}</Text>
         </View>
-        {/* TODO(i18n): no key for "N 組" set-count badge */}
         <Text style={styles.sessionMeta}>
-          {session.sets.length} 組 · {t('domain', 'volume')} {formatVolume(totalVolume, unit)}
+          {tSessionSetCountAndVolume(session.sets.length, formatVolume(totalVolume, unit))}
         </Text>
       </View>
       {topSet ? (
         <Text style={styles.topSetLine}>
-          {/* TODO(i18n): no key for "頂組：" top-set label */}
-          頂組：{formatHistoryWeight(topSet.eff, topSet.set.weight_kg ?? null, loadType, unit)} × {topSet.set.reps}
+          {t('status', 'topSetLabel')}{formatHistoryWeight(topSet.eff, topSet.set.weight_kg ?? null, loadType, unit)} × {topSet.set.reps}
           {topSet.set.reps != null ? `（${tPrBucketLabel(bucketLabel(classifyBucket(topSet.set.reps) ?? 'endurance'))}）` : ''}
         </Text>
       ) : null}
@@ -1428,8 +1438,7 @@ function SessionRow({
         <View style={styles.expandedBox}>
           {session.bw_snapshot_kg != null ? (
             <Text style={styles.bwLine}>
-              {/* TODO(i18n): no key for "當天體重：" prefix */}
-              當天體重：{formatPRWeight(session.bw_snapshot_kg, unit)}
+              {t('status', 'bodyweightLabel')}{formatPRWeight(session.bw_snapshot_kg, unit)}
             </Text>
           ) : null}
           {session.sets.map((set) => {
