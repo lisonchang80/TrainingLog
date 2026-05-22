@@ -100,7 +100,11 @@ import { PALETTE, hashColor } from './palette';
 import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
+import { t as tt } from '@/src/i18n';
 
+// SECTION_LABEL kept as legacy zh-only constants — these `'一般動作' / '常設動作'`
+// strings are used in render bodies below; we rewrap the read sites through
+// `tt('domain', ...)` where possible. The constant itself stays untouched.
 const SECTION_LABEL: Record<ExerciseSection, string> = {
   general: '一般動作',
   evergreen: '常設動作',
@@ -274,9 +278,9 @@ export default function TemplateEditorView() {
       onExit();
       return;
     }
-    Alert.alert('捨棄變更？', '尚未儲存的修改將會遺失。', [
-      { text: '繼續編輯', style: 'cancel' },
-      { text: '捨棄', style: 'destructive', onPress: onExit },
+    Alert.alert(tt('alert', 'discardChangesQ'), tt('alert', 'discardChangesLong'), [
+      { text: tt('button', 'editKeep'), style: 'cancel' },
+      { text: tt('button', 'discardSimple'), style: 'destructive', onPress: onExit },
     ]);
   }, [dirty, onExit]);
 
@@ -434,7 +438,7 @@ export default function TemplateEditorView() {
         }
         if (mode === 'save') {
           setSaveSheetMode(null);
-          Alert.alert('已儲存', '', [{ text: 'OK' }]);
+          Alert.alert(tt('status', 'saved'), '', [{ text: tt('common', 'ok') }]);
         } else {
           // import mode — redirect with apply params.
           const finalProgramId =
@@ -469,12 +473,13 @@ export default function TemplateEditorView() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
+          // TODO(i18n): '同三元組已存在' title + body copy — no dedicated key (alert.variantExists closest)
           Alert.alert(
-            '同三元組已存在',
+            tt('alert', 'variantExists'),
             '已有「相同名稱 + 計畫 + 強度」的模板，請換個強度或計畫。',
           );
         } else {
-          Alert.alert('儲存失敗', msg);
+          Alert.alert(tt('alert', 'saveFailed'), msg);
         }
       } finally {
         setBusy(false);
@@ -498,16 +503,17 @@ export default function TemplateEditorView() {
   const onDeleteTemplate = useCallback(() => {
     if (!id || !draft || busy) return;
     const programName = draft.program_id
-      ? programs.find((p) => p.id === draft.program_id)?.name ?? '通用'
+      ? programs.find((p) => p.id === draft.program_id)?.name ?? tt('common', 'default')
       : null;
     const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
     Alert.alert(
+      // TODO(i18n): 「刪除模板？」title + body copy includes a sibling-保留 line not present in tDeleteTemplateVariant; keep inline for now.
       '刪除模板？',
       `將永久刪除「${draft.name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`,
       [
-        { text: '取消', style: 'cancel' },
+        { text: tt('common', 'cancel'), style: 'cancel' },
         {
-          text: '刪除',
+          text: tt('common', 'delete'),
           style: 'destructive',
           onPress: async () => {
             setBusy(true);
@@ -515,7 +521,7 @@ export default function TemplateEditorView() {
               await deleteTemplate(db, id);
               router.back();
             } catch (e) {
-              Alert.alert('刪除失敗', e instanceof Error ? e.message : String(e));
+              Alert.alert(tt('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
             } finally {
               setBusy(false);
             }
@@ -532,12 +538,13 @@ export default function TemplateEditorView() {
       const active = await getActiveSession(db);
       if (active) {
         Alert.alert(
-          'Session already in progress',
-          'End the current session in the Today tab before starting a new one.',
+          tt('alert', 'sessionAlreadyInProgress'),
+          tt('alert', 'endActiveSessionFirst'),
         );
         return;
       }
       if (draft.exercises.length === 0) {
+        // TODO(i18n): 'Add at least one exercise...' single-arg Alert.alert — no dedicated key
         Alert.alert('Add at least one exercise before starting a session.');
         return;
       }
@@ -547,7 +554,7 @@ export default function TemplateEditorView() {
       await startSessionFromTemplate(db, { template_id: id, uuid: randomUUID });
       router.replace('/');
     } catch (e) {
-      Alert.alert('Start failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(tt('alert', 'cannotStartSession'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -696,8 +703,8 @@ export default function TemplateEditorView() {
         ).length;
         if (clusterSize <= 2) {
           Alert.alert(
-            '無法刪除',
-            'Dropset cluster 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 cluster head。',
+            tt('alert', 'cannotDelete'),
+            tt('alert', 'dropsetMinimum'),
           );
           return ex;
         }
@@ -1121,14 +1128,15 @@ export default function TemplateEditorView() {
     // 既有 filter 已正確處理（parent_id === ex.id 的 children 一併刪），
     // 只是 alert copy 要點明刪超級組以對齊 session UX。
     const isCluster = draft.exercises.some((e) => e.parent_id === ex.id);
-    const title = isCluster ? '刪除超級組？' : '確認刪除？';
+    // TODO(i18n): cluster vs solo delete confirm strings — 'cluster ⟂ all sets' wording is editor-specific.
+    const title = isCluster ? tt('alert', 'deleteSupersetQ') : '確認刪除？';
     const body = isCluster
       ? `將刪除超級組「${ex.name ?? '(動作)'}」及配對動作的所有 sets。`
       : `將刪除「${ex.name ?? '(動作)'}」及其所有 sets。`;
     Alert.alert(title, body, [
-      { text: '取消', style: 'cancel' },
+      { text: tt('common', 'cancel'), style: 'cancel' },
       {
-        text: '刪除',
+        text: tt('common', 'delete'),
         style: 'destructive',
         onPress: () => {
           setDraft({
@@ -1156,14 +1164,15 @@ export default function TemplateEditorView() {
     // 也是用 parent.exercise_id 寫 exercise.notes）。rest_seconds 寫在
     // template_exercise parent row 上、不 leak 到 children rows。
     const hasNotes = (ex.notes ?? '').trim().length > 0;
+    // TODO(i18n): 「休息時間（Ns）」compound label + 「設為常設/一般運動」section toggle options have no helpers yet
     const restLabel = `休息時間（${ex.rest_seconds ?? 90}s）`;
     const options = [
       hasNotes ? '編輯備註' : '新增備註',
       restLabel,
       '移動動作',
       ex.section === 'general' ? '設為常設運動' : '設為一般運動',
-      '刪除',
-      '取消',
+      tt('common', 'delete'),
+      tt('common', 'cancel'),
     ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -1445,7 +1454,7 @@ export default function TemplateEditorView() {
     return (
       <SafeAreaView style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.muted}>Loading…</Text>
+        <Text style={styles.muted}>{tt('status', 'loading')}</Text>
       </SafeAreaView>
     );
   }
@@ -1454,9 +1463,10 @@ export default function TemplateEditorView() {
       <SafeAreaView style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.empty}>
+          {/* TODO(i18n): 「找不到此 template」 — no key (would be alert.templateNotFound or similar). */}
           <Text style={styles.emptyText}>找不到此 template</Text>
           <Pressable style={styles.backBtn} onPress={onExit}>
-            <Text style={styles.backBtnText}>‹ 返回</Text>
+            <Text style={styles.backBtnText}>{tt('common', 'backArrow')}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -1543,7 +1553,7 @@ export default function TemplateEditorView() {
                   會壓縮標題空間。用戶反饋：移走後標題拿到 row 2 full-width。
                 */}
                 <View style={styles.clusterTagRow}>
-                  <Text style={styles.supersetTag}>超</Text>
+                  <Text style={styles.supersetTag}>{tt('domain', 'supersetChip')}</Text>
                   <View style={styles.flexFill} />
                   <Text style={styles.exSummary}>
                     {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
@@ -1830,12 +1840,13 @@ export default function TemplateEditorView() {
                     )
                   }
                   style={styles.exFooterBtn}>
+                  {/* TODO(i18n): 「新增 1 組」compact label — no key (button.addRecord '新增記錄' has different semantics) */}
                   <Text style={styles.exFooterBtnText}>新增 1 組</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => showSupersetHistory(parent, children)}
                   style={styles.exFooterBtn}>
-                  <Text style={styles.exFooterBtnText}>動作歷史</Text>
+                  <Text style={styles.exFooterBtnText}>{tt('page', 'exerciseHistory')}</Text>
                 </Pressable>
               </View>
             </>
@@ -1851,7 +1862,7 @@ export default function TemplateEditorView() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.topBar}>
           <Pressable onPress={onCancel} style={styles.topBtn}>
-            <Text style={styles.topBtnText}>取消</Text>
+            <Text style={styles.topBtnText}>{tt('common', 'cancel')}</Text>
           </Pressable>
           <View style={styles.topCenter}>
             {/*
@@ -1875,6 +1886,7 @@ export default function TemplateEditorView() {
                 value={draft.name}
                 onChangeText={updateName}
                 style={styles.nameInput}
+                // TODO(i18n): "Template 名稱" placeholder — no exact key (domain.template gives '模板')
                 placeholder="Template 名稱"
               />
             </View>
@@ -1895,7 +1907,7 @@ export default function TemplateEditorView() {
                     : displaySubTagOverride;
                 const programNameForDisplay = programIdForDisplay
                   ? programs.find((p) => p.id === programIdForDisplay)?.name ??
-                    '通用'
+                    tt('common', 'default')
                   : null;
                 return formatTemplateTriple(
                   programNameForDisplay,
@@ -1924,7 +1936,8 @@ export default function TemplateEditorView() {
                   styles.topBtnTextDisabled,
                 styles.topBtnSave,
               ]}>
-              {busy ? '...' : importMode ? '建立並導入' : '儲存'}
+              {/* TODO(i18n): 「建立並導入」 import-mode CTA — no dedicated key */}
+              {busy ? '...' : importMode ? '建立並導入' : tt('common', 'save')}
             </Text>
           </Pressable>
         </View>
@@ -1936,6 +1949,7 @@ export default function TemplateEditorView() {
           session app/(tabs)/index.tsx:1648).
         */}
         <NestableScrollContainer contentContainerStyle={styles.body}>
+          {/* TODO(i18n): SECTION_LABEL '一般動作' / '常設動作' + 「（無一般動作）」/ 「（無常設動作）」 — no helpers yet */}
           <SectionHeader label={SECTION_LABEL.general} />
           {renderSection('general', '（無一般動作）')}
 
@@ -1947,17 +1961,19 @@ export default function TemplateEditorView() {
           <Pressable
             style={styles.actionBtn}
             onPress={() => router.push('/exercise-picker?mode=picker')}>
-            <Text style={styles.actionBtnText}>+ 動作</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
             onPress={onStartSession}
             disabled={busy}>
+            {/* TODO(i18n): 「開始訓練」action — no key (start-template-sheet has same TODO) */}
             <Text style={styles.actionBtnText}>開始訓練</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
             onPress={() => setShowColorPicker(true)}>
+            {/* TODO(i18n): 「配色」action — no key (color-picker pill) */}
             <Text style={styles.actionBtnText}>配色</Text>
           </Pressable>
           <Pressable
@@ -1973,7 +1989,12 @@ export default function TemplateEditorView() {
               ActionSheetIOS.showActionSheetWithOptions(
                 {
                   title: draft.name,
-                  options: ['另存模板', '刪除模板', '取消'],
+                  options: [
+                    tt('button', 'saveAsTemplate'),
+                    // TODO(i18n): 「刪除模板」action-sheet item — no exact key (button.deleteExercise different)
+                    '刪除模板',
+                    tt('common', 'cancel'),
+                  ],
                   destructiveButtonIndex: 1,
                   cancelButtonIndex: 2,
                   disabledButtonIndices: canDelete ? [] : [1],
@@ -1981,7 +2002,8 @@ export default function TemplateEditorView() {
                 (idx) => {
                   if (idx === 0)
                     Alert.alert(
-                      '另存模板',
+                      tt('button', 'saveAsTemplate'),
+                      // TODO(i18n): stubbed copy — 'production 補齊三元組 UI…' developer-only Alert
                       'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
                     );
                   else if (idx === 1 && canDelete) onDeleteTemplate();
@@ -2002,9 +2024,10 @@ export default function TemplateEditorView() {
             onPress={() => setShowColorPicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
+                {/* TODO(i18n): 「選擇配色」sheet title — no key (would be page.selectColor) */}
                 <Text style={styles.sheetTitle}>選擇配色</Text>
                 <Pressable onPress={() => setShowColorPicker(false)}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <View style={styles.paletteGrid}>
@@ -2025,6 +2048,7 @@ export default function TemplateEditorView() {
                   );
                 })}
               </View>
+              {/* TODO(i18n): color-picker group-wide footnote — no key */}
               <Text style={styles.sheetFootnote}>
                 選色後會 group-wide 連動所有同 name sibling templates。
               </Text>
@@ -2042,9 +2066,10 @@ export default function TemplateEditorView() {
             onPress={() => setShowExercisePicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
+                {/* TODO(i18n): 「選擇動作」picker title — closest is page.selectTemplate ('選擇 template'); no exact key */}
                 <Text style={styles.sheetTitle}>選擇動作</Text>
                 <Pressable onPress={() => setShowExercisePicker(false)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
               </View>
               <ScrollView style={styles.exercisePickerScroll}>
@@ -2057,6 +2082,7 @@ export default function TemplateEditorView() {
                   </Pressable>
                 ))}
               </ScrollView>
+              {/* TODO(i18n): exercise-picker footnote — no key */}
               <Text style={styles.sheetFootnote}>
                 點選動作即加入「一般動作區」；用 ⚙「設為常設」改類別。
               </Text>
@@ -2075,11 +2101,11 @@ export default function TemplateEditorView() {
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Pressable onPress={() => setNoteEditing(null)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
-                <Text style={styles.sheetTitle}>備註</Text>
+                <Text style={styles.sheetTitle}>{tt('domain', 'note')}</Text>
                 <Pressable onPress={saveNote}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <TextInput
@@ -2089,11 +2115,13 @@ export default function TemplateEditorView() {
                     noteEditing ? { ...noteEditing, draft: t } : null,
                   )
                 }
+                // TODO(i18n): 「提示、cue、注意事項…」note placeholder differs from page.notePlaceholder ('例：握距、發力重點…')
                 placeholder="提示、cue、注意事項…"
                 multiline
                 autoFocus
                 style={styles.noteInput}
               />
+              {/* TODO(i18n): note-editor footnote copy — no key */}
               <Text style={styles.sheetFootnote}>
                 備註用於記錄動作 cue / 注意事項。
               </Text>
@@ -2122,7 +2150,8 @@ export default function TemplateEditorView() {
         */}
         <TemplateMetaSheet
           visible={saveSheetMode != null}
-          title={saveSheetMode === 'import' ? '建立並導入' : '儲存模板'}
+          // TODO(i18n): '建立並導入' / '儲存模板' sheet titles — no exact keys; button.saveTemplate matches 儲存模板.
+          title={saveSheetMode === 'import' ? '建立並導入' : tt('button', 'saveTemplate')}
           omitName
           defaultName={draft?.name ?? ''}
           defaultProgramId={draft?.program_id ?? null}
@@ -2158,11 +2187,12 @@ export default function TemplateEditorView() {
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Pressable onPress={() => setRestEditing(null)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
+                {/* TODO(i18n): 「休息時間」sheet title — no key (button.clusterRestSeconds has emoji prefix) */}
                 <Text style={styles.sheetTitle}>休息時間</Text>
                 <Pressable onPress={saveRest}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <View style={styles.restEditorRow}>
@@ -2208,6 +2238,7 @@ export default function TemplateEditorView() {
                   <Text style={styles.restStepBtnText}>+15s</Text>
                 </Pressable>
               </View>
+              {/* TODO(i18n): rest-time footnote copy — no key */}
               <Text style={styles.sheetFootnote}>
                 Session 對此動作 set ✓ 後自動跳此秒數倒數。
               </Text>
@@ -2249,7 +2280,7 @@ function computeExMeta(ex: TemplateExercise) {
   let workIdx = 0;
   let clusterIdx = 0;
   const setLabels = ex.sets.map((s) => {
-    if (s.kind === 'warmup') return '熱';
+    if (s.kind === 'warmup') return tt('domain', 'warmupChip');
     if (s.kind === 'dropset') {
       if ((s.parent_set_id ?? null) === null) {
         clusterIdx += 1;
@@ -2588,6 +2619,7 @@ function ExerciseBody({
                   styles.exFooterBtnText,
                   compact && styles.exFooterBtnTextCompact,
                 ]}>
+                {/* TODO(i18n): 「新增 1 組」compact label — no key (button.addRecord '新增記錄' has different semantics) */}
                 新增 1 組
               </Text>
             </Pressable>
@@ -2602,7 +2634,7 @@ function ExerciseBody({
                   styles.exFooterBtnText,
                   compact && styles.exFooterBtnTextCompact,
                 ]}>
-                動作歷史
+                {tt('page', 'exerciseHistory')}
               </Text>
             </Pressable>
           </View>

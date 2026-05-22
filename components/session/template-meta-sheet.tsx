@@ -57,6 +57,7 @@ import {
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
+import { t } from '@/src/i18n';
 
 interface TemplateMetaSheetProps {
   visible: boolean;
@@ -115,7 +116,7 @@ interface TemplateMetaSheetProps {
 
 export function TemplateMetaSheet({
   visible,
-  title = '另存模板',
+  title,
   omitName = false,
   defaultName,
   defaultProgramId,
@@ -126,6 +127,8 @@ export function TemplateMetaSheet({
   onConfirm,
   busy = false,
 }: TemplateMetaSheetProps) {
+  // Default title resolved at call time so locale switches at runtime propagate.
+  const resolvedTitle = title ?? t('button', 'saveAsTemplate');
   const db = useDatabase();
   const [name, setName] = useState(defaultName);
   const [programId, setProgramId] = useState<string | null>(
@@ -307,7 +310,7 @@ export function TemplateMetaSheet({
       // Other errors → quiet console.warn fallback (same inline-retry UX).
       const message = err instanceof Error ? err.message : String(err);
       if (message === 'DUPLICATE_PROGRAM_NAME') {
-        Alert.alert('無法建立計畫', '計畫名稱已存在，請改用別的名稱。');
+        Alert.alert(t('alert', 'programNameExists'), t('alert', 'programNameExistsMsg'));
       } else {
         console.warn('[TemplateMetaSheet] createProgram failed:', err);
       }
@@ -335,7 +338,8 @@ export function TemplateMetaSheet({
       (t) => t.toLowerCase() === lower
     );
     if (isDuplicate) {
-      Alert.alert('無法新增強度', '強度名稱已存在，請改用別的名稱。');
+      // TODO(i18n): 「無法新增強度」title + 「強度名稱已存在」body — strings has alert.variantExists ('變體已存在') closest. Keeping inline.
+      Alert.alert(t('alert', 'variantExists'), '強度名稱已存在，請改用別的名稱。');
       return;
     }
     setLocalSubTags((prev) => [...prev, trimmed]);
@@ -377,10 +381,10 @@ export function TemplateMetaSheet({
                   busy && styles.topBarBtnDisabled,
                 ]}
               >
-                取消
+                {t('common', 'cancel')}
               </Text>
             </Pressable>
-            <Text style={styles.topBarTitle}>{title}</Text>
+            <Text style={styles.topBarTitle}>{resolvedTitle}</Text>
             <Pressable onPress={handleConfirm} hitSlop={8} disabled={busy}>
               <Text
                 style={[
@@ -389,7 +393,7 @@ export function TemplateMetaSheet({
                   busy && styles.topBarBtnDisabled,
                 ]}
               >
-                {busy ? '儲存中…' : '儲存'}
+                {busy ? t('common', 'saving') : t('common', 'save')}
               </Text>
             </Pressable>
           </View>
@@ -400,6 +404,7 @@ export function TemplateMetaSheet({
                 to onConfirm.name unchanged via the `name` state. */}
             {omitName ? null : (
               <View style={styles.field}>
+                {/* TODO(i18n): 「名稱」label — no exact key; closest is page.programNamePlaceholder. */}
                 <Text style={styles.fieldLabel}>名稱</Text>
                 <TextInput
                   style={styles.input}
@@ -413,10 +418,11 @@ export function TemplateMetaSheet({
 
             {/* 歸屬計畫 */}
             <View style={styles.field}>
+              {/* TODO(i18n): 「歸屬計畫」field label — no key (program-of-template). */}
               <Text style={styles.fieldLabel}>歸屬計畫</Text>
               <View style={styles.chipRow}>
                 <Chip
-                  label="通用"
+                  label={t('common', 'default')}
                   active={programId == null && !customProgramMode}
                   onPress={() => {
                     setCustomProgramMode(false);
@@ -444,6 +450,7 @@ export function TemplateMetaSheet({
                     customProgramMode && styles.addCtaActive,
                   ]}
                 >
+                  {/* TODO(i18n): 「新增計畫」CTA — no key */}
                   <Text style={styles.addCtaText}>新增計畫</Text>
                 </Pressable>
               </View>
@@ -453,6 +460,7 @@ export function TemplateMetaSheet({
                     style={[styles.input, styles.inlineInput]}
                     value={customProgramName}
                     onChangeText={setCustomProgramName}
+                    // TODO(i18n): 「輸入新計畫名稱（≤ 60 字）」placeholder — no key yet
                     placeholder="輸入新計畫名稱（≤ 60 字）"
                     placeholderTextColor="#9ca3af"
                     maxLength={60}
@@ -472,8 +480,9 @@ export function TemplateMetaSheet({
                         styles.inlineConfirmDisabled,
                     ]}
                   >
+                    {/* TODO(i18n): 「建立中…」inline busy label — no key */}
                     <Text style={styles.inlineConfirmText}>
-                      {creatingProgram ? '建立中…' : '建立'}
+                      {creatingProgram ? '建立中…' : t('common', 'create')}
                     </Text>
                   </Pressable>
                 </View>
@@ -483,24 +492,25 @@ export function TemplateMetaSheet({
             {/* 強度標籤 — only when a specific program is selected. */}
             {programId !== null ? (
               <View style={styles.field}>
+                {/* TODO(i18n): 「強度標籤」field label — domain.intensity is just 「強度」, missing 「標籤」. */}
                 <Text style={styles.fieldLabel}>強度標籤</Text>
                 <View style={styles.chipRow}>
                   <Chip
-                    label="通用"
+                    label={t('common', 'default')}
                     active={!customMode && subTag == null}
                     onPress={() => {
                       setCustomMode(false);
                       setSubTag(null);
                     }}
                   />
-                  {[...subTags, ...localSubTags].map((t) => (
+                  {[...subTags, ...localSubTags].map((tag) => (
                     <Chip
-                      key={t}
-                      label={t}
-                      active={!customMode && subTag === t}
+                      key={tag}
+                      label={tag}
+                      active={!customMode && subTag === tag}
                       onPress={() => {
                         setCustomMode(false);
-                        setSubTag(t);
+                        setSubTag(tag);
                       }}
                     />
                   ))}
@@ -514,7 +524,7 @@ export function TemplateMetaSheet({
                       customMode && styles.addCtaActive,
                     ]}
                   >
-                    <Text style={styles.addCtaText}>新增強度</Text>
+                    <Text style={styles.addCtaText}>{t('button', 'addIntensityPlain')}</Text>
                   </Pressable>
                 </View>
                 {customMode ? (
@@ -523,6 +533,7 @@ export function TemplateMetaSheet({
                       style={[styles.input, styles.inlineInput]}
                       value={customSubTag}
                       onChangeText={setCustomSubTag}
+                      // TODO(i18n): same placeholder as start-template-sheet
                       placeholder="輸入新強度標籤（如 5x5、最大力量）"
                       placeholderTextColor="#9ca3af"
                     />
@@ -536,13 +547,14 @@ export function TemplateMetaSheet({
                           styles.inlineConfirmDisabled,
                       ]}
                     >
-                      <Text style={styles.inlineConfirmText}>建立</Text>
+                      <Text style={styles.inlineConfirmText}>{t('common', 'create')}</Text>
                     </Pressable>
                   </View>
                 ) : null}
               </View>
             ) : null}
 
+            {/* TODO(i18n): help hint copy — 4 variants describe name/通用 invariants, no key yet */}
             <Text style={styles.hint}>
               {omitName
                 ? programId === null
