@@ -35,19 +35,18 @@ import type {
   StatsSetRecord,
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
-import { t, tMuscleGroup } from '@/src/i18n';
+import { getLocale, t, tMuscleGroup } from '@/src/i18n';
 
 /**
- * Period selector labels. zh literals are single chars (年 / 月 / 週); we
- * don't have direct i18n keys for these abbreviations, so the labels stay
- * inline with TODO markers. EN locale will need a tPeriodScale helper in a
- * follow-up — likely "Year / Month / Week" full words.
+ * Period selector labels. zh literals are single chars (年 / 月 / 週); EN
+ * locale uses full words (Year / Month / Week). Kept inline as a local
+ * helper rather than added to `src/i18n/dynamic.ts` (panel-only usage).
  */
 function periodLabel(p: PeriodScale): string {
-  // TODO(i18n): no key for "年/月/週" period abbreviations
-  if (p === 'year') return '年';
-  if (p === 'month') return '月';
-  return '週';
+  const en = getLocale() === 'en';
+  if (p === 'year') return en ? 'Year' : '年';
+  if (p === 'month') return en ? 'Month' : '月';
+  return en ? 'Week' : '週';
 }
 
 interface PeriodChoice {
@@ -242,8 +241,7 @@ export function StatsPanel() {
         <Pressable
           style={styles.anchorBtn}
           onPress={() => setShowPicker((s) => !s)}>
-          {/* TODO(i18n): no key for "錨點" anchor-date label */}
-          <Text style={styles.anchorBtnLabel}>錨點</Text>
+          <Text style={styles.anchorBtnLabel}>{t('status', 'anchor')}</Text>
           <Text style={styles.anchorBtnDate}>{formatAnchorLabel(anchorDate)}</Text>
           <Text style={styles.anchorBtnCaret}>{showPicker ? '▴' : '▾'}</Text>
         </Pressable>
@@ -254,8 +252,7 @@ export function StatsPanel() {
               setAnchorDate(startOfDay(new Date()));
               setShowPicker(false);
             }}>
-            {/* TODO(i18n): no key for "今天" today reset button */}
-            <Text style={styles.anchorTodayText}>今天</Text>
+            <Text style={styles.anchorTodayText}>{t('status', 'today')}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -273,24 +270,23 @@ export function StatsPanel() {
 
       {/* Body heatmap */}
       <View style={styles.card}>
-        {/* TODO(i18n): no key for "訓練部位概況 · {currentBucket.label}" stats card titles + descriptions — needs per-card title/subtitle keys */}
-        <Text style={styles.cardTitle}>訓練部位概況 · {currentBucket.label}</Text>
-        <Text style={styles.cardSubtitle}>顏色 = per-Session 次數分位</Text>
+        <Text style={styles.cardTitle}>{t('page', 'bodyOverview')} · {currentBucket.label}</Text>
+        <Text style={styles.cardSubtitle}>{t('status', 'heatmapSubtitle')}</Text>
         <BodyHeatmap mgQuintile={mgQuintile} mgCount={freqByMg} />
         <BodyHeatmapLegend />
         {totalSessionsCurrent === 0 ? (
-          <Text style={styles.emptyText}>本期間尚無 Session</Text>
+          <Text style={styles.emptyText}>{t('status', 'noTrainingThisPeriod')}</Text>
         ) : null}
       </View>
 
       {/* Per-MG capacity histograms */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>各部位容量 · 近 6 期</Text>
+        <Text style={styles.cardTitle}>{t('page', 'capacityByMg')}</Text>
         <Text style={styles.cardSubtitle}>
-          顯示有訓練的部位 · 紅虛線 = 6 期平均
+          {t('status', 'capacityMgSubtitle')}
         </Text>
         {mgRows.length === 0 ? (
-          <Text style={styles.emptyText}>近 6 期尚無訓練容量</Text>
+          <Text style={styles.emptyText}>{t('status', 'noCapacityRecent')}</Text>
         ) : (
           <View style={styles.mgGrid}>
             {mgRows.map((row) => (
@@ -320,9 +316,9 @@ export function StatsPanel() {
 
       {/* Duration histogram */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>運動時長 · 近 6 期</Text>
+        <Text style={styles.cardTitle}>{t('page', 'durationOverPeriod')}</Text>
         <Text style={styles.cardSubtitle}>
-          每根長條 = 該期累計時長 · 紅虛線 = 6 期平均
+          {t('status', 'durationSubtitle')}
         </Text>
         <MiniBarChart
           data={durationBuckets.map((b) => ({ label: b.label, value: b.total_ms }))}
