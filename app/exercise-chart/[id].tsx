@@ -555,7 +555,7 @@ function ChartPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>Program 主</Text>
+                  <Text style={styles.advancedLabel}>週期</Text>
                   <Pressable
                     style={styles.dropdown}
                     onPress={() => setProgramPickerOpen(true)}>
