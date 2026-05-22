@@ -506,37 +506,6 @@ export async function addTemplateExercise(
   return { id, ordering };
 }
 
-/**
- * Toggle the evergreen flag on a single template_exercise row. Used by the
- * editor's star/zone toggle. No-op when the row is already in the requested
- * state. Bumps the parent template's `updated_at`.
- */
-export async function setTemplateExerciseEvergreen(
-  db: Database,
-  args: {
-    template_exercise_id: string;
-    is_evergreen: 0 | 1;
-    now?: () => number;
-  }
-): Promise<void> {
-  const ts = (args.now ?? Date.now)();
-  const row = await db.getFirstAsync<{ template_id: string }>(
-    `SELECT template_id FROM template_exercise WHERE id = ?`,
-    args.template_exercise_id
-  );
-  if (!row) return;
-  await db.runAsync(
-    `UPDATE template_exercise SET is_evergreen = ? WHERE id = ?`,
-    args.is_evergreen,
-    args.template_exercise_id
-  );
-  await db.runAsync(
-    `UPDATE template SET updated_at = ? WHERE id = ?`,
-    ts,
-    row.template_id
-  );
-}
-
 /** Remove one exercise row from a Template by its row id. No-op if missing. */
 export async function removeTemplateExercise(
   db: Database,

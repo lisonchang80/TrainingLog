@@ -193,21 +193,6 @@ export async function listSessionUsedExercises(
   return { solo_exercise_ids: solo, rs_template_ids: rs };
 }
 
-export async function listSessionExercises(
-  db: Database,
-  session_id: string
-): Promise<SessionExerciseRow[]> {
-  return db.getAllAsync<SessionExerciseRow>(
-    `SELECT id, session_id, exercise_id, ordering,
-            planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
-            parent_id, reusable_superset_id, rest_sec
-       FROM session_exercise
-      WHERE session_id = ?
-      ORDER BY ordering ASC`,
-    session_id
-  );
-}
-
 /**
  * Delete one session_exercise + all of its sets (per ADR-0019 ⚙️ menu's
  * 🗑️ option). Manual cascade because the v003 FK between set and
@@ -715,23 +700,6 @@ export async function computeSessionDiff(
     sessionSets: setRows,
     template: { exercises: templateExercises },
   });
-}
-
-/**
- * Link a Freestyle session to a newly-created template (sets
- * session_exercise.template_id on every plan row). Used by the
- * Freestyle finish dialog's 「升級成 Template」 option to flip the
- * session's identity from freestyle → template-based.
- */
-export async function linkSessionToTemplate(
-  db: Database,
-  args: { session_id: string; template_id: string }
-): Promise<void> {
-  await db.runAsync(
-    `UPDATE session_exercise SET template_id = ? WHERE session_id = ?`,
-    args.template_id,
-    args.session_id
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
