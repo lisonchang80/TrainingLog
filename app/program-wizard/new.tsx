@@ -48,6 +48,13 @@ import {
   type WizardState,
   type WizardStep,
 } from '@/src/domain/program/wizardStateMachine';
+import {
+  t,
+  tCycleN,
+  tNDays,
+  tRemoveIntensity,
+  tWeekdayLabels,
+} from '@/src/i18n';
 
 /**
  * 6-step Program creation wizard. State machine logic lives in
@@ -87,11 +94,11 @@ export default function ProgramWizardScreen() {
   const onCreateNewTemplate = useCallback(async () => {
     try {
       const id = randomUUID();
-      await createTemplate(db, { id, name: '新模板' });
+      await createTemplate(db, { id, name: t('domain', 'newTemplate') });
       router.push(`/template/${id}`);
     } catch (e) {
       Alert.alert(
-        '無法建立模板',
+        t('alert', 'cannotCreateTemplate'),
         e instanceof Error ? e.message : String(e)
       );
     }
@@ -134,7 +141,7 @@ export default function ProgramWizardScreen() {
     // check in createProgram — surfacing the failure here keeps the user from
     // walking through 5 more steps only to hit DUPLICATE_PROGRAM_NAME on save.
     if (state.step === 'NameAndTag' && isDuplicateName) {
-      Alert.alert('計畫名稱已存在', '請換一個名稱再繼續。');
+      Alert.alert(t('alert', 'programNameExists'), t('alert', 'programNameExistsMsg'));
       return;
     }
     const r = nextStep(state);
@@ -191,18 +198,18 @@ export default function ProgramWizardScreen() {
       await setActiveProgram(db, { id: programId });
       router.replace(`/program/${programId}`);
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const leftLabel = isFirstStep(state.step) ? '取消' : '上一步';
+  const leftLabel = isFirstStep(state.step) ? t('common', 'cancel') : t('common', 'back');
   const rightLabel = isLastStep(state.step)
     ? busy
-      ? '儲存中…'
-      : '建立'
-    : '下一步';
+      ? t('common', 'saving')
+      : t('common', 'create')
+    : t('common', 'next');
   const rightDisabled = isLastStep(state.step) && busy;
 
   return (
@@ -303,17 +310,17 @@ function StepHeader({ step }: { step: WizardStep }) {
 function stepTitle(step: WizardStep): string {
   switch (step) {
     case 'NameAndTag':
-      return '計畫名稱 + 強度';
+      return t('page', 'wizardStep1');
     case 'CycleConfig':
-      return '週期設定';
+      return t('page', 'wizardStep2');
     case 'DayPattern':
-      return '週期 1 每日內容';
+      return t('page', 'wizardStep3');
     case 'CycleSubTags':
-      return '各週期強度調整';
+      return t('page', 'wizardStep4');
     case 'Preview':
-      return '預覽日曆';
+      return t('page', 'wizardStep5');
     case 'Confirm':
-      return '確認建立';
+      return t('button', 'confirmCreate');
   }
 }
 
@@ -354,7 +361,7 @@ function NameAndTagPanel({
   return (
     <View style={styles.panel}>
       <View style={styles.labelRow}>
-        <Text style={styles.label}>計畫名稱</Text>
+        <Text style={styles.label}>{t('page', 'programNamePlaceholder')}</Text>
         {programs.length > 0 ? (
           <Pressable
             accessibilityRole="button"
@@ -363,7 +370,7 @@ function NameAndTagPanel({
               styles.loadProgramBtn,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.loadProgramBtnText}>↓ 載入計畫</Text>
+            <Text style={styles.loadProgramBtnText}>{t('button', 'loadProgram')}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -371,11 +378,11 @@ function NameAndTagPanel({
         style={[styles.input, isDuplicateName && styles.inputError]}
         value={state.draft.name}
         onChangeText={(name) => setState(updateDraft(state, { name }))}
-        placeholder="例：增肌-Q1"
+        placeholder={t('page', 'programNameExample')}
         placeholderTextColor="#999"
       />
       {isDuplicateName ? (
-        <Text style={styles.inlineErrorLine}>⚠️ 計畫名稱已存在</Text>
+        <Text style={styles.inlineErrorLine}>{t('alert', 'programNameExistsWarning')}</Text>
       ) : null}
       <ProgramPickerModal
         visible={loadModalOpen}
@@ -386,7 +393,7 @@ function NameAndTagPanel({
         }}
         onClose={() => setLoadModalOpen(false)}
       />
-      <Text style={styles.label}>強度（可空，可多筆）</Text>
+      <Text style={styles.label}>{t('page', 'intensityOptionalMulti')}</Text>
       {state.draft.sub_tags.length > 0 ? (
         <View style={styles.tagChipRow}>
           {state.draft.sub_tags.map((tag) => (
@@ -394,7 +401,7 @@ function NameAndTagPanel({
               <Text style={styles.tagChipText}>{tag}</Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`移除強度 ${tag}`}
+                accessibilityLabel={tRemoveIntensity(tag)}
                 onPress={() => removeSubTag(tag)}
                 hitSlop={8}
                 style={({ pressed }) => [
@@ -414,12 +421,12 @@ function NameAndTagPanel({
           onChangeText={setPending}
           onSubmitEditing={addSubTag}
           returnKeyType="done"
-          placeholder="例：10-12RM、II-1"
+          placeholder={t('page', 'intensityExample')}
           placeholderTextColor="#999"
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="新增強度"
+          accessibilityLabel={t('button', 'addIntensityPlain')}
           onPress={addSubTag}
           disabled={pending.trim().length === 0}
           style={({ pressed }) => [
@@ -445,21 +452,21 @@ function CycleConfigPanel({
     setState(updateDraft(state, patch));
   return (
     <View style={styles.panel}>
-      <Text style={styles.label}>循環天數（3-14 天）</Text>
+      <Text style={styles.label}>{t('page', 'cycleLengthInput')}</Text>
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
         value={String(state.draft.cycle_length)}
         onChangeText={(v) => update({ cycle_length: Number(v) || 0 })}
       />
-      <Text style={styles.label}>週期數</Text>
+      <Text style={styles.label}>{t('domain', 'cycleCount')}</Text>
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
         value={String(state.draft.cycle_count)}
         onChangeText={(v) => update({ cycle_count: Number(v) || 0 })}
       />
-      <Text style={styles.label}>起始日期 (yyyy-mm-dd)</Text>
+      <Text style={styles.label}>{t('page', 'startDateInput')}</Text>
       <TextInput
         style={styles.input}
         autoCapitalize="none"
@@ -501,9 +508,11 @@ function DayPatternPanel({
     setState(updateDraft(state, { dayPlans: next }));
   };
 
+  const weekdayLabels = tWeekdayLabels();
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
+        {/* TODO(i18n): missing key for "每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；強度在下一步逐週期選擇。" - consider page.wizardStep3Hint */}
         每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；
         強度在下一步逐週期選擇。
       </Text>
@@ -514,7 +523,7 @@ function DayPatternPanel({
             <Text style={styles.dayLabel}>
               Day {d + 1}
               {state.draft.cycle_length === 7
-                ? ` · ${['一', '二', '三', '四', '五', '六', '日'][d]}`
+                ? ` · ${weekdayLabels[d]}`
                 : ''}
             </Text>
             <ScrollView
@@ -533,15 +542,15 @@ function DayPatternPanel({
                     styles.pillText,
                     plan?.template_id == null && styles.pillTextActive,
                   ]}>
-                  休息
+                  {t('domain', 'rest')}
                 </Text>
               </Pressable>
-              {templates.map((t) => {
-                const active = plan?.template_id === t.id;
+              {templates.map((tpl) => {
+                const active = plan?.template_id === tpl.id;
                 return (
                   <Pressable
-                    key={t.id}
-                    onPress={() => setTemplate(d, t.id)}
+                    key={tpl.id}
+                    onPress={() => setTemplate(d, tpl.id)}
                     style={({ pressed }) => [
                       styles.pill,
                       active && styles.pillActive,
@@ -549,7 +558,7 @@ function DayPatternPanel({
                     ]}>
                     <Text
                       style={[styles.pillText, active && styles.pillTextActive]}>
-                      {t.name}
+                      {tpl.name}
                     </Text>
                   </Pressable>
                 );
@@ -562,7 +571,7 @@ function DayPatternPanel({
                   pressed && styles.btnPressed,
                 ]}>
                 <Text style={[styles.pillText, styles.pillCreateText]}>
-                  ＋ 新建
+                  {t('button', 'newTemplate')}
                 </Text>
               </Pressable>
             </ScrollView>
@@ -646,6 +655,7 @@ function CycleSubTagsPanel({
   return (
     <View style={styles.panel}>
       <Text style={styles.hint}>
+        {/* TODO(i18n): missing key for "每個週期選一個強度（套用到此週期內所有有模板的日子）。留「無強度」即不套用。" - consider page.wizardStep4Hint */}
         每個週期選一個強度（套用到此週期內所有有模板的日子）。
         留「無強度」即不套用。
       </Text>
@@ -656,7 +666,7 @@ function CycleSubTagsPanel({
           customMode && pick != null && pick !== 'mixed' ? pick : '';
         return (
           <View key={c} style={styles.cycleBlock}>
-            <Text style={styles.cycleHeader}>週期 {c + 1}</Text>
+            <Text style={styles.cycleHeader}>{tCycleN(c + 1)}</Text>
             {state.draft.sub_tags.length > 0 ? (
               <ScrollView
                 horizontal
@@ -677,7 +687,7 @@ function CycleSubTagsPanel({
                       styles.pillText,
                       !customMode && pick == null && styles.pillTextActive,
                     ]}>
-                    無強度
+                    {t('status', 'noIntensity')}
                   </Text>
                 </Pressable>
                 {state.draft.sub_tags.map((tag) => {
@@ -716,6 +726,7 @@ function CycleSubTagsPanel({
                       styles.pillText,
                       customMode && styles.pillTextActive,
                     ]}>
+                    {/* TODO(i18n): missing key for "自訂" - consider common.customPlain (currently common.custom is "· 自訂" with dot prefix) */}
                     自訂
                   </Text>
                 </Pressable>
@@ -726,7 +737,7 @@ function CycleSubTagsPanel({
                 style={[styles.input, styles.subTagInput]}
                 value={customValue}
                 onChangeText={(v) => pickCycle(c, v.trim() || null)}
-                placeholder="強度（例：10-12RM）"
+                placeholder={t('page', 'intensityPlaceholder')}
                 placeholderTextColor="#999"
               />
             ) : null}
@@ -760,17 +771,17 @@ function ProgramPickerModal({
           // Stop propagation so taps inside the sheet don't dismiss it.
           onPress={(e) => e.stopPropagation()}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>選擇要載入的計畫</Text>
+            <Text style={styles.modalTitle}>{t('page', 'selectProgramToLoad')}</Text>
             <Pressable
               accessibilityRole="button"
               onPress={onClose}
               hitSlop={8}>
-              <Text style={styles.modalClose}>關閉</Text>
+              <Text style={styles.modalClose}>{t('common', 'close')}</Text>
             </Pressable>
           </View>
           <ScrollView style={styles.modalList}>
             {programs.length === 0 ? (
-              <Text style={styles.modalEmpty}>尚無計畫可載入</Text>
+              <Text style={styles.modalEmpty}>{t('alert', 'noProgramsToLoad')}</Text>
             ) : (
               programs.map((p) => (
                 <Pressable
@@ -783,8 +794,8 @@ function ProgramPickerModal({
                   ]}>
                   <Text style={styles.modalRowName}>{p.name}</Text>
                   <Text style={styles.modalRowMeta}>
-                    {p.cycle_count} × {p.cycle_length} 天
-                    {p.is_active ? ' · 進行中' : ''}
+                    {p.cycle_count} × {tNDays(p.cycle_length)}
+                    {p.is_active ? ` ${t('common', 'inProgress')}` : ''}
                   </Text>
                 </Pressable>
               ))
@@ -810,7 +821,7 @@ function PreviewPanel({
   const dayPlanMap = new Map(state.draft.dayPlans.map((dp) => [dp.day_index, dp]));
   return (
     <View style={styles.panel}>
-      <Text style={styles.hint}>展開後的日曆 — 確認看起來對。</Text>
+      <Text style={styles.hint}>{t('page', 'wizardStep5Hint')}</Text>
       {Array.from({ length: state.draft.cycle_count }, (_, c) => (
         <View key={c} style={styles.previewRow}>
           <Text style={styles.previewCycleLabel}>C{c + 1}</Text>
@@ -845,28 +856,34 @@ function ConfirmPanel({ state }: { state: WizardState }) {
   const err = validateStep(state.draft, 'Confirm');
   return (
     <View style={styles.panel}>
-      <Text style={styles.hint}>檢查無誤後按下方建立。</Text>
+      <Text style={styles.hint}>{t('page', 'wizardStep6')}</Text>
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLine}>
-          名稱：{state.draft.name || '(未填)'}
+          {/* TODO(i18n): missing key for "名稱：" - consider page.summaryName */}
+          名稱：{state.draft.name || t('common', 'empty')}
         </Text>
         <Text style={styles.summaryLine}>
+          {/* TODO(i18n): missing key for "強度：" / "、" list separator - consider page.summaryIntensity */}
           強度：
           {state.draft.sub_tags.length === 0
-            ? '(無)'
+            ? t('common', 'noneParen')
             : state.draft.sub_tags.join('、')}
         </Text>
         <Text style={styles.summaryLine}>
-          週期：{state.draft.cycle_count} × {state.draft.cycle_length} 天
+          {/* TODO(i18n): missing key for "週期：" - consider page.summaryCycle */}
+          週期：{state.draft.cycle_count} × {tNDays(state.draft.cycle_length)}
         </Text>
         <Text style={styles.summaryLine}>
-          起始：{state.draft.start_date ?? '(未填)'}
+          {/* TODO(i18n): missing key for "起始：" - consider page.summaryStart */}
+          起始：{state.draft.start_date ?? t('common', 'empty')}
         </Text>
         <Text style={styles.summaryLine}>
+          {/* TODO(i18n): missing key for "已配置 Day：" + " 天" suffix - consider dynamic helper tConfiguredDays(n) */}
           已配置 Day：
           {state.draft.dayPlans.filter((dp) => dp.template_id).length} 天
         </Text>
         <Text style={styles.summaryLine}>
+          {/* TODO(i18n): missing key for "強度覆寫：" + " 項" - consider dynamic helper tIntensityOverrideCount(n) */}
           強度覆寫：{state.draft.overrides.length} 項
         </Text>
       </View>
