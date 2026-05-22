@@ -1717,8 +1717,7 @@ export default function SessionDetailScreen() {
                 />
 
                 <View style={styles.sectionRow}>
-                  {/* TODO(i18n): "動作清單" section header — needs new strings.ts key. */}
-                  <Text style={styles.section}>動作清單</Text>
+                  <Text style={styles.section}>{t('page', 'exerciseListSection')}</Text>
                   <View style={styles.hideUncheckedToggle}>
                     <Text style={styles.hideUncheckedLabel}>{t('status', 'hideUnchecked')}</Text>
                     <Switch
@@ -1730,9 +1729,8 @@ export default function SessionDetailScreen() {
                 {sessionExercises.length === 0 ? (
                   <View style={styles.emptyPlanBlock}>
                     <Text style={styles.emptyPlanTitle}>{t('status', 'noExercisesAdded')}</Text>
-                    {/* TODO(i18n): empty-plan body hint — needs new strings.ts key. */}
                     <Text style={styles.emptyPlanBody}>
-                      點下方「+ 動作」開始記錄這次訓練。
+                      {t('status', 'emptyPlanBody')}
                     </Text>
                   </View>
                 ) : (
@@ -1778,8 +1776,7 @@ export default function SessionDetailScreen() {
                 />
 
                 <View style={styles.sectionRow}>
-                  {/* TODO(i18n): "動作清單" section header — needs new strings.ts key. */}
-                  <Text style={styles.section}>動作清單</Text>
+                  <Text style={styles.section}>{t('page', 'exerciseListSection')}</Text>
                   <View style={styles.hideUncheckedToggle}>
                     <Text style={styles.hideUncheckedLabel}>{t('status', 'hideUnchecked')}</Text>
                     <Switch
@@ -2577,8 +2574,7 @@ function EditableExerciseCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          // TODO(i18n): 動作設定 accessibilityLabel — needs new strings.ts key.
-          accessibilityLabel="動作設定"
+          accessibilityLabel={t('button', 'a11yExerciseSettings')}
           onPress={onSettingsPress}
           style={({ pressed }) => [
             styles.exerciseCardGear,
@@ -2591,9 +2587,8 @@ function EditableExerciseCard({
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
           {sets.length === 0 ? (
-            // TODO(i18n): solo card empty-state hint — needs new strings.ts key.
             <Text style={styles.exerciseCardEmpty}>
-              還沒有 set — 按下方「+ 新增 1 組」開始記錄
+              {t('status', 'soloEmptyHint')}
             </Text>
           ) : (
             <NestableDraggableFlatList
@@ -2787,9 +2782,8 @@ function EditableExerciseCard({
                 pressed && styles.btnPressed,
               ]}
             >
-              {/* TODO(i18n): "新增 1 組" primary CTA — needs new strings.ts key. */}
               <Text style={styles.exerciseCardFooterBtnTextPrimary}>
-                新增 1 組
+                {t('button', 'addOneSet')}
               </Text>
             </Pressable>
             <Pressable
