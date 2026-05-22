@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@/components/database-provider';
 import {
   createProgram,
+  recordProgramSubTag,
   setActiveProgram,
 } from '@/src/adapters/sqlite/programRepository';
 import {
@@ -125,6 +126,11 @@ export default function ProgramWizardScreen() {
             sub_tag: dp.sub_tag,
           });
         }
+      }
+      // Pre-register 強度 labels typed in Step 1 into the persistent dictionary
+      // (`program_sub_tag` v022). INSERT OR IGNORE keeps duplicates silent.
+      for (const tag of r.draft.sub_tags) {
+        await recordProgramSubTag(db, programId, tag);
       }
       await setActiveProgram(db, { id: programId });
       router.replace(`/program/${programId}`);
@@ -236,13 +242,13 @@ function StepHeader({ step }: { step: WizardStep }) {
 function stepTitle(step: WizardStep): string {
   switch (step) {
     case 'NameAndTag':
-      return 'Program 名稱 + 週期';
+      return '計劃名稱 + 強度';
     case 'CycleConfig':
-      return 'Cycle 設定';
+      return '週期設定';
     case 'DayPattern':
-      return 'Cycle 1 每日內容';
+      return '週期 1 每日內容';
     case 'CycleSubTags':
-      return '各 Cycle 強度調整';
+      return '各週期強度調整';
     case 'Preview':
       return '預覽日曆';
     case 'Confirm':
@@ -257,9 +263,29 @@ function NameAndTagPanel({
   state: WizardState;
   setState: (s: WizardState) => void;
 }) {
+  const [pending, setPending] = useState('');
+  const addSubTag = () => {
+    const v = pending.trim();
+    if (!v) return;
+    if (state.draft.sub_tags.includes(v)) {
+      setPending('');
+      return;
+    }
+    setState(
+      updateDraft(state, { sub_tags: [...state.draft.sub_tags, v] })
+    );
+    setPending('');
+  };
+  const removeSubTag = (tag: string) => {
+    setState(
+      updateDraft(state, {
+        sub_tags: state.draft.sub_tags.filter((t) => t !== tag),
+      })
+    );
+  };
   return (
     <View style={styles.panel}>
-      <Text style={styles.label}>Program 名稱</Text>
+      <Text style={styles.label}>計劃名稱</Text>
       <TextInput
         style={styles.input}
         value={state.draft.name}
@@ -267,16 +293,50 @@ function NameAndTagPanel({
         placeholder="例：增肌-Q1"
         placeholderTextColor="#999"
       />
-      <Text style={styles.label}>週期（可空）</Text>
-      <TextInput
-        style={styles.input}
-        value={state.draft.main_tag ?? ''}
-        onChangeText={(v) =>
-          setState(updateDraft(state, { main_tag: v || null }))
-        }
-        placeholder="例：力量、增肌、減脂"
-        placeholderTextColor="#999"
-      />
+      <Text style={styles.label}>強度（可空，可多筆）</Text>
+      {state.draft.sub_tags.length > 0 ? (
+        <View style={styles.tagChipRow}>
+          {state.draft.sub_tags.map((tag) => (
+            <View key={tag} style={styles.tagChip}>
+              <Text style={styles.tagChipText}>{tag}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`移除強度 ${tag}`}
+                onPress={() => removeSubTag(tag)}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.tagChipRemove,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.tagChipRemoveText}>−</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <View style={styles.tagAddRow}>
+        <TextInput
+          style={[styles.input, styles.tagAddInput]}
+          value={pending}
+          onChangeText={setPending}
+          onSubmitEditing={addSubTag}
+          returnKeyType="done"
+          placeholder="例：10-12RM、II-1"
+          placeholderTextColor="#999"
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="新增強度"
+          onPress={addSubTag}
+          disabled={pending.trim().length === 0}
+          style={({ pressed }) => [
+            styles.tagAddBtn,
+            pending.trim().length === 0 && styles.btnDisabled,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.tagAddBtnText}>＋</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -292,14 +352,14 @@ function CycleConfigPanel({
     setState(updateDraft(state, patch));
   return (
     <View style={styles.panel}>
-      <Text style={styles.label}>Cycle 長度（3-14 天）</Text>
+      <Text style={styles.label}>循環天數（3-14 天）</Text>
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
         value={String(state.draft.cycle_length)}
         onChangeText={(v) => update({ cycle_length: Number(v) || 0 })}
       />
-      <Text style={styles.label}>Cycle 次數</Text>
+      <Text style={styles.label}>週期數</Text>
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
@@ -538,10 +598,13 @@ function ConfirmPanel({ state }: { state: WizardState }) {
           名稱：{state.draft.name || '(未填)'}
         </Text>
         <Text style={styles.summaryLine}>
-          週期：{state.draft.main_tag ?? '無'}
+          強度：
+          {state.draft.sub_tags.length === 0
+            ? '(無)'
+            : state.draft.sub_tags.join('、')}
         </Text>
         <Text style={styles.summaryLine}>
-          循環：{state.draft.cycle_count} × {state.draft.cycle_length} 天
+          週期：{state.draft.cycle_count} × {state.draft.cycle_length} 天
         </Text>
         <Text style={styles.summaryLine}>
           起始：{state.draft.start_date ?? '(未填)'}
@@ -584,6 +647,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   subTagInput: { marginTop: 6 },
+  tagChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+  },
+  tagChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,126,164,0.12)',
+    gap: 6,
+  },
+  tagChipText: { fontSize: 13, fontWeight: '600', color: '#0a7ea4' },
+  tagChipRemove: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(10,126,164,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tagChipRemoveText: {
+    color: '#0a7ea4',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  tagAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  tagAddInput: { flex: 1 },
+  tagAddBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0a7ea4',
+  },
+  tagAddBtnText: { color: 'white', fontSize: 22, fontWeight: '700', lineHeight: 24 },
   dayCard: {
     padding: 12,
     borderRadius: 10,
