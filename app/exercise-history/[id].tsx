@@ -45,6 +45,25 @@ import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
+import { t, tAssistedEffective, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+
+/**
+ * PR bucket labels come from `src/domain/pr/buckets.ts::bucketLabel` as raw
+ * zh literals (locked in ADR-0007). Round-trip through this map to render
+ * the localized variant from strings.ts without touching domain. Unknown
+ * labels (shouldn't happen) pass through unchanged.
+ */
+const PR_BUCKET_ZH_TO_DOMAIN_KEY: Record<string, 'maxStrength' | 'strength' | 'hypertrophy' | 'muscularEndurance' | 'endurance'> = {
+  最大力量: 'maxStrength',
+  力量: 'strength',
+  增肌: 'hypertrophy',
+  肌耐力: 'muscularEndurance',
+  耐力: 'endurance',
+};
+function tPrBucketLabel(zhLabel: string): string {
+  const key = PR_BUCKET_ZH_TO_DOMAIN_KEY[zhLabel];
+  return key ? t('domain', key) : zhLabel;
+}
 
 type PRKey = 'all' | BucketKey;
 
@@ -57,14 +76,16 @@ const PR_ORDER: PRKey[] = [
   'endurance',
 ];
 
-const PR_LABEL: Record<PRKey, string> = {
-  all: '全部',
-  max_strength: '最大力量',
-  strength: '力量',
-  hypertrophy: '增肌',
-  muscle_endurance: '肌耐力',
-  endurance: '耐力',
-};
+function prKeyLabel(k: PRKey): string {
+  switch (k) {
+    case 'all': return t('common', 'all');
+    case 'max_strength': return t('domain', 'maxStrength');
+    case 'strength': return t('domain', 'strength');
+    case 'hypertrophy': return t('domain', 'hypertrophy');
+    case 'muscle_endurance': return t('domain', 'muscularEndurance');
+    case 'endurance': return t('domain', 'endurance');
+  }
+}
 
 interface PRSnapshotWithDate {
   key: PRKey;
@@ -213,15 +234,15 @@ export default function ExerciseHistoryScreen() {
 
   const screenOptions = useMemo(
     () => ({
-      title: '動作歷史',
+      title: t('page', 'exerciseHistory'),
       headerBackVisible: false,
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="返回"
+          accessibilityLabel={t('common', 'backPlain')}
           onPress={() => router.back()}
           hitSlop={12}>
-          <Text style={styles.headerBack}>‹ 返回</Text>
+          <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
         </Pressable>
       ),
     }),
@@ -688,24 +709,24 @@ function HistoryPageContent({
     (sourceSession: ExerciseHistorySession) => {
       const setCount = sourceSession.sets.length;
       const title = isClusterReplay
-        ? '再次訓練（超級組）？'
-        : '再次訓練？';
+        ? t('alert', 'replaySessionSupersetQ')
+        : t('alert', 'replaySessionQ');
       const msg = isClusterReplay
-        ? `將砍掉目前這組超級組 A+B 兩側所有 sets，依該 session 的 ${setCount} 組記錄重新建立。\n\n（is_logged 會重置為未 ✓ 狀態，weight / reps / set_kind 會複製，notes 不複製）`
-        : `將砍掉目前這張卡片所有 sets，依該 session 的 ${setCount} 組記錄重新建立。\n\n（is_logged 會重置為未 ✓ 狀態，weight / reps / set_kind 會複製，notes 不複製）`;
+        ? tReplayClusterPrompt(setCount)
+        : tReplaySoloPrompt(setCount);
 
       Alert.alert(title, msg, [
-        { text: '取消', style: 'cancel' },
+        { text: t('common', 'cancel'), style: 'cancel' },
         {
-          text: '覆蓋',
+          text: t('button', 'overwrite'),
           style: 'destructive',
           onPress: async () => {
             try {
               const activeSession = await getActiveSession(db);
               if (!activeSession) {
                 Alert.alert(
-                  '無法覆蓋',
-                  '找不到進行中的訓練 session。請先回 Today 頁開始一次訓練後再試。',
+                  t('alert', 'cannotOverwrite'),
+                  t('alert', 'noActiveSession'),
                 );
                 return;
               }
@@ -727,7 +748,7 @@ function HistoryPageContent({
                   exerciseId,
                 );
                 if (!sourceA) {
-                  Alert.alert('覆蓋失敗', '找不到該超級組 A 側來源卡。');
+                  Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardASideNotFound'));
                   return;
                 }
                 const sourceB = await db.getFirstAsync<{ id: string }>(
@@ -741,7 +762,7 @@ function HistoryPageContent({
                   sourceA.id,
                 );
                 if (!sourceB) {
-                  Alert.alert('覆蓋失敗', '找不到該超級組 B 側來源卡。');
+                  Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardBSideNotFound'));
                   return;
                 }
                 await replayClusterCardSetsFromHistoricalSession(db, {
@@ -770,7 +791,7 @@ function HistoryPageContent({
                   exerciseId,
                 );
                 if (!sourceCard) {
-                  Alert.alert('覆蓋失敗', '找不到該動作來源卡。');
+                  Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardNotFound'));
                   return;
                 }
                 await replayCardSetsFromHistoricalSession(db, {
@@ -787,7 +808,7 @@ function HistoryPageContent({
               router.back();
             } catch (e) {
               Alert.alert(
-                '覆蓋失敗',
+                t('alert', 'overwriteFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
@@ -811,7 +832,7 @@ function HistoryPageContent({
     <>
       <ScrollView contentContainerStyle={styles.scroll}>
         {!header ? (
-          <Text style={styles.empty}>找不到此動作。</Text>
+          <Text style={styles.empty}>{t('alert', 'exerciseNotFound')}</Text>
         ) : sessions.length === 0 ? (
           <View>
             <HeaderCard
@@ -825,6 +846,7 @@ function HistoryPageContent({
               partnerName={partnerName}
               currentSide={currentSide}
             />
+            {/* TODO(i18n): no key for "還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。" empty-state copy */}
             <Text style={styles.empty}>
               還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
             </Text>
@@ -853,7 +875,7 @@ function HistoryPageContent({
                 return (
                   <FilterChip
                     key={chip}
-                    label={chip === 'all' ? '全部' : bucketDomainLabel(chip)}
+                    label={chip === 'all' ? t('common', 'all') : tPrBucketLabel(bucketDomainLabel(chip))}
                     sublabel={chip === 'all' ? undefined : `${repRangeLabel(chip)}RM`}
                     active={active}
                     onPress={() => onBucketChipTap(chip)}
@@ -871,6 +893,7 @@ function HistoryPageContent({
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
                 <Text style={styles.advancedHeaderText}>
+                  {/* TODO(i18n): no key for "進階篩選" advanced-filter header */}
                   進階篩選 {advancedOpen ? '▲' : '▼'}
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
@@ -883,21 +906,21 @@ function HistoryPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>週期</Text>
+                  <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
                   <Pressable
                     style={styles.dropdown}
                     onPress={() => setProgramPickerOpen(true)}>
                     <Text style={styles.dropdownText}>
-                      {selectedProgram ? selectedProgram.name : '— 尚未選擇 —'}
+                      {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
                     </Text>
                     <Text style={styles.dropdownChevron}>▾</Text>
                   </Pressable>
 
                   {programId != null && (
                     <View>
-                      <Text style={styles.advancedLabel}>強度</Text>
+                      <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
                       {subTagOptions.length === 0 ? (
-                        <Text style={styles.empty}>此 Program 無 sub_tag 紀錄。</Text>
+                        <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
                       ) : (
                         <View style={styles.filterRow}>
                           {subTagOptions.map((tag) => (
@@ -921,7 +944,7 @@ function HistoryPageContent({
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onJumpToChart}>
-                      <Text style={styles.actionBtnTextPrimary}>轉圖表</Text>
+                      <Text style={styles.actionBtnTextPrimary}>{t('button', 'switchToChart')}</Text>
                     </Pressable>
                     <Pressable
                       style={({ pressed }) => [
@@ -930,7 +953,7 @@ function HistoryPageContent({
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onClearAllFilters}>
-                      <Text style={styles.actionBtnTextSecondary}>取消篩選</Text>
+                      <Text style={styles.actionBtnTextSecondary}>{t('button', 'clearFilter')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -939,7 +962,7 @@ function HistoryPageContent({
 
             <View style={{ gap: 8 }}>
               {filteredSessions.length === 0 ? (
-                <Text style={styles.empty}>篩選條件下沒有紀錄。</Text>
+                <Text style={styles.empty}>{t('status', 'noRecordsUnderFilter')}</Text>
               ) : (
                 filteredSessions.map((sess) => {
                   const rowShape = classifyRowClusterShape(sess.sets);
@@ -975,14 +998,14 @@ function HistoryPageContent({
           style={styles.modalOverlay}
           onPress={() => setProgramPickerOpen(false)}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>選擇 Program</Text>
+            <Text style={styles.modalTitle}>{t('page', 'selectProgram')}</Text>
             <Pressable
               style={styles.modalRow}
               onPress={() => onPickProgram(null)}>
-              <Text style={styles.modalRowText}>— 尚未選擇 —</Text>
+              <Text style={styles.modalRowText}>{t('common', 'notSelected')}</Text>
             </Pressable>
             {programs.length === 0 ? (
-              <Text style={styles.empty}>沒有可用的 Program。</Text>
+              <Text style={styles.empty}>{t('alert', 'noProgramsAvailable')}</Text>
             ) : (
               programs.map((p) => (
                 <Pressable
@@ -1041,7 +1064,7 @@ function HeaderCard({
         <View style={styles.headerNameRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`}
+            accessibilityLabel={leftDisabled ? t('status', 'alreadyASide') : tSwitchToPartner(partnerName ?? '')}
             accessibilityState={{ disabled: leftDisabled }}
             onPress={leftDisabled ? undefined : onRequestSwap}
             disabled={leftDisabled || !onRequestSwap}
@@ -1061,7 +1084,7 @@ function HeaderCard({
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`}
+            accessibilityLabel={rightDisabled ? t('status', 'alreadyBSide') : tSwitchToPartner(partnerName ?? '')}
             accessibilityState={{ disabled: rightDisabled }}
             onPress={rightDisabled ? undefined : onRequestSwap}
             disabled={rightDisabled || !onRequestSwap}
@@ -1078,11 +1101,13 @@ function HeaderCard({
       ) : (
         <Text style={styles.headerName}>{header.exercise_name}</Text>
       )}
+      {/* TODO(i18n): no key for "共 N 次 Session · 最近 7 天 M 次" subline template */}
       <Text style={styles.headerSubline}>
         共 {header.total_sessions} 次 Session · 最近 7 天 {header.sessions_last_7_days} 次
       </Text>
+      {/* TODO(i18n): no key for "類型：" prefix; LOAD_TYPE_LABEL keys map to load_type values which are EN keys ('loaded'/'bodyweight'/'assisted'); use tLoadType for 'bodyweight'/'weighted'/'assisted' but 'loaded' label has no exact i18n key */}
       <Text style={styles.headerLoadType}>
-        類型：{LOAD_TYPE_LABEL[header.load_type]}
+        類型：{loadTypeDisplay(header.load_type)}
       </Text>
       {prs.length === 0 ? null : (
         <View style={styles.prList}>
@@ -1093,14 +1118,14 @@ function HeaderCard({
           </Pressable>
           {visiblePRs.map((pr) => (
             <View key={pr.key} style={styles.prRow}>
-              <Text style={styles.prBucket}>{PR_LABEL[pr.key]}</Text>
+              <Text style={styles.prBucket}>{prKeyLabel(pr.key)}</Text>
               <Text style={styles.prValue}>
-                重量 {formatHistoryWeight(pr.weight_best, pr.weight_best_raw, header.load_type, unit)}
+                {t('domain', 'weight')} {formatHistoryWeight(pr.weight_best, pr.weight_best_raw, header.load_type, unit)}
                 {pr.weight_best_reps != null ? ` × ${pr.weight_best_reps}` : ''}
                 {pr.weight_best_at != null ? `（${formatDate(pr.weight_best_at)}）` : ''}
               </Text>
               <Text style={styles.prValue}>
-                容量 {formatVolume(pr.volume_best, unit)}
+                {t('domain', 'volume')} {formatVolume(pr.volume_best, unit)}
                 {pr.volume_best_weight != null && pr.volume_best_reps != null
                   ? ` (${formatHistoryWeight(pr.volume_best_weight, pr.volume_best_raw_weight, header.load_type, unit)} × ${pr.volume_best_reps})`
                   : ''}
@@ -1386,14 +1411,16 @@ function SessionRow({
           {rowIsCluster ? <Text style={styles.supersetTag}>超</Text> : null}
           <Text style={styles.sessionDate}>{dateLabel}</Text>
         </View>
+        {/* TODO(i18n): no key for "N 組" set-count badge */}
         <Text style={styles.sessionMeta}>
-          {session.sets.length} 組 · 容量 {formatVolume(totalVolume, unit)}
+          {session.sets.length} 組 · {t('domain', 'volume')} {formatVolume(totalVolume, unit)}
         </Text>
       </View>
       {topSet ? (
         <Text style={styles.topSetLine}>
+          {/* TODO(i18n): no key for "頂組：" top-set label */}
           頂組：{formatHistoryWeight(topSet.eff, topSet.set.weight_kg ?? null, loadType, unit)} × {topSet.set.reps}
-          {topSet.set.reps != null ? `（${bucketLabel(classifyBucket(topSet.set.reps) ?? 'endurance')}）` : ''}
+          {topSet.set.reps != null ? `（${tPrBucketLabel(bucketLabel(classifyBucket(topSet.set.reps) ?? 'endurance'))}）` : ''}
         </Text>
       ) : null}
 
@@ -1401,6 +1428,7 @@ function SessionRow({
         <View style={styles.expandedBox}>
           {session.bw_snapshot_kg != null ? (
             <Text style={styles.bwLine}>
+              {/* TODO(i18n): no key for "當天體重：" prefix */}
               當天體重：{formatPRWeight(session.bw_snapshot_kg, unit)}
             </Text>
           ) : null}
@@ -1419,7 +1447,7 @@ function SessionRow({
                   {formatHistoryWeight(eff, set.weight_kg, loadType, unit)} × {set.reps ?? '—'}
                 </Text>
                 <Text style={styles.setBucket}>
-                  {bucket ? bucketLabel(bucket) : '—'}
+                  {bucket ? tPrBucketLabel(bucketLabel(bucket)) : '—'}
                 </Text>
               </View>
             );
@@ -1440,8 +1468,8 @@ function SessionRow({
                 pressed && styles.btnPressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="再次訓練 — 覆蓋目前卡片的 sets">
-              <Text style={styles.replayBtnText}>↻ 再次訓練</Text>
+              accessibilityLabel={t('button', 'replayDescription')}>
+              <Text style={styles.replayBtnText}>{t('button', 'replay')}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -1477,7 +1505,7 @@ function formatHistoryWeight(
   const effStr = formatWeight(effKg, unit);
   if (loadType !== 'assisted') return effStr;
   if (rawKg == null || !Number.isFinite(rawKg)) return effStr;
-  return `${effStr}（助力 ${formatWeight(rawKg, unit)}）`;
+  return tAssistedEffective(effStr, formatWeight(rawKg, unit));
 }
 
 function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
@@ -1486,11 +1514,19 @@ function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
   return `${display.toFixed(0)} ${unit}-reps`;
 }
 
-const LOAD_TYPE_LABEL: Record<string, string> = {
-  loaded: '加重',
-  bodyweight: '徒手',
-  assisted: '助力',
-};
+/**
+ * Round-trip the DB `load_type` enum through the i18n dictionary. Note: the
+ * DB key 'loaded' aligns with the i18n load-type key 'weighted' (both mean
+ * "external weight added"). 'bodyweight' and 'assisted' map directly. Held
+ * as a Proxy-style getter via function call site to keep the locale switch
+ * dynamic (don't capture locale at module init).
+ */
+function loadTypeDisplay(loadType: string): string {
+  if (loadType === 'loaded') return tLoadType('weighted');
+  if (loadType === 'bodyweight') return tLoadType('bodyweight');
+  if (loadType === 'assisted') return tLoadType('assisted');
+  return loadType;
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

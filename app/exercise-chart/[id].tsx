@@ -63,28 +63,46 @@ import {
   switcherArrowDisabled,
   type ClusterSide,
 } from '@/src/domain/exercise/clusterSwitcher';
+import { t, tSwitchToPartner } from '@/src/i18n';
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
 
-const CHART_TITLE: Record<ChartMetric, string> = {
-  weight: '最大重量',
-  volume: '訓練容量',
-  e1rm: '1RM',
+/**
+ * PR bucket labels from `src/domain/pr/buckets.ts::bucketLabel` are raw zh
+ * literals (ADR-0007). Round-trip via this map to render localized variants
+ * without touching domain. Mirror of exercise-history page helper.
+ */
+const PR_BUCKET_ZH_TO_DOMAIN_KEY: Record<string, 'maxStrength' | 'strength' | 'hypertrophy' | 'muscularEndurance' | 'endurance'> = {
+  最大力量: 'maxStrength',
+  力量: 'strength',
+  增肌: 'hypertrophy',
+  肌耐力: 'muscularEndurance',
+  耐力: 'endurance',
 };
+function tPrBucketLabel(zhLabel: string): string {
+  const key = PR_BUCKET_ZH_TO_DOMAIN_KEY[zhLabel];
+  return key ? t('domain', key) : zhLabel;
+}
 
-const CHART_DESC: Record<ChartMetric, string> = {
-  weight: '（每次 Session 最重一組）',
-  volume: '（每次 Session 容量最大一組）',
-  e1rm: '（每次 Session 預估 1RM 最大值）',
-};
+function chartTitle(metric: ChartMetric): string {
+  if (metric === 'weight') return t('domain', 'maxWeight');
+  if (metric === 'volume') return t('domain', 'trainingVolume');
+  return '1RM';
+}
 
-const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
-  weight: '重量',
-  volume: '容量',
-  e1rm: '1RM',
-  parallel: '並排',
-};
+function chartDesc(metric: ChartMetric): string {
+  if (metric === 'weight') return t('status', 'heaviestSetPerSession');
+  if (metric === 'volume') return t('status', 'highestVolumePerSession');
+  return t('status', 'maxEstimated1rmPerSession');
+}
+
+function chartToggleLabel(toggle: ChartToggle): string {
+  if (toggle === 'weight') return t('domain', 'weight');
+  if (toggle === 'volume') return t('domain', 'volume');
+  if (toggle === 'e1rm') return '1RM';
+  return t('button', 'sideBySide');
+}
 
 /**
  * Exercise Chart page (ADR-0017 Q14). Shares filter surface with history page
@@ -142,15 +160,15 @@ export default function ExerciseChartScreen() {
 
   const screenOptions = useMemo(
     () => ({
-      title: '動作圖表',
+      title: t('page', 'exerciseChart'),
       headerBackVisible: false,
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="返回"
+          accessibilityLabel={t('common', 'backPlain')}
           onPress={() => router.back()}
           hitSlop={12}>
-          <Text style={styles.headerBack}>‹ 返回</Text>
+          <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
         </Pressable>
       ),
     }),
@@ -492,8 +510,9 @@ function ChartPageContent({
     <>
       <ScrollView contentContainerStyle={styles.scroll}>
         {!header ? (
-          <Text style={styles.empty}>找不到此動作。</Text>
+          <Text style={styles.empty}>{t('alert', 'exerciseNotFound')}</Text>
         ) : sessions.length === 0 ? (
+          // TODO(i18n): no key for "還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。" empty-state copy
           <Text style={styles.empty}>
             還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
           </Text>
@@ -522,7 +541,7 @@ function ChartPageContent({
                 return (
                   <FilterChip
                     key={chip}
-                    label={chip === 'all' ? '全部' : bucketDomainLabel(chip)}
+                    label={chip === 'all' ? t('common', 'all') : tPrBucketLabel(bucketDomainLabel(chip))}
                     sublabel={chip === 'all' ? undefined : `${repRangeLabel(chip)}RM`}
                     active={active}
                     onPress={() => onBucketChipTap(chip)}
@@ -540,6 +559,7 @@ function ChartPageContent({
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
                 <Text style={styles.advancedHeaderText}>
+                  {/* TODO(i18n): no key for "進階篩選" advanced-filter header */}
                   進階篩選 {advancedOpen ? '▲' : '▼'}
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
@@ -555,21 +575,21 @@ function ChartPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>週期</Text>
+                  <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
                   <Pressable
                     style={styles.dropdown}
                     onPress={() => setProgramPickerOpen(true)}>
                     <Text style={styles.dropdownText}>
-                      {selectedProgram ? selectedProgram.name : '— 尚未選擇 —'}
+                      {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
                     </Text>
                     <Text style={styles.dropdownChevron}>▾</Text>
                   </Pressable>
 
                   {programId != null && (
                     <View>
-                      <Text style={styles.advancedLabel}>強度</Text>
+                      <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
                       {subTagOptions.length === 0 ? (
-                        <Text style={styles.empty}>此 Program 無 sub_tag 紀錄。</Text>
+                        <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
                       ) : (
                         <View style={styles.filterRow}>
                           {subTagOptions.map((tag) => (
@@ -593,7 +613,7 @@ function ChartPageContent({
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onJumpToHistory}>
-                      <Text style={styles.actionBtnTextPrimary}>看歷史</Text>
+                      <Text style={styles.actionBtnTextPrimary}>{t('button', 'viewHistory')}</Text>
                     </Pressable>
                     <Pressable
                       style={({ pressed }) => [
@@ -602,7 +622,7 @@ function ChartPageContent({
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onClearAllFilters}>
-                      <Text style={styles.actionBtnTextSecondary}>取消篩選</Text>
+                      <Text style={styles.actionBtnTextSecondary}>{t('button', 'clearFilter')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -617,20 +637,20 @@ function ChartPageContent({
             />
 
             <View style={styles.metricToggle}>
-              {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((t) => (
+              {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((tog) => (
                 <Pressable
-                  key={t}
-                  onPress={() => setChartToggle(t)}
+                  key={tog}
+                  onPress={() => setChartToggle(tog)}
                   style={[
                     styles.metricToggleBtn,
-                    chartToggle === t && styles.metricToggleBtnActive,
+                    chartToggle === tog && styles.metricToggleBtnActive,
                   ]}>
                   <Text
                     style={[
                       styles.metricToggleText,
-                      chartToggle === t && styles.metricToggleTextActive,
+                      chartToggle === tog && styles.metricToggleTextActive,
                     ]}>
-                    {CHART_TOGGLE_LABEL[t]}
+                    {chartToggleLabel(tog)}
                   </Text>
                 </Pressable>
               ))}
@@ -671,14 +691,14 @@ function ChartPageContent({
           style={styles.modalOverlay}
           onPress={() => setProgramPickerOpen(false)}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>選擇 Program</Text>
+            <Text style={styles.modalTitle}>{t('page', 'selectProgram')}</Text>
             <Pressable
               style={styles.modalRow}
               onPress={() => onPickProgram(null)}>
-              <Text style={styles.modalRowText}>— 尚未選擇 —</Text>
+              <Text style={styles.modalRowText}>{t('common', 'notSelected')}</Text>
             </Pressable>
             {programs.length === 0 ? (
-              <Text style={styles.empty}>沒有可用的 Program。</Text>
+              <Text style={styles.empty}>{t('alert', 'noProgramsAvailable')}</Text>
             ) : (
               programs.map((p) => (
                 <Pressable
@@ -719,7 +739,7 @@ function SwitcherTitle({
     <View style={styles.headerNameRow}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={leftDisabled ? '已是 A 側' : `切換到 ${partnerName}`}
+        accessibilityLabel={leftDisabled ? t('status', 'alreadyASide') : tSwitchToPartner(partnerName ?? '')}
         accessibilityState={{ disabled: leftDisabled }}
         onPress={leftDisabled ? undefined : onRequestSwap}
         disabled={leftDisabled || !onRequestSwap}
@@ -739,7 +759,7 @@ function SwitcherTitle({
       </Text>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={rightDisabled ? '已是 B 側' : `切換到 ${partnerName}`}
+        accessibilityLabel={rightDisabled ? t('status', 'alreadyBSide') : tSwitchToPartner(partnerName ?? '')}
         accessibilityState={{ disabled: rightDisabled }}
         onPress={rightDisabled ? undefined : onRequestSwap}
         disabled={rightDisabled || !onRequestSwap}
@@ -881,9 +901,9 @@ function PeriodStatsCard({
   };
 
   const items: { label: string; metric: ChartMetric }[] = [
-    { label: '最大重量', metric: 'weight' },
-    { label: '最大容量', metric: 'volume' },
-    { label: '1RM 預測', metric: 'e1rm' },
+    { label: t('domain', 'maxWeight'), metric: 'weight' },
+    { label: t('domain', 'maxVolume'), metric: 'volume' },
+    { label: t('domain', 'oneRepMaxEstimate'), metric: 'e1rm' },
   ];
 
   return (
@@ -927,21 +947,21 @@ function ChartCard({
     [scopedSessions, header, metric]
   );
 
-  const yearBadge = yearFilter == null ? '全部' : `${yearFilter}`;
+  const yearBadge = yearFilter == null ? t('common', 'all') : `${yearFilter}`;
 
   return (
     <View style={styles.chartCard}>
       <View style={styles.chartTitleRow}>
         <View style={styles.chartTitleBlock}>
-          <Text style={styles.cardTitle}>{CHART_TITLE[metric]}</Text>
-          <Text style={styles.cardSubtitle}>{CHART_DESC[metric]}</Text>
+          <Text style={styles.cardTitle}>{chartTitle(metric)}</Text>
+          <Text style={styles.cardSubtitle}>{chartDesc(metric)}</Text>
         </View>
         <Text style={styles.yearBadge}>{yearBadge}</Text>
       </View>
       {points.length >= 2 ? (
         <TrendChart points={points} unit={unit} metric={metric} />
       ) : (
-        <Text style={styles.empty}>此時段資料點不足，至少需 2 次 Session。</Text>
+        <Text style={styles.empty}>{t('alert', 'notEnoughDataPoints')}</Text>
       )}
     </View>
   );
@@ -956,10 +976,10 @@ function YearFilterRow({
 }) {
   const thisYear = new Date().getFullYear();
   const options: { key: string; label: string; year: number | null }[] = [
-    { key: 'prev', label: '上一年', year: thisYear - 1 },
-    { key: 'cur', label: '今年', year: thisYear },
-    { key: 'next', label: '下一年', year: thisYear + 1 },
-    { key: 'all', label: '全部', year: null },
+    { key: 'prev', label: t('status', 'previousYear'), year: thisYear - 1 },
+    { key: 'cur', label: t('status', 'thisYear'), year: thisYear },
+    { key: 'next', label: t('status', 'nextYear'), year: thisYear + 1 },
+    { key: 'all', label: t('common', 'all'), year: null },
   ];
   return (
     <View style={styles.yearRow}>
