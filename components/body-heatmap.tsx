@@ -33,6 +33,7 @@ import {
   MG_TRAP,
   MG_TRICEP,
 } from '@/src/db/seed/v006ExerciseLibrary';
+import { tMuscleGroup } from '@/src/i18n';
 
 // Label coordinates with leader lines (smoke round-2 #2: pull labels outside
 // body silhouette + bigger font for legibility).
@@ -44,6 +45,15 @@ import {
 // `label`  = the (x, y) at the outer edge where the text renders.
 interface MgLabel {
   mg_id: string;
+  /**
+   * Short zh literal label used for body-diagram leader-line callouts.
+   * Phase 4D i18n note: `short` is a fallback display; `MgLabels` render
+   * goes through `tMuscleGroup(mg_id)` first so EN locale shows
+   * Chest/Back/Legs etc. We keep `short` for legacy mg_ids that the
+   * strings.ts dictionary doesn't cover (e.g. 斜方 is mapped via 斜方肌
+   * key — so the zh literal here matches what tMuscleGroup returns when
+   * locale=zh and key matches).
+   */
   short: string;
   anchorX: number;
   anchorY: number;
@@ -113,7 +123,13 @@ function MgLabels({
     <>
       {labels.map((l) => {
         const c = mgCount?.get(l.mg_id);
-        const text = c != null && c > 0 ? `${l.short}·${c}` : l.short;
+        // Round-trip the mg_id through the i18n muscle-group dictionary
+        // first so EN locale shows e.g. "Chest" rather than "胸". The
+        // `short` field is the legacy zh literal used as ultimate
+        // fallback if the mg_id isn't in the dictionary.
+        const localized = tMuscleGroup(l.mg_id);
+        const display = localized && localized !== l.mg_id ? localized : l.short;
+        const text = c != null && c > 0 ? `${display}·${c}` : display;
         return (
           <React.Fragment key={l.mg_id}>
             <SvgLine
@@ -327,10 +343,12 @@ export function BodyHeatmap({ mgQuintile, mgCount }: BodyHeatmapProps) {
   return (
     <View style={styles.row}>
       <View style={styles.column}>
+        {/* TODO(i18n): no key for "正面" body-diagram column header */}
         <Text style={styles.label}>正面</Text>
         <FrontBody mgQuintile={mgQuintile} mgCount={mgCount} />
       </View>
       <View style={styles.column}>
+        {/* TODO(i18n): no key for "背面" body-diagram column header */}
         <Text style={styles.label}>背面</Text>
         <BackBody mgQuintile={mgQuintile} mgCount={mgCount} />
       </View>

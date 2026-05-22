@@ -37,6 +37,13 @@ import {
   kgToDisplay,
   parseWeightInput,
 } from '@/src/domain/body/unitConversion';
+import {
+  t,
+  tBodyweightWithUnit,
+  tBodyweightWithValue,
+  tHistoryWithCount,
+  tSaveOrSaving,
+} from '@/src/i18n';
 
 /**
  * Body tab — slice 7.
@@ -100,7 +107,7 @@ export default function BodyScreen() {
       setSmmInput('');
       await refresh();
     } catch (e) {
-      Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -114,12 +121,12 @@ export default function BodyScreen() {
         <ScrollView
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled">
-          <Text style={styles.heading}>Body</Text>
+          <Text style={styles.heading}>{t('page', 'bodyMetrics')}</Text>
 
           {/* Latest readings */}
           <View style={styles.statsRow}>
             <Stat
-              label="體重"
+              label={t('domain', 'bodyweight')}
               value={
                 latest.bodyweight_kg != null
                   ? formatWeight(latest.bodyweight_kg, unit)
@@ -142,10 +149,10 @@ export default function BodyScreen() {
           </View>
 
           {/* Input form */}
-          <Text style={styles.section}>新增記錄</Text>
+          <Text style={styles.section}>{t('button', 'addRecord')}</Text>
           <View style={styles.inputRow}>
             <Field
-              label={`體重 (${unit})`}
+              label={tBodyweightWithUnit(unit)}
               value={bwInput}
               onChangeText={setBwInput}
               placeholder={
@@ -181,15 +188,15 @@ export default function BodyScreen() {
               busy && styles.btnDisabled,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.saveBtnText}>{busy ? '儲存中…' : '儲存'}</Text>
+            <Text style={styles.saveBtnText}>{tSaveOrSaving(busy)}</Text>
           </Pressable>
 
           {/* Chart */}
-          <Text style={styles.section}>趨勢</Text>
+          <Text style={styles.section}>{t('domain', 'trend')}</Text>
           <BodyTrendChart metrics={metrics} visibility={visibility} unit={unit} />
           <View style={styles.legendRow}>
             <LegendChip
-              label="體重"
+              label={t('domain', 'bodyweight')}
               color={SERIES_COLORS.bodyweight}
               active={visibility.bodyweight}
               onPress={() => setVisibility((v) => toggleVisibility(v, 'bodyweight'))}
@@ -208,9 +215,9 @@ export default function BodyScreen() {
             />
           </View>
 
-          <Text style={styles.section}>歷史 ({metrics.length})</Text>
+          <Text style={styles.section}>{tHistoryWithCount(metrics.length)}</Text>
           {metrics.length === 0 ? (
-            <Text style={styles.muted}>尚無記錄</Text>
+            <Text style={styles.muted}>{t('status', 'noRecords')}</Text>
           ) : (
             <View style={styles.historyList}>
               {[...metrics]
@@ -305,21 +312,21 @@ function LegendChip({
 function translateError(err: string): string {
   switch (err) {
     case 'EMPTY':
-      return '至少輸入一個欄位（體重 / PBF / SMM）';
+      return t('alert', 'atLeastOneBodyField');
     case 'BODYWEIGHT_OUT_OF_RANGE':
-      return '體重數值不合理（應為 0–500 kg）';
+      return t('alert', 'invalidBodyweightLong');
     case 'PBF_OUT_OF_RANGE':
-      return 'PBF 應為 0–100 %';
+      return t('alert', 'invalidPbf');
     case 'SMM_OUT_OF_RANGE':
-      return 'SMM 數值不合理（應為 0–200 kg）';
+      return t('alert', 'invalidSmm');
     default:
-      return '輸入無效';
+      return t('alert', 'invalidInput');
   }
 }
 
 function formatRow(m: BodyMetric, unit: UnitPreference): string {
   const parts: string[] = [];
-  if (m.bodyweight_kg != null) parts.push(`體重 ${formatWeight(m.bodyweight_kg, unit)}`);
+  if (m.bodyweight_kg != null) parts.push(tBodyweightWithValue(formatWeight(m.bodyweight_kg, unit)));
   if (m.pbf != null) parts.push(`PBF ${m.pbf.toFixed(1)}%`);
   if (m.smm_kg != null) parts.push(`SMM ${formatWeight(m.smm_kg, unit)}`);
   return parts.join(' · ');

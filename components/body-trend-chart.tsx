@@ -7,6 +7,7 @@ import type {
   UnitPreference,
 } from '@/src/domain/body/types';
 import { kgToDisplay } from '@/src/domain/body/unitConversion';
+import { t } from '@/src/i18n';
 
 /**
  * Body Trend Chart — three series (bodyweight / PBF / SMM) on a dual-Y-axis
@@ -50,7 +51,8 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
   if (metrics.length === 0) {
     return (
       <View style={[styles.placeholderBox, { width: WIDTH, height: HEIGHT }]}>
-        <Text style={styles.placeholderText}>尚無資料</Text>
+        <Text style={styles.placeholderText}>{t('status', 'noRecords')}</Text>
+        {/* TODO(i18n): no key for "在上方輸入體重 / PBF / SMM 開始記錄" hint paragraph */}
         <Text style={styles.placeholderHint}>
           在上方輸入體重 / PBF / SMM 開始記錄
         </Text>
