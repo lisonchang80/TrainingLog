@@ -784,7 +784,7 @@ function ProgramPickerModal({
                   <Text style={styles.modalRowName}>{p.name}</Text>
                   <Text style={styles.modalRowMeta}>
                     {p.cycle_count} × {p.cycle_length} 天
-                    {p.is_active ? '・進行中' : ''}
+                    {p.is_active ? ' · 進行中' : ''}
                   </Text>
                 </Pressable>
               ))
