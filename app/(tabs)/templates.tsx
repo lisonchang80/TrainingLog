@@ -16,11 +16,24 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { useDatabase } from '@/components/database-provider';
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import {
+  getLocale,
   t,
   tDeleteAllTemplateVariants,
   tDeletePrompt,
   tDeleteTemplateVariant,
 } from '@/src/i18n';
+
+/**
+ * Inline dynamic helper — "{N} exercise{s} · edited {ts}" / "{N} 個動作 · 編輯於 {ts}".
+ * Kept local rather than in `src/i18n/dynamic.ts` (templates-tab-only usage).
+ */
+function tTemplateRowMeta(exerciseCount: number, ts: string): string {
+  if (getLocale() === 'en') {
+    const plural = exerciseCount === 1 ? '' : 's';
+    return `${exerciseCount} exercise${plural} · edited ${ts}`;
+  }
+  return `${exerciseCount} 個動作 · 編輯於 ${ts}`;
+}
 import {
   cloneTemplateWithSubTag,
   createTemplate,
@@ -533,8 +546,7 @@ export default function TemplatesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        {/* TODO(i18n): "Templates" plural page label — strings.page has no templates key yet */}
-        <Text style={styles.heading}>Templates</Text>
+        <Text style={styles.heading}>{t('page', 'templates')}</Text>
         <Pressable
           accessibilityRole="button"
           onPress={onCreate}
@@ -544,8 +556,7 @@ export default function TemplatesScreen() {
             busy && styles.btnDisabled,
             pressed && styles.btnPressed,
           ]}>
-          {/* TODO(i18n): "+ New" header CTA — strings.button.newCta ('新建' / 'New') closest but lacks the "+" prefix */}
-          <Text style={styles.newBtnText}>+ New</Text>
+          <Text style={styles.newBtnText}>{t('button', 'newWithPlus')}</Text>
         </Pressable>
       </View>
       <FlatList
@@ -556,10 +567,7 @@ export default function TemplatesScreen() {
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
-          // TODO(i18n): templates-tab empty hint — strings.alert.noTemplatesYet exists but copy differs.
-          <Text style={styles.emptyText}>
-            No templates yet — tap “+ New” to create your first one.
-          </Text>
+          <Text style={styles.emptyText}>{t('status', 'noTemplatesYetHint')}</Text>
         }
         renderItem={({ item }) => (
           // overnight #54 — wrap each row in SwipeableSetRow (shared with
@@ -585,10 +593,8 @@ export default function TemplatesScreen() {
               disabled={busy}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
               <Text style={styles.rowName}>{item.name}</Text>
-              {/* TODO(i18n): row meta — "{N} exercise{s} · edited {ts}" English-only, no helper yet */}
               <Text style={styles.rowDetails}>
-                {item.exerciseCount} exercise{item.exerciseCount === 1 ? '' : 's'} ·{' '}
-                edited {formatTimestamp(item.updated_at)}
+                {tTemplateRowMeta(item.exerciseCount, formatTimestamp(item.updated_at))}
               </Text>
             </Pressable>
           </SwipeableSetRow>
