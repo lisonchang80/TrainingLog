@@ -323,8 +323,7 @@ export function StartTemplateSheet({
       (t) => t.toLowerCase() === lower
     );
     if (isDuplicate) {
-      // TODO(i18n): 「無法新增強度」+「強度名稱已存在」copy lacks dedicated keys; reuse alert.variantExists for title.
-      Alert.alert(t('alert', 'variantExists'), '強度名稱已存在，請改用別的名稱。');
+      Alert.alert(t('alert', 'variantExists'), t('alert', 'intensityNameExists'));
       return;
     }
     if (isNoneSelected) {
@@ -332,8 +331,7 @@ export function StartTemplateSheet({
       // section so this code path should be unreachable. If it ever fires,
       // surface a hint rather than spawning a clone under the reserved
       // program.
-      // TODO(i18n): 「請先選擇一個計畫」hint copy — no key yet
-      Alert.alert(t('alert', 'variantExists'), '請先選擇一個計畫。');
+      Alert.alert(t('alert', 'variantExists'), t('alert', 'pickProgramFirst'));
       return;
     }
     setCloningSubTag(true);
@@ -346,10 +344,9 @@ export function StartTemplateSheet({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-        // TODO(i18n): dup-template-triple body copy — strings has no template-specific variant; reuse cannotCreateTemplate title.
         Alert.alert(
           t('alert', 'cannotCreateTemplate'),
-          '已有相同名稱 + 計畫 + 強度的 template，請改用別的強度名稱。'
+          t('alert', 'duplicateTemplateTripleBody')
         );
       } else {
         console.warn('[StartTemplateSheet] cloneTemplate failed:', err);
@@ -375,7 +372,6 @@ export function StartTemplateSheet({
       // user can edit + retry. Other errors → quiet console.warn fallback.
       const message = err instanceof Error ? err.message : String(err);
       if (message === 'DUPLICATE_PROGRAM_NAME') {
-        // TODO(i18n): 「無法建立計畫」title — strings has programNameExists ('計畫名稱已存在' / 'Program name already exists') closer but mismatched wording.
         Alert.alert(t('alert', 'programNameExists'), t('alert', 'programNameExistsMsg'));
       } else {
         console.warn('[StartTemplateSheet] createProgram failed:', err);
@@ -430,9 +426,8 @@ export function StartTemplateSheet({
                 >
                   <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
                   <Text style={styles.rowName}>{displayName}</Text>
-                  {/* TODO(i18n): '(固定項)' / '(最後使用)' hint chips — no key yet */}
-                  {isFixedNone && <Text style={styles.rowHint}>(固定項)</Text>}
-                  {isLastUsed && <Text style={styles.rowHint}>(最後使用)</Text>}
+                  {isFixedNone && <Text style={styles.rowHint}>{t('status', 'defaultVariantHint')}</Text>}
+                  {isLastUsed && <Text style={styles.rowHint}>{t('status', 'lastUsedHint')}</Text>}
                 </Pressable>
               );
             })}
@@ -450,8 +445,7 @@ export function StartTemplateSheet({
               }}
               style={[styles.addCta, customProgramMode && styles.addCtaActive]}
             >
-              {/* TODO(i18n): 「新增計畫」CTA — no exact key (button.addIntensity ≠ program) */}
-              <Text style={styles.addCtaText}>新增計畫</Text>
+              <Text style={styles.addCtaText}>{t('button', 'addProgram')}</Text>
             </Pressable>
             {customProgramMode ? (
               <View style={styles.inlineRow}>
@@ -459,8 +453,7 @@ export function StartTemplateSheet({
                   style={[styles.input, styles.inlineInput]}
                   value={customProgramName}
                   onChangeText={setCustomProgramName}
-                  // TODO(i18n): 「輸入新計畫名稱（≤ 60 字）」placeholder — no key yet
-                  placeholder="輸入新計畫名稱（≤ 60 字）"
+                  placeholder={t('page', 'newProgramNamePlaceholder')}
                   placeholderTextColor="#9ca3af"
                   maxLength={60}
                   editable={!creatingProgram}
@@ -479,9 +472,8 @@ export function StartTemplateSheet({
                       styles.inlineConfirmDisabled,
                   ]}
                 >
-                  {/* TODO(i18n): 「建立中…」inline-busy variant — no key yet */}
                   <Text style={styles.inlineConfirmText}>
-                    {creatingProgram ? '建立中…' : t('common', 'create')}
+                    {creatingProgram ? t('button', 'creating') : t('common', 'create')}
                   </Text>
                 </Pressable>
               </View>
@@ -564,8 +556,7 @@ export function StartTemplateSheet({
                       style={[styles.input, styles.inlineInput]}
                       value={customSubTag}
                       onChangeText={setCustomSubTag}
-                      // TODO(i18n): 「輸入新強度標籤（如 5x5、最大力量）」placeholder — page.newIntensityName ('新強度名稱') is shorter but lacks example
-                      placeholder="輸入新強度標籤（如 5x5、最大力量）"
+                      placeholder={t('page', 'newIntensityWithExamplePlaceholder')}
                       placeholderTextColor="#9ca3af"
                       editable={!cloningSubTag}
                     />
@@ -581,9 +572,8 @@ export function StartTemplateSheet({
                           styles.inlineConfirmDisabled,
                       ]}
                     >
-                      {/* TODO(i18n): 「建立中…」inline busy state — no key yet */}
                       <Text style={styles.inlineConfirmText}>
-                        {cloningSubTag ? '建立中…' : t('common', 'create')}
+                        {cloningSubTag ? t('button', 'creating') : t('common', 'create')}
                       </Text>
                     </Pressable>
                   </View>
@@ -607,9 +597,7 @@ export function StartTemplateSheet({
               ]}
               accessibilityRole="button"
             >
-              {/* TODO(i18n): 「編輯模板」action button — no exact key; closest is button.editSession ('編輯訓練') / page.exerciseDetail.
-                  Could reuse button.editKeep ('繼續編輯') but semantics differ. */}
-              <Text style={styles.actionBtnTextSecondary}>編輯模板</Text>
+              <Text style={styles.actionBtnTextSecondary}>{t('button', 'editTemplate')}</Text>
             </Pressable>
             <Pressable
               onPress={() =>
@@ -625,8 +613,7 @@ export function StartTemplateSheet({
               ]}
               accessibilityRole="button"
             >
-              {/* TODO(i18n): 「開始訓練」action button — no key yet (would be button.startSession) */}
-              <Text style={styles.actionBtnTextPrimary}>開始訓練</Text>
+              <Text style={styles.actionBtnTextPrimary}>{t('button', 'startSession')}</Text>
             </Pressable>
           </View>
         </Pressable>
