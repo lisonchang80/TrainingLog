@@ -512,10 +512,7 @@ function ChartPageContent({
         {!header ? (
           <Text style={styles.empty}>{t('alert', 'exerciseNotFound')}</Text>
         ) : sessions.length === 0 ? (
-          // TODO(i18n): no key for "還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。" empty-state copy
-          <Text style={styles.empty}>
-            還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
-          </Text>
+          <Text style={styles.empty}>{t('status', 'noHistoryYet')}</Text>
         ) : (
           <View style={{ gap: 12 }}>
             {/* Body title with A↔B switcher arrows when paging; plain
@@ -559,8 +556,7 @@ function ChartPageContent({
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
                 <Text style={styles.advancedHeaderText}>
-                  {/* TODO(i18n): no key for "進階篩選" advanced-filter header */}
-                  進階篩選 {advancedOpen ? '▲' : '▼'}
+                  {t('page', 'advancedFilter')} {advancedOpen ? '▲' : '▼'}
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
