@@ -1642,9 +1642,9 @@ export default function TodayScreen() {
           {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
         </Text>
         {programCellToday ? (
-          // TODO(i18n): "今天：" prefix — needs new strings.ts key.
           <Text style={styles.programBannerCell}>
-            今天：{todayTemplate ? todayTemplate.name : t('domain', 'restDay')}
+            {t('status', 'todayPrefix')}
+            {todayTemplate ? todayTemplate.name : t('domain', 'restDay')}
             {programCellToday.sub_tag ? ` · ${programCellToday.sub_tag}` : ''}
           </Text>
         ) : (
@@ -1684,9 +1684,8 @@ export default function TodayScreen() {
             ) : (
               <View style={styles.prePromptBox}>
                 <Text style={styles.prePromptHeading}>Pre-session</Text>
-                {/* TODO(i18n): pre-session bw confirmation hint — needs new strings.ts key. */}
                 <Text style={styles.prePromptHint}>
-                  確認當下體重（鎖入此 Session）。
+                  {t('status', 'prePromptBwHint')}
                   {latest.bodyweight_kg != null
                     ? tLastBodyweightLine(formatWeight(latest.bodyweight_kg, unit))
                     : ''}
@@ -1820,9 +1819,8 @@ export default function TodayScreen() {
           {plan.length === 0 && (
             <View style={styles.emptyPlanBlock}>
               <Text style={styles.emptyPlanTitle}>{t('status', 'noExercisesAdded')}</Text>
-              {/* TODO(i18n): empty-plan body hint — needs new strings.ts key. */}
               <Text style={styles.emptyPlanBody}>
-                點下方「+ 動作」開始記錄這次訓練。
+                {t('status', 'emptyPlanBody')}
               </Text>
             </View>
           )}
@@ -2179,9 +2177,8 @@ export default function TodayScreen() {
               styles.bottomStickyBtnSecondary,
               pressed && styles.btnPressed,
             ]}>
-            {/* TODO(i18n): "⏱ 手動計時" bottom button label — needs new strings.ts key. */}
             <Text style={styles.bottomStickyBtnTextSecondary}>
-              ⏱ 手動計時
+              {t('button', 'manualTimer')}
             </Text>
           </Pressable>
           <Pressable
@@ -2189,8 +2186,7 @@ export default function TodayScreen() {
             onPress={() =>
               Alert.alert(
                 t('button', 'sendToWatch'),
-                // TODO(i18n): watch-coming-in-slice-13 alert body — needs new strings.ts key.
-                'Coming in slice 13 — WatchConnectivity transferUserInfo + Watch SwiftUI app。',
+                t('alert', 'watchComingSlice13'),
               )
             }
             style={({ pressed }) => [
@@ -2516,8 +2512,7 @@ function ExerciseCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          // TODO(i18n): 動作設定 accessibilityLabel — needs new strings.ts key.
-          accessibilityLabel="動作設定"
+          accessibilityLabel={t('button', 'a11yExerciseSettings')}
           onPress={onSettingsPress}
           style={({ pressed }) => [
             styles.exerciseCardGear,
@@ -2568,9 +2563,8 @@ function ExerciseCard({
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
           {sets.length === 0 ? (
-            // TODO(i18n): solo card empty-state hint — needs new strings.ts key.
             <Text style={styles.exerciseCardEmpty}>
-              還沒有 set — 按下方「+ 新增 1 組」開始記錄
+              {t('status', 'soloEmptyHint')}
             </Text>
           ) : (
             <NestableDraggableFlatList
@@ -2788,9 +2782,8 @@ function ExerciseCard({
                 busy && styles.btnDisabled,
                 pressed && styles.btnPressed,
               ]}>
-              {/* TODO(i18n): "新增 1 組" primary CTA — needs new strings.ts key. */}
               <Text style={styles.exerciseCardFooterBtnTextPrimary}>
-                新增 1 組
+                {t('button', 'addOneSet')}
               </Text>
             </Pressable>
             <Pressable
