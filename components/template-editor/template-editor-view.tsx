@@ -99,7 +99,33 @@ import { PALETTE, hashColor } from './palette';
 import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
-import { t as tt } from '@/src/i18n';
+import { getLocale, t as tt } from '@/src/i18n';
+
+/**
+ * Inline dynamic helpers for template-editor-view. Kept local rather than
+ * added to `src/i18n/dynamic.ts` (editor-only usage).
+ */
+function tEditorDeleteTemplateBody(name: string, triple: string): string {
+  return getLocale() === 'en'
+    ? `"${name}" (${triple}) will be permanently deleted. This cannot be undone.\n\nOnly this (program · intensity) variant is deleted; other siblings with the same name are preserved.\nHistorical session records are unaffected.`
+    : `將永久刪除「${name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`;
+}
+
+function tEditorDeleteClusterBody(name: string): string {
+  return getLocale() === 'en'
+    ? `Superset "${name}" and all paired sets will be deleted.`
+    : `將刪除超級組「${name}」及配對動作的所有 sets。`;
+}
+
+function tEditorDeleteSoloBody(name: string): string {
+  return getLocale() === 'en'
+    ? `"${name}" and all its sets will be deleted.`
+    : `將刪除「${name}」及其所有 sets。`;
+}
+
+function tEditorRestLabel(seconds: number): string {
+  return getLocale() === 'en' ? `Rest Time (${seconds}s)` : `休息時間（${seconds}s）`;
+}
 
 // SECTION_LABEL kept as legacy zh-only constants — these `'一般動作' / '常設動作'`
 // strings are used in render bodies below; we rewrap the read sites through
@@ -472,10 +498,9 @@ export default function TemplateEditorView() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          // TODO(i18n): '同三元組已存在' title + body copy — no dedicated key (alert.variantExists closest)
           Alert.alert(
             tt('alert', 'variantExists'),
-            '已有「相同名稱 + 計畫 + 強度」的模板，請換個強度或計畫。',
+            tt('alert', 'duplicateTemplateTripleEditorBody'),
           );
         } else {
           Alert.alert(tt('alert', 'saveFailed'), msg);
@@ -506,9 +531,8 @@ export default function TemplateEditorView() {
       : null;
     const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
     Alert.alert(
-      // TODO(i18n): 「刪除模板？」title + body copy includes a sibling-保留 line not present in tDeleteTemplateVariant; keep inline for now.
-      '刪除模板？',
-      `將永久刪除「${draft.name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`,
+      tt('alert', 'deleteTemplateQ'),
+      tEditorDeleteTemplateBody(draft.name, triple),
       [
         { text: tt('common', 'cancel'), style: 'cancel' },
         {
@@ -543,8 +567,7 @@ export default function TemplateEditorView() {
         return;
       }
       if (draft.exercises.length === 0) {
-        // TODO(i18n): 'Add at least one exercise...' single-arg Alert.alert — no dedicated key
-        Alert.alert('Add at least one exercise before starting a session.');
+        Alert.alert(tt('alert', 'addExerciseFirst'));
         return;
       }
       if (dirty) {
@@ -1127,11 +1150,11 @@ export default function TemplateEditorView() {
     // 既有 filter 已正確處理（parent_id === ex.id 的 children 一併刪），
     // 只是 alert copy 要點明刪超級組以對齊 session UX。
     const isCluster = draft.exercises.some((e) => e.parent_id === ex.id);
-    // TODO(i18n): cluster vs solo delete confirm strings — 'cluster ⟂ all sets' wording is editor-specific.
-    const title = isCluster ? tt('alert', 'deleteSupersetQ') : '確認刪除？';
+    const title = isCluster ? tt('alert', 'deleteSupersetQ') : tt('alert', 'confirmDeleteQ');
+    const exName = ex.name ?? tt('common', 'unknownExercise');
     const body = isCluster
-      ? `將刪除超級組「${ex.name ?? '(動作)'}」及配對動作的所有 sets。`
-      : `將刪除「${ex.name ?? '(動作)'}」及其所有 sets。`;
+      ? tEditorDeleteClusterBody(exName)
+      : tEditorDeleteSoloBody(exName);
     Alert.alert(title, body, [
       { text: tt('common', 'cancel'), style: 'cancel' },
       {
@@ -1163,13 +1186,12 @@ export default function TemplateEditorView() {
     // 也是用 parent.exercise_id 寫 exercise.notes）。rest_seconds 寫在
     // template_exercise parent row 上、不 leak 到 children rows。
     const hasNotes = (ex.notes ?? '').trim().length > 0;
-    // TODO(i18n): 「休息時間（Ns）」compound label + 「設為常設/一般運動」section toggle options have no helpers yet
-    const restLabel = `休息時間（${ex.rest_seconds ?? 90}s）`;
+    const restLabel = tEditorRestLabel(ex.rest_seconds ?? 90);
     const options = [
-      hasNotes ? '編輯備註' : '新增備註',
+      hasNotes ? tt('button', 'editNote') : tt('button', 'addNote'),
       restLabel,
-      '移動動作',
-      ex.section === 'general' ? '設為常設運動' : '設為一般運動',
+      tt('button', 'moveExercise'),
+      ex.section === 'general' ? tt('button', 'setAsEvergreen') : tt('button', 'setAsGeneral'),
       tt('common', 'delete'),
       tt('common', 'cancel'),
     ];
