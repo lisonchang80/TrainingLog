@@ -47,6 +47,14 @@ import {
   findNearestNonRestInRow,
   formatCellDateLabel,
 } from '@/src/domain/program/programGridLayout';
+import {
+  t,
+  tApplyIntensityToCycle,
+  tApplyTemplateToDay,
+  tDiscardFilledCells,
+  tNCycles,
+  tNDays,
+} from '@/src/i18n';
 
 /**
  * Programs tab — wave 15 (2026-05-21) full UX rewrite per user spec:
@@ -317,7 +325,7 @@ export default function ProgramsScreen() {
         setEditing(true);
       } catch (e) {
         Alert.alert(
-          '導入失敗',
+          t('alert', 'importFailed'),
           e instanceof Error ? e.message : String(e)
         );
       } finally {
@@ -402,7 +410,7 @@ export default function ProgramsScreen() {
         await refresh();
       } catch (e) {
         Alert.alert(
-          '無法交換',
+          t('alert', 'cannotSwap'),
           e instanceof Error ? e.message : String(e),
         );
       }
@@ -474,11 +482,11 @@ export default function ProgramsScreen() {
       };
       if (lost > 0) {
         Alert.alert(
-          '縮小計畫表？',
-          `將砍掉 ${lost} 格已填內容（template + 強度）。此動作無法復原。`,
+          t('alert', 'shrinkProgramQ'),
+          tDiscardFilledCells(lost),
           [
-            { text: '取消', style: 'cancel' },
-            { text: '砍掉並縮小', style: 'destructive', onPress: doResize },
+            { text: t('common', 'cancel'), style: 'cancel' },
+            { text: t('button', 'shrinkAndDiscard'), style: 'destructive', onPress: doResize },
           ]
         );
         return;
@@ -519,8 +527,8 @@ export default function ProgramsScreen() {
     );
     if (!hasFilledCell) {
       Alert.alert(
-        '此 row 沒有 template',
-        '先在格子點選 template，再回來套用強度。\n（強度只能掛在有 template 的格子上）',
+        t('alert', 'noTemplateOnRow'),
+        t('alert', 'noTemplatePickFirst'),
       );
       return;
     }
@@ -626,7 +634,7 @@ export default function ProgramsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.headerRow}>
-          <Text style={styles.heading}>計畫表</Text>
+          <Text style={styles.heading}>{t('page', 'programs')}</Text>
           <View style={styles.headerButtons}>
             <Pressable
               accessibilityRole="button"
@@ -635,12 +643,13 @@ export default function ProgramsScreen() {
                 styles.newBtn,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={styles.newBtnText}>新建</Text>
+              <Text style={styles.newBtnText}>{t('button', 'newCta')}</Text>
             </Pressable>
           </View>
         </View>
         <View style={styles.body}>
           <Text style={styles.empty}>
+            {/* TODO(i18n): missing key for "還沒有計畫。按「新建」啟動 6 步建立精靈。" - consider status.noProgramsYetHint */}
             還沒有計畫。按「新建」啟動 6 步建立精靈。
           </Text>
         </View>
@@ -651,7 +660,7 @@ export default function ProgramsScreen() {
   if (!shown) {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={styles.empty}>載入中…</Text>
+        <Text style={styles.empty}>{t('status', 'loading')}</Text>
       </SafeAreaView>
     );
   }
@@ -695,7 +704,7 @@ export default function ProgramsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.heading}>計畫表</Text>
+        <Text style={styles.heading}>{t('page', 'programs')}</Text>
         <View style={styles.headerButtons}>
           <Pressable
             accessibilityRole="button"
@@ -710,7 +719,7 @@ export default function ProgramsScreen() {
                 styles.editBtnText,
                 editing && styles.editBtnTextActive,
               ]}>
-              {editing ? '完成' : '編輯'}
+              {editing ? t('common', 'done') : t('common', 'edit')}
             </Text>
           </Pressable>
           <Pressable
@@ -720,7 +729,7 @@ export default function ProgramsScreen() {
               styles.newBtn,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.newBtnText}>新建</Text>
+            <Text style={styles.newBtnText}>{t('button', 'newCta')}</Text>
           </Pressable>
         </View>
       </View>
@@ -730,10 +739,11 @@ export default function ProgramsScreen() {
         <Text style={styles.programName}>
           {shown.program.name}
           {shown.program.is_active === 1 ? null : (
-            <Text style={styles.inactiveTag}>{` · 未啟用`}</Text>
+            <Text style={styles.inactiveTag}>{` ${t('common', 'inactive')}`}</Text>
           )}
         </Text>
         <Text style={styles.metaLine}>
+          {/* TODO(i18n): missing key for " days · 起始 " composite — consider tProgramMetaLine(count, length, startDate) */}
           {shown.program.cycle_count} × {shown.program.cycle_length} days · 起始
           {' '}
           {shown.program.start_date}
@@ -742,22 +752,22 @@ export default function ProgramsScreen() {
         {editing ? (
           <View style={styles.editControls}>
             <DropdownButton
-              label="計畫"
+              label={t('domain', 'program')}
               value={shown.program.name}
               onPress={() => setPicker({ kind: 'program' })}
             />
             <DropdownButton
-              label="循環天數"
+              label={t('domain', 'cycleLengthDays')}
               value={String(shown.program.cycle_length)}
               onPress={() => setPicker({ kind: 'cycle_length' })}
             />
             <DropdownButton
-              label="週期數"
+              label={t('domain', 'cycleCount')}
               value={String(shown.program.cycle_count)}
               onPress={() => setPicker({ kind: 'cycle_count' })}
             />
             <DropdownButton
-              label="起始日"
+              label={t('domain', 'startDate')}
               value={formatCellDateLabel(shown.program.start_date)}
               onPress={() => setPicker({ kind: 'start_date' })}
             />
@@ -814,7 +824,7 @@ export default function ProgramsScreen() {
               },
             ]}>
             {isRest ? (
-              <Text style={styles.dragPreviewRest}>休息</Text>
+              <Text style={styles.dragPreviewRest}>{t('domain', 'rest')}</Text>
             ) : (
               <>
                 <Text
@@ -836,10 +846,10 @@ export default function ProgramsScreen() {
       {/* ── Simple pickers (program / cycle_length / cycle_count) ─── */}
       <PickerModal
         visible={picker?.kind === 'program'}
-        title="選擇計畫"
+        title={t('page', 'selectProgramAlt')}
         options={allPrograms.map((p) => ({
           key: p.id,
-          label: p.name + (p.is_active === 1 ? ' · 進行中' : ''),
+          label: p.name + (p.is_active === 1 ? ` ${t('common', 'inProgress')}` : ''),
           active: p.id === shown.program.id,
         }))}
         onPick={(key) => onPickProgram(key)}
@@ -847,10 +857,10 @@ export default function ProgramsScreen() {
       />
       <PickerModal
         visible={picker?.kind === 'cycle_length'}
-        title="選擇循環天數"
+        title={t('page', 'selectCycleLength')}
         options={CYCLE_LENGTH_OPTIONS.map((n) => ({
           key: String(n),
-          label: `${n} 天`,
+          label: tNDays(n),
           active: n === shown.program.cycle_length,
         }))}
         onPick={(key) => onPickCycleLength(Number(key))}
@@ -858,10 +868,10 @@ export default function ProgramsScreen() {
       />
       <PickerModal
         visible={picker?.kind === 'cycle_count'}
-        title="選擇週期數"
+        title={t('page', 'selectCycleCount')}
         options={CYCLE_COUNT_OPTIONS.map((n) => ({
           key: String(n),
-          label: `${n} 週期`,
+          label: tNCycles(n),
           active: n === shown.program.cycle_count,
         }))}
         onPick={(key) => onPickCycleCount(Number(key))}
@@ -882,9 +892,9 @@ export default function ProgramsScreen() {
         }
         title={
           picker?.kind === 'template_for_column'
-            ? '套用 template 到此 column'
+            ? t('button', 'applyTemplateToColumn')
             : picker?.kind === 'template_for_cell'
-              ? '選擇 template'
+              ? t('page', 'selectTemplate')
               : ''
         }
         templates={allTemplates}
@@ -947,7 +957,7 @@ export default function ProgramsScreen() {
             router.push(`/template/${id}?${params.toString()}`);
           } catch (e) {
             Alert.alert(
-              '無法建立模板',
+              t('alert', 'cannotCreateTemplate'),
               e instanceof Error ? e.message : String(e)
             );
           }
@@ -963,8 +973,8 @@ export default function ProgramsScreen() {
         }
         title={
           picker?.kind === 'sub_tag_for_row'
-            ? '套用強度到此 row'
-            : '選擇強度'
+            ? t('button', 'applyIntensityToRow')
+            : t('page', 'selectIntensity')
         }
         existingSubTags={(() => {
           // Union of (cells used a sub_tag) + (templates in this program have
@@ -1068,7 +1078,7 @@ function ProgramGrid({
             <Pressable
               key={d}
               accessibilityRole="button"
-              accessibilityLabel={`套用 template 到第 ${d + 1} 天`}
+              accessibilityLabel={tApplyTemplateToDay(d)}
               onPress={() => onColumnApply(d)}
               style={({ pressed }) => [
                 styles.applyBtnTop,
@@ -1086,7 +1096,7 @@ function ProgramGrid({
           {editing ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`套用強度到第 ${c + 1} 週期`}
+              accessibilityLabel={tApplyIntensityToCycle(c)}
               onPress={() => onRowApply(c)}
               style={({ pressed }) => [
                 styles.applyBtnLeft,
@@ -1141,7 +1151,7 @@ function ProgramGrid({
                       styles.cellRest,
                       tapsEnabled && pressed && styles.cellPressed,
                     ]}>
-                    <Text style={styles.cellRestText}>休息</Text>
+                    <Text style={styles.cellRestText}>{t('domain', 'rest')}</Text>
                   </Pressable>
                 ) : (
                   <>
@@ -1353,7 +1363,7 @@ function PickerModal({
           <Text style={styles.modalTitle}>{title}</Text>
           <ScrollView style={styles.modalList}>
             {options.length === 0 ? (
-              <Text style={styles.empty}>沒有可選項目。</Text>
+              <Text style={styles.empty}>{t('alert', 'noOptionsToSelect')}</Text>
             ) : (
               options.map((opt) => (
                 <Pressable
@@ -1417,6 +1427,7 @@ function TemplatePicker({
           <Text style={styles.modalTitle}>{title}</Text>
           {previewSubTag != null ? (
             <Text style={styles.modalSubtitle}>
+              {/* TODO(i18n): missing key for "強度將設為「{x}」（旁邊就近 cell）" - consider tIntensityWillBeSet(name) dynamic helper */}
               強度將設為「{previewSubTag}」（旁邊就近 cell）
             </Text>
           ) : null}
@@ -1429,7 +1440,7 @@ function TemplatePicker({
                   pressed && styles.btnPressed,
                 ]}
                 onPress={() => onPick(null)}>
-                <Text style={styles.modalRowText}>休息（清空此列）</Text>
+                <Text style={styles.modalRowText}>{t('button', 'restRowClear')}</Text>
               </Pressable>
             ) : null}
             {/* + 建立新模板 — creates a blank template and jumps to the editor.
@@ -1442,10 +1453,10 @@ function TemplatePicker({
                 pressed && styles.btnPressed,
               ]}
               onPress={onCreateNew}>
-              <Text style={styles.modalRowTextAdd}>+ 建立新模板</Text>
+              <Text style={styles.modalRowTextAdd}>{t('button', 'newProgramTemplate')}</Text>
             </Pressable>
             {templates.length === 0 ? (
-              <Text style={styles.empty}>沒有 template。先建一個再回來。</Text>
+              <Text style={styles.empty}>{t('alert', 'noTemplatesYet')}</Text>
             ) : (
               templates.map((t) => (
                 <Pressable
@@ -1534,7 +1545,7 @@ function SubTagPicker({
                   styles.modalRowText,
                   activeSubTag == null && styles.modalRowTextActive,
                 ]}>
-                無
+                {t('common', 'none')}
               </Text>
             </Pressable>
             {existingSubTags.map((tag) => (
@@ -1559,7 +1570,7 @@ function SubTagPicker({
                 <TextInput
                   value={input}
                   onChangeText={setInput}
-                  placeholder="新強度名稱"
+                  placeholder={t('page', 'newIntensityName')}
                   style={styles.modalInput}
                   autoFocus
                   onSubmitEditing={onConfirmNew}
@@ -1570,7 +1581,7 @@ function SubTagPicker({
                     pressed && styles.btnPressed,
                   ]}
                   onPress={onConfirmNew}>
-                  <Text style={styles.modalAddBtnText}>建立</Text>
+                  <Text style={styles.modalAddBtnText}>{t('common', 'create')}</Text>
                 </Pressable>
               </View>
             ) : (
@@ -1581,7 +1592,7 @@ function SubTagPicker({
                   pressed && styles.btnPressed,
                 ]}
                 onPress={() => setAdding(true)}>
-                <Text style={styles.modalRowTextAdd}>+ 新增強度</Text>
+                <Text style={styles.modalRowTextAdd}>{t('button', 'addIntensity')}</Text>
               </Pressable>
             )}
           </ScrollView>
@@ -1659,7 +1670,7 @@ function StartDateModal({
         <Pressable
           style={styles.modalCard}
           onPress={(e) => e.stopPropagation?.()}>
-          <Text style={styles.modalTitle}>選擇起始日</Text>
+          <Text style={styles.modalTitle}>{t('page', 'selectStartDate')}</Text>
           <View style={styles.startDatePickerWrap}>
             <DateTimePicker
               value={draft}
@@ -1676,7 +1687,7 @@ function StartDateModal({
                 pressed && styles.btnPressed,
               ]}
               onPress={onClose}>
-              <Text style={styles.startDateBtnCancelText}>取消</Text>
+              <Text style={styles.startDateBtnCancelText}>{t('common', 'cancel')}</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [
@@ -1684,7 +1695,7 @@ function StartDateModal({
                 pressed && styles.btnPressed,
               ]}
               onPress={onConfirm}>
-              <Text style={styles.startDateBtnConfirmText}>確認</Text>
+              <Text style={styles.startDateBtnConfirmText}>{t('common', 'confirm')}</Text>
             </Pressable>
           </View>
         </Pressable>
