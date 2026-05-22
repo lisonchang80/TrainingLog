@@ -122,7 +122,7 @@ export default function EditSupersetScreen() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="保存"
+          accessibilityLabel="儲存"
           onPress={onSave}
           disabled={!canSave}
           style={({ pressed }) => [
@@ -130,7 +130,7 @@ export default function EditSupersetScreen() {
             !canSave && styles.saveBtnDisabled,
             pressed && canSave && styles.pressed,
           ]}>
-          <Text style={styles.saveBtnText}>保存</Text>
+          <Text style={styles.saveBtnText}>儲存</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
