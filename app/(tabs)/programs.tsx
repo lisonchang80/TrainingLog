@@ -474,7 +474,7 @@ export default function ProgramsScreen() {
       };
       if (lost > 0) {
         Alert.alert(
-          '縮小計劃表？',
+          '縮小計畫表？',
           `將砍掉 ${lost} 格已填內容（template + 強度）。此動作無法復原。`,
           [
             { text: '取消', style: 'cancel' },
@@ -626,7 +626,7 @@ export default function ProgramsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.headerRow}>
-          <Text style={styles.heading}>計劃表</Text>
+          <Text style={styles.heading}>計畫表</Text>
           <View style={styles.headerButtons}>
             <Pressable
               accessibilityRole="button"
@@ -641,7 +641,7 @@ export default function ProgramsScreen() {
         </View>
         <View style={styles.body}>
           <Text style={styles.empty}>
-            還沒有計劃。按「新建」啟動 6 步建立精靈。
+            還沒有計畫。按「新建」啟動 6 步建立精靈。
           </Text>
         </View>
       </SafeAreaView>
@@ -695,7 +695,7 @@ export default function ProgramsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.heading}>計劃表</Text>
+        <Text style={styles.heading}>計畫表</Text>
         <View style={styles.headerButtons}>
           <Pressable
             accessibilityRole="button"
@@ -742,7 +742,7 @@ export default function ProgramsScreen() {
         {editing ? (
           <View style={styles.editControls}>
             <DropdownButton
-              label="計劃"
+              label="計畫"
               value={shown.program.name}
               onPress={() => setPicker({ kind: 'program' })}
             />
@@ -836,7 +836,7 @@ export default function ProgramsScreen() {
       {/* ── Simple pickers (program / cycle_length / cycle_count) ─── */}
       <PickerModal
         visible={picker?.kind === 'program'}
-        title="選擇計劃"
+        title="選擇計畫"
         options={allPrograms.map((p) => ({
           key: p.id,
           label: p.name + (p.is_active === 1 ? ' · 進行中' : ''),

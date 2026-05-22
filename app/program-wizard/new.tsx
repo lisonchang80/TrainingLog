@@ -134,7 +134,7 @@ export default function ProgramWizardScreen() {
     // check in createProgram — surfacing the failure here keeps the user from
     // walking through 5 more steps only to hit DUPLICATE_PROGRAM_NAME on save.
     if (state.step === 'NameAndTag' && isDuplicateName) {
-      Alert.alert('計劃名稱已存在', '請換一個名稱再繼續。');
+      Alert.alert('計畫名稱已存在', '請換一個名稱再繼續。');
       return;
     }
     const r = nextStep(state);
@@ -303,7 +303,7 @@ function StepHeader({ step }: { step: WizardStep }) {
 function stepTitle(step: WizardStep): string {
   switch (step) {
     case 'NameAndTag':
-      return '計劃名稱 + 強度';
+      return '計畫名稱 + 強度';
     case 'CycleConfig':
       return '週期設定';
     case 'DayPattern':
@@ -354,7 +354,7 @@ function NameAndTagPanel({
   return (
     <View style={styles.panel}>
       <View style={styles.labelRow}>
-        <Text style={styles.label}>計劃名稱</Text>
+        <Text style={styles.label}>計畫名稱</Text>
         {programs.length > 0 ? (
           <Pressable
             accessibilityRole="button"
@@ -363,7 +363,7 @@ function NameAndTagPanel({
               styles.loadProgramBtn,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.loadProgramBtnText}>↓ 載入計劃</Text>
+            <Text style={styles.loadProgramBtnText}>↓ 載入計畫</Text>
           </Pressable>
         ) : null}
       </View>
@@ -375,7 +375,7 @@ function NameAndTagPanel({
         placeholderTextColor="#999"
       />
       {isDuplicateName ? (
-        <Text style={styles.inlineErrorLine}>⚠️ 計劃名稱已存在</Text>
+        <Text style={styles.inlineErrorLine}>⚠️ 計畫名稱已存在</Text>
       ) : null}
       <ProgramPickerModal
         visible={loadModalOpen}
@@ -760,7 +760,7 @@ function ProgramPickerModal({
           // Stop propagation so taps inside the sheet don't dismiss it.
           onPress={(e) => e.stopPropagation()}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>選擇要載入的計劃</Text>
+            <Text style={styles.modalTitle}>選擇要載入的計畫</Text>
             <Pressable
               accessibilityRole="button"
               onPress={onClose}
@@ -770,7 +770,7 @@ function ProgramPickerModal({
           </View>
           <ScrollView style={styles.modalList}>
             {programs.length === 0 ? (
-              <Text style={styles.modalEmpty}>尚無計劃可載入</Text>
+              <Text style={styles.modalEmpty}>尚無計畫可載入</Text>
             ) : (
               programs.map((p) => (
                 <Pressable
