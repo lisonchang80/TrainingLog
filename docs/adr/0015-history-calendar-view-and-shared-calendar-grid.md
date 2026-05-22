@@ -131,6 +131,8 @@ cyan / blue / indigo / purple / pink / brown
 
 ### Schema 累加 (v011)
 
+> **2026-05-20 wave 56 訂正**：實際落點為 v020 migration (`v020_template_color_backfill.ts`)，非 v011 (v011 已被 reusable_superset 佔用)。
+
 ```sql
 -- v011 累加變動（接續 ADR-0014 v010）
 ALTER TABLE template ADD COLUMN color_hex TEXT NOT NULL DEFAULT '';

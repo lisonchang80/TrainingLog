@@ -193,6 +193,8 @@ Reusable Superset (ADR-0017) 進 Template 後爆開成 2 個 `template_exercise`
 
 效果：同一個「胸推」在 (a) solo / (b) 「胸+深」reusable cluster / (c) 「胸+硬」reusable cluster 各自 3 套互不污染的記憶單位。實作於 `queryMemoryCandidates` + `queryReusableSupersetMemory` (src/adapters/sqlite/templateRepository.ts)。
 
+> **2026-05-19 wave 51 修訂**：`startSessionFromTemplate` 改 `template_set` 直接 copy，不再走 memory query；memory query 路徑仍存於「+動作」(inline plan 外加) 場景。
+
 ## Reusable cluster lock rules (ADR-0017 引入，Slice 9.8b)
 
 當 `template_exercise.reusable_superset_id != NULL`，cluster 被視為**鎖死的二人組**（per ADR-0017 grill Q5 / 動作組合鎖死哲學）。Template editor 對該 cluster 的操作集：

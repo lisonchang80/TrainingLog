@@ -77,6 +77,8 @@ Dropset 重新建模為 **cluster**（多 step 單一 set，step 間無休息）
 
 ### Cluster 首 step 三 gesture（cluster 級）
 
+> **2026-05-16 ADR-0019 Q5 amendment**：cluster row 加 ⚙️ menu 6 槽 (3 主項 + 2 history shortcut + 1 utility)。詳見 ADR-0019 § Q5 (b)。
+
 | Gesture | 行為 |
 |---|---|
 | **左滑** | [刪除整 cluster] 紅 button：一鍵砍首 step + 所有 children（DELETE CASCADE）；**無二次確認** |
