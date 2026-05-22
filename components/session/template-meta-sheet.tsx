@@ -58,7 +58,31 @@ import {
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
-import { t } from '@/src/i18n';
+import { getLocale, t } from '@/src/i18n';
+
+/**
+ * Inline dynamic helper — 4-variant template-meta-sheet help hint copy.
+ * Kept local rather than added to `src/i18n/dynamic.ts` (sheet-only usage).
+ */
+function tTemplateMetaHint(omitName: boolean, programIsDefault: boolean): string {
+  const en = getLocale() === 'en';
+  if (omitName) {
+    return programIsDefault
+      ? en
+        ? 'When program is "Default", intensity is not set (= free template).'
+        : '計畫選「通用」時不指定強度（= 自由模板）。'
+      : en
+        ? 'Intensity can be "Default" or a new tag.'
+        : '強度可選「通用」或新增。';
+  }
+  return programIsDefault
+    ? en
+      ? 'Name is required. When program is "Default", intensity is not set (= free template).'
+      : '名稱必填、計畫選「通用」時不指定強度（= 自由模板）。'
+    : en
+      ? 'Name is required. Intensity can be "Default" or a new tag.'
+      : '名稱必填、強度可選「通用」或新增。';
+}
 
 interface TemplateMetaSheetProps {
   visible: boolean;
@@ -356,8 +380,7 @@ export function TemplateMetaSheet({
       (t) => t.toLowerCase() === lower
     );
     if (isDuplicate) {
-      // TODO(i18n): 「無法新增強度」title + 「強度名稱已存在」body — strings has alert.variantExists ('變體已存在') closest. Keeping inline.
-      Alert.alert(t('alert', 'variantExists'), '強度名稱已存在，請改用別的名稱。');
+      Alert.alert(t('alert', 'variantExists'), t('alert', 'intensityNameExists'));
       return;
     }
     setLocalSubTags((prev) => [...prev, trimmed]);
@@ -422,8 +445,7 @@ export function TemplateMetaSheet({
                 to onConfirm.name unchanged via the `name` state. */}
             {omitName ? null : (
               <View style={styles.field}>
-                {/* TODO(i18n): 「名稱」label — no exact key; closest is page.programNamePlaceholder. */}
-                <Text style={styles.fieldLabel}>名稱</Text>
+                <Text style={styles.fieldLabel}>{t('page', 'nameFieldLabel')}</Text>
                 <TextInput
                   style={styles.input}
                   value={name}
@@ -436,8 +458,7 @@ export function TemplateMetaSheet({
 
             {/* 歸屬計畫 */}
             <View style={styles.field}>
-              {/* TODO(i18n): 「歸屬計畫」field label — no key (program-of-template). */}
-              <Text style={styles.fieldLabel}>歸屬計畫</Text>
+              <Text style={styles.fieldLabel}>{t('page', 'templateProgramLabel')}</Text>
               <View style={styles.chipRow}>
                 <Chip
                   label={t('common', 'default')}
@@ -468,8 +489,7 @@ export function TemplateMetaSheet({
                     customProgramMode && styles.addCtaActive,
                   ]}
                 >
-                  {/* TODO(i18n): 「新增計畫」CTA — no key */}
-                  <Text style={styles.addCtaText}>新增計畫</Text>
+                  <Text style={styles.addCtaText}>{t('button', 'addProgram')}</Text>
                 </Pressable>
               </View>
               {customProgramMode ? (
@@ -478,8 +498,7 @@ export function TemplateMetaSheet({
                     style={[styles.input, styles.inlineInput]}
                     value={customProgramName}
                     onChangeText={setCustomProgramName}
-                    // TODO(i18n): 「輸入新計畫名稱（≤ 60 字）」placeholder — no key yet
-                    placeholder="輸入新計畫名稱（≤ 60 字）"
+                    placeholder={t('page', 'newProgramNamePlaceholder')}
                     placeholderTextColor="#9ca3af"
                     maxLength={60}
                     editable={!creatingProgram}
@@ -498,9 +517,8 @@ export function TemplateMetaSheet({
                         styles.inlineConfirmDisabled,
                     ]}
                   >
-                    {/* TODO(i18n): 「建立中…」inline busy label — no key */}
                     <Text style={styles.inlineConfirmText}>
-                      {creatingProgram ? '建立中…' : t('common', 'create')}
+                      {creatingProgram ? t('button', 'creating') : t('common', 'create')}
                     </Text>
                   </Pressable>
                 </View>
@@ -510,8 +528,7 @@ export function TemplateMetaSheet({
             {/* 強度標籤 — only when a specific program is selected. */}
             {programId !== null ? (
               <View style={styles.field}>
-                {/* TODO(i18n): 「強度標籤」field label — domain.intensity is just 「強度」, missing 「標籤」. */}
-                <Text style={styles.fieldLabel}>強度標籤</Text>
+                <Text style={styles.fieldLabel}>{t('page', 'templateIntensityLabel')}</Text>
                 <View style={styles.chipRow}>
                   <Chip
                     label={t('common', 'default')}
@@ -551,8 +568,7 @@ export function TemplateMetaSheet({
                       style={[styles.input, styles.inlineInput]}
                       value={customSubTag}
                       onChangeText={setCustomSubTag}
-                      // TODO(i18n): same placeholder as start-template-sheet
-                      placeholder="輸入新強度標籤（如 5x5、最大力量）"
+                      placeholder={t('page', 'newIntensityWithExamplePlaceholder')}
                       placeholderTextColor="#9ca3af"
                     />
                     <Pressable
@@ -572,15 +588,8 @@ export function TemplateMetaSheet({
               </View>
             ) : null}
 
-            {/* TODO(i18n): help hint copy — 4 variants describe name/通用 invariants, no key yet */}
             <Text style={styles.hint}>
-              {omitName
-                ? programId === null
-                  ? '計畫選「通用」時不指定強度（= 自由模板）。'
-                  : '強度可選「通用」或新增。'
-                : programId === null
-                  ? '名稱必填、計畫選「通用」時不指定強度（= 自由模板）。'
-                  : '名稱必填、強度可選「通用」或新增。'}
+              {tTemplateMetaHint(omitName, programId === null)}
             </Text>
           </ScrollView>
         </Pressable>
