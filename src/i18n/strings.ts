@@ -298,6 +298,10 @@ export const strings = {
       noProgramsAvailable: '沒有可用的 Program。',
       noProgramsToLoad: '尚無計劃可載入',
       programHasNoSubTag: '此 Program 無 sub_tag 紀錄。',
+      // Wave 18g (Phase 6) — same-name overwrite UX.
+      overwriteSheetBodyEmpty: '（目前無強度）',
+      overwriteSheetBodyConsequence:
+        '建立後將完全取代既有計劃設定（循環天數、週期數、起始日、每日內容、強度）。已結束的訓練紀錄會保留。',
       cannotUndo: '此操作無法復原。',
       cannotUndoLong: '此操作不可復原 — 將刪除整個 session、所有動作及記錄。',
       historyUnaffected: '歷史 session 紀錄不受影響。',
@@ -703,6 +707,10 @@ export const strings = {
       noProgramsAvailable: 'No available Programs.',
       noProgramsToLoad: 'No programs available to load',
       programHasNoSubTag: 'This Program has no intensity history.',
+      // Wave 18g (Phase 6) — same-name overwrite UX.
+      overwriteSheetBodyEmpty: '(no intensities yet)',
+      overwriteSheetBodyConsequence:
+        'Creating this will completely replace the existing program settings (cycle length, cycle count, start date, daily content, intensities). Finished session records are preserved.',
       cannotUndo: 'This cannot be undone.',
       cannotUndoLong: 'This cannot be undone — the entire session, exercises, and records will be deleted.',
       historyUnaffected: 'Historical session records are unaffected.',

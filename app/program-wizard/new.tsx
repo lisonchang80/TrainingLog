@@ -20,6 +20,7 @@ import {
   createProgram,
   listProgramSubTags,
   listPrograms,
+  overwriteProgram,
   recordProgramSubTag,
   setActiveProgram,
   type ProgramSummary,
@@ -52,6 +53,8 @@ import {
   t,
   tCycleN,
   tNDays,
+  tOverwriteBlockedByActiveSession,
+  tOverwriteSheetTitle,
   tRemoveIntensity,
   tWeekdayLabels,
 } from '@/src/i18n';
@@ -73,6 +76,26 @@ export default function ProgramWizardScreen() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Wave 18g (Phase 6) — same-name overwrite UX. Two-stage state:
+  //   - `overwriteTarget`: the program the user has CONFIRMED to overwrite
+  //     (set from `pendingOverwriteMatch` on modal 「確認覆蓋」). Cleared
+  //     automatically when the name changes away from it.
+  //   - `pendingOverwriteMatch` + `pendingOverwriteSubTags`: the program
+  //     currently being asked about (modal open, no decision yet). The
+  //     subTags arrive from `listProgramSubTags` so the modal can list
+  //     what's about to be replaced.
+  // This split prevents the cancel-then-blur loop where a single state
+  // flag would either re-prompt forever or accidentally treat a cancel
+  // as a confirm at Step 6.
+  const [overwriteTarget, setOverwriteTarget] =
+    useState<ProgramSummary | null>(null);
+  const [pendingOverwriteMatch, setPendingOverwriteMatch] =
+    useState<ProgramSummary | null>(null);
+  const [pendingOverwriteSubTags, setPendingOverwriteSubTags] = useState<
+    string[]
+  >([]);
+  const [showOverwriteModal, setShowOverwriteModal] = useState(false);
 
   const refresh = useCallback(async () => {
     const [ts, ps] = await Promise.all([listTemplates(db), listPrograms(db)]);
@@ -104,10 +127,56 @@ export default function ProgramWizardScreen() {
     }
   }, [db, router]);
 
+  // Wave 18g — pure case-insensitive trim lookup. Mirrors `createProgram`'s
+  // server-side `LOWER(TRIM(name))` guard so the wizard catches dup-name
+  // before the user walks all 6 steps.
+  const findOverwriteMatch = useCallback(
+    (name: string): ProgramSummary | null => {
+      const typed = name.trim().toLowerCase();
+      if (!typed) return null;
+      return (
+        programs.find((p) => p.name.trim().toLowerCase() === typed) ?? null
+      );
+    },
+    [programs],
+  );
+
+  // Open the overwrite-confirm modal if `state.draft.name` matches an
+  // existing program and we haven't already confirmed that exact program.
+  // Returns true if the modal was opened (caller should not advance the
+  // wizard). Used by both onBlur (Name input) and onNext (Step 1 → Step 2
+  // safety net in case blur didn't fire before tap).
+  const promptOverwriteIfNeeded = useCallback(async (): Promise<boolean> => {
+    const match = findOverwriteMatch(state.draft.name);
+    if (!match) return false;
+    // Already confirmed this exact program — no re-prompt.
+    if (overwriteTarget?.id === match.id) return false;
+    const tags = await listProgramSubTags(db, match.id);
+    setPendingOverwriteMatch(match);
+    setPendingOverwriteSubTags(tags);
+    setShowOverwriteModal(true);
+    return true;
+  }, [db, findOverwriteMatch, state.draft.name, overwriteTarget]);
+
+  const onOverwriteConfirm = useCallback(() => {
+    if (pendingOverwriteMatch) setOverwriteTarget(pendingOverwriteMatch);
+    setShowOverwriteModal(false);
+    setPendingOverwriteMatch(null);
+  }, [pendingOverwriteMatch]);
+
+  const onOverwriteCancel = useCallback(() => {
+    // User intends to rename. We DON'T re-prompt automatically — the user
+    // is back on Step 1 with the name input ready. If they don't rename and
+    // blur again, that blur will fire and re-open the prompt (intentional —
+    // confirms the user really wants to keep the same name).
+    setShowOverwriteModal(false);
+    setPendingOverwriteMatch(null);
+  }, []);
+
   // Wizard Step 1 「載入計劃」 entry — pick an existing program and copy its
-  // name + sub_tag dictionary into the draft. User can still edit before save.
-  // Final save's dup-guard (DUPLICATE_PROGRAM_NAME) prevents true collision
-  // even if user forgets to rename; Step 1 onNext also warns inline.
+  // name + sub_tag dictionary into the draft. User can still edit before
+  // save. Loading does NOT pre-confirm overwrite — if the user keeps the
+  // same name and blurs, the overwrite modal triggers normally.
   const onLoadFromProgram = useCallback(
     async (programId: string) => {
       const picked = programs.find((p) => p.id === programId);
@@ -116,17 +185,29 @@ export default function ProgramWizardScreen() {
       setState((prev) =>
         updateDraft(prev, { name: picked.name, sub_tags: tags })
       );
+      // Loading a different program invalidates any previously-confirmed
+      // overwrite target (which was for a different program).
+      setOverwriteTarget(null);
     },
     [db, programs]
   );
 
-  // Case-insensitive trim duplicate detection mirrors `createProgram`'s
-  // server-side `LOWER(TRIM(name))` guard. Empty name is "not a dup yet"
-  // (handled by the existing name-empty validator).
-  const trimmedName = state.draft.name.trim().toLowerCase();
-  const isDuplicateName =
-    trimmedName.length > 0 &&
-    programs.some((p) => p.name.trim().toLowerCase() === trimmedName);
+  // Wave 18g — clears the confirmed overwrite target when the user types a
+  // name that doesn't match the previously-confirmed program. Without this,
+  // a user could confirm overwrite of Program X, then rename to Y, and
+  // still trigger the overwrite path on Step 6 (writing the new draft over
+  // X under the renamed name).
+  const onNameChange = useCallback(
+    (name: string) => {
+      if (overwriteTarget) {
+        const typed = name.trim().toLowerCase();
+        const targetName = overwriteTarget.name.trim().toLowerCase();
+        if (typed !== targetName) setOverwriteTarget(null);
+      }
+      setState((prev) => updateDraft(prev, { name }));
+    },
+    [overwriteTarget],
+  );
 
   const onPrev = () => {
     if (isFirstStep(state.step)) {
@@ -136,13 +217,14 @@ export default function ProgramWizardScreen() {
     setState(prevStep(state));
   };
 
-  const onNext = () => {
-    // Step 1 client-side dup-guard mirrors the server-side LOWER(TRIM(name))
-    // check in createProgram — surfacing the failure here keeps the user from
-    // walking through 5 more steps only to hit DUPLICATE_PROGRAM_NAME on save.
-    if (state.step === 'NameAndTag' && isDuplicateName) {
-      Alert.alert(t('alert', 'programNameExists'), t('alert', 'programNameExistsMsg'));
-      return;
+  const onNext = async () => {
+    // Wave 18g — Step 1 safety net: if name matches existing and the user
+    // hasn't already confirmed overwrite, open the modal instead of
+    // advancing. onBlur is the primary trigger; this catches the case
+    // where focus didn't leave the input before Next was tapped.
+    if (state.step === 'NameAndTag') {
+      const prompted = await promptOverwriteIfNeeded();
+      if (prompted) return;
     }
     const r = nextStep(state);
     if ('error' in r) {
@@ -160,6 +242,48 @@ export default function ProgramWizardScreen() {
     }
     setBusy(true);
     try {
+      // Wave 18g — branch: overwrite existing program in-place vs create
+      // new. `overwriteTarget` is only set after explicit user confirm in
+      // the modal, so this branch faithfully reflects user intent.
+      if (overwriteTarget) {
+        const programCore = {
+          id: overwriteTarget.id,
+          name: r.draft.name.trim(),
+          main_tag: r.draft.main_tag?.trim() || null,
+          cycle_length: r.draft.cycle_length,
+          cycle_count: r.draft.cycle_count,
+          start_date: r.draft.start_date as string,
+          is_active: overwriteTarget.is_active,
+        };
+        const cells = expandWizardDraft({
+          program: programCore,
+          dayPlans: r.draft.dayPlans,
+          overrides: r.draft.overrides,
+          uuid: randomUUID,
+        });
+        await overwriteProgram(db, {
+          program_id: overwriteTarget.id,
+          new_program: programCore,
+          new_cells: cells,
+          new_sub_tags: r.draft.sub_tags,
+        });
+        // Re-attach picked templates to the program (mirror create flow).
+        const seen = new Set<string>();
+        for (const dp of r.draft.dayPlans) {
+          if (dp.template_id && !seen.has(dp.template_id)) {
+            seen.add(dp.template_id);
+            await attachTemplateToProgram(db, {
+              template_id: dp.template_id,
+              program_id: overwriteTarget.id,
+              sub_tag: dp.sub_tag,
+            });
+          }
+        }
+        router.replace(`/program/${overwriteTarget.id}`);
+        return;
+      }
+
+      // Create-new path (unchanged).
       const programId = randomUUID();
       const programCore = {
         id: programId,
@@ -198,7 +322,17 @@ export default function ProgramWizardScreen() {
       await setActiveProgram(db, { id: programId });
       router.replace(`/program/${programId}`);
     } catch (e) {
-      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
+      // Wave 18g — surface active-session block via dedicated Alert so the
+      // user knows they need to finish/discard the in-progress session.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'PROGRAM_HAS_ACTIVE_SESSION' && overwriteTarget) {
+        Alert.alert(
+          t('alert', 'cannotOverwrite'),
+          tOverwriteBlockedByActiveSession(overwriteTarget.name),
+        );
+      } else {
+        Alert.alert(t('alert', 'saveFailed'), msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -257,8 +391,9 @@ export default function ProgramWizardScreen() {
               state={state}
               setState={setState}
               programs={programs}
-              isDuplicateName={isDuplicateName}
               onLoadFromProgram={onLoadFromProgram}
+              onNameChange={onNameChange}
+              onNameBlur={promptOverwriteIfNeeded}
             />
           )}
           {state.step === 'CycleConfig' && (
@@ -281,6 +416,13 @@ export default function ProgramWizardScreen() {
           {state.step === 'Confirm' && <ConfirmPanel state={state} />}
         </ScrollView>
       </KeyboardAvoidingView>
+      <OverwriteConfirmModal
+        visible={showOverwriteModal}
+        match={pendingOverwriteMatch}
+        subTags={pendingOverwriteSubTags}
+        onConfirm={onOverwriteConfirm}
+        onCancel={onOverwriteCancel}
+      />
     </SafeAreaView>
   );
 }
@@ -328,14 +470,19 @@ function NameAndTagPanel({
   state,
   setState,
   programs,
-  isDuplicateName,
   onLoadFromProgram,
+  onNameChange,
+  onNameBlur,
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
   programs: ProgramSummary[];
-  isDuplicateName: boolean;
   onLoadFromProgram: (programId: string) => Promise<void>;
+  // Wave 18g (Phase 6) — parent owns name state so it can clear the
+  // confirmed overwrite target on name change, and trigger the
+  // overwrite-confirm modal on blur.
+  onNameChange: (name: string) => void;
+  onNameBlur: () => Promise<boolean>;
 }) {
   const [pending, setPending] = useState('');
   const [loadModalOpen, setLoadModalOpen] = useState(false);
@@ -375,15 +522,17 @@ function NameAndTagPanel({
         ) : null}
       </View>
       <TextInput
-        style={[styles.input, isDuplicateName && styles.inputError]}
+        style={styles.input}
         value={state.draft.name}
-        onChangeText={(name) => setState(updateDraft(state, { name }))}
+        onChangeText={onNameChange}
+        onBlur={() => {
+          // Fire-and-forget — modal opening is async (listProgramSubTags).
+          // The void here is intentional; we don't block on the prompt.
+          void onNameBlur();
+        }}
         placeholder={t('page', 'programNameExample')}
         placeholderTextColor="#999"
       />
-      {isDuplicateName ? (
-        <Text style={styles.inlineErrorLine}>{t('alert', 'programNameExistsWarning')}</Text>
-      ) : null}
       <ProgramPickerModal
         visible={loadModalOpen}
         programs={programs}
@@ -748,6 +897,93 @@ function CycleSubTagsPanel({
   );
 }
 
+/**
+ * Wave 18g (Phase 6) — same-name overwrite confirm sheet.
+ *
+ * Triggered when the user types a name that matches an existing program
+ * (onBlur of name input, or onNext from Step 1 as safety net). Shows the
+ * matched program's existing 強度 list + a "this replaces everything"
+ * warning. Confirming sets `overwriteTarget`; canceling leaves it null
+ * (user is expected to rename).
+ */
+function OverwriteConfirmModal({
+  visible,
+  match,
+  subTags,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  match: ProgramSummary | null;
+  subTags: string[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onCancel}>
+      <Pressable style={styles.modalBackdrop} onPress={onCancel}>
+        <Pressable
+          style={styles.modalSheet}
+          onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {match ? tOverwriteSheetTitle(match.name) : ''}
+            </Text>
+          </View>
+          <View style={styles.overwriteBody}>
+            {subTags.length > 0 ? (
+              <View style={styles.tagChipRow}>
+                {subTags.map((tag) => (
+                  <View key={tag} style={styles.tagChip}>
+                    <Text style={styles.tagChipText}>{tag}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.overwriteBodyEmpty}>
+                {t('alert', 'overwriteSheetBodyEmpty')}
+              </Text>
+            )}
+            <Text style={styles.overwriteBodyText}>
+              {t('alert', 'overwriteSheetBodyConsequence')}
+            </Text>
+          </View>
+          <View style={styles.overwriteActions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onCancel}
+              style={({ pressed }) => [
+                styles.overwriteBtn,
+                styles.overwriteBtnSecondary,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.overwriteBtnSecondaryText}>
+                {t('common', 'cancel')}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onConfirm}
+              style={({ pressed }) => [
+                styles.overwriteBtn,
+                styles.overwriteBtnPrimary,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.overwriteBtnPrimaryText}>
+                {t('button', 'overwrite')}
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function ProgramPickerModal({
   visible,
   programs,
@@ -924,15 +1160,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0a7ea4',
   },
-  inputError: {
-    borderWidth: 1,
-    borderColor: '#dc3545',
-  },
-  inlineErrorLine: {
-    color: '#dc3545',
-    fontSize: 12,
-    marginTop: 2,
-  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -970,6 +1197,26 @@ const styles = StyleSheet.create({
   },
   modalRowName: { fontSize: 15, fontWeight: '600' },
   modalRowMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
+  // Wave 18g (Phase 6) — same-name overwrite confirm sheet.
+  overwriteBody: { gap: 12, marginTop: 8, marginBottom: 16 },
+  overwriteBodyText: { fontSize: 13, lineHeight: 19, opacity: 0.75 },
+  overwriteBodyEmpty: { fontSize: 13, opacity: 0.55, fontStyle: 'italic' },
+  overwriteActions: {
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'flex-end',
+  },
+  overwriteBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    minWidth: 96,
+    alignItems: 'center',
+  },
+  overwriteBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
+  overwriteBtnSecondaryText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  overwriteBtnPrimary: { backgroundColor: '#dc3545' },
+  overwriteBtnPrimaryText: { fontSize: 14, fontWeight: '700', color: 'white' },
   hint: { fontSize: 13, opacity: 0.7, marginBottom: 6 },
   input: {
     paddingVertical: 12,

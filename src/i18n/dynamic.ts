@@ -364,3 +364,23 @@ export function tDuplicateRsPairError(existingId: string): string {
 export function tMainTagLine(mainTag: string): string {
   return isEn() ? `Main tag: ${mainTag}` : `主標籤：${mainTag}`;
 }
+
+/**
+ * Wave 18g (Phase 6) — same-name overwrite UX. Title shown on the
+ * onBlur-triggered confirm sheet listing the existing program's
+ * dimensions + intensities, asking the user to confirm overwrite.
+ */
+export function tOverwriteSheetTitle(programName: string): string {
+  return isEn() ? `Program "${programName}" already exists` : `已有計劃「${programName}」`;
+}
+
+/**
+ * Wave 18g — Alert body shown when overwriteProgram throws
+ * PROGRAM_HAS_ACTIVE_SESSION. Tells the user to finish or discard
+ * the in-progress session before overwriting the program.
+ */
+export function tOverwriteBlockedByActiveSession(programName: string): string {
+  return isEn()
+    ? `"${programName}" has an in-progress session. Please finish or discard it first.`
+    : `「${programName}」有進行中的 session，請先完成或捨棄。`;
+}
