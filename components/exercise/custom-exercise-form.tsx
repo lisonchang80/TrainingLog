@@ -120,8 +120,7 @@ export function CustomExerciseForm({
     if (!canSubmit || busy) return;
     const generalErrs = errors.filter((e) => e.field === 'general');
     if (generalErrs.length > 0) {
-      // TODO(i18n): 「無法儲存」title — no key (alert.saveFailed ~ 儲存失敗 covers the cause-Alert below).
-      Alert.alert('無法儲存', generalErrs.map((e) => e.message).join('\n'));
+      Alert.alert(t('alert', 'cannotSave'), generalErrs.map((e) => e.message).join('\n'));
       return;
     }
     setBusy(true);
@@ -153,10 +152,9 @@ export function CustomExerciseForm({
   );
 
   const mgLabel = useMemo(
-    // TODO(i18n): 「請選擇大分類」placeholder — no key (alert.pickCategoryFirst body close-ish but different wording)
     () => {
       const mg = muscleGroups.find((m) => m.id === mgId);
-      return mg ? tMuscleGroup(mg.name) : '請選擇大分類';
+      return mg ? tMuscleGroup(mg.name) : t('page', 'pickCategoryPlaceholder');
     },
     [muscleGroups, mgId]
   );
@@ -193,12 +191,10 @@ export function CustomExerciseForm({
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Row 1: 名稱 */}
-        {/* TODO(i18n): 「名稱」field label — no exact key (page.programNamePlaceholder is program-specific) */}
-        <Text style={styles.label}>名稱</Text>
+        <Text style={styles.label}>{t('page', 'nameFieldLabel')}</Text>
         <TextInput
-          // TODO(i18n): 「動作名稱」a11y + 「例：吊環划船」placeholder — no keys (page.enterExerciseName is the alert-style copy)
-          accessibilityLabel="動作名稱"
-          placeholder="例：吊環划船"
+          accessibilityLabel={t('page', 'exerciseNameA11y')}
+          placeholder={t('page', 'exerciseNameExamplePlaceholder')}
           value={name}
           onChangeText={setName}
           style={[styles.input, nameError && styles.inputError]}
@@ -209,11 +205,10 @@ export function CustomExerciseForm({
         {nameError && <Text style={styles.fieldError}>{nameError.message}</Text>}
 
         {/* Row 2: 大分類 picker row */}
-        {/* TODO(i18n): 「大分類」/「用具」/「訓練部位（選填）」field labels — no keys yet */}
-        <Text style={styles.label}>大分類</Text>
+        <Text style={styles.label}>{t('page', 'categoryLabel')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`大分類：${mgLabel}`}
+          accessibilityLabel={`${t('page', 'categoryLabel')}：${mgLabel}`}
           onPress={() => setShowMgPicker(true)}
           style={({ pressed }) => [
             styles.pickerRow,
@@ -227,10 +222,10 @@ export function CustomExerciseForm({
         </Pressable>
 
         {/* Row 3: 用具 picker row */}
-        <Text style={styles.label}>用具</Text>
+        <Text style={styles.label}>{t('page', 'equipmentLabel')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`用具：${tEquipment(equipment)}`}
+          accessibilityLabel={`${t('page', 'equipmentLabel')}：${tEquipment(equipment)}`}
           onPress={() => setShowEquipmentPicker(true)}
           style={({ pressed }) => [
             styles.pickerRow,
@@ -241,10 +236,9 @@ export function CustomExerciseForm({
         </Pressable>
 
         {/* Row 4: 訓練部位 — 解剖圖 + 標籤同畫面（正面 / 背面並列） */}
-        <Text style={styles.label}>訓練部位（選填）</Text>
-        {/* TODO(i18n): muscle-tag helper copy — no key */}
+        <Text style={styles.label}>{t('page', 'muscleGroupOptionalLabel')}</Text>
         <Text style={styles.helper}>
-          點標籤切換：未選 → 主要(橘) → 次要(藍) → 取消。空白時動作詳情頁不顯示解剖圖。
+          {t('page', 'muscleTagHelper')}
         </Text>
 
         <View style={styles.diagramWrap}>
@@ -254,8 +248,7 @@ export function CustomExerciseForm({
 
       <MgEquipmentPicker
         visible={showMgPicker}
-        // TODO(i18n): 「選擇大分類」/「選擇用具」picker titles — no keys (page.selectIntensity covers intensity only)
-        title="選擇大分類"
+        title={t('page', 'selectCategory')}
         cells={mgPickerCells}
         selectedId={mgId || null}
         onSelect={(id) => setMgId(id)}
@@ -263,7 +256,7 @@ export function CustomExerciseForm({
       />
       <MgEquipmentPicker
         visible={showEquipmentPicker}
-        title="選擇用具"
+        title={t('page', 'selectEquipment')}
         cells={equipmentPickerCells}
         selectedId={equipment}
         onSelect={(id) => setEquipment(id as Equipment)}
