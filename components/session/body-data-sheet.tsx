@@ -134,8 +134,7 @@ export function BodyDataSheet({
               />
             </View>
 
-            {/* TODO(i18n): bw_snapshot frozen hint — needs new strings.ts key. */}
-            <Text style={styles.hint}>此 Session 的 bw_snapshot 不會被改寫。</Text>
+            <Text style={styles.hint}>{t('status', 'bwSnapshotFrozenHint')}</Text>
           </View>
         </Pressable>
       </Pressable>
