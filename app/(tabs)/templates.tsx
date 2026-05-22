@@ -16,6 +16,12 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import { useDatabase } from '@/components/database-provider';
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import {
+  t,
+  tDeleteAllTemplateVariants,
+  tDeletePrompt,
+  tDeleteTemplateVariant,
+} from '@/src/i18n';
+import {
   cloneTemplateWithSubTag,
   createTemplate,
   deleteTemplate,
@@ -106,7 +112,7 @@ export default function TemplatesScreen() {
       router.push(`/template/${id}`);
     } catch (e) {
       Alert.alert(
-        'Could not create template',
+        t('alert', 'cannotCreateTemplate'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -138,7 +144,7 @@ export default function TemplatesScreen() {
       setSheetTemplate(item);
     } catch (e) {
       Alert.alert(
-        '無法開啟',
+        t('alert', 'cannotOpen'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -184,7 +190,7 @@ export default function TemplatesScreen() {
     } catch (e) {
       setBusy(false);
       Alert.alert(
-        '無法讀取模板',
+        t('alert', 'cannotReadTemplate'),
         e instanceof Error ? e.message : String(e),
       );
       return;
@@ -207,8 +213,8 @@ export default function TemplatesScreen() {
     );
     if (groupHasUniversal) {
       Alert.alert(
-        '無法刪除',
-        '此模板有「通用」變體（計畫或強度未指定），是歷史 prefill 的兜底層、不可刪。\n\n若需刪除個別非通用變體，請點該 row 進入編輯器、從 ⋯ 選單刪除。',
+        t('alert', 'cannotDelete'),
+        t('alert', 'defaultVariantUndeletable'),
       );
       return;
     }
@@ -216,20 +222,20 @@ export default function TemplatesScreen() {
     const tripleLines = variants
       .map((v) => {
         const programName = v.program_id
-          ? programOptions.find((p) => p.id === v.program_id)?.name ?? '通用'
+          ? programOptions.find((p) => p.id === v.program_id)?.name ?? t('common', 'default')
           : null;
         return `  • ${formatTemplateTriple(programName, v.sub_tag)}`;
       })
       .join('\n');
     const body =
       variants.length === 1
-        ? `將永久刪除「${item.name}」(${tripleLines.trim().replace(/^•\s*/, '')})。此操作無法復原。\n\n歷史 session 紀錄不受影響。`
-        : `將永久刪除「${item.name}」的全部 ${variants.length} 個變體：\n${tripleLines}\n\n此操作無法復原。歷史 session 紀錄不受影響。`;
+        ? tDeleteTemplateVariant(item.name, tripleLines.trim().replace(/^•\s*/, ''))
+        : tDeleteAllTemplateVariants(item.name, variants.length, tripleLines);
 
-    Alert.alert(`刪除「${item.name}」？`, body, [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(tDeletePrompt(item.name), body, [
+      { text: t('common', 'cancel'), style: 'cancel' },
       {
-        text: '刪除',
+        text: t('common', 'delete'),
         style: 'destructive',
         onPress: async () => {
           setBusy(true);
@@ -240,7 +246,7 @@ export default function TemplatesScreen() {
             await load();
           } catch (e) {
             Alert.alert(
-              '刪除失敗',
+              t('alert', 'deleteFailed'),
               e instanceof Error ? e.message : String(e),
             );
             // Best-effort reload so partial successes are reflected.
@@ -451,7 +457,7 @@ export default function TemplatesScreen() {
       );
     } catch (e) {
       Alert.alert(
-        '無法開啟編輯器',
+        t('alert', 'cannotOpenEditor'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -491,8 +497,8 @@ export default function TemplatesScreen() {
       const active = await getActiveSession(db);
       if (active) {
         Alert.alert(
-          '已有進行中的訓練',
-          '請先在「今日」分頁結束目前的訓練再開始新的。',
+          t('alert', 'sessionAlreadyInProgress'),
+          t('alert', 'endActiveSessionFirst'),
         );
         return;
       }
@@ -516,7 +522,7 @@ export default function TemplatesScreen() {
       router.replace('/');
     } catch (e) {
       Alert.alert(
-        '無法開始訓練',
+        t('alert', 'cannotStartSession'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -527,6 +533,7 @@ export default function TemplatesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
+        {/* TODO(i18n): "Templates" plural page label — strings.page has no templates key yet */}
         <Text style={styles.heading}>Templates</Text>
         <Pressable
           accessibilityRole="button"
@@ -537,6 +544,7 @@ export default function TemplatesScreen() {
             busy && styles.btnDisabled,
             pressed && styles.btnPressed,
           ]}>
+          {/* TODO(i18n): "+ New" header CTA — strings.button.newCta ('新建' / 'New') closest but lacks the "+" prefix */}
           <Text style={styles.newBtnText}>+ New</Text>
         </Pressable>
       </View>
@@ -548,6 +556,7 @@ export default function TemplatesScreen() {
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
+          // TODO(i18n): templates-tab empty hint — strings.alert.noTemplatesYet exists but copy differs.
           <Text style={styles.emptyText}>
             No templates yet — tap “+ New” to create your first one.
           </Text>
@@ -565,7 +574,7 @@ export default function TemplatesScreen() {
             swipeLeftActions={[
               {
                 key: 'delete',
-                label: '刪除',
+                label: t('common', 'delete'),
                 color: '#dc2626',
                 onPress: () => onSwipeDeleteGroup(item),
               },
@@ -576,6 +585,7 @@ export default function TemplatesScreen() {
               disabled={busy}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
               <Text style={styles.rowName}>{item.name}</Text>
+              {/* TODO(i18n): row meta — "{N} exercise{s} · edited {ts}" English-only, no helper yet */}
               <Text style={styles.rowDetails}>
                 {item.exerciseCount} exercise{item.exerciseCount === 1 ? '' : 's'} ·{' '}
                 edited {formatTimestamp(item.updated_at)}

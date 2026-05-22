@@ -55,6 +55,7 @@ import {
   selectionRank,
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
+import { t, tEquipment, tMuscleGroup, tNSessions } from '@/src/i18n';
 
 /**
  * Library screen (slice 9.6 / ADR-0017 Q1, Q6, Q7, Q15).
@@ -286,7 +287,7 @@ export default function LibraryScreen() {
         {isPickerMode && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="取消"
+            accessibilityLabel={t('common', 'cancel')}
             onPress={onPickerCancel}
             style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelBtnText}>✕</Text>
@@ -295,7 +296,7 @@ export default function LibraryScreen() {
         <View style={styles.searchWrap}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            placeholder="輸入動作名字搜索"
+            placeholder={t('page', 'searchExercises')}
             placeholderTextColor="rgba(255,255,255,0.4)"
             value={search}
             onChangeText={setSearch}
@@ -306,7 +307,7 @@ export default function LibraryScreen() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isSupersetTab ? '建立超級組' : '新增動作'}
+          accessibilityLabel={isSupersetTab ? t('button', 'createSuperset') : t('button', 'addExercisePlain')}
           onPress={() =>
             router.push(isSupersetTab ? '/superset/new' : '/exercise/new')
           }
@@ -370,7 +371,7 @@ export default function LibraryScreen() {
         <View style={styles.pickerFooter}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="完成"
+            accessibilityLabel={t('common', 'done')}
             onPress={onPickerDone}
             disabled={pickerTotal === 0}
             style={({ pressed }) => [
@@ -379,7 +380,7 @@ export default function LibraryScreen() {
               pressed && styles.pressed,
             ]}>
             <Text style={styles.pickerDoneBtnText}>
-              完成{pickerTotal > 0 ? ` (${pickerTotal})` : ''}
+              {t('common', 'done')}{pickerTotal > 0 ? ` (${pickerTotal})` : ''}
             </Text>
           </Pressable>
         </View>
@@ -432,7 +433,7 @@ function Sidebar(props: SidebarProps) {
                   styles.sidebarText,
                   isActive && styles.sidebarTextActive,
                 ]}>
-                {mg.name}
+                {tMuscleGroup(mg.name)}
               </Text>
             </Pressable>
             {isActive &&
@@ -449,7 +450,7 @@ function Sidebar(props: SidebarProps) {
                       styles.sidebarSubText,
                       selectedMuscleId === m.id && styles.sidebarSubTextActive,
                     ]}>
-                    {m.name}
+                    {tMuscleGroup(m.name)}
                   </Text>
                 </Pressable>
               ))}
@@ -466,7 +467,7 @@ function Sidebar(props: SidebarProps) {
             styles.sidebarText,
             isSupersetTab && styles.sidebarTextActive,
           ]}>
-          超級組
+          {t('domain', 'superset')}
         </Text>
       </Pressable>
     </ScrollView>
@@ -490,14 +491,14 @@ function EquipmentChipRow({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.equipRow}>
         <EquipmentChip
-          label="全部"
+          label={t('common', 'all')}
           active={value === null}
           onPress={() => onChange(null)}
         />
         {EQUIPMENT_VALUES.map((eq) => (
           <EquipmentChip
             key={eq}
-            label={eq}
+            label={tEquipment(eq)}
             active={value === eq}
             onPress={() => onChange(value === eq ? null : eq)}
           />
@@ -562,7 +563,7 @@ function ExerciseGrid({
   if (exercises.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>沒有符合條件的動作</Text>
+        <Text style={styles.emptyText}>{t('status', 'noExercisesMatch')}</Text>
       </View>
     );
   }
@@ -651,11 +652,11 @@ function ExerciseCard({
       ]}>
       {hasCues && (
         <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
-          <Text style={styles.cuesPillText}>講解</Text>
+          <Text style={styles.cuesPillText}>{t('button', 'cues')}</Text>
         </View>
       )}
       {sessionCount > 0 && (
-        <Text style={styles.countBadge}>{sessionCount} 次</Text>
+        <Text style={styles.countBadge}>{tNSessions(sessionCount)}</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>
@@ -672,11 +673,11 @@ function ExerciseCard({
       <Text style={styles.cardName} numberOfLines={2}>
         {exercise.name}
       </Text>
-      {hasCues && <Text style={styles.cardCueLink}>查看動作要點</Text>}
+      {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="查看動作詳情"
+          accessibilityLabel={t('button', 'viewExerciseDetails')}
           onPress={onInfoPress}
           hitSlop={8}
           style={({ pressed }) => [
@@ -729,8 +730,8 @@ function SupersetGrid({
   if (supersets.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>尚未建立超級組</Text>
-        <Text style={styles.emptySubText}>點右上角「+」建立新的超級組</Text>
+        <Text style={styles.emptyText}>{t('status', 'noSupersetsYet')}</Text>
+        <Text style={styles.emptySubText}>{t('status', 'noSupersetsHint')}</Text>
       </View>
     );
   }
@@ -823,7 +824,7 @@ function SupersetCard({
       ]}>
       <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
       {count > 0 && (
-        <Text style={styles.countBadge}>{count} 次</Text>
+        <Text style={styles.countBadge}>{tNSessions(count)}</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>
@@ -840,7 +841,7 @@ function SupersetCard({
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="查看超級組詳情"
+          accessibilityLabel={t('button', 'viewSupersetDetails')}
           onPress={onInfoPress}
           hitSlop={8}
           style={({ pressed }) => [
