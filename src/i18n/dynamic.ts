@@ -366,12 +366,15 @@ export function tMainTagLine(mainTag: string): string {
 }
 
 /**
- * Wave 18g (Phase 6) — same-name overwrite UX. Title shown on the
- * onBlur-triggered confirm sheet listing the existing program's
- * dimensions + intensities, asking the user to confirm overwrite.
+ * Wave 18g (Phase 6) — same-name overwrite UX. Banner title shown
+ * inline in Step 1 + Step 6 confirm panel when the typed name matches
+ * an existing program. The matched program's sub_tags are auto-prefilled
+ * into draft.sub_tags so they appear in the strength chip row directly.
  */
-export function tOverwriteSheetTitle(programName: string): string {
-  return isEn() ? `Program "${programName}" already exists` : `已有計劃「${programName}」`;
+export function tOverwriteBannerTitle(programName: string): string {
+  return isEn()
+    ? `Will overwrite existing program "${programName}"`
+    : `將覆蓋既有計劃「${programName}」`;
 }
 
 /**
