@@ -127,13 +127,14 @@ function tEditorRestLabel(seconds: number): string {
   return getLocale() === 'en' ? `Rest Time (${seconds}s)` : `休息時間（${seconds}s）`;
 }
 
-// SECTION_LABEL kept as legacy zh-only constants — these `'一般動作' / '常設動作'`
-// strings are used in render bodies below; we rewrap the read sites through
-// `tt('domain', ...)` where possible. The constant itself stays untouched.
-const SECTION_LABEL: Record<ExerciseSection, string> = {
-  general: '一般動作',
-  evergreen: '常設動作',
-};
+// SECTION_LABEL — section header labels (一般動作 / 常設動作). The constant
+// stayed zh-only during Phase 4 cleanup; Phase 4.5 batch 2 wraps it as
+// a getter so the locale switch propagates without changing render sites.
+function getSectionLabel(section: ExerciseSection): string {
+  const en = getLocale() === 'en';
+  if (section === 'general') return en ? 'General Exercises' : '一般動作';
+  return en ? 'Evergreen Exercises' : '常設動作';
+}
 
 function newId(prefix: string): string {
   if (typeof randomUUID === 'function') {
@@ -1488,8 +1489,7 @@ export default function TemplateEditorView() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.empty}>
-          {/* TODO(i18n): 「找不到此 template」 — no key (would be alert.templateNotFound or similar). */}
-          <Text style={styles.emptyText}>找不到此 template</Text>
+          <Text style={styles.emptyText}>{tt('alert', 'templateNotFound')}</Text>
           <Pressable style={styles.backBtn} onPress={onExit}>
             <Text style={styles.backBtnText}>{tt('common', 'backArrow')}</Text>
           </Pressable>
@@ -1865,8 +1865,7 @@ export default function TemplateEditorView() {
                     )
                   }
                   style={styles.exFooterBtn}>
-                  {/* TODO(i18n): 「新增 1 組」compact label — no key (button.addRecord '新增記錄' has different semantics) */}
-                  <Text style={styles.exFooterBtnText}>新增 1 組</Text>
+                  <Text style={styles.exFooterBtnText}>{tt('button', 'addOneSet')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => showSupersetHistory(parent, children)}
@@ -1912,8 +1911,7 @@ export default function TemplateEditorView() {
                 value={draft.name}
                 onChangeText={updateName}
                 style={styles.nameInput}
-                // TODO(i18n): "Template 名稱" placeholder — no exact key (domain.template gives '模板')
-                placeholder="Template 名稱"
+                placeholder={tt('page', 'templateNamePlaceholder')}
               />
             </View>
             <Text style={styles.tripleText}>
@@ -1962,8 +1960,7 @@ export default function TemplateEditorView() {
                   styles.topBtnTextDisabled,
                 styles.topBtnSave,
               ]}>
-              {/* TODO(i18n): 「建立並導入」 import-mode CTA — no dedicated key */}
-              {busy ? '...' : importMode ? '建立並導入' : tt('common', 'save')}
+              {busy ? '...' : importMode ? tt('button', 'createAndImport') : tt('common', 'save')}
             </Text>
           </Pressable>
         </View>
@@ -1975,12 +1972,11 @@ export default function TemplateEditorView() {
           session app/(tabs)/index.tsx:1648).
         */}
         <NestableScrollContainer contentContainerStyle={styles.body}>
-          {/* TODO(i18n): SECTION_LABEL '一般動作' / '常設動作' + 「（無一般動作）」/ 「（無常設動作）」 — no helpers yet */}
-          <SectionHeader label={SECTION_LABEL.general} />
-          {renderSection('general', '（無一般動作）')}
+          <SectionHeader label={getSectionLabel('general')} />
+          {renderSection('general', tt('status', 'noGeneralExercises'))}
 
-          <SectionHeader label={SECTION_LABEL.evergreen} />
-          {renderSection('evergreen', '（無常設動作）')}
+          <SectionHeader label={getSectionLabel('evergreen')} />
+          {renderSection('evergreen', tt('status', 'noEvergreenExercises'))}
         </NestableScrollContainer>
 
         <View style={styles.actionBar}>
@@ -1993,14 +1989,12 @@ export default function TemplateEditorView() {
             style={styles.actionBtn}
             onPress={onStartSession}
             disabled={busy}>
-            {/* TODO(i18n): 「開始訓練」action — no key (start-template-sheet has same TODO) */}
-            <Text style={styles.actionBtnText}>開始訓練</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'startSession')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
             onPress={() => setShowColorPicker(true)}>
-            {/* TODO(i18n): 「配色」action — no key (color-picker pill) */}
-            <Text style={styles.actionBtnText}>配色</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'selectColorAction')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
@@ -2017,8 +2011,7 @@ export default function TemplateEditorView() {
                   title: draft.name,
                   options: [
                     tt('button', 'saveAsTemplate'),
-                    // TODO(i18n): 「刪除模板」action-sheet item — no exact key (button.deleteExercise different)
-                    '刪除模板',
+                    tt('button', 'deleteTemplate'),
                     tt('common', 'cancel'),
                   ],
                   destructiveButtonIndex: 1,
@@ -2029,8 +2022,7 @@ export default function TemplateEditorView() {
                   if (idx === 0)
                     Alert.alert(
                       tt('button', 'saveAsTemplate'),
-                      // TODO(i18n): stubbed copy — 'production 補齊三元組 UI…' developer-only Alert
-                      'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
+                      tt('alert', 'saveAsTemplateStubBody'),
                     );
                   else if (idx === 1 && canDelete) onDeleteTemplate();
                 },
