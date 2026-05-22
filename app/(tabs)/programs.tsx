@@ -649,8 +649,7 @@ export default function ProgramsScreen() {
         </View>
         <View style={styles.body}>
           <Text style={styles.empty}>
-            {/* TODO(i18n): missing key for "還沒有計畫。按「新建」啟動 6 步建立精靈。" - consider status.noProgramsYetHint */}
-            還沒有計畫。按「新建」啟動 6 步建立精靈。
+            {t('status', 'noProgramsYetHint')}
           </Text>
         </View>
       </SafeAreaView>
@@ -743,10 +742,7 @@ export default function ProgramsScreen() {
           )}
         </Text>
         <Text style={styles.metaLine}>
-          {/* TODO(i18n): missing key for " days · 起始 " composite — consider tProgramMetaLine(count, length, startDate) */}
-          {shown.program.cycle_count} × {shown.program.cycle_length} days · 起始
-          {' '}
-          {shown.program.start_date}
+          {`${shown.program.cycle_count} × ${tNDays(shown.program.cycle_length)} · ${t('page', 'metaStartPrefix')} ${shown.program.start_date}`}
         </Text>
 
         {editing ? (
@@ -1427,8 +1423,7 @@ function TemplatePicker({
           <Text style={styles.modalTitle}>{title}</Text>
           {previewSubTag != null ? (
             <Text style={styles.modalSubtitle}>
-              {/* TODO(i18n): missing key for "強度將設為「{x}」（旁邊就近 cell）" - consider tIntensityWillBeSet(name) dynamic helper */}
-              強度將設為「{previewSubTag}」（旁邊就近 cell）
+              {`${t('alert', 'intensityWillBeSetPrefix')}${previewSubTag}${t('alert', 'intensityWillBeSetSuffix')}`}
             </Text>
           ) : null}
           <ScrollView style={styles.modalList}>
