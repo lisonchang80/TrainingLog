@@ -2584,6 +2584,19 @@ function EditableExerciseCard({
       </View>
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
+          {/*
+            Slice 10e bundle 1 — per-Exercise global notes (ADR-0013)
+            inline render in history-detail edit mode, mirror Today's
+            ExerciseCard. Notes content is read-only here; edit happens
+            via Library / Template editor (single source of truth).
+          */}
+          {planRow.exercise_notes && planRow.exercise_notes.trim().length > 0 ? (
+            <View style={styles.exerciseCardNotes}>
+              <Text style={styles.exerciseCardNotesText}>
+                📝 {planRow.exercise_notes.trim()}
+              </Text>
+            </View>
+          ) : null}
           {sets.length === 0 ? (
             <Text style={styles.exerciseCardEmpty}>
               {t('status', 'soloEmptyHint')}
@@ -3033,6 +3046,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   exerciseCardGearText: { fontSize: 18 },
+  // Slice 10e bundle 1 — inline notes callout in expanded session card.
+  exerciseCardNotes: {
+    backgroundColor: '#FEF3C7',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 4,
+  },
+  exerciseCardNotesText: {
+    fontSize: 13,
+    color: '#78350F',
+    lineHeight: 18,
+  },
   exerciseCardBody: {
     paddingHorizontal: 12,
     paddingBottom: 12,

@@ -526,6 +526,16 @@ export interface SessionExerciseRowWithName extends SessionExerciseRow {
    * accident of not joining at all).
    */
   reusable_superset_color_hex: string | null;
+  /**
+   * Per-exercise global notes (ADR-0013 + ADR-0017 amendment — owned by
+   * `exercise.notes`, shared across all templates/sessions using this
+   * exercise). NULL or empty string = no notes; UI renders inline notes
+   * box in expanded session card body when non-empty.
+   *
+   * Slice 10e bundle 1 — surface notes in session 上下文 (was previously
+   * only visible in template editor 📝 indicator).
+   */
+  exercise_notes: string | null;
 }
 
 /** Same as `listSessionExercises` but joins exercise.name + load_type for UI display. */
@@ -539,6 +549,7 @@ export async function listSessionExercisesWithName(
             se.parent_id, se.reusable_superset_id, se.rest_sec,
             e.name      AS exercise_name,
             e.load_type AS exercise_load_type,
+            e.notes     AS exercise_notes,
             rs.color_hex AS reusable_superset_color_hex
        FROM session_exercise se
        JOIN exercise e ON e.id = se.exercise_id

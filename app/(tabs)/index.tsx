@@ -2562,6 +2562,20 @@ function ExerciseCard({
       ) : null}
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
+          {/*
+            Slice 10e bundle 1 — per-Exercise global notes (ADR-0013) surfaced
+            inline in active session card so user sees coaching cues while
+            logging without an extra tap. Template editor uses 📝 indicator
+            + sheet; session 上下文 user is mid-rep, inline render is the
+            higher-utility variant.
+          */}
+          {planRow.exercise_notes && planRow.exercise_notes.trim().length > 0 ? (
+            <View style={styles.exerciseCardNotes}>
+              <Text style={styles.exerciseCardNotesText}>
+                📝 {planRow.exercise_notes.trim()}
+              </Text>
+            </View>
+          ) : null}
           {sets.length === 0 ? (
             <Text style={styles.exerciseCardEmpty}>
               {t('status', 'soloEmptyHint')}
@@ -3016,6 +3030,20 @@ const styles = StyleSheet.create({
     opacity: 0.55,
     fontStyle: 'italic',
     paddingVertical: 8,
+  },
+  // Slice 10e bundle 1 — inline notes callout in expanded session card.
+  exerciseCardNotes: {
+    backgroundColor: '#FEF3C7', // amber-100 — gentle highlight, mirror sticky-note feel
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B', // amber-500 — accent
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 4,
+  },
+  exerciseCardNotesText: {
+    fontSize: 13,
+    color: '#78350F', // amber-900 — high contrast on amber-100 bg
+    lineHeight: 18,
   },
   exerciseCardSetRowWrapper: {
     flexDirection: 'row',
