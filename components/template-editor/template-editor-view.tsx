@@ -2042,8 +2042,7 @@ export default function TemplateEditorView() {
             onPress={() => setShowColorPicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                {/* TODO(i18n): 「選擇配色」sheet title — no key (would be page.selectColor) */}
-                <Text style={styles.sheetTitle}>選擇配色</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'selectColor')}</Text>
                 <Pressable onPress={() => setShowColorPicker(false)}>
                   <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
@@ -2066,9 +2065,8 @@ export default function TemplateEditorView() {
                   );
                 })}
               </View>
-              {/* TODO(i18n): color-picker group-wide footnote — no key */}
               <Text style={styles.sheetFootnote}>
-                選色後會 group-wide 連動所有同 name sibling templates。
+                {tt('status', 'colorPickerFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -2084,8 +2082,7 @@ export default function TemplateEditorView() {
             onPress={() => setShowExercisePicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                {/* TODO(i18n): 「選擇動作」picker title — closest is page.selectTemplate ('選擇 template'); no exact key */}
-                <Text style={styles.sheetTitle}>選擇動作</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'selectExercise')}</Text>
                 <Pressable onPress={() => setShowExercisePicker(false)}>
                   <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
@@ -2100,9 +2097,8 @@ export default function TemplateEditorView() {
                   </Pressable>
                 ))}
               </ScrollView>
-              {/* TODO(i18n): exercise-picker footnote — no key */}
               <Text style={styles.sheetFootnote}>
-                點選動作即加入「一般動作區」；用 ⚙「設為常設」改類別。
+                {tt('status', 'exercisePickerFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -2133,15 +2129,13 @@ export default function TemplateEditorView() {
                     noteEditing ? { ...noteEditing, draft: t } : null,
                   )
                 }
-                // TODO(i18n): 「提示、cue、注意事項…」note placeholder differs from page.notePlaceholder ('例：握距、發力重點…')
-                placeholder="提示、cue、注意事項…"
+                placeholder={tt('page', 'noteEditorPlaceholder')}
                 multiline
                 autoFocus
                 style={styles.noteInput}
               />
-              {/* TODO(i18n): note-editor footnote copy — no key */}
               <Text style={styles.sheetFootnote}>
-                備註用於記錄動作 cue / 注意事項。
+                {tt('status', 'noteEditorFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -2168,8 +2162,7 @@ export default function TemplateEditorView() {
         */}
         <TemplateMetaSheet
           visible={saveSheetMode != null}
-          // TODO(i18n): '建立並導入' / '儲存模板' sheet titles — no exact keys; button.saveTemplate matches 儲存模板.
-          title={saveSheetMode === 'import' ? '建立並導入' : tt('button', 'saveTemplate')}
+          title={saveSheetMode === 'import' ? tt('page', 'createAndImportSheet') : tt('page', 'saveTemplateSheet')}
           omitName
           defaultName={draft?.name ?? ''}
           defaultProgramId={draft?.program_id ?? null}
@@ -2207,8 +2200,7 @@ export default function TemplateEditorView() {
                 <Pressable onPress={() => setRestEditing(null)}>
                   <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
-                {/* TODO(i18n): 「休息時間」sheet title — no key (button.clusterRestSeconds has emoji prefix) */}
-                <Text style={styles.sheetTitle}>休息時間</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'restTime')}</Text>
                 <Pressable onPress={saveRest}>
                   <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
@@ -2256,9 +2248,8 @@ export default function TemplateEditorView() {
                   <Text style={styles.restStepBtnText}>+15s</Text>
                 </Pressable>
               </View>
-              {/* TODO(i18n): rest-time footnote copy — no key */}
               <Text style={styles.sheetFootnote}>
-                Session 對此動作 set ✓ 後自動跳此秒數倒數。
+                {tt('status', 'restTimeFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -2637,8 +2628,7 @@ function ExerciseBody({
                   styles.exFooterBtnText,
                   compact && styles.exFooterBtnTextCompact,
                 ]}>
-                {/* TODO(i18n): 「新增 1 組」compact label — no key (button.addRecord '新增記錄' has different semantics) */}
-                新增 1 組
+                {tt('button', 'addOneSet')}
               </Text>
             </Pressable>
             <Pressable
