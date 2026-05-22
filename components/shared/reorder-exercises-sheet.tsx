@@ -92,10 +92,7 @@ export function ReorderExercisesSheet({
           </Pressable>
         </View>
         <View style={styles.hintBanner}>
-          {/* TODO(i18n): drag-to-reorder hint banner — needs new strings.ts key. */}
-          <Text style={styles.hintBannerText}>
-            長按任一列拖曳重新排序，完成後按右上「完成」儲存。
-          </Text>
+          <Text style={styles.hintBannerText}>{t('status', 'reorderHint')}</Text>
         </View>
         <DraggableFlatList
           data={draft}
