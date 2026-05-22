@@ -16,9 +16,6 @@ import type { ProgramCore } from '../../src/domain/program/types';
  *   - cross-program isolation: program B's tags do not leak into program A's
  */
 
-let counter = 0;
-const uuid = () => `u${counter++}`;
-
 const buildProgram = (
   id: string,
   name: string,
@@ -39,7 +36,6 @@ async function setupTwoPrograms(): Promise<{
   progA: string;
   progB: string;
 }> {
-  counter = 0;
   const db = new BetterSqliteDatabase(':memory:');
   await migrate(db);
   const progA = 'pid-A';
