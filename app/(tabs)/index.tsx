@@ -133,6 +133,19 @@ import { evaluateAndPersistAchievements } from '@/src/adapters/sqlite/achievemen
 import { detectPRBreaks } from '@/src/domain/pr/prEngine';
 import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
 import type { BucketKey, PRDelta } from '@/src/domain/pr/types';
+import {
+  t,
+  tExerciseNoteHeader,
+  tLastBodyweightLine,
+  tPrDeltaLine,
+  tRemoveExerciseFromSessionPrompt,
+  tRemoveSupersetFromSessionPrompt,
+  tRestSecondsHeader,
+  tWarningPerExerciseSetsUnfinished,
+  tWarningPerExerciseSetsWithLogged,
+  tWarningTotalSetsUnfinished,
+  tWarningTotalSetsWithLogged,
+} from '@/src/i18n';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -420,11 +433,11 @@ export default function TodayScreen() {
     if (!skipBw) {
       bwKg = parseWeightInput(preBwInput, unit);
       if (bwKg == null) {
-        Alert.alert('體重輸入無效', '請輸入正數，或選擇略過');
+        Alert.alert(t('alert', 'invalidBodyweight'), t('alert', 'enterPositiveOrSkip'));
         return;
       }
       if (bwKg <= 0 || bwKg > 500) {
-        Alert.alert('體重輸入無效', '應為 0–500 kg 區間');
+        Alert.alert(t('alert', 'invalidBodyweight'), t('alert', 'mustBeWithin500Kg'));
         return;
       }
     }
@@ -482,7 +495,7 @@ export default function TodayScreen() {
     };
     const err = validateBodyMetric(draft);
     if (err) {
-      Alert.alert('輸入無效', '至少輸入一個欄位且數值合理');
+      Alert.alert(t('alert', 'invalidInput'), t('alert', 'atLeastOneField'));
       return;
     }
     setBusy(true);
@@ -495,7 +508,7 @@ export default function TodayScreen() {
       const bms = await listBodyMetrics(db);
       setBodyMetrics(bms);
     } catch (e) {
-      Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -852,7 +865,7 @@ export default function TodayScreen() {
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
     } catch (e) {
-      Alert.alert('新增 dropset 失敗', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'addDropsetFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -879,11 +892,11 @@ export default function TodayScreen() {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('DROPSET_CHAIN_TOO_SHORT')) {
         Alert.alert(
-          '無法刪除',
-          'Dropset 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 head 那一列。',
+          t('alert', 'cannotDelete'),
+          t('alert', 'dropsetMinimum'),
         );
       } else {
-        Alert.alert('刪除失敗', msg);
+        Alert.alert(t('alert', 'deleteFailed'), msg);
       }
     }
   };
@@ -1263,25 +1276,34 @@ export default function TodayScreen() {
     const partnerExerciseId = options?.partnerExerciseId;
     const partnerSessionExerciseId = options?.partnerSessionExerciseId;
     const isCluster = !!partnerExerciseId && !!partnerSessionExerciseId;
+    // Localized labels — extracted as locals so the dispatch `===` comparison
+    // below references the same string the menu was built with.
+    const labelCancel = t('common', 'cancel');
+    const labelEditNote = t('button', 'clusterEditNote');
+    const labelRestSeconds = t('button', 'clusterRestSeconds');
+    const labelHistoryA = t('button', 'clusterHistoryA');
+    const labelHistoryB = t('button', 'clusterHistoryB');
+    const labelDeleteExercise = t('button', 'clusterDeleteExercise');
+    const labelReorder = t('button', 'clusterReorderExercises');
     // Build options array. Cluster context inserts two history items
     // before 🔃 排序動作 so the destructive 🗑️ 刪除動作 keeps its
     // visual separation. Indices below are derived from this array.
     const menuOptions: string[] = isCluster
       ? [
-          '取消',
-          '📝 編輯備註',
-          '⏱️ 休息秒數',
-          '📖 動作歷史 (A)',
-          '📖 動作歷史 (B)',
-          '🗑️ 刪除動作',
-          '🔃 排序動作',
+          labelCancel,
+          labelEditNote,
+          labelRestSeconds,
+          labelHistoryA,
+          labelHistoryB,
+          labelDeleteExercise,
+          labelReorder,
         ]
       : [
-          '取消',
-          '📝 編輯備註',
-          '⏱️ 休息秒數',
-          '🗑️ 刪除動作',
-          '🔃 排序動作',
+          labelCancel,
+          labelEditNote,
+          labelRestSeconds,
+          labelDeleteExercise,
+          labelReorder,
         ];
     const destructiveButtonIndex = isCluster ? 5 : 3;
     ActionSheetIOS.showActionSheetWithOptions(
@@ -1294,7 +1316,7 @@ export default function TodayScreen() {
       (idx) => {
         if (idx === 0) return;
         const label = menuOptions[idx];
-        if (label === '📝 編輯備註') {
+        if (label === labelEditNote) {
           (async () => {
             try {
               const initial = await getExerciseNotes(db, planRow.exercise_id);
@@ -1305,19 +1327,19 @@ export default function TodayScreen() {
               });
             } catch (e) {
               Alert.alert(
-                '讀取失敗',
+                t('alert', 'readFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
           })();
-        } else if (label === '⏱️ 休息秒數') {
+        } else if (label === labelRestSeconds) {
           // Open keypad pre-filled with current rest_sec (default 60).
           setRestSecTarget({
             session_exercise_id: planRow.id,
             current: planRow.rest_sec ?? 60,
             exercise_name: planRow.exercise_name,
           });
-        } else if (label === '📖 動作歷史 (A)') {
+        } else if (label === labelHistoryA) {
           // cluster A side history — mirror cluster card footer entry
           // (overnight #11) so user can reach A-side cluster_only history
           // from the ⚙️ menu without going through footer + switcher.
@@ -1330,7 +1352,7 @@ export default function TodayScreen() {
           router.push(
             `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A&currentSeIdA=${planRow.id}&currentSeIdB=${partnerSessionExerciseId}`,
           );
-        } else if (label === '📖 動作歷史 (B)') {
+        } else if (label === labelHistoryB) {
           // cluster B side history — direct entry skips the manual swap
           // step on the destination's A↔B switcher. partner inverted so
           // the switcher arrow points back to A.
@@ -1343,9 +1365,9 @@ export default function TodayScreen() {
           router.push(
             `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B&currentSeIdA=${partnerSessionExerciseId}&currentSeIdB=${planRow.id}`,
           );
-        } else if (label === '🔃 排序動作') {
+        } else if (label === labelReorder) {
           setReorderSheetOpen(true);
-        } else if (label === '🗑️ 刪除動作') {
+        } else if (label === labelDeleteExercise) {
           // Slice 10c overnight #18 — cluster context cascade-deletes BOTH
           // sides (A + B session_exercise rows + every set on either side).
           // 「刪超級組」= 拆掉整個 cluster, otherwise the B side becomes an
@@ -1361,7 +1383,7 @@ export default function TodayScreen() {
               (p) => p.id === partnerSessionExerciseId,
             );
             const partnerName =
-              partnerPlan?.exercise_name ?? '(未知動作)';
+              partnerPlan?.exercise_name ?? t('common', 'unknownExercise');
             const setsForCluster = setsInSession.filter(
               (s) =>
                 s.session_exercise_id === planRow.id ||
@@ -1373,17 +1395,21 @@ export default function TodayScreen() {
             const totalSets = setsForCluster.length;
             const warningSuffix =
               loggedCount > 0
-                ? `\n\n將連同 ${totalSets} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                ? tWarningTotalSetsWithLogged(totalSets, loggedCount)
                 : totalSets > 0
-                  ? `\n\n將連同 ${totalSets} 組未完成記錄一起刪除。`
+                  ? tWarningTotalSetsUnfinished(totalSets)
                   : '';
             Alert.alert(
-              '刪除超級組？',
-              `要從這次訓練中移除整個超級組「${planRow.exercise_name} + ${partnerName}」？${warningSuffix}`,
+              t('alert', 'deleteSupersetQ'),
+              tRemoveSupersetFromSessionPrompt(
+                planRow.exercise_name,
+                partnerName,
+                warningSuffix,
+              ),
               [
-                { text: '取消', style: 'cancel' },
+                { text: t('common', 'cancel'), style: 'cancel' },
                 {
-                  text: '刪除',
+                  text: t('common', 'delete'),
                   style: 'destructive',
                   onPress: async () => {
                     const session_id = getSessionId(sessionState);
@@ -1410,7 +1436,7 @@ export default function TodayScreen() {
                       await refresh();
                     } catch (e) {
                       Alert.alert(
-                        '刪除失敗',
+                        t('alert', 'deleteFailed'),
                         e instanceof Error ? e.message : String(e),
                       );
                       await refresh();
@@ -1436,17 +1462,17 @@ export default function TodayScreen() {
           ).length;
           const warningSuffix =
             loggedCount > 0
-              ? `\n\n⚠️ 將連同此動作的 ${setsForExercise.length} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+              ? tWarningPerExerciseSetsWithLogged(setsForExercise.length, loggedCount)
               : setsForExercise.length > 0
-                ? `\n\n將連同此動作的 ${setsForExercise.length} 組未完成記錄一起刪除。`
+                ? tWarningPerExerciseSetsUnfinished(setsForExercise.length)
                 : '';
           Alert.alert(
-            '刪除動作？',
-            `要從這次訓練中移除「${planRow.exercise_name}」？${warningSuffix}`,
+            t('alert', 'deleteExerciseQ'),
+            tRemoveExerciseFromSessionPrompt(planRow.exercise_name, warningSuffix),
             [
-              { text: '取消', style: 'cancel' },
+              { text: t('common', 'cancel'), style: 'cancel' },
               {
-                text: '刪除',
+                text: t('common', 'delete'),
                 style: 'destructive',
                 onPress: async () => {
                   const session_id = getSessionId(sessionState);
@@ -1482,7 +1508,7 @@ export default function TodayScreen() {
   const onHeaderMenuPress = () => {
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        options: ['取消', 'Body data', '🚫 放棄訓練'],
+        options: [t('common', 'cancel'), 'Body data', t('button', 'discardSession')],
         cancelButtonIndex: 0,
         destructiveButtonIndex: 2,
       },
@@ -1493,12 +1519,12 @@ export default function TodayScreen() {
         }
         if (idx !== 2) return;
         Alert.alert(
-          '放棄此次訓練？',
-          '此操作不可復原 — 將刪除整個 session、所有動作及記錄。',
+          t('alert', 'discardSessionQ'),
+          t('alert', 'cannotUndoLong'),
           [
-            { text: '取消', style: 'cancel' },
+            { text: t('common', 'cancel'), style: 'cancel' },
             {
-              text: '放棄',
+              text: t('button', 'discardSimple'),
               style: 'destructive',
               onPress: async () => {
                 const session_id = getSessionId(sessionState);
@@ -1603,7 +1629,7 @@ export default function TodayScreen() {
       programBanner = (
         <View style={styles.programBanner}>
           <Text style={styles.programBannerName} numberOfLines={1}>
-            自由訓練
+            {t('domain', 'freestyle')}
           </Text>
         </View>
       );
@@ -1616,12 +1642,13 @@ export default function TodayScreen() {
           {activeProgram.program.main_tag ? ` · ${activeProgram.program.main_tag}` : ''}
         </Text>
         {programCellToday ? (
+          // TODO(i18n): "今天：" prefix — needs new strings.ts key.
           <Text style={styles.programBannerCell}>
-            今天：{todayTemplate ? todayTemplate.name : '休息日'}
+            今天：{todayTemplate ? todayTemplate.name : t('domain', 'restDay')}
             {programCellToday.sub_tag ? ` · ${programCellToday.sub_tag}` : ''}
           </Text>
         ) : (
-          <Text style={styles.programBannerCell}>今天不在 Program 範圍內</Text>
+          <Text style={styles.programBannerCell}>{t('status', 'todayOutsideProgram')}</Text>
         )}
       </View>
     );
@@ -1657,13 +1684,14 @@ export default function TodayScreen() {
             ) : (
               <View style={styles.prePromptBox}>
                 <Text style={styles.prePromptHeading}>Pre-session</Text>
+                {/* TODO(i18n): pre-session bw confirmation hint — needs new strings.ts key. */}
                 <Text style={styles.prePromptHint}>
                   確認當下體重（鎖入此 Session）。
                   {latest.bodyweight_kg != null
-                    ? `\n上次紀錄：${formatWeight(latest.bodyweight_kg, unit)}`
+                    ? tLastBodyweightLine(formatWeight(latest.bodyweight_kg, unit))
                     : ''}
                 </Text>
-                <Text style={styles.label}>體重 ({unit})</Text>
+                <Text style={styles.label}>{t('domain', 'bodyweight')} ({unit})</Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="decimal-pad"
@@ -1687,7 +1715,7 @@ export default function TodayScreen() {
                         busy && styles.btnDisabled,
                         pressed && styles.btnPressed,
                       ]}>
-                      <Text style={styles.secondaryBtnText}>取消</Text>
+                      <Text style={styles.secondaryBtnText}>{t('common', 'cancel')}</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => onConfirmPrePrompt(true)}
@@ -1697,7 +1725,7 @@ export default function TodayScreen() {
                         busy && styles.btnDisabled,
                         pressed && styles.btnPressed,
                       ]}>
-                      <Text style={styles.secondaryBtnText}>略過</Text>
+                      <Text style={styles.secondaryBtnText}>{t('common', 'skip')}</Text>
                     </Pressable>
                   </View>
                   <Pressable
@@ -1753,7 +1781,7 @@ export default function TodayScreen() {
                 pressed && styles.btnPressed,
               ]}>
               <Text style={styles.headerDoneBtnText}>
-                {busy ? '結束中…' : '完成'}
+                {busy ? t('status', 'ending') : t('common', 'done')}
               </Text>
             </Pressable>
           </View>
@@ -1791,7 +1819,8 @@ export default function TodayScreen() {
           */}
           {plan.length === 0 && (
             <View style={styles.emptyPlanBlock}>
-              <Text style={styles.emptyPlanTitle}>尚未加入動作</Text>
+              <Text style={styles.emptyPlanTitle}>{t('status', 'noExercisesAdded')}</Text>
+              {/* TODO(i18n): empty-plan body hint — needs new strings.ts key. */}
               <Text style={styles.emptyPlanBody}>
                 點下方「+ 動作」開始記錄這次訓練。
               </Text>
@@ -1980,7 +2009,7 @@ export default function TodayScreen() {
                               await refresh();
                             } catch (e) {
                               Alert.alert(
-                                '排序失敗',
+                                t('alert', 'reorderFailed'),
                                 e instanceof Error ? e.message : String(e),
                               );
                             }
@@ -2060,7 +2089,7 @@ export default function TodayScreen() {
                             await refresh();
                           } catch (e) {
                             Alert.alert(
-                              '排序失敗',
+                              t('alert', 'reorderFailed'),
                               e instanceof Error ? e.message : String(e),
                             );
                           }
@@ -2084,7 +2113,7 @@ export default function TodayScreen() {
                     setLastPRExerciseName('');
                   }}
                   style={styles.linkBtn}>
-                  <Text style={styles.linkBtnText}>關閉</Text>
+                  <Text style={styles.linkBtnText}>{t('common', 'close')}</Text>
                 </Pressable>
               </View>
               {(() => {
@@ -2099,20 +2128,23 @@ export default function TodayScreen() {
                         <Text style={styles.prBannerBucket}>{bucketLabel(b.bucket)}</Text>
                       ) : null}
                       <Text style={styles.prBannerLine}>
-                        · {b.type === 'weight' ? '重量' : '容量'} PR
+                        · {b.type === 'weight' ? t('domain', 'weight') : t('domain', 'volume')} PR
                         {b.prior_best == null
-                          ? '（第一次）'
-                          : ` · 從 ${formatPRDeltaValue(b.prior_best, b.type, unit)} → ${formatPRDeltaValue(b.new_value, b.type, unit)}`}
+                          ? t('status', 'firstTime')
+                          : tPrDeltaLine(
+                              formatPRDeltaValue(b.prior_best, b.type, unit),
+                              formatPRDeltaValue(b.new_value, b.type, unit),
+                            )}
                       </Text>
                     </View>
                   );
                 });
               })()}
               {lastPRDelta.is_all_time_weight_pr ? (
-                <Text style={styles.prBannerAllTime}>★ 全紀錄重量 PR</Text>
+                <Text style={styles.prBannerAllTime}>{t('status', 'allTimeWeightPr')}</Text>
               ) : null}
               {lastPRDelta.is_all_time_volume_pr ? (
-                <Text style={styles.prBannerAllTime}>★ 全紀錄容量 PR</Text>
+                <Text style={styles.prBannerAllTime}>{t('status', 'allTimeVolumePr')}</Text>
               ) : null}
             </View>
           ) : null}
@@ -2129,17 +2161,17 @@ export default function TodayScreen() {
               busy && styles.btnDisabled,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={styles.bottomStickyBtnTextPrimary}>+ 動作</Text>
+            <Text style={styles.bottomStickyBtnTextPrimary}>{t('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="手動開始休息倒數"
+            accessibilityLabel={t('button', 'manualRestStart')}
             onPress={() => {
               // 手動計時 — opens the same RestTimerModal that tap-✓ uses,
               // but unbounded from any specific set. Default 60s; user can
               // cancel anytime. Per 2026-05-12 grill recommendation +
               // 2026-05-16 ultra-late pull-forward from slice 10d.
-              setRestTimerTarget({ rest_sec: 60, exercise_name: '手動休息' });
+              setRestTimerTarget({ rest_sec: 60, exercise_name: t('button', 'manualRest') });
               setRestTimerTrigger((n) => n + 1);
             }}
             style={({ pressed }) => [
@@ -2147,6 +2179,7 @@ export default function TodayScreen() {
               styles.bottomStickyBtnSecondary,
               pressed && styles.btnPressed,
             ]}>
+            {/* TODO(i18n): "⏱ 手動計時" bottom button label — needs new strings.ts key. */}
             <Text style={styles.bottomStickyBtnTextSecondary}>
               ⏱ 手動計時
             </Text>
@@ -2155,7 +2188,8 @@ export default function TodayScreen() {
             accessibilityRole="button"
             onPress={() =>
               Alert.alert(
-                '傳至手錶 ⌚',
+                t('button', 'sendToWatch'),
+                // TODO(i18n): watch-coming-in-slice-13 alert body — needs new strings.ts key.
                 'Coming in slice 13 — WatchConnectivity transferUserInfo + Watch SwiftUI app。',
               )
             }
@@ -2165,7 +2199,7 @@ export default function TodayScreen() {
               pressed && styles.btnPressed,
             ]}>
             <Text style={styles.bottomStickyBtnTextSecondary}>
-              傳至手錶 ⌚
+              {t('button', 'sendToWatch')}
             </Text>
           </Pressable>
         </View>
@@ -2182,7 +2216,7 @@ export default function TodayScreen() {
       <NumericKeypad
         visible={keypadTarget !== null}
         initialValue={keypadTarget?.current ?? 0}
-        label={keypadTarget?.field === 'weight' ? '重量 (kg)' : '次數'}
+        label={keypadTarget?.field === 'weight' ? t('domain', 'weightKg') : t('domain', 'reps')}
         mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
         onConfirm={(value) => {
           if (keypadTarget) {
@@ -2221,7 +2255,7 @@ export default function TodayScreen() {
             await refresh();
           } catch (e) {
             Alert.alert(
-              '排序失敗',
+              t('alert', 'reorderFailed'),
               e instanceof Error ? e.message : String(e),
             );
           }
@@ -2233,8 +2267,8 @@ export default function TodayScreen() {
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
         initialValue={exerciseNoteTarget?.initial ?? null}
-        title={`📝 ${exerciseNoteTarget?.exercise_name ?? ''} 備註`}
-        placeholder="例：握距、發力重點、易犯錯誤..."
+        title={exerciseNoteTarget ? tExerciseNoteHeader(exerciseNoteTarget.exercise_name) : ''}
+        placeholder={t('page', 'notePlaceholder')}
         onConfirm={async (notes) => {
           if (exerciseNoteTarget) {
             try {
@@ -2257,7 +2291,7 @@ export default function TodayScreen() {
       <NumericKeypad
         visible={restSecTarget !== null}
         initialValue={restSecTarget?.current ?? 60}
-        label={`⏱️ 休息秒數 · ${restSecTarget?.exercise_name ?? ''}`}
+        label={tRestSecondsHeader(restSecTarget?.exercise_name ?? '')}
         mode="integer"
         onConfirm={async (value) => {
           if (restSecTarget) {
@@ -2270,7 +2304,7 @@ export default function TodayScreen() {
               await refresh();
             } catch (e) {
               Alert.alert(
-                'Save failed',
+                t('alert', 'saveFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
@@ -2482,6 +2516,7 @@ function ExerciseCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          // TODO(i18n): 動作設定 accessibilityLabel — needs new strings.ts key.
           accessibilityLabel="動作設定"
           onPress={onSettingsPress}
           style={({ pressed }) => [
@@ -2504,7 +2539,7 @@ function ExerciseCard({
           <Text style={styles.exerciseCardPRText}>
             {prSnapshot.topWeightSet !== null ? (
               <>
-                重量 PR:{' '}
+                {t('domain', 'weight')} PR:{' '}
                 <Text style={styles.exerciseCardPREmphasis}>
                   {prSnapshot.topWeightSet.weight_kg}
                 </Text>
@@ -2517,7 +2552,7 @@ function ExerciseCard({
               : ''}
             {prSnapshot.topVolumeSet !== null ? (
               <>
-                容量 PR:{' '}
+                {t('domain', 'volume')} PR:{' '}
                 <Text style={styles.exerciseCardPREmphasis}>
                   {prSnapshot.topVolumeSet.weight_kg}
                 </Text>
@@ -2533,6 +2568,7 @@ function ExerciseCard({
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
           {sets.length === 0 ? (
+            // TODO(i18n): solo card empty-state hint — needs new strings.ts key.
             <Text style={styles.exerciseCardEmpty}>
               還沒有 set — 按下方「+ 新增 1 組」開始記錄
             </Text>
@@ -2581,7 +2617,7 @@ function ExerciseCard({
                     swipeLeftActions={[
                       {
                         key: 'delete',
-                        label: '刪除',
+                        label: t('common', 'delete'),
                         color: '#dc3545',
                         // overnight #46 第 2 點 — solo set 級別 swipe-delete
                         // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
@@ -2606,7 +2642,7 @@ function ExerciseCard({
                       },
                       {
                         key: 'note',
-                        label: '備註',
+                        label: t('domain', 'note'),
                         color: '#007AFF',
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
@@ -2655,7 +2691,7 @@ function ExerciseCard({
                           hitSlop={6}
                           accessibilityRole="button"
                           accessibilityLabel={
-                            headLogged ? '取消完成' : '標為完成'
+                            headLogged ? t('button', 'uncheck') : t('button', 'markAsDone')
                           }
                           style={({ pressed }) => [
                             styles.completeBtn,
@@ -2752,6 +2788,7 @@ function ExerciseCard({
                 busy && styles.btnDisabled,
                 pressed && styles.btnPressed,
               ]}>
+              {/* TODO(i18n): "新增 1 組" primary CTA — needs new strings.ts key. */}
               <Text style={styles.exerciseCardFooterBtnTextPrimary}>
                 新增 1 組
               </Text>
@@ -2765,7 +2802,7 @@ function ExerciseCard({
                 pressed && styles.btnPressed,
               ]}>
               <Text style={styles.exerciseCardFooterBtnTextSecondary}>
-                動作歷史
+                {t('page', 'exerciseHistory')}
               </Text>
             </Pressable>
           </View>
