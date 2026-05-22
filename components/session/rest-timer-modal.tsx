@@ -162,16 +162,14 @@ export function RestTimerModal({
         <Pressable
           style={styles.card}
           onPress={(e) => e.stopPropagation()}>
-          {/* TODO(i18n): 休息中 timer header (with optional exercise name suffix) — needs new strings.ts key. */}
           <Text style={styles.title}>
-            ⏱️ 休息中{exerciseName ? ` · ${exerciseName}` : ''}
+            ⏱️ {t('status', 'restingHeader')}{exerciseName ? ` · ${exerciseName}` : ''}
           </Text>
           <Text style={styles.countdown}>
             {formatRestRemaining(state.remaining_ms)}
           </Text>
-          {/* TODO(i18n): 時間到 / 把握短暫的休息 subtitle copy — needs new strings.ts keys. */}
           <Text style={styles.sub}>
-            {state.status === 'finished' ? '時間到 — 再來一組 💪' : '把握短暫的休息'}
+            {state.status === 'finished' ? t('status', 'restFinished') : t('status', 'restRunning')}
           </Text>
           <View style={styles.actions}>
             <Pressable
