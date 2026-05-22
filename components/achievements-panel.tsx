@@ -21,9 +21,19 @@ import {
   type AchievementUnlockRow,
 } from '@/src/adapters/sqlite/achievementRepository';
 import type { AchievementDefinitionRow } from '@/src/domain/achievement/types';
-import { t } from '@/src/i18n';
+import { getLocale, t } from '@/src/i18n';
 
 type FilterKey = 'all' | 'mg' | 'bucket' | 'milestone';
+
+/**
+ * Inline dynamic helper — "N / M 已解鎖" / "N / M unlocked".
+ * Kept local rather than in `src/i18n/dynamic.ts` (panel-only usage).
+ */
+function tUnlockedRatio(unlocked: number, total: number): string {
+  return getLocale() === 'en'
+    ? `${unlocked} / ${total} unlocked`
+    : `${unlocked} / ${total} 已解鎖`;
+}
 
 /**
  * Filter chip labels. `all` round-trips via `common.all`; the other three
@@ -35,10 +45,9 @@ type FilterKey = 'all' | 'mg' | 'bucket' | 'milestone';
  */
 function filterLabel(k: FilterKey): string {
   if (k === 'all') return t('common', 'all');
-  // TODO(i18n): no key for "部位" / "訓練目的" / "里程碑" filter chips
-  if (k === 'mg') return '部位';
-  if (k === 'bucket') return '訓練目的';
-  return '里程碑';
+  if (k === 'mg') return t('status', 'filterMuscleGroup');
+  if (k === 'bucket') return t('status', 'filterTrainingGoal');
+  return t('status', 'filterMilestone');
 }
 
 const FILTERS: readonly { key: FilterKey }[] = [
@@ -109,10 +118,8 @@ export function AchievementsPanel() {
         ))}
       </View>
 
-      {/* TODO(i18n): no key for "N / M 已解鎖" summary template — needs a
-          tUnlockedRatio(unlocked, total) dynamic helper */}
       <Text style={styles.summary}>
-        {unlockedCount} / {filtered.length} 已解鎖
+        {tUnlockedRatio(unlockedCount, filtered.length)}
       </Text>
 
       <FlatList
@@ -135,11 +142,10 @@ export function AchievementsPanel() {
                   {item.description}
                 </Text>
               ) : null}
-              {/* TODO(i18n): no key for "未解鎖" achievement-locked indicator */}
               <Text style={[styles.cellStatus, unlock ? styles.cellStatusUnlocked : null]}>
                 {unlock
                   ? `✓ ${formatUnlockDate(unlock.unlocked_at)}`
-                  : '未解鎖'}
+                  : t('status', 'achievementLocked')}
               </Text>
             </View>
           );
