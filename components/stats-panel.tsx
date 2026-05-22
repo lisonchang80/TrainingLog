@@ -35,16 +35,29 @@ import type {
   StatsSetRecord,
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
+import { t, tMuscleGroup } from '@/src/i18n';
+
+/**
+ * Period selector labels. zh literals are single chars (年 / 月 / 週); we
+ * don't have direct i18n keys for these abbreviations, so the labels stay
+ * inline with TODO markers. EN locale will need a tPeriodScale helper in a
+ * follow-up — likely "Year / Month / Week" full words.
+ */
+function periodLabel(p: PeriodScale): string {
+  // TODO(i18n): no key for "年/月/週" period abbreviations
+  if (p === 'year') return '年';
+  if (p === 'month') return '月';
+  return '週';
+}
 
 interface PeriodChoice {
   key: PeriodScale;
-  label: string;
 }
 
 const PERIOD_CHOICES: readonly PeriodChoice[] = [
-  { key: 'year', label: '年' },
-  { key: 'month', label: '月' },
-  { key: 'week', label: '週' },
+  { key: 'year' },
+  { key: 'month' },
+  { key: 'week' },
 ];
 
 function formatDurationShort(ms: number): string {
@@ -218,7 +231,7 @@ export function StatsPanel() {
                 styles.periodBtnText,
                 period === p.key && styles.periodBtnTextActive,
               ]}>
-              {p.label}
+              {periodLabel(p.key)}
             </Text>
           </Pressable>
         ))}
@@ -229,6 +242,7 @@ export function StatsPanel() {
         <Pressable
           style={styles.anchorBtn}
           onPress={() => setShowPicker((s) => !s)}>
+          {/* TODO(i18n): no key for "錨點" anchor-date label */}
           <Text style={styles.anchorBtnLabel}>錨點</Text>
           <Text style={styles.anchorBtnDate}>{formatAnchorLabel(anchorDate)}</Text>
           <Text style={styles.anchorBtnCaret}>{showPicker ? '▴' : '▾'}</Text>
@@ -240,6 +254,7 @@ export function StatsPanel() {
               setAnchorDate(startOfDay(new Date()));
               setShowPicker(false);
             }}>
+            {/* TODO(i18n): no key for "今天" today reset button */}
             <Text style={styles.anchorTodayText}>今天</Text>
           </Pressable>
         ) : null}
@@ -258,6 +273,7 @@ export function StatsPanel() {
 
       {/* Body heatmap */}
       <View style={styles.card}>
+        {/* TODO(i18n): no key for "訓練部位概況 · {currentBucket.label}" stats card titles + descriptions — needs per-card title/subtitle keys */}
         <Text style={styles.cardTitle}>訓練部位概況 · {currentBucket.label}</Text>
         <Text style={styles.cardSubtitle}>顏色 = per-Session 次數分位</Text>
         <BodyHeatmap mgQuintile={mgQuintile} mgCount={freqByMg} />
@@ -280,7 +296,10 @@ export function StatsPanel() {
             {mgRows.map((row) => (
               <View key={row.mg_id} style={styles.mgCell}>
                 <View style={styles.mgCellHeader}>
-                  <Text style={styles.mgCellName}>{row.mg_name}</Text>
+                  {/* Round-trip mg_id through tMuscleGroup so EN locale shows
+                      Chest/Back/etc. Falls back to row.mg_name (zh literal)
+                      when the mg_id has no dictionary entry. */}
+                  <Text style={styles.mgCellName}>{tMuscleGroup(row.mg_id) !== row.mg_id ? tMuscleGroup(row.mg_id) : row.mg_name}</Text>
                   <Text style={styles.mgCellTotal}>
                     {formatCapacityShort(row.total) || '—'}
                   </Text>

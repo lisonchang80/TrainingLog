@@ -142,6 +142,7 @@ export function MiniBarChart({
         </View>
       ) : null}
       {/* Avg line label (top-right corner) */}
+      {/* TODO(i18n): no key for "平均" prefix on average-line readout */}
       {avgLine != null && avgLine > 0 ? (
         <Text style={styles.avgLabel}>平均 {formatAvg(avgLine)}</Text>
       ) : null}

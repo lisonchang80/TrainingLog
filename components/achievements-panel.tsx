@@ -21,14 +21,31 @@ import {
   type AchievementUnlockRow,
 } from '@/src/adapters/sqlite/achievementRepository';
 import type { AchievementDefinitionRow } from '@/src/domain/achievement/types';
+import { t } from '@/src/i18n';
 
 type FilterKey = 'all' | 'mg' | 'bucket' | 'milestone';
 
-const FILTERS: readonly { key: FilterKey; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'mg', label: '部位' },
-  { key: 'bucket', label: '訓練目的' },
-  { key: 'milestone', label: '里程碑' },
+/**
+ * Filter chip labels. `all` round-trips via `common.all`; the other three
+ * (部位 / 訓練目的 / 里程碑) have no exact i18n key — left inline with
+ * TODO markers per Phase 4D spec. Achievement definitions themselves
+ * (item.display_name / item.description) come from DB rows seeded in
+ * v008Achievements.ts and are intentionally untranslated (Phase 2 user
+ * decision: schema migration required).
+ */
+function filterLabel(k: FilterKey): string {
+  if (k === 'all') return t('common', 'all');
+  // TODO(i18n): no key for "部位" / "訓練目的" / "里程碑" filter chips
+  if (k === 'mg') return '部位';
+  if (k === 'bucket') return '訓練目的';
+  return '里程碑';
+}
+
+const FILTERS: readonly { key: FilterKey }[] = [
+  { key: 'all' },
+  { key: 'mg' },
+  { key: 'bucket' },
+  { key: 'milestone' },
 ];
 
 const CATEGORY_FOR_FILTER: Record<FilterKey, AchievementDefinitionRow['category'][] | null> = {
@@ -86,12 +103,14 @@ export function AchievementsPanel() {
             onPress={() => setFilter(f.key)}>
             <Text
               style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]}>
-              {f.label}
+              {filterLabel(f.key)}
             </Text>
           </Pressable>
         ))}
       </View>
 
+      {/* TODO(i18n): no key for "N / M 已解鎖" summary template — needs a
+          tUnlockedRatio(unlocked, total) dynamic helper */}
       <Text style={styles.summary}>
         {unlockedCount} / {filtered.length} 已解鎖
       </Text>
@@ -116,6 +135,7 @@ export function AchievementsPanel() {
                   {item.description}
                 </Text>
               ) : null}
+              {/* TODO(i18n): no key for "未解鎖" achievement-locked indicator */}
               <Text style={[styles.cellStatus, unlock ? styles.cellStatusUnlocked : null]}>
                 {unlock
                   ? `✓ ${formatUnlockDate(unlock.unlocked_at)}`
