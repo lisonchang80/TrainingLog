@@ -18,10 +18,12 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { t } from '@/src/i18n';
+
 type SetNoteSheetProps = {
   visible: boolean;
   initialValue: string | null;
-  /** Title shown in the top bar. Defaults to '備註'. */
+  /** Title shown in the top bar. Defaults to localized 備註. */
   title?: string;
   /** Placeholder shown inside the input. */
   placeholder?: string;
@@ -32,11 +34,14 @@ type SetNoteSheetProps = {
 export function SetNoteSheet({
   visible,
   initialValue,
-  title = '備註',
-  placeholder = '這組想留下什麼？（例：RPE 8、左肘有點緊）',
+  title,
+  placeholder,
   onConfirm,
   onCancel,
 }: SetNoteSheetProps) {
+  const resolvedTitle = title ?? t('domain', 'note');
+  // TODO(i18n): set-specific placeholder distinct from exercise notePlaceholder — needs new strings.ts key.
+  const resolvedPlaceholder = placeholder ?? '這組想留下什麼？（例：RPE 8、左肘有點緊）';
   const [draft, setDraft] = useState(initialValue ?? '');
 
   useEffect(() => {
@@ -59,12 +64,12 @@ export function SetNoteSheet({
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.topBar}>
             <Pressable onPress={onCancel} hitSlop={8}>
-              <Text style={styles.topBarBtnText}>取消</Text>
+              <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
             </Pressable>
-            <Text style={styles.topBarTitle}>{title}</Text>
+            <Text style={styles.topBarTitle}>{resolvedTitle}</Text>
             <Pressable onPress={handleConfirm} hitSlop={8}>
               <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
-                完成
+                {t('common', 'done')}
               </Text>
             </Pressable>
           </View>
@@ -74,7 +79,7 @@ export function SetNoteSheet({
             multiline
             value={draft}
             onChangeText={setDraft}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             placeholderTextColor="#9ca3af"
             autoFocus
             textAlignVertical="top"

@@ -29,6 +29,8 @@ import DraggableFlatList, {
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 
+import { t } from '@/src/i18n';
+
 type ReorderItem = {
   id: string;
   name: string;
@@ -77,19 +79,20 @@ export function ReorderExercisesSheet({
       <View style={styles.sheet}>
         <View style={styles.topBar}>
           <Pressable onPress={onCancel} hitSlop={8}>
-            <Text style={styles.topBarBtnText}>取消</Text>
+            <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
           </Pressable>
-          <Text style={styles.topBarTitle}>🔃 排序動作</Text>
+          <Text style={styles.topBarTitle}>{t('button', 'clusterReorderExercises')}</Text>
           <Pressable
             onPress={() => onConfirm(draft.map((d) => d.id))}
             hitSlop={8}
           >
             <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
-              完成
+              {t('common', 'done')}
             </Text>
           </Pressable>
         </View>
         <View style={styles.hintBanner}>
+          {/* TODO(i18n): drag-to-reorder hint banner — needs new strings.ts key. */}
           <Text style={styles.hintBannerText}>
             長按任一列拖曳重新排序，完成後按右上「完成」儲存。
           </Text>

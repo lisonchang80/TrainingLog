@@ -27,6 +27,7 @@ import {
   parseKeypadBuffer,
   type KeypadMode,
 } from '@/src/domain/keypad';
+import { t } from '@/src/i18n';
 
 type NumericKeypadProps = {
   visible: boolean;
@@ -101,12 +102,12 @@ export function NumericKeypad({
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.topBar}>
             <Pressable onPress={onCancel} hitSlop={8}>
-              <Text style={styles.topBarBtnText}>取消</Text>
+              <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
             </Pressable>
             <Text style={styles.topBarTitle}>{label}</Text>
             <Pressable onPress={handleConfirm} hitSlop={8}>
               <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
-                完成
+                {t('common', 'done')}
               </Text>
             </Pressable>
           </View>
