@@ -216,8 +216,7 @@ export function SessionTimeEditorSheet({
                 {t('common', 'cancel')}
               </Text>
             </Pressable>
-            {/* TODO(i18n): 編輯訓練時間 title — needs new strings.ts key. */}
-            <Text style={styles.topBarTitle}>編輯訓練時間</Text>
+            <Text style={styles.topBarTitle}>{t('page', 'editSessionTime')}</Text>
             <Pressable
               onPress={handleSave}
               hitSlop={8}
@@ -238,8 +237,7 @@ export function SessionTimeEditorSheet({
           <View style={styles.body}>
             {/* 開始時間 */}
             <View style={styles.field}>
-              {/* TODO(i18n): 開始時間 field label — needs new strings.ts key. */}
-              <Text style={styles.fieldLabel}>開始時間</Text>
+              <Text style={styles.fieldLabel}>{t('page', 'startTimeLabel')}</Text>
               {Platform.OS === 'ios' ? (
                 <DateTimePicker
                   value={start}
@@ -273,8 +271,7 @@ export function SessionTimeEditorSheet({
 
             {/* 結束時間 */}
             <View style={styles.field}>
-              {/* TODO(i18n): 結束時間 field label — needs new strings.ts key. */}
-              <Text style={styles.fieldLabel}>結束時間</Text>
+              <Text style={styles.fieldLabel}>{t('page', 'endTimeLabel')}</Text>
               {Platform.OS === 'ios' ? (
                 <DateTimePicker
                   value={end}
@@ -308,8 +305,7 @@ export function SessionTimeEditorSheet({
 
             {/* Live duration preview */}
             <View style={styles.durationRow}>
-              {/* TODO(i18n): 訓練時長 label — needs new strings.ts key. */}
-              <Text style={styles.durationLabel}>訓練時長</Text>
+              <Text style={styles.durationLabel}>{t('page', 'durationLabel')}</Text>
               <Text
                 style={[
                   styles.durationValue,
@@ -321,9 +317,8 @@ export function SessionTimeEditorSheet({
             </View>
 
             {!isValid ? (
-              // TODO(i18n): end-must-be-after-start warning — needs new strings.ts key.
               <Text style={styles.warningText}>
-                ⚠️ 結束時間必須晚於開始時間
+                {t('alert', 'endMustBeAfterStart')}
               </Text>
             ) : null}
           </View>
