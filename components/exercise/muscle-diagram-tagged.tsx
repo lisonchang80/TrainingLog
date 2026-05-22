@@ -31,6 +31,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import type { MuscleRole } from '@/src/domain/exercise/types';
+import { tMuscleGroup } from '@/src/i18n';
 
 const COLOR_PRIMARY = '#F26B3A';
 const COLOR_SECONDARY = '#7CB6E0';
@@ -172,6 +173,7 @@ export function MuscleDiagramTagged({
           mode={mode}
         />
       </View>
+      {/* TODO(i18n): muscle-role legend labels (主要/次要/未活化) — no keys yet (would be muscleRole.primary/secondary/inactive) */}
       <View style={styles.legendRow}>
         <LegendItem color={COLOR_PRIMARY} label="主要" />
         <LegendItem color={COLOR_SECONDARY} label="次要" />
@@ -269,7 +271,7 @@ function LabelGroup({ muscle, role, side, mode, onTap }: LabelGroupProps) {
           fontWeight="600"
           fill={btn.text}
           textAnchor="middle">
-          {muscle.short}
+          {tMuscleGroup(muscle.short)}
         </SvgText>
       </>
     );

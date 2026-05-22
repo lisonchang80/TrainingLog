@@ -37,6 +37,7 @@ import {
   type MuscleGroup,
   type MuscleRole,
 } from '@/src/domain/exercise/types';
+import { t, tEquipment, tMuscleGroup } from '@/src/i18n';
 
 import { MgEquipmentPicker, type PickerCell } from './mg-equipment-picker';
 import { MuscleDiagramTagged } from './muscle-diagram-tagged';
@@ -119,6 +120,7 @@ export function CustomExerciseForm({
     if (!canSubmit || busy) return;
     const generalErrs = errors.filter((e) => e.field === 'general');
     if (generalErrs.length > 0) {
+      // TODO(i18n): 「無法儲存」title — no key (alert.saveFailed ~ 儲存失敗 covers the cause-Alert below).
       Alert.alert('無法儲存', generalErrs.map((e) => e.message).join('\n'));
       return;
     }
@@ -126,7 +128,7 @@ export function CustomExerciseForm({
     try {
       await onSubmit(draft);
     } catch (err) {
-      Alert.alert('儲存失敗', err instanceof Error ? err.message : String(err));
+      Alert.alert(t('alert', 'saveFailed'), err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -142,16 +144,20 @@ export function CustomExerciseForm({
   const nameError = errors.find((e) => e.field === 'name');
 
   const mgPickerCells: PickerCell[] = useMemo(
-    () => muscleGroups.map((mg) => ({ id: mg.id, label: mg.name })),
+    () => muscleGroups.map((mg) => ({ id: mg.id, label: tMuscleGroup(mg.name) })),
     [muscleGroups]
   );
   const equipmentPickerCells: PickerCell[] = useMemo(
-    () => EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: eq })),
+    () => EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: tEquipment(eq) })),
     []
   );
 
   const mgLabel = useMemo(
-    () => muscleGroups.find((mg) => mg.id === mgId)?.name ?? '請選擇大分類',
+    // TODO(i18n): 「請選擇大分類」placeholder — no key (alert.pickCategoryFirst body close-ish but different wording)
+    () => {
+      const mg = muscleGroups.find((m) => m.id === mgId);
+      return mg ? tMuscleGroup(mg.name) : '請選擇大分類';
+    },
     [muscleGroups, mgId]
   );
 
@@ -163,15 +169,15 @@ export function CustomExerciseForm({
           headerLeft: () => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="取消"
+              accessibilityLabel={t('common', 'cancel')}
               onPress={onCancel}>
-              <Text style={styles.headerCancel}>取消</Text>
+              <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
             </Pressable>
           ),
           headerRight: () => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="儲存"
+              accessibilityLabel={t('common', 'save')}
               onPress={handleSubmit}
               disabled={!canSubmit || busy}>
               <Text
@@ -179,7 +185,7 @@ export function CustomExerciseForm({
                   styles.headerSave,
                   (!canSubmit || busy) && styles.headerSaveDisabled,
                 ]}>
-                {busy ? '儲存中…' : '儲存'}
+                {busy ? t('common', 'saving') : t('common', 'save')}
               </Text>
             </Pressable>
           ),
@@ -187,8 +193,10 @@ export function CustomExerciseForm({
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Row 1: 名稱 */}
+        {/* TODO(i18n): 「名稱」field label — no exact key (page.programNamePlaceholder is program-specific) */}
         <Text style={styles.label}>名稱</Text>
         <TextInput
+          // TODO(i18n): 「動作名稱」a11y + 「例：吊環划船」placeholder — no keys (page.enterExerciseName is the alert-style copy)
           accessibilityLabel="動作名稱"
           placeholder="例：吊環划船"
           value={name}
@@ -201,6 +209,7 @@ export function CustomExerciseForm({
         {nameError && <Text style={styles.fieldError}>{nameError.message}</Text>}
 
         {/* Row 2: 大分類 picker row */}
+        {/* TODO(i18n): 「大分類」/「用具」/「訓練部位（選填）」field labels — no keys yet */}
         <Text style={styles.label}>大分類</Text>
         <Pressable
           accessibilityRole="button"
@@ -221,18 +230,19 @@ export function CustomExerciseForm({
         <Text style={styles.label}>用具</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`用具：${equipment}`}
+          accessibilityLabel={`用具：${tEquipment(equipment)}`}
           onPress={() => setShowEquipmentPicker(true)}
           style={({ pressed }) => [
             styles.pickerRow,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.pickerRowText}>{equipment}</Text>
+          <Text style={styles.pickerRowText}>{tEquipment(equipment)}</Text>
           <Text style={styles.pickerRowChevron}>▾</Text>
         </Pressable>
 
         {/* Row 4: 訓練部位 — 解剖圖 + 標籤同畫面（正面 / 背面並列） */}
         <Text style={styles.label}>訓練部位（選填）</Text>
+        {/* TODO(i18n): muscle-tag helper copy — no key */}
         <Text style={styles.helper}>
           點標籤切換：未選 → 主要(橘) → 次要(藍) → 取消。空白時動作詳情頁不顯示解剖圖。
         </Text>
@@ -244,6 +254,7 @@ export function CustomExerciseForm({
 
       <MgEquipmentPicker
         visible={showMgPicker}
+        // TODO(i18n): 「選擇大分類」/「選擇用具」picker titles — no keys (page.selectIntensity covers intensity only)
         title="選擇大分類"
         cells={mgPickerCells}
         selectedId={mgId || null}

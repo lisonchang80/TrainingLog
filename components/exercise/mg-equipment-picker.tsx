@@ -15,6 +15,8 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { t } from '@/src/i18n';
+
 export interface PickerCell {
   id: string;
   label: string;
@@ -48,7 +50,7 @@ export function MgEquipmentPicker({
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
-              <Text style={styles.done}>取消</Text>
+              <Text style={styles.done}>{t('common', 'cancel')}</Text>
             </Pressable>
           </View>
           <View style={styles.grid}>
