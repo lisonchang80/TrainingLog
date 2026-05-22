@@ -104,6 +104,20 @@ import {
 import { computeDetailPageStats } from '@/src/domain/session/sessionStats';
 import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
+import {
+  t,
+  tDuplicateTemplateTriple,
+  tExerciseNoteHeader,
+  tRemoveExerciseFromSessionPrompt,
+  tRemoveSupersetFromSessionPrompt,
+  tRestSecondsHeader,
+  tTemplateCreated,
+  tTemplateUpdated,
+  tWarningPerExerciseSetsUnfinished,
+  tWarningPerExerciseSetsWithLogged,
+  tWarningTotalSetsUnfinished,
+  tWarningTotalSetsWithLogged,
+} from '@/src/i18n';
 
 /**
  * Session detail page — ADR-0019 Q10 final layout (slice 10c session detail).
@@ -333,13 +347,13 @@ export default function SessionDetailScreen() {
     try {
       const snap = await captureSessionSnapshot(db, id);
       if (!snap) {
-        Alert.alert('編輯失敗', 'Session not found.');
+        Alert.alert(t('alert', 'editFailed'), 'Session not found.');
         return;
       }
       setEditSnapshot(snap);
       setEditMode(true);
     } catch (e) {
-      Alert.alert('編輯失敗', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'editFailed'), e instanceof Error ? e.message : String(e));
     }
   }, [db, id]);
 
@@ -415,12 +429,12 @@ export default function SessionDetailScreen() {
         return;
       }
       Alert.alert(
-        '捨棄修改？',
-        '離開將還原為進入編輯前的狀態，所有變更會消失。',
+        t('alert', 'discardChangesQ'),
+        t('alert', 'discardChangesLong'),
         [
-          { text: '繼續編輯', style: 'cancel' },
+          { text: t('button', 'editKeep'), style: 'cancel' },
           {
-            text: '捨棄修改',
+            text: t('button', 'discardChanges'),
             style: 'destructive',
             onPress: async () => {
               try {
@@ -428,7 +442,7 @@ export default function SessionDetailScreen() {
                 await load();
               } catch (e) {
                 Alert.alert(
-                  '還原失敗',
+                  t('alert', 'restoreFailed'),
                   e instanceof Error ? e.message : String(e),
                 );
                 return;
@@ -499,7 +513,7 @@ export default function SessionDetailScreen() {
           await load();
         } catch (e) {
           Alert.alert(
-            '加入動作失敗',
+            t('alert', 'addExerciseFailed'),
             e instanceof Error ? e.message : String(e),
           );
         }
@@ -818,7 +832,7 @@ export default function SessionDetailScreen() {
         await load();
       } catch (e) {
         Alert.alert(
-          '新增 dropset 失敗',
+          t('alert', 'addDropsetFailed'),
           e instanceof Error ? e.message : String(e),
         );
       } finally {
@@ -846,11 +860,11 @@ export default function SessionDetailScreen() {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes('DROPSET_CHAIN_TOO_SHORT')) {
           Alert.alert(
-            '無法刪除',
-            'Dropset 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 head 那一列。',
+            t('alert', 'cannotDelete'),
+            t('alert', 'dropsetMinimum'),
           );
         } else {
-          Alert.alert('刪除失敗', msg);
+          Alert.alert(t('alert', 'deleteFailed'), msg);
         }
       }
     },
@@ -1054,22 +1068,29 @@ export default function SessionDetailScreen() {
       const partnerExerciseId = options?.partnerExerciseId;
       const partnerSessionExerciseId = options?.partnerSessionExerciseId;
       const isCluster = !!partnerExerciseId && !!partnerSessionExerciseId;
+      const labelCancel = t('common', 'cancel');
+      const labelEditNote = t('button', 'clusterEditNote');
+      const labelRestSeconds = t('button', 'clusterRestSeconds');
+      const labelHistoryA = t('button', 'clusterHistoryA');
+      const labelHistoryB = t('button', 'clusterHistoryB');
+      const labelDeleteExercise = t('button', 'clusterDeleteExercise');
+      const labelReorder = t('button', 'clusterReorderExercises');
       const menuOptions: string[] = isCluster
         ? [
-            '取消',
-            '📝 編輯備註',
-            '⏱️ 休息秒數',
-            '📖 動作歷史 (A)',
-            '📖 動作歷史 (B)',
-            '🗑️ 刪除動作',
-            '🔃 排序動作',
+            labelCancel,
+            labelEditNote,
+            labelRestSeconds,
+            labelHistoryA,
+            labelHistoryB,
+            labelDeleteExercise,
+            labelReorder,
           ]
         : [
-            '取消',
-            '📝 編輯備註',
-            '⏱️ 休息秒數',
-            '🗑️ 刪除動作',
-            '🔃 排序動作',
+            labelCancel,
+            labelEditNote,
+            labelRestSeconds,
+            labelDeleteExercise,
+            labelReorder,
           ];
       const destructiveButtonIndex = isCluster ? 5 : 3;
       ActionSheetIOS.showActionSheetWithOptions(
@@ -1082,7 +1103,7 @@ export default function SessionDetailScreen() {
         (idx) => {
           if (idx === 0) return;
           const label = menuOptions[idx];
-          if (label === '📝 編輯備註') {
+          if (label === labelEditNote) {
             (async () => {
               try {
                 const initial = await getExerciseNotes(db, planRow.exercise_id);
@@ -1093,33 +1114,34 @@ export default function SessionDetailScreen() {
                 });
               } catch (e) {
                 Alert.alert(
-                  '讀取失敗',
+                  t('alert', 'readFailed'),
                   e instanceof Error ? e.message : String(e),
                 );
               }
             })();
-          } else if (label === '⏱️ 休息秒數') {
+          } else if (label === labelRestSeconds) {
             setRestSecTarget({
               session_exercise_id: planRow.id,
               current: planRow.rest_sec ?? 60,
               exercise_name: planRow.exercise_name,
             });
-          } else if (label === '📖 動作歷史 (A)') {
+          } else if (label === labelHistoryA) {
             router.push(
               `/exercise-history/${planRow.exercise_id}?clusterMode=cluster_only&partner=${partnerExerciseId}&side=A&currentSeIdA=${planRow.id}&currentSeIdB=${partnerSessionExerciseId}`,
             );
-          } else if (label === '📖 動作歷史 (B)') {
+          } else if (label === labelHistoryB) {
             router.push(
               `/exercise-history/${partnerExerciseId}?clusterMode=cluster_only&partner=${planRow.exercise_id}&side=B&currentSeIdA=${partnerSessionExerciseId}&currentSeIdB=${planRow.id}`,
             );
-          } else if (label === '🔃 排序動作') {
+          } else if (label === labelReorder) {
             setReorderSheetOpen(true);
-          } else if (label === '🗑️ 刪除動作') {
+          } else if (label === labelDeleteExercise) {
             if (isCluster && partnerSessionExerciseId) {
               const partnerPlan = sessionExercises.find(
                 (p) => p.id === partnerSessionExerciseId,
               );
-              const partnerName = partnerPlan?.exercise_name ?? '(未知動作)';
+              const partnerName =
+                partnerPlan?.exercise_name ?? t('common', 'unknownExercise');
               const setsForCluster = sets.filter(
                 (s) =>
                   s.session_exercise_id === planRow.id ||
@@ -1131,17 +1153,21 @@ export default function SessionDetailScreen() {
               const totalSets = setsForCluster.length;
               const warningSuffix =
                 loggedCount > 0
-                  ? `\n\n將連同 ${totalSets} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                  ? tWarningTotalSetsWithLogged(totalSets, loggedCount)
                   : totalSets > 0
-                    ? `\n\n將連同 ${totalSets} 組未完成記錄一起刪除。`
+                    ? tWarningTotalSetsUnfinished(totalSets)
                     : '';
               Alert.alert(
-                '刪除超級組？',
-                `要從這次訓練中移除整個超級組「${planRow.exercise_name} + ${partnerName}」？${warningSuffix}`,
+                t('alert', 'deleteSupersetQ'),
+                tRemoveSupersetFromSessionPrompt(
+                  planRow.exercise_name,
+                  partnerName,
+                  warningSuffix,
+                ),
                 [
-                  { text: '取消', style: 'cancel' },
+                  { text: t('common', 'cancel'), style: 'cancel' },
                   {
-                    text: '刪除',
+                    text: t('common', 'delete'),
                     style: 'destructive',
                     onPress: async () => {
                       if (!id) return;
@@ -1159,7 +1185,7 @@ export default function SessionDetailScreen() {
                         await load();
                       } catch (e) {
                         Alert.alert(
-                          '刪除失敗',
+                          t('alert', 'deleteFailed'),
                           e instanceof Error ? e.message : String(e),
                         );
                         await load();
@@ -1182,17 +1208,17 @@ export default function SessionDetailScreen() {
             ).length;
             const warningSuffix =
               loggedCount > 0
-                ? `\n\n⚠️ 將連同此動作的 ${setsForExercise.length} 組記錄一起刪除（其中 ${loggedCount} 組已標完成）。`
+                ? tWarningPerExerciseSetsWithLogged(setsForExercise.length, loggedCount)
                 : setsForExercise.length > 0
-                  ? `\n\n將連同此動作的 ${setsForExercise.length} 組未完成記錄一起刪除。`
+                  ? tWarningPerExerciseSetsUnfinished(setsForExercise.length)
                   : '';
             Alert.alert(
-              '刪除動作？',
-              `要從這次訓練中移除「${planRow.exercise_name}」？${warningSuffix}`,
+              t('alert', 'deleteExerciseQ'),
+              tRemoveExerciseFromSessionPrompt(planRow.exercise_name, warningSuffix),
               [
-                { text: '取消', style: 'cancel' },
+                { text: t('common', 'cancel'), style: 'cancel' },
                 {
-                  text: '刪除',
+                  text: t('common', 'delete'),
                   style: 'destructive',
                   onPress: async () => {
                     if (!id) return;
@@ -1205,7 +1231,7 @@ export default function SessionDetailScreen() {
                       await load();
                     } catch (e) {
                       Alert.alert(
-                        'Delete failed',
+                        t('alert', 'deleteFailed'),
                         e instanceof Error ? e.message : String(e),
                       );
                     }
@@ -1243,7 +1269,7 @@ export default function SessionDetailScreen() {
               : null,
           );
         } catch (e) {
-          Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
+          Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
           return;
         }
         setTemplateMetaSheetOpen(true);
@@ -1265,13 +1291,13 @@ export default function SessionDetailScreen() {
       try {
         linked = await getSessionLinkedTemplateTriple(db, id!);
       } catch (e) {
-        Alert.alert('載入失敗', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
         return;
       }
       if (!linked) {
         Alert.alert(
-          '找不到原模板',
-          '此 session 沒有連結的模板，或原模板已被刪除。請改用「另存模板」建立新的。',
+          t('alert', 'originalTemplateNotFound'),
+          t('alert', 'sessionTemplateMissing'),
         );
         return;
       }
@@ -1282,9 +1308,9 @@ export default function SessionDetailScreen() {
           mode: 'update',
           uuid: randomUUID,
         });
-        Alert.alert('已儲存', `模板「${linked.template_name}」已更新。`);
+        Alert.alert(t('status', 'saved'), tTemplateUpdated(linked.template_name));
       } catch (e) {
-        Alert.alert('失敗', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'failed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, session]
@@ -1311,16 +1337,16 @@ export default function SessionDetailScreen() {
           uuid: randomUUID,
         });
         setTemplateMetaSheetOpen(false);
-        Alert.alert('已另存', `模板「${finalName}」已建立。`);
+        Alert.alert(t('status', 'savedAsNew'), tTemplateCreated(finalName));
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
           Alert.alert(
-            '變體已存在',
-            `「${finalName}」+ 該計畫 + 該強度的組合已存在。請改名或選不同變體。`,
+            t('alert', 'variantExists'),
+            tDuplicateTemplateTriple(finalName),
           );
         } else {
-          Alert.alert('失敗', message);
+          Alert.alert(t('alert', 'failed'), message);
         }
       } finally {
         setTemplateMetaBusy(false);
@@ -1331,19 +1357,19 @@ export default function SessionDetailScreen() {
 
   const handleDelete = useCallback(() => {
     Alert.alert(
-      '刪除本訓練',
-      '已記錄的 set 將全部刪除，無法復原。',
+      t('button', 'deleteSession'),
+      t('alert', 'allLoggedSetsDeleted'),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common', 'cancel'), style: 'cancel' },
         {
-          text: '刪除',
+          text: t('common', 'delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await discardSession(db, id!);
               router.back();
             } catch (e) {
-              Alert.alert('刪除失敗', e instanceof Error ? e.message : String(e));
+              Alert.alert(t('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -1368,7 +1394,7 @@ export default function SessionDetailScreen() {
         setTimeEditorOpen(false);
         await load();
       } catch (e) {
-        Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, load],
@@ -1496,7 +1522,7 @@ export default function SessionDetailScreen() {
                 await load();
               } catch (e) {
                 Alert.alert(
-                  '排序失敗',
+                  t('alert', 'reorderFailed'),
                   e instanceof Error ? e.message : String(e),
                 );
               }
@@ -1561,7 +1587,7 @@ export default function SessionDetailScreen() {
               await load();
             } catch (e) {
               Alert.alert(
-                '排序失敗',
+                t('alert', 'reorderFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
@@ -1590,7 +1616,7 @@ export default function SessionDetailScreen() {
             }
           }}
           style={styles.headerBackBtn}>
-          <Text style={styles.headerBackText}>‹ 返回</Text>
+          <Text style={styles.headerBackText}>{t('common', 'backArrow')}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>{titleText}</Text>
         {editMode ? (
@@ -1598,7 +1624,7 @@ export default function SessionDetailScreen() {
             onPress={commitEditMode}
             style={styles.headerDoneBtn}
             accessibilityRole="button">
-            <Text style={styles.headerDoneText}>完成</Text>
+            <Text style={styles.headerDoneText}>{t('common', 'done')}</Text>
           </Pressable>
         ) : (
           <View style={styles.headerSpacer} />
@@ -1691,9 +1717,10 @@ export default function SessionDetailScreen() {
                 />
 
                 <View style={styles.sectionRow}>
+                  {/* TODO(i18n): "動作清單" section header — needs new strings.ts key. */}
                   <Text style={styles.section}>動作清單</Text>
                   <View style={styles.hideUncheckedToggle}>
-                    <Text style={styles.hideUncheckedLabel}>隱藏未打勾</Text>
+                    <Text style={styles.hideUncheckedLabel}>{t('status', 'hideUnchecked')}</Text>
                     <Switch
                       value={hideUnchecked}
                       onValueChange={setHideUnchecked}
@@ -1702,7 +1729,8 @@ export default function SessionDetailScreen() {
                 </View>
                 {sessionExercises.length === 0 ? (
                   <View style={styles.emptyPlanBlock}>
-                    <Text style={styles.emptyPlanTitle}>尚未加入動作</Text>
+                    <Text style={styles.emptyPlanTitle}>{t('status', 'noExercisesAdded')}</Text>
+                    {/* TODO(i18n): empty-plan body hint — needs new strings.ts key. */}
                     <Text style={styles.emptyPlanBody}>
                       點下方「+ 動作」開始記錄這次訓練。
                     </Text>
@@ -1750,9 +1778,10 @@ export default function SessionDetailScreen() {
                 />
 
                 <View style={styles.sectionRow}>
+                  {/* TODO(i18n): "動作清單" section header — needs new strings.ts key. */}
                   <Text style={styles.section}>動作清單</Text>
                   <View style={styles.hideUncheckedToggle}>
-                    <Text style={styles.hideUncheckedLabel}>隱藏未打勾</Text>
+                    <Text style={styles.hideUncheckedLabel}>{t('status', 'hideUnchecked')}</Text>
                     <Switch
                       value={hideUnchecked}
                       onValueChange={setHideUnchecked}
@@ -1833,32 +1862,32 @@ export default function SessionDetailScreen() {
               pressed && styles.btnPressed,
             ]}>
             <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>
-              + 動作
+              {t('button', 'addExercise')}
             </Text>
           </Pressable>
         ) : (
           <Pressable
             style={styles.actionBtn}
             onPress={enterEditMode}>
-            <Text style={styles.actionBtnText}>編輯訓練</Text>
+            <Text style={styles.actionBtnText}>{t('button', 'editSession')}</Text>
           </Pressable>
         )}
         <Pressable
           style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
           disabled={isFreestyle}
           onPress={() => handleSaveTemplate('update')}>
-          <Text style={styles.actionBtnText}>儲存模板</Text>
+          <Text style={styles.actionBtnText}>{t('button', 'saveTemplate')}</Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
           onPress={() => handleSaveTemplate('create')}>
-          <Text style={styles.actionBtnText}>另存模板</Text>
+          <Text style={styles.actionBtnText}>{t('button', 'saveAsTemplate')}</Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
           onPress={handleDelete}>
           <Text style={[styles.actionBtnText, styles.actionBtnTextDestructive]}>
-            刪除
+            {t('common', 'delete')}
           </Text>
         </Pressable>
       </View>
@@ -1891,7 +1920,7 @@ export default function SessionDetailScreen() {
       <NumericKeypad
         visible={keypadTarget !== null}
         initialValue={keypadTarget?.current ?? 0}
-        label={keypadTarget?.field === 'weight' ? '重量 (kg)' : '次數'}
+        label={keypadTarget?.field === 'weight' ? t('domain', 'weightKg') : t('domain', 'reps')}
         mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
         onConfirm={(value) => {
           if (keypadTarget) {
@@ -1930,7 +1959,7 @@ export default function SessionDetailScreen() {
                 await load();
               } catch (e) {
                 Alert.alert(
-                  '排序失敗',
+                  t('alert', 'reorderFailed'),
                   e instanceof Error ? e.message : String(e),
                 );
               }
@@ -1942,8 +1971,8 @@ export default function SessionDetailScreen() {
       <SetNoteSheet
         visible={exerciseNoteTarget !== null}
         initialValue={exerciseNoteTarget?.initial ?? null}
-        title={`📝 ${exerciseNoteTarget?.exercise_name ?? ''} 備註`}
-        placeholder="例：握距、發力重點、易犯錯誤..."
+        title={exerciseNoteTarget ? tExerciseNoteHeader(exerciseNoteTarget.exercise_name) : ''}
+        placeholder={t('page', 'notePlaceholder')}
         onConfirm={async (notes) => {
           if (exerciseNoteTarget) {
             try {
@@ -1954,7 +1983,7 @@ export default function SessionDetailScreen() {
               );
             } catch (e) {
               Alert.alert(
-                'Save failed',
+                t('alert', 'saveFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
@@ -1966,7 +1995,7 @@ export default function SessionDetailScreen() {
       <NumericKeypad
         visible={restSecTarget !== null}
         initialValue={restSecTarget?.current ?? 60}
-        label={`⏱️ 休息秒數 · ${restSecTarget?.exercise_name ?? ''}`}
+        label={tRestSecondsHeader(restSecTarget?.exercise_name ?? '')}
         mode="integer"
         onConfirm={async (value) => {
           if (restSecTarget) {
@@ -1979,7 +2008,7 @@ export default function SessionDetailScreen() {
               await load();
             } catch (e) {
               Alert.alert(
-                'Save failed',
+                t('alert', 'saveFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }
@@ -2328,7 +2357,7 @@ function ClusterBlock({
       ]}>
       <View style={styles.clusterHeader}>
         <View style={styles.clusterTagRow}>
-          <Text style={styles.supersetTag}>超</Text>
+          <Text style={styles.supersetTag}>{t('domain', 'supersetChip')}</Text>
         </View>
         <Text style={styles.clusterLabel}>
           {cluster.parent.exercise_name}
@@ -2548,6 +2577,7 @@ function EditableExerciseCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          // TODO(i18n): 動作設定 accessibilityLabel — needs new strings.ts key.
           accessibilityLabel="動作設定"
           onPress={onSettingsPress}
           style={({ pressed }) => [
@@ -2561,6 +2591,7 @@ function EditableExerciseCard({
       {isExpanded && (
         <View style={styles.exerciseCardBody}>
           {sets.length === 0 ? (
+            // TODO(i18n): solo card empty-state hint — needs new strings.ts key.
             <Text style={styles.exerciseCardEmpty}>
               還沒有 set — 按下方「+ 新增 1 組」開始記錄
             </Text>
@@ -2605,7 +2636,7 @@ function EditableExerciseCard({
                     swipeLeftActions={[
                       {
                         key: 'delete',
-                        label: '刪除',
+                        label: t('common', 'delete'),
                         color: '#dc3545',
                         onPress: () => onDeleteSet(head.id),
                       },
@@ -2619,7 +2650,7 @@ function EditableExerciseCard({
                       },
                       {
                         key: 'note',
-                        label: '備註',
+                        label: t('domain', 'note'),
                         color: '#007AFF',
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
@@ -2668,7 +2699,7 @@ function EditableExerciseCard({
                           hitSlop={6}
                           accessibilityRole="button"
                           accessibilityLabel={
-                            headLogged ? '取消完成' : '標為完成'
+                            headLogged ? t('button', 'uncheck') : t('button', 'markAsDone')
                           }
                           style={({ pressed }) => [
                             styles.completeBtn,
@@ -2756,6 +2787,7 @@ function EditableExerciseCard({
                 pressed && styles.btnPressed,
               ]}
             >
+              {/* TODO(i18n): "新增 1 組" primary CTA — needs new strings.ts key. */}
               <Text style={styles.exerciseCardFooterBtnTextPrimary}>
                 新增 1 組
               </Text>
@@ -2770,7 +2802,7 @@ function EditableExerciseCard({
               ]}
             >
               <Text style={styles.exerciseCardFooterBtnTextSecondary}>
-                動作歷史
+                {t('page', 'exerciseHistory')}
               </Text>
             </Pressable>
           </View>
