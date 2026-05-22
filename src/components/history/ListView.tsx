@@ -55,6 +55,7 @@ import {
   groupSessionsByDate,
 } from './historyListHelpers';
 import { t } from '@/src/i18n';
+import { tNExerciseCount } from '@/src/i18n/dynamic';
 
 const FREESTYLE_COLOR = '#D1D5DB';
 
@@ -162,8 +163,7 @@ export default function ListView() {
       }
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       ListEmptyComponent={
-        // TODO(i18n): no key for "No sessions yet — start one in the Today tab." empty-state copy (was already EN; treat as Day-0 placeholder)
-        <Text style={styles.emptyText}>No sessions yet — start one in the Today tab.</Text>
+        <Text style={styles.emptyText}>{t('status', 'noSessionsYetHint')}</Text>
       }
       renderItem={({ item }) => <Row vm={item} onPress={onRowPress} />}
     />
@@ -268,9 +268,8 @@ function Row({ vm, onPress }: RowProps) {
           {titleParts.text}
           {titleSuffix}
         </Text>
-        {/* TODO(i18n): no key for "N動" exercise-count badge — locale-specific compact suffix would need a tNExerciseCount helper */}
         <Text style={styles.subtitle} numberOfLines={1}>
-          {program} · {subTag} · {exerciseCount}動 · {durationLabel}
+          {program} · {subTag} · {tNExerciseCount(exerciseCount)} · {durationLabel}
         </Text>
       </View>
 

@@ -453,4 +453,21 @@ const M_LABELS_EN: Record<string, string> = {
 export function tMuscle(mId: string): string {
   const table = isEn() ? M_LABELS_EN : M_LABELS_ZH;
   return table[mId] ?? mId;
+/**
+ * Phase 4.5 final sweep — History list exercise-count badge.
+ * `5動` / `5 ex`. Compact suffix appended to subtitle line.
+ */
+export function tNExerciseCount(n: number): string {
+  return isEn() ? `${n} ex` : `${n}動`;
+}
+
+/**
+ * Phase 4.5 final sweep — Calendar grid header title.
+ * `2026年5月` / `May 2026`. Uses tMonthOfYear under the hood for EN month names.
+ */
+export function tYearMonthTitle(year: number, month1To12: number): string {
+  if (isEn()) {
+    return `${tMonthOfYear(month1To12)} ${year}`;
+  }
+  return `${year}年${month1To12}月`;
 }
