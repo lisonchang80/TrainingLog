@@ -44,6 +44,7 @@ import {
   type CalendarDayCell,
 } from '../../domain/calendar/monthGrid';
 import { t } from '@/src/i18n';
+import { tYearMonthTitle } from '@/src/i18n/dynamic';
 
 export type { CalendarDayCell };
 
@@ -167,10 +168,7 @@ export function CalendarGrid({
           <Text style={styles.navBtnText}>‹</Text>
         </Pressable>
         <Pressable onPress={openPicker} style={styles.titleBtn}>
-          {/* TODO(i18n): no key for "{year}年{month}月" header title — needs locale-aware month formatting (May 2026 vs 2026年5月). Inline literal kept for zh; EN locale will still render zh chars until follow-up. */}
-          <Text style={styles.headerTitle}>
-            {year}年{month}月
-          </Text>
+          <Text style={styles.headerTitle}>{tYearMonthTitle(year, month)}</Text>
         </Pressable>
         <Pressable
           onPress={goNext}
