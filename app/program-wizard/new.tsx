@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -17,8 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@/components/database-provider';
 import {
   createProgram,
+  listProgramSubTags,
+  listPrograms,
   recordProgramSubTag,
   setActiveProgram,
+  type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import {
   attachTemplateToProgram,
@@ -60,11 +64,13 @@ export default function ProgramWizardScreen() {
   const today = utcMsToIsoDate(Date.now());
   const [state, setState] = useState<WizardState>(() => initialWizardState(today));
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const ts = await listTemplates(db);
+    const [ts, ps] = await Promise.all([listTemplates(db), listPrograms(db)]);
     setTemplates(ts);
+    setPrograms(ps);
   }, [db]);
 
   useFocusEffect(
@@ -91,6 +97,30 @@ export default function ProgramWizardScreen() {
     }
   }, [db, router]);
 
+  // Wizard Step 1 「載入計劃」 entry — pick an existing program and copy its
+  // name + sub_tag dictionary into the draft. User can still edit before save.
+  // Final save's dup-guard (DUPLICATE_PROGRAM_NAME) prevents true collision
+  // even if user forgets to rename; Step 1 onNext also warns inline.
+  const onLoadFromProgram = useCallback(
+    async (programId: string) => {
+      const picked = programs.find((p) => p.id === programId);
+      if (!picked) return;
+      const tags = await listProgramSubTags(db, programId);
+      setState((prev) =>
+        updateDraft(prev, { name: picked.name, sub_tags: tags })
+      );
+    },
+    [db, programs]
+  );
+
+  // Case-insensitive trim duplicate detection mirrors `createProgram`'s
+  // server-side `LOWER(TRIM(name))` guard. Empty name is "not a dup yet"
+  // (handled by the existing name-empty validator).
+  const trimmedName = state.draft.name.trim().toLowerCase();
+  const isDuplicateName =
+    trimmedName.length > 0 &&
+    programs.some((p) => p.name.trim().toLowerCase() === trimmedName);
+
   const onPrev = () => {
     if (isFirstStep(state.step)) {
       router.back();
@@ -100,6 +130,13 @@ export default function ProgramWizardScreen() {
   };
 
   const onNext = () => {
+    // Step 1 client-side dup-guard mirrors the server-side LOWER(TRIM(name))
+    // check in createProgram — surfacing the failure here keeps the user from
+    // walking through 5 more steps only to hit DUPLICATE_PROGRAM_NAME on save.
+    if (state.step === 'NameAndTag' && isDuplicateName) {
+      Alert.alert('計劃名稱已存在', '請換一個名稱再繼續。');
+      return;
+    }
     const r = nextStep(state);
     if ('error' in r) {
       Alert.alert('Cannot continue', r.error);
@@ -209,7 +246,13 @@ export default function ProgramWizardScreen() {
           <StepHeader step={state.step} />
 
           {state.step === 'NameAndTag' && (
-            <NameAndTagPanel state={state} setState={setState} />
+            <NameAndTagPanel
+              state={state}
+              setState={setState}
+              programs={programs}
+              isDuplicateName={isDuplicateName}
+              onLoadFromProgram={onLoadFromProgram}
+            />
           )}
           {state.step === 'CycleConfig' && (
             <CycleConfigPanel state={state} setState={setState} />
@@ -277,11 +320,18 @@ function stepTitle(step: WizardStep): string {
 function NameAndTagPanel({
   state,
   setState,
+  programs,
+  isDuplicateName,
+  onLoadFromProgram,
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
+  programs: ProgramSummary[];
+  isDuplicateName: boolean;
+  onLoadFromProgram: (programId: string) => Promise<void>;
 }) {
   const [pending, setPending] = useState('');
+  const [loadModalOpen, setLoadModalOpen] = useState(false);
   const addSubTag = () => {
     const v = pending.trim();
     if (!v) return;
@@ -303,13 +353,38 @@ function NameAndTagPanel({
   };
   return (
     <View style={styles.panel}>
-      <Text style={styles.label}>計劃名稱</Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>計劃名稱</Text>
+        {programs.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setLoadModalOpen(true)}
+            style={({ pressed }) => [
+              styles.loadProgramBtn,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.loadProgramBtnText}>↓ 載入計劃</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <TextInput
-        style={styles.input}
+        style={[styles.input, isDuplicateName && styles.inputError]}
         value={state.draft.name}
         onChangeText={(name) => setState(updateDraft(state, { name }))}
         placeholder="例：增肌-Q1"
         placeholderTextColor="#999"
+      />
+      {isDuplicateName ? (
+        <Text style={styles.inlineErrorLine}>⚠️ 計劃名稱已存在</Text>
+      ) : null}
+      <ProgramPickerModal
+        visible={loadModalOpen}
+        programs={programs}
+        onPick={async (id) => {
+          setLoadModalOpen(false);
+          await onLoadFromProgram(id);
+        }}
+        onClose={() => setLoadModalOpen(false)}
       />
       <Text style={styles.label}>強度（可空，可多筆）</Text>
       {state.draft.sub_tags.length > 0 ? (
@@ -662,6 +737,65 @@ function CycleSubTagsPanel({
   );
 }
 
+function ProgramPickerModal({
+  visible,
+  programs,
+  onPick,
+  onClose,
+}: {
+  visible: boolean;
+  programs: ProgramSummary[];
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable
+          style={styles.modalSheet}
+          // Stop propagation so taps inside the sheet don't dismiss it.
+          onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>選擇要載入的計劃</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClose}
+              hitSlop={8}>
+              <Text style={styles.modalClose}>關閉</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={styles.modalList}>
+            {programs.length === 0 ? (
+              <Text style={styles.modalEmpty}>尚無計劃可載入</Text>
+            ) : (
+              programs.map((p) => (
+                <Pressable
+                  key={p.id}
+                  accessibilityRole="button"
+                  onPress={() => onPick(p.id)}
+                  style={({ pressed }) => [
+                    styles.modalRow,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.modalRowName}>{p.name}</Text>
+                  <Text style={styles.modalRowMeta}>
+                    {p.cycle_count} × {p.cycle_length} 天
+                    {p.is_active ? '・進行中' : ''}
+                  </Text>
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function PreviewPanel({
   state,
   templates,
@@ -757,6 +891,68 @@ const styles = StyleSheet.create({
   progressTickActive: { backgroundColor: '#0a7ea4' },
   panel: { gap: 10 },
   label: { fontSize: 13, fontWeight: '500', marginTop: 6, opacity: 0.7 },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  loadProgramBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(10,126,164,0.10)',
+  },
+  loadProgramBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0a7ea4',
+  },
+  inputError: {
+    borderWidth: 1,
+    borderColor: '#dc3545',
+  },
+  inlineErrorLine: {
+    color: '#dc3545',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    maxHeight: '70%',
+    backgroundColor: 'white',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalTitle: { fontSize: 16, fontWeight: '700' },
+  modalClose: { fontSize: 14, color: '#0a7ea4', fontWeight: '600' },
+  modalList: { flexGrow: 0 },
+  modalEmpty: {
+    paddingVertical: 24,
+    textAlign: 'center',
+    opacity: 0.55,
+    fontSize: 13,
+  },
+  modalRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(127,127,127,0.25)',
+  },
+  modalRowName: { fontSize: 15, fontWeight: '600' },
+  modalRowMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
   hint: { fontSize: 13, opacity: 0.7, marginBottom: 6 },
   input: {
     paddingVertical: 12,
