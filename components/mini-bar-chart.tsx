@@ -11,6 +11,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import { t } from '@/src/i18n';
 
 interface BarData {
   label: string;
@@ -142,9 +143,8 @@ export function MiniBarChart({
         </View>
       ) : null}
       {/* Avg line label (top-right corner) */}
-      {/* TODO(i18n): no key for "平均" prefix on average-line readout */}
       {avgLine != null && avgLine > 0 ? (
-        <Text style={styles.avgLabel}>平均 {formatAvg(avgLine)}</Text>
+        <Text style={styles.avgLabel}>{t('status', 'avgPrefix')} {formatAvg(avgLine)}</Text>
       ) : null}
     </View>
   );

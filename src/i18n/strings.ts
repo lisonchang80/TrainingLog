@@ -325,6 +325,8 @@ export const strings = {
       // Body heatmap M-layer view column headers.
       bodyFront: '正面',
       bodyBack: '背面',
+      // Phase 4.5 final sweep — set-note sheet placeholder.
+      setNotePlaceholder: '這組想留下什麼？（例：RPE 8、左肘有點緊）',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -526,6 +528,18 @@ export const strings = {
       heatmapSubtitle: '顏色 = per-Session 次數分位',
       capacityMgSubtitle: '顯示有訓練的部位 · 紅虛線 = 6 期平均',
       durationSubtitle: '每根長條 = 該期累計時長 · 紅虛線 = 6 期平均',
+      // Phase 4.5 final sweep — chart / sheet / modal inline literals.
+      avgPrefix: '平均',
+      bodyMetricsEmptyHint: '在上方輸入體重 / PBF / SMM 開始記錄',
+      reorderHint: '長按任一列拖曳重新排序，完成後按右上「完成」儲存。',
+      restingHeader: '休息中',
+      restFinished: '時間到 — 再來一組 💪',
+      restRunning: '把握短暫的休息',
+      bwSnapshotFrozenHint: '此 Session 的 bw_snapshot 不會被改寫。',
+      muscleRolePrimary: '主要',
+      muscleRoleSecondary: '次要',
+      muscleRoleInactive: '未活化',
+      noSessionsYetHint: '尚無 Session — 到 Today 分頁開始第一次訓練。',
     },
 
     /**
@@ -890,6 +904,8 @@ export const strings = {
       // Body heatmap M-layer view column headers.
       bodyFront: 'Front',
       bodyBack: 'Back',
+      // Phase 4.5 final sweep — set-note sheet placeholder.
+      setNotePlaceholder: 'What to remember about this set? (e.g. RPE 8, left elbow tight)',
     },
 
     alert: {
@@ -1083,6 +1099,18 @@ export const strings = {
       heatmapSubtitle: 'Color = per-Session frequency quintile',
       capacityMgSubtitle: 'Trained muscle groups only · Red dashed line = 6-period average',
       durationSubtitle: 'Each bar = period total duration · Red dashed line = 6-period average',
+      // Phase 4.5 final sweep — chart / sheet / modal inline literals.
+      avgPrefix: 'Avg',
+      bodyMetricsEmptyHint: 'Enter bodyweight / PBF / SMM above to start tracking.',
+      reorderHint: 'Long-press any row to drag and reorder. Tap "Done" at top-right to save.',
+      restingHeader: 'Resting',
+      restFinished: "Time's up — go again 💪",
+      restRunning: 'Make the most of the rest.',
+      bwSnapshotFrozenHint: "This session's bw_snapshot will not be overwritten.",
+      muscleRolePrimary: 'Primary',
+      muscleRoleSecondary: 'Secondary',
+      muscleRoleInactive: 'Inactive',
+      noSessionsYetHint: 'No sessions yet — start one in the Today tab.',
     },
 
     equipment: {
