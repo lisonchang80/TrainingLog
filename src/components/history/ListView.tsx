@@ -54,6 +54,7 @@ import {
   buildSameDayIdMap,
   groupSessionsByDate,
 } from './historyListHelpers';
+import { t } from '@/src/i18n';
 
 const FREESTYLE_COLOR = '#D1D5DB';
 
@@ -99,7 +100,7 @@ function deriveTitleParts(
   const rawTitle = typeof maybeTitle === 'string' ? maybeTitle.trim() : '';
   const isFreestyle = triple == null;
   if (isFreestyle) {
-    return { text: rawTitle.length > 0 ? rawTitle : '自由訓練', isFreestyle: true };
+    return { text: rawTitle.length > 0 ? rawTitle : t('domain', 'freestyle'), isFreestyle: true };
   }
   // Template-based: prefer session.title; fallback to linked template name.
   return {
@@ -161,6 +162,7 @@ export default function ListView() {
       }
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       ListEmptyComponent={
+        // TODO(i18n): no key for "No sessions yet — start one in the Today tab." empty-state copy (was already EN; treat as Day-0 placeholder)
         <Text style={styles.emptyText}>No sessions yet — start one in the Today tab.</Text>
       }
       renderItem={({ item }) => <Row vm={item} onPress={onRowPress} />}
@@ -214,8 +216,8 @@ function Row({ vm, onPress }: RowProps) {
   const titleParts = deriveTitleParts(session, triple);
   const titleSuffix = extraSameDay > 0 ? ` +${extraSameDay}` : '';
 
-  const program = triple?.program_name ?? '通用';
-  const subTag = triple?.sub_tag ?? '通用';
+  const program = triple?.program_name ?? t('common', 'default');
+  const subTag = triple?.sub_tag ?? t('common', 'default');
 
   // For 動作數: prefer unique exercise_id over raw set count (mirrors detail
   // page #47 fix). When sets is empty (in-progress / discarded plan), still
@@ -266,6 +268,7 @@ function Row({ vm, onPress }: RowProps) {
           {titleParts.text}
           {titleSuffix}
         </Text>
+        {/* TODO(i18n): no key for "N動" exercise-count badge — locale-specific compact suffix would need a tNExerciseCount helper */}
         <Text style={styles.subtitle} numberOfLines={1}>
           {program} · {subTag} · {exerciseCount}動 · {durationLabel}
         </Text>

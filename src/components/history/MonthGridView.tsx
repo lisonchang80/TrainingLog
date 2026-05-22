@@ -38,6 +38,7 @@ import {
   type CalendarDayCell,
 } from '@/src/domain/calendar/monthGrid';
 import { CalendarGrid } from './CalendarGrid';
+import { t } from '@/src/i18n';
 
 interface EnrichedSession {
   id: string;
@@ -76,7 +77,7 @@ function monthRangeMs(year: number, month: number): { start: number; end: number
 function displaySessionTitle(s: EnrichedSession): string {
   if (s.title.length > 0) return s.title;
   if (s.template_name && s.template_name.length > 0) return s.template_name;
-  return '自由訓練';
+  return t('domain', 'freestyle');
 }
 
 const FREESTYLE_BG = '#D1D5DB';

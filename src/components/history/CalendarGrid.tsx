@@ -43,6 +43,7 @@ import {
   todayISO,
   type CalendarDayCell,
 } from '../../domain/calendar/monthGrid';
+import { t } from '@/src/i18n';
 
 export type { CalendarDayCell };
 
@@ -60,7 +61,25 @@ type CalendarGridProps = {
   canGoNext?: boolean;
 };
 
-const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+/**
+ * Sun-first weekday labels. zh literals are single characters (日/一/二/…);
+ * EN locale renders 3-letter abbreviations (Sun/Mon/Tue/…) via the i18n
+ * dictionary keys `domain.weekdaySun..Sat`. The EN abbreviations are wider
+ * than the zh single chars — the calendar grid's `weekdayLabel` flex cell
+ * absorbs this without visual overflow (5 char abbrev fits in 1/7 column at
+ * 11 fontSize), but reviewer note: if locale=en + small device width
+ * combine to cause clipping in the future, switch to 1-letter abbrev (S /
+ * M / T / W / T / F / S) per Apple iOS Calendar.
+ */
+const WEEKDAY_LABEL_KEYS = [
+  'weekdaySun',
+  'weekdayMon',
+  'weekdayTue',
+  'weekdayWed',
+  'weekdayThu',
+  'weekdayFri',
+  'weekdaySat',
+] as const;
 
 export function CalendarGrid({
   year,
@@ -148,6 +167,7 @@ export function CalendarGrid({
           <Text style={styles.navBtnText}>‹</Text>
         </Pressable>
         <Pressable onPress={openPicker} style={styles.titleBtn}>
+          {/* TODO(i18n): no key for "{year}年{month}月" header title — needs locale-aware month formatting (May 2026 vs 2026年5月). Inline literal kept for zh; EN locale will still render zh chars until follow-up. */}
           <Text style={styles.headerTitle}>
             {year}年{month}月
           </Text>
@@ -164,9 +184,9 @@ export function CalendarGrid({
       </View>
 
       <View style={styles.weekdayRow}>
-        {WEEKDAY_LABELS.map((w) => (
-          <Text key={w} style={styles.weekdayLabel}>
-            {w}
+        {WEEKDAY_LABEL_KEYS.map((key) => (
+          <Text key={key} style={styles.weekdayLabel}>
+            {t('domain', key)}
           </Text>
         ))}
       </View>
@@ -195,7 +215,7 @@ export function CalendarGrid({
         onRequestClose={() => setShowPicker(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>選擇月份</Text>
+            <Text style={styles.modalTitle}>{t('page', 'selectMonth')}</Text>
             <DateTimePicker
               value={pickerDate}
               mode="date"
@@ -207,10 +227,10 @@ export function CalendarGrid({
                 <Pressable
                   style={styles.modalCancelBtn}
                   onPress={() => setShowPicker(false)}>
-                  <Text style={styles.modalCancelText}>取消</Text>
+                  <Text style={styles.modalCancelText}>{t('common', 'cancel')}</Text>
                 </Pressable>
                 <Pressable style={styles.modalDoneBtn} onPress={applyPicker}>
-                  <Text style={styles.modalDoneText}>完成</Text>
+                  <Text style={styles.modalDoneText}>{t('common', 'done')}</Text>
                 </Pressable>
               </View>
             ) : null}
