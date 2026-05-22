@@ -251,8 +251,7 @@ export function ClusterCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          // TODO(i18n): 超級組設定 accessibilityLabel — needs new strings.ts key.
-          accessibilityLabel="超級組設定"
+          accessibilityLabel={t('button', 'a11yClusterSettings')}
           onPress={onSettingsPress}
           style={({ pressed }) => [
             styles.clusterGear,
@@ -286,9 +285,8 @@ export function ClusterCard({
           </View>
 
           {cycles.length === 0 ? (
-            // TODO(i18n): cluster empty-state hint — needs new strings.ts key.
             <Text style={styles.clusterEmpty}>
-              還沒有組 — 按下方「+ 新增 1 組」開始記錄
+              {t('status', 'clusterEmptyHint')}
             </Text>
           ) : (
             <NestableDraggableFlatList
@@ -330,8 +328,7 @@ export function ClusterCard({
                         ? [
                             {
                               key: 'del-cluster-cycle',
-                              // TODO(i18n): swipe-delete '刪' button label — needs new strings.ts key.
-                              label: '刪',
+                              label: t('button', 'swipeDelete'),
                               color: '#FF3B30',
                               onPress: () =>
                                 onDeleteCycle({
@@ -504,8 +501,7 @@ export function ClusterCard({
                           hitSlop={6}
                           style={styles.cycleNoteBtn}
                           accessibilityRole="button"
-                          // TODO(i18n): 開啟備註 accessibilityLabel — needs new strings.ts key.
-                          accessibilityLabel="開啟備註"
+                          accessibilityLabel={t('button', 'a11yOpenNote')}
                         >
                           <Text style={styles.cycleNoteBtnText}>📝</Text>
                         </Pressable>
@@ -522,9 +518,10 @@ export function ClusterCard({
                       }}
                       disabled={!canTap}
                       accessibilityRole="button"
-                      // TODO(i18n): 取消完成這組 / 標記這組完成 accessibilityLabel — needs new strings.ts keys.
                       accessibilityLabel={
-                        bothLogged ? '取消完成這組' : '標記這組完成'
+                        bothLogged
+                          ? t('button', 'a11yUncheckSetDone')
+                          : t('button', 'a11yMarkSetDone')
                       }
                       accessibilityState={{ disabled: !canTap }}
                       hitSlop={6}
@@ -563,8 +560,7 @@ export function ClusterCard({
                 pressed && styles.btnPressed,
               ]}
             >
-              {/* TODO(i18n): 新增 1 組 button — needs new strings.ts key. */}
-              <Text style={styles.clusterFooterBtnTextPrimary}>新增 1 組</Text>
+              <Text style={styles.clusterFooterBtnTextPrimary}>{t('button', 'addOneSet')}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
