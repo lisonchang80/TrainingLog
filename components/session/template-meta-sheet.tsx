@@ -51,6 +51,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { useDatabase } from '@/components/database-provider';
 import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
+import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
   createProgram,
   listPrograms,
@@ -233,18 +234,35 @@ export function TemplateMetaSheet({
     setLocalSubTags((prev) =>
       subTag != null && prev.includes(subTag) ? [subTag] : [],
     );
-    listDistinctSubTagsByProgram(db, programId)
-      .then((tags) => {
+    // Wave 18g smoke fix — union of two sources:
+    //   (a) `listDistinctSubTagsByProgram` — sub_tags currently classified
+    //       on templates (legacy / wave-pre-22 path).
+    //   (b) `listProgramSubTags` — v022 persistent dictionary; remembers
+    //       every sub_tag the program-wizard or row-apply ever introduced,
+    //       even if no template references it yet. Without this union the
+    //       「儲存模板」 sheet would only show classifications that hit a
+    //       template, dropping every dictionary-only label (e.g. user
+    //       typed GG-2 in Step 1 but no template attached to GG yet).
+    //   Mirror of start-template-sheet's same fix.
+    Promise.all([
+      listDistinctSubTagsByProgram(db, programId),
+      listProgramSubTags(db, programId),
+    ])
+      .then(([templateTags, dictionaryTags]) => {
         if (cancelled) return;
-        setSubTags(tags);
-        // If the prefilled subTag isn't already in the DB-fetched list, keep
+        const merged = Array.from(
+          new Set([...templateTags, ...dictionaryTags]),
+        );
+        merged.sort((a, b) => a.localeCompare(b));
+        setSubTags(merged);
+        // If the prefilled subTag isn't already in the merged list, keep
         // it in localSubTags so the chip remains visible + active.
-        if (subTag != null && !tags.includes(subTag)) {
+        if (subTag != null && !merged.includes(subTag)) {
           setLocalSubTags((prev) =>
             prev.includes(subTag) ? prev : [...prev, subTag],
           );
-        } else if (subTag != null && tags.includes(subTag)) {
-          // The DB already has it — drop the duplicate from localSubTags.
+        } else if (subTag != null && merged.includes(subTag)) {
+          // The merged list already has it — drop the duplicate from localSubTags.
           setLocalSubTags((prev) => prev.filter((t) => t !== subTag));
         }
       })
