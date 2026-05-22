@@ -25,6 +25,12 @@ import {
   getReusableSupersetSessionCount,
   getReusableSupersetWithExercises,
 } from '@/src/adapters/sqlite/supersetRepository';
+import {
+  t,
+  tDeleteSupersetPrompt,
+  tUsedNSessions,
+  tViewExerciseDetails,
+} from '@/src/i18n';
 
 /**
  * Reusable Superset detail page (ADR-0017 Q17 / slice 9.8a).
@@ -71,10 +77,10 @@ export default function SupersetDetailScreen() {
     () => (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="返回"
+        accessibilityLabel={t('common', 'backPlain')}
         onPress={() => router.back()}
         hitSlop={12}>
-        <Text style={styles.headerBack}>‹ 返回</Text>
+        <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
       </Pressable>
     ),
     [router]
@@ -82,7 +88,7 @@ export default function SupersetDetailScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: '超級組詳情',
+      title: t('page', 'supersetDetails'),
       headerBackVisible: false,
       headerLeft: renderHeaderLeft,
       headerRight: undefined,
@@ -93,7 +99,7 @@ export default function SupersetDetailScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.body}>
-          <Text style={styles.placeholder}>超級組不存在或已刪除。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'supersetNotFound')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -106,12 +112,12 @@ export default function SupersetDetailScreen() {
 
   const onDelete = () => {
     Alert.alert(
-      '刪除超級組',
-      `確認刪除「${superset.name}」？已加進 Template 的副本會保留。`,
+      t('button', 'deleteSuperset'),
+      tDeleteSupersetPrompt(superset.name),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common', 'cancel'), style: 'cancel' },
         {
-          text: '刪除',
+          text: t('common', 'delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -119,7 +125,7 @@ export default function SupersetDetailScreen() {
               router.back();
             } catch (err) {
               Alert.alert(
-                '刪除失敗',
+                t('alert', 'deleteFailed'),
                 err instanceof Error ? err.message : String(err)
               );
             }
@@ -137,8 +143,8 @@ export default function SupersetDetailScreen() {
           <Text style={styles.heading}>{superset.name}</Text>
         </View>
         <Text style={styles.subheading}>
-          超級組
-          {sessionCount > 0 ? ` · 已使用 ${sessionCount} 次` : ''}
+          {t('domain', 'superset')}
+          {sessionCount > 0 ? ' ' + tUsedNSessions(sessionCount) : ''}
         </Text>
 
         <View style={styles.exercisesRow}>
@@ -164,7 +170,7 @@ export default function SupersetDetailScreen() {
             We funnel "歷史" / "圖表" to the A-side exercise pre-set to
             cluster_only so the user lands on the same shared cluster view. */}
         <FooterButton
-          label="歷史"
+          label={t('domain', 'history')}
           onPress={() =>
             exA
               ? router.push(
@@ -179,7 +185,7 @@ export default function SupersetDetailScreen() {
           }
         />
         <FooterButton
-          label="圖表"
+          label={t('domain', 'chart')}
           onPress={() =>
             exA
               ? router.push(
@@ -189,10 +195,10 @@ export default function SupersetDetailScreen() {
           }
         />
         <FooterButton
-          label="編輯"
+          label={t('common', 'edit')}
           onPress={() => router.push(`/superset/edit/${superset.id}`)}
         />
-        <FooterButton label="刪除" destructive onPress={onDelete} />
+        <FooterButton label={t('common', 'delete')} destructive onPress={onDelete} />
       </View>
     </SafeAreaView>
   );
@@ -208,7 +214,7 @@ function ExerciseTile({
   if (!exercise) {
     return (
       <View style={[styles.tile, styles.tileEmpty]}>
-        <Text style={styles.tileMissing}>動作遺失</Text>
+        <Text style={styles.tileMissing}>{t('status', 'missingExercise')}</Text>
       </View>
     );
   }
@@ -218,7 +224,7 @@ function ExerciseTile({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`查看 ${exercise.name} 詳情`}
+      accessibilityLabel={tViewExerciseDetails(exercise.name)}
       onPress={onPress}
       style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
       <View style={styles.tileThumb}>

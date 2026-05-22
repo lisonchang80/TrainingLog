@@ -40,6 +40,7 @@ import {
   insertReusableSuperset,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
+import { t, tEquipment, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
 
 /**
  * Reusable Superset creation page (ADR-0017 Q10 / slice 9.8a).
@@ -156,12 +157,12 @@ export default function NewSupersetScreen() {
       if (existingId !== null) {
         // `finally` below resets `submitting`; no need to flip it manually.
         Alert.alert(
-          '已有同樣動作組合的超級組',
-          '是否前往編輯既有的超級組？',
+          t('alert', 'duplicateSupersetPair'),
+          t('alert', 'openExistingSupersetQ'),
           [
-            { text: '取消', style: 'cancel' },
+            { text: t('common', 'cancel'), style: 'cancel' },
             {
-              text: '前往',
+              text: t('common', 'go'),
               onPress: () => router.push(`/superset/${existingId}`),
             },
           ]
@@ -194,7 +195,7 @@ export default function NewSupersetScreen() {
       <View style={styles.topBar}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="取消"
+          accessibilityLabel={t('common', 'cancel')}
           onPress={() => router.back()}
           style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
           <Text style={styles.cancelBtnText}>✕</Text>
@@ -202,7 +203,7 @@ export default function NewSupersetScreen() {
         <View style={styles.searchWrap}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            placeholder="輸入動作名字搜索"
+            placeholder={t('page', 'searchExercises')}
             placeholderTextColor="rgba(255,255,255,0.4)"
             value={search}
             onChangeText={setSearch}
@@ -242,7 +243,7 @@ export default function NewSupersetScreen() {
       <View style={styles.footer}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="組合"
+          accessibilityLabel={t('button', 'combine')}
           onPress={onCombine}
           disabled={selection.length !== 2 || submitting}
           style={({ pressed }) => [
@@ -251,7 +252,7 @@ export default function NewSupersetScreen() {
             pressed && selection.length === 2 && styles.pressed,
           ]}>
           <Text style={styles.combineBtnText}>
-            組合 ({selection.length}/2)
+            {t('button', 'combine')} ({selection.length}/2)
           </Text>
         </Pressable>
       </View>
@@ -268,15 +269,15 @@ function SelectedChipRow({
 }) {
   return (
     <View style={styles.chipRow}>
-      <Text style={styles.chipRowLabel}>已選擇</Text>
+      <Text style={styles.chipRowLabel}>{t('status', 'selected')}</Text>
       {selected.length === 0 ? (
-        <Text style={styles.chipRowHint}>請選 2 個動作</Text>
+        <Text style={styles.chipRowHint}>{t('alert', 'pickTwoExercises')}</Text>
       ) : (
         selected.map((ex) => (
           <Pressable
             key={ex.id}
             accessibilityRole="button"
-            accessibilityLabel={`移除 ${ex.name}`}
+            accessibilityLabel={tRemoveExercise(ex.name)}
             onPress={() => onRemove(ex.id)}
             style={styles.chip}>
             <Text style={styles.chipText} numberOfLines={1}>
@@ -319,7 +320,7 @@ function MgSidebar({
                   styles.sidebarText,
                   isActive && styles.sidebarTextActive,
                 ]}>
-                {mg.name}
+                {tMuscleGroup(mg.name)}
               </Text>
             </Pressable>
           );
@@ -343,14 +344,14 @@ function EquipmentChipRow({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.equipRow}>
         <EquipmentChipBtn
-          label="全部"
+          label={t('common', 'all')}
           active={value === null}
           onPress={() => onChange(null)}
         />
         {EQUIPMENT_VALUES.map((eq) => (
           <EquipmentChipBtn
             key={eq}
-            label={eq}
+            label={tEquipment(eq)}
             active={value === eq}
             onPress={() => onChange(value === eq ? null : eq)}
           />
@@ -401,7 +402,7 @@ function ExercisePickerGrid({
   if (exercises.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>沒有符合條件的動作</Text>
+        <Text style={styles.emptyText}>{t('status', 'noExercisesMatch')}</Text>
       </View>
     );
   }

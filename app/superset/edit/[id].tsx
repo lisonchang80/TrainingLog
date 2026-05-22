@@ -20,6 +20,7 @@ import {
   getReusableSupersetWithExercises,
   updateReusableSupersetName,
 } from '@/src/adapters/sqlite/supersetRepository';
+import { t, tSaveOrSaving } from '@/src/i18n';
 
 /**
  * Reusable Superset edit page (ADR-0017 Q10 / slice 9.8a).
@@ -44,16 +45,16 @@ export default function EditSupersetScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: '編輯超級組',
+      title: t('button', 'editSuperset'),
       // Modal presentation has no native back arrow on iOS — surface an
       // explicit「取消」on the left so user can dismiss without learning
       // the swipe-down gesture.
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="取消"
+          accessibilityLabel={t('common', 'cancel')}
           onPress={() => router.back()}>
-          <Text style={styles.headerCancel}>取消</Text>
+          <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
         </Pressable>
       ),
     });
@@ -73,9 +74,9 @@ export default function EditSupersetScreen() {
   const trimmedName = name.trim();
   const nameError =
     trimmedName.length === 0
-      ? '請輸入超級組名稱'
+      ? t('page', 'enterSupersetName')
       : trimmedName.length > 60
-        ? '超級組名稱請少於 60 字元'
+        ? t('alert', 'supersetNameMaxLen')
         : null;
   const isDirty = original ? trimmedName !== original.name : false;
   const canSave = nameError === null && isDirty && !saving;
@@ -97,7 +98,7 @@ export default function EditSupersetScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.body}>
-          <Text style={styles.placeholder}>超級組不存在或已刪除。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'supersetNotFound')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -107,11 +108,11 @@ export default function EditSupersetScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.section}>
-          <Text style={styles.label}>超級組名稱</Text>
+          <Text style={styles.label}>{t('domain', 'supersetName')}</Text>
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="輸入超級組名稱"
+            placeholder={t('page', 'enterSupersetNameShort')}
             placeholderTextColor="rgba(127,127,127,0.6)"
             style={styles.input}
             maxLength={60}
@@ -122,7 +123,7 @@ export default function EditSupersetScreen() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="儲存"
+          accessibilityLabel={t('common', 'save')}
           onPress={onSave}
           disabled={!canSave}
           style={({ pressed }) => [
@@ -130,7 +131,7 @@ export default function EditSupersetScreen() {
             !canSave && styles.saveBtnDisabled,
             pressed && canSave && styles.pressed,
           ]}>
-          <Text style={styles.saveBtnText}>儲存</Text>
+          <Text style={styles.saveBtnText}>{tSaveOrSaving(saving)}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
