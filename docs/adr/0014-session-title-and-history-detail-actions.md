@@ -48,6 +48,8 @@ UPDATE session
 
 ## 歷史詳情頁三按鈕
 
+> (2026-05-18 wave 12 翻盤：擴為 4-button sticky bar + edit-mode swap，詳見 ADR-0019 ledger)
+
 ### 按鈕 1：「儲存模板」（覆蓋既有 Template + sibling rename 連動）
 
 > **2026-05-18 wave 12 修訂**：4-branch 收斂為 silent overwrite linked template（無 diff prompt / 無 sibling rename）；Freestyle 升級改走「另存模板」(TemplateMetaSheet)。詳見 ADR-0019 翻盤 ledger 2026-05-18 row。

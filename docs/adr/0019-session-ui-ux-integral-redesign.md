@@ -709,8 +709,8 @@ ADR-0014 sibling rename propagation 隨 🔀 一起 moot — 不再需要 in-ses
 **Schema drift fix**: spec `/tmp/slice-10c-ship-spec-2026-05-16.md` L311「no migration」是樂觀假設；Q9 per-set notes 必須 v018 ADD COLUMN「notes」到 runtime `set` table（template_set 從 v009 就有）。第一個 schema-touching commit 是 Phase 2 commit 7c `4ff79e0`。
 
 **Phase 6-7 留尾**：
-- **Phase 6** — Reorder modal（Q10）：需 `react-native-draggable-flatlist` 或自寫 up/down 按鈕 UI
-- **Phase 7** — Cluster atomic ✓ pull-forward（Q16）：需新 `components/session/cluster-card.tsx` 元件 + warmup↔working 限制的 sibling mirror + aggregated 容量計算
+- **Phase 6** — Reorder modal（Q10）：需 `react-native-draggable-flatlist` 或自寫 up/down 按鈕 UI（**Phase 6 ✅ done**：DraggableFlatList modal 已落地）
+- **Phase 7** — Cluster atomic ✓ pull-forward（Q16）：需新 `components/session/cluster-card.tsx` 元件 + warmup↔working 限制的 sibling mirror + aggregated 容量計算（**Phase 7 ✅ done**：wave 13 chain-aware + wave 14 cluster_partner_exercise_id）
 
 **測試**：main baseline 663/663 → branch 10c 累積 765/765（+102 tests）。
 
