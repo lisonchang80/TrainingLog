@@ -7,9 +7,7 @@ import { useDatabase } from '@/components/database-provider';
 import { getProgram } from '@/src/adapters/sqlite/programRepository';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import type { ProgramWithCells } from '@/src/domain/program/types';
-
-/** Day of week labels for cycle_length === 7. */
-const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+import { t, tMainTagLine, tWeekdayLabels } from '@/src/i18n';
 
 /**
  * Program detail screen — calendar grid showing the fan-out of cycles ×
@@ -40,7 +38,7 @@ export default function ProgramDetailScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.body}>
-          <Text style={styles.empty}>Loading…</Text>
+          <Text style={styles.empty}>{t('status', 'loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -48,13 +46,14 @@ export default function ProgramDetailScreen() {
 
   const { program, cells } = data;
   const showWeekdays = program.cycle_length === 7;
+  const weekdayLabels = tWeekdayLabels();
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>{program.name}</Text>
         {program.main_tag ? (
-          <Text style={styles.tag}>主標籤：{program.main_tag}</Text>
+          <Text style={styles.tag}>{tMainTagLine(program.main_tag)}</Text>
         ) : null}
         <Text style={styles.meta}>
           {program.cycle_count} × {program.cycle_length} days · starts {program.start_date}
@@ -67,7 +66,7 @@ export default function ProgramDetailScreen() {
           {Array.from({ length: program.cycle_length }).map((_, d) => (
             <View key={d} style={styles.cellHeader}>
               <Text style={styles.headerLabel}>
-                {showWeekdays ? WEEKDAY_LABELS[d] : `D${d + 1}`}
+                {showWeekdays ? weekdayLabels[d] : `D${d + 1}`}
               </Text>
             </View>
           ))}
