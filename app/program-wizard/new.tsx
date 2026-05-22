@@ -139,19 +139,18 @@ export default function ProgramWizardScreen() {
   // Inline detection: when the typed name matches an existing program,
   // load its sub_tag dictionary and replace `draft.sub_tags` so the
   // existing 強度 chips render directly in Step 1. Renaming away clears
-  // both `overwriteTarget` AND any auto-prefilled sub_tags so the wizard
-  // returns to a clean "creating a new program" state.
+  // `overwriteTarget` only — any chips the user has at that point stay
+  // put (whether auto-prefilled or manually added) and can be removed
+  // individually if not wanted.
+  //
+  // No setState-inside-updater here: that anti-pattern fires the inner
+  // setState during React reconciliation (and twice under StrictMode),
+  // which we saw cause a Maximum-update-depth crash when the editor
+  // mounted on top of the wizard. Plain top-level setOverwriteTarget +
+  // setState calls are safe.
   useEffect(() => {
     if (!overwriteMatch) {
-      setOverwriteTarget((prev) => {
-        if (prev) {
-          // The current draft's sub_tags came from `prev` (auto-prefill);
-          // clear them so the user isn't stuck with the previous match's
-          // strength labels on what's now a different program name.
-          setState((s) => updateDraft(s, { sub_tags: [] }));
-        }
-        return null;
-      });
+      setOverwriteTarget(null);
       return;
     }
     let cancelled = false;
