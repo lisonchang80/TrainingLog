@@ -59,6 +59,8 @@ export const strings = {
       custom: '· 自訂',
       inactive: '· 未啟用',
       inProgress: '· 進行中',
+      // Phase 4.5 batch 1 — plain "自訂" (no dot prefix) for wizard intensity chip.
+      customPlain: '自訂',
     },
 
     /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
@@ -182,6 +184,21 @@ export const strings = {
       clusterDeleteExercise: '🗑️ 刪除動作',
       clusterHistoryA: '📖 動作歷史 (A)',
       clusterHistoryB: '📖 動作歷史 (B)',
+      // Phase 4.5 batch 1 — solo + cluster card "+ 新增 1 組" primary CTA.
+      addOneSet: '新增 1 組',
+      // Phase 4.5 batch 1 — swipe-delete label on cluster cycle row.
+      swipeDelete: '刪',
+      // Phase 4.5 batch 1 — Today bottom-bar "⏱ 手動計時" button.
+      manualTimer: '⏱ 手動計時',
+      // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on exercise card.
+      a11yExerciseSettings: '動作設定',
+      // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on cluster card.
+      a11yClusterSettings: '超級組設定',
+      // Phase 4.5 batch 1 — accessibilityLabel: 📝 indicator on cluster cycle row.
+      a11yOpenNote: '開啟備註',
+      // Phase 4.5 batch 1 — accessibilityLabel: ✓/○ button toggling set logged state.
+      a11yMarkSetDone: '標記這組完成',
+      a11yUncheckSetDone: '取消完成這組',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -239,6 +256,31 @@ export const strings = {
       autoPopupRestTimerHint:
         '打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。',
       bodyMetricsHint: '體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。',
+      // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
+      wizardStep3Hint:
+        '每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；強度在下一步逐週期選擇。',
+      wizardStep4Hint:
+        '每個週期選一個強度（套用到此週期內所有有模板的日子）。留「通用」即不套用。',
+      // Phase 4.5 batch 1 — wizard Step 6 summary line prefixes.
+      summaryName: '名稱：',
+      summaryIntensity: '強度：',
+      summaryCycle: '週期：',
+      summaryStart: '起始：',
+      summaryConfiguredDays: '已配置 Day：',
+      summaryIntensityOverride: '強度覆寫：',
+      summarySuffixDays: ' 天',
+      summarySuffixCount: ' 項',
+      // Wizard intensity list 「、」separator between sub_tags.
+      summarySeparator: '、',
+      // Programs tab meta line: "{count} × {length} days · 起始 {start_date}".
+      metaStartPrefix: '起始',
+      // Session detail / Today section header above exercise list.
+      exerciseListSection: '動作清單',
+      // SessionTimeEditorSheet labels.
+      editSessionTime: '編輯訓練時間',
+      startTimeLabel: '開始時間',
+      endTimeLabel: '結束時間',
+      durationLabel: '訓練時長',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -329,6 +371,14 @@ export const strings = {
       notEnoughDataPoints: '此時段資料點不足，至少需 2 次 Session。',
       defaultVariantUndeletable:
         '此模板有「通用」變體（計畫或強度未指定），是歷史 prefill 的兜底層、不可刪。\n\n若需刪除個別非通用變體，請點該 row 進入編輯器、從 ⋯ 選單刪除。',
+      // Phase 4.5 batch 1 — SessionTimeEditorSheet end-must-be-after-start warning.
+      endMustBeAfterStart: '⚠️ 結束時間必須晚於開始時間',
+      // Phase 4.5 batch 1 — Programs row picker preview hint (split for dynamic name).
+      intensityWillBeSetPrefix: '強度將設為「',
+      intensityWillBeSetSuffix: '」（旁邊就近 cell）',
+      // Phase 4.5 batch 1 — Today "Send to Watch" placeholder body.
+      watchComingSlice13:
+        'Coming in slice 13 — WatchConnectivity transferUserInfo + Watch SwiftUI app。',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -381,6 +431,18 @@ export const strings = {
       languageAuto: '自動偵測',
       languageZh: '中文（繁體）',
       languageEn: 'English',
+      // Phase 4.5 batch 1 — Programs tab empty-state CTA.
+      noProgramsYetHint: '還沒有計畫。按「新建」啟動 6 步建立精靈。',
+      // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
+      todayPrefix: '今天：',
+      // Phase 4.5 batch 1 — Today pre-prompt bodyweight confirmation hint.
+      prePromptBwHint: '確認當下體重（鎖入此 Session）。',
+      // Phase 4.5 batch 1 — Today / Session detail empty-plan body.
+      emptyPlanBody: '點下方「+ 動作」開始記錄這次訓練。',
+      // Phase 4.5 batch 1 — solo exercise card empty-state hint.
+      soloEmptyHint: '還沒有 set — 按下方「+ 新增 1 組」開始記錄',
+      // Phase 4.5 batch 1 — cluster card empty-state hint.
+      clusterEmptyHint: '還沒有組 — 按下方「+ 新增 1 組」開始記錄',
     },
 
     /**
@@ -486,6 +548,8 @@ export const strings = {
       custom: '· Custom',
       inactive: '· Inactive',
       inProgress: '· In progress',
+      // Phase 4.5 batch 1 — plain "Custom" (no dot prefix) for wizard intensity chip.
+      customPlain: 'Custom',
     },
 
     domain: {
@@ -605,6 +669,21 @@ export const strings = {
       clusterDeleteExercise: '🗑️ Delete Exercise',
       clusterHistoryA: '📖 Exercise History (A)',
       clusterHistoryB: '📖 Exercise History (B)',
+      // Phase 4.5 batch 1 — solo + cluster card "+ 新增 1 組" primary CTA.
+      addOneSet: 'Add 1 Set',
+      // Phase 4.5 batch 1 — swipe-delete label on cluster cycle row.
+      swipeDelete: 'Del',
+      // Phase 4.5 batch 1 — Today bottom-bar manual rest-timer button.
+      manualTimer: '⏱ Manual Timer',
+      // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on exercise card.
+      a11yExerciseSettings: 'Exercise settings',
+      // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on cluster card.
+      a11yClusterSettings: 'Superset settings',
+      // Phase 4.5 batch 1 — accessibilityLabel: 📝 indicator on cluster cycle row.
+      a11yOpenNote: 'Open note',
+      // Phase 4.5 batch 1 — accessibilityLabel: ✓/○ button toggling set logged state.
+      a11yMarkSetDone: 'Mark this set done',
+      a11yUncheckSetDone: 'Uncheck this set',
     },
 
     page: {
@@ -660,6 +739,30 @@ export const strings = {
         'Auto-show a 60-second countdown after marking a set as complete (close manually or skip).',
       bodyMetricsHint:
         'Bodyweight / PBF / SMM trends and history. Quick input is still available from the Today tab.',
+      // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
+      wizardStep3Hint:
+        'Pick a template for each day (leave blank for a rest day). Cycle 1 picks fan out to every cycle; per-cycle intensities come next.',
+      wizardStep4Hint:
+        'Pick one intensity per cycle (applied to all days-with-templates in the cycle). Leave on "Default" to skip.',
+      // Phase 4.5 batch 1 — wizard Step 6 summary line prefixes.
+      summaryName: 'Name: ',
+      summaryIntensity: 'Intensity: ',
+      summaryCycle: 'Cycle: ',
+      summaryStart: 'Start: ',
+      summaryConfiguredDays: 'Configured Days: ',
+      summaryIntensityOverride: 'Intensity Overrides: ',
+      summarySuffixDays: ' days',
+      summarySuffixCount: ' items',
+      summarySeparator: ', ',
+      // Programs tab meta line: "{count} × {length} days · Starts {start_date}".
+      metaStartPrefix: 'Starts',
+      // Session detail / Today section header above exercise list.
+      exerciseListSection: 'Exercise List',
+      // SessionTimeEditorSheet labels.
+      editSessionTime: 'Edit Session Time',
+      startTimeLabel: 'Start Time',
+      endTimeLabel: 'End Time',
+      durationLabel: 'Duration',
     },
 
     alert: {
@@ -751,6 +854,14 @@ export const strings = {
       notEnoughDataPoints: 'Not enough data points for this period. At least 2 sessions are required.',
       defaultVariantUndeletable:
         'This template has a "Default" variant (no program or intensity specified). It serves as a fallback for history prefill and cannot be deleted.\n\nTo delete a non-default variant, tap that row to open the editor and delete from the ⋯ menu.',
+      // Phase 4.5 batch 1 — SessionTimeEditorSheet end-must-be-after-start warning.
+      endMustBeAfterStart: '⚠️ End time must be later than start time',
+      // Phase 4.5 batch 1 — Programs row picker preview hint (split for dynamic name).
+      intensityWillBeSetPrefix: 'Intensity will be set to "',
+      intensityWillBeSetSuffix: '" (from the nearest cell)',
+      // Phase 4.5 batch 1 — Today "Send to Watch" placeholder body.
+      watchComingSlice13:
+        'Coming in slice 13 — WatchConnectivity transferUserInfo + Watch SwiftUI app.',
     },
 
     status: {
@@ -794,6 +905,18 @@ export const strings = {
       languageAuto: 'Auto-detect',
       languageZh: 'Traditional Chinese',
       languageEn: 'English',
+      // Phase 4.5 batch 1 — Programs tab empty-state CTA.
+      noProgramsYetHint: 'No programs yet. Tap "New" to launch the 6-step wizard.',
+      // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
+      todayPrefix: 'Today: ',
+      // Phase 4.5 batch 1 — Today pre-prompt bodyweight confirmation hint.
+      prePromptBwHint: 'Confirm current bodyweight (locked to this session).',
+      // Phase 4.5 batch 1 — Today / Session detail empty-plan body.
+      emptyPlanBody: 'Tap "+ Exercise" below to start logging this session.',
+      // Phase 4.5 batch 1 — solo exercise card empty-state hint.
+      soloEmptyHint: 'No sets yet — tap "+ Add 1 Set" below to start logging',
+      // Phase 4.5 batch 1 — cluster card empty-state hint.
+      clusterEmptyHint: 'No cycles yet — tap "+ Add 1 Set" below to start logging',
     },
 
     equipment: {
