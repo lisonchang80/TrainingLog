@@ -52,9 +52,8 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
     return (
       <View style={[styles.placeholderBox, { width: WIDTH, height: HEIGHT }]}>
         <Text style={styles.placeholderText}>{t('status', 'noRecords')}</Text>
-        {/* TODO(i18n): no key for "在上方輸入體重 / PBF / SMM 開始記錄" hint paragraph */}
         <Text style={styles.placeholderHint}>
-          在上方輸入體重 / PBF / SMM 開始記錄
+          {t('status', 'bodyMetricsEmptyHint')}
         </Text>
       </View>
     );
