@@ -208,6 +208,130 @@ export async function deleteProgram(db: Database, id: string): Promise<void> {
 }
 
 /**
+ * Wave 18g (2026-05-22) — overwrite an existing Program with new wizard
+ * output. Per user spec (Phase 6 / `/tmp/phase6-overwrite-program-plan.md`):
+ *
+ *   - Replace program metadata (name / cycle_length / cycle_count /
+ *     start_date / main_tag). `is_active` is intentionally preserved so
+ *     overwriting the active program doesn't silently deactivate it.
+ *   - Replace cells entirely (DELETE old, INSERT new from
+ *     `expandWizardDraft` output).
+ *   - Replace sub_tag dictionary entirely (DELETE program_sub_tag rows,
+ *     re-INSERT from `new_sub_tags` via INSERT OR IGNORE).
+ *   - Finished session rows (program_id referenced indirectly via
+ *     `session_exercise.template_id → template.program_id`) are NOT
+ *     touched — historical session lineage stays intact.
+ *
+ * Active session guard: if any in-progress session (`ended_at IS NULL`)
+ * has a `session_exercise` whose template currently belongs to this
+ * program, throws `Error('PROGRAM_HAS_ACTIVE_SESSION')`. The UI is
+ * expected to catch this and Alert the user to finish or discard the
+ * session first.
+ *
+ * Caller responsibilities (mirror create-program flow):
+ *   - Pre-expand wizard draft into `new_cells` via `expandWizardDraft`.
+ *   - After successful overwrite, attach the picked templates to the
+ *     program via `attachTemplateToProgram` (this helper doesn't reach
+ *     into the template table — keeps the boundary clean).
+ *
+ * Templates previously attached to this program but absent from the new
+ * `dayPlans` are NOT orphaned by this helper — they keep their
+ * `template.program_id` reference. The user can manually orphan them via
+ * the template editor if desired. This is intentionally less destructive
+ * than `deleteProgram`.
+ */
+export async function overwriteProgram(
+  db: Database,
+  args: {
+    program_id: string;
+    new_program: ProgramCore;
+    new_cells: ProgramCell[];
+    new_sub_tags: string[];
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+
+  // Active session guard — check before opening a transaction so the
+  // thrown error doesn't roll back any state. We traverse session →
+  // session_exercise → template.program_id (sessions don't carry a
+  // direct program_id — the relationship is reconstructed via the
+  // linked templates per ADR-0018).
+  const active = await db.getFirstAsync<{ id: string }>(
+    `SELECT s.id FROM session s
+       INNER JOIN session_exercise se ON se.session_id = s.id
+       INNER JOIN template t ON t.id = se.template_id
+      WHERE s.ended_at IS NULL
+        AND t.program_id = ?
+      LIMIT 1`,
+    args.program_id,
+  );
+  if (active) {
+    throw new Error('PROGRAM_HAS_ACTIVE_SESSION');
+  }
+
+  await db.withTransactionAsync(async () => {
+    // DELETE then re-INSERT pattern. The schema is sparse — only rows
+    // present in `new_cells` get persisted (rest days stay missing).
+    await db.runAsync(
+      `DELETE FROM program_cell WHERE program_id = ?`,
+      args.program_id,
+    );
+    // sub_tag dictionary is a label store (v022) — full replace mirrors
+    // the wizard's "Step 1 typed labels are the new truth" semantics.
+    await db.runAsync(
+      `DELETE FROM program_sub_tag WHERE program_id = ?`,
+      args.program_id,
+    );
+    // Update program metadata in place — id + is_active preserved.
+    await db.runAsync(
+      `UPDATE program SET
+         name = ?,
+         main_tag = ?,
+         cycle_length = ?,
+         cycle_count = ?,
+         start_date = ?,
+         updated_at = ?
+       WHERE id = ?`,
+      args.new_program.name,
+      args.new_program.main_tag,
+      args.new_program.cycle_length,
+      args.new_program.cycle_count,
+      args.new_program.start_date,
+      ts,
+      args.program_id,
+    );
+    // Insert new cells.
+    for (const c of args.new_cells) {
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        c.id,
+        c.program_id,
+        c.cycle_index,
+        c.day_index,
+        c.template_id,
+        c.sub_tag,
+      );
+    }
+    // Re-INSERT sub_tag dictionary. INSERT OR IGNORE is defensive — we
+    // just DELETE'd everything but the helper guards against any
+    // caller-side duplicates in `new_sub_tags`.
+    for (const tag of args.new_sub_tags) {
+      if (!tag || tag.length === 0) continue;
+      await db.runAsync(
+        `INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
+           VALUES (?, ?, ?)`,
+        args.program_id,
+        tag,
+        ts,
+      );
+    }
+  });
+}
+
+/**
  * Wave 15 (2026-05-21) — count of cells with `template_id != null` that
  * would be lost if the program were resized to `(new_cycle_length,
  * new_cycle_count)`. Cells with NULL template_id are 「休息」 = no
