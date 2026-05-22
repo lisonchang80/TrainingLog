@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -160,8 +160,48 @@ export default function ProgramWizardScreen() {
     }
   };
 
+  const leftLabel = isFirstStep(state.step) ? '取消' : '上一步';
+  const rightLabel = isLastStep(state.step)
+    ? busy
+      ? '儲存中…'
+      : '建立'
+    : '下一步';
+  const rightDisabled = isLastStep(state.step) && busy;
+
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen
+        options={{
+          headerLeft: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={leftLabel}
+              onPress={onPrev}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.headerBtn,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.headerBtnSecondary}>{leftLabel}</Text>
+            </Pressable>
+          ),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={rightLabel}
+              onPress={isLastStep(state.step) ? onConfirm : onNext}
+              disabled={rightDisabled}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.headerBtn,
+                rightDisabled && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.headerBtnPrimary}>{rightLabel}</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
@@ -189,48 +229,6 @@ export default function ProgramWizardScreen() {
             <PreviewPanel state={state} templates={templates} />
           )}
           {state.step === 'Confirm' && <ConfirmPanel state={state} />}
-
-          <View style={styles.navRow}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onPrev}
-              style={({ pressed }) => [
-                styles.navBtn,
-                styles.navBtnSecondary,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.navBtnSecondaryText}>
-                {isFirstStep(state.step) ? 'Cancel' : 'Back'}
-              </Text>
-            </Pressable>
-            {isLastStep(state.step) ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={onConfirm}
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.navBtn,
-                  styles.navBtnPrimary,
-                  busy && styles.btnDisabled,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.navBtnPrimaryText}>
-                  {busy ? 'Saving…' : 'Create Program'}
-                </Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={onNext}
-                style={({ pressed }) => [
-                  styles.navBtn,
-                  styles.navBtnPrimary,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.navBtnPrimaryText}>Next</Text>
-              </Pressable>
-            )}
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -903,21 +901,20 @@ const styles = StyleSheet.create({
   },
   summaryLine: { fontSize: 14 },
   errorLine: { color: '#dc3545', fontSize: 14, marginTop: 8 },
-  navRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 24,
+  headerBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
-  navBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
+  headerBtnPrimary: {
+    color: '#0a7ea4',
+    fontSize: 16,
+    fontWeight: '700',
   },
-  navBtnPrimary: { backgroundColor: '#0a7ea4' },
-  navBtnPrimaryText: { color: 'white', fontSize: 15, fontWeight: '700' },
-  navBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
-  navBtnSecondaryText: { fontSize: 15, fontWeight: '600' },
+  headerBtnSecondary: {
+    color: '#6b7280',
+    fontSize: 16,
+    fontWeight: '500',
+  },
   btnPressed: { opacity: 0.85 },
   btnDisabled: { opacity: 0.5 },
 });
