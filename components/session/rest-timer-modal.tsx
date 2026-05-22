@@ -16,6 +16,7 @@ import {
   tickTimer,
   type RestTimerState,
 } from '@/src/domain/session/restTimer';
+import { t } from '@/src/i18n';
 
 /**
  * Rest timer modal (ADR-0019 Q2 R1 v1, slice 10c — Agent C).
@@ -161,12 +162,14 @@ export function RestTimerModal({
         <Pressable
           style={styles.card}
           onPress={(e) => e.stopPropagation()}>
+          {/* TODO(i18n): 休息中 timer header (with optional exercise name suffix) — needs new strings.ts key. */}
           <Text style={styles.title}>
             ⏱️ 休息中{exerciseName ? ` · ${exerciseName}` : ''}
           </Text>
           <Text style={styles.countdown}>
             {formatRestRemaining(state.remaining_ms)}
           </Text>
+          {/* TODO(i18n): 時間到 / 把握短暫的休息 subtitle copy — needs new strings.ts keys. */}
           <Text style={styles.sub}>
             {state.status === 'finished' ? '時間到 — 再來一組 💪' : '把握短暫的休息'}
           </Text>
@@ -178,7 +181,7 @@ export function RestTimerModal({
                 styles.btnPrimary,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={styles.btnPrimaryText}>跳過</Text>
+              <Text style={styles.btnPrimaryText}>{t('common', 'skip')}</Text>
             </Pressable>
           </View>
         </Pressable>

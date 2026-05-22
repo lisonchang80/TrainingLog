@@ -52,6 +52,7 @@ import {
 import {
   validateSessionTimes,
 } from '@/src/domain/session/sessionTimeEditor';
+import { t } from '@/src/i18n';
 
 interface SessionTimeEditorSheetProps {
   visible: boolean;
@@ -212,9 +213,10 @@ export function SessionTimeEditorSheet({
                   busy && styles.topBarBtnDisabled,
                 ]}
               >
-                取消
+                {t('common', 'cancel')}
               </Text>
             </Pressable>
+            {/* TODO(i18n): 編輯訓練時間 title — needs new strings.ts key. */}
             <Text style={styles.topBarTitle}>編輯訓練時間</Text>
             <Pressable
               onPress={handleSave}
@@ -228,7 +230,7 @@ export function SessionTimeEditorSheet({
                   (!isValid || busy) && styles.topBarBtnDisabled,
                 ]}
               >
-                {busy ? '儲存中…' : '儲存'}
+                {busy ? t('common', 'saving') : t('common', 'save')}
               </Text>
             </Pressable>
           </View>
@@ -236,6 +238,7 @@ export function SessionTimeEditorSheet({
           <View style={styles.body}>
             {/* 開始時間 */}
             <View style={styles.field}>
+              {/* TODO(i18n): 開始時間 field label — needs new strings.ts key. */}
               <Text style={styles.fieldLabel}>開始時間</Text>
               {Platform.OS === 'ios' ? (
                 <DateTimePicker
@@ -270,6 +273,7 @@ export function SessionTimeEditorSheet({
 
             {/* 結束時間 */}
             <View style={styles.field}>
+              {/* TODO(i18n): 結束時間 field label — needs new strings.ts key. */}
               <Text style={styles.fieldLabel}>結束時間</Text>
               {Platform.OS === 'ios' ? (
                 <DateTimePicker
@@ -304,6 +308,7 @@ export function SessionTimeEditorSheet({
 
             {/* Live duration preview */}
             <View style={styles.durationRow}>
+              {/* TODO(i18n): 訓練時長 label — needs new strings.ts key. */}
               <Text style={styles.durationLabel}>訓練時長</Text>
               <Text
                 style={[
@@ -316,6 +321,7 @@ export function SessionTimeEditorSheet({
             </View>
 
             {!isValid ? (
+              // TODO(i18n): end-must-be-after-start warning — needs new strings.ts key.
               <Text style={styles.warningText}>
                 ⚠️ 結束時間必須晚於開始時間
               </Text>

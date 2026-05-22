@@ -7,6 +7,7 @@ import {
   formatVolumeShort,
   type SessionStatsSetInput,
 } from '@/src/domain/session/sessionStats';
+import { t } from '@/src/i18n';
 
 /**
  * In-session 3-tile stats panel (ADR-0019 Q6, position P1 — between
@@ -91,6 +92,7 @@ export function SessionStatsPanel({
         <Pressable
           onPress={onTapDuration}
           accessibilityRole="button"
+          // TODO(i18n): accessibilityLabel needs new strings.ts key.
           accessibilityLabel="編輯訓練時間"
           style={({ pressed }) => [
             styles.tile,
@@ -99,15 +101,18 @@ export function SessionStatsPanel({
           ]}
         >
           <Text style={styles.bigText}>{durationBig}</Text>
+          {/* TODO(i18n): 訓練時間 tile label — needs new strings.ts key. */}
           <Text style={styles.labelText}>訓練時間</Text>
         </Pressable>
       ) : (
         <View style={styles.tile}>
           <Text style={styles.bigText}>{durationBig}</Text>
+          {/* TODO(i18n): 訓練時間 tile label — needs new strings.ts key. */}
           <Text style={styles.labelText}>訓練時間</Text>
         </View>
       )}
-      <Tile big={formatVolumeShort(stats.volume_kg)} label="容量" />
+      <Tile big={formatVolumeShort(stats.volume_kg)} label={t('domain', 'volume')} />
+      {/* TODO(i18n): 動作數 tile label — needs new strings.ts key. */}
       <Tile big={String(stats.exercise_count)} label="動作數" />
     </View>
   );

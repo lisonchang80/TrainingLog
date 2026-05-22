@@ -62,6 +62,7 @@ import {
 } from '@/src/domain/set/workingSetOrdinal';
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
+import { t } from '@/src/i18n';
 
 type ClusterCardGroup = ClusterGroup<
   SessionExerciseRowWithName,
@@ -204,7 +205,7 @@ export function ClusterCard({
       <View style={styles.clusterCardHeader}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`超級組 ${group.a.exercise.exercise_name} 加 ${group.b.exercise.exercise_name}`}
+          accessibilityLabel={`${t('domain', 'superset')} ${group.a.exercise.exercise_name} + ${group.b.exercise.exercise_name}`}
           onPress={onToggleExpand}
           style={({ pressed }) => [
             styles.clusterCardHeaderMain,
@@ -217,7 +218,7 @@ export function ClusterCard({
               overnight #5 第 5 點: 標題分行 — tag 一行、title 獨佔下一行.
             */}
             <View style={styles.clusterTagRow}>
-              <Text style={styles.supersetTag}>超</Text>
+              <Text style={styles.supersetTag}>{t('domain', 'supersetChip')}</Text>
             </View>
             {/* Row 2: title 獨佔全寬, 不再 ... truncate. */}
             <Text style={styles.clusterName}>
@@ -250,6 +251,7 @@ export function ClusterCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          // TODO(i18n): 超級組設定 accessibilityLabel — needs new strings.ts key.
           accessibilityLabel="超級組設定"
           onPress={onSettingsPress}
           style={({ pressed }) => [
@@ -284,6 +286,7 @@ export function ClusterCard({
           </View>
 
           {cycles.length === 0 ? (
+            // TODO(i18n): cluster empty-state hint — needs new strings.ts key.
             <Text style={styles.clusterEmpty}>
               還沒有組 — 按下方「+ 新增 1 組」開始記錄
             </Text>
@@ -327,6 +330,7 @@ export function ClusterCard({
                         ? [
                             {
                               key: 'del-cluster-cycle',
+                              // TODO(i18n): swipe-delete '刪' button label — needs new strings.ts key.
                               label: '刪',
                               color: '#FF3B30',
                               onPress: () =>
@@ -357,7 +361,7 @@ export function ClusterCard({
                         ? [
                             {
                               key: 'note-cluster-cycle',
-                              label: '備註',
+                              label: t('domain', 'note'),
                               color: '#007AFF',
                               onPress: () => onShowCycleNote(noteTarget),
                             },
@@ -500,6 +504,7 @@ export function ClusterCard({
                           hitSlop={6}
                           style={styles.cycleNoteBtn}
                           accessibilityRole="button"
+                          // TODO(i18n): 開啟備註 accessibilityLabel — needs new strings.ts key.
                           accessibilityLabel="開啟備註"
                         >
                           <Text style={styles.cycleNoteBtnText}>📝</Text>
@@ -517,6 +522,7 @@ export function ClusterCard({
                       }}
                       disabled={!canTap}
                       accessibilityRole="button"
+                      // TODO(i18n): 取消完成這組 / 標記這組完成 accessibilityLabel — needs new strings.ts keys.
                       accessibilityLabel={
                         bothLogged ? '取消完成這組' : '標記這組完成'
                       }
@@ -557,6 +563,7 @@ export function ClusterCard({
                 pressed && styles.btnPressed,
               ]}
             >
+              {/* TODO(i18n): 新增 1 組 button — needs new strings.ts key. */}
               <Text style={styles.clusterFooterBtnTextPrimary}>新增 1 組</Text>
             </Pressable>
             <Pressable
@@ -571,7 +578,7 @@ export function ClusterCard({
               ]}
             >
               <Text style={styles.clusterFooterBtnTextSecondary}>
-                動作歷史
+                {t('page', 'exerciseHistory')}
               </Text>
             </Pressable>
           </View>

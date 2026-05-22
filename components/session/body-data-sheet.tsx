@@ -36,6 +36,7 @@ import {
 
 import type { UnitPreference } from '@/src/domain/body/types';
 import { formatWeight } from '@/src/domain/body/unitConversion';
+import { t } from '@/src/i18n';
 
 interface BodyDataSheetProps {
   visible: boolean;
@@ -93,7 +94,7 @@ export function BodyDataSheet({
                   busy && styles.topBarBtnDisabled,
                 ]}
               >
-                取消
+                {t('common', 'cancel')}
               </Text>
             </Pressable>
             <Text style={styles.topBarTitle}>Body data</Text>
@@ -105,7 +106,7 @@ export function BodyDataSheet({
                   busy && styles.topBarBtnDisabled,
                 ]}
               >
-                {busy ? '儲存中…' : '儲存'}
+                {busy ? t('common', 'saving') : t('common', 'save')}
               </Text>
             </Pressable>
           </View>
@@ -121,7 +122,7 @@ export function BodyDataSheet({
 
             <View style={styles.row}>
               <Field
-                label={`體重 (${unit})`}
+                label={`${t('domain', 'bodyweight')} (${unit})`}
                 value={bwInput}
                 onChange={onBwInputChange}
               />
@@ -133,6 +134,7 @@ export function BodyDataSheet({
               />
             </View>
 
+            {/* TODO(i18n): bw_snapshot frozen hint — needs new strings.ts key. */}
             <Text style={styles.hint}>此 Session 的 bw_snapshot 不會被改寫。</Text>
           </View>
         </Pressable>
