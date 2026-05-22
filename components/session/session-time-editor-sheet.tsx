@@ -53,7 +53,7 @@ import {
   validateSessionTimes,
 } from '@/src/domain/session/sessionTimeEditor';
 
-export interface SessionTimeEditorSheetProps {
+interface SessionTimeEditorSheetProps {
   visible: boolean;
   started_at_ms: number;
   ended_at_ms: number;

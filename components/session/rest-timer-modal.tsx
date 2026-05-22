@@ -45,7 +45,7 @@ import {
  * the `triggerKey` prop on the same `visible=true` cycle — we listen
  * to triggerKey changes and call startTimer fresh.
  */
-export interface RestTimerModalProps {
+interface RestTimerModalProps {
   visible: boolean;
   /**
    * Initial rest_sec to count down from. Effective value of 0 / null

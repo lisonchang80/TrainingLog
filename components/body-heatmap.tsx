@@ -81,7 +81,7 @@ const COLOR_ZERO = '#E5E7EB';
 
 export type Quintile = 0 | 1 | 2 | 3 | 4;
 
-export interface BodyHeatmapProps {
+interface BodyHeatmapProps {
   /**
    * mg_id → quintile bucket (0..4) for non-zero MGs.
    * MGs absent from this map render in zero-grey.

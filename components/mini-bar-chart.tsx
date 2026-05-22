@@ -12,12 +12,12 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
-export interface BarData {
+interface BarData {
   label: string;
   value: number;
 }
 
-export interface MiniBarChartProps {
+interface MiniBarChartProps {
   data: readonly BarData[];
   /** Y value for a horizontal dashed avg line. Skipped if undefined / 0. */
   avgLine?: number;

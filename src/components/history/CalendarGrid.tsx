@@ -46,7 +46,7 @@ import {
 
 export type { CalendarDayCell };
 
-export type CalendarGridProps = {
+type CalendarGridProps = {
   year: number;
   month: number; // 1-12
   onMonthChange: (year: number, month: number) => void;

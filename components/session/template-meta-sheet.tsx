@@ -58,7 +58,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 
-export interface TemplateMetaSheetProps {
+interface TemplateMetaSheetProps {
   visible: boolean;
   /**
    * Top-bar title. Defaults to '另存模板' (session detail caller). Template

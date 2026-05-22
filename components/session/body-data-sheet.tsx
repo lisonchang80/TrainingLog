@@ -37,7 +37,7 @@ import {
 import type { UnitPreference } from '@/src/domain/body/types';
 import { formatWeight } from '@/src/domain/body/unitConversion';
 
-export interface BodyDataSheetProps {
+interface BodyDataSheetProps {
   visible: boolean;
   unit: UnitPreference;
   /** Session-frozen bw snapshot (kg). NULL = no snapshot yet → hide badge. */

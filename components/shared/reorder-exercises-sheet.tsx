@@ -29,7 +29,7 @@ import DraggableFlatList, {
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 
-export type ReorderItem = {
+type ReorderItem = {
   id: string;
   name: string;
 };

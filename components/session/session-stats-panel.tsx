@@ -35,7 +35,7 @@ import {
  *   is also provided the 訓練時間 tile becomes a Pressable that opens the
  *   SessionTimeEditorSheet for editing started_at / ended_at.
  */
-export interface SessionStatsPanelProps {
+interface SessionStatsPanelProps {
   sets: SessionStatsSetInput[];
   exercise_count: number;
   started_at_ms: number;

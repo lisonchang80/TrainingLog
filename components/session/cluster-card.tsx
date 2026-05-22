@@ -63,7 +63,7 @@ import {
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
 
-export type ClusterCardGroup = ClusterGroup<
+type ClusterCardGroup = ClusterGroup<
   SessionExerciseRowWithName,
   SessionSetWithExercise
 >;
