@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
@@ -8,6 +9,8 @@ import 'react-native-reanimated';
 import { DatabaseProvider } from '@/components/database-provider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { t } from '@/src/i18n';
+import { setLocale } from '@/src/i18n/strings';
+import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 
 // Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
 // `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
@@ -43,6 +46,18 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Phase 5 — hydrate locale from AsyncStorage on boot. A brief flash with
+  // the default ('zh') is acceptable; once resolved, every `t()` call in
+  // subsequent renders returns the user's chosen language. The Settings
+  // toggle updates module state directly so re-renders pick up the change.
+  useEffect(() => {
+    (async () => {
+      const stored = await loadStoredLocale();
+      const resolved = resolveLocale(stored);
+      setLocale(resolved);
+    })();
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

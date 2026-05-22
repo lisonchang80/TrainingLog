@@ -19,6 +19,13 @@ import {
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
 import { t } from '@/src/i18n';
+import {
+  loadStoredLocale,
+  resolveLocale,
+  saveStoredLocale,
+  type StoredLocaleValue,
+} from '@/src/i18n/locale-persist';
+import { setLocale } from '@/src/i18n/strings';
 
 /**
  * Settings tab — slice 7 ships the unit preference toggle.
@@ -35,14 +42,22 @@ export default function SettingsScreen() {
    * Read on focus, persisted optimistically on toggle. `null` = loading.
    */
   const [autoPopup, setAutoPopup] = useState<boolean | null>(null);
+  /**
+   * Phase 5 — locale preference. `'auto'` follows device locale, `'zh'` /
+   * `'en'` are explicit overrides. Backed by AsyncStorage via
+   * `locale-persist.ts`. `null` while loading (renders a default snapshot).
+   */
+  const [localePref, setLocalePref] = useState<StoredLocaleValue | null>(null);
 
   const refresh = useCallback(async () => {
-    const [u, popup] = await Promise.all([
+    const [u, popup, loc] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
+      loadStoredLocale(),
     ]);
     setUnit(u);
     setAutoPopup(popup);
+    setLocalePref(loc);
   }, [db]);
 
   useFocusEffect(
@@ -63,6 +78,22 @@ export default function SettingsScreen() {
     // same boolean twice = no-op).
     setAutoPopup(next);
     await setAutoPopupRestTimer(db, next);
+  };
+
+  /**
+   * Phase 5 — apply locale change.
+   *   1. Persist to AsyncStorage.
+   *   2. Push resolved locale into the module-level i18n state so subsequent
+   *      `t(...)` calls return the new language.
+   *   3. Local state bump forces this screen to re-render with new labels.
+   * Re-rendering the rest of the app happens lazily as other screens mount /
+   * focus — module-level locale is read at every `t(...)` call.
+   */
+  const onPickLocale = async (next: StoredLocaleValue) => {
+    if (next === localePref) return;
+    setLocalePref(next);
+    await saveStoredLocale(next);
+    setLocale(resolveLocale(next));
   };
 
   return (
@@ -102,6 +133,28 @@ export default function SettingsScreen() {
             value={autoPopup ?? true}
             onValueChange={onToggleAutoPopup}
             disabled={autoPopup === null}
+          />
+        </View>
+
+        <Text style={styles.section}>{t('page', 'languageSection')}</Text>
+        <View style={styles.langGroup}>
+          <LangOption
+            label={t('status', 'languageAuto')}
+            active={localePref === 'auto'}
+            disabled={localePref === null}
+            onPress={() => onPickLocale('auto')}
+          />
+          <LangOption
+            label={t('status', 'languageZh')}
+            active={localePref === 'zh'}
+            disabled={localePref === null}
+            onPress={() => onPickLocale('zh')}
+          />
+          <LangOption
+            label={t('status', 'languageEn')}
+            active={localePref === 'en'}
+            disabled={localePref === null}
+            onPress={() => onPickLocale('en')}
           />
         </View>
 
@@ -153,6 +206,41 @@ function UnitOption({
   );
 }
 
+/**
+ * Phase 5 — single radio-style row for the language toggle. List-style (one
+ * per row) rather than side-by-side because labels can be long (e.g.
+ * "Traditional Chinese") and would wrap awkwardly in a flex-row.
+ */
+function LangOption({
+  label,
+  active,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active, disabled: !!disabled }}
+      style={({ pressed }) => [
+        styles.langRow,
+        active && styles.langRowActive,
+        pressed && styles.btnPressed,
+      ]}>
+      <Text style={[styles.langLabel, active && styles.langLabelActive]}>
+        {label}
+      </Text>
+      {active ? <Text style={styles.langCheck}>✓</Text> : null}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   body: { padding: 24, gap: 12 },
@@ -193,4 +281,17 @@ const styles = StyleSheet.create({
   },
   switchLabelGroup: { flex: 1, gap: 2 },
   switchLabel: { fontSize: 16, fontWeight: '500' },
+  langGroup: { gap: 8 },
+  langRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+  },
+  langRowActive: { backgroundColor: '#0a7ea4' },
+  langLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
+  langLabelActive: { color: 'white' },
+  langCheck: { fontSize: 18, color: 'white', fontWeight: '700' },
 });

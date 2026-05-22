@@ -231,6 +231,8 @@ export const strings = {
       notePlaceholder: '例：握距、發力重點、易犯錯誤...',
       intensityExample: '例：10-12RM、II-1',
       programNameExample: '例：增肌-Q1',
+      // Phase 5 — settings Language section header
+      languageSection: '語言',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -369,6 +371,10 @@ export const strings = {
       missingExercise: '動作遺失',
       // chart panel header
       previousYearArrow: '上一年',
+      // Phase 5 — settings Language toggle radio labels
+      languageAuto: '自動偵測',
+      languageZh: '中文（繁體）',
+      languageEn: 'English',
     },
 
     /**
@@ -638,6 +644,8 @@ export const strings = {
       notePlaceholder: 'e.g. grip width, force focus, common mistakes...',
       intensityExample: 'e.g. 10-12RM, II-1',
       programNameExample: 'e.g. Hypertrophy-Q1',
+      // Phase 5 — settings Language section header
+      languageSection: 'Language',
     },
 
     alert: {
@@ -768,6 +776,10 @@ export const strings = {
       nextYear: 'Next Year',
       missingExercise: 'Exercise Missing',
       previousYearArrow: 'Previous Year',
+      // Phase 5 — settings Language toggle radio labels
+      languageAuto: 'Auto-detect',
+      languageZh: 'Traditional Chinese',
+      languageEn: 'English',
     },
 
     equipment: {
