@@ -188,7 +188,30 @@ export default function ProgramWizardScreen() {
     setState(prevStep(state));
   };
 
-  const onNext = () => {
+  const onNext = async () => {
+    // Wave 18g smoke fix — when leaving Step 1 in overwrite mode, persist
+    // any newly-typed intensity labels into the existing program's v022
+    // `program_sub_tag` dictionary RIGHT NOW (rather than waiting for Step
+    // 6 confirm). User expectation: typing GG-3 / GG-4 in Step 1 should
+    // make those chips visible to other app surfaces (儲存模板 sheet,
+    // 開始訓練 sheet, programs-tab row picker) without finishing the
+    // wizard. INSERT OR IGNORE makes this idempotent — chips already in
+    // the dict are silent no-ops.
+    //
+    // Why only overwrite path: a brand-new program has no `program_id`
+    // until Step 6 commits createProgram, so there's nowhere to write the
+    // labels. New-program path still defers to Step 6's recordProgramSubTag
+    // loop (see onConfirm).
+    //
+    // Why no rollback on cancel: the v022 dict is a label-only store —
+    // having extra chips that aren't referenced by any template / cell is
+    // harmless and matches how the dict behaves elsewhere (intentional
+    // "remember every label ever typed" per ADR-0021).
+    if (state.step === 'NameAndTag' && overwriteTarget) {
+      for (const tag of state.draft.sub_tags) {
+        await recordProgramSubTag(db, overwriteTarget.id, tag);
+      }
+    }
     const r = nextStep(state);
     if ('error' in r) {
       Alert.alert('Cannot continue', r.error);
