@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActionSheetIOS,
@@ -1600,8 +1600,6 @@ export default function SessionDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
-
       {/* Header — back btn + title + (edit mode) 完成 btn */}
       <View style={styles.header}>
         <Pressable

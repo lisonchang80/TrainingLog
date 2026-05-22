@@ -116,6 +116,18 @@ export default function RootLayout() {
             name="template/[id]"
             options={{ headerShown: false }}
           />
+          {/* Phase 4.5 batch 1 — preventive lift (mirror wave 18g `ce3ca5a`).
+              Session detail page renders its own header, so the OS Stack
+              header must be off. Previously this was declared inline via
+              `<Stack.Screen options={{ headerShown: false }} />` inside the
+              component body — same dangerous pattern as the template editor
+              fix above. session/[id] is not currently pushed from a modal
+              parent, but lifting now removes the latent risk before the
+              next routing change accidentally exposes it. */}
+          <Stack.Screen
+            name="session/[id]"
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name="superset/new"
             options={{ presentation: 'modal', headerShown: false }}
