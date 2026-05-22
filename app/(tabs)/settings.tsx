@@ -18,6 +18,7 @@ import {
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
+import { t } from '@/src/i18n';
 
 /**
  * Settings tab — slice 7 ships the unit preference toggle.
@@ -67,8 +68,9 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.heading}>Settings</Text>
+        <Text style={styles.heading}>{t('page', 'settings')}</Text>
 
+        {/* TODO(i18n): no key for "Unit preference" section title in strings.ts */}
         <Text style={styles.section}>Unit preference</Text>
         <View style={styles.toggleRow}>
           <UnitOption
@@ -83,14 +85,16 @@ export default function SettingsScreen() {
           />
         </View>
         <Text style={styles.hint}>
+          {/* TODO(i18n): no key for unit-preference hint paragraph */}
           顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。
         </Text>
 
-        <Text style={styles.section}>訓練偏好</Text>
+        <Text style={styles.section}>{t('domain', 'trainingPreferences')}</Text>
         <View style={styles.switchRow}>
           <View style={styles.switchLabelGroup}>
-            <Text style={styles.switchLabel}>自動跳出休息倒數</Text>
+            <Text style={styles.switchLabel}>{t('status', 'autoShowRestCountdown')}</Text>
             <Text style={styles.hint}>
+              {/* TODO(i18n): no key for auto-popup hint paragraph */}
               打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。
             </Text>
           </View>
@@ -101,7 +105,7 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <Text style={styles.section}>數據</Text>
+        <Text style={styles.section}>{t('domain', 'data')}</Text>
         <Pressable
           accessibilityRole="button"
           onPress={() => router.push('/body')}
@@ -109,15 +113,16 @@ export default function SettingsScreen() {
             styles.linkRow,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.linkLabel}>身體數據</Text>
+          <Text style={styles.linkLabel}>{t('page', 'bodyMetrics')}</Text>
           <Text style={styles.linkChevron}>›</Text>
         </Pressable>
         <Text style={styles.hint}>
+          {/* TODO(i18n): no key for body-metrics hint paragraph */}
           體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。
         </Text>
 
-        <Text style={styles.section}>備份 / 還原</Text>
-        <Text style={styles.placeholder}>於 slice 15 加入。</Text>
+        <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
+        <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
       </ScrollView>
     </SafeAreaView>
   );

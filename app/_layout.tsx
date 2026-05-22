@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 
 import { DatabaseProvider } from '@/components/database-provider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { t } from '@/src/i18n';
 
 // Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
 // `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
@@ -76,11 +77,11 @@ export default function RootLayout() {
               re-launches rather than page flips. */}
           <Stack.Screen
             name="exercise-history/[id]"
-            options={{ title: '動作歷史' }}
+            options={{ title: t('page', 'exerciseHistory') }}
           />
           <Stack.Screen
             name="exercise-chart/[id]"
-            options={{ title: '動作圖表' }}
+            options={{ title: t('page', 'exerciseChart') }}
           />
           <Stack.Screen
             name="exercise-picker"
@@ -92,11 +93,11 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="superset/[id]"
-            options={{ title: '超級組' }}
+            options={{ title: t('domain', 'superset') }}
           />
           <Stack.Screen
             name="superset/edit/[id]"
-            options={{ presentation: 'modal', title: '編輯超級組' }}
+            options={{ presentation: 'modal', title: t('button', 'editSuperset') }}
           />
           {/* Slice 10c — /superset-history and /superset-chart were folded into
               /exercise-history + /exercise-chart with a `clusterMode=cluster_only`
@@ -106,7 +107,7 @@ export default function RootLayout() {
               /body 頁是「看趨勢 / 看歷史」deep dive 入口. */}
           <Stack.Screen
             name="body"
-            options={{ title: '身體數據' }}
+            options={{ title: t('page', 'bodyMetrics') }}
           />
         </Stack>
         <StatusBar style="auto" />

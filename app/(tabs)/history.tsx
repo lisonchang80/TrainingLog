@@ -6,20 +6,32 @@ import { StatsPanel } from '@/components/stats-panel';
 import { AchievementsPanel } from '@/components/achievements-panel';
 import MonthGridView from '@/src/components/history/MonthGridView';
 import ListView from '@/src/components/history/ListView';
+import { t } from '@/src/i18n';
 
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryMode = 'calendar' | 'list';
 
-const SUB_TABS: readonly { key: SubTab; label: string }[] = [
-  { key: 'history', label: '歷史' },
-  { key: 'stats', label: '統計' },
-  { key: 'achievements', label: '獎章' },
+const SUB_TABS: readonly { key: SubTab; labelKey: 'history' | 'stats' | 'achievements' }[] = [
+  { key: 'history', labelKey: 'history' },
+  { key: 'stats', labelKey: 'stats' },
+  { key: 'achievements', labelKey: 'achievements' },
 ];
 
-const HISTORY_MODES: readonly { key: HistoryMode; label: string }[] = [
-  { key: 'calendar', label: '月曆' },
-  { key: 'list', label: '表列' },
+const HISTORY_MODES: readonly { key: HistoryMode; labelKey: 'calendar' | 'listView' }[] = [
+  { key: 'calendar', labelKey: 'calendar' },
+  { key: 'list', labelKey: 'listView' },
 ];
+
+function subTabLabel(k: SubTab): string {
+  if (k === 'history') return t('domain', 'history');
+  if (k === 'stats') return t('domain', 'stats');
+  return t('domain', 'achievements');
+}
+
+function historyModeLabel(m: HistoryMode): string {
+  if (m === 'calendar') return t('domain', 'calendar');
+  return t('button', 'listView');
+}
 
 /**
  * History tab — three-level structure (slice 9 / ADR-0009 / ADR-0015).
@@ -40,19 +52,19 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.heading}>History</Text>
+        <Text style={styles.heading}>{t('page', 'history')}</Text>
         <View style={styles.subTabRow}>
-          {SUB_TABS.map((t) => (
+          {SUB_TABS.map((sub) => (
             <Pressable
-              key={t.key}
-              style={[styles.subTabBtn, tab === t.key && styles.subTabBtnActive]}
-              onPress={() => setTab(t.key)}>
+              key={sub.key}
+              style={[styles.subTabBtn, tab === sub.key && styles.subTabBtnActive]}
+              onPress={() => setTab(sub.key)}>
               <Text
                 style={[
                   styles.subTabBtnText,
-                  tab === t.key && styles.subTabBtnTextActive,
+                  tab === sub.key && styles.subTabBtnTextActive,
                 ]}>
-                {t.label}
+                {subTabLabel(sub.key)}
               </Text>
             </Pressable>
           ))}
@@ -69,7 +81,7 @@ export default function HistoryScreen() {
                     styles.modeBtnText,
                     mode === m.key && styles.modeBtnTextActive,
                   ]}>
-                  {m.label}
+                  {historyModeLabel(m.key)}
                 </Text>
               </Pressable>
             ))}
