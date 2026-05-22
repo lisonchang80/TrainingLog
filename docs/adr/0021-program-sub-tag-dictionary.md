@@ -47,6 +47,37 @@ CREATE INDEX idx_program_sub_tag_program ON program_sub_tag (program_id);
 
 `swapProgramCells` (wave 17) 也呼叫 `recordProgramSubTag` 作為 defensive re-registration（理論上字典已有，stale label 防禦）。
 
+### 2026-05-22 wave 18g amendment — 4th write path: `overwriteProgram`
+
+Wave 18g (commit `d8df14f`) 加第 4 條 write path：
+
+```ts
+overwriteProgram(db, { program_id, new_program, new_cells, new_sub_tags, now? })
+```
+
+語意上跟前 3 條 (a)dditive write 路徑**不同** — `overwriteProgram` 把整個 program 的 `program_cell` + `program_sub_tag` 集合視為「從 wizard 重新權威 (authoritative-from-wizard)」，DELETE 後 re-INSERT 全部，而非 additive register。
+
+**Trigger**：program-wizard Step 6 偵測 name match + user 確認「覆蓋」inline banner（wave 18g `8b2075d` smoke pivot 從 modal 改 inline detect）。
+
+**Active session guard** — 透過 `session ↔ session_exercise ↔ template.program_id` JOIN：
+
+```sql
+SELECT COUNT(*) FROM session s
+  JOIN session_exercise se ON se.session_id = s.id
+  JOIN template t ON t.id = se.template_id
+ WHERE t.program_id = ? AND s.ended_at IS NULL;
+```
+
+非零 → throw `PROGRAM_HAS_ACTIVE_SESSION`、transaction 不開、**zero writes**。確認無 active session 才進 transaction、依序 DELETE `program_cell` + `program_sub_tag` (該 program 範圍)、UPDATE `program` 元資料（id + `is_active` 保留）、re-INSERT 兩表的新內容。
+
+**`is_active` 保留 + finished session reference 不動** — `is_active` 是 program 屬於哪個 active context 的旗標、覆蓋語意是「同一 entity 改內容」非「換 entity」；finished session 透過 template_id reference program、不會掃 cells，所以歷史 session 不受影響。
+
+**v022 字典互動**：覆蓋場景下 dictionary 整段被替換、但字典 row 仍走 `recordProgramSubTag` 標準入口（透過 re-INSERT 路徑），與既有 idempotency 規約一致。
+
+**Tests**：`tests/db/overwriteProgram.test.ts` 7 case — happy path / active session block ZERO writes / finished session preserved / sub_tag dict full replace + empty skip / cells full replace / idempotent / cross-program isolation。
+
+**Why not extend `upsertCell` to handle bulk replace**: bulk 替換語意（DELETE all + re-INSERT）跟 cell-by-cell additive 不同 — 把 active session 守衛、transaction 邊界、authoritative semantic 都集中在 `overwriteProgram` 比 fan out 到 `upsertCell` × N 更明確。
+
 ### Null / 空字串 guard
 
 `recordProgramSubTag(db, pid, sub_tag, now?)` 第一行：
@@ -98,18 +129,21 @@ INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
 ## References
 
 - **Wave 16 commit** `485e9bc` (2026-05-21) — v022 migration + `recordProgramSubTag` / `listProgramSubTags` helper + 3 write path 接線 + picker UI union 讀取
+- **Wave 18g commit** `d8df14f` (2026-05-22) — 4th write path `overwriteProgram` + active session guard + tests `73f9926` (7 case) + UI integration `f927357` / `8b2075d` inline pivot
 - **Source code** —
   - `src/db/schema/v022_program_sub_tag.ts` (78 行，含 backfill 兩段)
   - `src/adapters/sqlite/programRepository.ts:310-343` (`recordProgramSubTag` + `listProgramSubTags`)
   - `src/adapters/sqlite/programRepository.ts:395` (`upsertCell` 接線)
   - `src/adapters/sqlite/programRepository.ts:494` (`applyTemplateToColumn::sub_tag_override` 分支接線)
   - `src/adapters/sqlite/programRepository.ts:540` (`applyTagToRow` 接線)
+  - `src/adapters/sqlite/programRepository.ts:243` (`overwriteProgram` — bulk DELETE + re-INSERT 第 4 條 write path)
 - **Tests** —
   - `tests/db/v022ProgramSubTag.test.ts` (7 case — forward / backfill / idempotency / CASCADE / runner integration)
   - `tests/db/recordProgramSubTag.test.ts` (5 case — null/empty guard + idempotency + clock injection)
   - `tests/db/listProgramSubTags.test.ts` (3 case — empty / 排序 / cross-program isolation)
   - `tests/db/programApply.test.ts` (extended — `sub_tag_override` 3 case + `applyTagToRow` all-rest dict side-effect 1 case)
+  - `tests/db/overwriteProgram.test.ts` (7 case — happy path / active session block ZERO writes / finished session preserved / sub_tag dict full replace / cells full replace / idempotent / cross-program isolation)
 - **Related ADRs** —
   - ADR-0003 §「強度」(原副標籤) 概念 — 三元組 identity 仍 anchor，本 ADR 把 label 集合本身升 entity
   - ADR-0004 § Cycle-based grid — wave 15-17 編輯模式 ▶ apply 場景是本 ADR motivation
-  - ADR-0022 (proposed) Programs tab grid-on-tab UX — write path 在那條 UI flow 上下文 ship
+  - ADR-0022 — Programs tab grid + program-wizard 6-step UX 整合（涵蓋 wave 15/17/18a-g 寫入路徑 trigger 上下文）

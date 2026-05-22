@@ -121,6 +121,18 @@ UI display：muscle.name 全名「二頭長頭 / 二頭短頭」（在 19 muscle
 
 **工作量估算**：~1-2 週一次性投資（含 SVG 設計 + 19 muscle path + RN 與 SwiftUI 各端 fill 程式接口）。
 
+### 2026-05-23 amendment — 19-path 解剖 SVG 落地 + 雙層分流現況
+
+**RN 端落地狀態**（commit `91e02ac` / `c694f6d` overnight wave 2026-05-23 Agent A）：
+
+- `components/body-heatmap.tsx` 重繪為 anatomical-fidelity 兩視圖（front + back），含 18 M (M_*) muscle path + striation 內部紋理 + 20 條 leader-line label；M_TRAP 在前後身各畫一次（前身上斜方頸基 + 背身肩胛間菱形）→ **path count 達 19**，對齊本 ADR 原承諾。
+- **雙用途實際分流**：
+  - **統計頁 heatmap** ([by M layer](.) — 從 11 MG aggregate **升格** 至 18 M individual)：新 `mFrequencyOverPeriod(records)` (`src/domain/stats/statsEngine.ts`) + `StatsSetRecord.m_ids: string[]` 從 `exercise_muscle.role='primary'` JOIN 取主肌；`stats-panel.tsx` 餵 `<BodyHeatmap mQuintile={...} mCount={...} />`。Quintile 配色維持 5 階分位數（冷藍 → 暖紅 + 灰）。**注意：原 ADR 寫 by-11-MG aggregate，現在實際是 by-18-M individual** — 比原承諾更細，不退化。
+  - **Exercise 詳情頁 by 19 muscle individual highlight**：**v1 仍未落地**（只有 heatmap 入口在 History → Stats subtab）。Exercise 詳情頁的「該動作主要活化」目前用文字 chip + 列表呈現，非 muscle path highlight。
+- **SwiftUI Watch 端**：slice 11 watch scaffold 待開始；本 ADR 雙端 path 同步策略仍 valid，落地時走 ADR 既定路徑。
+
+**Path/fill semantic 微調**：原 ADR 設想單一 muscle path 一個 fill 對應 muscle id；實作上 quad / glute / bicep / pec 等位置內**多 sub-path 視覺分隔（striation + 解剖分塊）但共用單一 fill semantic**（例如 quad 的 3 頭 — rectus femoris + vastus lateralis + vastus medialis — 都吃 `M_QUAD` 同一個 quintile 色）。這個簡化讓 fill 邏輯 1:1 對齊 muscle layer，視覺解剖細節純粹靠 SVG 繪製累積。
+
 ## Module 影響
 
 PRD 既有 10 個 pure logic 模組**不變**（不新增模組）。muscle layer 主要是 schema + UI + 資料 mapping，不涉及純邏輯運算：
@@ -181,6 +193,6 @@ ADR-0017 Q9 grill 結果，二頭與前臂命名 revise。理由：對齊本 ADR
 - v010 migration 4 筆 UPDATE（見 ADR-0017 § Schema migration plan v010）
 - `src/db/seed/v006ExerciseLibrary.ts` L90,115,116,122 同步改 name (const 名保留)
 - `components/body-heatmap.tsx` L59「前臂」label → 「小臂」
-- `components/body-diagram.tsx` SVG label text 同步
+- ~~`components/body-diagram.tsx` SVG label text 同步~~（2026-05-22 wave-2 overnight `01ca9f5` 移除 — 該檔為 dead code，從未在 production import；唯一存活的 body 繪製 surface 是 `components/body-heatmap.tsx`）
 - CONTEXT.md L116-128 muscle 表更新
 

@@ -119,7 +119,7 @@ UPDATE muscle_group SET name = '小臂' WHERE id = 'mg-forearm';
 
 **ID 不動**（M_BICEP_LONG / M_BICEP_SHORT / M_FOREARM / MG_FOREARM 等 const 名保留為 internal alias，避免 FK / code 大改）。
 
-**Body diagram SVG**：components/body-heatmap.tsx + components/body-diagram.tsx 內的 label text 同步改。
+**Body diagram SVG**：components/body-heatmap.tsx 內的 label text 同步改。（**2026-05-22 amendment**：`components/body-diagram.tsx` 在 wave-2 overnight cleanup `01ca9f5` 移除 — dead code，從未在 production import。所有 body 繪製集中在 `body-heatmap.tsx` 唯一 surface。）
 
 ### Q10：Reusable Superset entity (v1 進、fixed 2 動作)
 
@@ -348,6 +348,21 @@ ADR-0017 整包 3-4 週估時超過單 slice 風險閾值，slice 開工前再 g
 理由：9.8a 不碰 Template editor，blast radius 小；9.8b 是改既有行為（風險集中於此）；9.8c 依賴實戰資料、不能跟 9.8b 平行。
 
 **ADR-0016「+ 動作」inline picker 砍掉**（Q15 amendment）延後到 9.8b 處理（slice 9.8a 不影響 Template editor 既有 inline picker）。
+
+### 2026-05-21 wave 16 / 2026-05-22 wave 18g amendment — program-wizard ↔ Template editor round-trip
+
+Wave 16 (commit `485e9bc`) 加新 round-trip route：**program-wizard Step 3「+ 建立新模板」pill → Template editor (import mode) → 回 wizard**。Q11 (Custom Exercise form) + Q15 (`/library?mode=picker`) 是 library-picker round-trip；本 wave 加 Template-editor round-trip 是平行 entry。
+
+**Trigger 與資料流**：
+- Wizard Step 3 點 `[+ 新建]` → `createTemplate('新模板')` + `router.push('/template/[id]?fromProgram=...&fromKind=...&fromCycle=...&fromDay=...')`（pure 編輯模式無 fromX params 進普通 editor、有 fromX 進 import mode）
+- Editor 右上「建立並導入」按鈕（import mode 才顯示）→ pre-fill program_id + pop `TemplateMetaSheet` (omitName) → onSaveSheetConfirm 整合 `attachTemplateToProgram` + `commitTemplateDraft` + dup-triple guard
+- `router.back()` 回 wizard、wizard `state.draft` 不掉、`useFocusEffect` re-fetch templates auto-顯示新建那個
+
+**重要實作細節**：`commitTemplateDraft` 的 SQL **只 UPDATE name + color_hex + updated_at** — 不寫 program_id / sub_tag；要寫 triple 必須先走 `attachTemplateToProgram(db, template_id, program_id, sub_tag)`。這個分工是 wave 16 踩坑後拍板的：editor 編輯路徑跟 program 綁定路徑解耦，避免 generic editor save 意外重寫 program 上下文。
+
+**Wave 18g 加碼 — `TemplateMetaSheet` 強度 picker union source**（commit `e32a016`）：sheet 渲染 program 的強度 chip 列改用 `Promise.all([listDistinctSubTagsByProgram, listProgramSubTags])` union（template list + v022 persistent dict）+ dedupe + alphabetical sort。Mirror 於 `start-template-sheet.tsx` wave 16 baseline。目的：覆寫 program 後 chip 不再從 picker 消失（與 ADR-0021 motivation 一致）。
+
+**Cross-ref**：本 round-trip 是 ADR-0021 v022 persistent dict 的 UI 上下文之一；wizard `+ 新建` 走完 6 步在 `recordProgramSubTag` loop 寫進字典是寫入路徑、本 round-trip 屬於 ad-hoc 中途新增 template + meta 的讀取路徑，兩者協同確保強度 label 跨 reload 都記得。
 
 ## Schema migration plan
 

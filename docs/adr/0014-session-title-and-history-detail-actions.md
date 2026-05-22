@@ -127,6 +127,7 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 - 隨時可改，無 draft staging（跟 ADR-0013 notes 編輯同 in-place pattern）
 - 編輯**不觸發**任何 dialog / Save-back / sibling 連動（改 session.title 而已）
 - 即時 UPDATE，無 commit/cancel 雙態
+- **per ADR-0019 § slice 10d E2 翻盤**：history detail (`session/[id].tsx`) edit mode 編輯既有 set 時**不**觸發 rest-timer modal — edit 屬 post-hoc 修訂，跟 in-session 即時 logging 上下文不同；`enableRestTimer` flag 刻意不存在，Today 與 detail screens timer state 完全獨立
 
 跟 ADR-0012 set logger 哲學一致：「Session 在運動中編輯，要快速、即時 → 摩擦極力消除」。
 
