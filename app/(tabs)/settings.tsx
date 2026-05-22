@@ -101,8 +101,7 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>{t('page', 'settings')}</Text>
 
-        {/* TODO(i18n): no key for "Unit preference" section title in strings.ts */}
-        <Text style={styles.section}>Unit preference</Text>
+        <Text style={styles.section}>{t('page', 'unitPreferenceSection')}</Text>
         <View style={styles.toggleRow}>
           <UnitOption
             label="kg"
@@ -115,19 +114,13 @@ export default function SettingsScreen() {
             onPress={() => onSet('lb')}
           />
         </View>
-        <Text style={styles.hint}>
-          {/* TODO(i18n): no key for unit-preference hint paragraph */}
-          顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。
-        </Text>
+        <Text style={styles.hint}>{t('page', 'unitPreferenceHint')}</Text>
 
         <Text style={styles.section}>{t('domain', 'trainingPreferences')}</Text>
         <View style={styles.switchRow}>
           <View style={styles.switchLabelGroup}>
             <Text style={styles.switchLabel}>{t('status', 'autoShowRestCountdown')}</Text>
-            <Text style={styles.hint}>
-              {/* TODO(i18n): no key for auto-popup hint paragraph */}
-              打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。
-            </Text>
+            <Text style={styles.hint}>{t('page', 'autoPopupRestTimerHint')}</Text>
           </View>
           <Switch
             value={autoPopup ?? true}
@@ -169,10 +162,7 @@ export default function SettingsScreen() {
           <Text style={styles.linkLabel}>{t('page', 'bodyMetrics')}</Text>
           <Text style={styles.linkChevron}>›</Text>
         </Pressable>
-        <Text style={styles.hint}>
-          {/* TODO(i18n): no key for body-metrics hint paragraph */}
-          體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。
-        </Text>
+        <Text style={styles.hint}>{t('page', 'bodyMetricsHint')}</Text>
 
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
         <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>

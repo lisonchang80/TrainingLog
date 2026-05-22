@@ -233,6 +233,12 @@ export const strings = {
       programNameExample: '例：增肌-Q1',
       // Phase 5 — settings Language section header
       languageSection: '語言',
+      // Phase 5 — settings section headers + hints (sweep TODO(i18n))
+      unitPreferenceSection: '顯示單位',
+      unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
+      autoPopupRestTimerHint:
+        '打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。',
+      bodyMetricsHint: '體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -646,6 +652,14 @@ export const strings = {
       programNameExample: 'e.g. Hypertrophy-Q1',
       // Phase 5 — settings Language section header
       languageSection: 'Language',
+      // Phase 5 — settings section headers + hints (sweep TODO(i18n))
+      unitPreferenceSection: 'Unit Preference',
+      unitPreferenceHint:
+        'Display unit toggle (data is stored in kg; this only affects display and input).',
+      autoPopupRestTimerHint:
+        'Auto-show a 60-second countdown after marking a set as complete (close manually or skip).',
+      bodyMetricsHint:
+        'Bodyweight / PBF / SMM trends and history. Quick input is still available from the Today tab.',
     },
 
     alert: {
