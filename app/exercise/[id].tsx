@@ -23,11 +23,23 @@ import {
   getExerciseWithMuscles,
   listMuscleGroups,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import {
+  t,
+  tDeleteExerciseFromLibrary,
+  tEquipment,
+  tLoadType,
+  tMuscleGroup,
+} from '@/src/i18n';
 
-const LOAD_TYPE_LABEL: Record<string, string> = {
-  loaded: '加重',
-  bodyweight: '徒手',
-  assisted: '助力',
+/**
+ * exerciseLibrary load_type DB enum → tLoadType key. DB row uses `loaded` /
+ * `bodyweight` / `assisted`; tLoadType accepts `weighted` / `bodyweight` /
+ * `assisted`. Pure data — keep adjacency to the read site for clarity.
+ */
+const LOAD_TYPE_KEY: Record<string, 'weighted' | 'bodyweight' | 'assisted'> = {
+  loaded: 'weighted',
+  bodyweight: 'bodyweight',
+  assisted: 'assisted',
 };
 
 /**
@@ -67,10 +79,10 @@ export default function ExerciseDetailScreen() {
     () => (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="返回"
+        accessibilityLabel={t('common', 'backPlain')}
         onPress={() => router.back()}
         hitSlop={12}>
-        <Text style={styles.headerBack}>‹ 返回</Text>
+        <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
       </Pressable>
     ),
     [router]
@@ -78,7 +90,7 @@ export default function ExerciseDetailScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: '動作詳情',
+      title: t('page', 'exerciseDetail'),
       headerBackVisible: false,
       headerLeft: renderHeaderLeft,
       headerRight: undefined,
@@ -89,7 +101,7 @@ export default function ExerciseDetailScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.body}>
-          <Text style={styles.placeholder}>動作不存在或已封存。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'exerciseNotFoundOrArchived')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -98,16 +110,17 @@ export default function ExerciseDetailScreen() {
   const mg = data.exercise.muscle_group_id
     ? muscleGroups.find((g) => g.id === data.exercise.muscle_group_id)
     : null;
+  const loadTypeKey = LOAD_TYPE_KEY[data.exercise.load_type];
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.heading}>{data.exercise.name}</Text>
         <Text style={styles.subheading}>
-          {mg ? `${mg.name} · ` : ''}
-          {LOAD_TYPE_LABEL[data.exercise.load_type] ?? data.exercise.load_type}
-          {` · ${data.exercise.equipment}`}
-          {data.exercise.is_custom === 1 ? ' · 自訂' : ''}
+          {mg ? `${tMuscleGroup(mg.name)} · ` : ''}
+          {loadTypeKey ? tLoadType(loadTypeKey) : data.exercise.load_type}
+          {` · ${tEquipment(data.exercise.equipment)}`}
+          {data.exercise.is_custom === 1 ? t('common', 'custom') : ''}
         </Text>
 
         {(data.primary.length > 0 || data.secondary.length > 0) && (
@@ -119,40 +132,40 @@ export default function ExerciseDetailScreen() {
 
       <View style={styles.footer}>
         <FooterButton
-          label="歷史"
+          label={t('domain', 'history')}
           onPress={() => router.push(`/exercise-history/${id}`)}
         />
         <FooterButton
-          label="圖表"
+          label={t('domain', 'chart')}
           onPress={() => router.push(`/exercise-chart/${id}`)}
         />
         <FooterButton
-          label="編輯"
+          label={t('common', 'edit')}
           disabled={data.exercise.is_custom !== 1}
           onPress={() => {
             if (data.exercise.is_custom === 1) {
               router.push(`/exercise/edit/${id}`);
             } else {
-              Alert.alert('編輯動作', '內建動作目前無可編輯內容。');
+              Alert.alert(t('button', 'editExercise'), t('alert', 'builtinExerciseNoEdit'));
             }
           }}
         />
         <FooterButton
-          label="刪除"
+          label={t('common', 'delete')}
           destructive
           disabled={data.exercise.is_custom !== 1}
           onPress={() => {
             if (data.exercise.is_custom !== 1) {
-              Alert.alert('刪除動作', '內建動作無法刪除。');
+              Alert.alert(t('button', 'deleteExercise'), t('alert', 'builtinExerciseNoDelete'));
               return;
             }
             Alert.alert(
-              '刪除動作',
-              `確認刪除「${data.exercise.name}」？歷史紀錄會保留，但動作會從動作庫移除。`,
+              t('button', 'deleteExercise'),
+              tDeleteExerciseFromLibrary(data.exercise.name),
               [
-                { text: '取消', style: 'cancel' },
+                { text: t('common', 'cancel'), style: 'cancel' },
                 {
-                  text: '刪除',
+                  text: t('common', 'delete'),
                   style: 'destructive',
                   onPress: async () => {
                     try {
@@ -160,7 +173,7 @@ export default function ExerciseDetailScreen() {
                       router.back();
                     } catch (err) {
                       Alert.alert(
-                        '刪除失敗',
+                        t('alert', 'deleteFailed'),
                         err instanceof Error ? err.message : String(err)
                       );
                     }
@@ -223,12 +236,12 @@ function MuscleSection({
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       {muscles.length === 0 ? (
-        <Text style={styles.empty}>無</Text>
+        <Text style={styles.empty}>{t('common', 'none')}</Text>
       ) : (
         <View style={styles.chipRow}>
           {muscles.map((m) => (
             <View key={m.id} style={[styles.muscleChip, { borderColor: color }]}>
-              <Text style={styles.muscleChipText}>{m.name}</Text>
+              <Text style={styles.muscleChipText}>{tMuscleGroup(m.name)}</Text>
             </View>
           ))}
         </View>

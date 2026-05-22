@@ -20,6 +20,7 @@ import type {
   ExerciseWithMuscles,
   MuscleGroup,
 } from '@/src/domain/exercise/types';
+import { t } from '@/src/i18n';
 
 /**
  * Custom Exercise edit screen — thin wrapper around `<CustomExerciseForm>`.
@@ -73,19 +74,19 @@ export default function EditExerciseScreen() {
       <SafeAreaView style={styles.container}>
         <Stack.Screen
           options={{
-            title: '編輯動作',
+            title: t('button', 'editExercise'),
             headerLeft: () => (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="取消"
+                accessibilityLabel={t('common', 'cancel')}
                 onPress={() => router.back()}>
-                <Text style={styles.headerCancel}>取消</Text>
+                <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
               </Pressable>
             ),
           }}
         />
         <View style={styles.placeholderWrap}>
-          <Text style={styles.placeholder}>內建動作目前無可編輯內容。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'builtinExerciseNoEdit')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -95,9 +96,9 @@ export default function EditExerciseScreen() {
   if (!initial) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ title: '編輯動作' }} />
+        <Stack.Screen options={{ title: t('button', 'editExercise') }} />
         <View style={styles.placeholderWrap}>
-          <Text style={styles.placeholder}>載入中…</Text>
+          <Text style={styles.placeholder}>{t('status', 'loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -111,7 +112,7 @@ export default function EditExerciseScreen() {
 
   return (
     <CustomExerciseForm
-      title="編輯動作"
+      title={t('button', 'editExercise')}
       initial={initial}
       existingNames={existingNames}
       muscleGroups={muscleGroups}
