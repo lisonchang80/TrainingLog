@@ -453,6 +453,8 @@ const M_LABELS_EN: Record<string, string> = {
 export function tMuscle(mId: string): string {
   const table = isEn() ? M_LABELS_EN : M_LABELS_ZH;
   return table[mId] ?? mId;
+}
+
 /**
  * Phase 4.5 final sweep — History list exercise-count badge.
  * `5動` / `5 ex`. Compact suffix appended to subtitle line.
