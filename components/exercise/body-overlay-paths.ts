@@ -185,30 +185,42 @@ export const PATH_MID_DELT_PEAK_BACK_R = '';
  *     so overlap is invisible
  */
 /**
- * Per user feedback (round 5, 2026-05-23): "請填滿、些微增加厚度、像不對稱的葉子".
- * Enlarged from thin diagonal slice → asymmetric leaf shape (top + bottom apex,
- * widest in middle, outer side more curved than inner). Each leaf:
- *   - top apex near deltoid upper-medial vertex
- *   - outer mid pulled to lateral side of medial 1/3 (widest point)
- *   - bottom apex near deltoid lower-medial vertex
- *   - inner mid sits just inside deltoid bbox medial edge
+ * Per user feedback (round 6, 2026-05-23): "異常，沒有填滿，請對稱左右肩，
+ * 從上到下弧，不要出現鋸齒". Previous round-5 paths used 4 Q-segments with
+ * control points that overshot the deltoid bbox medial edge (e.g. FRONT_L
+ * had control point (279, 322) past bbox edge 278.43), causing the
+ * unclipped fill to bleed into chest/back areas and producing visible
+ * sawtooth artifacts.
  *
- * Asymmetry: outer-edge curve has greater amplitude than inner-edge, so
- * the leaf's midrib leans toward the inner (medial bbox) side — reads as
- * a stylized leaf rather than a symmetric eye/lens.
+ * Redesign: each leaf is exactly TWO cubic Bezier curves (smooth single
+ * sweep top→bottom→top), all control points strictly inside the deltoid
+ * medial half (between SPLIT_X and bbox medial edge, with 2-3 unit buffer).
+ * L↔R control points are byte-for-byte mirrors about chest centerline
+ * (x=362, sum=724) / spine centerline (x=1086, sum=2172).
  *
- * All 4 paths still stay entirely INSIDE deltoid bbox (no extension into
- * chest/back). Back deltoid bbox is narrower (w=67) than front (w=86),
- * so back leaves are proportionally smaller.
+ * Shape: asymmetric leaf — outer-edge cubic has wider amplitude than
+ * inner-edge cubic, so the midrib leans toward the medial (bbox edge)
+ * side. Reads as a stylized leaf, not a symmetric ellipse.
+ *
+ * Coverage:
+ *   - FRONT leaves: x range ~[225, 273] (covers 84% of medial half width 57)
+ *   - BACK leaves: x range ~[943, 978] (covers 78% of medial half width 45)
+ *
+ * Invariants:
+ *   - all control points x ∈ [SPLIT_X + buffer, bbox_medial_edge - buffer]
+ *   - L↔R mirror: FRONT cp x_L + x_R = 724; BACK cp x_L + x_R = 2172
+ *   - Two cubic Beziers share endpoints → single smooth contour, no folds
+ *   - Fill stays inside deltoid → no bleed into chest/back, no overlap with
+ *     mid-delt rect (no colour collision, no sawtooth)
  */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M276 314 Q250 322 242 358 Q235 380 238 388 Q265 380 273 350 Q279 322 276 314 Z';
+  'M250 315 C225 320 230 365 240 390 C270 385 273 340 250 315 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M448 314 Q474 322 482 358 Q489 380 486 388 Q459 380 451 350 Q445 322 448 314 Z';
+  'M474 315 C499 320 494 365 484 390 C454 385 451 340 474 315 Z';
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M979 314 Q957 322 953 358 Q947 380 950 388 Q972 380 978 350 Q982 322 979 314 Z';
+  'M959 315 C943 320 946 365 952 390 C974 385 978 340 959 315 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1193 314 Q1215 322 1219 358 Q1225 380 1222 388 Q1200 380 1194 350 Q1190 322 1193 314 Z';
+  'M1213 315 C1229 320 1226 365 1220 390 C1198 385 1194 340 1213 315 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
