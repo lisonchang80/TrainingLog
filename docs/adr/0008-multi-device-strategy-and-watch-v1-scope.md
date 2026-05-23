@@ -55,6 +55,22 @@ Watch → iPhone events 走 `WCSession.transferUserInfo`（OS-managed reliable d
 | 16 | Pre-session 兩態 | 選定 Template → ▶ 開始訓練按鈕，不啟 HKWorkoutSession |
 | 17 | In-session 啟動點 | 按鈕觸發 HKWorkoutSession + Session row 創建 |
 
+### 2026-05-23 amendment — iPhone `[傳至手錶 ⌚]` button feature-gate
+
+iPhone 端 Today bottom sticky bar 在 slice 10c Phase 5 期間（2026-05-XX）有 forward-port placeholder Pressable `[傳至手錶 ⌚]`，tap → 顯示「將在 slice 13 上線」informational Alert。slice 10e bundle 3 拍板：**按鈕預設**不渲染**，由 build-time flag `FEATURE_WATCH_HANDOFF` 控制**（`src/config/features.ts`、default `false`）。
+
+理由：
+- App Store user 不知道「slice 13」是什麼，看到「敬請期待」Alert 會解讀為功能壞掉
+- 真正的 WatchConnectivity handoff 要等 slice 11+（watch scaffold + WCSession 真實對接）才有意義
+- Build-time flag 是最輕量的 gate，flip true 後 button 出現、無需動 UI 邏輯
+
+當 slice 11+ 真正 ship WatchConnectivity 對接時：
+1. `src/config/features.ts` 把 `FEATURE_WATCH_HANDOFF` 改 `true`
+2. `app/(tabs)/index.tsx` 的 `onPress` 從目前 informational Alert 換成真正觸發 `WatchConnectivity.send(...)` 呼叫
+3. `tests/config/features.test.ts` 的 invariant 更新或刪除（看 watch handoff 是否視為「永遠開」）
+
+`session/[id].tsx` history detail edit mode 目前**沒有**此按鈕（編輯 post-hoc session 不需要 handoff，per ADR-0019 § slice 10d E2 區分）。
+
 ## HealthKit 整合（v1 提前實作）
 
 - **HKWorkoutType** = `traditionalStrengthTraining`
