@@ -143,45 +143,52 @@ export const SPLIT_X_BACK_DELT_R = 1230.2;
 // ---------------------------------------------------------------------------
 
 /**
- * Mid-delt extension up to the acromion peak. A small triangular cap that
- * extends from the TOP of the package's deltoid silhouette (y≈312) UP to
- * approximately y≈293, sitting on the lateral half (mid-delt side) of each
- * shoulder. Bridges the gap between the package's deltoid contour and the
- * true bony acromion landmark. Reference IMG_1370.PNG (中束 highlight).
+ * Mid-delt acromion peak extensions — REMOVED (set to empty path) after
+ * user feedback they overflowed the body silhouette outline. The package's
+ * deltoid contour already provides the shoulder cap; extending above it
+ * pokes beyond the body boundary. Kept as empty exports so the consumer
+ * render stays structurally stable without conditional branches.
  */
-export const PATH_MID_DELT_PEAK_FRONT_L =
-  'M204 314 Q207 300 215 295 Q220 293 222 296 L222 314 Q217 314 210 316 Z';
-export const PATH_MID_DELT_PEAK_FRONT_R =
-  'M510 314 L510 296 Q513 293 518 295 Q525 300 528 314 Q522 316 517 314 Z';
-export const PATH_MID_DELT_PEAK_BACK_L =
-  'M918 316 Q922 300 930 295 Q936 293 938 297 L938 316 Q930 316 924 316 Z';
-export const PATH_MID_DELT_PEAK_BACK_R =
-  'M1228 316 L1228 297 Q1230 293 1237 295 Q1245 300 1249 316 Q1240 316 1234 316 Z';
+export const PATH_MID_DELT_PEAK_FRONT_L = '';
+export const PATH_MID_DELT_PEAK_FRONT_R = '';
+export const PATH_MID_DELT_PEAK_BACK_L = '';
+export const PATH_MID_DELT_PEAK_BACK_R = '';
 
 /**
- * Front-delt extension filling the chest-notch — a small fan that extends
- * from the medial edge of the front-delt (around the lower-medial corner
- * where the package's deltoid path swings under the pec) DOWNWARD and
- * slightly OVER the package's chest region. Sits on top of the chest fill
- * so the front-delt visually wraps onto the upper-medial pec strip.
- * Reference IMG_1371.PNG (前束 highlight).
+ * Front-delt extension filling the chest-notch — a rounded arc that
+ * bulges from the medial deltoid edge INWARD into the upper-medial pec
+ * area, rounding out the front-delt's inner contour. Sits on top of the
+ * package's chest fill so the front-delt visually wraps over it.
+ * Reference IMG_1371.PNG (前束 highlight). Per user request 2026-05-23
+ * iteration: extension is larger + curvier than initial draft, sweeping
+ * further into chest (Δx ≈ 30 units) for a clearly rounded inner edge.
+ *
+ * Coordinates (front L, deltoid medial edge at x≈278, chest centerline x=362):
+ *   anchor top      = (268, 320) on deltoid medial edge upper
+ *   anchor bottom   = (268, 380) on deltoid medial edge lower
+ *   bulge apex      = (310, 350) ~32 units into chest
  */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M268 320 Q278 318 285 326 Q292 340 290 358 Q284 372 274 378 Q264 376 260 366 Q258 348 262 332 Z';
+  'M268 320 Q295 322 308 338 Q314 352 308 366 Q295 378 268 380 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M464 326 Q472 318 482 320 Q488 332 490 348 Q492 366 488 376 Q478 378 470 372 Q460 366 458 350 Q458 336 464 326 Z';
+  'M482 320 Q455 322 442 338 Q436 352 442 366 Q455 378 482 380 Z';
 
 /**
- * Rear-delt extension filling the back-notch — a small fan that extends
- * from the medial edge of the rear-delt INWARD over the package's
- * upper-back / trapezius region. Sits on top so the rear-delt visually
- * wraps onto the upper-medial scapular strip. Reference IMG_1369.PNG
- * (後束 highlight).
+ * Rear-delt extension filling the back-notch — a rounded arc bulging from
+ * the medial deltoid edge INWARD over the upper-back / trapezius region,
+ * rounding out the rear-delt's inner contour. Sits on top of trap / upper-
+ * back fills. Reference IMG_1369.PNG (後束 highlight). Same iteration as
+ * front-delt — larger and curvier than initial draft.
+ *
+ * Coordinates (back L, deltoid medial edge at x≈980, spine centerline x=1086):
+ *   anchor top    = (980, 320)
+ *   anchor bottom = (980, 380)
+ *   bulge apex    = (1020, 350)
  */
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M984 322 Q996 320 1006 328 Q1014 342 1014 358 Q1010 372 1000 378 Q988 376 982 366 Q978 350 980 334 Z';
+  'M980 320 Q1007 322 1018 338 Q1024 352 1018 366 Q1007 378 980 380 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1162 328 Q1172 320 1184 322 Q1188 334 1190 350 Q1188 366 1180 376 Q1170 378 1160 372 Q1154 358 1156 342 Z';
+  'M1190 320 Q1163 322 1152 338 Q1146 352 1152 366 Q1163 378 1190 380 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
