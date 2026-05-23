@@ -60,39 +60,65 @@ export const PATH_BICEP_LONG_R =
   'M528 415 Q532 460 526 492 L548 488 Q548 460 540 410 Z';
 
 /**
- * Front: anterior (front) deltoid — medial half closer to chest.
- * Left side (subject's right shoulder on screen).
+ * Front: anterior (front) deltoid — medial fan from clavicle to humerus.
+ * Package outline (FRONT LEFT = subject's right): y=320 x∈[213,278], y=340
+ * x∈[200,250], y=360 x∈[195,248], y=378 x∈[200,242], y=395 x∈[217,228].
+ * Anterior fibers run from clavicular origin (top-medial) → humeral
+ * insertion (bottom). This wedge occupies the MEDIAL upper half of the cap
+ * (higher x on left shoulder = closer to chest centerline x=362).
+ *
+ * Left side (subject's right shoulder, viewer's left).
  */
 export const PATH_FRONT_DELT_L =
-  'M242 318 Q250 350 252 380 Q262 395 274 400 L290 395 Q295 360 290 325 Q272 310 252 312 Z';
-/** Front: anterior (front) deltoid — right side. */
+  'M244 322 Q238 340 236 358 Q236 370 240 372 Q248 366 252 354 Q256 338 260 324 Z';
+/** Front: anterior (front) deltoid — right side (mirror at x=362). */
 export const PATH_FRONT_DELT_R =
-  'M448 320 Q446 360 450 395 L468 400 Q480 395 488 380 Q490 350 488 318 Q470 310 452 314 Z';
+  'M470 324 Q478 342 482 358 Q486 368 490 370 Q496 366 494 354 Q488 340 484 322 Z';
 
 /**
- * Front: middle (lateral) deltoid — lateral cap of shoulder.
- * Visible on both front and back. Front view: outer half.
+ * Front: middle (lateral) deltoid — outer strip of the cap.
+ * Acromial origin (top-lateral) → humeral insertion. Stays in the LATERAL
+ * half of the cap (lower x on left shoulder = further from centerline).
+ * Strip kept ≥5 units inside the package's lateral curve at every y.
+ *
+ * Left side (subject's right shoulder, viewer's left).
  */
 export const PATH_MID_DELT_FRONT_L =
-  'M200 330 Q198 370 210 395 Q224 400 240 395 Q238 360 240 320 Q220 320 208 322 Z';
+  'M222 324 Q212 348 216 368 Q222 374 228 370 Q230 350 230 326 Z';
 export const PATH_MID_DELT_FRONT_R =
-  'M488 320 Q488 360 488 395 Q502 400 514 395 Q526 370 524 330 Q514 322 500 320 Z';
+  'M498 326 Q498 350 500 370 Q506 374 512 368 Q516 348 506 324 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
 // ---------------------------------------------------------------------------
 
-/** Back: rear (posterior) deltoid — medial half closer to back. */
+/**
+ * Back: rear (posterior) deltoid — fan from scapular spine to humerus.
+ * MEDIAL portion of the deltoid cap (toward spine centerline x=1086).
+ * Package outline (BACK LEFT = subject's right): cap top at y=312-320 spans
+ * only x=955-980 (narrow apex); widens going down: y=340 x∈[917,960],
+ * y=360 x∈[914,951], y=380 x∈[914,935], y=395 x∈[914,915].
+ * Rear delt fans from upper-medial origin → tapers down-and-out toward
+ * humeral insertion. Stays in the MEDIAL half (higher x) of the cap.
+ *
+ * Back left = subject's right shoulder (viewer's left on back view).
+ */
 export const PATH_REAR_DELT_L =
-  'M962 326 Q960 360 966 392 L985 395 Q998 392 1004 380 Q1004 348 998 322 Q982 318 970 320 Z';
+  'M960 324 Q950 340 942 358 Q938 370 942 374 Q948 370 950 360 Q958 342 968 324 Z';
+/** Back right = subject's left shoulder (viewer's right on back view). */
 export const PATH_REAR_DELT_R =
-  'M1188 322 Q1180 350 1180 380 Q1188 392 1200 395 L1220 392 Q1226 360 1226 326 Q1208 318 1192 320 Z';
+  'M1200 324 Q1210 342 1220 360 Q1224 370 1226 374 Q1230 370 1224 358 Q1216 340 1208 324 Z';
 
-/** Back: middle (lateral) deltoid — outer cap on back view. */
+/**
+ * Back: middle (lateral) deltoid — LATERAL strip on outer cap, back view.
+ * Acromial origin → humeral insertion. Stays in LATERAL half of the cap.
+ * Package lateral edge (BACK LEFT): vertical at x≈914 from y=346 to y=395,
+ * curving to (955, 311) at top. Strip kept ≥4 units inside.
+ */
 export const PATH_MID_DELT_BACK_L =
-  'M928 332 Q920 372 930 398 Q940 405 956 400 Q958 365 962 326 Q942 322 930 326 Z';
+  'M934 334 Q920 358 922 380 Q928 386 932 384 Q934 360 938 336 Z';
 export const PATH_MID_DELT_BACK_R =
-  'M1226 326 Q1226 365 1228 398 Q1240 405 1254 400 Q1262 372 1256 332 Q1242 322 1230 324 Z';
+  'M1234 336 Q1238 360 1240 384 Q1244 386 1248 380 Q1248 358 1238 334 Z';
 
 /** Back: upper gluteal — top crescent of glutes (both sides). */
 export const PATH_UPPER_GLUTE =
