@@ -151,6 +151,66 @@ L: C 270 400 335 348 356 336  (asymmetric concave-up cubic)
    cp2 (335, 348) → shallow bulge near inner (depth 7 at t=0.7)
 ```
 
+### S-shape cubic Bezier (different concavity at outer vs inner)
+
+When user wants 切線 with DIFFERENT concavity at each end (e.g. "外側凹向上、內側凹向下" — S-shape with inflection point):
+
+Place cp1 and cp2 on OPPOSITE sides of the straight line:
+- cp1 (near outer): y > straight_at_cp1_x → ∪ near outer
+- cp2 (near inner): y < straight_at_cp2_x → ∩ near inner
+- Inflection point happens around t=0.5 (curve crosses straight line once)
+
+Example (glute 切線 round 3):
+```
+L→R from (978, 674) to (1081, 685), straight slope 11/103 ≈ 0.107
+  cp1 (1008, 706): straight y at x=1008 ≈ 677.2, cp1 y=706 → 29 below straight → ∪ pull
+  cp2 (1054, 654): straight y at x=1054 ≈ 681.7, cp2 y=654 → 28 above straight → ∩ pull
+  Curve at t=0.3: y=684.6 vs straight 677.2 → +7 below straight (∪ confirmed)
+  Curve at t=0.7: y=675.0 vs straight 682.0 → -7 above straight (∩ confirmed)
+  Total amplitude ~14 units, clearly visible S
+```
+
+For mirroring across an axis, reverse cp order: L→R `C cp1 cp2 end` ↔ reverse `C cp2 cp1 start` (same shape, opposite direction).
+
+## Catmull-Rom smoothing for jagged polylines
+
+When user traces an outline with 20+ closely-spaced keypoints, connecting them with straight L lines produces visible jaggedness at small render size. Replace with Catmull-Rom cubic Bezier chain — curve passes through every keypoint with continuous tangent (C1 smoothness).
+
+**Formula** (segment from Pi → Pi+1, with neighbors Pi-1 and Pi+2):
+```
+cp1 = Pi   + (Pi+1 - Pi-1) / 6
+cp2 = Pi+1 - (Pi+2 - Pi)   / 6
+```
+Factor 1/6 is standard Catmull-Rom (tension=1). Larger factor (e.g. 1/3) = more curve; smaller (1/12) = sharper.
+
+**Boundary handling**: first/last segments have no real neighbor on one side. Use mirror-phantom:
+```python
+p_neg1 = (2*pts[0][0] - pts[1][0], 2*pts[0][1] - pts[1][1])
+p_n    = (2*pts[-1][0] - pts[-2][0], 2*pts[-1][1] - pts[-2][1])
+```
+This makes endpoint tangent direction continuous with first/last segment direction (no sudden snap).
+
+**Python script** (reusable across muscle outlines):
+```python
+def catmull_rom(pts, factor=1/6):
+    p_neg1 = (2*pts[0][0] - pts[1][0], 2*pts[0][1] - pts[1][1])
+    p_n = (2*pts[-1][0] - pts[-2][0], 2*pts[-1][1] - pts[-2][1])
+    extended = [p_neg1] + list(pts) + [p_n]
+    parts = [f"M{pts[0][0]} {pts[0][1]}"]
+    for i in range(1, len(extended) - 2):
+        p0, p1, p2, p3 = extended[i-1], extended[i], extended[i+1], extended[i+2]
+        cp1 = (p1[0] + (p2[0]-p0[0])*factor, p1[1] + (p2[1]-p0[1])*factor)
+        cp2 = (p2[0] - (p3[0]-p1[0])*factor, p2[1] - (p3[1]-p1[1])*factor)
+        parts.append(f"C{cp1[0]:.1f} {cp1[1]:.1f} {cp2[0]:.1f} {cp2[1]:.1f} {p2[0]} {p2[1]}")
+    return " ".join(parts)
+```
+
+**Cost**: ~30 chars per Bezier segment × N-1 segments. For 28 keypoints → 27 cubic Beziers → ~810 chars. Path size doubles vs straight L, but jaggedness eliminated.
+
+**When NOT to smooth**: short polylines (< 10 points) where each segment is intentional / where straight edges are anatomically correct (e.g., bone landmarks).
+
+Used: glute UPPER/LOWER outline round 4 (51-keypoint trace).
+
 ## Mirror axis selection
 
 PACKAGE bodies (`react-native-body-highlighter`) are NOT strictly mirror-symmetric about viewBox center x=362:
@@ -197,6 +257,8 @@ When 2 fills need to share a boundary (e.g., UPPER and LOWER chest sharing 切�
 - ❌ Assume mirror axis = viewBox center 362 — PACKAGE is asymmetric, user often picks 363/364
 - ❌ Naive coordinate-mirror cubic Bezier without reversing curve order — flips winding direction silently
 - ❌ Iterate 5+ rounds with agent guesses on user black-line images — break to coord-picker tool, get exact SVG coords from user instead
+- ❌ Assume cut line has single concavity (∪ only or ∩ only) — user may want S-shape (∪ at outer + ∩ at inner). Confirm with user before picking cp y direction; for S-shape, place cps on OPPOSITE sides of straight line.
+- ❌ Leave user-traced polyline (20+ keypoints) as raw `L` segments — looks jagged at render size. Apply Catmull-Rom smoothing (cubic Bezier chain through every keypoint, C1 continuous tangent).
 
 ## Pre-commit hook integration
 
@@ -227,3 +289,14 @@ TrainingLog 2026-05-23 evening:
 - Round 20: caught Q ctrl direction bug — concave-down → cubic Bezier asymmetric concave-up
 
 **Key takeaway**: agent visual interpretation of user hand-drawn ink images is unreliable past 3-5 iterations. Switch to coord-picker HTML tool to get exact SVG coords from user. Build the tool when iteration stalls, don't wait 10 rounds.
+
+## Historical example session 3 — glute UPPER/LOWER 切線 + outline (2026-05-24)
+
+4 rounds, 1 commit (no agent — direct main-convo Edit with verification math each round). Leveraged session 2's coord-picker tool from start, avoided wasted iterations:
+
+- **Round 1** — Built `glute-coord-picker.html` (back viewBox `940 540 280 320`, full back silhouette + dashed overlay of existing PATH_UPPER_GLUTE/LOWER_GLUTE for reference). User clicked 4 切線 keypoints. Mirror sums P1+P4 = P2+P3 = 2167 → axis x=1083.5. Implemented cut line as single-concavity cubic (cp y > straight midpoint → ∪).
+- **Round 2** — User traced 51-point L glute combined outline. Decomposed into UPPER (P3-P23) + LOWER (P24-P51) via cut line. Mirrored R using x'=2167-x. Outline as raw `L` segments.
+- **Round 3** — User feedback "接近外側凹向上，接近內側凹向下" → S-shape cubic. Placed cp1 below straight near outer (∪ pull), cp2 above straight near inner (∩ pull). Verified amplitude ±7 units at t=0.3 / t=0.7.
+- **Round 4** — User feedback "外圍有點鋸齒給一點點平滑" → Catmull-Rom smoothing on all 4 polylines (UPPER L 21 + UPPER R 21 + LOWER L 27 + LOWER R 27 segments). Used Python script with mirror-phantom boundary.
+
+**Key takeaway vs session 2**: when the user's mental model is precise (they can articulate "外側凹向上、內側凹向下"), do the math in the main conversation — no agent spawn needed. Save agents for ambiguous visual interpretation tasks. Also: re-use the coord-picker HTML template (just swap viewBox + silhouette parts) — building takes 5 min, saves 5+ rounds of guesswork.
