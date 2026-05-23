@@ -69,13 +69,32 @@ import {
  * Two paths share the V-line; together they fill the chest silhouette
  * without extending outside.
  */
-/** Front: upper chest — area above V line (clavicular head). */
+/**
+ * Round 11 chest fix (2026-05-23): user reported "上方中間超出胸的界線 (中縫)"
+ * — UPPER paint crossed PACKAGE sternum notch (between chest L medial top
+ * (337, 319) and chest R medial top (380, 327)) painting over body area
+ * that has no pec muscle.
+ *
+ * Redesign: each of UPPER + LOWER is now TWO sub-paths (one per pec L/R),
+ * never crossing sternum notch at top or xiphoid notch at bottom.
+ *
+ * V wings now end at chest L/R medial silhouette crossings (where the
+ * original V wing from lateral to centerline-apex would intersect chest
+ * medial): L crossing ~(357, 383), R crossing ~(374, 380). Two close-but-
+ * separate "V apexes" 17 units apart in x — visually reads as single V
+ * apex at sternum xiphoid area without actually crossing into the notch.
+ *
+ * "一點點凹向上" preserved: V wing left Q control (309, 357), curve mid
+ * y=360.5 vs straight midpoint y=364 → 3.5 above (slight concave up).
+ * V wing right Q control (416, 356), similar slight concave up.
+ */
+/** Front: upper chest — 2 sub-paths (L pec upper + R pec upper). */
 export const PATH_UPPER_CHEST =
-  'M260 345 Q268 318 300 318 Q320 316 337 320 Q362 318 380 326 Q400 316 422 320 Q445 322 463 345 Q410 358 362 385 Q312 358 260 345 Z';
+  'M260 345 Q270 322 300 318 Q320 316 337 319 Q351 333 357 344 L357 383 Q309 357 260 345 Z M463 345 Q449 326 425 320 Q405 316 380 327 Q377 354 374 380 Q416 356 463 345 Z';
 
-/** Front: lower chest — area below V line (sternal head). */
+/** Front: lower chest — 2 sub-paths (L pec lower + R pec lower). */
 export const PATH_LOWER_CHEST =
-  'M260 345 Q312 358 362 385 Q410 358 463 345 Q473 378 471 400 Q460 428 440 432 Q408 437 380 425 L362 395 L344 425 Q314 437 290 432 Q268 428 263 405 Q256 378 260 345 Z';
+  'M260 345 Q309 357 357 383 L357 392 L355 409 Q327 425 297 433 Q282 430 272 422 Q263 405 263 350 L260 345 Z M463 345 Q416 356 374 380 L372 401 L375 413 Q393 425 416 435 Q425 437 443 430 Q460 428 471 400 Q472 380 463 345 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
