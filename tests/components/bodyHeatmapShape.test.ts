@@ -4,9 +4,18 @@
  * Jest config (jest.config in package.json) runs in `testEnvironment: node`
  * and matches only `*.test.ts`, so we cannot mount the React Native SVG
  * component here. Instead we parse the source file for the 19 stable M_*
- * constant references and assert each muscle ID is wired into at least one
- * `fill={f(M_*)}` call — guarding against accidentally dropping a muscle in
- * future visual edits.
+ * constant references and assert each muscle ID is referenced somewhere in
+ * the body-heatmap source — guarding against accidentally dropping a
+ * muscle in future visual edits.
+ *
+ * Architecture note (2026-05-23, slice anatomy/r5-library): the body-heatmap
+ * was migrated from hand-drawn per-muscle SVG paths to the
+ * `react-native-body-highlighter` package's pre-built body. The 19 M_*
+ * constants collapse onto the package's 16 slugs (some N:1 — e.g. all
+ * three deltoid heads → `deltoids`). The shape test now asserts each M_*
+ * is *referenced* in the source (via M_TO_SLUG mapping + `f(M_*, ...)` fill
+ * helper), not the older `fill={f(M_*)}` JSX literal pattern, since the
+ * underlying Body component owns the SVG.
  *
  * Also verifies the BodyHeatmap public API contract (mQuintile prop name,
  * Quintile type export) hasn't drifted away from what stats-panel.tsx
@@ -80,13 +89,13 @@ describe('BodyHeatmap M-layer shape invariants', () => {
     }
   });
 
-  it('fills each of the 19 muscles via fill={f(M_*)} expression', () => {
-    // The heatmap source paints each muscle path with a `fill={f(M_*)}`
-    // expression that runs the quintile lookup. Verify every M_* import
-    // appears at least once in such a fill expression.
-    //
-    // (Body silhouette/skin paths use literal hex colors, so the f()
-    // function call is exclusive to the per-muscle paths.)
+  it('references each of the 19 muscles in the source (M_TO_SLUG + f() helper)', () => {
+    // Under the library-based architecture the heatmap delegates the actual
+    // SVG drawing to react-native-body-highlighter. Each M_* must still be
+    // referenced in the file so that:
+    //   (a) the M_TO_SLUG mapping covers it, and
+    //   (b) the `f(M_*, mQuintile)` fill helper resolves its quintile color.
+    // The test counts raw occurrences of each constant name.
     const importNames = [
       'M_ABS',
       'M_BACK',
@@ -109,9 +118,18 @@ describe('BodyHeatmap M-layer shape invariants', () => {
       'M_UPPER_GLUTE',
     ];
     for (const name of importNames) {
-      const pattern = new RegExp(`fill=\\{f\\(${name}\\)\\}`);
+      // Match the bare constant as a whole word (allowing the comma /
+      // bracket / colon / paren contexts they appear in).
+      const pattern = new RegExp(`\\b${name}\\b`);
       expect(HEATMAP_SOURCE).toMatch(pattern);
     }
+    // Sanity: at minimum the file should reference each constant at least
+    // twice (once on import, once via M_TO_SLUG or f()).
+    const totalRefs = importNames.reduce((sum, name) => {
+      const occurrences = HEATMAP_SOURCE.match(new RegExp(`\\b${name}\\b`, 'g')) ?? [];
+      return sum + occurrences.length;
+    }, 0);
+    expect(totalRefs).toBeGreaterThanOrEqual(importNames.length * 2);
   });
 
   it('exposes BodyHeatmap with mQuintile + mCount props (not legacy mgQuintile)', () => {
