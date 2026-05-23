@@ -184,14 +184,31 @@ export const PATH_MID_DELT_PEAK_BACK_R = '';
  *     colour (back view) — same colour as the medial half ClipPath rect,
  *     so overlap is invisible
  */
+/**
+ * Per user feedback (round 5, 2026-05-23): "請填滿、些微增加厚度、像不對稱的葉子".
+ * Enlarged from thin diagonal slice → asymmetric leaf shape (top + bottom apex,
+ * widest in middle, outer side more curved than inner). Each leaf:
+ *   - top apex near deltoid upper-medial vertex
+ *   - outer mid pulled to lateral side of medial 1/3 (widest point)
+ *   - bottom apex near deltoid lower-medial vertex
+ *   - inner mid sits just inside deltoid bbox medial edge
+ *
+ * Asymmetry: outer-edge curve has greater amplitude than inner-edge, so
+ * the leaf's midrib leans toward the inner (medial bbox) side — reads as
+ * a stylized leaf rather than a symmetric eye/lens.
+ *
+ * All 4 paths still stay entirely INSIDE deltoid bbox (no extension into
+ * chest/back). Back deltoid bbox is narrower (w=67) than front (w=86),
+ * so back leaves are proportionally smaller.
+ */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M276 318 Q272 332 260 348 Q252 360 250 372 L240 378 Q244 358 252 342 Q262 326 276 318 Z';
+  'M276 314 Q250 322 242 358 Q235 380 238 388 Q265 380 273 350 Q279 322 276 314 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M448 318 Q452 332 464 348 Q472 360 474 372 L484 378 Q480 358 472 342 Q462 326 448 318 Z';
+  'M448 314 Q474 322 482 358 Q489 380 486 388 Q459 380 451 350 Q445 322 448 314 Z';
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M979 318 Q975 332 963 348 Q955 360 953 372 L943 378 Q947 358 955 342 Q965 326 979 318 Z';
+  'M979 314 Q957 322 953 358 Q947 380 950 388 Q972 380 978 350 Q982 322 979 314 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1193 318 Q1197 332 1209 348 Q1217 360 1219 372 L1229 378 Q1225 358 1217 342 Q1207 326 1193 318 Z';
+  'M1193 314 Q1215 322 1219 358 Q1225 380 1222 388 Q1200 380 1194 350 Q1190 322 1193 314 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
