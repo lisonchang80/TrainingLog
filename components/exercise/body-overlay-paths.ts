@@ -557,13 +557,74 @@ export const PATH_REAR_DELT_BACK_FILL_R =
 // Back-side overlay paths
 // ---------------------------------------------------------------------------
 
-/** Back: upper gluteal — top crescent of glutes (both sides). */
+/**
+ * Back: upper gluteal — top crescent of glutes (both sides).
+ *
+ * Round 2 outline (2026-05-24): user-traced 51 keypoints via glute
+ * coord-picker HTML tool tracing the COMBINED L glute silhouette:
+ *   P1 (978, 674)        — L outer cut endpoint
+ *   P2 (1081, 685)       — L inner cut endpoint
+ *   P3 (1081, 675)       — L inner-top (just above cut)
+ *   P4-P14 (down to 1018, 619) — inner edge going up-left to top
+ *   P15 (1010, 619)      — top corner
+ *   P16-P23 (to 980, 665) — outer edge going down-left from top to just
+ *                            above cut
+ *   P24 (977, 680)       — outer just below cut (LOWER starts)
+ *   P25-P40 (to 1050, 778) — outer/bottom edge of LOWER
+ *   P41-P51 (to 1081, 694) — bottom/inner edge going up to just below cut
+ *
+ * Cut-line cubic (round 3, 2026-05-24): user feedback "接近外側凹向上，
+ * 接近內側凹向下" — S-shape, NOT single ∪. Cps placed off-straight in
+ * opposite directions to produce inflection point near t=0.5.
+ *   L→R from (978,674) to (1081,685): C 1008 706 1054 654 1081 685
+ *     cp1 (1008, 706): ~29 units below straight at x=1008 → ∪ near outer
+ *     cp2 (1054, 654): ~28 units above straight at x=1054 → ∩ near inner
+ *     Curve amplitude ~7 units below straight at t=0.3, ~7 above at t=0.7
+ *   Mirror axis x=1083.5 (P1+P4 = P2+P3 = 2167 sums verified)
+ *
+ * UPPER decomposition for L sub-path (CCW traversal):
+ *   M P3 → Catmull-Rom Bezier chain through P4..P23 → L P1 (outer cut)
+ *   → cubic L→R → P2 (inner cut) → Z (closes back to P3)
+ *
+ * Round 4 smoothing (2026-05-24): user feedback "外圍有點鋸齒給一點點平滑"
+ * — outline polyline (straight L lines between 22 keypoints) replaced
+ * with Catmull-Rom cubic Bezier chain (tension=1/6 standard). Curve
+ * still passes through every user keypoint exactly, but tangents are
+ * continuous across vertices (no sharp corners). Boundary endpoints
+ * (P3 and P23) use mirror-phantom for smooth tangent direction.
+ *
+ * R sub-path: same shape, mirrored about x=1083.5 (every x → 2167-x),
+ * traversed in same order (CCW on R side = CW visually, but fill-rule
+ * nonzero treats both consistently).
+ */
 export const PATH_UPPER_GLUTE =
-  'M978 632 Q1010 622 1042 626 L1062 628 Q1080 622 1118 628 Q1156 622 1184 632 Q1186 660 1180 685 L1156 692 Q1112 686 1082 690 Q1052 686 1010 692 L984 685 Q978 660 978 632 Z';
+  'M1081 675 C1080.3 672 1079.8 668.8 1079 666 C1078.2 663.2 1077.2 660.7 1076 658 C1074.8 655.3 1073.5 652.5 1072 650 C1070.5 647.5 1068.7 645.2 1067 643 C1065.3 640.8 1064.2 638.7 1062 637 C1059.8 635.3 1056.2 634.2 1054 633 C1051.8 631.8 1050.7 631.3 1049 630 C1047.3 628.7 1046.3 626.3 1044 625 C1041.7 623.7 1038 622.8 1035 622 C1032 621.2 1028.8 620.5 1026 620 C1023.2 619.5 1020.7 619.2 1018 619 C1015.3 618.8 1012.5 618.7 1010 619 C1007.5 619.3 1005 620 1003 621 C1001 622 999.5 623.5 998 625 C996.5 626.5 995.3 628.2 994 630 C992.7 631.8 991.3 633.8 990 636 C988.7 638.2 987.2 640.7 986 643 C984.8 645.3 983.8 647.5 983 650 C982.2 652.5 981.5 655.5 981 658 C980.5 660.5 980.3 662.7 980 665 L978 674 C1008 706 1054 654 1081 685 Z M1086 675 C1086.7 672 1087.2 668.8 1088 666 C1088.8 663.2 1089.8 660.7 1091 658 C1092.2 655.3 1093.5 652.5 1095 650 C1096.5 647.5 1098.3 645.2 1100 643 C1101.7 640.8 1102.8 638.7 1105 637 C1107.2 635.3 1110.8 634.2 1113 633 C1115.2 631.8 1116.3 631.3 1118 630 C1119.7 628.7 1120.7 626.3 1123 625 C1125.3 623.7 1129 622.8 1132 622 C1135 621.2 1138.2 620.5 1141 620 C1143.8 619.5 1146.3 619.2 1149 619 C1151.7 618.8 1154.5 618.7 1157 619 C1159.5 619.3 1162 620 1164 621 C1166 622 1167.5 623.5 1169 625 C1170.5 626.5 1171.7 628.2 1173 630 C1174.3 631.8 1175.7 633.8 1177 636 C1178.3 638.2 1179.8 640.7 1181 643 C1182.2 645.3 1183.2 647.5 1184 650 C1184.8 652.5 1185.5 655.5 1186 658 C1186.5 660.5 1186.7 662.7 1187 665 L1189 674 C1159 706 1113 654 1086 685 Z';
 
-/** Back: lower gluteal — bottom half of glutes (both sides). */
+/**
+ * Back: lower gluteal — bottom half of glutes (both sides).
+ *
+ * Top edge shares the same cut-line cubic as PATH_UPPER_GLUTE (paths
+ * touch but don't overlap). See PATH_UPPER_GLUTE comment for the 51-
+ * keypoint trace decomposition.
+ *
+ * LOWER decomposition for L sub-path (CCW traversal):
+ *   M P24 → Catmull-Rom Bezier chain through P25..P51 → L P2 (inner cut)
+ *   → cubic R→L → Z (closes back to P24)
+ *
+ * Round 4 smoothing: same Catmull-Rom treatment as UPPER (see comment
+ * above) — 28-point polyline → 27 cubic Bezier segments passing through
+ * every keypoint with continuous tangents.
+ *
+ * R sub-path: same shape, mirrored about x=1083.5.
+ *
+ * Cubic R→L cps for L (round 3 S-shape, reverse of UPPER L→R):
+ *   C 1054 654 1008 706 978 674
+ *     cp1 (1054, 654): ∩ near inner (= near t=0 = right end of L LOWER cut)
+ *     cp2 (1008, 706): ∪ near outer (= near t=1 = left end of L LOWER cut)
+ * Cubic L→R cps for R (mirror + reverse): C 1113 654 1159 706 1189 674
+ */
 export const PATH_LOWER_GLUTE =
-  'M984 685 Q1010 696 1042 692 L1062 694 Q1080 696 1118 694 Q1156 696 1180 685 L1186 720 Q1184 752 1170 778 Q1140 790 1110 776 L1080 770 Q1050 778 1020 780 Q990 786 974 770 Q970 740 980 712 Z';
+  'M977 680 C977 682 977 683.8 977 686 C977 688.2 977.2 690.8 977 693 C976.8 695.2 976 696.7 976 699 C976 701.3 976.5 704.5 977 707 C977.5 709.5 978.3 711.5 979 714 C979.7 716.5 980.2 719.5 981 722 C981.8 724.5 982.7 726.3 984 729 C985.3 731.7 987.5 735.3 989 738 C990.5 740.7 991.3 742.7 993 745 C994.7 747.3 997.2 749.7 999 752 C1000.8 754.3 1002 756.8 1004 759 C1006 761.2 1008.5 763.2 1011 765 C1013.5 766.8 1016 768.8 1019 770 C1022 771.2 1025.3 771 1029 772 C1032.7 773 1037.5 775 1041 776 C1044.5 777 1046.8 777.8 1050 778 C1053.2 778.2 1057.3 777.7 1060 777 C1062.7 776.3 1064 775.7 1066 774 C1068 772.3 1071 769.5 1072 767 C1073 764.5 1072 761.7 1072 759 C1072 756.3 1071.8 753.8 1072 751 C1072.2 748.2 1072.5 745 1073 742 C1073.5 739 1074.2 736.3 1075 733 C1075.8 729.7 1077.3 725.7 1078 722 C1078.7 718.3 1078.5 714.5 1079 711 C1079.5 707.5 1080.7 703.8 1081 701 C1081.3 698.2 1081 696.3 1081 694 L1081 685 C1054 654 1008 706 978 674 Z M1190 680 C1190 682 1190 683.8 1190 686 C1190 688.2 1189.8 690.8 1190 693 C1190.2 695.2 1191 696.7 1191 699 C1191 701.3 1190.5 704.5 1190 707 C1189.5 709.5 1188.7 711.5 1188 714 C1187.3 716.5 1186.8 719.5 1186 722 C1185.2 724.5 1184.3 726.3 1183 729 C1181.7 731.7 1179.5 735.3 1178 738 C1176.5 740.7 1175.7 742.7 1174 745 C1172.3 747.3 1169.8 749.7 1168 752 C1166.2 754.3 1165 756.8 1163 759 C1161 761.2 1158.5 763.2 1156 765 C1153.5 766.8 1151 768.8 1148 770 C1145 771.2 1141.7 771 1138 772 C1134.3 773 1129.5 775 1126 776 C1122.5 777 1120.2 777.8 1117 778 C1113.8 778.2 1109.7 777.7 1107 777 C1104.3 776.3 1103 775.7 1101 774 C1099 772.3 1096 769.5 1095 767 C1094 764.5 1095 761.7 1095 759 C1095 756.3 1095.2 753.8 1095 751 C1094.8 748.2 1094.5 745 1094 742 C1093.5 739 1092.8 736.3 1092 733 C1091.2 729.7 1089.7 725.7 1089 722 C1088.3 718.3 1088.5 714.5 1088 711 C1087.5 707.5 1086.3 703.8 1086 701 C1085.7 698.2 1086 696.3 1086 694 L1086 685 C1113 654 1159 706 1189 674 Z';
 
 // ---------------------------------------------------------------------------
 // Sibling groups — each entry shares a package slug (overlay split)
