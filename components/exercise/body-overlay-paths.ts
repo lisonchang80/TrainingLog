@@ -239,13 +239,37 @@ import {
  * → top arc reversed → chest lateral top → lateral down → close.
  * UPPER_R follows real chest R silhouette (PACKAGE asymmetric).
  */
+/**
+ * Round 18 chest (2026-05-23): user traced left pec outline via
+ * coord-picker, gave 28 keypoints (P1..P28) defining custom chest L
+ * silhouette. Chest R mirrored about x=364 (user's centerline).
+ *
+ * User's L outline keypoints (CCW from top-medial):
+ *   P1 (342, 321) → P2 (323, 317) → P3 (305, 317) → P4 (289, 321) →
+ *   P5 (275, 327) → P6 (266, 335) → P7 (258, 350) → P8 (255, 362) →
+ *   P9 (255, 374) → P10 (256, 385) → P11 (258, 395) → P12 (262, 406) →
+ *   P13 (267, 416) → P14 (275, 424) → P15 (286, 430) → P16 (297, 433) →
+ *   P17 (310, 434) → P18 (327, 432) → P19 (341, 426) → P20 (350, 418) →
+ *   P21 (355, 412) → P22 (357, 400) → P23 (357, 388) → P24 (358, 376) →
+ *   P25 (359, 363) → P26 (357, 352) → P27 (355, 341) → P28 (350, 330)
+ *
+ * 切線 (from round 17, snapped to outline):
+ *   L: (255, 379) → (354, 338), Q control (304, 350) — concave up 4.25u
+ *   R: (473, 379) → (374, 338), Q control (424, 350) — mirror about x=364
+ *
+ * UPPER (above 切線) covers P1..P9 + P28 + 切線 closure
+ * LOWER (below 切線) covers 切線 + P27..P22..P10 closure
+ *
+ * Together UPPER + LOWER tile the user-defined chest area. No overlap,
+ * no holes needed (each path fills its own region).
+ */
 /** Front: upper chest — 2 sub-paths above 切線 (clavicular regions). */
 export const PATH_UPPER_CHEST =
-  'M265 379 Q308 350 352 338 L337 319 Q320 316 300 318 Q280 322 260 344 Q263 360 265 379 Z M462 379 Q463 360 463 344 Q455 332 449 326 Q432 320 422 318 Q410 316 399 318 Q388 320 380 327 L378 339 Q420 350 462 379 Z';
+  'M255 379 L255 374 L255 362 L258 350 L266 335 L275 327 L289 321 L305 317 L323 317 L342 321 L350 330 L354 338 Q304 350 255 379 Z M473 379 L473 374 L473 362 L470 350 L462 335 L453 327 L439 321 L423 317 L405 317 L386 321 L378 330 L374 338 Q424 350 473 379 Z';
 
-/** Front: lower chest — chest L+R silhouettes with UPPER holes (sternal). */
+/** Front: lower chest — 2 sub-paths below 切線 (sternal regions). */
 export const PATH_LOWER_CHEST =
-  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M265 379 Q308 350 352 338 L337 319 Q320 316 300 318 Q280 322 260 344 Q263 360 265 379 Z M462 379 Q463 360 463 344 Q455 332 449 326 Q432 320 422 318 Q410 316 399 318 Q388 320 380 327 L378 339 Q420 350 462 379 Z';
+  'M255 379 Q304 350 354 338 L355 341 L357 352 L359 363 L358 376 L357 388 L357 400 L355 412 L350 418 L341 426 L327 432 L310 434 L297 433 L286 430 L275 424 L267 416 L262 406 L258 395 L256 385 L255 379 Z M473 379 Q424 350 374 338 L373 341 L371 352 L369 363 L370 376 L371 388 L371 400 L373 412 L378 418 L387 426 L401 432 L418 434 L431 433 L442 430 L453 424 L461 416 L466 406 L470 395 L472 385 L473 379 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
