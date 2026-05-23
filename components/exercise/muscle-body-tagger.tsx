@@ -67,8 +67,16 @@ import {
   PATH_BICEP_LONG_R,
   PATH_BICEP_SHORT_L,
   PATH_BICEP_SHORT_R,
+  PATH_FRONT_DELT_CHEST_FILL_L,
+  PATH_FRONT_DELT_CHEST_FILL_R,
   PATH_LOWER_CHEST,
   PATH_LOWER_GLUTE,
+  PATH_MID_DELT_PEAK_BACK_L,
+  PATH_MID_DELT_PEAK_BACK_R,
+  PATH_MID_DELT_PEAK_FRONT_L,
+  PATH_MID_DELT_PEAK_FRONT_R,
+  PATH_REAR_DELT_BACK_FILL_L,
+  PATH_REAR_DELT_BACK_FILL_R,
   PATH_UPPER_CHEST,
   PATH_UPPER_GLUTE,
   SPLIT_X_BACK_DELT_L,
@@ -359,6 +367,14 @@ function FrontOverlay({
         fill={midDeltFill}
         clipPath="url(#delt-front-r)"
       />
+      {/* UNCLIPPED delt extensions — drawn on top of everything so the package's
+          chest / trapezius slugs cannot mask these regions. Each path is a
+          small fan / cap that extends the visual delt coverage beyond the
+          package's slug silhouette. See body-overlay-paths.ts for geometry. */}
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_L} fill={frontDeltFill} />
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_R} fill={frontDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_R} fill={midDeltFill} />
     </Svg>
   );
 }
@@ -431,6 +447,14 @@ function BackOverlay({
         fill={midDeltFill}
         clipPath="url(#delt-back-r)"
       />
+      {/* UNCLIPPED delt extensions — drawn on top of everything so the package's
+          trapezius / upper-back slugs cannot mask these regions. Each path is a
+          small fan / cap that extends the visual delt coverage beyond the
+          package's slug silhouette. See body-overlay-paths.ts for geometry. */}
+      <Path d={PATH_REAR_DELT_BACK_FILL_L} fill={rearDeltFill} />
+      <Path d={PATH_REAR_DELT_BACK_FILL_R} fill={rearDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_R} fill={midDeltFill} />
       {/* Gluteal split */}
       <Path d={PATH_UPPER_GLUTE} fill={roleSubFill(M_UPPER_GLUTE, GLUTE_SIBS, highlight)} />
       <Path d={PATH_LOWER_GLUTE} fill={roleSubFill(M_LOWER_GLUTE, GLUTE_SIBS, highlight)} />

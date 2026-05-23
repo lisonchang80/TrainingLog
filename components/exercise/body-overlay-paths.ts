@@ -126,6 +126,64 @@ export const SPLIT_X_BACK_DELT_L = 936.4;
 export const SPLIT_X_BACK_DELT_R = 1230.2;
 
 // ---------------------------------------------------------------------------
+// Deltoid EXTENSION paths — drawn UNCLIPPED on top of the package's slug fills
+// so the visual delt coverage is complete (the package's deltoid silhouette
+// doesn't reach the acromion peak, and chest / upper-back / trapezius slugs
+// mask the medial deltoid edge). Each path is a small fan / wedge that sits
+// at the topmost paint layer — they cannot be masked by underlying slugs.
+//
+// Coordinates were derived from the package paths:
+//   PACKAGE_DELT_FRONT_L bbox x ∈ [192.58, 278.43], y ∈ [312, 395]
+//   PACKAGE_DELT_FRONT_R bbox x ∈ [449.44, 542.73], y ∈ [308, 393]
+//   PACKAGE_DELT_BACK_L  bbox x ∈ [913.97, 981.31], y ∈ [312, 397]
+//   PACKAGE_DELT_BACK_R  bbox x ∈ [1184.98, 1252.78], y ∈ [313, 398]
+//   chest L front start  M272.91 422.84 (upper-medial pec edge ≈ x 270-300, y 320-360)
+//   trapezius L back     bbox roughly x ∈ [1005, 1075], y ∈ [299, 475]
+//   upper-back L start   bbox roughly x ∈ [957, 1075], y ∈ [325, 585]
+// ---------------------------------------------------------------------------
+
+/**
+ * Mid-delt extension up to the acromion peak. A small triangular cap that
+ * extends from the TOP of the package's deltoid silhouette (y≈312) UP to
+ * approximately y≈293, sitting on the lateral half (mid-delt side) of each
+ * shoulder. Bridges the gap between the package's deltoid contour and the
+ * true bony acromion landmark. Reference IMG_1370.PNG (中束 highlight).
+ */
+export const PATH_MID_DELT_PEAK_FRONT_L =
+  'M204 314 Q207 300 215 295 Q220 293 222 296 L222 314 Q217 314 210 316 Z';
+export const PATH_MID_DELT_PEAK_FRONT_R =
+  'M510 314 L510 296 Q513 293 518 295 Q525 300 528 314 Q522 316 517 314 Z';
+export const PATH_MID_DELT_PEAK_BACK_L =
+  'M918 316 Q922 300 930 295 Q936 293 938 297 L938 316 Q930 316 924 316 Z';
+export const PATH_MID_DELT_PEAK_BACK_R =
+  'M1228 316 L1228 297 Q1230 293 1237 295 Q1245 300 1249 316 Q1240 316 1234 316 Z';
+
+/**
+ * Front-delt extension filling the chest-notch — a small fan that extends
+ * from the medial edge of the front-delt (around the lower-medial corner
+ * where the package's deltoid path swings under the pec) DOWNWARD and
+ * slightly OVER the package's chest region. Sits on top of the chest fill
+ * so the front-delt visually wraps onto the upper-medial pec strip.
+ * Reference IMG_1371.PNG (前束 highlight).
+ */
+export const PATH_FRONT_DELT_CHEST_FILL_L =
+  'M268 320 Q278 318 285 326 Q292 340 290 358 Q284 372 274 378 Q264 376 260 366 Q258 348 262 332 Z';
+export const PATH_FRONT_DELT_CHEST_FILL_R =
+  'M464 326 Q472 318 482 320 Q488 332 490 348 Q492 366 488 376 Q478 378 470 372 Q460 366 458 350 Q458 336 464 326 Z';
+
+/**
+ * Rear-delt extension filling the back-notch — a small fan that extends
+ * from the medial edge of the rear-delt INWARD over the package's
+ * upper-back / trapezius region. Sits on top so the rear-delt visually
+ * wraps onto the upper-medial scapular strip. Reference IMG_1369.PNG
+ * (後束 highlight).
+ */
+export const PATH_REAR_DELT_BACK_FILL_L =
+  'M984 322 Q996 320 1006 328 Q1014 342 1014 358 Q1010 372 1000 378 Q988 376 982 366 Q978 350 980 334 Z';
+export const PATH_REAR_DELT_BACK_FILL_R =
+  'M1162 328 Q1172 320 1184 322 Q1188 334 1190 350 Q1188 366 1180 376 Q1170 378 1160 372 Q1154 358 1156 342 Z';
+
+// ---------------------------------------------------------------------------
 // Back-side overlay paths
 // ---------------------------------------------------------------------------
 
