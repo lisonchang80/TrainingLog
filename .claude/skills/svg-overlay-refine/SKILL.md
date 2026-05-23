@@ -70,6 +70,24 @@ User reports specifically what's off (extends too far, doesn't match shape, miss
 - Quick approximation, OK for non-collapse cases (chest upper/lower, gluteal upper/lower)
 - Less precise than ClipPath but simpler
 
+**D. User-traced outline via coord-picker tool** (best when user has strong visual opinion):
+- After 5+ iterations of agent guessing fail, ask user to TRACE the outline themselves
+- Build interactive HTML page with PACKAGE body silhouette + grid + landmark labels + sternum centerline
+- Render in browser via `open file.html` — user moves mouse to see SVG viewBox coords live, clicks to record keypoints
+- User provides N keypoints (typically 10-30 for one half of body, ~4 for a 切線/split line)
+- Mirror about user-chosen axis (NOT necessarily viewBox center — user may pick x=363 / x=364 / etc based on visual symmetry, verify by checking mirror sums on 切線 endpoints)
+- Pattern used: chest UPPER/LOWER 切線 + 28-point chest outline trace (2026-05-23/24)
+- Coord-picker HTML template:
+  ```html
+  <svg viewBox="X Y W H" onmousemove="..." onclick="...">
+    <!-- inline ALL PACKAGE body parts so user has full context (not just chest in isolation) -->
+  </svg>
+  ```
+  Extract paths via: `node -e "const {bodyFront} = require('./node_modules/react-native-body-highlighter/dist/assets/bodyFront'); ..."`
+  - Display landmark dots + labels + grid + sternum centerline
+  - Show live coord display + click-to-mark + copy-to-clipboard
+  - Place at `~/Desktop/<thing>-coord-picker.html` so user can re-open easily
+
 ### Step 3 — Spawn agent with reference
 
 Agent prompt should:
@@ -106,6 +124,67 @@ User reloads simulator, screenshots back. Compare to reference IMG + previous at
 
 Typical session: 3-6 iterations until visual matches reference.
 
+## Bezier curve direction reference
+
+For SVG screen coords (y increases downward):
+
+| Visual shape | Math name | How to make with Q control |
+|---|---|---|
+| ∪ (smile, sags down at middle) | Concave-UP | Q ctrl y **>** straight midpoint y |
+| ∩ (frown, bulges up at middle) | Concave-DOWN | Q ctrl y **<** straight midpoint y |
+
+**Common mistake**: in SVG, "concave-up" is COUNTER-intuitive vs math-class drawings because y axis flips. For a 切線 from (252, 379) lower-left to (356, 336) upper-right, straight midpoint y=357.5. To make concave-UP (user usually wants this for natural muscle boundary):
+- Q ctrl (305, 372) → curve y > 357.5 at midpoint → ∪ ✓
+- Q ctrl (305, 343) → curve y < 357.5 at midpoint → ∩ ✗ (looks "凹向下")
+
+For asymmetric leaf shape, switch Q (quadratic, symmetric) → C (cubic, 2 control points):
+- `C cp1_x cp1_y cp2_x cp2_y end_x end_y`
+- cp1 controls curve near start (typically outer lateral end of 切線)
+- cp2 controls curve near end (typically inner medial end)
+- Both cp y > straight midpoint → concave-up
+- |cp1.y - midpoint.y| > |cp2.y - midpoint.y| → bulge deeper near outer side → asymmetric leaf
+
+Example (chest 切線 round 20):
+```
+L: C 270 400 335 348 356 336  (asymmetric concave-up cubic)
+   cp1 (270, 400) → deep bulge near outer (depth 12.75 at t=0.3)
+   cp2 (335, 348) → shallow bulge near inner (depth 7 at t=0.7)
+```
+
+## Mirror axis selection
+
+PACKAGE bodies (`react-native-body-highlighter`) are NOT strictly mirror-symmetric about viewBox center x=362:
+- PACKAGE chest L bbox: [251, 359] (width 108, center 305)
+- PACKAGE chest R bbox: [372, 471] (width 99, center 421.5)
+- Naive mirror about 362 → R extends [365, 473], doesn't match PACKAGE R
+
+**How to choose mirror axis**:
+1. Ask user to click 4 symmetric reference points on coord-picker tool (e.g., 切線 L outer + R outer + L inner + R inner)
+2. Compute mirror sums: L.x + R.x for each pair
+3. If sums consistent (e.g., all 728), user's mental centerline = sum/2 (= 364, NOT 362)
+4. Use user's centerline for ALL subsequent mirror calculations on this body region
+
+**Don't impose viewBox center x=362** as mirror axis — user perceives PACKAGE asymmetry and adjusts visually. Trust user's clicked symmetry.
+
+## SVG fill rule + hole technique
+
+When 2 fills need to share a boundary (e.g., UPPER and LOWER chest sharing 切線):
+
+**Approach 1: Separate non-overlapping paths** (preferred if possible):
+- UPPER = path bounded by chest top + 切線
+- LOWER = path bounded by 切線 + chest bottom
+- Both share EXACT 切線 endpoints + control points (copy-paste same Bezier into both)
+- No anti-alias gap because boundaries align
+
+**Approach 2: SVG nonzero hole** (for chest L+R combined fills, where one slug needs hole inside):
+- LOWER path = `[chest CW] [hole CCW] [hole CCW]` — reversed direction hole sub-paths cancel chest's winding inside → SVG nonzero rule treats them as holes
+- UPPER path = same hole shapes alone (forward direction) → fills the holes
+
+**Anti-pattern: naive mirror flips winding direction**:
+- If L path written CW (computed via shoelace), naive coordinate-mirror about x-axis gives R path traversed in OPPOSITE direction = CCW
+- Result: R hole subpath has SAME direction as chest R → no hole created → fill bleeds across (user sees R leaf invisible, L leaf visible)
+- Fix: explicitly reverse R subpath traversal order so it's CW like chest R (swap top/bottom curve order, swap C cp1/cp2)
+
 ## Anti-pattern
 
 - ❌ Eyeball-tune SVG coords in main convo without reading reference IMG — high error rate
@@ -114,6 +193,10 @@ Typical session: 3-6 iterations until visual matches reference.
 - ❌ Change `SPLIT_X` value without explaining the 1/2 vs 1/3 ratio choice
 - ❌ Forget side-aware exclusion (deltoid front vs back) when modifying buildData
 - ❌ Don't put extension paths AFTER clipped rects in render order — they get covered
+- ❌ Confuse SVG concave-up/down vs math class convention (y axis flipped) — always verify with curve midpoint calc against straight midpoint
+- ❌ Assume mirror axis = viewBox center 362 — PACKAGE is asymmetric, user often picks 363/364
+- ❌ Naive coordinate-mirror cubic Bezier without reversing curve order — flips winding direction silently
+- ❌ Iterate 5+ rounds with agent guesses on user black-line images — break to coord-picker tool, get exact SVG coords from user instead
 
 ## Pre-commit hook integration
 
@@ -131,3 +214,16 @@ TrainingLog 2026-05-23 evening:
 - Arc shrink (apex pulled back 22-28 units toward delt) — 1 agent
 
 7 iterations, ~3-4 hr total, 8 separate commits. Each iteration: user reports, I decide approach, spawn agent (or manual Edit for 1-line changes), push, user reloads. Reference IMGs key to convergence.
+
+## Historical example session 2 — chest UPPER/LOWER 切線 (2026-05-23 → 24)
+
+10 rounds (round 10 → 20), ~12 commits, escalating tool sophistication:
+- Round 10-13: agent guesses based on user black-ink screenshot → REPEATED FAILURE (V apex direction wrong, leaf shape too thin, R leaf invisible due to winding direction bug)
+- Round 14: tried ∧ apex at sternum top — still wrong direction
+- Round 15-16: leaf shape attempt — R leaf hidden by LOWER (winding bug fixed)
+- Round 17: **BREAKTHROUGH** — built coord-picker HTML, user clicked 4 切線 keypoints, mirror sum=728 → user's centerline = 364
+- Round 18: user traced 28 chest L outline keypoints → custom chest silhouette, mirror gave R, exact match
+- Round 19: 4 fixes (symmetry, gap, curve depth, scale 1.05)
+- Round 20: caught Q ctrl direction bug — concave-down → cubic Bezier asymmetric concave-up
+
+**Key takeaway**: agent visual interpretation of user hand-drawn ink images is unreliable past 3-5 iterations. Switch to coord-picker HTML tool to get exact SVG coords from user. Build the tool when iteration stalls, don't wait 10 rounds.
