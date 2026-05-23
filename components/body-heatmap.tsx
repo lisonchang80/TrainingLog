@@ -22,7 +22,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { ClipPath, Defs, Path, Rect } from 'react-native-svg';
 
 import {
   M_ABS,
@@ -52,22 +52,22 @@ import {
   COLOR_BODY_BASE,
   DELT_SIBS,
   GLUTE_SIBS,
+  PACKAGE_DELT_BACK_L,
+  PACKAGE_DELT_BACK_R,
+  PACKAGE_DELT_FRONT_L,
+  PACKAGE_DELT_FRONT_R,
   PATH_BICEP_LONG_L,
   PATH_BICEP_LONG_R,
   PATH_BICEP_SHORT_L,
   PATH_BICEP_SHORT_R,
-  PATH_FRONT_DELT_L,
-  PATH_FRONT_DELT_R,
   PATH_LOWER_CHEST,
   PATH_LOWER_GLUTE,
-  PATH_MID_DELT_BACK_L,
-  PATH_MID_DELT_BACK_R,
-  PATH_MID_DELT_FRONT_L,
-  PATH_MID_DELT_FRONT_R,
-  PATH_REAR_DELT_L,
-  PATH_REAR_DELT_R,
   PATH_UPPER_CHEST,
   PATH_UPPER_GLUTE,
+  SPLIT_X_BACK_DELT_L,
+  SPLIT_X_BACK_DELT_R,
+  SPLIT_X_FRONT_DELT_L,
+  SPLIT_X_FRONT_DELT_R,
 } from './exercise/body-overlay-paths';
 
 // ---------------------------------------------------------------------------
@@ -222,6 +222,11 @@ function subFill(m: string, siblings: readonly string[], mQuintile: Map<string, 
  * front+mid). Positioned absolutely over the package's front body.
  */
 function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; scale: number }) {
+  // Front deltoid sub-division via ClipPath partition (see body-overlay-paths
+  // for geometry rationale). LEFT shoulder: medial right half = front delt,
+  // lateral left half = mid delt. RIGHT shoulder: mirrored.
+  const frontDeltFill = subFill(M_FRONT_DELT, DELT_SIBS, mQuintile);
+  const midDeltFill = subFill(M_MID_DELT, DELT_SIBS, mQuintile);
   return (
     <Svg
       style={{ position: 'absolute', top: 0, left: 0 }}
@@ -230,6 +235,14 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
       viewBox="0 0 724 1448"
       pointerEvents="none"
     >
+      <Defs>
+        <ClipPath id="heatmap-delt-front-l">
+          <Path d={PACKAGE_DELT_FRONT_L} />
+        </ClipPath>
+        <ClipPath id="heatmap-delt-front-r">
+          <Path d={PACKAGE_DELT_FRONT_R} />
+        </ClipPath>
+      </Defs>
       {/* Chest split */}
       <Path d={PATH_UPPER_CHEST} fill={subFill(M_UPPER_CHEST, CHEST_SIBS, mQuintile)} />
       <Path d={PATH_LOWER_CHEST} fill={subFill(M_LOWER_CHEST, CHEST_SIBS, mQuintile)} />
@@ -239,11 +252,40 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
       {/* Bicep split — right arm */}
       <Path d={PATH_BICEP_SHORT_R} fill={subFill(M_BICEP_SHORT, BICEPS_SIBS, mQuintile)} />
       <Path d={PATH_BICEP_LONG_R} fill={subFill(M_BICEP_LONG, BICEPS_SIBS, mQuintile)} />
-      {/* Front delt + mid delt (front view) */}
-      <Path d={PATH_FRONT_DELT_L} fill={subFill(M_FRONT_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_FRONT_DELT_R} fill={subFill(M_FRONT_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_MID_DELT_FRONT_L} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_MID_DELT_FRONT_R} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
+      {/* Front view LEFT shoulder: lateral half (mid delt) + medial half (front delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-front-l)"
+      />
+      <Rect
+        x={SPLIT_X_FRONT_DELT_L}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#heatmap-delt-front-l)"
+      />
+      {/* Front view RIGHT shoulder: medial half (front delt) + lateral half (mid delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#heatmap-delt-front-r)"
+      />
+      <Rect
+        x={SPLIT_X_FRONT_DELT_R}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-front-r)"
+      />
     </Svg>
   );
 }
@@ -253,6 +295,11 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
  * absolutely over the package's back body.
  */
 function BackOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; scale: number }) {
+  // Back deltoid sub-division via ClipPath partition. LEFT shoulder:
+  // medial right half = rear delt, lateral left half = mid delt. RIGHT
+  // shoulder: mirrored.
+  const rearDeltFill = subFill(M_REAR_DELT, DELT_SIBS, mQuintile);
+  const midDeltFill = subFill(M_MID_DELT, DELT_SIBS, mQuintile);
   return (
     <Svg
       style={{ position: 'absolute', top: 0, left: 0 }}
@@ -261,11 +308,48 @@ function BackOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; s
       viewBox="724 0 724 1448"
       pointerEvents="none"
     >
-      {/* Rear delt + mid delt (back view) */}
-      <Path d={PATH_REAR_DELT_L} fill={subFill(M_REAR_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_REAR_DELT_R} fill={subFill(M_REAR_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_MID_DELT_BACK_L} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
-      <Path d={PATH_MID_DELT_BACK_R} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
+      <Defs>
+        <ClipPath id="heatmap-delt-back-l">
+          <Path d={PACKAGE_DELT_BACK_L} />
+        </ClipPath>
+        <ClipPath id="heatmap-delt-back-r">
+          <Path d={PACKAGE_DELT_BACK_R} />
+        </ClipPath>
+      </Defs>
+      {/* Back view LEFT shoulder: lateral half (mid delt) + medial half (rear delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_L - 724}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-back-l)"
+      />
+      <Rect
+        x={SPLIT_X_BACK_DELT_L}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_L}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#heatmap-delt-back-l)"
+      />
+      {/* Back view RIGHT shoulder: medial half (rear delt) + lateral half (mid delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_R - 724}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#heatmap-delt-back-r)"
+      />
+      <Rect
+        x={SPLIT_X_BACK_DELT_R}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-back-r)"
+      />
       {/* Gluteal split */}
       <Path d={PATH_UPPER_GLUTE} fill={subFill(M_UPPER_GLUTE, GLUTE_SIBS, mQuintile)} />
       <Path d={PATH_LOWER_GLUTE} fill={subFill(M_LOWER_GLUTE, GLUTE_SIBS, mQuintile)} />

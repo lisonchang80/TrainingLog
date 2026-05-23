@@ -10,10 +10,18 @@
  *   - front : "0 0 724 1448"
  *   - back  : "724 0 724 1448"
  *
- * Path shapes are reasonable polygon approximations of each half — see the
- * anatomy reference IMG_1359..IMG_1377 PNGs for the visual targets. They
- * don't trace the package paths exactly but occupy roughly the right region
- * so a viewer can tell which sub-head is highlighted.
+ * Chest / biceps / gluteal overlay paths are reasonable polygon
+ * approximations of each half — see the anatomy reference IMG_1359..IMG_1377
+ * PNGs for the visual targets. They don't trace the package paths exactly
+ * but occupy roughly the right region so a viewer can tell which sub-head
+ * is highlighted.
+ *
+ * The DELTOID slug is handled differently (since 2026-05-23): instead of
+ * approximate per-head wedges, the consumer wraps the package's verbatim
+ * deltoid path in a `<ClipPath>` and partitions it via two `<Rect>` halves
+ * split at the bounding-box midpoint. This guarantees the combined fill
+ * exactly equals the underlying cap silhouette — see PACKAGE_DELT_* and
+ * SPLIT_X_*_DELT_* constants below.
  *
  * Each consumer (heatmap = quintile-fill, tagger = role-fill) builds its own
  * `subFill` helper around these primitives — the fill colour space differs
@@ -60,65 +68,59 @@ export const PATH_BICEP_LONG_R =
   'M528 415 Q532 460 526 492 L548 488 Q548 460 540 410 Z';
 
 /**
- * Front: anterior (front) deltoid — medial fan from clavicle to humerus.
- * Package outline (FRONT LEFT = subject's right): y=320 x∈[213,278], y=340
- * x∈[200,250], y=360 x∈[195,248], y=378 x∈[200,242], y=395 x∈[217,228].
- * Anterior fibers run from clavicular origin (top-medial) → humeral
- * insertion (bottom). This wedge occupies the MEDIAL upper half of the cap
- * (higher x on left shoulder = closer to chest centerline x=362).
+ * Deltoid sub-division — partition the package's verbatim deltoid slug path
+ * into MEDIAL + LATERAL halves via `<ClipPath>` so the combined fill exactly
+ * equals the underlying cap silhouette (no gaps, no overflow).
  *
- * Left side (subject's right shoulder, viewer's left).
+ * The 4 path strings below are byte-for-byte copies of the
+ * `react-native-body-highlighter` package's `deltoids` slug paths
+ * (node_modules/.../bodyFront.js + bodyBack.js). The consumer wraps each in
+ * `<Defs><ClipPath id="..."><Path d={...}/></ClipPath></Defs>` and then
+ * renders two `<Rect>` elements (one per half) clipped to it — `Rect`
+ * covers the full bounding box, the clip restricts paint to the cap shape.
+ *
+ * SPLIT_X constants are the horizontal midpoint of each path's bounding box
+ * (parsed once offline and hard-coded here). They are tagged with the
+ * anatomical fiber-direction interpretation:
+ *   - Front view: anterior (front delt) on the chest-centerline side,
+ *     lateral (mid delt) on the outer side.
+ *   - Back view : posterior (rear delt) on the spine-centerline side,
+ *     lateral (mid delt) on the outer side.
+ *
+ * Per-shoulder geometry (chest centerline x=362; spine centerline x=1086):
+ *   FRONT_L (viewer's left, subject's right) : MEDIAL = right half (x ≥ split)
+ *   FRONT_R (viewer's right, subject's left) : MEDIAL = left  half (x ≤ split)
+ *   BACK_L  (viewer's left, subject's right) : MEDIAL = right half (x ≥ split)
+ *   BACK_R  (viewer's right, subject's left) : MEDIAL = left  half (x ≤ split)
  */
-export const PATH_FRONT_DELT_L =
-  'M244 322 Q238 340 236 358 Q236 370 240 372 Q248 366 252 354 Q256 338 260 324 Z';
-/** Front: anterior (front) deltoid — right side (mirror at x=362). */
-export const PATH_FRONT_DELT_R =
-  'M470 324 Q478 342 482 358 Q486 368 490 370 Q496 366 494 354 Q488 340 484 322 Z';
+export const PACKAGE_DELT_FRONT_L =
+  'M274.06 311.69q3.94 2.77 4.33 8.14.04.48-.38.73c-9.98 5.88-24.35 7.45-28.82 19.75-2.31 6.36-.97 17.35-1.43 23.68q-.55 7.51-5.73 14.07-10.37 13.11-13.81 16.67c-3.41 3.53-6.81 1.76-10.69-.47-15.42-8.87-24.95-25.45-22.52-43.22 2.05-14.92 12.71-25.79 24.06-35.02 16.99-13.82 35.58-17.99 54.99-4.33z';
+export const PACKAGE_DELT_FRONT_R =
+  'M450.39 320.75q-.95-.52-.7-1.58c1.57-6.61 5.8-9.1 12.14-11.9 24.99-11.03 43.76 3.33 60.17 20.74 20.73 21.99 11.81 56.44-14.82 68.19-4.41 1.94-6.79-1.03-9.81-4.51-5.81-6.7-13.46-14.12-15.99-22.8-3.93-13.43 4.32-27.54-9.64-37.62q-8.22-5.93-17.99-9.08-1.84-.59-3.36-1.44z';
+export const PACKAGE_DELT_BACK_L =
+  'M980.66 319.58c.19.14.55.19.65.32a.8.8 0 01-.16 1.15c-6.78 4.75-15.26 9.77-20.03 15.58-6.41 7.78-8.76 16.96-9.44 27.04-.39 5.92-1.68 9.5-5.59 13.43-10.02 10.08-19.04 16.47-31.14 20.41q-.75.25-.75-.55.19-18.4-.09-36.3-.14-9.4 1.07-14.22c4.04-16.07 22.8-33.85 39.68-35.64 9.99-1.06 17.34 2.46 25.8 8.78z';
+export const PACKAGE_DELT_BACK_R =
+  'M1227.3 316.44c14.62 9.44 25.48 21.03 25.46 39.51q-.02 20.56-.01 41.37a.37.37 0 01-.51.35c-5.08-2.06-10.41-3.98-14.9-6.97-7.84-5.24-21.14-14.95-21.77-24.95-.69-10.75-2.81-20.85-9.76-29.25-4.68-5.65-12.96-10.58-19.6-15.26q-1.23-.87.01-1.71c4.6-3.13 9.91-6.78 15.25-7.98q13.58-3.03 25.83 4.89z';
 
 /**
- * Front: middle (lateral) deltoid — outer strip of the cap.
- * Acromial origin (top-lateral) → humeral insertion. Stays in the LATERAL
- * half of the cap (lower x on left shoulder = further from centerline).
- * Strip kept ≥5 units inside the package's lateral curve at every y.
+ * Horizontal midpoint of each deltoid bounding box. Used to position the
+ * two split-rects per shoulder: one covers x ≤ SPLIT, the other x ≥ SPLIT,
+ * both clipped to the package path → exact partition of the cap.
  *
- * Left side (subject's right shoulder, viewer's left).
+ * Bounding boxes (computed once from the package paths, offline):
+ *   FRONT_L: x ∈ [192.58, 278.43]  → mid 235.50
+ *   FRONT_R: x ∈ [449.44, 542.73]  → mid 496.09
+ *   BACK_L : x ∈ [913.97, 981.31]  → mid 947.64
+ *   BACK_R : x ∈ [1184.98, 1252.78] → mid 1218.88
  */
-export const PATH_MID_DELT_FRONT_L =
-  'M222 324 Q212 348 216 368 Q222 374 228 370 Q230 350 230 326 Z';
-export const PATH_MID_DELT_FRONT_R =
-  'M498 326 Q498 350 500 370 Q506 374 512 368 Q516 348 506 324 Z';
+export const SPLIT_X_FRONT_DELT_L = 235.5;
+export const SPLIT_X_FRONT_DELT_R = 496.1;
+export const SPLIT_X_BACK_DELT_L = 947.6;
+export const SPLIT_X_BACK_DELT_R = 1218.9;
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
 // ---------------------------------------------------------------------------
-
-/**
- * Back: rear (posterior) deltoid — fan from scapular spine to humerus.
- * MEDIAL portion of the deltoid cap (toward spine centerline x=1086).
- * Package outline (BACK LEFT = subject's right): cap top at y=312-320 spans
- * only x=955-980 (narrow apex); widens going down: y=340 x∈[917,960],
- * y=360 x∈[914,951], y=380 x∈[914,935], y=395 x∈[914,915].
- * Rear delt fans from upper-medial origin → tapers down-and-out toward
- * humeral insertion. Stays in the MEDIAL half (higher x) of the cap.
- *
- * Back left = subject's right shoulder (viewer's left on back view).
- */
-export const PATH_REAR_DELT_L =
-  'M960 324 Q950 340 942 358 Q938 370 942 374 Q948 370 950 360 Q958 342 968 324 Z';
-/** Back right = subject's left shoulder (viewer's right on back view). */
-export const PATH_REAR_DELT_R =
-  'M1200 324 Q1210 342 1220 360 Q1224 370 1226 374 Q1230 370 1224 358 Q1216 340 1208 324 Z';
-
-/**
- * Back: middle (lateral) deltoid — LATERAL strip on outer cap, back view.
- * Acromial origin → humeral insertion. Stays in LATERAL half of the cap.
- * Package lateral edge (BACK LEFT): vertical at x≈914 from y=346 to y=395,
- * curving to (955, 311) at top. Strip kept ≥4 units inside.
- */
-export const PATH_MID_DELT_BACK_L =
-  'M934 334 Q920 358 922 380 Q928 386 932 384 Q934 360 938 336 Z';
-export const PATH_MID_DELT_BACK_R =
-  'M1234 336 Q1238 360 1240 384 Q1244 386 1248 380 Q1248 358 1238 334 Z';
 
 /** Back: upper gluteal — top crescent of glutes (both sides). */
 export const PATH_UPPER_GLUTE =
