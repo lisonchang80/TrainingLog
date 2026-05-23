@@ -280,13 +280,36 @@ import {
  * UPPER + LOWER share EXACT same 切線 coords + Q ctrl — anti-alias should
  * align (round 18's "公差沒切乾淨" was likely this).
  */
+/**
+ * Round 20 chest (2026-05-24): user feedback "兩條切線做成凹向下了，
+ * 改成凹向上弧度 (像不對稱的葉子)".
+ *
+ * Round 19 had Q ctrl y=343 < straight midpoint y=357.5 → curve passed
+ * ABOVE straight line at midpoint = ∩ shape (concave-DOWN), wrong.
+ *
+ * Round 20: changed Q (quadratic) to C (cubic Bezier) for asymmetric
+ * leaf shape. Both control points have y > straight midpoint to bulge
+ * curve BELOW straight line → ∪ shape (concave-UP).
+ *
+ * Asymmetric cubic:
+ *   L 切線: M 252 379 → cp1 (270, 400) [near outer, deep bulge]
+ *           → cp2 (335, 348) [near inner, shallow bulge] → 356 336
+ *   R 切線: mirror about x=364 → cp1 (458, 400), cp2 (393, 348)
+ *
+ * Curve depth vs straight (asymmetric leaf, bulge偏 outer):
+ *   t=0.3 (near outer): 12.75 units below straight ✓ deepest
+ *   t=0.5 (midpoint):   12.0 units
+ *   t=0.7 (near inner): 7.0 units below ✓ shallowest
+ *
+ * UPPER + LOWER share IDENTICAL 切線 cubic coords → no anti-alias gap.
+ */
 /** Front: upper chest — 2 sub-paths above 切線 (clavicular regions). */
 export const PATH_UPPER_CHEST =
-  'M252 379 L252 374 L252 361 L256 349 L264 333 L273 325 L288 318 L305 314 L324 314 L344 318 L352 328 L356 336 Q305 343 252 379 Z M476 379 L476 374 L476 361 L472 349 L464 333 L455 325 L440 318 L423 314 L404 314 L384 318 L376 328 L372 336 Q423 343 476 379 Z';
+  'M252 379 L252 374 L252 361 L256 349 L264 333 L273 325 L288 318 L305 314 L324 314 L344 318 L352 328 L356 336 C335 348 270 400 252 379 Z M476 379 L476 374 L476 361 L472 349 L464 333 L455 325 L440 318 L423 314 L404 314 L384 318 L376 328 L372 336 C393 348 458 400 476 379 Z';
 
 /** Front: lower chest — 2 sub-paths below 切線 (sternal regions). */
 export const PATH_LOWER_CHEST =
-  'M252 379 Q305 343 356 336 L357 339 L360 351 L362 362 L361 376 L360 389 L360 401 L357 414 L352 420 L343 429 L328 435 L310 437 L297 436 L285 433 L273 426 L265 418 L260 408 L256 396 L253 386 L252 379 Z M476 379 Q423 343 372 336 L371 339 L368 351 L366 362 L367 376 L368 389 L368 401 L371 414 L376 420 L385 429 L400 435 L418 437 L431 436 L443 433 L455 426 L463 418 L468 408 L472 396 L475 386 L476 379 Z';
+  'M252 379 C270 400 335 348 356 336 L357 339 L360 351 L362 362 L361 376 L360 389 L360 401 L357 414 L352 420 L343 429 L328 435 L310 437 L297 436 L285 433 L273 426 L265 418 L260 408 L256 396 L253 386 L252 379 Z M476 379 C458 400 393 348 372 336 L371 339 L368 351 L366 362 L367 376 L368 389 L368 401 L371 414 L376 420 L385 429 L400 435 L418 437 L431 436 L443 433 L455 426 L463 418 L468 408 L472 396 L475 386 L476 379 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
