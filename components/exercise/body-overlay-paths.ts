@@ -263,13 +263,30 @@ import {
  * Together UPPER + LOWER tile the user-defined chest area. No overlap,
  * no holes needed (each path fills its own region).
  */
+/**
+ * Round 19 chest (2026-05-24): user feedback on round 18:
+ *   1. 對稱 — already mirror about x=364, PACKAGE body inherent asymmetry
+ *   2. 切線公差沒切乾淨 — UPPER + LOWER 切線 endpoints + Q ctrl exact match
+ *      avoid anti-alias gap
+ *   3. 弧度加深 — Q ctrl y 350 → 343, curve mid y=350.25, 7.25u above
+ *      straight midpoint y=357.5 (was 4.25u)
+ *   4. 比例放大 — 28 outline points + 切線 endpoints all scaled × 1.05
+ *      around chest center (307, 375)
+ *
+ * Scaled outline (28 points + 切線):
+ *   L outer (252, 379), L inner (356, 336), Q ctrl (305, 343)
+ *   R outer (476, 379), R inner (372, 336), Q ctrl (423, 343) — mirror x=364
+ *
+ * UPPER + LOWER share EXACT same 切線 coords + Q ctrl — anti-alias should
+ * align (round 18's "公差沒切乾淨" was likely this).
+ */
 /** Front: upper chest — 2 sub-paths above 切線 (clavicular regions). */
 export const PATH_UPPER_CHEST =
-  'M255 379 L255 374 L255 362 L258 350 L266 335 L275 327 L289 321 L305 317 L323 317 L342 321 L350 330 L354 338 Q304 350 255 379 Z M473 379 L473 374 L473 362 L470 350 L462 335 L453 327 L439 321 L423 317 L405 317 L386 321 L378 330 L374 338 Q424 350 473 379 Z';
+  'M252 379 L252 374 L252 361 L256 349 L264 333 L273 325 L288 318 L305 314 L324 314 L344 318 L352 328 L356 336 Q305 343 252 379 Z M476 379 L476 374 L476 361 L472 349 L464 333 L455 325 L440 318 L423 314 L404 314 L384 318 L376 328 L372 336 Q423 343 476 379 Z';
 
 /** Front: lower chest — 2 sub-paths below 切線 (sternal regions). */
 export const PATH_LOWER_CHEST =
-  'M255 379 Q304 350 354 338 L355 341 L357 352 L359 363 L358 376 L357 388 L357 400 L355 412 L350 418 L341 426 L327 432 L310 434 L297 433 L286 430 L275 424 L267 416 L262 406 L258 395 L256 385 L255 379 Z M473 379 Q424 350 374 338 L373 341 L371 352 L369 363 L370 376 L371 388 L371 400 L373 412 L378 418 L387 426 L401 432 L418 434 L431 433 L442 430 L453 424 L461 416 L466 406 L470 395 L472 385 L473 379 Z';
+  'M252 379 Q305 343 356 336 L357 339 L360 351 L362 362 L361 376 L360 389 L360 401 L357 414 L352 420 L343 429 L328 435 L310 437 L297 436 L285 433 L273 426 L265 418 L260 408 L256 396 L253 386 L252 379 Z M476 379 Q423 343 372 336 L371 339 L368 351 L366 362 L367 376 L368 389 L368 401 L371 414 L376 420 L385 429 L400 435 L418 437 L431 436 L443 433 L455 426 L463 418 L468 408 L472 396 L475 386 L476 379 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
