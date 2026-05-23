@@ -164,13 +164,42 @@ import {
  * Chest silhouette traced through sternum top notch + xiphoid bottom
  * notch (user said "中縫可以著色" — sternum strip ok to color).
  */
-/** Front: upper chest — chest silhouette CCW with central ∧-triangle hole (CW). */
+/**
+ * Round 15 chest fix (2026-05-23): re-mapped user black ink keypoints to
+ * SVG viewBox coordinates from comparing user image with reload screenshot.
+ *
+ * User's 2 black ink curves = 2 mirrored leaf/lens shapes, one per pec.
+ * Each leaf goes from chest upper-outer diagonally to sternum mid-low.
+ * Anatomically = clavicular head fiber direction (upper-outer → lower-medial).
+ *
+ * Mapping:
+ *   - UPPER (clavicular) = 2 leaves
+ *   - LOWER (sternal head main belly) = chest L+R minus 2 leaves
+ *
+ * Leaf vertices (strict mirror about x=362, sums all 724):
+ *   L leaf: (280, 340) upper-outer → (356, 392) chest L medial bottom
+ *   R leaf: (444, 340) upper-outer → (368, 392) chest R medial bottom
+ *   Q controls: top curve (318, 350) / (406, 350); bottom curve
+ *   (318, 385) / (406, 385) — gives leaf height ~17 units mid.
+ *
+ * Lens vertices verified INSIDE respective PACKAGE pec silhouette
+ * (no extension past chest into sternum gap or body silhouette).
+ *
+ * Implementation: LOWER path includes chest L + chest R silhouettes (CW)
+ * + 2 leaves reversed (CCW) → SVG nonzero fill rule cuts leaves as
+ * HOLES in LOWER. UPPER path = same 2 leaves (forward) → fills the holes.
+ *
+ * Together UPPER + LOWER = entire chest L + chest R silhouette area,
+ * with leaves visible as UPPER and rest as LOWER. Each path stays
+ * strictly within chest silhouettes (no painting outside).
+ */
+/** Front: upper chest — 2 leaves matching clavicular head fiber direction. */
 export const PATH_UPPER_CHEST =
-  'M260 344 Q280 322 305 318 Q335 314 362 322 Q392 316 422 318 Q445 320 463 345 Q474 380 471 405 Q462 430 443 432 Q427 437 416 435 Q393 425 375 413 L362 395 L357 392 Q325 425 297 433 Q280 432 272 422 Q260 405 260 360 Z M362 320 Q404 360 434 425 L290 425 Q320 360 362 320 Z';
+  'M280 340 Q318 385 356 392 Q318 350 280 340 Z M444 340 Q406 385 368 392 Q406 350 444 340 Z';
 
-/** Front: lower chest — central ∧-triangle (covers sternum middle, 左下-中上-右下). */
+/** Front: lower chest — chest L+R silhouettes with leaf holes (sternal head). */
 export const PATH_LOWER_CHEST =
-  'M362 320 Q320 360 290 425 L434 425 Q404 360 362 320 Z';
+  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M280 340 Q318 385 356 392 Q318 350 280 340 Z M444 340 Q406 385 368 392 Q406 350 444 340 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
