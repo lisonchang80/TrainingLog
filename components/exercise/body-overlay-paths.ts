@@ -155,40 +155,42 @@ export const PATH_MID_DELT_PEAK_BACK_L = '';
 export const PATH_MID_DELT_PEAK_BACK_R = '';
 
 /**
- * Front-delt extension filling the chest-notch — a rounded arc that
- * bulges from the medial deltoid edge INWARD into the upper-medial pec
- * area, rounding out the front-delt's inner contour. Sits on top of the
- * package's chest fill so the front-delt visually wraps over it.
- * Reference IMG_1371.PNG (前束 highlight). Per user request 2026-05-23
- * iteration: extension is larger + curvier than initial draft, sweeping
- * further into chest (Δx ≈ 30 units) for a clearly rounded inner edge.
+ * Front-delt extension filling the chest-notch — a small rounded arc that
+ * smooths the medial deltoid edge WITHOUT extending visibly into chest.
+ * Sits on top of the package's chest fill so the front-delt visually wraps
+ * over it. Reference IMG_1371.PNG (前束 highlight): the medial edge in the
+ * reference is rounded but stays within the deltoid area — only the
+ * smallest extension into chest is visible. Per user feedback 2026-05-23:
+ * shrunk from Δx≈30 (which bulged too far into chest) to Δx≈10.
  *
  * Coordinates (front L, deltoid medial edge at x≈278, chest centerline x=362):
- *   anchor top      = (268, 320) on deltoid medial edge upper
- *   anchor bottom   = (268, 380) on deltoid medial edge lower
- *   bulge apex      = (310, 350) ~32 units into chest
+ *   anchor top      = (276, 320) on deltoid medial edge upper
+ *   anchor bottom   = (276, 380) on deltoid medial edge lower
+ *   bulge apex      = (288, 350) ~10 units into chest
  */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M268 320 Q295 322 308 338 Q314 352 308 366 Q295 378 268 380 Z';
+  'M276 320 Q284 324 287 338 Q289 350 287 362 Q284 376 276 380 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M482 320 Q455 322 442 338 Q436 352 442 366 Q455 378 482 380 Z';
+  'M474 320 Q466 324 463 338 Q461 350 463 362 Q466 376 474 380 Z';
 
 /**
- * Rear-delt extension filling the back-notch — a rounded arc bulging from
- * the medial deltoid edge INWARD over the upper-back / trapezius region,
- * rounding out the rear-delt's inner contour. Sits on top of trap / upper-
- * back fills. Reference IMG_1369.PNG (後束 highlight). Same iteration as
- * front-delt — larger and curvier than initial draft.
+ * Rear-delt extension filling the back-notch — a small rounded arc that
+ * smooths the medial deltoid edge WITHOUT extending visibly into upper
+ * back / trapezius. Sits on top of trap / upper-back fills. Reference
+ * IMG_1369.PNG (後束 highlight): the medial edge in the reference is
+ * rounded but stays within the deltoid area — only the smallest extension
+ * into back is visible. Per user feedback 2026-05-23: shrunk from Δx≈32
+ * (which bulged too far into trap/upper-back) to Δx≈10.
  *
  * Coordinates (back L, deltoid medial edge at x≈980, spine centerline x=1086):
  *   anchor top    = (980, 320)
  *   anchor bottom = (980, 380)
- *   bulge apex    = (1020, 350)
+ *   bulge apex    = (990, 350) ~10 units into back
  */
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M980 320 Q1007 322 1018 338 Q1024 352 1018 366 Q1007 378 980 380 Z';
+  'M980 320 Q987 324 990 338 Q992 350 990 362 Q987 376 980 380 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1190 320 Q1163 322 1152 338 Q1146 352 1152 366 Q1163 378 1190 380 Z';
+  'M1190 320 Q1183 324 1180 338 Q1178 350 1180 362 Q1183 376 1190 380 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
