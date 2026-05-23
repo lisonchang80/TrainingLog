@@ -236,14 +236,38 @@ export const PATH_MID_DELT_PEAK_BACK_R = '';
  *   BACK_L medial half [936.4, 981.31]: all pts in [943, 980] ✓
  *   BACK_R medial half [1184.98, 1230.2]: all pts in [1192, 1229] ✓
  */
+/**
+ * Round 8 (2026-05-23): "前束沒對稱，右邊太寬，有空隙，下方鋸齒；左邊上方鋸齒".
+ *
+ * Diagnosis: PACKAGE deltoid_L and _R are NOT strict mirrors about chest
+ * centerline x=362 — L medial edge x=278.43, R medial edge x=449.44,
+ * sum=727.87 ≠ 724. Round-7 strict-x-mirror anchors (sum=724) left a
+ * 1-2 unit gap between fill anchor and deltoid medial edge on at least
+ * one side, visible as sawtooth.
+ *
+ * Fix: abandon strict x mirror; each side's anchor pinned to its OWN
+ * PACKAGE medial edge. To preserve visual symmetry, each leaf is sized
+ * to span exactly 46 units (top→bottom medial vertical) and uses the
+ * same control-point offset pattern from its respective edge.
+ *
+ * FRONT_L medial vertical: top (278, 320) → bottom (232, 390), span 46
+ * FRONT_R medial vertical: top (450, 320) → bottom (496, 390), span 46
+ *   (sum top=728, bottom=728; not 724 but matches each side's own edge)
+ *
+ * BACK_L medial vertical: top (980, 320) → bottom (945, 390), span 35
+ * BACK_R medial vertical: top (1192, 320) → bottom (1227, 390), span 35
+ *   (BACK deltoid bbox is narrower, so leaves proportionally smaller)
+ *
+ * All control points stay 2-4 units inside own bbox medial edge / SPLIT_X.
+ */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M274 320 C273 350 245 385 230 390 C225 360 250 325 274 320 Z';
+  'M278 320 C276 350 245 385 232 390 C225 360 250 325 278 320 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M450 320 C451 350 479 385 494 390 C499 360 474 325 450 320 Z';
+  'M450 320 C452 350 483 385 496 390 C503 360 478 325 450 320 Z';
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M979 320 C980 355 960 385 945 390 C943 360 965 325 979 320 Z';
+  'M980 320 C978 350 958 385 945 390 C940 360 962 325 980 320 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1193 320 C1192 355 1212 385 1227 390 C1229 360 1207 325 1193 320 Z';
+  'M1192 320 C1194 350 1214 385 1227 390 C1229 360 1210 325 1192 320 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
