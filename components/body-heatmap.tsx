@@ -366,12 +366,25 @@ const SKIN_SLUGS: ReadonlySet<Slug> = new Set<Slug>(['head', 'hair', 'hands', 'f
  * the rest get the light body base. We pass `color` explicitly to override
  * the package's hardcoded asset `color: "#3f3f3f"`.
  */
-function buildSlugData(mQuintile: Map<string, Quintile>): ExtendedBodyPart[] {
+/**
+ * Side-aware deltoid exclusion: front-view's deltoid cap visually represents
+ * front + mid (lateral) heads only; back-view's represents rear + mid.
+ * Picking only M_REAR_DELT shouldn't fill the FRONT shoulder — it's a
+ * different muscle anatomically.
+ */
+function isMSidedExcluded(m: string, side: 'front' | 'back'): boolean {
+  if (side === 'front' && m === M_REAR_DELT) return true;
+  if (side === 'back' && m === M_FRONT_DELT) return true;
+  return false;
+}
+
+function buildSlugData(mQuintile: Map<string, Quintile>, side: 'front' | 'back'): ExtendedBodyPart[] {
   // Touch every M_* fill so the static-analysis test sees the references.
   M_FILLS(mQuintile);
 
   const slugMax = new Map<Slug, Quintile>();
   for (const [m, slug] of Object.entries(M_TO_SLUG)) {
+    if (isMSidedExcluded(m, side)) continue;
     const q = mQuintile.get(m);
     if (q == null) continue;
     const prev = slugMax.get(slug);
@@ -403,7 +416,8 @@ function buildSlugData(mQuintile: Map<string, Quintile>): ExtendedBodyPart[] {
 const BODY_SCALE = 0.8;
 
 export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
-  const data = React.useMemo(() => buildSlugData(mQuintile), [mQuintile]);
+  const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
+  const backData = React.useMemo(() => buildSlugData(mQuintile, 'back'), [mQuintile]);
   return (
     <View style={styles.row}>
       <View style={styles.column}>
@@ -412,7 +426,7 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           <Body
             side="front"
             gender="male"
-            data={data}
+            data={frontData}
             colors={BODY_COLORS}
             scale={BODY_SCALE}
             border={COLOR_OUTLINE}
@@ -428,7 +442,7 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           <Body
             side="back"
             gender="male"
-            data={data}
+            data={backData}
             colors={BODY_COLORS}
             scale={BODY_SCALE}
             border={COLOR_OUTLINE}

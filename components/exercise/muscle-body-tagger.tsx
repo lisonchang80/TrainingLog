@@ -168,9 +168,23 @@ function colorToIntensity(color: string): number {
  * highlighted ones get the role color, the rest get the light body base
  * (or skin-tone for head/hair/hands/feet).
  */
-function buildData(highlight: Map<string, MuscleRole>): ExtendedBodyPart[] {
+/**
+ * Side-aware M_* exclusions: deltoids slug spans 3 anatomical heads but the
+ * package renders deltoids once per view. Front view's deltoid cap visually
+ * represents front + mid (lateral) heads only; back view's deltoid cap
+ * represents rear + mid heads only. So picking ONLY M_REAR_DELT shouldn't
+ * light up the FRONT shoulder — it's a different muscle in real anatomy.
+ */
+function isMSidedExcluded(m: string, side: 'front' | 'back'): boolean {
+  if (side === 'front' && m === M_REAR_DELT) return true;
+  if (side === 'back' && m === M_FRONT_DELT) return true;
+  return false;
+}
+
+function buildData(highlight: Map<string, MuscleRole>, side: 'front' | 'back'): ExtendedBodyPart[] {
   const slugRole = new Map<Slug, MuscleRole>();
   for (const [m, slug] of Object.entries(M_TO_SLUG)) {
+    if (isMSidedExcluded(m, side)) continue;
     const role = highlight.get(m);
     if (!role) continue;
     const prev = slugRole.get(slug);
@@ -200,7 +214,8 @@ export function MuscleBodyTagger({
   mode = 'readonly',
   onTap,
 }: MuscleBodyTaggerProps): React.JSX.Element {
-  const data = React.useMemo(() => buildData(highlight), [highlight]);
+  const frontData = React.useMemo(() => buildData(highlight, 'front'), [highlight]);
+  const backData = React.useMemo(() => buildData(highlight, 'back'), [highlight]);
 
   const handlePress = React.useCallback(
     (part: ExtendedBodyPart) => {
@@ -224,7 +239,7 @@ export function MuscleBodyTagger({
           <Body
             side="front"
             gender="male"
-            data={data}
+            data={frontData}
             colors={BODY_COLORS}
             scale={0.8}
             border={COLOR_OUTLINE}
@@ -238,7 +253,7 @@ export function MuscleBodyTagger({
           <Body
             side="back"
             gender="male"
-            data={data}
+            data={backData}
             colors={BODY_COLORS}
             scale={0.8}
             border={COLOR_OUTLINE}
