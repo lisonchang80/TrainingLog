@@ -155,25 +155,43 @@ export const PATH_MID_DELT_PEAK_BACK_L = '';
 export const PATH_MID_DELT_PEAK_BACK_R = '';
 
 /**
- * Front-delt / rear-delt notch fills — RESET TO EMPTY 2026-05-23 evening.
+ * Front-delt / rear-delt notch fills — "smooth the medial concavity"
+ * variant 2026-05-23 evening.
  *
- * User reset all 3 bulge variants (Δx≈10 / Δx≈30 outward / inner-pull
- * overlap) as either "floating arch" (gap to delt curve) or "extends
- * outward into chest/back" (not 補缺口). Restored to baseline =
- * deltoid silhouette is purely the package ClipPath + medial/lateral
- * rect partition; no extension paths.
+ * User clarification (round 4): "補缺口" means smooth the deltoid's OWN
+ * medial concave curve (deltoid 自身內側內凹 curve), NOT extend past the
+ * deltoid silhouette into chest/back.
  *
- * User instruction: "回到補滿肩的區域那時候，重新來過" — baseline = pure
- * package shape, awaiting clarification on what "補缺口" means visually
- * (the deltoid-to-chest V-gap is in the package body silhouette itself;
- * filling it would necessarily extend past the deltoid outline).
+ * Analysis of PACKAGE_DELT_FRONT_L path (decoded relative cmds):
+ *   - top apex (274, 312)
+ *   - briefly pokes to medial bbox edge (278, 320)
+ *   - sharp inward curve to (249, 340) — THIS is the visible concavity
+ *   - gradually tapers to (247, 364) → (241, 378) → (228, 395) at bottom
  *
- * Kept as empty exports so consumer render stays structurally stable.
+ * The "sharp inward curve" between (278, 320) and (249, 340) reads
+ * visually as a notch — the medial edge of the deltoid suddenly recedes
+ * by ~29 units in only 20 vertical units. The fill below smooths this
+ * by drawing a gentler arc from (276, 318) down to (250, 360), tracing
+ * a more gradual diagonal that fills the concave pocket without
+ * extending past the deltoid bbox.
+ *
+ * IMPORTANT invariants:
+ *   - fill x stays ≤ deltoid bbox medial edge (278 front-L, ≥449 front-R,
+ *     ≤981 back-L, ≥1185 back-R) — NEVER extends into chest/back area
+ *   - all 4 paths byte-for-byte mirror about chest centerline (x=362) or
+ *     spine centerline (x=1086)
+ *   - fill colour = front-delt rect colour (front view) / rear-delt rect
+ *     colour (back view) — same colour as the medial half ClipPath rect,
+ *     so overlap is invisible
  */
-export const PATH_FRONT_DELT_CHEST_FILL_L = '';
-export const PATH_FRONT_DELT_CHEST_FILL_R = '';
-export const PATH_REAR_DELT_BACK_FILL_L = '';
-export const PATH_REAR_DELT_BACK_FILL_R = '';
+export const PATH_FRONT_DELT_CHEST_FILL_L =
+  'M276 318 Q272 332 260 348 Q252 360 250 372 L240 378 Q244 358 252 342 Q262 326 276 318 Z';
+export const PATH_FRONT_DELT_CHEST_FILL_R =
+  'M448 318 Q452 332 464 348 Q472 360 474 372 L484 378 Q480 358 472 342 Q462 326 448 318 Z';
+export const PATH_REAR_DELT_BACK_FILL_L =
+  'M979 318 Q975 332 963 348 Q955 360 953 372 L943 378 Q947 358 955 342 Q965 326 979 318 Z';
+export const PATH_REAR_DELT_BACK_FILL_R =
+  'M1193 318 Q1197 332 1209 348 Q1217 360 1219 372 L1229 378 Q1225 358 1217 342 Q1207 326 1193 318 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
