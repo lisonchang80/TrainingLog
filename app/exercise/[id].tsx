@@ -8,7 +8,7 @@ import { useCallback, useLayoutEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MuscleDiagramTagged } from '@/components/exercise/muscle-diagram-tagged';
+import { MuscleBodyTagger } from '@/components/exercise/muscle-body-tagger';
 import { useDatabase } from '@/components/database-provider';
 import { muscleHighlightMap } from '@/src/domain/exercise/exerciseLibrary';
 import type {
@@ -125,7 +125,7 @@ export default function ExerciseDetailScreen() {
 
         {(data.primary.length > 0 || data.secondary.length > 0) && (
           <View style={styles.diagramCard}>
-            <MuscleDiagramTagged highlight={highlight} mode="readonly" />
+            <MuscleBodyTagger highlight={highlight} mode="readonly" />
           </View>
         )}
       </ScrollView>

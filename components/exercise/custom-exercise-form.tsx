@@ -40,7 +40,7 @@ import {
 import { t, tEquipment, tMuscleGroup } from '@/src/i18n';
 
 import { MgEquipmentPicker, type PickerCell } from './mg-equipment-picker';
-import { MuscleDiagramTagged } from './muscle-diagram-tagged';
+import { MuscleBodyTagger } from './muscle-body-tagger';
 
 export interface CustomExerciseInitial {
   name: string;
@@ -242,7 +242,11 @@ export function CustomExerciseForm({
         </Text>
 
         <View style={styles.diagramWrap}>
-          <MuscleDiagramTagged highlight={highlight} onTap={cycleMuscleRole} />
+          <MuscleBodyTagger
+            highlight={highlight}
+            mode="tap-cycle"
+            onTap={cycleMuscleRole}
+          />
         </View>
       </ScrollView>
 
