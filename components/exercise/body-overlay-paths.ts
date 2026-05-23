@@ -264,10 +264,36 @@ export const PATH_FRONT_DELT_CHEST_FILL_L =
   'M278 320 C276 350 245 385 232 390 C225 360 250 325 278 320 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
   'M450 320 C452 350 483 385 496 390 C503 360 478 325 450 320 Z';
+/**
+ * Round 9 BACK fix (2026-05-23): "後束一樣沒對稱，左邊有空隙下方鋸齒，
+ * 右邊上下都有鋸齒". Root cause: previous BACK anchors used estimates
+ * not from real PACKAGE_DELT_BACK_L/R medial edge analysis.
+ *
+ * Decoded PACKAGE_DELT_BACK_L medial side: top vertex (980, 320) →
+ * curve thru (961, 337) → (951, 363) → bottom vertex (946, 377).
+ * Previous bottom anchor (945, 390) was 13 units below real medial
+ * edge → big gap → sawtooth.
+ *
+ * Decoded PACKAGE_DELT_BACK_R medial side: top vertex (1186, 320) →
+ * (1205, 336) → (1215, 365) → (1237, 391). Note (1237, 391) is past
+ * SPLIT_X_BACK_R=1230.2 → in lateral half! So R bottom anchor must
+ * stop at where medial curve crosses SPLIT: ~ (1228, 380).
+ *
+ * New design:
+ *   BACK_L: top (980, 320), bottom (942, 380), leaf span 60
+ *   BACK_R: top (1186, 320), bottom (1228, 380), leaf span 60
+ * Control points sit along each side's real medial curve so the fill
+ * outer edge traces PACKAGE silhouette and inner edge stays just inside
+ * SPLIT_X with 2-4 unit buffer.
+ *
+ * Verified each path point stays in own medial half:
+ *   BACK_L medial half [936.4, 981.31]: pts in [938, 980] ✓
+ *   BACK_R medial half [1184.98, 1230.2]: pts in [1186, 1228] ✓
+ */
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M980 320 C978 350 958 385 945 390 C940 360 962 325 980 320 Z';
+  'M980 320 C979 340 953 372 942 380 C938 350 960 325 980 320 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1192 320 C1194 350 1214 385 1227 390 C1229 360 1210 325 1192 320 Z';
+  'M1186 320 C1187 340 1219 372 1228 380 C1228 350 1208 325 1186 320 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
