@@ -224,7 +224,7 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           gender="male"
           data={data}
           colors={BODY_COLORS}
-          scale={1.2}
+          scale={0.8}
           border={COLOR_OUTLINE}
         />
       </View>
@@ -235,7 +235,7 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           gender="male"
           data={data}
           colors={BODY_COLORS}
-          scale={1.2}
+          scale={0.8}
           border={COLOR_OUTLINE}
         />
       </View>
