@@ -226,6 +226,8 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           colors={BODY_COLORS}
           scale={0.8}
           border={COLOR_OUTLINE}
+          defaultFill="#FAFAFA"
+          defaultStroke="#9CA3AF"
         />
       </View>
       <View style={styles.column}>
@@ -237,6 +239,8 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
           colors={BODY_COLORS}
           scale={0.8}
           border={COLOR_OUTLINE}
+          defaultFill="#FAFAFA"
+          defaultStroke="#9CA3AF"
         />
       </View>
     </View>
