@@ -213,14 +213,37 @@ export const PATH_MID_DELT_PEAK_BACK_R = '';
  *   - Fill stays inside deltoid → no bleed into chest/back, no overlap with
  *     mid-delt rect (no colour collision, no sawtooth)
  */
+/**
+ * Round 7 (2026-05-23): "都有鋸齒，弧請連結肌肉端點". Previous round-6 leaf
+ * had anchor at deltoid bbox CENTER (e.g. FRONT_L (250, 315)), leaving
+ * a ~25 unit gap between fill anchor and deltoid medial edge → visible
+ * seam read as sawtooth.
+ *
+ * Fix: anchor pulled out to deltoid medial bbox edge (2-4 units inside).
+ * top anchor sits on the deltoid's upper-medial vertex (close to PACKAGE
+ * path start); bottom anchor sits on the lower-medial vertex (close to
+ * PACKAGE medial curve's lowest point in medial half). Now fill visually
+ * "connects" the muscle endpoints — no gap, no seam.
+ *
+ * Strict L↔R mirror (FRONT sums=724 about chest centerline x=362; BACK
+ * sums=2172 about spine centerline x=1086). Two-cubic-Bezier leaf with
+ * asymmetric midrib leaning medial. All control points stay in medial
+ * half: outer cp ≤ bbox medial edge - 2; inner cp ≥ SPLIT_X + 4.
+ *
+ * Verified each path point in own bbox medial half:
+ *   FRONT_L medial half [221.2, 278.43]: all pts in [225, 274] ✓
+ *   FRONT_R medial half [449.44, 511.6]: all pts in [450, 499] ✓
+ *   BACK_L medial half [936.4, 981.31]: all pts in [943, 980] ✓
+ *   BACK_R medial half [1184.98, 1230.2]: all pts in [1192, 1229] ✓
+ */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M250 315 C225 320 230 365 240 390 C270 385 273 340 250 315 Z';
+  'M274 320 C273 350 245 385 230 390 C225 360 250 325 274 320 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M474 315 C499 320 494 365 484 390 C454 385 451 340 474 315 Z';
+  'M450 320 C451 350 479 385 494 390 C499 360 474 325 450 320 Z';
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M959 315 C943 320 946 365 952 390 C974 385 978 340 959 315 Z';
+  'M979 320 C980 355 960 385 945 390 C943 360 965 325 979 320 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1213 315 C1229 320 1226 365 1220 390 C1198 385 1194 340 1213 315 Z';
+  'M1193 320 C1192 355 1212 385 1227 390 C1229 360 1207 325 1193 320 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
