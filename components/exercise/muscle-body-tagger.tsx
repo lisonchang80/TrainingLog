@@ -28,6 +28,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
+import Svg, { Path } from 'react-native-svg';
 
 import {
   M_ABS,
@@ -52,6 +53,29 @@ import {
 } from '@/src/db/seed/v006ExerciseLibrary';
 import type { MuscleRole } from '@/src/domain/exercise/types';
 import { t } from '@/src/i18n';
+import {
+  BICEPS_SIBS,
+  CHEST_SIBS,
+  COLOR_BODY_BASE,
+  DELT_SIBS,
+  GLUTE_SIBS,
+  PATH_BICEP_LONG_L,
+  PATH_BICEP_LONG_R,
+  PATH_BICEP_SHORT_L,
+  PATH_BICEP_SHORT_R,
+  PATH_FRONT_DELT_L,
+  PATH_FRONT_DELT_R,
+  PATH_LOWER_CHEST,
+  PATH_LOWER_GLUTE,
+  PATH_MID_DELT_BACK_L,
+  PATH_MID_DELT_BACK_R,
+  PATH_MID_DELT_FRONT_L,
+  PATH_MID_DELT_FRONT_R,
+  PATH_REAR_DELT_L,
+  PATH_REAR_DELT_R,
+  PATH_UPPER_CHEST,
+  PATH_UPPER_GLUTE,
+} from './body-overlay-paths';
 
 // ---------------------------------------------------------------------------
 // Color tokens — preserve existing MuscleDiagramTagged palette
@@ -59,9 +83,10 @@ import { t } from '@/src/i18n';
 
 const COLOR_PRIMARY = '#F26B3A';
 const COLOR_SECONDARY = '#7CB6E0';
-const COLOR_BODY_BASE = '#FAFAFA';
 const COLOR_SKIN = '#E5E5E5';
 const COLOR_OUTLINE = '#9CA3AF';
+// COLOR_BODY_BASE imported from body-overlay-paths (single source of truth so
+// the overlay's "split visible" fallback exactly matches the underlying slug).
 
 /**
  * Color array fed to the underlying Body component. Index 0 = body base,
@@ -181,6 +206,20 @@ function isMSidedExcluded(m: string, side: 'front' | 'back'): boolean {
   return false;
 }
 
+/**
+ * Slugs whose underlying region is bundled across 2+ M_* constants. For these
+ * the overlay (FrontOverlay/BackOverlay) does the actual sub-region colouring,
+ * so the package's slug fill is forced to COLOR_BODY_BASE — otherwise picking
+ * only one sub-head (e.g. M_REAR_DELT) would still flood the full deltoid cap
+ * because the role-promotion logic propagates to the parent slug.
+ */
+const COLLAPSED_SLUGS: ReadonlySet<Slug> = new Set<Slug>([
+  'chest',
+  'biceps',
+  'deltoids',
+  'gluteal',
+]);
+
 function buildData(highlight: Map<string, MuscleRole>, side: 'front' | 'back'): ExtendedBodyPart[] {
   const slugRole = new Map<Slug, MuscleRole>();
   for (const [m, slug] of Object.entries(M_TO_SLUG)) {
@@ -194,15 +233,121 @@ function buildData(highlight: Map<string, MuscleRole>, side: 'front' | 'back'): 
   const out: ExtendedBodyPart[] = [];
   for (const slug of ALL_SLUGS) {
     const role = slugRole.get(slug);
-    if (role) {
+    if (role && !COLLAPSED_SLUGS.has(slug)) {
+      // Non-collapsed slugs: render with role color directly.
       const color = role === 'primary' ? COLOR_PRIMARY : COLOR_SECONDARY;
       out.push({ slug, color, intensity: colorToIntensity(color) });
     } else {
+      // Collapsed slugs (chest/biceps/deltoids/gluteal): the overlay paints
+      // the actual region, so leave the underlying slug at body-base. Other
+      // unhighlighted slugs also fall here.
       const fill = SKIN_SLUGS.has(slug) ? COLOR_SKIN : COLOR_BODY_BASE;
       out.push({ slug, color: fill });
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-division overlay (role-aware)
+//
+// Mirrors the structure in body-heatmap.tsx but emits role colours
+// (primary/secondary) instead of quintile colours. The path geometry +
+// sibling-group constants come from the shared `body-overlay-paths` module.
+// ---------------------------------------------------------------------------
+
+/**
+ * Role-aware sibling fill. If the M_* has its own role → primary/secondary
+ * colour. Otherwise if ANY sibling M_* (sharing the same package slug) is
+ * highlighted → render COLOR_BODY_BASE so the split line stays visible
+ * against the sibling's filled region. If no sibling is highlighted →
+ * 'none' (transparent), letting the underlying body-base show through.
+ */
+function roleSubFill(
+  m: string,
+  siblings: readonly string[],
+  highlight: Map<string, MuscleRole>
+): string {
+  const role = highlight.get(m);
+  if (role === 'primary') return COLOR_PRIMARY;
+  if (role === 'secondary') return COLOR_SECONDARY;
+  if (siblings.some((s) => highlight.has(s))) return COLOR_BODY_BASE;
+  return 'none';
+}
+
+/**
+ * Body render scale — single source of truth so the SVG overlay
+ * (positioned absolutely over the Body) uses the same dimensions as the
+ * package's wrapper (width=200*scale, height=400*scale).
+ */
+const BODY_SCALE = 0.8;
+
+/**
+ * Front-side overlay paths (chest split, biceps split per-arm, deltoids
+ * front+mid). Positioned absolutely over the package's front body.
+ */
+function FrontOverlay({
+  highlight,
+  scale,
+}: {
+  highlight: Map<string, MuscleRole>;
+  scale: number;
+}) {
+  return (
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="0 0 724 1448"
+      pointerEvents="none"
+    >
+      {/* Chest split */}
+      <Path d={PATH_UPPER_CHEST} fill={roleSubFill(M_UPPER_CHEST, CHEST_SIBS, highlight)} />
+      <Path d={PATH_LOWER_CHEST} fill={roleSubFill(M_LOWER_CHEST, CHEST_SIBS, highlight)} />
+      {/* Bicep split — left arm */}
+      <Path d={PATH_BICEP_LONG_L} fill={roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight)} />
+      <Path d={PATH_BICEP_SHORT_L} fill={roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight)} />
+      {/* Bicep split — right arm */}
+      <Path d={PATH_BICEP_SHORT_R} fill={roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight)} />
+      <Path d={PATH_BICEP_LONG_R} fill={roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight)} />
+      {/* Front delt + mid delt (front view) */}
+      <Path d={PATH_FRONT_DELT_L} fill={roleSubFill(M_FRONT_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_FRONT_DELT_R} fill={roleSubFill(M_FRONT_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_MID_DELT_FRONT_L} fill={roleSubFill(M_MID_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_MID_DELT_FRONT_R} fill={roleSubFill(M_MID_DELT, DELT_SIBS, highlight)} />
+    </Svg>
+  );
+}
+
+/**
+ * Back-side overlay paths (rear+mid delts, upper/lower gluteal). Positioned
+ * absolutely over the package's back body.
+ */
+function BackOverlay({
+  highlight,
+  scale,
+}: {
+  highlight: Map<string, MuscleRole>;
+  scale: number;
+}) {
+  return (
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="724 0 724 1448"
+      pointerEvents="none"
+    >
+      {/* Rear delt + mid delt (back view) */}
+      <Path d={PATH_REAR_DELT_L} fill={roleSubFill(M_REAR_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_REAR_DELT_R} fill={roleSubFill(M_REAR_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_MID_DELT_BACK_L} fill={roleSubFill(M_MID_DELT, DELT_SIBS, highlight)} />
+      <Path d={PATH_MID_DELT_BACK_R} fill={roleSubFill(M_MID_DELT, DELT_SIBS, highlight)} />
+      {/* Gluteal split */}
+      <Path d={PATH_UPPER_GLUTE} fill={roleSubFill(M_UPPER_GLUTE, GLUTE_SIBS, highlight)} />
+      <Path d={PATH_LOWER_GLUTE} fill={roleSubFill(M_LOWER_GLUTE, GLUTE_SIBS, highlight)} />
+    </Svg>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -236,31 +381,37 @@ export function MuscleBodyTagger({
       <View style={styles.row}>
         <View style={styles.column}>
           <Text style={styles.label}>{t('page', 'bodyFront')}</Text>
-          <Body
-            side="front"
-            gender="male"
-            data={frontData}
-            colors={BODY_COLORS}
-            scale={0.8}
-            border={COLOR_OUTLINE}
-            defaultFill={COLOR_BODY_BASE}
-            defaultStroke={COLOR_OUTLINE}
-            {...bodyProps}
-          />
+          <View style={styles.bodyWrap}>
+            <Body
+              side="front"
+              gender="male"
+              data={frontData}
+              colors={BODY_COLORS}
+              scale={BODY_SCALE}
+              border={COLOR_OUTLINE}
+              defaultFill={COLOR_BODY_BASE}
+              defaultStroke={COLOR_OUTLINE}
+              {...bodyProps}
+            />
+            <FrontOverlay highlight={highlight} scale={BODY_SCALE} />
+          </View>
         </View>
         <View style={styles.column}>
           <Text style={styles.label}>{t('page', 'bodyBack')}</Text>
-          <Body
-            side="back"
-            gender="male"
-            data={backData}
-            colors={BODY_COLORS}
-            scale={0.8}
-            border={COLOR_OUTLINE}
-            defaultFill={COLOR_BODY_BASE}
-            defaultStroke={COLOR_OUTLINE}
-            {...bodyProps}
-          />
+          <View style={styles.bodyWrap}>
+            <Body
+              side="back"
+              gender="male"
+              data={backData}
+              colors={BODY_COLORS}
+              scale={BODY_SCALE}
+              border={COLOR_OUTLINE}
+              defaultFill={COLOR_BODY_BASE}
+              defaultStroke={COLOR_OUTLINE}
+              {...bodyProps}
+            />
+            <BackOverlay highlight={highlight} scale={BODY_SCALE} />
+          </View>
         </View>
       </View>
       <View style={styles.legendRow}>
@@ -288,6 +439,9 @@ const styles = StyleSheet.create({
   },
   column: {
     alignItems: 'center',
+  },
+  bodyWrap: {
+    position: 'relative',
   },
   label: {
     fontSize: 12,
