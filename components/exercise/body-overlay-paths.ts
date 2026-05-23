@@ -113,13 +113,37 @@ import {
  * inherent; paths follow each side's real silhouette → visual symmetry
  * within PACKAGE constraints.
  */
-/** Front: upper chest — 2 sub-paths above V wings (L + R clavicular triangles). */
+/**
+ * Round 13 chest fix (2026-05-23): user black-line drawing shows V wings
+ * going DOWN-INWARD (from chest upper-outer lateral to chest lower-medial),
+ * forming a bowtie where the two wings visually meet at sternum mid-lower.
+ *
+ * V apex on each side at chest medial near lower-mid:
+ *   L: (357, 395) — on chest L medial silhouette mid-bottom
+ *   R: (374, 395) — on chest R medial silhouette mid-bottom
+ * Two close-but-separate V apex points (17 units apart in x) — visually
+ * read as single bowtie center around sternum lower-mid area.
+ *
+ * UPPER = large region above V wings (most of chest from V down to top)
+ * LOWER = small region below V wings (chest bottom near medial)
+ *
+ * V wing concave up via Q control y=360 (5 above straight midpoint 365).
+ * "一點點凹向上" — slight upward bow on each wing.
+ *
+ * Each of UPPER + LOWER is 2 sub-paths (L pec + R pec) — no crossing
+ * of sternum top notch or xiphoid bottom notch.
+ *
+ * PACKAGE chest L/R asymmetry inherent (medial top y=319 vs y=327);
+ * paths follow each side's real silhouette. Visual symmetry within
+ * PACKAGE constraints.
+ */
+/** Front: upper chest — 2 sub-paths above V wings (L + R, covers most of chest). */
 export const PATH_UPPER_CHEST =
-  'M260 345 Q270 322 300 318 Q320 316 337 319 Q295 326 260 345 Z M463 345 Q449 326 425 320 Q405 316 380 327 Q428 326 463 345 Z';
+  'M260 345 Q270 322 300 318 Q320 316 337 319 Q351 333 357 344 L357 395 Q308 360 260 345 Z M463 345 Q449 326 425 320 Q405 316 380 327 Q377 354 374 380 L374 395 Q416 360 463 345 Z';
 
-/** Front: lower chest — 2 sub-paths below V wings (L + R sternal areas). */
+/** Front: lower chest — 2 sub-paths below V wings (L + R, small bottom areas). */
 export const PATH_LOWER_CHEST =
-  'M260 345 Q295 326 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q282 430 272 422 Q263 405 263 350 L260 345 Z M463 345 Q428 326 380 327 L372 401 L375 413 Q393 425 416 435 Q425 437 443 430 Q460 428 471 400 Q472 380 463 345 Z';
+  'M260 345 Q308 360 357 395 L355 409 Q327 425 297 433 Q282 430 272 422 Q263 405 263 350 L260 345 Z M463 345 Q416 360 374 395 L375 413 Q393 425 416 435 Q425 437 443 430 Q460 428 471 400 Q472 380 463 345 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
