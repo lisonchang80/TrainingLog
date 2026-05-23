@@ -37,10 +37,45 @@ import {
   type MuscleGroup,
   type MuscleRole,
 } from '@/src/domain/exercise/types';
-import { t, tEquipment, tMuscleGroup } from '@/src/i18n';
+import { t, tEquipment, tMuscle, tMuscleGroup } from '@/src/i18n';
+import {
+  M_ABS,
+  M_BACK,
+  M_BICEP_LONG,
+  M_BICEP_SHORT,
+  M_CALF,
+  M_FOREARM,
+  M_FRONT_DELT,
+  M_HAMSTRING,
+  M_LOWER_BACK,
+  M_LOWER_CHEST,
+  M_LOWER_GLUTE,
+  M_MID_DELT,
+  M_OBLIQUE,
+  M_QUAD,
+  M_REAR_DELT,
+  M_TRAP,
+  M_TRICEP,
+  M_UPPER_CHEST,
+  M_UPPER_GLUTE,
+} from '@/src/db/seed/v006ExerciseLibrary';
 
 import { MgEquipmentPicker, type PickerCell } from './mg-equipment-picker';
 import { MuscleBodyTagger } from './muscle-body-tagger';
+
+/**
+ * 19 M_* in 5×4 grid order matching reference fitness app body chart:
+ *   row 1: trap / upper-chest / lower-chest / back / lower-back
+ *   row 2: calf / forearm / tricep / bicep-short / bicep-long
+ *   row 3: rear-delt / mid-delt / front-delt / oblique / abs
+ *   row 4: upper-glute / lower-glute / hamstring / quad
+ */
+const M_BUTTONS: readonly string[] = [
+  M_TRAP, M_UPPER_CHEST, M_LOWER_CHEST, M_BACK, M_LOWER_BACK,
+  M_CALF, M_FOREARM, M_TRICEP, M_BICEP_SHORT, M_BICEP_LONG,
+  M_REAR_DELT, M_MID_DELT, M_FRONT_DELT, M_OBLIQUE, M_ABS,
+  M_UPPER_GLUTE, M_LOWER_GLUTE, M_HAMSTRING, M_QUAD,
+];
 
 export interface CustomExerciseInitial {
   name: string;
@@ -115,6 +150,45 @@ export function CustomExerciseForm({
       return new Set(p).add(mid);
     });
   }, [secondary]);
+
+  // Button-grid toggle handlers (per role section).
+  // Primary tap: if already primary → clear; else → set primary (and clear secondary if any).
+  // Secondary tap: if already secondary → clear; else → set secondary (and clear primary if any).
+  const togglePrimary = useCallback((mid: string) => {
+    setPrimary((p) => {
+      const np = new Set(p);
+      if (np.has(mid)) {
+        np.delete(mid);
+      } else {
+        np.add(mid);
+        setSecondary((s) => {
+          if (!s.has(mid)) return s;
+          const ns = new Set(s);
+          ns.delete(mid);
+          return ns;
+        });
+      }
+      return np;
+    });
+  }, []);
+
+  const toggleSecondary = useCallback((mid: string) => {
+    setSecondary((s) => {
+      const ns = new Set(s);
+      if (ns.has(mid)) {
+        ns.delete(mid);
+      } else {
+        ns.add(mid);
+        setPrimary((p) => {
+          if (!p.has(mid)) return p;
+          const np = new Set(p);
+          np.delete(mid);
+          return np;
+        });
+      }
+      return ns;
+    });
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || busy) return;
@@ -235,17 +309,63 @@ export function CustomExerciseForm({
           <Text style={styles.pickerRowChevron}>▾</Text>
         </Pressable>
 
-        {/* Row 4: 訓練部位 — 解剖圖 + 標籤同畫面（正面 / 背面並列） */}
+        {/* Row 4: 訓練部位 — 按鈕格 + 解剖圖（reference 風格）*/}
         <Text style={styles.label}>{t('page', 'muscleGroupOptionalLabel')}</Text>
         <Text style={styles.helper}>
           {t('page', 'muscleTagHelper')}
         </Text>
 
+        {/* TODO(i18n): 主要/次要訓練部位 headings */}
+        <Text style={styles.sectionLabel}>主要訓練部位</Text>
+        <View style={styles.btnGrid}>
+          {M_BUTTONS.map((mid) => {
+            const active = primary.has(mid);
+            return (
+              <Pressable
+                key={`p-${mid}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${tMuscle(mid)} 主要`}
+                onPress={() => togglePrimary(mid)}
+                style={({ pressed }) => [
+                  styles.muscleBtn,
+                  active && styles.muscleBtnPrimaryActive,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={[styles.muscleBtnText, active && styles.muscleBtnTextActive]}>
+                  {tMuscle(mid)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.sectionLabel}>次要訓練部位</Text>
+        <View style={styles.btnGrid}>
+          {M_BUTTONS.map((mid) => {
+            const active = secondary.has(mid);
+            return (
+              <Pressable
+                key={`s-${mid}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${tMuscle(mid)} 次要`}
+                onPress={() => toggleSecondary(mid)}
+                style={({ pressed }) => [
+                  styles.muscleBtn,
+                  active && styles.muscleBtnSecondaryActive,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={[styles.muscleBtnText, active && styles.muscleBtnTextActive]}>
+                  {tMuscle(mid)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <View style={styles.diagramWrap}>
           <MuscleBodyTagger
             highlight={highlight}
-            mode="tap-cycle"
-            onTap={cycleMuscleRole}
+            mode="readonly"
           />
         </View>
       </ScrollView>
@@ -320,4 +440,44 @@ const styles = StyleSheet.create({
 
   diagramWrap: { alignItems: 'center', marginVertical: 8 },
   btnPressed: { opacity: 0.85 },
+
+  // muscle button grid (reference-style 5-col layout, primary + secondary sections)
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  btnGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  muscleBtn: {
+    flexBasis: '18.5%',
+    flexGrow: 1,
+    minHeight: 38,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  muscleBtnPrimaryActive: {
+    backgroundColor: '#F26B3A',
+  },
+  muscleBtnSecondaryActive: {
+    backgroundColor: '#7CB6E0',
+  },
+  muscleBtnText: {
+    fontSize: 12,
+    color: '#374151',
+    textAlign: 'center',
+  },
+  muscleBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
 });
