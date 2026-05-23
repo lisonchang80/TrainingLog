@@ -253,10 +253,25 @@ const PATH_LOWER_GLUTE =
  * so the underlying Body component's slug color (max across collapsed M_*)
  * shows through unmodified.
  */
-function subFill(m: string, mQuintile: Map<string, Quintile>): string {
+/**
+ * Sibling-aware fill. If the M_* has its own quintile → render that color.
+ * Otherwise if ANY sibling M_* (sharing the same package slug) has data →
+ * render COLOR_BODY_BASE so the split line stays visible against the
+ * sibling's filled region. If no sibling has data → 'none' (transparent),
+ * letting the package's empty body show through unmodified.
+ */
+function subFill(m: string, siblings: readonly string[], mQuintile: Map<string, Quintile>): string {
   const q = mQuintile.get(m);
-  return q == null ? 'none' : QUINTILE_COLORS[q];
+  if (q != null) return QUINTILE_COLORS[q];
+  if (siblings.some((s) => mQuintile.has(s))) return COLOR_BODY_BASE;
+  return 'none';
 }
+
+/** Sibling groups (each entry shares a package slug — overlay split). */
+const CHEST_SIBS = [M_UPPER_CHEST, M_LOWER_CHEST];
+const BICEPS_SIBS = [M_BICEP_LONG, M_BICEP_SHORT];
+const DELT_SIBS = [M_FRONT_DELT, M_MID_DELT, M_REAR_DELT];
+const GLUTE_SIBS = [M_UPPER_GLUTE, M_LOWER_GLUTE];
 
 /**
  * Front-side overlay paths (chest split, biceps split per-arm, deltoids
@@ -272,19 +287,19 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
       pointerEvents="none"
     >
       {/* Chest split */}
-      <Path d={PATH_UPPER_CHEST} fill={subFill(M_UPPER_CHEST, mQuintile)} />
-      <Path d={PATH_LOWER_CHEST} fill={subFill(M_LOWER_CHEST, mQuintile)} />
+      <Path d={PATH_UPPER_CHEST} fill={subFill(M_UPPER_CHEST, CHEST_SIBS, mQuintile)} />
+      <Path d={PATH_LOWER_CHEST} fill={subFill(M_LOWER_CHEST, CHEST_SIBS, mQuintile)} />
       {/* Bicep split — left arm */}
-      <Path d={PATH_BICEP_LONG_L} fill={subFill(M_BICEP_LONG, mQuintile)} />
-      <Path d={PATH_BICEP_SHORT_L} fill={subFill(M_BICEP_SHORT, mQuintile)} />
+      <Path d={PATH_BICEP_LONG_L} fill={subFill(M_BICEP_LONG, BICEPS_SIBS, mQuintile)} />
+      <Path d={PATH_BICEP_SHORT_L} fill={subFill(M_BICEP_SHORT, BICEPS_SIBS, mQuintile)} />
       {/* Bicep split — right arm */}
-      <Path d={PATH_BICEP_SHORT_R} fill={subFill(M_BICEP_SHORT, mQuintile)} />
-      <Path d={PATH_BICEP_LONG_R} fill={subFill(M_BICEP_LONG, mQuintile)} />
+      <Path d={PATH_BICEP_SHORT_R} fill={subFill(M_BICEP_SHORT, BICEPS_SIBS, mQuintile)} />
+      <Path d={PATH_BICEP_LONG_R} fill={subFill(M_BICEP_LONG, BICEPS_SIBS, mQuintile)} />
       {/* Front delt + mid delt (front view) */}
-      <Path d={PATH_FRONT_DELT_L} fill={subFill(M_FRONT_DELT, mQuintile)} />
-      <Path d={PATH_FRONT_DELT_R} fill={subFill(M_FRONT_DELT, mQuintile)} />
-      <Path d={PATH_MID_DELT_FRONT_L} fill={subFill(M_MID_DELT, mQuintile)} />
-      <Path d={PATH_MID_DELT_FRONT_R} fill={subFill(M_MID_DELT, mQuintile)} />
+      <Path d={PATH_FRONT_DELT_L} fill={subFill(M_FRONT_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_FRONT_DELT_R} fill={subFill(M_FRONT_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_MID_DELT_FRONT_L} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_MID_DELT_FRONT_R} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
     </Svg>
   );
 }
@@ -303,13 +318,13 @@ function BackOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; s
       pointerEvents="none"
     >
       {/* Rear delt + mid delt (back view) */}
-      <Path d={PATH_REAR_DELT_L} fill={subFill(M_REAR_DELT, mQuintile)} />
-      <Path d={PATH_REAR_DELT_R} fill={subFill(M_REAR_DELT, mQuintile)} />
-      <Path d={PATH_MID_DELT_BACK_L} fill={subFill(M_MID_DELT, mQuintile)} />
-      <Path d={PATH_MID_DELT_BACK_R} fill={subFill(M_MID_DELT, mQuintile)} />
+      <Path d={PATH_REAR_DELT_L} fill={subFill(M_REAR_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_REAR_DELT_R} fill={subFill(M_REAR_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_MID_DELT_BACK_L} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
+      <Path d={PATH_MID_DELT_BACK_R} fill={subFill(M_MID_DELT, DELT_SIBS, mQuintile)} />
       {/* Gluteal split */}
-      <Path d={PATH_UPPER_GLUTE} fill={subFill(M_UPPER_GLUTE, mQuintile)} />
-      <Path d={PATH_LOWER_GLUTE} fill={subFill(M_LOWER_GLUTE, mQuintile)} />
+      <Path d={PATH_UPPER_GLUTE} fill={subFill(M_UPPER_GLUTE, GLUTE_SIBS, mQuintile)} />
+      <Path d={PATH_LOWER_GLUTE} fill={subFill(M_LOWER_GLUTE, GLUTE_SIBS, mQuintile)} />
     </Svg>
   );
 }
