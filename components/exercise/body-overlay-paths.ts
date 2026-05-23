@@ -45,13 +45,37 @@ import {
 // Front-side overlay paths
 // ---------------------------------------------------------------------------
 
-/** Front: upper chest — top ~40% of chest area (clavicular head, both pecs). */
+/**
+ * Front chest — upper / lower split via V-line meeting at sternum mid.
+ *
+ * Decoded from PACKAGE chest L+R silhouettes (node_modules/.../bodyFront.js):
+ *   Chest L outline: (260, 344) top-left → (300, 318) top arc → (337, 319)
+ *     top-medial → (357, 392) right-medial mid → (297, 433) bottom-medial
+ *     → (272, 422) bottom-left.
+ *   Chest R outline: (380, 327) top-medial → (399, 318) → (422, 318) →
+ *     (449, 326) top-right → (471, 355) right-lateral → (443, 430)
+ *     bottom-right → (416, 435) → (375, 413) bottom-medial.
+ *   Sternum notch gap between (337, 319) and (380, 327); xiphoid notch
+ *   between (357, 392) and (375, 413).
+ *
+ * V-line design (per user 2026-05-23 round 10):
+ *   - apex at (362, 385) — chest centerline, mid-height
+ *   - endpoints at chest lateral edges: L (260, 345), R (463, 345)
+ *   - "一點點凹向上弧度" — each V wing uses Q control at y=358,
+ *     ~7 units above straight-line midpoint (subtle upward bow)
+ *   - L↔R mirror about x=362 (anchor sums = 723, close to 724;
+ *     PACKAGE chest is not strictly symmetric)
+ *
+ * Two paths share the V-line; together they fill the chest silhouette
+ * without extending outside.
+ */
+/** Front: upper chest — area above V line (clavicular head). */
 export const PATH_UPPER_CHEST =
-  'M260 330 Q300 318 332 322 L362 326 Q392 320 432 326 Q466 332 478 348 L478 378 Q448 372 432 370 L362 374 Q330 372 300 376 L260 380 Z';
+  'M260 345 Q268 318 300 318 Q320 316 337 320 Q362 318 380 326 Q400 316 422 320 Q445 322 463 345 Q410 358 362 385 Q312 358 260 345 Z';
 
-/** Front: lower chest — bottom ~60% of chest area (sternal head, with V-notch). */
+/** Front: lower chest — area below V line (sternal head). */
 export const PATH_LOWER_CHEST =
-  'M260 380 Q300 376 332 378 L362 376 Q392 378 432 376 Q466 378 478 378 L478 410 Q458 438 422 446 Q392 450 362 442 L362 442 Q332 450 302 446 Q272 442 260 414 Z';
+  'M260 345 Q312 358 362 385 Q410 358 463 345 Q473 378 471 400 Q460 428 440 432 Q408 437 380 425 L362 395 L344 425 Q314 437 290 432 Q268 428 263 405 Q256 378 260 345 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
