@@ -137,13 +137,40 @@ import {
  * paths follow each side's real silhouette. Visual symmetry within
  * PACKAGE constraints.
  */
-/** Front: upper chest — 2 sub-paths above V wings (L + R, covers most of chest). */
+/**
+ * Round 14 chest fix (2026-05-23): user gave explicit 3 keypoints —
+ * 切割線 = 左下－中上－右下 (∧ shape spanning entire chest).
+ *
+ * Strict ∧ design per user keypoints:
+ *   - 中上 apex: (362, 320) sternum top center
+ *   - 左下: (290, 425) chest L lower interior
+ *   - 右下: (434, 425) chest R lower interior (strict mirror about x=362)
+ *
+ * Mirror sum = 290+434 = 724 ✓ symmetric.
+ *
+ * V wings concave up via Q control y=360 (12 above straight midpoint
+ * y=372.5) — "一點點凹向上弧度".
+ *
+ * Chest fill structure:
+ *   - LOWER = central triangle inside ∧ (apex top, base at y=425)
+ *     covers sternum middle → "中間也塗到"
+ *   - UPPER = chest area OUTSIDE the ∧ triangle (lateral upper + lateral
+ *     lower regions around the triangle)
+ *
+ * Implementation: UPPER path has chest silhouette (CCW outer) + triangle
+ * (CW inner) so nonzero fill rule makes triangle a HOLE in UPPER.
+ * LOWER fills the same triangle (CW alone).
+ *
+ * Chest silhouette traced through sternum top notch + xiphoid bottom
+ * notch (user said "中縫可以著色" — sternum strip ok to color).
+ */
+/** Front: upper chest — chest silhouette CCW with central ∧-triangle hole (CW). */
 export const PATH_UPPER_CHEST =
-  'M260 345 Q270 322 300 318 Q320 316 337 319 Q351 333 357 344 L357 395 Q308 360 260 345 Z M463 345 Q449 326 425 320 Q405 316 380 327 Q377 354 374 380 L374 395 Q416 360 463 345 Z';
+  'M260 344 Q280 322 305 318 Q335 314 362 322 Q392 316 422 318 Q445 320 463 345 Q474 380 471 405 Q462 430 443 432 Q427 437 416 435 Q393 425 375 413 L362 395 L357 392 Q325 425 297 433 Q280 432 272 422 Q260 405 260 360 Z M362 320 Q404 360 434 425 L290 425 Q320 360 362 320 Z';
 
-/** Front: lower chest — 2 sub-paths below V wings (L + R, small bottom areas). */
+/** Front: lower chest — central ∧-triangle (covers sternum middle, 左下-中上-右下). */
 export const PATH_LOWER_CHEST =
-  'M260 345 Q308 360 357 395 L355 409 Q327 425 297 433 Q282 430 272 422 Q263 405 263 350 L260 345 Z M463 345 Q416 360 374 395 L375 413 Q393 425 416 435 Q425 437 443 430 Q460 428 471 400 Q472 380 463 345 Z';
+  'M362 320 Q320 360 290 425 L434 425 Q404 360 362 320 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
