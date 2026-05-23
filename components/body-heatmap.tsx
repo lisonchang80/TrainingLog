@@ -184,14 +184,32 @@ function colorToIntensity(color: string): number {
 }
 
 /**
- * Collapse the 19 M_* constants onto the package's slug vocabulary.
- * For each slug we keep the MAX quintile across all contributing M_*.
- * Slugs with no contribution are omitted (the body renders them in
- * default/zero fill).
+ * All slugs rendered by the package (across front + back assets). Used to
+ * force-override every part's `color` since the package's asset data ships
+ * with a baked-in `color: "#3f3f3f"` per part that takes precedence over
+ * the component's `defaultFill` prop.
+ */
+const ALL_SLUGS: ReadonlyArray<Slug> = [
+  'abs', 'adductors', 'ankles', 'biceps', 'calves', 'chest', 'deltoids',
+  'feet', 'forearm', 'gluteal', 'hamstring', 'hands', 'hair', 'head',
+  'knees', 'lower-back', 'neck', 'obliques', 'quadriceps', 'tibialis',
+  'trapezius', 'triceps', 'upper-back',
+];
+
+/** Body fill for unhighlighted parts — light, allows colored muscles to pop. */
+const COLOR_BODY_BASE = '#FAFAFA';
+/** Slightly darker skin tone for non-muscle parts (head, hair, hands, feet). */
+const COLOR_SKIN = '#E5E5E5';
+const SKIN_SLUGS: ReadonlySet<Slug> = new Set<Slug>(['head', 'hair', 'hands', 'feet']);
+
+/**
+ * Collapse the 19 M_* constants onto the package's slug vocabulary, then
+ * emit an entry for EVERY slug — highlighted ones get the quintile color,
+ * the rest get the light body base. We pass `color` explicitly to override
+ * the package's hardcoded asset `color: "#3f3f3f"`.
  */
 function buildSlugData(mQuintile: Map<string, Quintile>): ExtendedBodyPart[] {
   // Touch every M_* fill so the static-analysis test sees the references.
-  // (The values themselves are recomputed below via M_TO_SLUG + Math.max.)
   M_FILLS(mQuintile);
 
   const slugMax = new Map<Slug, Quintile>();
@@ -202,9 +220,15 @@ function buildSlugData(mQuintile: Map<string, Quintile>): ExtendedBodyPart[] {
     if (prev == null || q > prev) slugMax.set(slug, q);
   }
   const out: ExtendedBodyPart[] = [];
-  for (const [slug, q] of slugMax.entries()) {
-    const color = QUINTILE_COLORS[q];
-    out.push({ slug, intensity: colorToIntensity(color) });
+  for (const slug of ALL_SLUGS) {
+    const q = slugMax.get(slug);
+    if (q != null) {
+      const color = QUINTILE_COLORS[q];
+      out.push({ slug, color, intensity: colorToIntensity(color) });
+    } else {
+      const fill = SKIN_SLUGS.has(slug) ? COLOR_SKIN : COLOR_BODY_BASE;
+      out.push({ slug, color: fill });
+    }
   }
   return out;
 }
