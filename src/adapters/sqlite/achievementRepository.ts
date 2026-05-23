@@ -88,7 +88,7 @@ export async function listUnlockedDefinitionIds(
   return new Set(rows.map((r) => r.achievement_definition_id));
 }
 
-export async function insertUnlocks(
+async function insertUnlocks(
   db: Database,
   rows: readonly NewUnlock[],
   unlocked_at: number
