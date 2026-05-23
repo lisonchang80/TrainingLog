@@ -155,61 +155,65 @@ export const PATH_MID_DELT_PEAK_BACK_L = '';
 export const PATH_MID_DELT_PEAK_BACK_R = '';
 
 /**
- * Front-delt extension filling the chest-notch — a rounded diagonal sweep
- * from the deltoid medial-upper edge, bulging well into the upper-chest /
- * clavicle gap before curving back to the medial-lower edge. Sits on top
- * of the package's chest fill so the front-delt visually wraps over it
- * and the shoulder→pec transition reads as one smooth lobe instead of
- * a hard vertical seam.
+ * Front-delt extension filling the chest-notch — a horizontal-teardrop fill
+ * whose INNER edge sits INSIDE the deltoid bounding box (not on its outer
+ * boundary), so the fill overlaps the package's deltoid silhouette interior
+ * AND extends past it into the chest gap. The overlap covers the deltoid's
+ * concave medial curve, eliminating the white triangular gap that previously
+ * made the bulge read as an isolated "arch" floating beside the cap.
  *
- * Reference IMG_1371.PNG (前束 highlight): the medial edge isn't a
- * shallow bulge — it's a clear diagonal lobe that visibly fills the
- * triangular gap between the deltoid cap and the upper pec. Per user
- * feedback 2026-05-23: enlarged from Δx≈10 (too shy, didn't bridge the
- * gap) to Δx≈30 (matches the reference's diagonal sweep). Path height
- * also extended from 60 → 75 units to span the full deltoid medial edge.
+ * Reference IMG_1371.PNG (前束 highlight): the highlighted deltoid reads as
+ * ONE smooth cap with a slight medial extension — no visible seam between
+ * shoulder body and the extension lobe. Per user feedback 2026-05-23 (round 2):
+ * the previous version's right-edge straight line at x=278 (deltoid medial
+ * boundary) left a white gap against the deltoid's inward-curving medial
+ * silhouette. Fix: pull the inner edge to x=250 (≈28 units INSIDE the
+ * deltoid bbox of 192..278). The fill colour matches the front-delt rect
+ * fill, so the inner-edge overlap with the medial deltoid-rect is invisible
+ * (same colour over same colour); only the outward bulge past x=278 paints
+ * new pixels. Apex still ≈30 units past the deltoid medial edge so the
+ * user-approved bulge depth is preserved.
  *
- * Coordinates (front L, deltoid medial edge at x≈278, chest centerline x=362):
- *   anchor top      = (278, 315) on deltoid medial edge upper
- *   anchor bottom   = (278, 390) on deltoid medial edge lower
- *   bulge apex      = (308, 350) ~30 units into chest (diagonal mid-lobe)
+ * Coordinates (front L, deltoid bbox x∈[192.58, 278.43], chest centerline x=362):
+ *   inner top      = (250, 320) — 28 units INSIDE deltoid bbox right edge
+ *   inner bottom   = (250, 380) — same, vertical Z close hidden inside delt
+ *   apex           = (310, 350) — ~32 units past deltoid medial edge,
+ *                                  same chest bulge depth as previous version
  *
- * Right side is the exact mirror about x=362 (chest centerline): apex
- * at (419, 350), Δx=30. L and R are byte-for-byte symmetric.
+ * Right side is the exact mirror about x=362: inner edge x=474, apex x=414.
+ * L and R are byte-for-byte symmetric.
  */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M278 315 Q302 318 308 350 Q302 382 278 390 Z';
+  'M250 320 Q305 320 310 350 Q305 380 250 380 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M449 315 Q425 318 419 350 Q425 382 449 390 Z';
+  'M474 320 Q419 320 414 350 Q419 380 474 380 Z';
 
 /**
- * Rear-delt extension filling the back-notch — a rounded diagonal sweep
- * from the deltoid medial-upper edge, bulging well into the upper-back /
- * trapezius gap before curving back to the medial-lower edge. Sits on
- * top of trap / upper-back fills so the rear-delt visually wraps over
- * them and the shoulder→back transition reads as one smooth lobe.
+ * Rear-delt extension filling the back-notch — mirrors the front-delt fill's
+ * horizontal-teardrop strategy: INNER edge sits INSIDE the deltoid bounding
+ * box so the fill overlaps the deltoid silhouette interior AND extends past
+ * it into the upper-back gap. The overlap covers the deltoid's concave medial
+ * curve, eliminating the white gap that previously made the bulge read as an
+ * isolated arch.
  *
- * Reference IMG_1369.PNG (後束 highlight): mirrors the front-delt's
- * diagonal lobe — the medial edge visibly fills the triangular gap
- * between the deltoid cap and the upper back. Per user feedback
- * 2026-05-23: enlarged from Δx≈10 to Δx≈30 (matches reference). Path
- * height also extended from 60 → 75 units (y=315..390) to span the
- * full deltoid medial edge.
+ * Reference IMG_1369.PNG (後束 highlight): same as front-delt — one smooth
+ * cap with slight medial extension, no visible seam. Per user feedback
+ * 2026-05-23 (round 2): inner edge pulled INTO the deltoid bbox to cover the
+ * medial concave curve (same fix as front fills). Apex bulge depth preserved.
  *
- * Coordinates (back L, deltoid medial edge at x≈981, spine centerline x=1086):
- *   anchor top    = (981, 315)
- *   anchor bottom = (981, 390)
- *   bulge apex    = (1011, 350) ~30 units into back (diagonal mid-lobe)
+ * Coordinates (back L, deltoid bbox x∈[913.97, 981.31], spine centerline x=1086):
+ *   inner top    = (950, 320) — ~31 units INSIDE deltoid bbox right edge
+ *   inner bottom = (950, 380)
+ *   apex         = (1015, 350) — ~34 units past deltoid medial edge into back
  *
- * Right side is the exact mirror about x=1086 (spine centerline): apex
- * at (1155, 350), Δx=30. L and R are byte-for-byte symmetric, and the
- * Δx matches the front-delt fill so the front/back views read as one
- * consistent anatomy.
+ * Right side is the exact mirror about x=1086: inner edge x=1222, apex x=1157.
+ * L and R are byte-for-byte symmetric, and the bulge geometry mirrors the
+ * front-delt fills so the front/back views read as one consistent anatomy.
  */
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M981 315 Q1005 318 1011 350 Q1005 382 981 390 Z';
+  'M950 320 Q1010 320 1015 350 Q1010 380 950 380 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1185 315 Q1161 318 1155 350 Q1161 382 1185 390 Z';
+  'M1222 320 Q1162 320 1157 350 Q1162 380 1222 380 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
