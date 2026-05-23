@@ -2,16 +2,16 @@
  * Body Heatmap — front + back anatomical M-layer human silhouette,
  * each muscle filled by per-Session frequency quintile.
  *
- * Variant A (2026-05-23 redraw):
- *   - Athletic male silhouette, ~7-8 heads tall, V-taper.
+ * Upgraded 2026-05-23 from MG (粗) layer → M (細) layer:
  *   - 18 distinct muscle bellies painted individually (上胸 / 中下胸 / 前束 /
- *     中束 / 後束 / 二頭長短 / 三頭 / 上下臀部 / 股四 / 膕繩 / 腹肌 / 側腹 /
+ *     中束 / 後束 / 二頭內外 / 三頭 / 上下臀部 / 股四 / 膕繩 / 腹肌 / 側腹 /
  *     斜方 / 背部 / 下背 / 小腿 / 小臂).
- *   - Each muscle has a primary fill path + striation strokes suggesting
- *     fiber direction (horizontal sweep for pec/abs, vertical for bicep
- *     /tricep/quad/calf, diagonal for lats/obliques).
- *   - Enlarged to viewBox -80 0 320 520 @ width 200 for thumbnail readability.
- *   - Style: lean fitness-app medical illustration with subtle 3D depth.
+ *   - Each muscle has a primary fill path + 2-4 decorative striation strokes
+ *     suggesting fiber direction (ripped/muscular appearance).
+ *   - Two-tone style: grey outline + flat fill colored by quintile.
+ *
+ * Reference style: anatomical illustration with visible muscle bellies (pec
+ * V-notch, deltoid 3-head split, bicep twin bulge, quad 3-head split, etc).
  *
  * Used by the Stats sub-tab of History (slice 9 / ADR-0009 §人體部位圖).
  *
@@ -55,7 +55,6 @@ import { t, tMuscle } from '@/src/i18n';
 // ---------------------------------------------------------------------------
 
 const COLOR_OUTLINE = '#9CA3AF';
-const COLOR_OUTLINE_BODY = '#6B7280';
 const COLOR_STRIATION = 'rgba(60,60,75,0.35)';
 const COLOR_SKIN = '#F5F5F7';
 const QUINTILE_COLORS: readonly string[] = [
@@ -66,10 +65,6 @@ const QUINTILE_COLORS: readonly string[] = [
   '#EF4444', // Q5 warm red
 ];
 const COLOR_ZERO = '#E5E7EB';
-
-const STROKE_BODY = 0.8;
-const STROKE_MUSCLE = 0.6;
-const STROKE_STRIATION = 0.7;
 
 export type Quintile = 0 | 1 | 2 | 3 | 4;
 
@@ -104,32 +99,30 @@ interface MuscleLabel {
   labelY: number;
 }
 
-// Anchor coords align with new geometry (centerline x=100, ~520 tall body).
-// Label coords sit outside the body silhouette so leader lines never overlap.
 const FRONT_LABELS: readonly MuscleLabel[] = [
-  { m_id: M_FRONT_DELT, anchorX: 56, anchorY: 120, labelX: -14, labelY: 112 },
-  { m_id: M_UPPER_CHEST, anchorX: 88, anchorY: 122, labelX: -14, labelY: 136 },
-  { m_id: M_LOWER_CHEST, anchorX: 88, anchorY: 152, labelX: -14, labelY: 160 },
-  { m_id: M_BICEP_LONG, anchorX: 42, anchorY: 170, labelX: -14, labelY: 184 },
-  { m_id: M_BICEP_SHORT, anchorX: 56, anchorY: 178, labelX: -14, labelY: 208 },
-  { m_id: M_ABS, anchorX: 100, anchorY: 210, labelX: -14, labelY: 232 },
-  { m_id: M_OBLIQUE, anchorX: 74, anchorY: 222, labelX: -14, labelY: 256 },
-  { m_id: M_FOREARM, anchorX: 46, anchorY: 244, labelX: -14, labelY: 280 },
-  { m_id: M_QUAD, anchorX: 82, anchorY: 330, labelX: -14, labelY: 340 },
-  { m_id: M_CALF, anchorX: 82, anchorY: 430, labelX: -14, labelY: 432 },
+  { m_id: M_FRONT_DELT, anchorX: 56, anchorY: 102, labelX: -6, labelY: 96 },
+  { m_id: M_UPPER_CHEST, anchorX: 86, anchorY: 102, labelX: -6, labelY: 118 },
+  { m_id: M_LOWER_CHEST, anchorX: 86, anchorY: 126, labelX: -6, labelY: 140 },
+  { m_id: M_BICEP_LONG, anchorX: 44, anchorY: 144, labelX: -6, labelY: 162 },
+  { m_id: M_BICEP_SHORT, anchorX: 56, anchorY: 152, labelX: -6, labelY: 184 },
+  { m_id: M_ABS, anchorX: 100, anchorY: 170, labelX: -6, labelY: 206 },
+  { m_id: M_OBLIQUE, anchorX: 74, anchorY: 180, labelX: -6, labelY: 228 },
+  { m_id: M_FOREARM, anchorX: 50, anchorY: 196, labelX: -6, labelY: 250 },
+  { m_id: M_QUAD, anchorX: 84, anchorY: 274, labelX: -6, labelY: 290 },
+  { m_id: M_CALF, anchorX: 82, anchorY: 354, labelX: -6, labelY: 362 },
 ];
 
 const BACK_LABELS: readonly MuscleLabel[] = [
-  { m_id: M_TRAP, anchorX: 100, anchorY: 112, labelX: 220, labelY: 108 },
-  { m_id: M_REAR_DELT, anchorX: 150, anchorY: 124, labelX: 220, labelY: 132 },
-  { m_id: M_MID_DELT, anchorX: 158, anchorY: 140, labelX: 220, labelY: 156 },
-  { m_id: M_BACK, anchorX: 100, anchorY: 158, labelX: 220, labelY: 180 },
-  { m_id: M_TRICEP, anchorX: 154, anchorY: 174, labelX: 220, labelY: 204 },
-  { m_id: M_LOWER_BACK, anchorX: 100, anchorY: 226, labelX: 220, labelY: 228 },
-  { m_id: M_UPPER_GLUTE, anchorX: 100, anchorY: 258, labelX: 220, labelY: 252 },
-  { m_id: M_LOWER_GLUTE, anchorX: 100, anchorY: 290, labelX: 220, labelY: 276 },
-  { m_id: M_HAMSTRING, anchorX: 118, anchorY: 340, labelX: 220, labelY: 320 },
-  { m_id: M_CALF, anchorX: 118, anchorY: 430, labelX: 220, labelY: 420 },
+  { m_id: M_TRAP, anchorX: 100, anchorY: 96, labelX: 206, labelY: 92 },
+  { m_id: M_REAR_DELT, anchorX: 152, anchorY: 102, labelX: 206, labelY: 114 },
+  { m_id: M_MID_DELT, anchorX: 158, anchorY: 116, labelX: 206, labelY: 136 },
+  { m_id: M_BACK, anchorX: 100, anchorY: 132, labelX: 206, labelY: 158 },
+  { m_id: M_TRICEP, anchorX: 156, anchorY: 148, labelX: 206, labelY: 180 },
+  { m_id: M_LOWER_BACK, anchorX: 100, anchorY: 188, labelX: 206, labelY: 202 },
+  { m_id: M_UPPER_GLUTE, anchorX: 100, anchorY: 218, labelX: 206, labelY: 224 },
+  { m_id: M_LOWER_GLUTE, anchorX: 100, anchorY: 252, labelX: 206, labelY: 246 },
+  { m_id: M_HAMSTRING, anchorX: 116, anchorY: 290, labelX: 206, labelY: 286 },
+  { m_id: M_CALF, anchorX: 118, anchorY: 354, labelX: 206, labelY: 350 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -178,361 +171,264 @@ function MuscleLabels({
 }
 
 // ---------------------------------------------------------------------------
-// Front view — athletic male anatomy, 18 distinct M-paths + striations
-//
-// Geometry overview (centerline x=100):
-//   head        y=12-74     (oval cranium r≈18×30)
-//   neck        y=74-94
-//   shoulders   y=94-110    (delt caps span x=38..162, shoulder width ~124)
-//   chest       y=104-164
-//   abs/torso   y=160-242
-//   pelvis      y=240-278
-//   thighs      y=278-388
-//   knee        y=388-402
-//   calves      y=402-484
-//   feet        y=484-516
+// Front view — 10 distinct M-paths + striations
 // ---------------------------------------------------------------------------
 
 function FrontBody({ mQuintile, mCount }: BodyHeatmapProps) {
   const f = (m: string) => fillForM(m, mQuintile);
   return (
-    <Svg viewBox="-80 0 320 520" width={200} height={325}>
-      {/* ============================ HEAD ============================ */}
-      {/* Cranium oval */}
+    <Svg viewBox="-72 0 282 408" width={170} height={246}>
+      {/* Head — oval cranium */}
       <Path
-        d="M100 12 C82 12 68 28 68 46 C68 64 76 76 82 80 C84 86 88 90 92 92 C96 94 104 94 108 92 C112 90 116 86 118 80 C124 76 132 64 132 46 C132 28 118 12 100 12 Z"
+        d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-      {/* Jaw shadow / chin highlight */}
-      <Path
-        d="M82 80 C88 88 112 88 118 80"
         stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+      {/* Hairline */}
+      <Path d="M76 30 C86 22 114 22 124 30" stroke={COLOR_OUTLINE} strokeWidth={0.6} fill="none" />
+      {/* Neck — sternocleidomastoid silhouette */}
+      <Path
+        d="M88 74 L112 74 L113 86 L100 90 L87 86 Z"
+        fill={COLOR_SKIN}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+
+      {/* ------ Trapezius (front view — neck-to-shoulder yoke). Painted with TRAP fill
+              so front + back stay in sync. ------- */}
+      <Path
+        d="M88 86 C76 92 64 92 60 94 L72 100 L100 96 L128 100 L140 94 C136 92 124 92 112 86 Z"
+        fill={f(M_TRAP)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+
+      {/* ------ Torso outline (background — fill stays light) ------- */}
+      <Path
+        d="M60 94 C56 102 50 116 50 132 C48 158 46 184 52 204 L100 212 L148 204 C154 184 152 158 150 132 C150 116 144 102 140 94 L100 96 Z"
+        fill="#FAFAFA"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+
+      {/* ------ Front Deltoid (left + right cap, anterior head) ------- */}
+      <Path
+        d="M60 94 C50 100 44 112 42 126 C42 134 46 140 54 140 C58 130 60 116 62 108 C62 100 62 96 60 94 Z
+           M140 94 C150 100 156 112 158 126 C158 134 154 140 146 140 C142 130 140 116 138 108 C138 100 138 96 140 94 Z"
+        fill={f(M_FRONT_DELT)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+      {/* Front-delt striations (arc fibers from clavicle insertion outward) */}
+      <Path
+        d="M50 108 C54 116 56 128 56 134
+           M156 134 C156 128 154 116 150 108"
+        stroke={COLOR_STRIATION}
+        strokeWidth={0.6}
+        fill="none"
+      />
+
+      {/* ------ Mid Deltoid lateral cap edge (visible side strip from front view) ------- */}
+      <Path
+        d="M44 126 C40 134 40 144 44 152 C46 144 46 132 44 126 Z
+           M156 126 C160 134 160 144 156 152 C154 144 154 132 156 126 Z"
+        fill={f(M_MID_DELT)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+
+      {/* ------ Upper Chest (pec major clavicular head, top arc near clavicle) ------- */}
+      <Path
+        d="M100 96 C92 98 84 104 76 110 C70 116 68 122 68 128 L100 122 Z
+           M100 96 C108 98 116 104 124 110 C130 116 132 122 132 128 L100 122 Z"
+        fill={f(M_UPPER_CHEST)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+      {/* Upper-chest striations (clavicle insertion fibers, fanning down-and-out) */}
+      <Path
+        d="M82 102 L94 118
+           M90 100 L98 120
+           M118 100 L110 120
+           M126 102 L114 118"
+        stroke={COLOR_STRIATION}
         strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ NECK ============================ */}
+      {/* ------ Lower Chest (pec major sternal head — lobed shape under upper chest with V-notch) ------- */}
       <Path
-        d="M88 92 L88 104 C92 108 96 110 100 110 C104 110 108 108 112 104 L112 92 Z"
-        fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-      {/* Sternocleidomastoid hint */}
-      <Path
-        d="M90 94 L96 108 M110 94 L104 108"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ TRAPEZIUS (front yoke) ============================ */}
-      {/* Triangular wedge from neck base out to shoulder peak */}
-      <Path
-        d="M88 104 C76 108 64 114 56 120 C66 116 80 112 92 112 L100 110 L108 112 C120 112 134 116 144 120 C136 114 124 108 112 104 Z"
-        fill={f(M_TRAP)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Trap fiber sweep */}
-      <Path
-        d="M92 108 L60 118 M108 108 L140 118"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ TORSO SILHOUETTE ============================ */}
-      {/* V-taper torso — wide shoulders, narrow waist */}
-      <Path
-        d="M56 120
-           C50 128 44 142 42 158
-           C40 178 40 196 44 214
-           C46 226 50 238 56 246
-           L72 256 L100 250 L128 256 L144 246
-           C150 238 154 226 156 214
-           C160 196 160 178 158 158
-           C156 142 150 128 144 120
-           L128 124 L100 122 L72 124 Z"
-        fill="#FAFAFA"
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-
-      {/* ============================ DELTOID — ANTERIOR (front cap) ============================ */}
-      {/* Curved triangle from clavicle out to upper arm */}
-      <Path
-        d="M56 120 C46 128 38 142 38 158 C38 164 42 168 48 168 C52 156 56 142 60 132 C62 126 60 122 56 120 Z
-           M144 120 C154 128 162 142 162 158 C162 164 158 168 152 168 C148 156 144 142 140 132 C138 126 140 122 144 120 Z"
-        fill={f(M_FRONT_DELT)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Anterior delt arc striations (fan from clavicle) */}
-      <Path
-        d="M46 130 C48 142 50 156 52 164
-           M154 130 C152 142 150 156 148 164
-           M52 124 C54 138 56 150 56 162
-           M148 124 C146 138 144 150 144 162"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ DELTOID — LATERAL (side strip visible on front) ============================ */}
-      <Path
-        d="M38 158 C34 168 34 180 38 190 C42 184 46 174 46 162 C46 158 42 156 38 158 Z
-           M162 158 C166 168 166 180 162 190 C158 184 154 174 154 162 C154 158 158 156 162 158 Z"
-        fill={f(M_MID_DELT)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Lateral delt vertical fibers */}
-      <Path
-        d="M38 168 L40 188 M42 164 L44 188
-           M162 168 L160 188 M158 164 L156 188"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ PECTORALIS — CLAVICULAR (upper chest) ============================ */}
-      {/* Upper half of pec, fans down-and-out from clavicle */}
-      <Path
-        d="M100 122 C92 124 82 128 72 136 C66 142 64 148 66 154 L100 144 Z
-           M100 122 C108 124 118 128 128 136 C134 142 136 148 134 154 L100 144 Z"
-        fill={f(M_UPPER_CHEST)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Upper-pec horizontal-sweep striations (clavicular fibers) */}
-      <Path
-        d="M78 130 L96 140
-           M86 128 L98 142
-           M122 130 L104 140
-           M114 128 L102 142
-           M70 142 L96 144
-           M130 142 L104 144"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ PECTORALIS — STERNAL (lower chest, lobed C with V-notch) ============================ */}
-      <Path
-        d="M100 144 L66 154 C64 162 66 172 72 178 C82 180 92 174 100 162 Z
-           M100 144 L134 154 C136 162 134 172 128 178 C118 180 108 174 100 162 Z"
+        d="M100 122 L68 128 C66 138 70 146 78 148 C86 146 94 142 100 134 Z
+           M100 122 L132 128 C134 138 130 146 122 148 C114 146 106 142 100 134 Z"
         fill={f(M_LOWER_CHEST)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Sternum V-notch + horizontal sternal-head fibers */}
+      {/* V-notch + lower-chest striations (sternal fibers, horizontal sweep) */}
       <Path
-        d="M100 144 L100 162
-           M70 160 L96 158
-           M76 168 L96 166
-           M82 174 L96 172
-           M130 160 L104 158
-           M124 168 L104 166
-           M118 174 L104 172"
+        d="M100 122 L100 134
+           M72 134 L96 138
+           M80 142 L94 142
+           M128 134 L104 138
+           M120 142 L106 142"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ BICEPS — LONG HEAD (outer lobe) ============================ */}
+      {/* ------ Biceps brachii — TWIN BULGE per arm
+              Long head (outer, lateral) + Short head (inner, medial). ------- */}
+      {/* Bicep LONG (outer/lateral head) — left arm outer lobe + right arm outer lobe */}
       <Path
-        d="M38 168 C32 180 32 198 36 214 C40 222 46 226 50 224 C52 210 54 196 54 184 C54 176 50 170 44 168 Z
-           M162 168 C168 180 168 198 164 214 C160 222 154 226 150 224 C148 210 146 196 146 184 C146 176 150 170 156 168 Z"
+        d="M40 136 C36 144 36 156 38 168 C40 174 44 178 48 178 C50 168 52 158 52 148 C52 142 48 138 44 136 Z
+           M160 136 C164 144 164 156 162 168 C160 174 156 178 152 178 C150 168 148 158 148 148 C148 142 152 138 156 136 Z"
         fill={f(M_BICEP_LONG)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-
-      {/* ============================ BICEPS — SHORT HEAD (inner lobe parallel to long) ============================ */}
+      {/* Bicep SHORT (inner/medial head) — left arm inner lobe + right arm inner lobe */}
       <Path
-        d="M54 174 C52 186 52 202 54 216 C58 222 62 222 64 218 C64 204 62 190 60 178 C58 172 56 172 54 174 Z
-           M146 174 C148 186 148 202 146 216 C142 222 138 222 136 218 C136 204 138 190 140 178 C142 172 144 172 146 174 Z"
+        d="M52 142 C50 150 50 162 52 172 C56 176 60 176 62 172 C62 160 60 150 58 144 C56 140 54 140 52 142 Z
+           M148 142 C150 150 150 162 148 172 C144 176 140 176 138 172 C138 160 140 150 142 144 C144 140 146 140 148 142 Z"
         fill={f(M_BICEP_SHORT)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Bicep longitudinal fibers — twin bulge centerlines */}
+      {/* Bicep striations (longitudinal muscle-belly fibers) */}
       <Path
-        d="M40 178 L46 220
-           M48 176 L50 222
-           M58 184 L60 218
-           M160 178 L154 220
-           M152 176 L150 222
-           M142 184 L140 218"
+        d="M42 144 L46 170
+           M48 144 L50 170
+           M56 148 L58 172
+           M152 144 L148 170
+           M158 144 L154 170
+           M144 148 L142 172"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ FOREARM (flexor bulge tapering to wrist) ============================ */}
+      {/* ------ Abs (rectus abdominis — 6-pack columnar segmentation, central column) ------- */}
       <Path
-        d="M42 226 C36 240 34 258 38 274 C42 282 48 286 52 284 C56 270 58 254 58 240 C58 232 52 226 46 226 Z
-           M158 226 C164 240 166 258 162 274 C158 282 152 286 148 284 C144 270 142 254 142 240 C142 232 148 226 154 226 Z"
-        fill={f(M_FOREARM)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Forearm longitudinal striations */}
-      <Path
-        d="M44 240 L50 282
-           M50 236 L54 284
-           M156 240 L150 282
-           M150 236 L146 284"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* Wrist / hand */}
-      <Path
-        d="M40 284 C40 290 42 296 46 300 L56 300 C58 296 58 290 56 284 Z
-           M160 284 C160 290 158 296 154 300 L144 300 C142 296 142 290 144 284 Z"
-        fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-
-      {/* ============================ ABS — RECTUS ABDOMINIS (6-pack grid) ============================ */}
-      {/* Central column with two parallel rows of 3 segments separated by linea alba */}
-      <Path
-        d="M84 168 C82 188 82 214 84 240 C88 244 96 244 100 242 C104 244 112 244 116 240 C118 214 118 188 116 168 C110 170 100 172 100 172 C100 172 90 170 84 168 Z"
+        d="M86 138 C84 152 84 172 86 196 C90 200 96 200 100 198 C104 200 110 200 114 196 C116 172 116 152 114 138 C108 140 100 142 100 142 C100 142 92 140 86 138 Z"
         fill={f(M_ABS)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* 6-pack tendinous intersections (linea alba + 3 horizontal lines) */}
+      {/* Abs 6-pack tendinous intersection cross-hatching (linea alba + 3 horizontal) */}
       <Path
-        d="M100 172 L100 240
-           M85 184 L115 184
-           M85 200 L115 200
-           M85 216 L115 216
-           M85 230 L115 230"
+        d="M100 142 L100 198
+           M88 154 L112 154
+           M88 168 L112 168
+           M88 182 L112 182"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.6}
         fill="none"
       />
 
-      {/* ============================ OBLIQUES (side wedge rib→hip) ============================ */}
+      {/* ------ Obliques (side abdominal wings, lateral panels flanking the abs) ------- */}
       <Path
-        d="M66 174 C62 192 62 214 66 236 C72 242 80 244 84 240 C84 218 84 194 84 168 C76 168 70 170 66 174 Z
-           M134 174 C138 192 138 214 134 236 C128 242 120 244 116 240 C116 218 116 194 116 168 C124 168 130 170 134 174 Z"
+        d="M70 144 C68 158 68 174 70 192 C74 198 80 200 84 198 C84 178 84 158 84 142 C78 142 72 142 70 144 Z
+           M130 144 C132 158 132 174 130 192 C126 198 120 200 116 198 C116 178 116 158 116 142 C122 142 128 142 130 144 Z"
         fill={f(M_OBLIQUE)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Oblique serration striations (slanted rib→hip) */}
+      {/* Oblique serration striations (slanted lateral fibers) */}
       <Path
-        d="M68 184 L82 196
-           M68 202 L82 214
-           M68 220 L82 232
-           M132 184 L118 196
-           M132 202 L118 214
-           M132 220 L118 232"
+        d="M72 152 L82 160
+           M72 168 L82 176
+           M72 184 L82 192
+           M128 152 L118 160
+           M128 168 L118 176
+           M128 184 L118 192"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ PELVIS / HIP ============================ */}
+      {/* ------ Forearm (brachioradialis bulge near elbow, tapering to wrist) ------- */}
       <Path
-        d="M56 246 C60 258 66 268 74 274 L126 274 C134 268 140 258 144 246 L128 256 L100 250 L72 256 Z"
+        d="M44 180 C40 190 40 204 44 216 C48 222 54 224 58 222 C60 212 60 200 58 190 C56 184 52 180 48 180 Z
+           M156 180 C160 190 160 204 156 216 C152 222 146 224 142 222 C140 212 140 200 142 190 C144 184 148 180 152 180 Z"
+        fill={f(M_FOREARM)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+      {/* Forearm striations */}
+      <Path
+        d="M46 190 L52 218
+           M52 188 L56 218
+           M154 190 L148 218
+           M148 188 L144 218"
+        stroke={COLOR_STRIATION}
+        strokeWidth={0.5}
+        fill="none"
+      />
+
+      {/* ------ Hip / pelvis silhouette ------- */}
+      <Path
+        d="M52 204 C58 218 70 230 80 236 L120 236 C130 230 142 218 148 204 L100 214 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-      {/* Iliac crest hint */}
-      <Path
-        d="M64 256 L80 268 M136 256 L120 268"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
-      {/* ============================ QUADRICEPS — 3-head visible: vastus lateralis (outer) +
-              rectus femoris (center vertical strip) + vastus medialis (inner teardrop above knee) ============================ */}
+      {/* ------ Quadriceps (3 visible heads): rectus femoris (center) + vastus lateralis (outer) + vastus medialis (inner).
+              Single M_QUAD fill — heads drawn as separate sub-paths for shape detail. ------- */}
       <Path
-        d="M62 278 C56 300 54 336 60 372 C64 380 70 384 76 380 C80 350 86 318 90 290 C84 282 72 278 62 278 Z
-           M138 278 C144 300 146 336 140 372 C136 380 130 384 124 380 C120 350 114 318 110 290 C116 282 128 278 138 278 Z
-           M90 290 C88 318 88 350 92 380 L98 380 C100 354 100 322 100 294 C96 290 92 290 90 290 Z
-           M110 290 C112 318 112 350 108 380 L102 380 C100 354 100 322 100 294 C104 290 108 290 110 290 Z"
+        d="M68 238 C62 256 60 286 64 316 C68 320 72 320 76 318 C78 290 82 264 86 244 C80 240 72 238 68 238 Z
+           M132 238 C138 256 140 286 136 316 C132 320 128 320 124 318 C122 290 118 264 114 244 C120 240 128 238 132 238 Z
+           M86 244 C84 270 84 300 88 318 L98 318 C100 296 100 268 100 246 C96 242 90 240 86 244 Z
+           M114 244 C116 270 116 300 112 318 L102 318 C100 296 100 268 100 246 C104 242 110 240 114 244 Z"
         fill={f(M_QUAD)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Quad head separation + vertical rectus striations */}
+      {/* Quad-head separation lines + striations */}
       <Path
-        d="M70 292 L78 380
-           M82 294 L86 380
-           M90 296 L92 380
-           M100 294 L100 380
-           M110 296 L108 380
-           M118 294 L114 380
-           M130 292 L122 380"
+        d="M76 250 L84 318
+           M86 254 L88 316
+           M100 246 L100 316
+           M112 254 L112 316
+           M124 250 L116 318"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-      {/* Vastus medialis teardrop accent (just above knee, inner thigh) */}
-      <Path
-        d="M86 364 C90 372 96 378 98 378
-           M114 364 C110 372 104 378 102 378"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.6}
         fill="none"
       />
 
-      {/* ============================ KNEE ============================ */}
+      {/* ------ Knee ------- */}
       <Path
-        d="M64 382 C66 392 74 400 84 400 L96 400 C98 396 98 388 96 382 Z
-           M104 382 C104 388 104 396 106 400 L116 400 C126 400 134 392 136 382 Z"
+        d="M70 320 C72 324 76 328 82 328 L92 328 C94 324 94 322 92 320 Z
+           M108 320 C108 322 108 324 110 328 L120 328 C124 328 128 324 130 320 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-      {/* Patella centerline */}
-      <Path
-        d="M82 388 L94 396 M118 388 L106 396"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
-      {/* ============================ CALF — GASTROCNEMIUS DIAMOND (front view, tapering to ankle) ============================ */}
+      {/* ------ Calf (gastrocnemius two-headed diamond on front view, tapers to ankle) ------- */}
       <Path
-        d="M68 402 C62 420 60 446 66 466 C70 476 76 482 82 482 L88 482 C90 466 92 444 92 422 C92 412 86 404 80 402 Z
-           M132 402 C138 420 140 446 134 466 C130 476 124 482 118 482 L112 482 C110 466 108 444 108 422 C108 412 114 404 120 402 Z"
+        d="M74 328 C70 342 70 360 74 374 C76 382 80 388 84 390 L88 390 C90 378 92 360 92 346 C92 338 90 332 86 328 Z
+           M108 328 C104 332 104 338 104 346 C104 360 106 378 108 390 L114 390 C118 388 122 382 124 374 C128 360 128 342 126 328 Z"
         fill={f(M_CALF)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Calf vertical midline + outer/inner head split */}
+      {/* Calf diamond mid-line striation */}
       <Path
-        d="M78 412 L82 478
-           M122 412 L118 478
-           M70 432 L88 430
-           M130 432 L112 430"
+        d="M82 336 L84 386
+           M118 336 L116 386"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ ANKLE / FOOT ============================ */}
+      {/* ------ Ankle / foot ------- */}
       <Path
-        d="M72 482 L92 482 L96 500 L70 500 Z
-           M108 482 L128 482 L130 500 L104 500 Z
-           M68 500 L98 500 L100 514 L66 514 Z
-           M102 500 L132 500 L134 514 L100 514 Z"
+        d="M76 390 L92 390 L94 400 L74 400 Z M108 390 L124 390 L126 400 L106 400 Z"
         fill="#FAFAFA"
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
       <MuscleLabels labels={FRONT_LABELS} mCount={mCount} textAnchor="end" />
@@ -541,309 +437,253 @@ function FrontBody({ mQuintile, mCount }: BodyHeatmapProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Back view — athletic male anatomy, 18 distinct M-paths + striations
-// Same geometry as front (centerline x=100), with back-specific muscle shapes:
-//   - Trap diamond kite (skull → mid-back, widest at shoulder line)
-//   - Lats V-taper (armpit → lumbar)
-//   - Erector spinae lumbar columns
-//   - Tricep horseshoe (upper bulk + lower fork)
-//   - Glute upper hill + lower fold
-//   - Hamstring split (biceps femoris outer + semi inner)
+// Back view — 10 distinct M-paths + striations
 // ---------------------------------------------------------------------------
 
 function BackBody({ mQuintile, mCount }: BodyHeatmapProps) {
   const f = (m: string) => fillForM(m, mQuintile);
   return (
-    <Svg viewBox="0 0 320 520" width={200} height={325}>
-      {/* ============================ HEAD (occipital) ============================ */}
+    <Svg viewBox="0 0 282 408" width={170} height={246}>
+      {/* Head — occipital cranium */}
       <Path
-        d="M100 12 C82 12 68 28 68 46 C68 64 76 76 82 80 C84 86 88 90 92 92 C96 94 104 94 108 92 C112 90 116 86 118 80 C124 76 132 64 132 46 C132 28 118 12 100 12 Z"
+        d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-      {/* Hairline on back of head */}
-      <Path
-        d="M78 64 C86 72 114 72 122 64"
         stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+      {/* Hairline (back) */}
+      <Path d="M76 56 C86 64 114 64 124 56" stroke={COLOR_OUTLINE} strokeWidth={0.6} fill="none" />
+      {/* Neck nape */}
+      <Path
+        d="M88 74 L112 74 L113 86 L100 90 L87 86 Z"
+        fill={COLOR_SKIN}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+
+      {/* ------ Torso outline ------- */}
+      <Path
+        d="M60 94 C56 102 50 116 50 132 C48 158 46 184 52 204 L100 212 L148 204 C154 184 152 158 150 132 C150 116 144 102 140 94 L100 96 Z"
+        fill="#FAFAFA"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
+      />
+
+      {/* ------ Trapezius — upper trap kite + middle trap diamond down between scapulae ------- */}
+      <Path
+        d="M100 86 C90 88 80 92 72 100 C70 104 74 108 78 110 C88 108 94 106 100 104 C106 106 112 108 122 110 C126 108 130 104 128 100 C120 92 110 88 100 86 Z
+           M100 104 C92 110 86 118 84 130 C90 134 96 138 100 144 C104 138 110 134 116 130 C114 118 108 110 100 104 Z"
+        fill={f(M_TRAP)}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={0.5}
+      />
+      {/* Trap fiber striations (radiating from spine/neck) */}
+      <Path
+        d="M84 100 L100 108
+           M116 100 L100 108
+           M90 122 L100 134
+           M110 122 L100 134"
+        stroke={COLOR_STRIATION}
         strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ NECK (nape) ============================ */}
+      {/* ------ Rear Deltoid (posterior head) ------- */}
       <Path
-        d="M88 92 L88 104 C92 108 96 110 100 110 C104 110 108 108 112 104 L112 92 Z"
-        fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-
-      {/* ============================ TORSO SILHOUETTE ============================ */}
-      <Path
-        d="M56 120
-           C50 128 44 142 42 158
-           C40 178 40 196 44 214
-           C46 226 50 238 56 246
-           L72 256 L100 250 L128 256 L144 246
-           C150 238 154 226 156 214
-           C160 196 160 178 158 158
-           C156 142 150 128 144 120
-           L128 124 L100 122 L72 124 Z"
-        fill="#FAFAFA"
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-
-      {/* ============================ TRAPEZIUS — BACK DIAMOND KITE (skull → mid-back) ============================ */}
-      {/* Upper trap yoke + middle trap diamond down to T12 */}
-      <Path
-        d="M100 100 C90 102 78 108 68 116 C62 122 66 128 72 130 C84 126 92 122 100 120 C108 122 116 126 128 130 C134 128 138 122 132 116 C122 108 110 102 100 100 Z
-           M100 120 C88 128 78 142 76 158 C82 162 90 166 100 170 C110 166 118 162 124 158 C122 142 112 128 100 120 Z"
-        fill={f(M_TRAP)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      {/* Trap fiber sweep (radiating from spine) */}
-      <Path
-        d="M76 114 L100 122
-           M124 114 L100 122
-           M82 138 L100 158
-           M118 138 L100 158
-           M88 150 L100 168
-           M112 150 L100 168"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
-      />
-
-      {/* ============================ DELTOID — POSTERIOR (back of shoulder lobe) ============================ */}
-      <Path
-        d="M56 120 C46 128 38 142 38 158 C38 164 42 168 48 168 C52 156 56 142 60 132 C62 126 60 122 56 120 Z
-           M144 120 C154 128 162 142 162 158 C162 164 158 168 152 168 C148 156 144 142 140 132 C138 126 140 122 144 120 Z"
+        d="M60 94 C50 100 44 112 42 124 C42 132 46 136 52 136 C56 126 60 116 62 108 C62 100 62 96 60 94 Z
+           M140 94 C150 100 156 112 158 124 C158 132 154 136 148 136 C144 126 140 116 138 108 C138 100 138 96 140 94 Z"
         fill={f(M_REAR_DELT)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Posterior delt fibers converging towards humerus */}
+      {/* Rear delt striations (rear fibers converging at olecranon) */}
       <Path
-        d="M44 130 C48 140 52 152 54 162
-           M156 130 C152 140 148 152 146 162
-           M50 124 C52 134 54 146 54 158
-           M150 124 C148 134 146 146 146 158"
+        d="M48 108 C52 116 54 124 56 132
+           M152 108 C148 116 146 124 144 132"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ DELTOID — LATERAL (visible on back view) ============================ */}
+      {/* ------ Mid Deltoid (lateral cap visible from back at upper outer edge) ------- */}
       <Path
-        d="M38 158 C34 168 34 180 38 190 C42 184 46 174 46 162 C46 158 42 156 38 158 Z
-           M162 158 C166 168 166 180 162 190 C158 184 154 174 154 162 C154 158 158 156 162 158 Z"
+        d="M44 124 C40 134 42 146 48 152 C50 144 50 132 46 124 Z
+           M156 124 C160 134 158 146 152 152 C150 144 150 132 154 124 Z"
         fill={f(M_MID_DELT)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
 
-      {/* ============================ LATISSIMUS DORSI + ERECTOR ROW (M_BACK) ============================ */}
-      {/* Lat wings V-taper from armpit down to lower scapula widest, then narrow at waist.
-              Plus thin erector spinae columns flanking spine in upper torso. */}
+      {/* ------ Latissimus dorsi + central back: M_BACK fill ------- */}
+      {/* Lat wings sweep from armpit down to lumbar; plus erector spinae columns flanking spine */}
       <Path
-        d="M62 132 C56 152 56 180 64 206 C72 216 84 220 92 218 C90 188 86 162 80 138 C76 132 70 130 62 132 Z
-           M138 132 C144 152 144 180 136 206 C128 216 116 220 108 218 C110 188 114 162 120 138 C124 132 130 130 138 132 Z
-           M94 170 C92 184 92 202 94 218 L98 218 L98 170 Z
-           M106 170 C108 184 108 202 106 218 L102 218 L102 170 Z"
+        d="M62 110 C56 132 60 156 70 178 C78 184 88 186 96 184 C92 156 86 132 80 116 C76 110 70 108 62 110 Z
+           M138 110 C144 132 140 156 130 178 C122 184 112 186 104 184 C108 156 114 132 120 116 C124 110 130 108 138 110 Z
+           M94 142 C92 158 92 174 94 188 L98 188 L98 142 Z
+           M106 142 C108 158 108 174 106 188 L102 188 L102 142 Z"
         fill={f(M_BACK)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Lat V-taper diagonal fibers (spine → armpit, downward sweep) */}
+      {/* Lat V striations (diagonal fibers sweeping down-and-inward) */}
       <Path
-        d="M68 144 L88 206
-           M76 138 L94 204
-           M82 134 L96 208
-           M132 144 L112 206
-           M124 138 L106 204
-           M118 134 L104 208"
+        d="M68 124 L88 178
+           M76 120 L92 176
+           M132 124 L112 178
+           M124 120 L108 176"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ TRICEPS — HORSESHOE (upper bulk + lower fork) ============================ */}
+      {/* ------ Triceps brachii — horseshoe: long head (medial) + lateral head (outer) ------- */}
       <Path
-        d="M38 158 C32 174 32 196 36 212 C40 220 46 222 50 220 C52 208 54 194 54 182 C54 172 50 164 44 162 Z
-           M52 168 C50 184 50 202 52 216 C56 220 60 220 62 216 C62 202 60 188 58 176 C56 170 54 168 52 168 Z
-           M162 158 C168 174 168 196 164 212 C160 220 154 222 150 220 C148 208 146 194 146 182 C146 172 150 164 156 162 Z
-           M148 168 C150 184 150 202 148 216 C144 220 140 220 138 216 C138 202 140 188 142 176 C144 170 146 168 148 168 Z"
+        d="M40 124 C36 134 36 148 38 162 C40 170 44 174 48 174 C50 164 52 152 52 142 C52 132 48 126 44 124 Z
+           M50 132 C48 144 48 158 50 170 C54 174 58 174 60 170 C60 158 58 144 56 134 C54 130 52 130 50 132 Z
+           M160 124 C164 134 164 148 162 162 C160 170 156 174 152 174 C150 164 148 152 148 142 C148 132 152 126 156 124 Z
+           M150 132 C152 144 152 158 150 170 C146 174 142 174 140 170 C140 158 142 144 144 134 C146 130 148 130 150 132 Z"
         fill={f(M_TRICEP)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Tricep 3-head fibers — upper bulk + lower fork */}
+      {/* Tricep horseshoe striations (longitudinal + medial dip) */}
       <Path
-        d="M40 172 L48 218
-           M46 168 L52 218
-           M58 178 L60 216
-           M160 172 L152 218
-           M154 168 L148 218
-           M142 178 L140 216"
+        d="M42 134 L50 172
+           M48 132 L54 172
+           M58 138 L58 170
+           M158 134 L150 172
+           M152 132 L146 172
+           M142 138 L142 170"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ FOREARM (extensor compartment) ============================ */}
+      {/* ------ Forearm (back / extensor compartment) ------- */}
       <Path
-        d="M42 226 C36 240 34 258 38 274 C42 282 48 286 52 284 C56 270 58 254 58 240 C58 232 52 226 46 226 Z
-           M158 226 C164 240 166 258 162 274 C158 282 152 286 148 284 C144 270 142 254 142 240 C142 232 148 226 154 226 Z"
+        d="M44 180 C40 190 40 204 44 216 C48 222 54 224 58 222 C60 212 60 200 58 190 C56 184 52 180 48 180 Z
+           M156 180 C160 190 160 204 156 216 C152 222 146 224 142 222 C140 212 140 200 142 190 C144 184 148 180 152 180 Z"
         fill={f(M_FOREARM)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
-      />
-      <Path
-        d="M44 240 L50 282
-           M50 236 L54 284
-           M156 240 L150 282
-           M150 236 L146 284"
-        stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
-        fill="none"
+        strokeWidth={0.5}
       />
 
-      {/* Wrist / hand */}
+      {/* ------ Lower Back (erector spinae lumbar columns + thoracolumbar fascia diamond) ------- */}
       <Path
-        d="M40 284 C40 290 42 296 46 300 L56 300 C58 296 58 290 56 284 Z
-           M160 284 C160 290 158 296 154 300 L144 300 C142 296 142 290 144 284 Z"
-        fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
-      />
-
-      {/* ============================ LOWER BACK — ERECTOR SPINAE (paired vertical lumbar columns) ============================ */}
-      <Path
-        d="M86 222 C82 232 82 244 86 254 L100 256 L114 254 C118 244 118 232 114 222 C108 224 100 226 100 226 C100 226 92 224 86 222 Z"
+        d="M88 188 C84 196 84 206 88 214 L112 214 C116 206 116 196 112 188 C108 192 100 194 100 194 C100 194 92 192 88 188 Z"
         fill={f(M_LOWER_BACK)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Erector spinae paired columns flanking spine */}
+      {/* Lower-back fascia diamond striations */}
       <Path
-        d="M92 226 L92 250
-           M100 228 L100 254
-           M108 226 L108 250
-           M88 240 L96 240
-           M104 240 L112 240"
+        d="M92 192 L92 210
+           M100 194 L100 214
+           M108 192 L108 210"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ PELVIS / HIP ============================ */}
+      {/* ------ Hip / pelvic outline ------- */}
       <Path
-        d="M56 246 C60 258 66 268 74 274 L126 274 C134 268 140 258 144 246 L128 256 L100 250 L72 256 Z"
+        d="M52 214 C58 222 64 228 72 232 L128 232 C136 228 142 222 148 214 L100 214 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
-      {/* ============================ UPPER GLUTE (gluteus medius hill — upper hip curve) ============================ */}
+      {/* ------ Upper Glute (gluteus medius/upper-max crescent, upper hip curve) ------- */}
       <Path
-        d="M70 256 C62 260 56 268 56 280 C62 284 70 284 78 280 C86 274 94 268 100 262 C96 258 86 256 70 256 Z
-           M130 256 C138 260 144 268 144 280 C138 284 130 284 122 280 C114 274 106 268 100 262 C104 258 114 256 130 256 Z"
+        d="M70 216 C64 220 60 228 60 236 C64 238 70 238 76 236 C82 232 90 226 96 220 C94 216 86 214 76 216 Z
+           M130 216 C136 220 140 228 140 236 C136 238 130 238 124 236 C118 232 110 226 104 220 C106 216 114 214 124 216 Z"
         fill={f(M_UPPER_GLUTE)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Upper glute crescent sweep */}
+      {/* Upper-glute striations (crescent fiber sweep) */}
       <Path
-        d="M68 264 L84 278
-           M132 264 L116 278"
+        d="M68 222 L82 232
+           M132 222 L118 232"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ LOWER GLUTE (gluteus maximus dome — heart cleft fold) ============================ */}
+      {/* ------ Lower Glute (gluteus maximus lower dome — two rounded buttocks meeting at cleft) ------- */}
       <Path
-        d="M78 280 C68 286 60 304 60 320 C60 330 64 340 76 340 C88 340 96 332 100 318 C100 308 100 290 100 282 C94 280 84 278 78 280 Z
-           M122 280 C132 286 140 304 140 320 C140 330 136 340 124 340 C112 340 104 332 100 318 C100 308 100 290 100 282 C106 280 116 278 122 280 Z"
+        d="M76 236 C68 240 62 254 62 268 C62 278 66 286 76 286 C86 286 94 280 100 268 C100 260 100 246 100 240 C96 236 86 236 76 236 Z
+           M124 236 C132 240 138 254 138 268 C138 278 134 286 124 286 C114 286 106 280 100 268 C100 260 100 246 100 240 C104 236 114 236 124 236 Z"
         fill={f(M_LOWER_GLUTE)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Glute cleft fold + lower-fold separation */}
+      {/* Lower-glute heart cleft + striations */}
       <Path
-        d="M100 282 L100 340
-           M70 304 L88 322
-           M130 304 L112 322
-           M64 332 L86 336
-           M136 332 L114 336"
+        d="M100 240 L100 286
+           M72 250 L86 274
+           M128 250 L114 274"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.6}
         fill="none"
       />
 
-      {/* ============================ HAMSTRINGS (biceps femoris outer + semitendinosus inner per leg) ============================ */}
+      {/* ------ Hamstrings (biceps femoris outer + semitendinosus/semimembranosus inner per leg) ------- */}
       <Path
-        d="M64 342 C58 362 56 380 60 380 C64 384 70 384 74 380 C78 360 82 344 86 326 C80 326 70 334 64 342 Z
-           M86 326 C84 348 84 368 88 380 L98 380 C100 360 100 340 100 324 C96 324 90 324 86 326 Z
-           M136 342 C142 362 144 380 140 380 C136 384 130 384 126 380 C122 360 118 344 114 326 C120 326 130 334 136 342 Z
-           M114 326 C116 348 116 368 112 380 L102 380 C100 360 100 340 100 324 C104 324 110 324 114 326 Z"
+        d="M68 288 C64 304 62 326 66 318 L66 318 C70 320 74 320 78 318 C82 300 86 286 88 270 C84 270 76 282 68 288 Z
+           M88 270 C86 290 86 308 90 318 L98 318 C100 296 100 280 100 268 C96 268 92 268 88 270 Z
+           M132 288 C136 304 138 326 134 318 L134 318 C130 320 126 320 122 318 C118 300 114 286 112 270 C116 270 124 282 132 288 Z
+           M112 270 C114 290 114 308 110 318 L102 318 C100 296 100 280 100 268 C104 268 108 268 112 270 Z"
         fill={f(M_HAMSTRING)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Hamstring longitudinal fibers (biceps femoris + semi split) */}
+      {/* Hamstring striations (longitudinal posterior-thigh fibers) */}
       <Path
-        d="M72 340 L78 380
-           M84 332 L92 380
-           M100 328 L100 380
-           M116 332 L108 380
-           M128 340 L122 380"
+        d="M74 280 L80 318
+           M86 276 L92 318
+           M100 272 L100 318
+           M114 276 L108 318
+           M126 280 L120 318"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ KNEE (popliteal) ============================ */}
+      {/* ------ Knee (popliteal) ------- */}
       <Path
-        d="M64 382 C66 392 74 400 84 400 L96 400 C98 396 98 388 96 382 Z
-           M104 382 C104 388 104 396 106 400 L116 400 C126 400 134 392 136 382 Z"
+        d="M70 320 C72 324 76 328 82 328 L92 328 C94 324 94 322 92 320 Z
+           M108 320 C108 322 108 324 110 328 L120 328 C124 328 128 324 130 320 Z"
         fill={COLOR_SKIN}
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
-      {/* ============================ CALF — GASTROCNEMIUS DIAMOND (back view — most prominent) ============================ */}
+      {/* ------ Calf (gastrocnemius two-headed diamond — prominent on back view) ------- */}
       <Path
-        d="M68 402 C60 422 58 448 64 466 C68 476 74 480 80 480 L88 480 C90 460 92 436 92 420 C92 410 86 404 80 402 Z
-           M132 402 C140 422 142 448 136 466 C132 476 126 480 120 480 L112 480 C110 460 108 436 108 420 C108 410 114 404 120 402 Z"
+        d="M74 328 C68 342 68 360 74 374 C78 382 82 386 86 388 L90 388 C92 374 94 356 94 342 C94 334 90 330 86 328 Z
+           M108 328 C106 330 106 334 106 342 C106 356 108 374 110 388 L114 388 C118 386 122 382 126 374 C132 360 132 342 126 328 Z"
         fill={f(M_CALF)}
         stroke={COLOR_OUTLINE}
-        strokeWidth={STROKE_MUSCLE}
+        strokeWidth={0.5}
       />
-      {/* Gastroc diamond midline + outer/inner head split */}
+      {/* Gastroc midline + soleus underline */}
       <Path
-        d="M78 412 L84 476
-           M122 412 L116 476
-           M70 432 L88 428
-           M130 432 L112 428
-           M76 456 L90 452
-           M124 456 L110 452"
+        d="M84 340 L88 384
+           M116 340 L112 384
+           M76 364 L92 360
+           M124 364 L108 360"
         stroke={COLOR_STRIATION}
-        strokeWidth={STROKE_STRIATION}
+        strokeWidth={0.5}
         fill="none"
       />
 
-      {/* ============================ ANKLE / HEEL ============================ */}
+      {/* ------ Ankle / heel ------- */}
       <Path
-        d="M72 480 L92 480 L96 500 L70 500 Z
-           M108 480 L128 480 L130 500 L104 500 Z
-           M68 500 L98 500 L100 514 L66 514 Z
-           M102 500 L132 500 L134 514 L100 514 Z"
+        d="M76 388 L92 388 L94 400 L74 400 Z M108 388 L124 388 L126 400 L106 400 Z"
         fill="#FAFAFA"
-        stroke={COLOR_OUTLINE_BODY}
-        strokeWidth={STROKE_BODY}
+        stroke={COLOR_OUTLINE}
+        strokeWidth={1}
       />
 
       <MuscleLabels labels={BACK_LABELS} mCount={mCount} textAnchor="start" />
