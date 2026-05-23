@@ -123,6 +123,9 @@ export const strings = {
       weekdayThu: '四',
       weekdayFri: '五',
       weekdaySat: '六',
+      // Phase 4.5 audit (2026-05-24) — Stats panel period selector chips.
+      year: '年',
+      month: '月',
     },
 
     /** UI button / CTA / action label。包括 wizard nav、cluster ⚙️ 選單 item。 */
@@ -707,6 +710,9 @@ export const strings = {
       weekdayThu: 'Thu',
       weekdayFri: 'Fri',
       weekdaySat: 'Sat',
+      // Phase 4.5 audit (2026-05-24) — Stats panel period selector chips.
+      year: 'Year',
+      month: 'Month',
     },
 
     button: {

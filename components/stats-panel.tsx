@@ -36,18 +36,17 @@ import type {
   StatsSetRecord,
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
-import { getLocale, t, tMuscleGroup } from '@/src/i18n';
+import { t, tMuscleGroup } from '@/src/i18n';
 
 /**
- * Period selector labels. zh literals are single chars (年 / 月 / 週); EN
- * locale uses full words (Year / Month / Week). Kept inline as a local
- * helper rather than added to `src/i18n/dynamic.ts` (panel-only usage).
+ * Period selector labels. Backed by `domain.year/month/week` keys in
+ * `strings.ts`. Year/Month added 2026-05-24 (Phase 4.5 audit sweep);
+ * `domain.week` predates them.
  */
 function periodLabel(p: PeriodScale): string {
-  const en = getLocale() === 'en';
-  if (p === 'year') return en ? 'Year' : '年';
-  if (p === 'month') return en ? 'Month' : '月';
-  return en ? 'Week' : '週';
+  if (p === 'year') return t('domain', 'year');
+  if (p === 'month') return t('domain', 'month');
+  return t('domain', 'week');
 }
 
 interface PeriodChoice {
