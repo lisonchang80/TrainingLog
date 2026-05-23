@@ -214,13 +214,38 @@ import {
  *
  * Q controls verified inside chest L/R silhouette → no painting outside.
  */
-/** Front: upper chest — 2 wider leaves (clavicular head, ~42 unit width). */
+/**
+ * Round 17 chest fix (2026-05-23): user clicked 4 切線 keypoints via
+ * coord-picker tool, strict mirror about x=364:
+ *   P2 (255, 379) L outer / P4 (354, 338) L inner
+ *   P1 (473, 379) R outer / P3 (374, 339) R inner
+ *
+ * Snapped to PACKAGE chest L/R boundaries (avoid 超出胸):
+ *   L 切線: (265, 379) → (352, 338)
+ *   R 切線: (462, 379) → (378, 339)
+ *
+ * 切線 goes from chest lateral mid-low to chest medial upper, slight
+ * concave-up curve (Q ctrl y=350, ~4 units above straight midpoint).
+ *
+ * Anatomical interpretation:
+ *   UPPER (above 切線) = small region near chest top (clavicular head)
+ *   LOWER (below 切線) = larger region (sternal head)
+ *
+ * Both regions use 2 sub-paths (L pec + R pec). LOWER includes chest
+ * silhouettes + UPPER sub-paths (CCW direction creates holes via SVG
+ * nonzero fill rule, since chest paths are CW).
+ *
+ * UPPER_L traversed as CCW: 切線 outer → 切線 inner → chest medial top
+ * → top arc reversed → chest lateral top → lateral down → close.
+ * UPPER_R follows real chest R silhouette (PACKAGE asymmetric).
+ */
+/** Front: upper chest — 2 sub-paths above 切線 (clavicular regions). */
 export const PATH_UPPER_CHEST =
-  'M280 340 Q347 408 356 392 Q290 324 280 340 Z M444 340 Q434 324 368 392 Q377 408 444 340 Z';
+  'M265 379 Q308 350 352 338 L337 319 Q320 316 300 318 Q280 322 260 344 Q263 360 265 379 Z M462 379 Q463 360 463 344 Q455 332 449 326 Q432 320 422 318 Q410 316 399 318 Q388 320 380 327 L378 339 Q420 350 462 379 Z';
 
-/** Front: lower chest — chest L+R with leaf holes (sternal head). */
+/** Front: lower chest — chest L+R silhouettes with UPPER holes (sternal). */
 export const PATH_LOWER_CHEST =
-  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M280 340 Q290 324 356 392 Q347 408 280 340 Z M444 340 Q377 408 368 392 Q434 324 444 340 Z';
+  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M265 379 Q308 350 352 338 L337 319 Q320 316 300 318 Q280 322 260 344 Q263 360 265 379 Z M462 379 Q463 360 463 344 Q455 332 449 326 Q432 320 422 318 Q410 316 399 318 Q388 320 380 327 L378 339 Q420 350 462 379 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
