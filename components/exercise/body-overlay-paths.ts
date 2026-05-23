@@ -193,13 +193,34 @@ import {
  * with leaves visible as UPPER and rest as LOWER. Each path stays
  * strictly within chest silhouettes (no painting outside).
  */
-/** Front: upper chest — 2 leaves matching clavicular head fiber direction. */
+/**
+ * Round 16 chest fix (2026-05-23): user screenshot showed R leaf invisible
+ * + L leaf too thin to read as leaf shape.
+ *
+ * Two bugs identified:
+ *   1. R leaf coordinate-mirror gave SAME winding direction as chest R
+ *      (CW in screen). SVG nonzero rule didn't make R leaf a HOLE in
+ *      LOWER → LOWER fill covered UPPER R leaf. Fix: R leaf uses reversed
+ *      curve order (top-curve-first) to force CCW direction.
+ *   2. Leaf width at midpoint only 17 units — rendered as thin line, not
+ *      visible as leaf. Fix: widen leaves to ~42 units width via Q control
+ *      y offsets (bottom curve y=408, top curve y=324).
+ *
+ * Final leaf control points (all strict mirror about x=362, sums=724):
+ *   L leaf (CCW screen): M 280 340 Q 347 408 (bottom curve via (347, 408))
+ *     → 356 392 → Q 290 324 (top curve via (290, 324)) → 280 340 Z
+ *   R leaf (CCW screen): M 444 340 Q 434 324 (top curve first) → 368 392
+ *     → Q 377 408 (bottom curve) → 444 340 Z
+ *
+ * Q controls verified inside chest L/R silhouette → no painting outside.
+ */
+/** Front: upper chest — 2 wider leaves (clavicular head, ~42 unit width). */
 export const PATH_UPPER_CHEST =
-  'M280 340 Q318 385 356 392 Q318 350 280 340 Z M444 340 Q406 385 368 392 Q406 350 444 340 Z';
+  'M280 340 Q347 408 356 392 Q290 324 280 340 Z M444 340 Q434 324 368 392 Q377 408 444 340 Z';
 
-/** Front: lower chest — chest L+R silhouettes with leaf holes (sternal head). */
+/** Front: lower chest — chest L+R with leaf holes (sternal head). */
 export const PATH_LOWER_CHEST =
-  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M280 340 Q318 385 356 392 Q318 350 280 340 Z M444 340 Q406 385 368 392 Q406 350 444 340 Z';
+  'M260 344 Q280 322 300 318 Q320 316 337 319 L357 344 L357 392 L355 409 Q327 425 297 433 Q280 432 272 422 Q260 405 260 360 L260 344 Z M380 327 Q388 320 399 318 Q410 316 422 318 Q435 320 449 326 Q462 335 471 355 Q470 400 462 415 Q462 437 443 430 Q432 437 416 435 Q393 425 375 413 L372 401 L380 327 Z M280 340 Q290 324 356 392 Q347 408 280 340 Z M444 340 Q377 408 368 392 Q434 324 444 340 Z';
 
 /** Front: bicep long head (outer/lateral) left arm. */
 export const PATH_BICEP_LONG_L =
