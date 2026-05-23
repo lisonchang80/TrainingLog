@@ -155,42 +155,61 @@ export const PATH_MID_DELT_PEAK_BACK_L = '';
 export const PATH_MID_DELT_PEAK_BACK_R = '';
 
 /**
- * Front-delt extension filling the chest-notch — a small rounded arc that
- * smooths the medial deltoid edge WITHOUT extending visibly into chest.
- * Sits on top of the package's chest fill so the front-delt visually wraps
- * over it. Reference IMG_1371.PNG (前束 highlight): the medial edge in the
- * reference is rounded but stays within the deltoid area — only the
- * smallest extension into chest is visible. Per user feedback 2026-05-23:
- * shrunk from Δx≈30 (which bulged too far into chest) to Δx≈10.
+ * Front-delt extension filling the chest-notch — a rounded diagonal sweep
+ * from the deltoid medial-upper edge, bulging well into the upper-chest /
+ * clavicle gap before curving back to the medial-lower edge. Sits on top
+ * of the package's chest fill so the front-delt visually wraps over it
+ * and the shoulder→pec transition reads as one smooth lobe instead of
+ * a hard vertical seam.
+ *
+ * Reference IMG_1371.PNG (前束 highlight): the medial edge isn't a
+ * shallow bulge — it's a clear diagonal lobe that visibly fills the
+ * triangular gap between the deltoid cap and the upper pec. Per user
+ * feedback 2026-05-23: enlarged from Δx≈10 (too shy, didn't bridge the
+ * gap) to Δx≈30 (matches the reference's diagonal sweep). Path height
+ * also extended from 60 → 75 units to span the full deltoid medial edge.
  *
  * Coordinates (front L, deltoid medial edge at x≈278, chest centerline x=362):
- *   anchor top      = (276, 320) on deltoid medial edge upper
- *   anchor bottom   = (276, 380) on deltoid medial edge lower
- *   bulge apex      = (288, 350) ~10 units into chest
+ *   anchor top      = (278, 315) on deltoid medial edge upper
+ *   anchor bottom   = (278, 390) on deltoid medial edge lower
+ *   bulge apex      = (308, 350) ~30 units into chest (diagonal mid-lobe)
+ *
+ * Right side is the exact mirror about x=362 (chest centerline): apex
+ * at (419, 350), Δx=30. L and R are byte-for-byte symmetric.
  */
 export const PATH_FRONT_DELT_CHEST_FILL_L =
-  'M276 320 Q284 324 287 338 Q289 350 287 362 Q284 376 276 380 Z';
+  'M278 315 Q302 318 308 350 Q302 382 278 390 Z';
 export const PATH_FRONT_DELT_CHEST_FILL_R =
-  'M474 320 Q466 324 463 338 Q461 350 463 362 Q466 376 474 380 Z';
+  'M449 315 Q425 318 419 350 Q425 382 449 390 Z';
 
 /**
- * Rear-delt extension filling the back-notch — a small rounded arc that
- * smooths the medial deltoid edge WITHOUT extending visibly into upper
- * back / trapezius. Sits on top of trap / upper-back fills. Reference
- * IMG_1369.PNG (後束 highlight): the medial edge in the reference is
- * rounded but stays within the deltoid area — only the smallest extension
- * into back is visible. Per user feedback 2026-05-23: shrunk from Δx≈32
- * (which bulged too far into trap/upper-back) to Δx≈10.
+ * Rear-delt extension filling the back-notch — a rounded diagonal sweep
+ * from the deltoid medial-upper edge, bulging well into the upper-back /
+ * trapezius gap before curving back to the medial-lower edge. Sits on
+ * top of trap / upper-back fills so the rear-delt visually wraps over
+ * them and the shoulder→back transition reads as one smooth lobe.
  *
- * Coordinates (back L, deltoid medial edge at x≈980, spine centerline x=1086):
- *   anchor top    = (980, 320)
- *   anchor bottom = (980, 380)
- *   bulge apex    = (990, 350) ~10 units into back
+ * Reference IMG_1369.PNG (後束 highlight): mirrors the front-delt's
+ * diagonal lobe — the medial edge visibly fills the triangular gap
+ * between the deltoid cap and the upper back. Per user feedback
+ * 2026-05-23: enlarged from Δx≈10 to Δx≈30 (matches reference). Path
+ * height also extended from 60 → 75 units (y=315..390) to span the
+ * full deltoid medial edge.
+ *
+ * Coordinates (back L, deltoid medial edge at x≈981, spine centerline x=1086):
+ *   anchor top    = (981, 315)
+ *   anchor bottom = (981, 390)
+ *   bulge apex    = (1011, 350) ~30 units into back (diagonal mid-lobe)
+ *
+ * Right side is the exact mirror about x=1086 (spine centerline): apex
+ * at (1155, 350), Δx=30. L and R are byte-for-byte symmetric, and the
+ * Δx matches the front-delt fill so the front/back views read as one
+ * consistent anatomy.
  */
 export const PATH_REAR_DELT_BACK_FILL_L =
-  'M980 320 Q987 324 990 338 Q992 350 990 362 Q987 376 980 380 Z';
+  'M981 315 Q1005 318 1011 350 Q1005 382 981 390 Z';
 export const PATH_REAR_DELT_BACK_FILL_R =
-  'M1190 320 Q1183 324 1180 338 Q1178 350 1180 362 Q1183 376 1190 380 Z';
+  'M1185 315 Q1161 318 1155 350 Q1161 382 1185 390 Z';
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
