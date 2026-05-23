@@ -113,10 +113,17 @@ export const PACKAGE_DELT_BACK_R =
  *   BACK_L : x ∈ [913.97, 981.31]  → mid 947.64
  *   BACK_R : x ∈ [1184.98, 1252.78] → mid 1218.88
  */
-export const SPLIT_X_FRONT_DELT_L = 235.5;
-export const SPLIT_X_FRONT_DELT_R = 496.1;
-export const SPLIT_X_BACK_DELT_L = 947.6;
-export const SPLIT_X_BACK_DELT_R = 1218.9;
+// SPLIT_X shifted toward lateral edge so mid-delt occupies 1/3 of deltoid
+// width (was 1/2). Mid-delt = lateral strip; medial side (front-delt on
+// front view, rear-delt on back view) now gets 2/3.
+//   Front L bbox 192.58..278.43 (w=85.85) → 1/3 = 28.6 → split @ 192.58+28.6 = 221.2
+//   Front R bbox 449.44..542.73 (w=93.29) → 1/3 = 31.1 → split @ 542.73-31.1 = 511.6
+//   Back  L bbox 913.97..981.31 (w=67.34) → 1/3 = 22.4 → split @ 913.97+22.4 = 936.4
+//   Back  R bbox 1184.98..1252.78 (w=67.80) → 1/3 = 22.6 → split @ 1252.78-22.6 = 1230.2
+export const SPLIT_X_FRONT_DELT_L = 221.2;
+export const SPLIT_X_FRONT_DELT_R = 511.6;
+export const SPLIT_X_BACK_DELT_L = 936.4;
+export const SPLIT_X_BACK_DELT_R = 1230.2;
 
 // ---------------------------------------------------------------------------
 // Back-side overlay paths
