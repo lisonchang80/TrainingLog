@@ -84,6 +84,23 @@ Why this matters: 視覺化 prompts repeatedly land at decision points where tex
 
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
+### Treat plan / audit recommendations as stale-by-default
+
+When grilling against an implementation plan or design audit doc, **never accept a Q's recommendation without grepping the actual impl first**. Plans get written from snapshot-in-time audits; audits get written from grep at one point in time. Between then and your grill, commits land. The plan's recommendation may now contradict reality.
+
+**Recipe per Q**:
+1. Identify the impl surface the Q touches (file paths, function names, URL params, schema columns).
+2. Grep / read those before drafting options.
+3. If plan rec contradicts impl, surface the contradiction explicitly in your options table — "Plan推薦 X, code 已落定 Y" — and recommend Y.
+
+Example (TrainingLog 2026-05-24 Round D, 4 Q):
+- Q1: plan rec `targetSessionId=` URL param. Code in `app/session/[id].tsx:1850` already uses `sessionId=`. Rec翻盤 → A.
+- Q2: plan rec「不 block dup RS in session」. Code in `sessionRepository.ts:381-395` has `throw 'duplicate RS in session'` + `library.tsx` picker UI dims used RS + Agent D test `.rejects.toThrow(/duplicate RS/i)`. Three-layer lock-in. Rec翻盤 → A.
+- Q3: plan rec「tap RS 立刻 explode + router.back」per ADR-0019 Q7. Re-reading Q7: "tap RS card → 整 RS explode" describes data transformation, NOT UI timing. Existing `library.tsx` is multi-select uniform across solo + RS via `pickerBridge.reusableSupersetIds: string[]`. Rec翻盤 → A (keep multi-select).
+- Q4: plan rec「auto-expand new card」. Code in `index.tsx:347-413` consumePick drain doesn't touch `setExpandedExerciseId`. Plan-aligned UX argument wins this one. Rec aligned → B.
+
+**3 of 4 plan recs contradicted code.** Pattern: when the plan was authored before the current grill round, assume 50%+ of its recs need overturning. The grill exists to catch this drift before implementation locks it in.
+
 ### When user pins to existing pattern, scan that pattern's code BEFORE proposing options
 
 If the user says "match X's pattern" / "reference X" / "X 怎麼做的就照辦" / "後續優先參考 X" — that's a meta-rule binding all subsequent answers. Aggressively grep / read X's code BEFORE answering the next question.
