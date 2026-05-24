@@ -10,7 +10,6 @@ import {
   insertReusableSuperset,
   listReusableSupersets,
   listReusableSupersetsWithExercises,
-  listSlotsForSuperset,
   updateReusableSupersetName,
 } from '../../src/adapters/sqlite/supersetRepository';
 import {
@@ -55,11 +54,8 @@ describe('supersetRepository', () => {
     it('inserts superset + 2 link rows in transaction', async () => {
       const id = await insertReusableSuperset(db, draft(), uuid, now);
       expect(id).toBe('ss-1');
-      const slots = await listSlotsForSuperset(db, id);
-      expect(slots).toEqual([
-        { superset_id: 'ss-1', position: 0, exercise_id: BENCH },
-        { superset_id: 'ss-1', position: 1, exercise_id: ROW },
-      ]);
+      const hydrated = await getReusableSupersetWithExercises(db, id);
+      expect(hydrated!.exercises.map((e) => e.id)).toEqual([BENCH, ROW]);
       const list = await listReusableSupersets(db);
       expect(list).toHaveLength(1);
       expect(list[0].name).toBe('Bench + Row');
@@ -161,8 +157,8 @@ describe('supersetRepository', () => {
       expect(list).toHaveLength(1);
       expect(list[0].id).toBe(id);
       // No orphan link rows from a partially-applied insert.
-      const slots = await listSlotsForSuperset(db, id);
-      expect(slots).toHaveLength(2);
+      const hydrated = await getReusableSupersetWithExercises(db, id);
+      expect(hydrated!.exercises).toHaveLength(2);
     });
   });
 
@@ -258,7 +254,12 @@ describe('supersetRepository', () => {
       const id = await insertReusableSuperset(db, draft(), uuid, now);
       await deleteReusableSuperset(db, id);
       expect(await listReusableSupersets(db)).toEqual([]);
-      expect(await listSlotsForSuperset(db, id)).toEqual([]);
+      // Cascade probe: link rows must be gone from superset_exercise.
+      const links = await db.getAllAsync<{ superset_id: string }>(
+        `SELECT superset_id FROM superset_exercise WHERE superset_id = ?`,
+        id
+      );
+      expect(links).toEqual([]);
     });
 
     it('does NOT affect other supersets sharing one exercise', async () => {
@@ -277,10 +278,8 @@ describe('supersetRepository', () => {
       await deleteReusableSuperset(db, a);
       const remaining = await listReusableSupersets(db);
       expect(remaining.map((s) => s.id)).toEqual([b]);
-      expect((await listSlotsForSuperset(db, b)).map((s) => s.exercise_id)).toEqual([
-        BENCH,
-        SQUAT,
-      ]);
+      const hydrated = await getReusableSupersetWithExercises(db, b);
+      expect(hydrated!.exercises.map((e) => e.id)).toEqual([BENCH, SQUAT]);
     });
   });
 

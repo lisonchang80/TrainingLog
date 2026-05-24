@@ -11,7 +11,6 @@ import {
 import type {
   ReusableSuperset,
   ReusableSupersetWithExercises,
-  SupersetExerciseSlot,
 } from '../../domain/superset/types';
 
 /**
@@ -383,20 +382,3 @@ export async function deleteReusableSuperset(
   await db.runAsync(`DELETE FROM superset WHERE id = ?`, id);
 }
 
-/**
- * Internal helper exported for tests: returns the raw 2-link rows for a
- * superset in position order. Production callers should use
- * `getReusableSupersetWithExercises` instead.
- */
-export async function listSlotsForSuperset(
-  db: Database,
-  superset_id: string
-): Promise<SupersetExerciseSlot[]> {
-  return db.getAllAsync<SupersetExerciseSlot>(
-    `SELECT superset_id, position, exercise_id
-       FROM superset_exercise
-      WHERE superset_id = ?
-      ORDER BY position ASC`,
-    superset_id
-  );
-}
