@@ -22,7 +22,7 @@
 | Session.title in-session tap-to-edit（ADR-0014 + ADR-0019 Q9.2 rename）| ❌ – Today screen 無 title field | 全新 |
 | Finish dialog 差異化（Q9d）| ❌ – `onEndSession` (`app/(tabs)/index.tsx:342`) 直接 endSession 無 diff prompt | 全新 |
 | Discard 路徑（Q9c）| ❌ – 無 header `[⋯]` menu | 全新 |
-| Start UX bottom sheet（Q9a）| ❌ – Today/Templates tab 仍走 row tap 立刻 createSession | 全新 |
+| Start UX bottom sheet（Q9a）| ❌ – sheet 已 ship、scope 改大為 ADR-0024 訓練 tab 重構（slice 10g）| 砍 templates tab、3 區塊 + bodyweight 流程改 |
 | Save-back diff 範圍（Q9 Sticky 3 擴展）| ❌ – `src/domain/template/saveBackDiff.ts:194-261` 只看 sets/reps/weight | 擴 set_kind / position / cluster / rest_sec |
 | 歷史詳情頁 HU1/HV1/HE1 layout（Q10）| ❌ – `app/session/[id].tsx:115-222` 仍是 Per exercise / 超級組 / All sets 3 段 + 無 4-button bar + 無 stats panel | 全 reimplement |
 | ADR-0012 amendment marker / ADR-0018 amendment marker / ADR-0014 amendment marker | ✅ 已 inline | – |
@@ -191,19 +191,18 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 - **Commit boundary**：2 commit
 - **Risk**：**med** — cluster row group 邏輯在 index.tsx render 切容易踩 c-2 only-one-expanded edge
 
-### Card 8 — Session lifecycle Start UX bottom sheet（ADR-0019 Q9a + Q9.2）
+### Card 8 — Session lifecycle Start UX bottom sheet（ADR-0019 Q9a + Q9.2） — **2026-05-24 取代**
 
-- **Status**: ❌
-- **Decision needed (grill)**: yes — § 4 Round E（Templates tab vs Today tab 入口；既有 Today tab 已有自己的 start flow per slice 10b、user 是否要 Templates tab 也加 bottom sheet 或統一移到 Today）
-- **Code touch list**：
-  - 新建 `components/session/start-template-sheet.tsx`（週期 picker + 強度 picker + [編輯模板] / [開始訓練] 兩 btn；FB1 首次 fallback「無」、N1 sticky last-selected）
-  - 改 `app/(tabs)/templates.tsx` tap Template name → push sheet（不再立刻 push editor）
-  - 新建 `src/domain/template/lastSelected.ts`（pure：per template_id 記住 last (period_id, intensity_id)、存 SQLite `app_settings` JSON 或 dedicated table）
-  - 改 `src/adapters/sqlite/sessionRepository.ts::createSession` 加 `(period_id, intensity_id)` args（slice 10a wave 35 已加？需 verify — MEMORY mentions `startSessionFromTemplate` 加 (period_id, intensity_id) args）
-  - 改 `app/(tabs)/index.tsx::onStart` 對齊 Templates tab flow
-- **Test cases needed** (`tests/domain/lastSelected.test.ts`)：5 case（per template sticky / FB1 / 新 template fallback / cleared template / cross-template isolation）
-- **Commit boundary**：3 commit（lastSelected + sheet + Today/Templates wire）
-- **Risk**：**med** — Templates tab + Today tab 兩入口統一是設計上長期 ambiguity；recommend grill round 先釐清
+> **2026-05-24 Round E 完成、本卡 scope 大改、拆出獨立 ADR-0024 + slice 10g**。原 plan 假設「Templates tab 加 bottom sheet」、Round E 翻盤為「砍 Templates tab、Today tab 改名訓練 + 3 區塊重構」。本卡留作 history、實際工作見 [ADR-0024](../adr/0024-training-tab-three-sections-and-templates-tab-removal.md) 與下方 slice 10g bundle。
+>
+> Grill 拍板：見上方 § 4 Round E 22 sub-decision ledger。
+>
+> 既有 `components/templates/start-template-sheet.tsx` + `startSessionFromTemplate(.. program_id, sub_tag)` + sticky GLOBAL key 全保留不動、只是 sheet invocation 改在「訓練 → 模板訓練」區塊內。
+
+- **Status**: ❌ — 工作搬到 slice 10g
+- **Decision needed (grill)**: ✅ Round E 已完
+- **Code touch list**：見 slice 10g bundle 6 commit 拆分
+- **Risk**：med（評估 unchanged — 跨 tab + 砍 file + bodyweight schema 整合）
 
 ### Card 9 — Session header [⋯] menu「放棄訓練」(Q9c)
 
@@ -365,20 +364,48 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 
 ### Round E — Start UX：Templates tab 入口 vs Today tab 入口統一?
 
-- **Background**：ADR-0019 Q9a 拍板「Templates tab → tap Template name → bottom sheet」，但 Today tab 也有 start session 入口（slice 10b 加的）；user 從 Today 開 session 是否也走 bottom sheet？
-- **Questions**：
-  1. Today tab 還保留「直接 Start Freestyle Session」按鈕嗎？（per Q9.2 N1 「無」program 仍是合法選項，所以走 sheet 也能達到 freestyle）
-  2. 如果統一移到 Templates tab → Today tab 變成「只看當下 active session / 空 state 引導去 Templates」？
-  3. Sticky last-selected 是 per template 還是 global 一份？
-  4. 「無」週期 + 強度 picker 隱藏：fade-out animation 還是 instant？
-  5. `[+ 新增週期]` / `[+ 新增強度]` 走既有 wave 17 wizard 還是 minimal inline modal（slice 10b 內 wave 34 已有 case-insensitive dup guard）？
-- **Recommended answer**：
-  1. Today 保留「Quick Start Freestyle」（直接走 Q9.2 N1 「無」program freestyle path，不開 sheet）
-  2. 不（Today 仍是 in-session primary view）
-  3. per template（per ADR-0019 N1 sticky last-selected = 每 Template 各自記）
-  4. instant（sheet 內動畫太雜）
-  5. inline minimal modal（per ADR-0019 Q9.2 P1 「stack push 小 modal」）
-- **Open question count if all default ruled**：1 — 「Quick Start Freestyle」按鈕的位置 / visual treatment 等小決定，不卡 implementation
+> **2026-05-24 grill 完成、拍板大重構，落地 [ADR-0024](../adr/0024-training-tab-three-sections-and-templates-tab-removal.md)。原 5 Q + recommended 段落保留作 history、實際拍板見下方 22 sub-decision ledger。**
+
+- **拍板摘要**：Today tab 改名「訓練」(zh) / Training (en) + 砍 Templates tab + idle 分 3 區塊（計劃訓練 / 空白訓練 / 模板訓練）+ bodyweight pre-prompt 移除 + assisted 動作彈窗 block-only + Settings 新增體重 row + 獨立 slice 10g ship。
+
+- **22 sub-decision 拍板 ledger**：
+
+  | Sub-Q | 主題 | 拍板 |
+  |---|---|---|
+  | Q1 | In-session view 切換 | **A. Mode switch** — 1 tab 兩態，現行行為延續 |
+  | Q1.2a | 計劃訓練內容廣度 | **a1.** 只今天單一 template |
+  | Q1.2b | 無 active program fallback | **b2.** Empty state + Programs tab CTA |
+  | Q1.2c | 今天 cell = 休息 / 空白 | **c1.** 灰底「今天休息」、無 tap |
+  | Q1.3d | 模板 list 顯示樣式 | **d1.** 整 list 攤開（不折疊） |
+  | Q1.3e | [+ 新建模板] 位置 | **e1.** 模板訓練 heading 右上角 |
+  | Q1.3f | 模板數 = 0 顯示 | **f1.** Empty state CTA + 保留 [+ New] btn |
+  | Q1.4g | Tab 順序 | **g1.** 訓練 / Programs / Library / History / Settings |
+  | Q1.4h | 訓練 tab icon | **h2.** figure.run / dumbbell（實作時挑） |
+  | Q1.4i | Tab title 語言 | **i1.** 跟 i18n locale (per ADR-0023) |
+  | Q1.5 | Sticky scope | **A. 維持 global**（plan 原 recommended「per template」為 stale-plan-default、被否） |
+  | Q2.1j | Bodyweight 寫入時機 | **E+補丁** — eager auto-pull + assisted 彈窗補 |
+  | Q2.1k | Body_metric 時效性 | **無限制**，永遠拿最後一筆 |
+  | Q2.2l | Assisted 彈窗 trigger | **l1.** `appendSessionExercise` 那一刻 |
+  | Q2.2m | 已有 snapshot 後又遇 assisted | **m1.** 不再彈 |
+  | Q2.3o | Modal 拒填行為 | **o1. Block** — 必填、無 Skip btn |
+  | Q2.4p | Settings 體重 UI | **p1.** 加「體重」row + mini sheet（quick-update only、不含 history CRUD） |
+  | Q3q | 程式碼搬遷 | **q2.** 抽 `<TemplateListSection>` shared component |
+  | Q3r | ADR 策略 | **r3.** 新 ADR-0024 |
+  | Q3s | Slice 切分 | **s2.** 獨立 slice 10g（跨 lifecycle 10e 解耦） |
+
+- **翻盤的既有拍板（stale-plan-default）**：
+  - ❌ Plan Q3 原 recommended「sticky per template」→ 否決，維持現行 global single-key（code ground truth）
+  - ❌ Plan Q1 原 recommended「Quick Start Freestyle 直接走 freestyle path、不開 sheet」→ 升級為「空白訓練」獨立區塊，但實作上仍 = 同 direct path
+  - ❌ ADR-0019 § Q9a「Templates tab → sheet」→ Templates tab entity 砍除、sheet invocation 改在「模板訓練」區塊（sheet logic 不動）
+
+- **Open question count post-grill**：0（實作細節留給 slice 10g：SF Symbol icon 確切名稱、Settings row 排序位置、3 區塊 vertical spacing 等 visual polish）
+
+- **原 5 Q + recommended（history）**：
+  1. ~~Today tab 還保留「直接 Start Freestyle Session」按鈕嗎？~~ → 升級為「空白訓練」獨立區塊
+  2. ~~如果統一移到 Templates tab → Today tab 變成「只看當下 active session / 空 state 引導去 Templates」？~~ → 翻盤：Templates tab 砍除、Today tab 變「訓練」+ 3 區塊
+  3. ~~Sticky last-selected 是 per template 還是 global 一份？~~ → 維持 global（plan recommended 「per template」為 stale-plan-default）
+  4. ~~「無」週期 + 強度 picker 隱藏：fade-out animation 還是 instant？~~ → 未討論（sheet 本身不動、留實作）
+  5. ~~`[+ 新增週期]` / `[+ 新增強度]` 走 wizard 還是 minimal modal？~~ → 未討論（sheet 本身不動、留實作）
 
 ### Round F — Finish diff 偵測時機 + dialog 排序
 
@@ -422,8 +449,9 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 |---|---|---|---|---|---|
 | **10c**（set logger 主結構）| Card 1 + Card 2 + Card 5 | 7 commit | ~25 test | ~12 file | Round A + B（必須先 grill）|
 | **10d**（rest timer + cluster write path + cluster card）| Card 3 + Card 6 + Card 7 + Card 4 | 7 commit | ~22 test | ~14 file | Round C + D（必須先 grill）|
-| **10e**（lifecycle 全套）| Card 8 + Card 9 + Card 10 + Card 11 | 8 commit | ~28 test | ~18 file | Round E + F + (Card 11 schema verify) |
+| **10e**（lifecycle 全套）| Card 9 + Card 10 + Card 11（Card 8 拆出 → 10g）| ~7 commit | ~22 test | ~16 file | Round F + (Card 11 schema verify) |
 | **10f**（歷史頁 layout）| Card 12 | 4 commit | ~6 test | ~8 file | Round G + 依賴 10c/10d 元件 ship |
+| **10g**（訓練 tab 重構）| ADR-0024 全部範圍（取代原 Card 8）| ~6 commit | ~12 test | ~10 file | Round E ✅（已完）+ 依賴 10c/10d/10e 元件 ship 與否皆可 |
 
 ### Slice 10c bundle 詳細
 
@@ -447,9 +475,23 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 
 ### Slice 10e bundle
 
-- 估時：2 週（含 Round E+F grill + Card 10 高風險 saveBackDiff 擴展）
+- 估時：1.5 週（含 Round F grill + Card 10 高風險 saveBackDiff 擴展；Card 8 拆到 10g 後 lifecycle scope 縮）
 - 風險 cards：Card 10（diff 範圍擴展牽動既有 saveBackRepository apply 路徑）
 - 依賴：Card 11 schema verify 可能需要 v018 backfill migration（先 verify v010 是否落、無則加 1 commit）
+
+### Slice 10g bundle（訓練 tab 重構，per ADR-0024）
+
+- 估時：0.7 週（不含 grill — Round E 已完成）
+- 風險 cards：(a) `appendSessionExercise` 注入 bodyweight modal 點 — 牽動既有 in-session view 流程；(b) `templates.tsx` 整檔砍除需 grep 0 ripple 確認
+- 依賴：可獨立 ship、與 10e lifecycle 解耦
+- Commits（6 estimated）：
+  - 10g.1 抽 `components/training/template-list-section.tsx` shared component（純 refactor、行為等價）
+  - 10g.2 `app/(tabs)/index.tsx` idle 區改 3 區塊 layout + 「計劃訓練」today resolver
+  - 10g.3 `_layout.tsx` tab rename / icon / 砍 templates entry + 刪 `templates.tsx`
+  - 10g.4 Settings 「體重」row + mini sheet + `insertBodyMetric` wire
+  - 10g.5 Bodyweight snapshot E+補丁 model：session start auto-pull + `appendSessionExercise` assisted modal block
+  - 10g.6 移除 Today pre-prompt（`prePromptVisible/preBwInput/onConfirmPrePrompt/onCancelPrePrompt` 整段砍）
+- Smoke gate：3 區塊 layout / 空白訓練一鍵 / 模板訓練 sheet roundtrip / Settings 體重 quick-update / assisted modal block / Programs CTA navigation
 
 ### Slice 10f bundle
 
