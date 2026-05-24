@@ -43,7 +43,9 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
   getAutoPopupRestTimer,
+  getSetting,
   getUnitPreference,
+  setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
 import {
   addSessionDropsetCluster,
@@ -97,10 +99,21 @@ import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRe
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
+  cloneTemplateWithSubTag,
+  findTemplateByTriple,
   getSessionLinkedTemplateTriple,
+  listDistinctSubTags,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
+import {
+  createProgram,
+  listPrograms,
+} from '@/src/adapters/sqlite/programRepository';
+import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
+import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
+import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
+import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
 import type { BodyMetric, UnitPreference } from '@/src/domain/body/types';
@@ -149,6 +162,15 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
+
+/**
+ * Sticky-state keys for the start-template bottom sheet
+ * (ADR-0019 §Q9.1a + Q9.2 FB1; reused here for the 訓練 tab 模板訓練 wire-up
+ * per ADR-0024). Same `app_settings` keys the deleted Templates tab used —
+ * stickiness carries over for users upgrading from the pre-ADR-0024 build.
+ */
+const LAST_PROGRAM_KEY = 'start_dialog_last_program_id';
+const LAST_SUB_TAG_KEY = 'start_dialog_last_sub_tag';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -258,6 +280,25 @@ export default function TodayScreen() {
     program_name: string | null;
     sub_tag: string | null;
   } | null>(null);
+
+  /**
+   * StartTemplateSheet wire-up (ADR-0024 § 2.c). `sheetTemplate != null`
+   * controls visibility — set when the user taps a row in 模板訓練, cleared
+   * on cancel / start / edit. Picker option lists (`programs`, `subTags`) +
+   * sticky last-used values are loaded on-demand inside `onPickTemplate` so
+   * they reflect any edits made since the last open. Pattern (b) per the
+   * slice spec: sheet lives in this screen, `TemplateListSection` stays a
+   * pure presentational component (its `onPickTemplate` contract unchanged).
+   */
+  const [sheetTemplate, setSheetTemplate] = useState<TemplateSummary | null>(
+    null,
+  );
+  const [sheetPrograms, setSheetPrograms] = useState<ProgramOption[]>([]);
+  const [sheetSubTags, setSheetSubTags] = useState<string[]>([]);
+  const [sheetLastProgramId, setSheetLastProgramId] = useState<string | null>(
+    null,
+  );
+  const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [exs, active, prog, tpls, u, bms, popup] = await Promise.all([
@@ -471,6 +512,235 @@ export default function TodayScreen() {
         program_id: program_id ?? undefined,
         sub_tag: sub_tag ?? null,
       });
+      await refresh();
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotStartSession'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * ADR-0024 § 2.c — 模板訓練 row tap. Loads picker data on demand (programs,
+   * sub_tags, sticky last-used) then opens `StartTemplateSheet`. Mirrors the
+   * deleted Templates tab's `onRowPress` (commit e08944e). Loading happens
+   * inline so the lists reflect any program / template edits the user made
+   * between visits.
+   */
+  const onPickTemplate = async (item: TemplateSummary) => {
+    setBusy(true);
+    try {
+      const [programSummaries, distinctSubTags, lastProgram, lastTag] =
+        await Promise.all([
+          listPrograms(db),
+          listDistinctSubTags(db),
+          getSetting<string>(db, LAST_PROGRAM_KEY),
+          getSetting<string>(db, LAST_SUB_TAG_KEY),
+        ]);
+      setSheetPrograms(
+        programSummaries.map((p) => ({ id: p.id, name: p.name })),
+      );
+      setSheetSubTags(distinctSubTags);
+      setSheetLastProgramId(lastProgram);
+      setSheetLastSubTag(lastTag);
+      setSheetTemplate(item);
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotOpen'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeSheet = () => setSheetTemplate(null);
+
+  /**
+   * Inline「新增計畫」handler — creates a minimal Program (ADR-0004 defaults),
+   * refreshes the sheet's picker, returns {id, name} so the sheet auto-selects
+   * the new option. Mirrors the deleted Templates tab handler verbatim.
+   */
+  const handleCreateProgram = async (
+    name: string,
+  ): Promise<{ id: string; name: string }> => {
+    const id = randomUUID();
+    const today = utcMsToIsoDate(Date.now());
+    await createProgram(db, {
+      program: {
+        id,
+        name,
+        main_tag: null,
+        cycle_length: 3,
+        cycle_count: 1,
+        start_date: today,
+        is_active: 0,
+      },
+    });
+    setSheetPrograms((prev) => [...prev, { id, name }]);
+    return { id, name };
+  };
+
+  /**
+   * Inline「新增強度」handler — clone the sheet template under
+   * (program_id, new sub_tag) so the new chip is immediately backed by a real
+   * row. Returns void; the sheet narrows scope to「user explicitly created a
+   * brand-new sub_tag」per round 38.
+   */
+  const handleCloneTemplateWithNewSubTag = async (
+    sub_tag: string,
+    program_id: string,
+  ): Promise<void> => {
+    if (!sheetTemplate) {
+      throw new Error('NO_SHEET_TEMPLATE');
+    }
+    await cloneTemplateWithSubTag(db, {
+      source_template_id: sheetTemplate.id,
+      new_program_id: program_id,
+      new_sub_tag: sub_tag,
+      uuid: randomUUID,
+    });
+    // Refresh so the new clone shows up in the 模板訓練 list. No need to
+    // touch sheet visibility — sheet keeps `sheetTemplate` as its source.
+    await refresh();
+  };
+
+  const persistSticky = async (
+    program_id: string,
+    sub_tag: string | null,
+  ): Promise<void> => {
+    await setSetting<string>(db, LAST_PROGRAM_KEY, program_id);
+    if (sub_tag != null) {
+      await setSetting<string>(db, LAST_SUB_TAG_KEY, sub_tag);
+    }
+  };
+
+  /**
+   * Lookup-or-spawn shared by onSheetEdit + onSheetStart. Returns the
+   * template_id of the sibling matching the user's (period_id, intensity_id)
+   * selection. Pure planner is `planResolveTarget` in
+   * src/domain/template/resolveTargetTemplate.ts.
+   */
+  const resolveTargetTemplateId = useCallback(
+    async (
+      sheetTpl: TemplateSummary,
+      selection: { period_id: string; intensity_id: string | null },
+    ): Promise<{
+      template_id: string;
+      alert?: { title: string; body: string };
+    }> => {
+      const sourceProgramId = sheetTpl.program_id ?? null;
+      const sourceSubTag = sheetTpl.sub_tag ?? null;
+      const isNoneProgram = selection.period_id === RESERVED_NONE_PROGRAM_ID;
+      const wantedProgramId = isNoneProgram ? null : selection.period_id;
+      const wantedSubTag = selection.intensity_id;
+
+      const source = {
+        id: sheetTpl.id,
+        name: sheetTpl.name,
+        program_id: sourceProgramId,
+        sub_tag: sourceSubTag,
+      };
+      const sel = {
+        wanted_program_id: wantedProgramId,
+        wanted_sub_tag: wantedSubTag,
+      };
+
+      const matchesSelf =
+        sourceProgramId === wantedProgramId && sourceSubTag === wantedSubTag;
+      const found = matchesSelf
+        ? null
+        : await findTemplateByTriple(db, {
+            name: sheetTpl.name,
+            program_id: wantedProgramId,
+            sub_tag: wantedSubTag,
+          });
+
+      const plan = planResolveTarget(source, sel, found);
+      switch (plan.kind) {
+        case 'use_self':
+        case 'use_sibling':
+          return { template_id: plan.template_id };
+        case 'fallback_with_alert':
+          return { template_id: plan.template_id, alert: plan.alert };
+      }
+    },
+    [db],
+  );
+
+  /**
+   * [編輯模板] handler — lookup-or-spawn + router.push to the editor with
+   * the user's (period, intensity) selection encoded as query params so the
+   * editor header shows what they picked even on fallback. Mirrors the
+   * deleted Templates tab handler (round 42 + #50 C1).
+   */
+  const onSheetEdit = async (selection: {
+    period_id: string;
+    intensity_id: string | null;
+  }) => {
+    if (!sheetTemplate) return;
+    setBusy(true);
+    try {
+      await persistSticky(selection.period_id, selection.intensity_id);
+      const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
+      closeSheet();
+      if (resolved.alert) {
+        Alert.alert(resolved.alert.title, resolved.alert.body);
+      }
+      const dpidParam =
+        selection.period_id === RESERVED_NONE_PROGRAM_ID
+          ? '__none__'
+          : encodeURIComponent(selection.period_id);
+      const dstParam =
+        selection.intensity_id === null
+          ? '__none__'
+          : encodeURIComponent(selection.intensity_id);
+      router.push(
+        `/template/${resolved.template_id}?dpid=${dpidParam}&dst=${dstParam}`,
+      );
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotOpenEditor'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * [開始訓練] handler — lookup-or-spawn + startSessionFromTemplate. Refuses
+   * if a session is already in progress (guard mirrors template editor's
+   * onStartSession). After start, closes the sheet + refreshes so the idle →
+   * in_progress transition picks up.
+   */
+  const onSheetStart = async (selection: {
+    period_id: string;
+    intensity_id: string | null;
+  }) => {
+    if (!sheetTemplate) return;
+    setBusy(true);
+    try {
+      const active = await getActiveSession(db);
+      if (active) {
+        Alert.alert(
+          t('alert', 'sessionAlreadyInProgress'),
+          t('alert', 'endActiveSessionFirst'),
+        );
+        return;
+      }
+      await persistSticky(selection.period_id, selection.intensity_id);
+      const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
+      await startSessionFromTemplate(db, {
+        template_id: resolved.template_id,
+        uuid: randomUUID,
+        program_id: selection.period_id,
+        sub_tag: selection.intensity_id,
+      });
+      closeSheet();
       await refresh();
     } catch (e) {
       Alert.alert(
@@ -1754,17 +2024,30 @@ export default function TodayScreen() {
 
           {/* (c) 模板訓練 — ADR-0024 § 2.c */}
           {/*
-            Tap a row → open the editor for now; the start-template sheet
-            (ADR-0024 § 2.c) lands in a follow-up slice. Keeping the
-            onPickTemplate wired makes the future swap a one-liner.
+            Tap a row → load picker data + open StartTemplateSheet. The sheet
+            owns the (program, sub_tag) pick + lookup-or-spawn before either
+            editing or starting a session. Wired here rather than inside
+            TemplateListSection so the section component stays a pure list
+            (its `onPickTemplate` contract unchanged for reuse).
           */}
           <TemplateListSection
             heading={t('page', 'templateTraining')}
-            onPickTemplate={(tpl) => {
-              router.push(`/template/${tpl.id}`);
-            }}
+            onPickTemplate={onPickTemplate}
           />
         </ScrollView>
+        <StartTemplateSheet
+          visible={sheetTemplate != null}
+          templateName={sheetTemplate?.name ?? ''}
+          programs={sheetPrograms}
+          subTags={sheetSubTags}
+          lastUsedProgramId={sheetLastProgramId}
+          lastUsedSubTag={sheetLastSubTag}
+          onEdit={onSheetEdit}
+          onStart={onSheetStart}
+          onCreateProgram={handleCreateProgram}
+          onCloneTemplateWithNewSubTag={handleCloneTemplateWithNewSubTag}
+          onCancel={closeSheet}
+        />
       </SafeAreaView>
     );
   }
