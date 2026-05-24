@@ -282,20 +282,6 @@ export async function updateReusableSupersetName(
   );
 }
 
-export async function updateReusableSupersetColor(
-  db: Database,
-  id: string,
-  color_hex: string | null,
-  now: () => number
-): Promise<void> {
-  await db.runAsync(
-    `UPDATE superset SET color_hex = ?, updated_at = ? WHERE id = ?`,
-    color_hex,
-    now(),
-    id
-  );
-}
-
 /**
  * Slice 10c overnight #24 — dynamic "N 次" badge for the RS template card,
  * aligned with #19 方向 A for solo exercises (`exerciseLibraryRepository.

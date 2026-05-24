@@ -8,7 +8,6 @@ import {
 } from '../../src/adapters/sqlite/sessionRepository';
 import {
   insertReusableSuperset,
-  updateReusableSupersetColor,
 } from '../../src/adapters/sqlite/supersetRepository';
 
 /**
@@ -24,7 +23,6 @@ import {
  *   - When the source RS has `color_hex = NULL` (manual / no color picked),
  *     both cluster rows still come back from the LEFT JOIN with NULL color
  *     (verifies LEFT JOIN doesn't drop rows and the column propagates).
- *   - Updating the RS color is reflected on next read (live join, not frozen).
  */
 
 const BENCH = '00000000-0000-4000-8000-000000000001'; // Bench Press (v001/v002 seed)
@@ -116,26 +114,4 @@ describe('cluster RS color threading via listSessionExercisesWithName', () => {
     expect(rows[1].reusable_superset_color_hex).toBeNull();
   });
 
-  it('updateReusableSupersetColor is reflected on next read (live join)', async () => {
-    const rsId = await insertReusableSuperset(
-      db,
-      { name: 'Recolor RS', color_hex: '#ff0000', exercise_ids: [BENCH, SQUAT] },
-      uuid,
-      () => now,
-    );
-    await appendReusableSupersetToSession(db, {
-      session_id: sessionId,
-      reusable_superset_id: rsId,
-      uuid,
-    });
-
-    let rows = await listSessionExercisesWithName(db, sessionId);
-    expect(rows[0].reusable_superset_color_hex).toBe('#ff0000');
-
-    await updateReusableSupersetColor(db, rsId, '#00aaff', () => now + 1000);
-
-    rows = await listSessionExercisesWithName(db, sessionId);
-    expect(rows[0].reusable_superset_color_hex).toBe('#00aaff');
-    expect(rows[1].reusable_superset_color_hex).toBe('#00aaff');
-  });
 });

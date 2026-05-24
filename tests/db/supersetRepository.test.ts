@@ -11,7 +11,6 @@ import {
   listReusableSupersets,
   listReusableSupersetsWithExercises,
   listSlotsForSuperset,
-  updateReusableSupersetColor,
   updateReusableSupersetName,
 } from '../../src/adapters/sqlite/supersetRepository';
 import {
@@ -240,14 +239,6 @@ describe('supersetRepository', () => {
       await updateReusableSupersetName(db, id, '  Push Pull  ', () => 2000);
       const got = await getReusableSupersetWithExercises(db, id);
       expect(got!.superset.name).toBe('Push Pull');
-      expect(got!.superset.updated_at).toBe(2000);
-    });
-
-    it('updateReusableSupersetColor accepts null', async () => {
-      const id = await insertReusableSuperset(db, draft(), uuid, () => 1000);
-      await updateReusableSupersetColor(db, id, null, () => 2000);
-      const got = await getReusableSupersetWithExercises(db, id);
-      expect(got!.superset.color_hex).toBeNull();
       expect(got!.superset.updated_at).toBe(2000);
     });
 
