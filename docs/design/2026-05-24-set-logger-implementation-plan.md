@@ -216,30 +216,33 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 - **Commit boundary**：1 commit
 - **Risk**：**low**
 
-### Card 10 — Finish dialog 差異化（Q9d + Save-back diff 範圍擴展）
+### Card 10 — Finish dialog 差異化（Q9d + Save-back diff 範圍擴展） — **2026-05-24 deprecated**
 
-- **Status**: ❌ — `onEndSession` (`app/(tabs)/index.tsx:342`) 直接 `endSession` + push detail；無 diff prompt
-- **Decision needed (grill)**: yes — § 4 Round F（diff 偵測在 client（render path 也要算）vs server（finish 時 one-shot）；3-option vs 2-option 排序 / wording）
+> **2026-05-24 Round F 重定義** — ADR-0019 wave 12 (2026-05-18) 翻盤砍除整個 finish dialog flow + saveBackDiff pipeline 全砍為 dead code。本卡整題 obsolete。新 Card 10R 吸收 Round F 拍板（4-button bar polish 5 sub-decision）。
+
+- **Status**: 🗑️ deprecated — 留 placeholder
+- **取代**: Card 10R 下方
+
+### Card 10R — Session 詳情頁 4-button bar polish（Round F 拍板落地）
+
+- **Status**: ❌（新卡，2026-05-24 grill 完）
+- **Decision needed (grill)**: ✅ Round F 已完
 - **Code touch list**：
-  - 改 `src/domain/template/saveBackDiff.ts:194-261` 加 `computeSaveBackDiffExtended` 涵蓋 set_kind / position / cluster / rest_sec（per ADR-0019 Q9 § Sticky 3 表）
-  - 新建 `components/session/finish-template-diff-dialog.tsx`（3-option：儲存 / 另存 / 否；Template-based + diff 路徑）
-  - 新建 `components/session/finish-freestyle-dialog.tsx`（2-option：儲存 / 否；Freestyle 路徑）
-  - 改 `app/(tabs)/index.tsx::onEndSession` → 先 query diff + session.template_id → 三路 branch（Template 無 diff / Template 有 diff / Freestyle）
-  - 改 `src/adapters/sqlite/saveBackRepository.ts` apply 流程支援 set_kind / position diff（既有可能只支援 add / modify / remove sets）
-- **Test cases needed** (`tests/domain/saveBackDiffExtended.test.ts` + `tests/db/finishFlow.test.ts`)：
-  1. Template + 無 diff → 直接 finish 無 dialog
-  2. Template + sets/reps/weight diff → 3-option
-  3. Template + set_kind diff（warmup → working）→ 3-option
-  4. Template + position reorder → 3-option
-  5. Template + rest_sec diff → 3-option
-  6. Template + cluster 加入 → 3-option
-  7. Template + cluster 刪除 → 3-option
-  8. Template + exercise.notes 改 → 不算 diff
-  9. Template + session.title 改 → 不算 diff
-  10. Freestyle → 永遠 2-option（無 template_id）
-  11. Freestyle「儲存」走「另存模板」flow（補三元組 + dup guard）
-- **Commit boundary**：3 commit（pure diff 擴展 / dialog UI / Today wire + saveBackRepository apply）
-- **Risk**：**high** — diff scope 擴大牽動既有 ADR-0002 saveBackDiff 引擎、Test gap 風險大；mitigation：(a) 先 pure diff 擴展 + 大量 test；(b) Freestyle「儲存」flow 重用既有 ADR-0014「另存模板」既有元件（per Q9 known issues #4 ✅ 已確認）
+  - 新建 minimal toast component (`components/shared/toast.tsx` + `<ToastProvider>` root + `useToast()` hook) — 不引第三方 lib、純 RN Animated.View + setTimeout autodismiss
+  - 改 `app/session/[id].tsx::handleSaveTemplate('update')` Alert.alert → `showToast('已儲存到 [模板名]')`
+  - 改 `app/session/[id].tsx::handleSaveTemplate('create')` defaultName 計算邏輯：`session.title?.trim() || linked?.template_name || 'Session ${dateLabel}'` 三層 fallback
+  - 改 `app/session/[id].tsx::handleDelete` confirm body：`'「${session.title || '本訓練'}」將被刪除、已記錄的 set 將全部刪除、無法復原。'`
+  - 改 `app/session/[id].tsx` header title rendering 加 [編] chip（editMode true 時）
+  - 加 inline `// KNOWN RISK ...` comment 在 4-button bar 描述 edit mode 期間 [儲存模板] 行為（per Q1 拍板）
+- **Test cases needed** (`tests/components/toast.test.tsx` + `tests/integration/sessionDetailActions.test.ts`)：
+  1. Toast: 顯示 / autodismiss 計時 / multiple toasts 排隊
+  2. defaultName 三層 fallback：session.title 非空 / linked template / freestyle dateLabel
+  3. Delete confirm body 含 session.title 字串
+  4. Edit mode 進入 → header [編] chip 顯示
+  5. Edit mode 退出 → header [編] chip 消失
+  6. (regression) Edit mode 期間 [儲存模板] 仍可按 + 寫 template（鎖定 Q1 拍板「不動」）
+- **Commit boundary**：3-4 commit（toast component / defaultName + delete polish / header chip / regression test）
+- **Risk**：**low** — 純 UI polish、無 schema 動、無新 domain logic
 
 ### Card 11 — Session.title in-session tap-to-edit（ADR-0014 + Q9.2 rename）
 
@@ -407,22 +410,40 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
   4. ~~「無」週期 + 強度 picker 隱藏：fade-out animation 還是 instant？~~ → 未討論（sheet 本身不動、留實作）
   5. ~~`[+ 新增週期]` / `[+ 新增強度]` 走 wizard 還是 minimal modal？~~ → 未討論（sheet 本身不動、留實作）
 
-### Round F — Finish diff 偵測時機 + dialog 排序
+### Round F — Session 詳情頁 4-button bar 行為 polish（topic 重定義 2026-05-24）
 
-- **Background**：Card 10 是高 risk 卡；diff 偵測 cost 高（要全 query session_exercise + set + 跟 template snapshot 比），時機點影響 UX。
-- **Questions**：
-  1. Diff 偵測在 `onEndSession` 按下時 one-shot 計算 vs 整 session 進行中每次 set save 後 incremental 累積？
-  2. 3-option dialog 排序 = 儲存 / 另存 / 否，還是 否 / 儲存 / 另存？（[否] 預設位置影響誤觸風險）
-  3. dialog 上方是否顯 diff summary（「3 動作改、1 動作加、1 動作刪」）？
-  4. exercise.notes / session.title 不算 diff 已拍 — 但 cluster A↔B swap 算 diff 嗎？（ADR-0019 Q9 Sticky 3 沒列）
-  5. Save-back 寫回 cluster diff 時、template-side cluster schema 也要動 `template_exercise.parent_id` + `reusable_superset_id`？
-- **Recommended answer**：
-  1. one-shot at finish（incremental cache 複雜化 reducer / 易腐 cache；session 結束時 100ms latency 可接受）
-  2. 儲存 / 另存 / 否（最常用 = 儲存最左）
-  3. ✅ 顯 diff summary（透明 = 信任）
-  4. cluster swap 算 diff（per ADR-0019 Q9 「Cluster 加入 / 刪 cluster」既列 — swap = 一加一刪等效）
-  5. ✅ 寫回（per ADR-0014 Q7.3-A propagate scope；template side 也要 update parent_id linkage）
-- **Open question count if all default ruled**：0
+> **2026-05-24 stale-plan-default 翻盤**：原 Round F 5 題（finish diff 偵測時機 + 3-option dialog 排序 + diff summary + cluster swap diff + template cluster schema 寫回）**全部 obsolete** — ADR-0019 2026-05-18 wave 12 翻盤段已把整個 finish dialog 砍除、Save-back domain/repo/screen pipeline 全砍為 dead code。Round F topic 重定義為「session 詳情頁 4-button bar polish」5 題。
+
+- **拍板摘要**：edit mode 期間 3 button 維持 active（已知 risk 接受）+ [儲存模板] 反饋改 toast + [另存模板] default name 三層 fallback + [刪除] confirm 加 session.title + edit mode 加 header [編] chip。歸入 slice 10e bundle、~3-4 commit / ~6-8 test。
+
+- **5 sub-decision 拍板 ledger**：
+
+  | Sub-Q | 主題 | 拍板 |
+  |---|---|---|
+  | Q1 | Edit mode 期間 [儲存模板] / [另存模板] / [刪除] 3 button 行為 | **不動**（維持 active）— 已知 risk：edit mode transactional 保護只涵蓋 session-side、user 在 edit mode 按 [儲存模板] 會 immediate overwrite template、之後 [返回] discard session edits 也無法 rollback template。**接受此 risk**，理由：user 心智模型 = edit mode 是「session 編輯」、template 寫入是 explicit 動作。 |
+  | Q2 | [儲存模板] silent overwrite 成功反饋 | **B. 改 toast** — Alert 2 tap 過重、toast 1 tap auto dismiss。需引 toast lib 或自寫 minimal toast component（codebase 目前無 toast pattern）。 |
+  | Q3 | [另存模板] sheet default name 規則 | **C. session.title → linked.template_name → dateLabel** 三層 fallback。session.title 非空優先（最貼 user 意圖）；template-based fallback linked.template_name；freestyle fallback dateLabel。 |
+  | Q4 | [刪除] confirm dialog body polish | **B. 加 session.title 確認**「『腿日 Q1 第3次』將被刪除...」— 防誤刪比量化代價（set count / volume）重要。 |
+  | Q5 | Edit mode visual indicator | **D. Header title 加 [編] chip**「(腿日) [編]」— sticky header 永遠可見、不搶 vertical space、對齊 iOS Notes app convention。 |
+
+- **翻盤的既有拍板（stale-plan-default）**：
+  - ❌ 原 plan Q1「diff 偵測 one-shot at finish」→ topic 整題不存在（無 finish dialog 可承載 diff）
+  - ❌ 原 plan Q2「3-option dialog 排序 儲存/另存/否」→ topic 不存在
+  - ❌ 原 plan Q3「dialog 顯 diff summary」→ topic 不存在
+  - ❌ 原 plan Q4「cluster swap 算 diff」→ topic 不存在（saveBackDiff dead）
+  - ❌ 原 plan Q5「template-side cluster schema 寫回」→ topic 不存在
+  - ❌ Card 10「Finish dialog 差異化」整題 deprecated → 拆出 Card 10R 「session 詳情頁 4-button bar polish」吸收 Round F 拍板
+
+- **Open question count post-grill**：0
+
+- **Known risk acknowledged (Q1)**：edit mode 期間 [儲存模板] 寫入不在 transactional 保護內。若 user 在 edit mode 改了 session、按 [儲存模板] 寫進 template、然後按 [返回] discard session edits → DB session 回滾但 template 已 leaked。**處理策略**：implement 時加 inline comment 標警告 + 加一個 test 鎖定 expected behavior（不 fix），未來若收到 user complaint 再 grill 翻盤改成 (A) disable / (B) snapshot template / (C) implicit commit。
+
+- **原 5 Q + recommended（history，全 obsolete）**：
+  1. ~~Diff 偵測 one-shot vs incremental~~ → 不存在
+  2. ~~3-option dialog 排序~~ → 不存在
+  3. ~~Diff summary~~ → 不存在
+  4. ~~Cluster swap 算 diff~~ → 不存在
+  5. ~~Save-back template-side cluster~~ → 不存在
 
 ### Round G — 歷史詳情頁 [編輯訓練] in-place modal vs push new route
 
@@ -449,7 +470,7 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 |---|---|---|---|---|---|
 | **10c**（set logger 主結構）| Card 1 + Card 2 + Card 5 | 7 commit | ~25 test | ~12 file | Round A + B（必須先 grill）|
 | **10d**（rest timer + cluster write path + cluster card）| Card 3 + Card 6 + Card 7 + Card 4 | 7 commit | ~22 test | ~14 file | Round C + D（必須先 grill）|
-| **10e**（lifecycle 全套）| Card 9 + Card 10 + Card 11（Card 8 拆出 → 10g）| ~7 commit | ~22 test | ~16 file | Round F + (Card 11 schema verify) |
+| **10e**（lifecycle 全套）| Card 9 + Card 10R + Card 11（Card 8 拆出 → 10g、原 Card 10 deprecated）| ~5 commit | ~14 test | ~10 file | Round F ✅（已完）+ (Card 11 schema verify) |
 | **10f**（歷史頁 layout）| Card 12 | 4 commit | ~6 test | ~8 file | Round G + 依賴 10c/10d 元件 ship |
 | **10g**（訓練 tab 重構）| ADR-0024 全部範圍（取代原 Card 8）| ~6 commit | ~12 test | ~10 file | Round E ✅（已完）+ 依賴 10c/10d/10e 元件 ship 與否皆可 |
 
