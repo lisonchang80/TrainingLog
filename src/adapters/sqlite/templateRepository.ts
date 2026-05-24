@@ -35,9 +35,9 @@ export interface TemplateSummary extends TemplateRow {
 }
 
 /** Classification derived from (program_id, sub_tag), per ADR-0003. */
-export type TemplateKind = 'main' | 'sub' | 'free';
+type TemplateKind = 'main' | 'sub' | 'free';
 
-export interface TemplateExerciseRow {
+interface TemplateExerciseRow {
   id: string;
   template_id: string;
   exercise_id: string;

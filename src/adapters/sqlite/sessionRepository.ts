@@ -138,7 +138,7 @@ export async function listSessions(db: Database): Promise<Session[]> {
  * captured at Session start (slice 3). `template_id` is nullable so a
  * "blank" Session (started without a Template) holds zero rows here.
  */
-export interface SessionExerciseRow {
+interface SessionExerciseRow {
   id: string;
   session_id: string;
   exercise_id: string;
@@ -218,7 +218,7 @@ export async function insertSessionExercise(
  * template set (distinct on the template id, both A and B sides collapse
  * to the same id).
  */
-export interface SessionUsedExercises {
+interface SessionUsedExercises {
   /** session_exercise.exercise_id where reusable_superset_id IS NULL. */
   solo_exercise_ids: Set<string>;
   /** Distinct session_exercise.reusable_superset_id (NOT NULL only). */

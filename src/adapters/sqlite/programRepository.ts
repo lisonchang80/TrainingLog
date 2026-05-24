@@ -20,7 +20,7 @@ import { RESERVED_NONE_PROGRAM_ID } from '../../db/seed/v017ProgramNone';
  * a future slice may add a unique index when name-level propagation lands).
  */
 
-export interface ProgramRow extends ProgramCore {
+interface ProgramRow extends ProgramCore {
   created_at: number;
   updated_at: number;
 }

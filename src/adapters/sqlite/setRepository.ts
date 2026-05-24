@@ -125,7 +125,7 @@ export async function listAllSets(db: Database): Promise<SetRow[]> {
   );
 }
 
-export interface SetWithExercise extends SetRow {
+interface SetWithExercise extends SetRow {
   exercise_name: string;
 }
 

@@ -21,7 +21,7 @@ import type { RepBucketChip } from '../../domain/exercise/repBucketFilter';
 import type { SetKind } from '../../domain/set/setLabels';
 
 /** One row per set; fields needed by PR / Volume engines + UI display. */
-export interface ExerciseHistorySet {
+interface ExerciseHistorySet {
   set_id: string;
   session_id: string;
   session_started_at: number;
@@ -351,9 +351,9 @@ export async function getExerciseHistoryHeader(
 // ---------------------------------------------------------------------------
 
 /** Filter chip values matching `RepBucketChip`. `'all'` widens to every set. */
-export type ExerciseHistoryBucketFilter = RepBucketChip;
+type ExerciseHistoryBucketFilter = RepBucketChip;
 
-export interface QueryExerciseHistoryOptions {
+interface QueryExerciseHistoryOptions {
   /** `'all'` (default) or one of the 5 `BucketKey`s. */
   repBucket?: ExerciseHistoryBucketFilter;
   /** Max rows to return; defaults to 200. Use `Number.POSITIVE_INFINITY` for unbounded (NOT recommended). */
@@ -371,7 +371,7 @@ export interface QueryExerciseHistoryOptions {
  * `rep_bucket` is derived from `reps` via the same provider used by PR
  * engine (`classifyBucket`). May be `null` for invalid / null reps.
  */
-export interface ExerciseHistoryRow {
+interface ExerciseHistoryRow {
   session_id: string;
   /** session.started_at — unix ms; the "date" the work was performed. */
   session_started_at: number;
@@ -591,10 +591,10 @@ export async function hasClusterHistory(
  * type alias so Function B's signature can evolve independently if v014
  * adds rs-id-specific filters (e.g. "cluster intent only").
  */
-export type QueryReusableSupersetHistoryOptions = QueryExerciseHistoryOptions;
+type QueryReusableSupersetHistoryOptions = QueryExerciseHistoryOptions;
 
 /** One side of a reusable-superset cluster pairing within a single session. */
-export interface ReusableSupersetSide {
+interface ReusableSupersetSide {
   /** position in the reusable superset's slot table — 0 = "A", 1 = "B". */
   position: 0 | 1;
   exercise_id: string;
@@ -605,7 +605,7 @@ export interface ReusableSupersetSide {
 }
 
 /** One session's pairing — both A and B sides if both were performed. */
-export interface ReusableSupersetHistoryRow {
+interface ReusableSupersetHistoryRow {
   session_id: string;
   /** session.started_at — unix ms. */
   session_started_at: number;
