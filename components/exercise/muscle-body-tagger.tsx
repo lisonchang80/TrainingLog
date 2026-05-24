@@ -61,7 +61,9 @@ import {
   vbToBodyLocalY,
 } from './body-anchors';
 import {
+  BICEP_PATTERN,
   BICEPS_SIBS,
+  bicepSplitX,
   CHEST_SIBS,
   COLOR_ABS_DETAIL,
   COLOR_BODY_BASE,
@@ -386,28 +388,33 @@ function FrontOverlay({
       {/* Chest split */}
       <Path d={PATH_UPPER_CHEST} fill={roleSubFill(M_UPPER_CHEST, CHEST_SIBS, highlight)} />
       <Path d={PATH_LOWER_CHEST} fill={roleSubFill(M_LOWER_CHEST, CHEST_SIBS, highlight)} />
-      {/* Bicep diagonal split — LEFT arm: lateral half (long) + medial half (short) */}
-      <Path
-        d={PATH_BICEP_L_LATERAL_HALF}
-        fill={longBicepFill}
-        clipPath="url(#tagger-bicep-l)"
-      />
-      <Path
-        d={PATH_BICEP_L_MEDIAL_HALF}
-        fill={shortBicepFill}
-        clipPath="url(#tagger-bicep-l)"
-      />
-      {/* Bicep diagonal split — RIGHT arm: medial half (short) + lateral half (long) */}
-      <Path
-        d={PATH_BICEP_R_MEDIAL_HALF}
-        fill={shortBicepFill}
-        clipPath="url(#tagger-bicep-r)"
-      />
-      <Path
-        d={PATH_BICEP_R_LATERAL_HALF}
-        fill={longBicepFill}
-        clipPath="url(#tagger-bicep-r)"
-      />
+      {/* Bicep split — A2 (diagonal, default) or B_* (vertical SPLIT_X).
+          Toggle via BICEP_PATTERN in body-overlay-paths.ts. */}
+      {BICEP_PATTERN === 'A2' ? (
+        <>
+          {/* LEFT arm: lateral half (long) + medial half (short) */}
+          <Path d={PATH_BICEP_L_LATERAL_HALF} fill={longBicepFill} clipPath="url(#tagger-bicep-l)" />
+          <Path d={PATH_BICEP_L_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#tagger-bicep-l)" />
+          {/* RIGHT arm: medial half (short) + lateral half (long) */}
+          <Path d={PATH_BICEP_R_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#tagger-bicep-r)" />
+          <Path d={PATH_BICEP_R_LATERAL_HALF} fill={longBicepFill} clipPath="url(#tagger-bicep-r)" />
+        </>
+      ) : (
+        (() => {
+          const split = bicepSplitX();
+          if (!split) return null;
+          return (
+            <>
+              {/* LEFT arm: long head (lateral, west of SPLIT) + short head (medial, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.l} height={1448} fill={longBicepFill} clipPath="url(#tagger-bicep-l)" />
+              <Rect x={split.l} y={0} width={724 - split.l} height={1448} fill={shortBicepFill} clipPath="url(#tagger-bicep-l)" />
+              {/* RIGHT arm: short head (medial, west of SPLIT) + long head (lateral, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.r} height={1448} fill={shortBicepFill} clipPath="url(#tagger-bicep-r)" />
+              <Rect x={split.r} y={0} width={724 - split.r} height={1448} fill={longBicepFill} clipPath="url(#tagger-bicep-r)" />
+            </>
+          );
+        })()
+      )}
       {/* Front view LEFT shoulder: lateral half (mid delt) + medial half (front delt) */}
       <Rect
         x={0}

@@ -369,6 +369,99 @@ export const PATH_BICEP_R_MEDIAL_HALF =
 export const PATH_BICEP_R_LATERAL_HALF =
   'M509.4 395 L580 395 L580 510 L550.8 510 Z';
 
+// ---------------------------------------------------------------------------
+// Pattern B (vertical ClipPath partition) — REVISIT 2026-05-24 agent A
+// ---------------------------------------------------------------------------
+//
+// Round 1 (commit 26ba1a4, since reverted by Round 2 / commit 188d723) used
+// `SPLIT_X_BICEP_L = 202.4`, `SPLIT_X_BICEP_R = 525.9`. User feedback "anatomy
+// off" → switched to Pattern A2 diagonal via coord-picker.
+//
+// This second-pass revisit asks: now that A2 has shown the belly's real fiber
+// direction (long head fibers wrap supraglenoid → lateral elbow, slope
+// |dx/dy| ≈ 0.36), can a refined vertical split still compete? Key data:
+//
+//   PACKAGE_BICEP_L: x ∈ [181.79, 222.99] w=41.20, y ∈ [406.20, 492.81] h=86.61
+//   PACKAGE_BICEP_R: x ∈ [505.39, 546.48] w=41.09, y ∈ [406.24, 492.93] h=86.69
+//
+//   Per-y mid-x drift inside the belly (14-band sampling):
+//     L belly mid-x: top y=406 ⇒ x=211   bottom y=493 ⇒ x=192   total drift 19.4
+//     R belly mid-x: top y=406 ⇒ x=517   bottom y=493 ⇒ x=537   total drift 19.7
+//
+//   So the belly's OWN midline is already curved/diagonal: any single
+//   vertical SPLIT_X cuts across changing anatomy. At the top y=410, the
+//   "split=202.4" line sits 8.6 lateral of the belly mid; at y=480 it sits
+//   6 medial of the belly mid. Even a mass-centered SPLIT_X (≈ 202.0) has
+//   the same problem.
+//
+// Three candidate SPLIT_X values per arm (all kept side-by-side here so the
+// PNG/HTML preview can show them; only one set is wired to the overlay at a
+// time via `BICEP_PATTERN` toggle below):
+//
+//   B_BBOX_MID  : L=202.4, R=525.9   — exact Round 1 (user-rejected baseline)
+//   B_MASS      : L=202.0, R=526.2   — mass-weighted by belly width, nearly identical
+//   B_MEDIAL_5  : L=207.4, R=520.9   — shift 5u medial → long head gets 2/3 of belly
+//                                       (mirrors the deltoid mid-delt 1/3-width tweak)
+//   B_LATERAL_5 : L=197.4, R=530.9   — shift 5u lateral → short head gets 2/3 of belly
+//
+// `medial-5` is the most defensible Pattern B candidate: long head is
+// anatomically the larger, more visible head in most physiques (it forms
+// the "peak" of the bicep), so giving it 2/3 of the partition matches what
+// users visually expect — same logic as the 1/3-width mid-delt fix.
+//
+// Mirror axis check: B_BBOX_MID sums to L+R = 728.3 → mirror axis x=364.2
+// (matches A2's user-derived x=364, within 0.2 unit — anti-alias safe).
+//
+// Decision (see docs/audit/agent-A-biceps-findings.md): default ships
+// `'A2'`, Pattern B kept behind toggle so future iterations can flip via a
+// single constant edit. Pattern B candidates stay in dead-code under
+// `BICEP_PATTERN === 'B_*'` branches in muscle-body-tagger.tsx +
+// body-heatmap.tsx so the partition math remains discoverable.
+
+/** Pattern B vertical SPLIT_X — bbox-mid (Round 1 baseline). */
+export const SPLIT_X_BICEP_L_B_BBOX_MID = 202.4;
+export const SPLIT_X_BICEP_R_B_BBOX_MID = 525.9;
+/** Pattern B vertical SPLIT_X — mass-weighted (alternate). */
+export const SPLIT_X_BICEP_L_B_MASS = 202.0;
+export const SPLIT_X_BICEP_R_B_MASS = 526.2;
+/** Pattern B vertical SPLIT_X — shifted medial (long head 2/3). */
+export const SPLIT_X_BICEP_L_B_MEDIAL_5 = 207.4;
+export const SPLIT_X_BICEP_R_B_MEDIAL_5 = 520.9;
+/** Pattern B vertical SPLIT_X — shifted lateral (short head 2/3). */
+export const SPLIT_X_BICEP_L_B_LATERAL_5 = 197.4;
+export const SPLIT_X_BICEP_R_B_LATERAL_5 = 530.9;
+
+/**
+ * Active bicep overlay pattern. Switch to compare:
+ *   'A2'         → diagonal split via user coord-picker (current ship)
+ *   'B_BBOX_MID' → vertical at bbox mid (Round 1)
+ *   'B_MASS'     → vertical at mass-weighted mid
+ *   'B_MEDIAL_5' → vertical shifted 5u medial (long head 2/3)
+ *   'B_LATERAL_5'→ vertical shifted 5u lateral (short head 2/3)
+ *
+ * Consumer (muscle-body-tagger, body-heatmap) reads this constant once at
+ * render time. Default 'A2' to preserve current ship while keeping all
+ * Pattern B variants discoverable in a single grep.
+ */
+export type BicepPattern = 'A2' | 'B_BBOX_MID' | 'B_MASS' | 'B_MEDIAL_5' | 'B_LATERAL_5';
+export const BICEP_PATTERN: BicepPattern = 'A2';
+
+/**
+ * Helper for consumer code: given the active BICEP_PATTERN, return the
+ * vertical SPLIT_X pair for L+R arms. Returns `null` when pattern is 'A2'
+ * (diagonal — no vertical split). Centralised here so heatmap + tagger
+ * stay byte-identical in their pattern-switch logic.
+ */
+export function bicepSplitX(): { l: number; r: number } | null {
+  switch (BICEP_PATTERN) {
+    case 'A2': return null;
+    case 'B_BBOX_MID': return { l: SPLIT_X_BICEP_L_B_BBOX_MID, r: SPLIT_X_BICEP_R_B_BBOX_MID };
+    case 'B_MASS': return { l: SPLIT_X_BICEP_L_B_MASS, r: SPLIT_X_BICEP_R_B_MASS };
+    case 'B_MEDIAL_5': return { l: SPLIT_X_BICEP_L_B_MEDIAL_5, r: SPLIT_X_BICEP_R_B_MEDIAL_5 };
+    case 'B_LATERAL_5': return { l: SPLIT_X_BICEP_L_B_LATERAL_5, r: SPLIT_X_BICEP_R_B_LATERAL_5 };
+  }
+}
+
 /**
  * Deltoid sub-division — partition the package's verbatim deltoid slug path
  * into MEDIAL + LATERAL halves via `<ClipPath>` so the combined fill exactly
