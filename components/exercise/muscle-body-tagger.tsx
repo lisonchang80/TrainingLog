@@ -26,9 +26,9 @@
  * "hottest" role across the group.
  */
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
-import Svg, { ClipPath, Defs, Path, Rect } from 'react-native-svg';
+import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
 
 import {
   M_ABS,
@@ -52,7 +52,7 @@ import {
   M_UPPER_GLUTE,
 } from '@/src/db/seed/v006ExerciseLibrary';
 import type { MuscleRole } from '@/src/domain/exercise/types';
-import { t } from '@/src/i18n';
+import { t, tMuscle } from '@/src/i18n';
 import {
   BICEPS_SIBS,
   CHEST_SIBS,
@@ -291,8 +291,116 @@ function roleSubFill(
  * Body render scale — single source of truth so the SVG overlay
  * (positioned absolutely over the Body) uses the same dimensions as the
  * package's wrapper (width=200*scale, height=400*scale).
+ *
+ * 2026-05-24 fan-layout redesign: shrink body to leave room for callout
+ * labels on the outer side of each container (front: labels left, back:
+ * labels right). The sub-overlay still uses the same scale so the role
+ * colours track the body exactly (塗色不跑位).
  */
-const BODY_SCALE = 0.8;
+const BODY_SCALE = 0.5;
+const BODY_WIDTH_PX = 200 * BODY_SCALE; // 100
+const BODY_HEIGHT_PX = 400 * BODY_SCALE; // 200
+
+const LABEL_LANE_WIDTH = 80;
+const LABEL_WIDTH = 70;
+const LABEL_HEIGHT = 18;
+const SIDE_WIDTH = LABEL_LANE_WIDTH + BODY_WIDTH_PX; // 180
+const LANE_Y_MIN = LABEL_HEIGHT / 2; // 9
+const LANE_Y_MAX = BODY_HEIGHT_PX - LABEL_HEIGHT / 2; // 191
+const LABEL_FONT_SIZE = 11;
+
+// Per-side label colour theme (matches old MuscleDiagramTagged palette).
+const BTN_THEME = {
+  inactive: { fill: '#F3F4F6', stroke: '#D1D5DB', text: '#374151' },
+  primary: { fill: '#FED7AA', stroke: '#F26B3A', text: '#C2410C' },
+  secondary: { fill: '#BFDBFE', stroke: '#7CB6E0', text: '#1E40AF' },
+};
+function btnThemeFor(role: MuscleRole | undefined) {
+  if (role === 'primary') return BTN_THEME.primary;
+  if (role === 'secondary') return BTN_THEME.secondary;
+  return BTN_THEME.inactive;
+}
+
+/**
+ * Per-M_* anchor table. Anchor coords are in PACKAGE viewBox units:
+ *   front side: x ∈ [0, 724], y ∈ [0, 1448]
+ *   back  side: x ∈ [724, 1448], y ∈ [0, 1448]
+ * Each M_* lives on exactly one side (mid-delt goes on FRONT for label
+ * placement even though it fills both views).
+ *
+ * Front anchors pick L-arm/L-side x (subject's right) so the leader exits
+ * the label-lane (left of container) and dives RIGHT toward the body.
+ * Back anchors pick R-back x (subject's left, viewer's right) so the leader
+ * exits the label-lane (right of container) and dives LEFT toward the body.
+ */
+interface AnchorEntry {
+  m: string;
+  vbX: number;
+  vbY: number;
+}
+
+const FRONT_ANCHORS: readonly AnchorEntry[] = [
+  { m: M_FRONT_DELT,  vbX: 260, vbY: 340 },
+  { m: M_MID_DELT,    vbX: 200, vbY: 355 },
+  { m: M_UPPER_CHEST, vbX: 320, vbY: 360 },
+  { m: M_LOWER_CHEST, vbX: 320, vbY: 410 },
+  { m: M_BICEP_LONG,  vbX: 190, vbY: 440 },
+  { m: M_BICEP_SHORT, vbX: 220, vbY: 460 },
+  { m: M_ABS,         vbX: 340, vbY: 540 },
+  { m: M_OBLIQUE,     vbX: 295, vbY: 580 },
+  { m: M_FOREARM,     vbX: 170, vbY: 600 },
+  { m: M_QUAD,        vbX: 290, vbY: 820 },
+];
+
+const BACK_ANCHORS: readonly AnchorEntry[] = [
+  { m: M_TRAP,        vbX: 1086, vbY: 310 },
+  { m: M_REAR_DELT,   vbX: 1227, vbY: 360 },
+  { m: M_TRICEP,      vbX: 1250, vbY: 440 },
+  { m: M_BACK,        vbX: 1140, vbY: 480 },
+  { m: M_LOWER_BACK,  vbX: 1100, vbY: 620 },
+  { m: M_UPPER_GLUTE, vbX: 1120, vbY: 700 },
+  { m: M_LOWER_GLUTE, vbX: 1120, vbY: 760 },
+  { m: M_HAMSTRING,   vbX: 1160, vbY: 870 },
+  { m: M_CALF,        vbX: 1160, vbY: 1100 },
+];
+
+/**
+ * Convert package viewBox coords to screen px inside the side container.
+ *   front: vbX ∈ [0, 724]   → screen ∈ [0, BODY_WIDTH_PX]
+ *   back : vbX ∈ [724, 1448] → screen ∈ [0, BODY_WIDTH_PX] (relative to body)
+ *   y    : vbY ∈ [0, 1448]   → screen ∈ [0, BODY_HEIGHT_PX]
+ */
+function vbToBodyLocalX(vbX: number, side: 'front' | 'back'): number {
+  const local = side === 'front' ? vbX : vbX - 724;
+  return (local / 724) * BODY_WIDTH_PX;
+}
+function vbToBodyLocalY(vbY: number): number {
+  return (vbY / 1448) * BODY_HEIGHT_PX;
+}
+
+/**
+ * Fan layout — sort anchors by anchorY ASC and distribute labelY evenly
+ * across the lane. Guarantees no leader-line crossings: same ordering
+ * top-to-bottom in label lane as anchor top-to-bottom on body.
+ *
+ * Readonly mode: only highlighted anchors get a label (drop the rest +
+ * re-distribute).
+ */
+function fanLayout(
+  anchors: readonly AnchorEntry[],
+  highlight: Map<string, MuscleRole>,
+  mode: 'readonly' | 'tap-cycle'
+): Array<AnchorEntry & { labelY: number }> {
+  const filtered =
+    mode === 'readonly' ? anchors.filter((a) => highlight.has(a.m)) : [...anchors];
+  if (filtered.length === 0) return [];
+  const sorted = [...filtered].sort((a, b) => a.vbY - b.vbY);
+  if (sorted.length === 1) {
+    return [{ ...sorted[0], labelY: (LANE_Y_MIN + LANE_Y_MAX) / 2 }];
+  }
+  const step = (LANE_Y_MAX - LANE_Y_MIN) / (sorted.length - 1);
+  return sorted.map((a, i) => ({ ...a, labelY: LANE_Y_MIN + i * step }));
+}
 
 /**
  * Front-side overlay paths (chest split, biceps split per-arm, deltoids
@@ -512,6 +620,118 @@ function BackOverlay({
 }
 
 // ---------------------------------------------------------------------------
+// SideContainer — body + fan-layout labels for one view (front / back)
+// ---------------------------------------------------------------------------
+
+interface SideContainerProps {
+  side: 'front' | 'back';
+  highlight: Map<string, MuscleRole>;
+  mode: 'readonly' | 'tap-cycle';
+  onTap: ((mId: string) => void) | undefined;
+  data: ExtendedBodyPart[];
+  handlePress: ((part: ExtendedBodyPart) => void) | undefined;
+}
+
+function SideContainer({
+  side,
+  highlight,
+  mode,
+  onTap,
+  data,
+  handlePress,
+}: SideContainerProps): React.JSX.Element {
+  const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
+  const items = React.useMemo(() => fanLayout(anchors, highlight, mode), [anchors, highlight, mode]);
+
+  // Per-side layout: front has label lane on LEFT, body on RIGHT;
+  // back has body on LEFT, label lane on RIGHT.
+  const labelOnLeft = side === 'front';
+  const bodyLeft = labelOnLeft ? LABEL_LANE_WIDTH : 0;
+  const labelLeft = labelOnLeft ? 4 : SIDE_WIDTH - LABEL_WIDTH - 4;
+  const labelRight = labelLeft + LABEL_WIDTH;
+  const railX = labelOnLeft ? LABEL_LANE_WIDTH - 4 : BODY_WIDTH_PX + 4;
+  const leaderStart = labelOnLeft ? labelRight : labelLeft;
+
+  const bodyProps = mode === 'tap-cycle' && handlePress ? { onBodyPartPress: handlePress } : {};
+
+  return (
+    <View style={{ width: SIDE_WIDTH, height: BODY_HEIGHT_PX, position: 'relative' }}>
+      {/* Body — package's <Svg> + our role overlay, both at BODY_SCALE. */}
+      <View style={{ position: 'absolute', left: bodyLeft, top: 0 }}>
+        <Body
+          side={side}
+          gender="male"
+          data={data}
+          colors={BODY_COLORS}
+          scale={BODY_SCALE}
+          border={COLOR_OUTLINE}
+          defaultFill={COLOR_BODY_BASE}
+          defaultStroke={COLOR_OUTLINE}
+          {...bodyProps}
+        />
+        {side === 'front' ? (
+          <FrontOverlay highlight={highlight} scale={BODY_SCALE} />
+        ) : (
+          <BackOverlay highlight={highlight} scale={BODY_SCALE} />
+        )}
+      </View>
+
+      {/* Leader polylines — non-interactive overlay across the whole container. */}
+      <Svg
+        style={{ position: 'absolute', left: 0, top: 0 }}
+        width={SIDE_WIDTH}
+        height={BODY_HEIGHT_PX}
+        pointerEvents="none"
+      >
+        {items.map((item) => {
+          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side);
+          const ay = vbToBodyLocalY(item.vbY);
+          return (
+            <Polyline
+              key={`leader-${item.m}`}
+              points={`${leaderStart},${item.labelY} ${railX},${item.labelY} ${ax},${ay}`}
+              stroke={COLOR_OUTLINE}
+              strokeWidth={0.6}
+              fill="none"
+            />
+          );
+        })}
+      </Svg>
+
+      {/* Label Pressables — fan-layout positions, tappable in tap-cycle mode. */}
+      {items.map((item) => {
+        const role = highlight.get(item.m);
+        const theme = btnThemeFor(role);
+        const tappable = mode === 'tap-cycle' && !!onTap;
+        return (
+          <Pressable
+            key={`label-${item.m}`}
+            disabled={!tappable}
+            onPress={tappable ? () => onTap!(item.m) : undefined}
+            accessibilityRole={tappable ? 'button' : undefined}
+            accessibilityLabel={`${tMuscle(item.m)} ${role ?? ''}`.trim()}
+            style={({ pressed }) => [
+              styles.label,
+              {
+                left: labelLeft,
+                top: item.labelY - LABEL_HEIGHT / 2,
+                backgroundColor: theme.fill,
+                borderColor: theme.stroke,
+                opacity: pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Text style={{ fontSize: LABEL_FONT_SIZE, color: theme.text, fontWeight: '600' }}>
+              {tMuscle(item.m)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
 
@@ -535,44 +755,32 @@ export function MuscleBodyTagger({
     [mode, onTap]
   );
 
-  const bodyProps = mode === 'tap-cycle' ? { onBodyPartPress: handlePress } : {};
+  const handlePressBound = mode === 'tap-cycle' ? handlePress : undefined;
 
   return (
     <View>
       <View style={styles.row}>
         <View style={styles.column}>
-          <Text style={styles.label}>{t('page', 'bodyFront')}</Text>
-          <View style={styles.bodyWrap}>
-            <Body
-              side="front"
-              gender="male"
-              data={frontData}
-              colors={BODY_COLORS}
-              scale={BODY_SCALE}
-              border={COLOR_OUTLINE}
-              defaultFill={COLOR_BODY_BASE}
-              defaultStroke={COLOR_OUTLINE}
-              {...bodyProps}
-            />
-            <FrontOverlay highlight={highlight} scale={BODY_SCALE} />
-          </View>
+          <Text style={styles.sideLabel}>{t('page', 'bodyFront')}</Text>
+          <SideContainer
+            side="front"
+            highlight={highlight}
+            mode={mode}
+            onTap={onTap}
+            data={frontData}
+            handlePress={handlePressBound}
+          />
         </View>
         <View style={styles.column}>
-          <Text style={styles.label}>{t('page', 'bodyBack')}</Text>
-          <View style={styles.bodyWrap}>
-            <Body
-              side="back"
-              gender="male"
-              data={backData}
-              colors={BODY_COLORS}
-              scale={BODY_SCALE}
-              border={COLOR_OUTLINE}
-              defaultFill={COLOR_BODY_BASE}
-              defaultStroke={COLOR_OUTLINE}
-              {...bodyProps}
-            />
-            <BackOverlay highlight={highlight} scale={BODY_SCALE} />
-          </View>
+          <Text style={styles.sideLabel}>{t('page', 'bodyBack')}</Text>
+          <SideContainer
+            side="back"
+            highlight={highlight}
+            mode={mode}
+            onTap={onTap}
+            data={backData}
+            handlePress={handlePressBound}
+          />
         </View>
       </View>
       <View style={styles.legendRow}>
@@ -596,18 +804,24 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: 4,
   },
   column: {
     alignItems: 'center',
   },
-  bodyWrap: {
-    position: 'relative',
-  },
-  label: {
+  sideLabel: {
     fontSize: 12,
     color: '#6B7280',
     marginBottom: 4,
+  },
+  label: {
+    position: 'absolute',
+    width: LABEL_WIDTH,
+    height: LABEL_HEIGHT,
+    borderWidth: 1,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   legendRow: {
     flexDirection: 'row',
