@@ -70,6 +70,20 @@ A second case for amendment blocks: **when a downstream ADR explicitly amends th
 
 Example (TrainingLog ADR-0010 / 0013 / 0009 / 0016 all got `2026-05-13 amendment（ADR-0017 觸發 — ...）` blocks in one sweep): 4 ADRs each got a single dated block referencing ADR-0017 Q9 / Q5 / Q14 / Q15 respectively. Each block self-contained + auditable + traceable to the trigger.
 
+### PRD core-ADR-table N-versions-stale variant (partial sync OK)
+
+When the PRD's「核心 ADR 對照」table (the one that lists `ADR-0001 → User stories #X-Y, Modules #Z`) is **stale by N versions** (e.g., table ends at ADR-0019 but ADRs 0020/0021/0022/0023 have been written), the natural urge is to「先 catch up the whole table 再加 0024」— but that scope-creeps a grill sweep into a 100-200-line PRD edit. **Don't do it.**
+
+**Recipe**:
+- ✅ Add ONLY the current grill's ADR entry to the「Update log」section at top of PRD body (1 dated bullet, ≤200 chars)
+- ✅ Inline-flag the staleness in the same log entry: e.g. `「**注意：本 PRD 「核心 ADR 對照」表停在 ADR-0019、未含 0020-0024，catch-up 全表已 deferred backlog**」`
+- ❌ Do NOT touch the「核心 ADR 對照」table (entries 0020-0024 missing → leave missing)
+- ✅ Record the deferred catch-up in user-level memory's `下一步候選` / `留尾` section with explicit list of pending ADRs
+
+**Rationale**: each missing ADR-entry is ~3-7 lines (story range + modules + schema notes) — catching up 4-5 ADRs in one sweep adds 20-40 lines + risks introducing errors from re-reading 4 ADRs in one pass. Better to flag-and-defer, do the whole table catch-up as a separate dedicated task when user explicitly asks for PRD freshness.
+
+**TrainingLog example (2026-05-24 ADR-0024 sweep)**: PRD #1 Update log got 1 new bullet for ADR-0024 with inline warning that core ADR table 0020-0024 are missing. Total PRD diff: +918 chars (1 log entry only). The 4-ADR catch-up (0020-0023) deferred to backlog. Compare to alternative「sync all 5 ADRs in one sweep」which would have been ~3000 chars + 4 chances to mis-summarize.
+
 ## The 4 locations (do in this order)
 
 ### 1. Write or update ADR — `docs/adr/000X-<kebab-name>.md`

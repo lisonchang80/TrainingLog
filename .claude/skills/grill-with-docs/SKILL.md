@@ -101,6 +101,54 @@ Example (TrainingLog 2026-05-24 Round D, 4 Q):
 
 **3 of 4 plan recs contradicted code.** Pattern: when the plan was authored before the current grill round, assume 50%+ of its recs need overturning. The grill exists to catch this drift before implementation locks it in.
 
+### When the entire Round topic is obsolete, not just individual recs
+
+Stale-default's strongest form: **the Round's premise itself no longer exists** — usually because a major revert / amendment between plan authoring and grill day killed the whole flow being grilled. Don't try to force the original Qs through.
+
+**Detection signal**: while grounding, you find **the plan's "Background" sentence references a feature / flow / dialog that grep shows is fully deleted or replaced**. e.g. plan Round F backgrounds「finish diff dialog 偵測時機」but `onEndSession` direct-jumps to detail with no dialog + saveBackDiff.ts file deleted in dead-code sweep.
+
+**Recipe**:
+
+1. **Don't open the Qs**. Open the round with a single message:
+   - State the stale finding upfront: "原 Round X 5 題 全 obsolete because [specific revert / amendment, with date / commit / ADR section]"
+   - Cross-check each original Q against current code state in a table (Q → Plan rec → Code 現狀 → ✅ shipped / ❌ N/A / ⚠️ partial)
+   - Show what's actually still open (might be 0, 1, or a totally different topic)
+
+2. **Ask the user where to redirect** (use `AskUserQuestion`):
+   - Don't assume the round should be force-fit. Offer 2-4 options including「只做 deprecation cleanup、關 round」.
+   - List concrete sub-topics that are actually open, with risk / scope estimates.
+   - The user picks the new framing.
+
+3. **Run a normal grill on the redirected topic**. The 5-Q ceiling from the original plan no longer applies — could be 1Q, could be 8.
+
+4. **Plan doc Round 段重寫 using fixed template** (used 3x in TrainingLog Round E/F/G 2026-05-24):
+   ```markdown
+   ### Round X — <new framing> (topic 重定義 YYYY-MM-DD)
+
+   > **YYYY-MM-DD stale-plan-default 翻盤**：原 Round X N 題（<list>）**全部 obsolete** — <reason with ADR / wave / commit reference>。Round X topic 重定義為「<new topic>」M 題。
+
+   - **拍板摘要**：<one-liner>
+   - **M sub-decision 拍板 ledger**: <table>
+   - **翻盤的既有拍板（stale-plan-default）**: <list of ❌ each old plan rec>
+   - **Open question count post-grill**: <num>
+   - **原 N Q + recommended（history，全 obsolete）**: <strikethrough list>
+   ```
+
+5. **Card 拆 R 變體** — if a Card in plan is also fully or partially obsolete because of the same revert:
+   - Add deprecation marker to original Card (don't delete the section — readers might be mid-reading)
+   - Create `Card NR` (R = revised / replacement) right below it, scoped to the new grill's拍板
+   - Update slice phasing table: original Card → 🗑️ deprecated, NR appears in same slice or new slice
+   - Re-balance commit / test estimates per bundle
+
+**Example transition** (TrainingLog Round F 2026-05-24):
+- Original: Round F 5 Q on「finish dialog diff 偵測時機 + 排序 + summary + cluster swap + template-side cluster schema」+ Card 10「Finish dialog 差異化」3 commit / 11 test high-risk
+- Killed by: ADR-0019 wave 12 (2026-05-18) — 整 finish dialog 砍除 + saveBackDiff pipeline dead-code
+- Redirected to: 4-button bar polish (toast / defaultName / delete confirm / [編] chip / edit-mode 3-btn risk) — 5 sub-Q
+- New Card: Card 10R 3-4 commit / 6-8 test low-risk
+- Total estimate shift: slice 10e bundle 7 → 5 commit, total grill upstream Round F ✅
+
+**Why this matters**: forcing original Qs through when topic is dead wastes user time + produces ledger noise ("Q3 N/A、Q4 obsolete..." instead of「Round F 重定義」一句話）. The redirect is the value-add — the original Qs being dead is information, not failure.
+
 ### When user pins to existing pattern, scan that pattern's code BEFORE proposing options
 
 If the user says "match X's pattern" / "reference X" / "X 怎麼做的就照辦" / "後續優先參考 X" — that's a meta-rule binding all subsequent answers. Aggressively grep / read X's code BEFORE answering the next question.
