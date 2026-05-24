@@ -616,6 +616,11 @@ export const strings = {
       weighted: '加重',
       assisted: '助力',
     },
+
+    /** Tab bar titles. ADR-0024 § 1 — 訓練 tab rename (was 'Today'). */
+    tabs: {
+      training: '訓練',
+    },
   },
 
   en: {
@@ -1177,6 +1182,11 @@ export const strings = {
       bodyweight: 'Unloaded',
       weighted: 'Weighted',
       assisted: 'Assisted',
+    },
+
+    /** Tab bar titles. ADR-0024 § 1 — 訓練 tab rename (was 'Today'). */
+    tabs: {
+      training: 'Training',
     },
   },
 } as const;

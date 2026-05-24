@@ -5,6 +5,7 @@ import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { t } from '@/src/i18n';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -19,21 +20,16 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Today',
+          // ADR-0024 § 1 — Today → 訓練 (i18n via tabs.training); icon
+          // 'figure.run' (mapped to MaterialIcons 'directions-run' on
+          // Android/web in components/ui/icon-symbol.tsx).
+          title: t('tabs', 'training'),
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="plus.circle.fill" color={color} />
+            <IconSymbol size={28} name="figure.run" color={color} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="templates"
-        options={{
-          title: 'Templates',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="doc.text" color={color} />
-          ),
-        }}
-      />
+      {/* ADR-0024 § 1 — Templates tab 砍除；list + start flow 移入訓練 tab 的「模板訓練」區塊。 */}
       <Tabs.Screen
         name="programs"
         options={{
