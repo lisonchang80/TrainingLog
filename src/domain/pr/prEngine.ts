@@ -21,7 +21,7 @@
  *   - reps not in any bucket (≤ 0 or invalid) → skip
  */
 
-import type { BucketKey, PRBreak, PRDelta, SetForPR } from './types';
+import type { PRBreak, PRDelta, SetForPR } from './types';
 import { classifyBucket } from './buckets';
 import { setVolume } from './volumeEngine';
 import { effectiveLoad } from './e1rmEngine';
