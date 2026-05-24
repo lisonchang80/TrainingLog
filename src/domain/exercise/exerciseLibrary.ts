@@ -108,7 +108,7 @@ export interface ValidationError {
   message: string;
 }
 
-export interface ValidateOptions {
+interface ValidateOptions {
   /**
    * Names of non-archived exercises that already exist. Names compared
    * case-insensitively after trim — "Bench Press" collides with "bench press".

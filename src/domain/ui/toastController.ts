@@ -24,7 +24,7 @@
 
 export type ToastIcon = 'success' | 'info' | 'error' | null;
 
-export interface ToastState {
+interface ToastState {
   /** When `null`, no toast is visible. */
   message: string | null;
   /** Optional icon hint for the renderer. */

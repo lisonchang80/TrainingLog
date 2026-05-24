@@ -100,7 +100,7 @@ export function validateTemplate(t: TemplateData): string | null {
   return null;
 }
 
-export interface SessionExerciseSnapshot {
+interface SessionExerciseSnapshot {
   id: string;
   session_id: string;
   exercise_id: string;

@@ -16,7 +16,7 @@
 import type { LoadType } from '../exercise/types';
 import { effectiveLoad } from './e1rmEngine';
 
-export interface VolumeInput {
+interface VolumeInput {
   weight_kg: number | null;
   reps: number | null;
   load_type: LoadType;

@@ -48,7 +48,7 @@ export function computeSessionVolume(sets: SessionVolumeInput[]): number {
 
 // ── In-session 3-tile stats panel (Agent C, ADR-0019 Q6) ──────────────────────
 
-export interface SessionStats {
+interface SessionStats {
   /** Wall-clock duration since session.started_at (ms). */
   duration_ms: number;
   /** Σ weight × reps for is_logged=1, non-warmup sets (kg). */
@@ -74,7 +74,7 @@ export function computeSessionStats(args: {
 
 // ── Detail page 4-tile stats (Agent A, ADR-0019 Q10) ──────────────────────────
 
-export interface DetailPageStatsInput {
+interface DetailPageStatsInput {
   session: {
     started_at: number;
     ended_at: number | null;
@@ -88,7 +88,7 @@ export interface DetailPageStatsInput {
   now?: () => number;
 }
 
-export interface DetailPageStats {
+interface DetailPageStats {
   /** Total session duration in ms (started_at → ended_at, or → now if open). */
   durationMs: number;
   /** Volume — Σ weight×reps over logged non-warmup sets. */

@@ -26,7 +26,7 @@ import { classifyBucket } from './buckets';
 import { setVolume } from './volumeEngine';
 import { effectiveLoad } from './e1rmEngine';
 
-export interface DetectPRArgs {
+interface DetectPRArgs {
   /** The set just recorded. */
   new_set: SetForPR;
   /** All prior sets of the SAME exercise (any session, any template). Order doesn't matter. */

@@ -97,12 +97,12 @@ export function templatesEqual(a: Template, b: Template): boolean {
 // Diff: produce batch UPSERT-DELETE plan
 // ---------------------------------------------------------------------------
 
-export interface TemplatePatch {
+interface TemplatePatch {
   name?: string;
   color_hex?: string;
 }
 
-export interface TemplateExerciseInsert {
+interface TemplateExerciseInsert {
   id: string;
   template_id: string;
   exercise_id: string;
@@ -115,7 +115,7 @@ export interface TemplateExerciseInsert {
   reusable_superset_id: string | null;
 }
 
-export interface TemplateExerciseUpdate {
+interface TemplateExerciseUpdate {
   id: string;
   ordering?: number;
   section?: TemplateExercise['section'];
@@ -126,7 +126,7 @@ export interface TemplateExerciseUpdate {
   reusable_superset_id?: string | null;
 }
 
-export interface TemplateSetInsert {
+interface TemplateSetInsert {
   id: string;
   template_exercise_id: string;
   position: number;
@@ -137,7 +137,7 @@ export interface TemplateSetInsert {
   notes: string | null;
 }
 
-export interface TemplateSetUpdate {
+interface TemplateSetUpdate {
   id: string;
   position?: number;
   kind?: TemplateSet['kind'];
@@ -147,7 +147,7 @@ export interface TemplateSetUpdate {
   notes?: string | null;
 }
 
-export interface TemplateDiff {
+interface TemplateDiff {
   /** template-level fields that changed (name / color_hex). undefined = no change. */
   templatePatch: TemplatePatch | null;
   exerciseInserts: TemplateExerciseInsert[];

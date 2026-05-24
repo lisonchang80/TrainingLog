@@ -37,7 +37,7 @@ export function isTemplateDeletable(template: {
 
 import type { TemplateExercise, TemplateSet } from './types';
 
-export interface IdGenerator {
+interface IdGenerator {
   /** Returns a stable unique id. Tests pass a deterministic stub. */
   uuid: () => string;
 }

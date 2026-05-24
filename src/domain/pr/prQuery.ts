@@ -27,7 +27,7 @@ export interface PRQueryInput {
   reps: number | null;
 }
 
-export interface WeightRepsPR {
+interface WeightRepsPR {
   weight_kg: number;
   reps: number;
 }

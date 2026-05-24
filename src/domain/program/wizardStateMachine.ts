@@ -34,7 +34,7 @@ export const WIZARD_STEPS = [
 
 export type WizardStep = (typeof WIZARD_STEPS)[number];
 
-export interface WizardDraft {
+interface WizardDraft {
   /** Program-level fields. */
   name: string;
   /** @deprecated wave 18 — main_tag UX removed; field kept for back-compat (always null). */

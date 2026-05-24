@@ -25,7 +25,7 @@ export interface ProgramOption {
   name: string;
 }
 
-export interface ResolveProgramDefaultsInput {
+interface ResolveProgramDefaultsInput {
   /** Available period options (programs). MUST include the reserved 「無」 entity. */
   programs: ProgramOption[];
   /** Available intensity options (free-form sub_tag strings). May be empty. */
@@ -36,7 +36,7 @@ export interface ResolveProgramDefaultsInput {
   lastUsedSubTag: string | null;
 }
 
-export interface ProgramDefaults {
+interface ProgramDefaults {
   /** Resolved program_id to pre-select. Always a real id (never null). */
   period_id: string;
   /** Resolved sub_tag to pre-select; null when no intensity applies / no last-use. */

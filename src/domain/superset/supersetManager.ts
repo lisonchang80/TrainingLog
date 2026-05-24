@@ -88,7 +88,7 @@ export function validateReusableSupersetDraft(
   return errors;
 }
 
-export interface CreateReusableSupersetArgs {
+interface CreateReusableSupersetArgs {
   draft: ReusableSupersetDraft;
   idGen: () => string;
   now: () => number;
@@ -123,7 +123,7 @@ export function createReusableSuperset(
   return { superset, links };
 }
 
-export interface ExplodeSupersetArgs {
+interface ExplodeSupersetArgs {
   /** Reusable superset entity (only `id` consulted; rest is for caller readability). */
   superset: ReusableSuperset;
   /**
