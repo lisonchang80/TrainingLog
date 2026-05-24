@@ -40,7 +40,7 @@ import {
   M_UPPER_GLUTE,
 } from '@/src/db/seed/v006ExerciseLibrary';
 
-export interface AnchorEntry {
+interface AnchorEntry {
   m: string;
   vbX: number;
   vbY: number;

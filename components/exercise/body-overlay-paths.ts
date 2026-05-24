@@ -419,17 +419,17 @@ export const PATH_BICEP_R_LATERAL_HALF =
 // body-heatmap.tsx so the partition math remains discoverable.
 
 /** Pattern B vertical SPLIT_X — bbox-mid (Round 1 baseline). */
-export const SPLIT_X_BICEP_L_B_BBOX_MID = 202.4;
-export const SPLIT_X_BICEP_R_B_BBOX_MID = 525.9;
+const SPLIT_X_BICEP_L_B_BBOX_MID = 202.4;
+const SPLIT_X_BICEP_R_B_BBOX_MID = 525.9;
 /** Pattern B vertical SPLIT_X — mass-weighted (alternate). */
-export const SPLIT_X_BICEP_L_B_MASS = 202.0;
-export const SPLIT_X_BICEP_R_B_MASS = 526.2;
+const SPLIT_X_BICEP_L_B_MASS = 202.0;
+const SPLIT_X_BICEP_R_B_MASS = 526.2;
 /** Pattern B vertical SPLIT_X — shifted medial (long head 2/3). */
-export const SPLIT_X_BICEP_L_B_MEDIAL_5 = 207.4;
-export const SPLIT_X_BICEP_R_B_MEDIAL_5 = 520.9;
+const SPLIT_X_BICEP_L_B_MEDIAL_5 = 207.4;
+const SPLIT_X_BICEP_R_B_MEDIAL_5 = 520.9;
 /** Pattern B vertical SPLIT_X — shifted lateral (short head 2/3). */
-export const SPLIT_X_BICEP_L_B_LATERAL_5 = 197.4;
-export const SPLIT_X_BICEP_R_B_LATERAL_5 = 530.9;
+const SPLIT_X_BICEP_L_B_LATERAL_5 = 197.4;
+const SPLIT_X_BICEP_R_B_LATERAL_5 = 530.9;
 
 /**
  * Active bicep overlay pattern. Switch to compare:
@@ -443,7 +443,7 @@ export const SPLIT_X_BICEP_R_B_LATERAL_5 = 530.9;
  * render time. Default 'A2' to preserve current ship while keeping all
  * Pattern B variants discoverable in a single grep.
  */
-export type BicepPattern = 'A2' | 'B_BBOX_MID' | 'B_MASS' | 'B_MEDIAL_5' | 'B_LATERAL_5';
+type BicepPattern = 'A2' | 'B_BBOX_MID' | 'B_MASS' | 'B_MEDIAL_5' | 'B_LATERAL_5';
 export const BICEP_PATTERN: BicepPattern = 'A2';
 
 /**
