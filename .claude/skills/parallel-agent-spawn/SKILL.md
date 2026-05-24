@@ -1,6 +1,6 @@
 ---
 name: parallel-agent-spawn
-description: Same-day parallel agent spawn — diff-check before merge + hybrid cherry-pick salvage when isolation worktree lands on stale base. For overnight workflows see overnight-parallel-agents (which already covers prevention rules in item #23). Use when you call Agent tool with isolation:"worktree" AND plan to merge agent branches back interactively.
+description: Same-day parallel agent spawn — manual worktree provisioning when isolation:"worktree" base-mismatches (Step 0) + diff-check before merge + hybrid cherry-pick salvage when prevention failed. For overnight workflows see overnight-parallel-agents (which already covers prevention rules in item #23). Use when you call Agent tool with isolation:"worktree" AND plan to merge agent branches back interactively, OR when you need 2+ agents working on the same long-lived feature branch.
 ---
 
 # Parallel Agent Spawn — same-day diff verification + salvage recipe
@@ -9,8 +9,52 @@ description: Same-day parallel agent spawn — diff-check before merge + hybrid 
 
 1. **post-completion diff verification** — same-day workflows are interactive, you SEE the merge collision before it happens; check the diff BEFORE merging
 2. **hybrid cherry-pick salvage recipe** — when prevention failed and direct merge would revert real work, this is the recovery path
+3. **pre-flight manual worktree workaround** — when `isolation: "worktree"` repeatedly lands on the wrong base (e.g. main is 100+ commits behind your working branch), skip the SDK option entirely and provision worktrees yourself
 
-Validated 2026-05-24 on TrainingLog (Card 10R + Slice 10g parallel salvage, ~1 hr recovery cost, ~80% of agent work salvaged vs. discarding everything).
+Validated 2026-05-24 on TrainingLog (Card 10R + Slice 10g parallel salvage, ~1 hr recovery cost, ~80% of agent work salvaged vs. discarding everything; Card 11 + StartTemplateSheet 2-agent parallel via manual worktree workaround, 0% salvage cost — 3 commits cherry-picked clean with auto-merge on same file).
+
+## Step 0 — when isolation: "worktree" keeps landing on wrong base, do this instead
+
+Symptom (real case TrainingLog 2026-05-24): two consecutive `isolation: "worktree"` spawns from `slice/10c-set-logger-and-menu @ 915a253` both produced agents stopped at HEAD `ee2ff2f` on `[main]`. The SDK appears to base its temp worktree from main's HEAD, not the current branch's HEAD — so when main is far behind (here 517 commits), every agent stops immediately on BASE BRANCH CHECK.
+
+Don't keep retrying `isolation: "worktree"`. Provision manually:
+
+```bash
+# From your main repo path (NOT a worktree path — git worktree add resolves
+# branches relative to repo root, not cwd)
+cd /Users/you/code/YourRepo
+git worktree add /Users/you/code/YourRepo-worktrees/agent-task-a <SHA> -b agent-task-a
+git worktree add /Users/you/code/YourRepo-worktrees/agent-task-b <SHA> -b agent-task-b
+```
+
+Then spawn agents WITHOUT `isolation`, with explicit `cd <path>` in the prompt:
+
+```
+You are implementing X. Working directory: `cd /Users/you/code/YourRepo-worktrees/agent-task-a`
+— **work strictly inside this path**.
+
+## BASE BRANCH CHECK (do this FIRST)
+cd /Users/you/code/YourRepo-worktrees/agent-task-a
+git rev-parse HEAD   # expected: <SHA>
+[other invariants — file existence, schema version, etc.]
+```
+
+Cost: ~5 sec per worktree to create, ~2 sec to verify base, ~10 sec to remove after. Compare to ~1 min × N agents wasted spawn-stop cycles when SDK isolation picks the wrong base.
+
+After both agents finish, cherry-pick to the live worktree as usual, then clean up:
+
+```bash
+git worktree remove /Users/you/code/YourRepo-worktrees/agent-task-a
+git worktree remove /Users/you/code/YourRepo-worktrees/agent-task-b
+git branch -D agent-task-a agent-task-b
+```
+
+## When to use Step 0 vs SDK isolation
+
+- **SDK `isolation: "worktree"` works**: when your working branch IS main, or main is ≤ a handful of commits behind. The SDK picks up the right base.
+- **Manual worktree (Step 0)**: when working on a long-lived feature branch that is far ahead of main, OR when you've already had `isolation: "worktree"` agents stop on BASE BRANCH CHECK in this session.
+
+Don't speculatively go manual on first try — SDK isolation is cheaper to set up when it works. But after one base-mismatch stop, switch to manual.
 
 ## Step 1 — verify diff before merging agent branches
 
