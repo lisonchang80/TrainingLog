@@ -29,6 +29,8 @@ UPDATE session
    );
 ```
 
+> (slice 10c 5/24 ship as v023 — `src/db/schema/v023_session_title.ts` + `components/session/session-title-editor.tsx`)
+
 | 欄位 | 表 | 性質 | 寫入規則 |
 |---|---|---|---|
 | `title` | `session` | mutable，frozen-on-create | Template-based: session create 時複製 template.name；Freestyle: 起始 ''；之後使用者可任改（in-session / 歷史頁） |
@@ -121,6 +123,8 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 具體 Program 日曆顯示行為 **defer 到 Backlog #9 月曆視圖 grill** 統一處理（記入 Flagged ambiguities）。
 
 ## In-session 編輯入口
+
+> (slice 10c 5/24 ship as v023 — `src/db/schema/v023_session_title.ts` + `components/session/session-title-editor.tsx`)
 
 `timer header` 顯示 session.title（空 → UI fallback「自由訓練」），tap header → 編輯框 → UPDATE session.title。
 
