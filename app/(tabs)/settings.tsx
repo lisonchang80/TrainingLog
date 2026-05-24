@@ -1,16 +1,21 @@
+import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
+  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import {
   getAutoPopupRestTimer,
   getUnitPreference,
@@ -18,6 +23,7 @@ import {
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
+import { parseWeightInput } from '@/src/domain/body/unitConversion';
 import { t } from '@/src/i18n';
 import {
   loadStoredLocale,
@@ -48,6 +54,15 @@ export default function SettingsScreen() {
    * `locale-persist.ts`. `null` while loading (renders a default snapshot).
    */
   const [localePref, setLocalePref] = useState<StoredLocaleValue | null>(null);
+  /**
+   * ADR-0024 § 5 — 體重 row mini sheet state.
+   *   - `bwSheetOpen`: modal visibility
+   *   - `bwInput`: current TextInput value (raw string, parsed on save)
+   *   - `bwBusy`: insert-in-flight guard
+   */
+  const [bwSheetOpen, setBwSheetOpen] = useState(false);
+  const [bwInput, setBwInput] = useState('');
+  const [bwBusy, setBwBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [u, popup, loc] = await Promise.all([
@@ -96,6 +111,39 @@ export default function SettingsScreen() {
     setLocale(resolveLocale(next));
   };
 
+  // ADR-0024 § 5 — 體重 mini sheet handlers.
+  const onOpenBwSheet = () => {
+    setBwInput('');
+    setBwSheetOpen(true);
+  };
+
+  const onSaveBw = async () => {
+    const bwKg = parseWeightInput(bwInput, unit);
+    if (bwKg == null || bwKg <= 0 || bwKg > 500) {
+      Alert.alert('體重輸入無效', '請輸入 0–500 之間的正數');
+      return;
+    }
+    setBwBusy(true);
+    try {
+      await insertBodyMetric(
+        db,
+        {
+          recorded_at: Date.now(),
+          bodyweight_kg: bwKg,
+          pbf: null,
+          smm_kg: null,
+        },
+        randomUUID,
+      );
+      setBwSheetOpen(false);
+      setBwInput('');
+    } catch (e) {
+      Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBwBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.body}>
@@ -115,6 +163,22 @@ export default function SettingsScreen() {
           />
         </View>
         <Text style={styles.hint}>{t('page', 'unitPreferenceHint')}</Text>
+
+        {/* ADR-0024 § 5 — 體重 row。位於單位偏好之下、訓練偏好之上。
+            Quick capture via mini sheet → insertBodyMetric. History list /
+            chart 仍走既有「資料 → 體重資料」路徑（下方 linkRow）。 */}
+        <Text style={styles.section}>體重</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="紀錄體重"
+          onPress={onOpenBwSheet}
+          style={({ pressed }) => [
+            styles.bwRow,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.bwRowLabel}>＋ 紀錄體重</Text>
+          <Text style={styles.bwRowHint}>單位依上方偏好（{unit}）</Text>
+        </Pressable>
 
         <Text style={styles.section}>{t('domain', 'trainingPreferences')}</Text>
         <View style={styles.switchRow}>
@@ -167,6 +231,53 @@ export default function SettingsScreen() {
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
         <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
       </ScrollView>
+
+      {/* ADR-0024 § 5 — 體重 mini sheet (modal). 單一 TextInput + 儲存。 */}
+      <Modal
+        visible={bwSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBwSheetOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalHeading}>紀錄體重</Text>
+            <Text style={styles.modalLabel}>體重 ({unit})</Text>
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="decimal-pad"
+              value={bwInput}
+              onChangeText={setBwInput}
+              placeholder={unit === 'kg' ? '70.0' : '154.0'}
+              placeholderTextColor="#999"
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setBwSheetOpen(false)}
+                disabled={bwBusy}
+                style={({ pressed }) => [
+                  styles.modalSecondaryBtn,
+                  bwBusy && styles.btnDisabled,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.modalSecondaryText}>取消</Text>
+              </Pressable>
+              <Pressable
+                onPress={onSaveBw}
+                disabled={bwBusy}
+                style={({ pressed }) => [
+                  styles.modalPrimaryBtn,
+                  bwBusy && styles.btnDisabled,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.modalPrimaryText}>
+                  {bwBusy ? '儲存中…' : '儲存'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -284,4 +395,53 @@ const styles = StyleSheet.create({
   langLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
   langLabelActive: { color: 'white' },
   langCheck: { fontSize: 18, color: 'white', fontWeight: '700' },
+  // ADR-0024 § 5 — 體重 row + mini sheet.
+  bwRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    gap: 4,
+  },
+  bwRowLabel: { fontSize: 16, fontWeight: '600' },
+  bwRowHint: { fontSize: 12, opacity: 0.7 },
+  btnDisabled: { opacity: 0.5 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalSheet: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    padding: 20,
+    gap: 12,
+  },
+  modalHeading: { fontSize: 18, fontWeight: '700' },
+  modalLabel: { fontSize: 13, opacity: 0.7 },
+  modalInput: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.12)',
+    fontSize: 18,
+  },
+  modalActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  modalPrimaryBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#0a7ea4',
+    alignItems: 'center',
+  },
+  modalPrimaryText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  modalSecondaryBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(127,127,127,0.2)',
+    alignItems: 'center',
+  },
+  modalSecondaryText: { fontSize: 14, fontWeight: '600' },
 });
