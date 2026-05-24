@@ -74,6 +74,8 @@ import {
   PATH_BICEP_L_MEDIAL_HALF,
   PATH_BICEP_R_LATERAL_HALF,
   PATH_BICEP_R_MEDIAL_HALF,
+  PATH_HEAD_OUTLINE_BACK,
+  PATH_HEAD_OUTLINE_FRONT,
   SPLIT_X_BACK_DELT_L,
   SPLIT_X_BACK_DELT_R,
   SPLIT_X_FRONT_DELT_L,
@@ -332,6 +334,15 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
       <Path d={PATH_FRONT_DELT_CHEST_FILL_R} fill={frontDeltFill} />
       <Path d={PATH_MID_DELT_PEAK_FRONT_L} fill={midDeltFill} />
       <Path d={PATH_MID_DELT_PEAK_FRONT_R} fill={midDeltFill} />
+      {/* Head outline — package's border path skips head/hair; trace the
+          slug paths once more here as a stroke-only layer. */}
+      <Path
+        d={PATH_HEAD_OUTLINE_FRONT}
+        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
     </Svg>
   );
 }
@@ -405,6 +416,14 @@ function BackOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; s
       {/* Gluteal split */}
       <Path d={PATH_UPPER_GLUTE} fill={subFill(M_UPPER_GLUTE, GLUTE_SIBS, mQuintile)} />
       <Path d={PATH_LOWER_GLUTE} fill={subFill(M_LOWER_GLUTE, GLUTE_SIBS, mQuintile)} />
+      {/* Head outline — same stroke-only layer as FrontOverlay. */}
+      <Path
+        d={PATH_HEAD_OUTLINE_BACK}
+        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
     </Svg>
   );
 }
