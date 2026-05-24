@@ -761,7 +761,7 @@ export function MuscleBodyTagger({
     <View>
       <View style={styles.row}>
         <View style={styles.column}>
-          <Text style={styles.sideLabel}>{t('page', 'bodyFront')}</Text>
+          <SideHeader side="front" label={t('page', 'bodyFront')} />
           <SideContainer
             side="front"
             highlight={highlight}
@@ -772,7 +772,7 @@ export function MuscleBodyTagger({
           />
         </View>
         <View style={styles.column}>
-          <Text style={styles.sideLabel}>{t('page', 'bodyBack')}</Text>
+          <SideHeader side="back" label={t('page', 'bodyBack')} />
           <SideContainer
             side="back"
             highlight={highlight}
@@ -787,6 +787,24 @@ export function MuscleBodyTagger({
         <LegendItem color={COLOR_PRIMARY} label={t('status', 'muscleRolePrimary')} />
         <LegendItem color={COLOR_SECONDARY} label={t('status', 'muscleRoleSecondary')} />
       </View>
+    </View>
+  );
+}
+
+/**
+ * SideHeader — places the 正面/背面 label centered over the body lane only,
+ * not over the label lane. Uses a flex row with a spacer the width of the
+ * label lane and a fixed-width body slot that centers the label text.
+ */
+function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) {
+  const labelOnLeft = side === 'front';
+  return (
+    <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
+      {labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
+      <View style={{ width: BODY_WIDTH_PX, alignItems: 'center' }}>
+        <Text style={styles.sideLabel}>{label}</Text>
+      </View>
+      {!labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
     </View>
   );
 }
