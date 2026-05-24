@@ -9,7 +9,6 @@ import {
   type ReusableSupersetDraft,
 } from '../../domain/superset/supersetManager';
 import type {
-  ReusableSuperset,
   ReusableSupersetWithExercises,
 } from '../../domain/superset/types';
 
@@ -67,20 +66,13 @@ function rowToExercise(r: SupersetExerciseJoinRow): Exercise {
   };
 }
 
-export async function listReusableSupersets(
-  db: Database
-): Promise<ReusableSuperset[]> {
-  return db.getAllAsync<SupersetRow>(
-    `SELECT id, name, color_hex, use_count, created_at, updated_at
-       FROM superset
-      ORDER BY use_count DESC, updated_at DESC`
-  );
-}
-
 /**
  * Hydrated list for the library sidebar tab. One query joins each superset
  * to its 2 (position 0/1) exercises; rows are grouped by superset id and
  * exercises emitted in `position` order.
+ *
+ * Sort order: `use_count DESC, updated_at DESC` — recently / heavily used
+ * supersets float to the top, ties broken by recency.
  *
  * If a superset has != 2 exercises (corruption — UI prevents creating
  * size != 2), this function still emits the row but with however many
@@ -90,7 +82,11 @@ export async function listReusableSupersets(
 export async function listReusableSupersetsWithExercises(
   db: Database
 ): Promise<ReusableSupersetWithExercises[]> {
-  const supersets = await listReusableSupersets(db);
+  const supersets = await db.getAllAsync<SupersetRow>(
+    `SELECT id, name, color_hex, use_count, created_at, updated_at
+       FROM superset
+      ORDER BY use_count DESC, updated_at DESC`
+  );
   if (supersets.length === 0) return [];
 
   const links = await db.getAllAsync<SupersetExerciseJoinRow>(

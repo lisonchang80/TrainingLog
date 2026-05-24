@@ -1,5 +1,6 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
+import type { Database } from '../../src/db/types';
 import {
   deleteReusableSuperset,
   findExistingReusableSupersetByPair,
@@ -8,10 +9,20 @@ import {
   getReusableSupersetWithExercises,
   incrementUseCount,
   insertReusableSuperset,
-  listReusableSupersets,
   listReusableSupersetsWithExercises,
   updateReusableSupersetName,
 } from '../../src/adapters/sqlite/supersetRepository';
+
+/**
+ * Test-only helper: previously the adapter exported a bare
+ * `listReusableSupersets(db) -> ReusableSuperset[]`. That helper was
+ * dropped (only the hydrated variant has prod consumers); tests still
+ * want the bare-row list for assertions, so derive it locally.
+ */
+async function listSupersetRows(db: Database) {
+  const hydrated = await listReusableSupersetsWithExercises(db);
+  return hydrated.map((h) => h.superset);
+}
 import {
   createSession,
   endSession,
@@ -56,7 +67,7 @@ describe('supersetRepository', () => {
       expect(id).toBe('ss-1');
       const hydrated = await getReusableSupersetWithExercises(db, id);
       expect(hydrated!.exercises.map((e) => e.id)).toEqual([BENCH, ROW]);
-      const list = await listReusableSupersets(db);
+      const list = await listSupersetRows(db);
       expect(list).toHaveLength(1);
       expect(list[0].name).toBe('Bench + Row');
       expect(list[0].color_hex).toBe('#34c759');
@@ -67,13 +78,13 @@ describe('supersetRepository', () => {
 
     it('trims name before INSERT', async () => {
       await insertReusableSuperset(db, draft({ name: '  PR Day  ' }), uuid, now);
-      const list = await listReusableSupersets(db);
+      const list = await listSupersetRows(db);
       expect(list[0].name).toBe('PR Day');
     });
 
     it('stores null color_hex when draft has null', async () => {
       await insertReusableSuperset(db, draft({ color_hex: null }), uuid, now);
-      const list = await listReusableSupersets(db);
+      const list = await listSupersetRows(db);
       expect(list[0].color_hex).toBeNull();
     });
   });
@@ -153,7 +164,7 @@ describe('supersetRepository', () => {
           now
         )
       ).rejects.toThrow(/duplicate RS pair/);
-      const list = await listReusableSupersets(db);
+      const list = await listSupersetRows(db);
       expect(list).toHaveLength(1);
       expect(list[0].id).toBe(id);
       // No orphan link rows from a partially-applied insert.
@@ -162,7 +173,7 @@ describe('supersetRepository', () => {
     });
   });
 
-  describe('listReusableSupersets ordering', () => {
+  describe('listReusableSupersetsWithExercises ordering', () => {
     it('sorts by use_count DESC, updated_at DESC', async () => {
       // Distinct exercise pairs per RS — insertReusableSuperset rejects
       // duplicate pairs (#26); ordering only cares about use_count/updated_at.
@@ -192,7 +203,7 @@ describe('supersetRepository', () => {
       await incrementUseCount(db, c, () => 3000);
       await incrementUseCount(db, c, () => 3000);
 
-      const list = await listReusableSupersets(db);
+      const list = await listSupersetRows(db);
       // C (use_count=2, updated_at=3000) → B (use_count=2, updated_at=2000) → A
       expect(list.map((s) => s.name)).toEqual(['C', 'B', 'A']);
       void a;
@@ -253,7 +264,7 @@ describe('supersetRepository', () => {
       await db.execAsync(`PRAGMA foreign_keys = ON`);
       const id = await insertReusableSuperset(db, draft(), uuid, now);
       await deleteReusableSuperset(db, id);
-      expect(await listReusableSupersets(db)).toEqual([]);
+      expect(await listSupersetRows(db)).toEqual([]);
       // Cascade probe: link rows must be gone from superset_exercise.
       const links = await db.getAllAsync<{ superset_id: string }>(
         `SELECT superset_id FROM superset_exercise WHERE superset_id = ?`,
@@ -276,7 +287,7 @@ describe('supersetRepository', () => {
         now
       );
       await deleteReusableSuperset(db, a);
-      const remaining = await listReusableSupersets(db);
+      const remaining = await listSupersetRows(db);
       expect(remaining.map((s) => s.id)).toEqual([b]);
       const hydrated = await getReusableSupersetWithExercises(db, b);
       expect(hydrated!.exercises.map((e) => e.id)).toEqual([BENCH, SQUAT]);
