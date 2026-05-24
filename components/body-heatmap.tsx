@@ -22,7 +22,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
-import Svg, { ClipPath, Defs, Path, Rect } from 'react-native-svg';
+import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
 
 import {
   M_ABS,
@@ -45,7 +45,14 @@ import {
   M_UPPER_CHEST,
   M_UPPER_GLUTE,
 } from '@/src/db/seed/v006ExerciseLibrary';
-import { t } from '@/src/i18n';
+import { t, tMuscle } from '@/src/i18n';
+import {
+  BACK_ANCHORS,
+  FRONT_ANCHORS,
+  fanLayout,
+  vbToBodyLocalX,
+  vbToBodyLocalY,
+} from './exercise/body-anchors';
 import {
   BICEPS_SIBS,
   CHEST_SIBS,
@@ -509,8 +516,23 @@ function buildSlugData(mQuintile: Map<string, Quintile>, side: 'front' | 'back')
  * Body Heatmap render scale. Kept as a single source of truth so the SVG
  * overlay (positioned absolutely over the Body) uses the exact same
  * dimensions as the package's wrapper (width=200*scale, height=400*scale).
+ *
+ * 2026-05-24 fan-label redesign: shrink slightly to make room for plain-text
+ * muscle name labels in outer lanes (front=left, back=right). Heatmap labels
+ * are READ-ONLY (not Pressable buttons) so the lane can be slimmer than
+ * muscle-body-tagger's interactive layout.
  */
-const BODY_SCALE = 0.8;
+const BODY_SCALE = 0.65;
+const BODY_WIDTH_PX = 200 * BODY_SCALE; // 130
+const BODY_HEIGHT_PX = 400 * BODY_SCALE; // 260
+const LABEL_LANE_WIDTH = 56;
+const LABEL_WIDTH = 50;
+const LABEL_HEIGHT = 16;
+const SIDE_WIDTH = LABEL_LANE_WIDTH + BODY_WIDTH_PX; // 186
+const LANE_Y_MIN = LABEL_HEIGHT / 2;
+const LANE_Y_MAX = BODY_HEIGHT_PX - LABEL_HEIGHT / 2;
+const LABEL_FONT_SIZE = 10;
+const COLOR_LABEL_TEXT = '#4B5563';
 
 export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
   const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
@@ -518,37 +540,123 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
   return (
     <View style={styles.row}>
       <View style={styles.column}>
-        <Text style={styles.label}>{t('page', 'bodyFront')}</Text>
-        <View style={styles.bodyWrap}>
-          <Body
-            side="front"
-            gender="male"
-            data={frontData}
-            colors={BODY_COLORS}
-            scale={BODY_SCALE}
-            border={COLOR_OUTLINE}
-            defaultFill="#FAFAFA"
-            defaultStroke="#9CA3AF"
-          />
-          <FrontOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
-        </View>
+        <SideHeader side="front" label={t('page', 'bodyFront')} />
+        <SideContainer side="front" mQuintile={mQuintile} data={frontData} />
       </View>
       <View style={styles.column}>
-        <Text style={styles.label}>{t('page', 'bodyBack')}</Text>
-        <View style={styles.bodyWrap}>
-          <Body
-            side="back"
-            gender="male"
-            data={backData}
-            colors={BODY_COLORS}
-            scale={BODY_SCALE}
-            border={COLOR_OUTLINE}
-            defaultFill="#FAFAFA"
-            defaultStroke="#9CA3AF"
-          />
-          <BackOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
-        </View>
+        <SideHeader side="back" label={t('page', 'bodyBack')} />
+        <SideContainer side="back" mQuintile={mQuintile} data={backData} />
       </View>
+    </View>
+  );
+}
+
+/**
+ * SideContainer — body + role overlay + fan-layout muscle-name labels for
+ * one view. Labels are READ-ONLY plain text (not Pressable, no border).
+ * Layout: front has label lane on LEFT, body on RIGHT; back mirrored.
+ */
+function SideContainer({
+  side,
+  mQuintile,
+  data,
+}: {
+  side: 'front' | 'back';
+  mQuintile: Map<string, Quintile>;
+  data: ExtendedBodyPart[];
+}): React.JSX.Element {
+  const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
+  const items = React.useMemo(
+    () => fanLayout(anchors, () => true, LANE_Y_MIN, LANE_Y_MAX),
+    [anchors]
+  );
+
+  const labelOnLeft = side === 'front';
+  const bodyLeft = labelOnLeft ? LABEL_LANE_WIDTH : 0;
+  const labelLeft = labelOnLeft ? 2 : SIDE_WIDTH - LABEL_WIDTH - 2;
+  const labelRight = labelLeft + LABEL_WIDTH;
+  const railX = labelOnLeft ? LABEL_LANE_WIDTH - 3 : BODY_WIDTH_PX + 3;
+  const leaderStart = labelOnLeft ? labelRight : labelLeft;
+
+  return (
+    <View style={{ width: SIDE_WIDTH, height: BODY_HEIGHT_PX, position: 'relative' }}>
+      {/* Body + role overlay */}
+      <View style={{ position: 'absolute', left: bodyLeft, top: 0 }}>
+        <Body
+          side={side}
+          gender="male"
+          data={data}
+          colors={BODY_COLORS}
+          scale={BODY_SCALE}
+          border={COLOR_OUTLINE}
+          defaultFill="#FAFAFA"
+          defaultStroke="#9CA3AF"
+        />
+        {side === 'front' ? (
+          <FrontOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
+        ) : (
+          <BackOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
+        )}
+      </View>
+
+      {/* Leader polylines — pure presentation. */}
+      <Svg
+        style={{ position: 'absolute', left: 0, top: 0 }}
+        width={SIDE_WIDTH}
+        height={BODY_HEIGHT_PX}
+        pointerEvents="none"
+      >
+        {items.map((item) => {
+          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side, BODY_WIDTH_PX);
+          const ay = vbToBodyLocalY(item.vbY, BODY_HEIGHT_PX);
+          return (
+            <Polyline
+              key={`leader-${item.m}`}
+              points={`${leaderStart},${item.labelY} ${railX},${item.labelY} ${ax},${ay}`}
+              stroke={COLOR_OUTLINE}
+              strokeWidth={0.5}
+              fill="none"
+            />
+          );
+        })}
+      </Svg>
+
+      {/* Muscle name labels — plain Text, no background. */}
+      {items.map((item) => (
+        <View
+          key={`label-${item.m}`}
+          style={[
+            styles.muscleLabel,
+            {
+              left: labelLeft,
+              top: item.labelY - LABEL_HEIGHT / 2,
+              alignItems: labelOnLeft ? 'flex-end' : 'flex-start',
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={{ fontSize: LABEL_FONT_SIZE, color: COLOR_LABEL_TEXT }}>
+            {tMuscle(item.m)}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Centers the 正面/背面 header over the body lane only (not over the label
+ * lane). Spacer-row trick mirrors muscle-body-tagger.tsx.
+ */
+function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) {
+  const labelOnLeft = side === 'front';
+  return (
+    <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
+      {labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
+      <View style={{ width: BODY_WIDTH_PX, alignItems: 'center' }}>
+        <Text style={styles.label}>{label}</Text>
+      </View>
+      {!labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
     </View>
   );
 }
@@ -594,6 +702,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginBottom: 4,
+  },
+  muscleLabel: {
+    position: 'absolute',
+    width: LABEL_WIDTH,
+    height: LABEL_HEIGHT,
+    justifyContent: 'center',
   },
   legendRow: {
     flexDirection: 'row',

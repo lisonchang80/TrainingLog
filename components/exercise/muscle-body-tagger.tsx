@@ -54,6 +54,13 @@ import {
 import type { MuscleRole } from '@/src/domain/exercise/types';
 import { t, tMuscle } from '@/src/i18n';
 import {
+  BACK_ANCHORS,
+  FRONT_ANCHORS,
+  fanLayout,
+  vbToBodyLocalX,
+  vbToBodyLocalY,
+} from './body-anchors';
+import {
   BICEPS_SIBS,
   CHEST_SIBS,
   COLOR_BODY_BASE,
@@ -321,86 +328,9 @@ function btnThemeFor(role: MuscleRole | undefined) {
   return BTN_THEME.inactive;
 }
 
-/**
- * Per-M_* anchor table. Anchor coords are in PACKAGE viewBox units:
- *   front side: x ∈ [0, 724], y ∈ [0, 1448]
- *   back  side: x ∈ [724, 1448], y ∈ [0, 1448]
- * Each M_* lives on exactly one side (mid-delt goes on FRONT for label
- * placement even though it fills both views).
- *
- * Front anchors pick L-arm/L-side x (subject's right) so the leader exits
- * the label-lane (left of container) and dives RIGHT toward the body.
- * Back anchors pick R-back x (subject's left, viewer's right) so the leader
- * exits the label-lane (right of container) and dives LEFT toward the body.
- */
-interface AnchorEntry {
-  m: string;
-  vbX: number;
-  vbY: number;
-}
-
-const FRONT_ANCHORS: readonly AnchorEntry[] = [
-  { m: M_FRONT_DELT,  vbX: 260, vbY: 340 },
-  { m: M_MID_DELT,    vbX: 200, vbY: 355 },
-  { m: M_UPPER_CHEST, vbX: 320, vbY: 360 },
-  { m: M_LOWER_CHEST, vbX: 320, vbY: 410 },
-  { m: M_BICEP_LONG,  vbX: 190, vbY: 440 },
-  { m: M_BICEP_SHORT, vbX: 220, vbY: 460 },
-  { m: M_ABS,         vbX: 340, vbY: 540 },
-  { m: M_OBLIQUE,     vbX: 295, vbY: 580 },
-  { m: M_FOREARM,     vbX: 170, vbY: 600 },
-  { m: M_QUAD,        vbX: 290, vbY: 820 },
-];
-
-const BACK_ANCHORS: readonly AnchorEntry[] = [
-  { m: M_TRAP,        vbX: 1086, vbY: 310 },
-  { m: M_REAR_DELT,   vbX: 1227, vbY: 360 },
-  { m: M_TRICEP,      vbX: 1250, vbY: 440 },
-  { m: M_BACK,        vbX: 1140, vbY: 480 },
-  { m: M_LOWER_BACK,  vbX: 1100, vbY: 620 },
-  { m: M_UPPER_GLUTE, vbX: 1120, vbY: 700 },
-  { m: M_LOWER_GLUTE, vbX: 1120, vbY: 760 },
-  { m: M_HAMSTRING,   vbX: 1160, vbY: 870 },
-  { m: M_CALF,        vbX: 1160, vbY: 1100 },
-];
-
-/**
- * Convert package viewBox coords to screen px inside the side container.
- *   front: vbX ∈ [0, 724]   → screen ∈ [0, BODY_WIDTH_PX]
- *   back : vbX ∈ [724, 1448] → screen ∈ [0, BODY_WIDTH_PX] (relative to body)
- *   y    : vbY ∈ [0, 1448]   → screen ∈ [0, BODY_HEIGHT_PX]
- */
-function vbToBodyLocalX(vbX: number, side: 'front' | 'back'): number {
-  const local = side === 'front' ? vbX : vbX - 724;
-  return (local / 724) * BODY_WIDTH_PX;
-}
-function vbToBodyLocalY(vbY: number): number {
-  return (vbY / 1448) * BODY_HEIGHT_PX;
-}
-
-/**
- * Fan layout — sort anchors by anchorY ASC and distribute labelY evenly
- * across the lane. Guarantees no leader-line crossings: same ordering
- * top-to-bottom in label lane as anchor top-to-bottom on body.
- *
- * Readonly mode: only highlighted anchors get a label (drop the rest +
- * re-distribute).
- */
-function fanLayout(
-  anchors: readonly AnchorEntry[],
-  highlight: Map<string, MuscleRole>,
-  mode: 'readonly' | 'tap-cycle'
-): Array<AnchorEntry & { labelY: number }> {
-  const filtered =
-    mode === 'readonly' ? anchors.filter((a) => highlight.has(a.m)) : [...anchors];
-  if (filtered.length === 0) return [];
-  const sorted = [...filtered].sort((a, b) => a.vbY - b.vbY);
-  if (sorted.length === 1) {
-    return [{ ...sorted[0], labelY: (LANE_Y_MIN + LANE_Y_MAX) / 2 }];
-  }
-  const step = (LANE_Y_MAX - LANE_Y_MIN) / (sorted.length - 1);
-  return sorted.map((a, i) => ({ ...a, labelY: LANE_Y_MIN + i * step }));
-}
+// Anchor table + layout helpers are now in `./body-anchors` so the same
+// 19-M_* anchor data is reused by `body-heatmap.tsx`. fanLayout is called
+// with a per-mode predicate (readonly = only highlighted; tap-cycle = all).
 
 /**
  * Front-side overlay paths (chest split, biceps split per-arm, deltoids
@@ -641,7 +571,16 @@ function SideContainer({
   handlePress,
 }: SideContainerProps): React.JSX.Element {
   const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
-  const items = React.useMemo(() => fanLayout(anchors, highlight, mode), [anchors, highlight, mode]);
+  const items = React.useMemo(
+    () =>
+      fanLayout(
+        anchors,
+        mode === 'readonly' ? (a) => highlight.has(a.m) : () => true,
+        LANE_Y_MIN,
+        LANE_Y_MAX
+      ),
+    [anchors, highlight, mode]
+  );
 
   // Per-side layout: front has label lane on LEFT, body on RIGHT;
   // back has body on LEFT, label lane on RIGHT.
@@ -684,8 +623,8 @@ function SideContainer({
         pointerEvents="none"
       >
         {items.map((item) => {
-          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side);
-          const ay = vbToBodyLocalY(item.vbY);
+          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side, BODY_WIDTH_PX);
+          const ay = vbToBodyLocalY(item.vbY, BODY_HEIGHT_PX);
           return (
             <Polyline
               key={`leader-${item.m}`}
