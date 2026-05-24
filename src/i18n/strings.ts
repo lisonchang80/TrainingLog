@@ -191,6 +191,10 @@ export const strings = {
       addOneSet: '新增 1 組',
       // Phase 4.5 batch 1 — swipe-delete label on cluster cycle row.
       swipeDelete: '刪',
+      // Phase 4.5 final — swipe-add (clone) label on template editor row.
+      swipeAdd: '加',
+      // Phase 4.5 final — swipe-note label on template editor row.
+      swipeNote: '備註',
       // Phase 4.5 batch 1 — Today bottom-bar "⏱ 手動計時" button.
       manualTimer: '⏱ 手動計時',
       // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on exercise card.
@@ -776,6 +780,10 @@ export const strings = {
       addOneSet: 'Add 1 Set',
       // Phase 4.5 batch 1 — swipe-delete label on cluster cycle row.
       swipeDelete: 'Del',
+      // Phase 4.5 final — swipe-add (clone) label on template editor row.
+      swipeAdd: 'Add',
+      // Phase 4.5 final — swipe-note label on template editor row.
+      swipeNote: 'Note',
       // Phase 4.5 batch 1 — Today bottom-bar manual rest-timer button.
       manualTimer: '⏱ Manual Timer',
       // Phase 4.5 batch 1 — accessibilityLabel: ⚙️ on exercise card.
