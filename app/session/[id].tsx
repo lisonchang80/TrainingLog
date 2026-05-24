@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -23,6 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
@@ -91,6 +92,11 @@ import {
   groupClusterSides,
   type ClusterGroup,
 } from '@/src/domain/session/clusterCard';
+import {
+  computeDefaultTemplateName,
+  computeDeleteConfirmMessage,
+  shouldShowEditChip,
+} from '@/src/domain/session/sessionDetailLabels';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -230,6 +236,13 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+
+  // Toast controller (Round F Q2 — replaces Alert.alert success on [儲存模板]).
+  // Created once, kept alive for the entire page lifecycle; ToastHost subscribes.
+  const toastRef = useRef<ToastController | null>(null);
+  if (toastRef.current == null) {
+    toastRef.current = new ToastController();
+  }
   // 進入 edit mode 時拍 snapshot；按「完成」commit (清掉)、按「返回」若有
   // 變更 alert 確認後 restore；無變更則 silent exit。
   const [editSnapshot, setEditSnapshot] = useState<SessionSnapshot | null>(
@@ -1248,6 +1261,13 @@ export default function SessionDetailScreen() {
 
   // ── Top-level handlers ────────────────────────────────────────────────────
 
+  // KNOWN RISK (Round F 2026-05-24 拍板接受):
+  // edit mode 期間呼叫 [儲存模板] 會 silent overwrite，未列入
+  // commitEditMode / discardSession 的 transactional protection
+  // (template-side write 走獨立 convertSessionToTemplate path)。
+  // user 決議不動、ADR-0019 § Q10 Round F 段確認 — 4-btn bar 在 edit mode
+  // 只剩 [+ 動作][...] 兩 btn、[儲存模板] 不可見，所以 racing 入口窄；
+  // 萬一未來把 btn 拿回 edit mode 要重新評估 protection cost。
   const handleSaveTemplate = useCallback(
     async (mode: 'update' | 'create') => {
       if (!session) return;
@@ -1259,15 +1279,20 @@ export default function SessionDetailScreen() {
             getSessionLinkedTemplateTriple(db, id!),
           ]);
           setPrograms(progs);
-          setTemplateMetaPrefill(
-            linked
-              ? {
-                  name: linked.template_name,
-                  program_id: linked.program_id,
-                  sub_tag: linked.sub_tag,
-                }
-              : null,
-          );
+          // Round F Q3 — prefill 跟著 fallback chain (sessionTitle [尚無欄位、
+          // 永遠 null] → linkedTemplateName → dateLabel) 走，避免 freestyle
+          // session 開 TemplateMetaSheet 時 input 空白。
+          const dateLabel = formatDateLabel(session.started_at);
+          const prefillName = computeDefaultTemplateName({
+            sessionTitle: null,
+            linkedTemplateName: linked?.template_name,
+            dateLabel,
+          });
+          setTemplateMetaPrefill({
+            name: prefillName,
+            program_id: linked?.program_id ?? null,
+            sub_tag: linked?.sub_tag ?? null,
+          });
         } catch (e) {
           Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
           return;
@@ -1308,7 +1333,10 @@ export default function SessionDetailScreen() {
           mode: 'update',
           uuid: randomUUID,
         });
-        Alert.alert(t('status', 'saved'), tTemplateUpdated(linked.template_name));
+        // Round F Q2 — success feedback 改 toast (was Alert.alert).
+        toastRef.current?.show(tTemplateUpdated(linked.template_name), {
+          icon: 'success',
+        });
       } catch (e) {
         Alert.alert(t('alert', 'failed'), e instanceof Error ? e.message : String(e));
       }
@@ -1323,8 +1351,14 @@ export default function SessionDetailScreen() {
       sub_tag: string | null;
     }) => {
       if (!session) return;
+      // Round F Q3 — final fallback chain mirrors the prefill chain so the
+      // dialog default and the "user submitted blank input" default agree.
       const dateLabel = formatDateLabel(session.started_at);
-      const defaultName = `Session ${dateLabel}`;
+      const defaultName = computeDefaultTemplateName({
+        sessionTitle: null,
+        linkedTemplateName: null,
+        dateLabel,
+      });
       const finalName = args.name.trim() || defaultName;
       setTemplateMetaBusy(true);
       try {
@@ -1356,9 +1390,14 @@ export default function SessionDetailScreen() {
   );
 
   const handleDelete = useCallback(() => {
+    // Round F Q4 — confirm 文案含 session 顯示名（目前 = dateLabel；session
+    // table 還沒 title 欄位、未來加上後 displayName 自動 follow header title）。
+    const displayName = session
+      ? formatDateLabel(session.started_at)
+      : 'Session';
     Alert.alert(
       t('button', 'deleteSession'),
-      t('alert', 'allLoggedSetsDeleted'),
+      computeDeleteConfirmMessage({ sessionDisplayName: displayName }),
       [
         { text: t('common', 'cancel'), style: 'cancel' },
         {
@@ -1375,7 +1414,7 @@ export default function SessionDetailScreen() {
         },
       ]
     );
-  }, [db, id, router]);
+  }, [db, id, router, session]);
 
   /**
    * Persist new started_at / ended_at via direct UPDATE. Used by tap on
@@ -1616,7 +1655,14 @@ export default function SessionDetailScreen() {
           style={styles.headerBackBtn}>
           <Text style={styles.headerBackText}>{t('common', 'backArrow')}</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>{titleText}</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitleText}>{titleText}</Text>
+          {shouldShowEditChip(editMode) ? (
+            <View style={styles.editChip} accessibilityLabel="編輯模式">
+              <Text style={styles.editChipText}>編</Text>
+            </View>
+          ) : null}
+        </View>
         {editMode ? (
           <Pressable
             onPress={commitEditMode}
@@ -2023,6 +2069,8 @@ export default function SessionDetailScreen() {
         onSave={handleTimeSave}
         onClose={() => setTimeEditorOpen(false)}
       />
+      {/* Round F Q2 — bottom toast (replaces Alert.alert on [儲存模板]). */}
+      <ToastHost controller={toastRef.current!} />
     </SafeAreaView>
   );
 }
@@ -2835,6 +2883,21 @@ const styles = StyleSheet.create({
   headerBackBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   headerBackText: { fontSize: 15, color: '#007AFF' },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  headerTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  headerTitleText: { fontSize: 17, fontWeight: '700' },
+  editChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: '#FF375F',
+  },
+  editChipText: { color: 'white', fontSize: 12, fontWeight: '700' },
   headerSpacer: { width: 60 },
   headerDoneBtn: {
     paddingHorizontal: 8,
