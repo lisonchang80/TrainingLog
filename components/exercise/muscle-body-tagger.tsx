@@ -59,14 +59,12 @@ import {
   COLOR_BODY_BASE,
   DELT_SIBS,
   GLUTE_SIBS,
+  PACKAGE_BICEP_L,
+  PACKAGE_BICEP_R,
   PACKAGE_DELT_BACK_L,
   PACKAGE_DELT_BACK_R,
   PACKAGE_DELT_FRONT_L,
   PACKAGE_DELT_FRONT_R,
-  PATH_BICEP_LONG_L,
-  PATH_BICEP_LONG_R,
-  PATH_BICEP_SHORT_L,
-  PATH_BICEP_SHORT_R,
   PATH_FRONT_DELT_CHEST_FILL_L,
   PATH_FRONT_DELT_CHEST_FILL_R,
   PATH_LOWER_CHEST,
@@ -81,6 +79,8 @@ import {
   PATH_UPPER_GLUTE,
   SPLIT_X_BACK_DELT_L,
   SPLIT_X_BACK_DELT_R,
+  SPLIT_X_BICEP_L,
+  SPLIT_X_BICEP_R,
   SPLIT_X_FRONT_DELT_L,
   SPLIT_X_FRONT_DELT_R,
 } from './body-overlay-paths';
@@ -306,8 +306,13 @@ function FrontOverlay({
   //     → anterior (M_FRONT_DELT) at x ≥ SPLIT, lateral (M_MID_DELT) at x ≤ SPLIT
   //   FRONT_R (viewer's right, subject's left): MEDIAL = left half of bbox
   //     → anterior (M_FRONT_DELT) at x ≤ SPLIT, lateral (M_MID_DELT) at x ≥ SPLIT
+  // Biceps sub-division via ClipPath partition (round 1, 2026-05-24):
+  //   LEFT arm  : lateral left  half = LONG  head, medial right half = SHORT head
+  //   RIGHT arm : medial  left  half = SHORT head, lateral right half = LONG  head
   const frontDeltFill = roleSubFill(M_FRONT_DELT, DELT_SIBS, highlight);
   const midDeltFill = roleSubFill(M_MID_DELT, DELT_SIBS, highlight);
+  const longBicepFill = roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight);
+  const shortBicepFill = roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight);
   return (
     <Svg
       style={{ position: 'absolute', top: 0, left: 0 }}
@@ -323,16 +328,50 @@ function FrontOverlay({
         <ClipPath id="delt-front-r">
           <Path d={PACKAGE_DELT_FRONT_R} />
         </ClipPath>
+        <ClipPath id="tagger-bicep-l">
+          <Path d={PACKAGE_BICEP_L} />
+        </ClipPath>
+        <ClipPath id="tagger-bicep-r">
+          <Path d={PACKAGE_BICEP_R} />
+        </ClipPath>
       </Defs>
       {/* Chest split */}
       <Path d={PATH_UPPER_CHEST} fill={roleSubFill(M_UPPER_CHEST, CHEST_SIBS, highlight)} />
       <Path d={PATH_LOWER_CHEST} fill={roleSubFill(M_LOWER_CHEST, CHEST_SIBS, highlight)} />
-      {/* Bicep split — left arm */}
-      <Path d={PATH_BICEP_LONG_L} fill={roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight)} />
-      <Path d={PATH_BICEP_SHORT_L} fill={roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight)} />
-      {/* Bicep split — right arm */}
-      <Path d={PATH_BICEP_SHORT_R} fill={roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight)} />
-      <Path d={PATH_BICEP_LONG_R} fill={roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight)} />
+      {/* Bicep split — LEFT arm: lateral half (long head) + medial half (short head) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_BICEP_L}
+        height={1448}
+        fill={longBicepFill}
+        clipPath="url(#tagger-bicep-l)"
+      />
+      <Rect
+        x={SPLIT_X_BICEP_L}
+        y={0}
+        width={724 - SPLIT_X_BICEP_L}
+        height={1448}
+        fill={shortBicepFill}
+        clipPath="url(#tagger-bicep-l)"
+      />
+      {/* Bicep split — RIGHT arm: medial half (short head) + lateral half (long head) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_BICEP_R}
+        height={1448}
+        fill={shortBicepFill}
+        clipPath="url(#tagger-bicep-r)"
+      />
+      <Rect
+        x={SPLIT_X_BICEP_R}
+        y={0}
+        width={724 - SPLIT_X_BICEP_R}
+        height={1448}
+        fill={longBicepFill}
+        clipPath="url(#tagger-bicep-r)"
+      />
       {/* Front view LEFT shoulder: lateral half (mid delt) + medial half (front delt) */}
       <Rect
         x={0}

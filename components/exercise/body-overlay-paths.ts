@@ -311,19 +311,44 @@ export const PATH_UPPER_CHEST =
 export const PATH_LOWER_CHEST =
   'M252 379 C270 400 335 348 356 336 L357 339 L360 351 L362 362 L361 376 L360 389 L360 401 L357 414 L352 420 L343 429 L328 435 L310 437 L297 436 L285 433 L273 426 L265 418 L260 408 L256 396 L253 386 L252 379 Z M476 379 C458 400 393 348 372 336 L371 339 L368 351 L366 362 L367 376 L368 389 L368 401 L371 414 L376 420 L385 429 L400 435 L418 437 L431 436 L443 433 L455 426 L463 418 L468 408 L472 396 L475 386 L476 379 Z';
 
-/** Front: bicep long head (outer/lateral) left arm. */
-export const PATH_BICEP_LONG_L =
-  'M182 410 Q176 460 184 495 L200 495 Q205 460 208 415 Z';
-/** Front: bicep short head (inner/medial) left arm. */
-export const PATH_BICEP_SHORT_L =
-  'M200 415 Q205 460 200 495 L222 495 Q228 465 224 420 Z';
+/**
+ * Bicep sub-division — partition the package's verbatim biceps slug path into
+ * LATERAL (long head, outer) + MEDIAL (short head, inner) halves via
+ * `<ClipPath>` so the combined fill exactly equals the underlying belly
+ * silhouette (no gap, no overflow). Mirrors the DELTOID treatment above.
+ *
+ * The two path strings are byte-for-byte copies of the
+ * `react-native-body-highlighter` package's `biceps` slug paths
+ * (node_modules/.../bodyFront.js). The consumer wraps each in
+ * `<Defs><ClipPath id="..."><Path d={...}/></ClipPath></Defs>` and then
+ * renders two `<Rect>` elements (one per half) clipped to it — `Rect`
+ * covers the full bounding box, the clip restricts paint to the belly shape.
+ *
+ * SPLIT_X constants are the horizontal midpoint of each path's bounding box
+ * (computed offline via Bezier sampling, /tmp/bicep-bbox.mjs):
+ *   FRONT_L bicep: x ∈ [181.79, 222.99] → mid 202.39
+ *   FRONT_R bicep: x ∈ [505.39, 546.48] → mid 525.93
+ * Each bicep belly is ~41 units wide; long head (lateral, outer) and short
+ * head (medial, inner) each take ~half. PACKAGE biceps are not strict mirrors
+ * about chest centerline x=362 (L+R mid sums to 728.32 → effective mirror axis
+ * x=364.16, same minor asymmetry as deltoid).
+ *
+ * Per-arm geometry (chest centerline x=362; lateral = "outer", away from body
+ * centerline; medial = "inner", toward body centerline):
+ *   FRONT_L (viewer's left, subject's right) :
+ *     LATERAL (long head)  = LEFT  half (x ≤ SPLIT, far from chest)
+ *     MEDIAL (short head)  = RIGHT half (x ≥ SPLIT, near chest)
+ *   FRONT_R (viewer's right, subject's left) :
+ *     MEDIAL (short head)  = LEFT  half (x ≤ SPLIT, near chest)
+ *     LATERAL (long head)  = RIGHT half (x ≥ SPLIT, far from chest)
+ */
+export const PACKAGE_BICEP_L =
+  'M189.52 492.51c-2.43.62-7.38.57-7.51-3.08-.56-16.01-.42-35.49 5.11-50.26 3.19-8.54 13.89-30.22 23.27-32.72 10.08-2.68 12.68 16.59 12.6 22.8-.22 15.98-7.51 34.79-15.05 48.71-4.29 7.94-9.95 12.38-18.42 14.55z';
+export const PACKAGE_BICEP_R =
+  'M526.69 486.31c-9.9-8.61-17.75-33.21-20.65-47.73-1.41-7.06-1.34-29.61 8.58-32.16 10.33-2.66 23.81 25.34 26.6 32.91q2.6 7.04 3.6 16.13 1.62 14.66 1.66 32.28c.03 11.04-16.45 1.48-19.79-1.43z';
 
-/** Front: bicep short head (inner/medial) right arm. */
-export const PATH_BICEP_SHORT_R =
-  'M502 420 Q500 465 506 492 L526 492 Q532 460 528 415 Z';
-/** Front: bicep long head (outer/lateral) right arm. */
-export const PATH_BICEP_LONG_R =
-  'M528 415 Q532 460 526 492 L548 488 Q548 460 540 410 Z';
+export const SPLIT_X_BICEP_L = 202.4;
+export const SPLIT_X_BICEP_R = 525.9;
 
 /**
  * Deltoid sub-division — partition the package's verbatim deltoid slug path
