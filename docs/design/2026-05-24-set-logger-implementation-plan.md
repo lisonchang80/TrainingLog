@@ -24,7 +24,7 @@
 | Discard 路徑（Q9c）| ❌ – 無 header `[⋯]` menu | 全新 |
 | Start UX bottom sheet（Q9a）| ❌ – sheet 已 ship、scope 改大為 ADR-0024 訓練 tab 重構（slice 10g）| 砍 templates tab、3 區塊 + bodyweight 流程改 |
 | Save-back diff 範圍（Q9 Sticky 3 擴展）| ❌ – `src/domain/template/saveBackDiff.ts:194-261` 只看 sets/reps/weight | 擴 set_kind / position / cluster / rest_sec |
-| 歷史詳情頁 HU1/HV1/HE1 layout（Q10）| ❌ – `app/session/[id].tsx:115-222` 仍是 Per exercise / 超級組 / All sets 3 段 + 無 4-button bar + 無 stats panel | 全 reimplement |
+| 歷史詳情頁 HU1/HV1/HE1 layout（Q10）| 🟢 大部分 ship – `app/session/[id].tsx` 已 3176 行、HU1/HV1/HE1 + 4-button bar + 3-tile stats panel + edit mode 全 shipped、僅缺 HR chart (留 slice 13) | Round G 拍板新 Card 12R (persistent snapshot) 吸到 slice 10e |
 | ADR-0012 amendment marker / ADR-0018 amendment marker / ADR-0014 amendment marker | ✅ 已 inline | – |
 | Session.title `v010` 欄 + ADR-0014 backfill | ⚠️ 需要 verify — schema 未列在 v015-v017 中（可能在更早 v009/v010 已落） | check + 加 backfill 若缺 |
 
@@ -257,31 +257,43 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 - **Commit boundary**：1 commit（含 verify migration step）
 - **Risk**：**low**（如果 v010 已落）/ **med**（如果要新 migration）
 
-### Card 12 — 歷史詳情頁 HU1/HV1/HE1 layout（ADR-0019 Q10）
+### Card 12 — 歷史詳情頁 HU1/HV1/HE1 layout（ADR-0019 Q10）— **2026-05-24 大部分已 ship**
 
-- **Status**: ❌ — `app/session/[id].tsx:115-222` 仍是 3 段 + 無 4-button bar + 無 stats panel + 無心率 chart
-- **Decision needed (grill)**: partial — § 4 Round G（HE1「整頁進編輯模式」是 modal-mode in-place 還是 push 新 route；in-session set-row gesture 在 read mode 是否 reuse）
+> **2026-05-24 stale-plan-default 翻盤**：本卡實際 status 跟 plan 描述差很多 — `app/session/[id].tsx` 已 **3176 行**（plan 估 600+）、HU1/HV1/HE1 全 ship、4-button bar shipped、SessionStatsPanel shipped。**只剩 HR chart 待 slice 13 (HealthKit landed)** 才能接真資料。
+>
+> 唯一新 grill 點 = Round G Q1 (force-kill recovery)、拆出 Card 12R 吸收。
+
+- **Status**: 🟢 大部分 ship — 只剩 HR chart 等 slice 13
+- **Shipped 對照表**：
+  - ✅ Header: title + back btn (line 1604-1630)
+  - ✅ 3-tile SessionStatsPanel (line 1700)
+  - ✅ HU1 統一動作清單 (read mode SoloExerciseBlock/ClusterBlock display)
+  - ✅ HV1 全 expanded default (per file note line 134「FULL active-session UI parity」)
+  - ✅ HE1 編輯模式 toggle (enterEditMode/commitEditMode/attemptExitEditMode pattern)
+  - ✅ hideUnchecked switch (slice 10c amendment per ADR-0019 Q10)
+  - ✅ Same-day session ← N/M → switcher (overnight #58)
+  - ❌ HR zone chart — 等 slice 13 HealthKit
+- **Decision needed (grill)**: ✅ Round G grill 已完
+- **Cleanup needed**：本卡狀態描述更新 + Card 10R/12R 已吸收 Round F/G grill 拍板、無 reimplement 工作
+
+### Card 12R — 歷史詳情頁 edit mode persistent snapshot（Round G 拍板落地）
+
+- **Status**: ❌（新卡，2026-05-24 grill 完）
+- **Decision needed (grill)**: ✅ Round G 已完
 - **Code touch list**：
-  - 全 reimplement `app/session/[id].tsx`（445 行 → 估 600+ 行）：
-    - Header：標題 + 週期 · 強度 + 時間範圍 + 編輯 ✏ icon
-    - 4-button bar：`[編輯訓練][儲存模板][另存模板][刪除]`
-    - 4-tile stats panel（時間 / 容量 / 動作數 / 大卡）
-    - Watch-tracked 加心率 chart（slice 11+ landed 後）
-    - HU1 統一「動作清單」依 ordering ASC + solo / cluster inline 混排（既有 buildClusters → 變成 ordering-walking）
-    - HV1 全 expanded default
-    - HE1 [編輯訓練] → 進編輯模式（套 in-session set-row gesture）
-  - 重用 Card 1 / Card 7 的 `<SetRowList>` + `<ClusterCard>` 元件
-  - 新建 `components/session/session-detail-header.tsx`（標題 / 週期 / 時間）
-  - 新建 `components/session/session-action-bar.tsx`（4 button）
-  - 重用 Card 4 的 `<SessionStatsPanel>`
-  - 新建 `components/session/hr-zone-chart.tsx`（slice 13 HK landed 才 wire 真實資料；slice 10f 落地時用 hardcode demo 資料）
-- **Test cases needed** (`tests/domain/sessionDetailOrdering.test.ts`)：
-  1. solo / cluster inline 依 ordering ASC 混排
-  2. HV1 default expanded（無 collapsed state）
-  3. HE1 編輯模式 toggle on / off
-  4. 4-button bar 各按鈕 router push 正確 entry
-- **Commit boundary**：4 commit（header + action bar / stats reuse / HU1 動作清單 / HE1 編輯模式）
-- **Risk**：**high** — 整頁 reimplement、跟 in-session card 元件強依賴 → 必須 Card 1+7 先 ship
+  - 新建 `src/domain/session/editSnapshotPersistence.ts` (pure helpers: snapshot ↔ JSON serialize/deserialize + TTL check)
+  - 改 `app/session/[id].tsx::enterEditMode` → also `setSetting('session_edit_snapshot_${session_id}', { snap, savedAt: Date.now() })`
+  - 改 `app/session/[id].tsx::commitEditMode` + `attemptExitEditMode` (discard path) → also `setSetting(key, null)` (delete)
+  - 加 `useFocusEffect` on mount → `getSetting(key)` → if exists：(a) >7d 舊 → silent delete only; (b) ≤7d → `restoreSessionFromSnapshot(db, snap)` + delete + toast「上次未完成編輯已還原」(per Round F Q2 toast component)
+  - 改 `src/adapters/sqlite/sessionRepository.ts::discardSession` → also delete `session_edit_snapshot_${id}` setting key
+- **Test cases needed** (`tests/domain/editSnapshotPersistence.test.ts` + `tests/integration/editModeRecovery.test.ts`)：
+  1. enterEditMode persist snapshot to app_settings (round-trip serialize)
+  2. commitEditMode delete snapshot key
+  3. attemptExitEditMode discard path delete snapshot key
+  4. discardSession cascade delete snapshot key (FK semantic)
+  5. Stale snapshot (savedAt > 7d) silent discard (no restore)
+- **Commit boundary**：2 commit（pure persistence helpers + tests / wire enterEditMode + focus restore + discardSession cascade）
+- **Risk**：**low-med** — 牽動 enterEditMode/commitEditMode/discardSession 3 條 path、需 cross-cutting test；mitigation: pure helpers 先 ship + integration test 跑全 cycle
 
 ---
 
@@ -445,22 +457,36 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
   4. ~~Cluster swap 算 diff~~ → 不存在
   5. ~~Save-back template-side cluster~~ → 不存在
 
-### Round G — 歷史詳情頁 [編輯訓練] in-place modal vs push new route
+### Round G — 歷史詳情頁編輯模式（topic 重定義 2026-05-24）
 
-- **Background**：ADR-0019 Q10 HE1 「整頁進編輯模式 + header `[✓ 完成編輯]` exit btn + in-session 同款 row gesture 生效」，但 expo-router 慣例 push new route 更乾淨；in-place toggle 要管 unsaved state。
-- **Questions**：
-  1. [編輯訓練] in-place toggle vs push `/session/[id]/edit` 新 route？
-  2. 編輯模式中 user back / app background → 自動保存 vs prompt 確認？
-  3. 編輯模式內 swipe-delete set / 新增 cluster 等動作即時 commit DB vs 累積 dirty state 最後一次 save？
-  4. [✓ 完成編輯] exit 後是否 trigger Save-back diff dialog（跟 in-session finish 同 flow）？
-  5. 編輯模式內可否 [刪除] / [另存模板]？（4-button bar 在編輯模式 hide 還是 disabled）
-- **Recommended answer**：
-  1. in-place toggle（per ADR-0019 Q10 HE1 「整頁進編輯模式」明寫；push new route 是 over-engineering）
-  2. 自動保存（per ADR-0012 「無 commit / cancel 雙態」哲學一致）
-  3. 即時 commit（per (2) 同理）
-  4. ❌ 不 trigger Save-back diff（per ADR-0014 Q7.7-d 「in-session 編輯不觸發 Save-back dialog」），歷史頁編輯維持「身份維度」靠 4-button bar 不靠 finish dialog
-  5. 編輯模式 hide 3 button（保留 [✓ 完成編輯] 取代 [編輯訓練] / 其他 3 btn hide）
-- **Open question count if all default ruled**：0
+> **2026-05-24 stale-plan-default 翻盤**：原 Round G 5 題全 obsolete — Card 12 大部分已 ship、Round G 5 個原 recommended 都已落地（in-place toggle ✅ / back dirty check ✅ / 即時 commit DB + snapshot restore ✅ / Save-back dead N/A / 4-button bar 行為 = Round F Q1 「不動」與原 plan「hide 3 button」相反）。
+>
+> Topic 重定義為「App force-kill 期間 edit mode snapshot 恢復策略」3 sub-decision。
+
+- **拍板摘要**：persistent snapshot to `app_settings` JSON kv + 進 session detail focus 時自動 restore + 7d TTL + discardSession cascade clean + re-enter edit overwrite baseline。歸入 slice 10e bundle、~1-2 commit / ~5 test。
+
+- **3 sub-decision 拍板 ledger**：
+
+  | Sub-Q | 主題 | 拍板 |
+  |---|---|---|
+  | Q1 | Force-kill 期間 snapshot 保留策略 | **A. Persistent snapshot + auto-restore** — `enterEditMode` 時 also `setSetting('session_edit_snapshot_${session_id}', { snap, savedAt: now })`；進 session detail focus 時 check key、有則 restore + clear + toast「上次未完成編輯已還原」；commitEditMode + discard path 也 clear key。**不給 user 3-way prompt** — 直接 always restore，避免心智負擔。 |
+  | Q2a | Snapshot TTL | **a1. 7 天** — restore 時若 snapshot 超過 7 天則 silent discard、不還原（避免 user 1 個月後看到不記得的還原）。 |
+  | Q2b | discardSession 連動清理 | **b1. 連動刪除** `session_edit_snapshot_${id}` key — FK semantic、避免 orphan。 |
+  | Q2c | 同 session 多次 enterEditMode | **c1. 覆蓋新 baseline** — 每次 enterEditMode = 新 snapshot、跟 React state behaviour 一致。 |
+
+- **翻盤的既有拍板（stale-plan-default）**：
+  - ❌ 原 Round G Q5「編輯模式 hide 3 button」→ 已被 Round F Q1「不動」翻盤
+  - ❌ 原 Round G Q4「Save-back diff 不 trigger」→ topic 已不存在（Save-back dead）
+  - ❌ 原 Card 12 plan「445 行 → 估 600+ 行 reimplement」→ stale，實際 `app/session/[id].tsx` 已 **3176 行**、HU1/HV1/HE1 全 ship、只剩 HR chart 待 slice 13
+
+- **Open question count post-grill**：0（implementation 細節：toast 字串、TTL 是否要 expose 為 Settings、restore 失敗 fallback）
+
+- **原 5 Q + recommended（history，全 obsolete）**：
+  1. ~~in-place toggle vs new route~~ → 已 ship in-place
+  2. ~~back / app background 自動保存 vs prompt~~ → back dirty check shipped；app background 由 Q1 持久化 snapshot 涵蓋
+  3. ~~即時 commit DB vs dirty state~~ → 已 ship 即時 commit + snapshot restore
+  4. ~~Save-back diff trigger~~ → Save-back dead，N/A
+  5. ~~4-button bar hide vs disable in edit mode~~ → Round F Q1 已拍「不動」
 
 ---
 
@@ -470,8 +496,8 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
 |---|---|---|---|---|---|
 | **10c**（set logger 主結構）| Card 1 + Card 2 + Card 5 | 7 commit | ~25 test | ~12 file | Round A + B（必須先 grill）|
 | **10d**（rest timer + cluster write path + cluster card）| Card 3 + Card 6 + Card 7 + Card 4 | 7 commit | ~22 test | ~14 file | Round C + D（必須先 grill）|
-| **10e**（lifecycle 全套）| Card 9 + Card 10R + Card 11（Card 8 拆出 → 10g、原 Card 10 deprecated）| ~5 commit | ~14 test | ~10 file | Round F ✅（已完）+ (Card 11 schema verify) |
-| **10f**（歷史頁 layout）| Card 12 | 4 commit | ~6 test | ~8 file | Round G + 依賴 10c/10d 元件 ship |
+| **10e**（lifecycle 全套）| Card 9 + Card 10R + Card 11 + Card 12R（Card 8 拆出 → 10g、原 Card 10/12 deprecated）| ~7 commit | ~19 test | ~12 file | Round F ✅ + Round G ✅（皆已完）+ (Card 11 schema verify) |
+| **10f**（歷史頁 layout）| 🗑️ deprecated — Card 12 大部分已 ship、剩 HR chart 留 slice 13 | — | — | — | — |
 | **10g**（訓練 tab 重構）| ADR-0024 全部範圍（取代原 Card 8）| ~6 commit | ~12 test | ~10 file | Round E ✅（已完）+ 依賴 10c/10d/10e 元件 ship 與否皆可 |
 
 ### Slice 10c bundle 詳細
@@ -514,15 +540,15 @@ a3e72dc fix(anatomy): chest leaves — fix R-leaf winding direction
   - 10g.6 移除 Today pre-prompt（`prePromptVisible/preBwInput/onConfirmPrePrompt/onCancelPrePrompt` 整段砍）
 - Smoke gate：3 區塊 layout / 空白訓練一鍵 / 模板訓練 sheet roundtrip / Settings 體重 quick-update / assisted modal block / Programs CTA navigation
 
-### Slice 10f bundle
+### Slice 10f bundle — **2026-05-24 deprecated**
 
-- 估時：1 週
-- 依賴：必須 10c/10d 的 `<SetRowList>` + `<ClusterCard>` + `<SessionStatsPanel>` 元件已 ship；否則重複造輪子
+- Card 12「歷史詳情頁 HU1/HV1/HE1 layout」大部分已 ship、HR chart 留 slice 13 (HK landed)；Round G 新需求 (force-kill snapshot recovery) 拆 Card 12R 吸到 slice 10e。
+- 整 slice 10f 不再需要、總時程 -1 週。
 
 ### Total estimate
 
-- 5.5 週（落在 ADR-0012 § v1 ship 時程「~5 週」+ ADR-0019 § Slice 10+ ship 範圍「~5-8 週」中段 — 跟 5/23 roadmap 一致）
-- 26 commit / ~81 test / ~52 file touched / 7 grill rounds upstream
+- **4.5 週**（10f 砍除、Round F/G 拍板把 finish dialog + 整頁 reimplement 兩條主 risk 全消除；剩 slice 10c + 10d + 10e + 10g 四 bundle）
+- 估 **~24 commit / ~75 test / ~50 file touched / 7 grill rounds upstream**（Round A-G 全完）
 
 ### Out of scope（slice 10g+ 後續）
 
