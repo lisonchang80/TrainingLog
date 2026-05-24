@@ -57,6 +57,7 @@ import {
   BICEPS_SIBS,
   CHEST_SIBS,
   COLOR_BODY_BASE,
+  COLOR_ABS_DETAIL,
   DELT_SIBS,
   GLUTE_SIBS,
   PACKAGE_BICEP_L,
@@ -65,6 +66,10 @@ import {
   PACKAGE_DELT_BACK_R,
   PACKAGE_DELT_FRONT_L,
   PACKAGE_DELT_FRONT_R,
+  PATH_ABS_LINEA_ALBA,
+  PATH_ABS_TENDINOUS_BOTTOM,
+  PATH_ABS_TENDINOUS_MIDDLE,
+  PATH_ABS_TENDINOUS_TOP,
   PATH_FRONT_DELT_CHEST_FILL_L,
   PATH_FRONT_DELT_CHEST_FILL_R,
   PATH_LOWER_CHEST,
@@ -355,6 +360,41 @@ function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; 
       <Path d={PATH_FRONT_DELT_CHEST_FILL_R} fill={frontDeltFill} />
       <Path d={PATH_MID_DELT_PEAK_FRONT_L} fill={midDeltFill} />
       <Path d={PATH_MID_DELT_PEAK_FRONT_R} fill={midDeltFill} />
+      {/* Abs 6-pack detail — Pattern C unclipped stroke layer. Only render
+          when M_ABS has a quintile (data exists); lines stay inside the abs
+          slug bbox so they don't overlap obliques or body silhouette. */}
+      {mQuintile.has(M_ABS) ? (
+        <>
+          <Path
+            d={PATH_ABS_LINEA_ALBA}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_TOP}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_MIDDLE}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_BOTTOM}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        </>
+      ) : null}
       {/* Head outline — package's border path skips head/hair; trace the
           slug paths once more here as a stroke-only layer. */}
       <Path
