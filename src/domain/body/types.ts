@@ -23,21 +23,9 @@ export interface BodyMetricDraft {
 
 export type UnitPreference = 'kg' | 'lb';
 
-export interface UnitPreferenceState {
-  unit: UnitPreference;
-}
-
 /** Which metric series is currently visible on the Body trend chart. */
 export interface BodyChartVisibility {
   bodyweight: boolean;
   pbf: boolean;
   smm: boolean;
-}
-
-/** A single point on the trend chart. */
-export interface BodyTrendPoint {
-  recorded_at: number;
-  bodyweight_kg: number | null;
-  pbf: number | null;
-  smm_kg: number | null;
 }

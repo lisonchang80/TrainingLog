@@ -6,12 +6,6 @@
  * aggregations. The engine does NOT know about period boundaries or DB.
  */
 
-/** Closed-open ms range [start, end). Period selector → range mapping. */
-export interface Period {
-  start_ms: number;
-  end_ms: number;
-}
-
 /** One per-set record fed into the engine. Pre-joined with mg + volume. */
 export interface StatsSetRecord {
   session_id: string;
