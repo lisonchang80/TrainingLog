@@ -72,21 +72,6 @@ export async function updateSessionTitle(
 }
 
 /**
- * Tiny lookup helper so the UI doesn't need to know the exercise table
- * schema just to drive the ADR-0024 § 4 assisted-modal guard.
- */
-export async function getExerciseLoadType(
-  db: Database,
-  exercise_id: string
-): Promise<'loaded' | 'bodyweight' | 'assisted' | null> {
-  const row = await db.getFirstAsync<{ load_type: 'loaded' | 'bodyweight' | 'assisted' }>(
-    `SELECT load_type FROM exercise WHERE id = ?`,
-    exercise_id
-  );
-  return row?.load_type ?? null;
-}
-
-/**
  * Set the bodyweight snapshot for a session. Caller is responsible for
  * enforcing the lock semantics (see `bodyMetricManager.canWriteBwSnapshot`) —
  * this function blindly overwrites the column. UI gates this behind
