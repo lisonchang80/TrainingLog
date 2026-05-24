@@ -21,6 +21,7 @@ import { v019_set_session_exercise_id } from './schema/v019_set_session_exercise
 import { v020_template_color_backfill } from './schema/v020_template_color_backfill';
 import { v021_drop_template_exercise_rest_sec } from './schema/v021_drop_template_exercise_rest_sec';
 import { v022_program_sub_tag } from './schema/v022_program_sub_tag';
+import { v023_session_title } from './schema/v023_session_title';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -57,6 +58,7 @@ const migrations: Record<number, MigrationFn> = {
   20: v020_template_color_backfill,
   21: v021_drop_template_exercise_rest_sec,
   22: v022_program_sub_tag,
+  23: v023_session_title,
 };
 
 export async function migrate(db: Database): Promise<void> {
