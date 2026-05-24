@@ -405,6 +405,12 @@ export default function TodayScreen() {
           const active = await getActiveSession(db);
           if (!active) return;
           try {
+            // ADR-0019 Round D Amendment Q4 — track lastAppendedId so we can
+            // auto-expand the LAST appended exercise card after the loop.
+            // RS appends → parent (a_id) of the cluster is the visible card.
+            // Solo appends → newSeId is the card. Solos run AFTER RS in this
+            // loop, so a solo wins over an RS if both kinds were picked.
+            let lastAppendedId: string | null = null;
             // Reusable supersets FIRST (per pickerBridge convention) — each
             // explodes into a cluster pair (A + B session_exercise rows
             // linked via parent_id + reusable_superset_id).
@@ -430,6 +436,7 @@ export default function TodayScreen() {
                 new_b_session_exercise_id: b_id,
                 uuid: randomUUID,
               });
+              lastAppendedId = a_id;
             }
             // Solo exercises after.
             for (const exercise_id of payload.exerciseIds) {
@@ -450,8 +457,15 @@ export default function TodayScreen() {
                 uuid: randomUUID,
                 session_exercise_id: newSeId,
               });
+              lastAppendedId = newSeId;
             }
             await refresh();
+            // Round D Amendment Q4 — auto-expand the last appended card
+            // (Q3 c-2 "only-one-expanded" invariant: setting this collapses
+            // any previously-expanded card automatically).
+            if (lastAppendedId) {
+              setExpandedExerciseId(lastAppendedId);
+            }
           } catch (e) {
             Alert.alert(
               'Add failed',

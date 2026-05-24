@@ -532,6 +532,10 @@ export default function SessionDetailScreen() {
       if (!id) return;
       void (async () => {
         try {
+          // ADR-0019 Round D Amendment Q4 — track lastAppendedId so we can
+          // auto-expand the LAST appended exercise card after the loop.
+          // Mirrors the Today screen consumePick (see app/(tabs)/index.tsx).
+          let lastAppendedId: string | null = null;
           // Reusable supersets FIRST (per pickerBridge convention) — each
           // explodes into a cluster pair (A + B session_exercise rows
           // linked via parent_id + reusable_superset_id).
@@ -551,6 +555,7 @@ export default function SessionDetailScreen() {
               new_b_session_exercise_id: b_id,
               uuid: randomUUID,
             });
+            lastAppendedId = a_id;
           }
           // Solo exercises after.
           for (const exercise_id of payload.exerciseIds) {
@@ -566,8 +571,14 @@ export default function SessionDetailScreen() {
               uuid: randomUUID,
               session_exercise_id: newSeId,
             });
+            lastAppendedId = newSeId;
           }
           await load();
+          // Round D Amendment Q4 — auto-expand the last appended card
+          // (Q3 c-2 "only-one-expanded" invariant).
+          if (lastAppendedId) {
+            setExpandedExerciseId(lastAppendedId);
+          }
         } catch (e) {
           Alert.alert(
             t('alert', 'addExerciseFailed'),
