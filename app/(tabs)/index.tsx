@@ -130,6 +130,10 @@ import {
 } from '@/src/domain/program/programManager';
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
 import { resolveTodayPlan, type TodayPlan } from '@/src/domain/training/todayPlan';
+import {
+  STICKY_KEY_LAST_PROGRAM_ID as LAST_PROGRAM_KEY,
+  STICKY_KEY_LAST_SUB_TAG as LAST_SUB_TAG_KEY,
+} from '@/src/domain/training/templateListGroups';
 import { TemplateListSection } from '@/components/training/template-list-section';
 import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
@@ -162,15 +166,6 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
-
-/**
- * Sticky-state keys for the start-template bottom sheet
- * (ADR-0019 §Q9.1a + Q9.2 FB1; reused here for the 訓練 tab 模板訓練 wire-up
- * per ADR-0024). Same `app_settings` keys the deleted Templates tab used —
- * stickiness carries over for users upgrading from the pre-ADR-0024 build.
- */
-const LAST_PROGRAM_KEY = 'start_dialog_last_program_id';
-const LAST_SUB_TAG_KEY = 'start_dialog_last_sub_tag';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
