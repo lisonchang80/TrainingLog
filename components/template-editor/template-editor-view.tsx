@@ -1741,7 +1741,7 @@ export default function TemplateEditorView() {
                             swipeLeftActions={[
                               {
                                 key: 'del-superset-row',
-                                label: '刪',
+                                label: tt('button', 'swipeDelete'),
                                 color: '#FF3B30',
                                 onPress: () =>
                                   deleteSupersetRowAt(parent.id, childIds, i),
@@ -1750,14 +1750,14 @@ export default function TemplateEditorView() {
                             swipeRightActions={[
                               {
                                 key: 'clone-superset-row',
-                                label: '加',
+                                label: tt('button', 'swipeAdd'),
                                 color: '#34C759',
                                 onPress: () =>
                                   cloneSupersetRowAt(parent.id, childIds, i),
                               },
                               {
                                 key: 'note-superset-row',
-                                label: '備註',
+                                label: tt('button', 'swipeNote'),
                                 color: '#007AFF',
                                 onPress: () => {
                                   if (parentSet)
@@ -2499,7 +2499,7 @@ function ExerciseBody({
                   const swipeLeftActions: SwipeAction[] = [
                     {
                       key: 'delete-cluster',
-                      label: '刪',
+                      label: tt('button', 'swipeDelete'),
                       color: '#FF3B30',
                       onPress: () => onDeleteCluster(head.id),
                     },
@@ -2507,13 +2507,13 @@ function ExerciseBody({
                   const swipeRightActions: SwipeAction[] = [
                     {
                       key: 'add-cluster',
-                      label: '加',
+                      label: tt('button', 'swipeAdd'),
                       color: '#34C759',
                       onPress: () => onAddClusterAfter(head.id),
                     },
                     {
                       key: 'note-cluster',
-                      label: '備註',
+                      label: tt('button', 'swipeNote'),
                       color: '#007AFF',
                       onPress: () => onShowSetNote(head),
                     },
@@ -2564,7 +2564,7 @@ function ExerciseBody({
                 const swipeLeftActions: SwipeAction[] = [
                   {
                     key: 'delete-set',
-                    label: '刪',
+                    label: tt('button', 'swipeDelete'),
                     color: '#FF3B30',
                     onPress: () => onDeleteSet(head.id),
                   },
@@ -2572,13 +2572,13 @@ function ExerciseBody({
                 const swipeRightActions: SwipeAction[] = [
                   {
                     key: 'clone-set',
-                    label: '加',
+                    label: tt('button', 'swipeAdd'),
                     color: '#34C759',
                     onPress: () => onCloneSetAfter(head.id),
                   },
                   {
                     key: 'note',
-                    label: '備註',
+                    label: tt('button', 'swipeNote'),
                     color: '#007AFF',
                     onPress: () => onShowSetNote(head),
                   },
