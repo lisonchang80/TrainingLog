@@ -1,9 +1,6 @@
 import React, {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -19,7 +16,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   ToastController,
-  type ShowToastOptions,
   type ToastIcon,
 } from '@/src/domain/ui/toastController';
 
@@ -30,16 +26,9 @@ export type { ShowToastOptions, ToastIcon } from '@/src/domain/ui/toastControlle
  * Shared bottom-floating Toast (ADR-0019 Q10 Round F polish).
  *
  * Used by the session detail page's [儲存模板] success feedback (replacing
- * the previous Alert.alert call — see app/session/[id].tsx). Pattern: wrap
- * the app (or screen) with `<ToastProvider>` and call `useToast().show(msg)`
- * from anywhere inside.
- *
- *   <ToastProvider>
- *     <App />
- *   </ToastProvider>
- *
- *   const toast = useToast();
- *   toast.show('已更新模板');
+ * the previous Alert.alert call — see app/session/[id].tsx). Consumers
+ * create a long-lived `ToastController` (e.g. via `useRef`) and render
+ * `<ToastHost controller={ref.current} />` once at the screen root.
  *
  * Default duration: 2.5s. Icon defaults to a success checkmark — pass
  * `{ icon: 'error' | 'info' | null }` to override.
@@ -50,44 +39,6 @@ export type { ShowToastOptions, ToastIcon } from '@/src/domain/ui/toastControlle
  * controller, drives a fade/translate Animated value, and renders the floating
  * surface. Uses react-native's built-in Animated (no new dependency).
  */
-
-interface ToastContextValue {
-  show: (message: string, opts?: ShowToastOptions) => void;
-  hide: () => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const controllerRef = useRef<ToastController | null>(null);
-  if (controllerRef.current == null) {
-    controllerRef.current = new ToastController();
-  }
-  const controller = controllerRef.current;
-
-  const value = useMemo<ToastContextValue>(
-    () => ({
-      show: (message, opts) => controller.show(message, opts),
-      hide: () => controller.hide(),
-    }),
-    [controller]
-  );
-
-  return (
-    <ToastContext.Provider value={value}>
-      {children}
-      <ToastHost controller={controller} />
-    </ToastContext.Provider>
-  );
-}
-
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (ctx == null) {
-    throw new Error('useToast() must be used inside <ToastProvider>');
-  }
-  return ctx;
-}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Renderer
