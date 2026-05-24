@@ -787,3 +787,47 @@ Slice 10d 接手 ADR-0019 Q2 rest timer 系統收尾。Slice 10c 期間 Agent C 
 - **短音 F1**：`expo-av` 整合 deferred to slice 13；`RestTimerModal` 0 → 仍只震動（`Haptics.notificationAsync` Success）+ auto-dismiss 400ms。
 - **iOS 硬 kill recovery**：app 被 OS low-memory eviction 時 modal React state 整個沒；無 local notification fallback。可接受 v1 trade-off。
 - **`session/[id].tsx` edit mode 行為對稱性**：edit mode tap-✓ 不啟 timer，與 Today 視覺上 mirror 但 timer 行為不同。E2 拍板認可此「語意非對稱」（編輯歷史 ≠ 現場訓練）。
+
+## Round D Amendment (2026-05-24) — set-logger plan finalization
+
+Grill round D（set-logger implementation plan finalization）resolved 4 decisions on 2026-05-24。3 reversed prior plan recommendations after codebase cross-reference at HEAD `01a0a62`；1 aligned with plan。這 4 條的目的是把 plan 文件（`/tmp/2026-05-24-set-logger-implementation-plan.md` 12 implementation card）跟既存 codebase 對齊，避免 plan 描述的入口 / 介面與真實 code 矛盾。
+
+### Q1 — URL param naming = `sessionId=`（**翻盤 plan**）
+
+- **Plan recommendation**：`targetSessionId=`（更明確表達語意 = 「append into THIS session」）
+- **Codebase truth at `01a0a62`**：
+  - `app/(tabs)/library.tsx:75` 已宣告 `useLocalSearchParams<{ mode?: string; sessionId?: string }>()`
+  - `app/session/[id].tsx:1850` 用 `router.push('/exercise-picker?mode=picker&sessionId=${id}')`
+- **Decision**：保留 `sessionId=`。Codebase 為真，plan 文字 `targetSessionId=` 一律 superseded；本 ADR § Q7 第 168 行同步加 inline marker。
+
+### Q2 — Duplicate RS in session = BLOCK（**翻盤 plan**）
+
+- **Plan recommendation**：not block（允許同一個 RS 在 session 內多次 append，方便 user 重複操作）
+- **Codebase truth at `01a0a62`**（3-layer lock 已落定）：
+  - **SQL layer**：`src/adapters/sqlite/sessionRepository.ts:381-395` `appendReusableSupersetToSession` 內 SELECT-then-throw guard，命中即 `throw new Error('duplicate RS in session')`
+  - **UI layer**：picker mode 模式 dim 已用 SupersetCard / ExerciseCard（per `app/(tabs)/library.tsx` slice 10c round 4 #20）
+  - **Test layer**：`tests/db/appendReusableSupersetActiveSessionInterlock.test.ts:184` `.rejects.toThrow(/duplicate RS/i)`
+- **Decision**：BLOCK 三層鎖 enforced。Plan「not block」superseded — user 真要重做 RS，刪掉舊的 + 重新加（per Q5 cluster 「換成員」flow 同一語意）。
+
+### Q3 — Multi-select uniformity 兩 array（**翻盤 plan**）
+
+- **Plan recommendation**：single-shot RS（每次 picker 只能挑 1 個 RS，其他 solo exercise 才支援 multi-select）
+- **Codebase truth at `01a0a62`**：
+  - `src/domain/exercise/pickerBridge.ts` `PickerPayload` 已宣告 `reusableSupersetIds: string[]`（array shape，可承載多筆 RS id）
+  - 本 ADR § Q7 (i) K1 picker UI「tap RS card → 整 RS explode」文字 ambiguous（沒明寫 single vs multi、code 已是 array）
+- **Decision**：`exerciseIds[]` 與 `reusableSupersetIds[]` 兩個 array 都統一 multi-select；UI 完成才 commit（user 按 [完成]）；`consumePick` at `app/(tabs)/index.tsx:347-413` 同時 drain 兩個 array。Plan「single-shot RS」superseded — 與 pickerBridge 既有 array shape 對齊就好，不引入 single/multi 雙模式複雜度。
+
+### Q4 — Auto-expand LAST appended exercise card（**對齊 plan**）
+
+- **Plan recommendation**：multi-pick 後自動展開最後一張新增的卡（user mass-pick 完不必再點開最後一張就能直接 inline-edit）
+- **Codebase truth at `01a0a62`**：`app/(tabs)/index.tsx:347-413` `consumePick` drain 後**不動** `setExpandedExerciseId`，新卡 land 在 collapsed 狀態
+- **Decision**：對齊 plan。`consumePick` 尾段 +1 line `setExpandedExerciseId(lastAppendedId)`（最後一張 appended 卡的 `session_exercise.id`）。與 Q3 c-2「only-one-expanded」一致（自動 collapse 別張、展開新卡這一張）。**此項 plan 與 code 不衝突、純擴充行為**。
+
+### Revision ledger
+
+| Date | Section | Action | Reason |
+|---|---|---|---|
+| 2026-05-24 | Q7 (i) K1 picker URL param naming | ❌ supersede `targetSessionId=` mentions | Codebase truth: `sessionId=` 已 ship（`app/(tabs)/library.tsx:75` + `app/session/[id].tsx:1850`） |
+| 2026-05-24 | Q7 § In-session 動作庫 RS picker 路徑 — duplicate RS behavior | ❌ supersede "do not block" plan | 3-layer lock 已落定（SQL throw + UI dim + integration test） |
+| 2026-05-24 | Q7 (i) K1 picker selection mode | ❌ supersede "single-shot RS" plan | `pickerBridge.PickerPayload.reusableSupersetIds: string[]` 既為 array shape |
+| 2026-05-24 | Slice 10c § Phase 5 consumePick post-append behavior | ➕ extend "auto-expand last appended" | New behavior (no prior decision in ADR-0019 / ADR-0017) |
