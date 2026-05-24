@@ -201,6 +201,10 @@ export async function startSessionFromTemplate(
   }
 
   await db.withTransactionAsync(async () => {
+    // ADR-0024 § 4 — `createSession` auto-pulls the latest body_metric for
+    // the snapshot column when no explicit value is supplied. Keep the
+    // omission deliberate; passing `bodyweight_snapshot_kg: undefined` here
+    // routes through the same auto-pull path.
     await createSession(db, { id: session_id, started_at });
     for (const row of snapshots) {
       await insertSessionExercise(db, { ...row });

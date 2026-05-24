@@ -25,6 +25,8 @@ const MAPPING = {
   'doc.text': 'description',
   'calendar': 'calendar-today',
   'dumbbell': 'fitness-center',
+  // ADR-0024 § 1 — 訓練 tab icon (figure.run on iOS, directions-run on Android/web).
+  'figure.run': 'directions-run',
 } as IconMapping;
 
 /**

@@ -1,17 +1,57 @@
 import type { Database } from '../../db/types';
 import type { Session } from '../../domain/session/types';
+import { listBodyMetrics } from './bodyMetricRepository';
 import { getReusableSupersetWithExercises } from './supersetRepository';
+
+/**
+ * Resolve the bodyweight snapshot for a new Session per ADR-0024 § 4:
+ * "session 開始時 system 自動 snapshot 的 latest body_metric, 無時效性限制".
+ *
+ * Implementation note: `listBodyMetrics` returns rows in `recorded_at ASC`
+ * order (tuned for the body-trend chart consumer), so "latest" is `.at(-1)`,
+ * NOT `.at(0)` as the ADR pseudocode reads. ADR doc follow-up flagged.
+ *
+ * Returns null when the user has no body_metric on record — the assisted
+ * modal (ADR-0024 § 4 補丁) handles the blocking case in the UI layer.
+ */
+async function resolveBwSnapshot(db: Database): Promise<number | null> {
+  const rows = await listBodyMetrics(db);
+  return rows.at(-1)?.bodyweight_kg ?? null;
+}
 
 export async function createSession(
   db: Database,
   args: { id: string; started_at: number; bodyweight_snapshot_kg?: number | null }
 ): Promise<void> {
+  // ADR-0024 § 4 — if the caller didn't supply a snapshot explicitly, pull
+  // the latest body_metric. Passing an explicit `null` (or any number) wins
+  // over auto-pull so test fixtures and migrations stay deterministic.
+  const snapshot =
+    args.bodyweight_snapshot_kg === undefined
+      ? await resolveBwSnapshot(db)
+      : args.bodyweight_snapshot_kg;
+
   await db.runAsync(
     `INSERT INTO session (id, started_at, bodyweight_snapshot_kg) VALUES (?, ?, ?)`,
     args.id,
     args.started_at,
-    args.bodyweight_snapshot_kg ?? null
+    snapshot
   );
+}
+
+/**
+ * Tiny lookup helper so the UI doesn't need to know the exercise table
+ * schema just to drive the ADR-0024 § 4 assisted-modal guard.
+ */
+export async function getExerciseLoadType(
+  db: Database,
+  exercise_id: string
+): Promise<'loaded' | 'bodyweight' | 'assisted' | null> {
+  const row = await db.getFirstAsync<{ load_type: 'loaded' | 'bodyweight' | 'assisted' }>(
+    `SELECT load_type FROM exercise WHERE id = ?`,
+    exercise_id
+  );
+  return row?.load_type ?? null;
 }
 
 /**
