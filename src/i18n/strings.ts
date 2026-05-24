@@ -159,6 +159,9 @@ export const strings = {
       discardChanges: '捨棄修改',
       discardSession: '🚫 放棄訓練',
       discardSimple: '放棄',
+      // Smoke F3 patch — in-session header ⋯ menu option + BodyDataSheet
+      // top bar title.
+      bodyData: '體重資料',
       saveTemplate: '儲存模板',
       saveAsTemplate: '另存模板',
       deleteExercise: '刪除動作',
@@ -240,6 +243,10 @@ export const strings = {
       plannedTraining: '計劃訓練',
       freestyleTraining: '空白訓練',
       templateTraining: '模板訓練',
+      // Smoke F1 patch — in-session plan-list label above today's exercise
+      // cards (app/(tabs)/index.tsx ~line 2161). Distinct from
+      // plannedTraining (idle section header).
+      todayPlan: '今日計畫',
       exerciseDetail: '動作詳情',
       exerciseHistory: '動作歷史',
       exerciseChart: '動作圖表',
@@ -640,6 +647,13 @@ export const strings = {
     /** Tab bar titles. ADR-0024 § 1 — 訓練 tab rename (was 'Today'). */
     tabs: {
       training: '訓練',
+      // Smoke F1 patch — 4 tab bar titles previously hard-coded in
+      // app/(tabs)/_layout.tsx; mirror page.* labels for cross-screen
+      // consistency.
+      programs: '計畫',
+      library: '動作庫',
+      history: '歷史',
+      settings: '設定',
     },
   },
 
@@ -774,6 +788,8 @@ export const strings = {
       discardChanges: 'Discard Changes',
       discardSession: '🚫 Discard Session',
       discardSimple: 'Discard',
+      // Smoke F3 patch — see zh-side note.
+      bodyData: 'Body data',
       saveTemplate: 'Save Template',
       saveAsTemplate: 'Save as Template',
       deleteExercise: 'Delete Exercise',
@@ -853,6 +869,8 @@ export const strings = {
       plannedTraining: 'Planned Training',
       freestyleTraining: 'Freestyle Training',
       templateTraining: 'Templates',
+      // Smoke F1 patch — see zh-side note.
+      todayPlan: "Today's plan",
       exerciseDetail: 'Exercise Details',
       exerciseHistory: 'Exercise History',
       exerciseChart: 'Exercise Chart',
@@ -1227,6 +1245,11 @@ export const strings = {
     /** Tab bar titles. ADR-0024 § 1 — 訓練 tab rename (was 'Today'). */
     tabs: {
       training: 'Training',
+      // Smoke F1 patch — see zh-side note.
+      programs: 'Programs',
+      library: 'Library',
+      history: 'History',
+      settings: 'Settings',
     },
   },
 } as const;

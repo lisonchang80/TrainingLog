@@ -1789,7 +1789,7 @@ export default function TodayScreen() {
   const onHeaderMenuPress = () => {
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        options: [t('common', 'cancel'), 'Body data', t('button', 'discardSession')],
+        options: [t('common', 'cancel'), t('button', 'bodyData'), t('button', 'discardSession')],
         cancelButtonIndex: 0,
         destructiveButtonIndex: 2,
       },
@@ -2158,7 +2158,7 @@ export default function TodayScreen() {
 
           {plan.length > 0 && (
             <>
-              <Text style={styles.label}>Today&apos;s plan</Text>
+              <Text style={styles.label}>{t('page', 'todayPlan')}</Text>
               <View style={styles.planList}>
                 {(() => {
                   // ADR-0019 Q16 (slice 10c Phase 7): cluster session_exercise

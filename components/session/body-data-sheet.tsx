@@ -97,7 +97,7 @@ export function BodyDataSheet({
                 {t('common', 'cancel')}
               </Text>
             </Pressable>
-            <Text style={styles.topBarTitle}>Body data</Text>
+            <Text style={styles.topBarTitle}>{t('button', 'bodyData')}</Text>
             <Pressable onPress={onSave} hitSlop={8} disabled={busy}>
               <Text
                 style={[
