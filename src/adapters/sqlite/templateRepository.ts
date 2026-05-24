@@ -34,9 +34,6 @@ export interface TemplateSummary extends TemplateRow {
   exerciseCount: number;
 }
 
-/** Classification derived from (program_id, sub_tag), per ADR-0003. */
-type TemplateKind = 'main' | 'sub' | 'free';
-
 interface TemplateExerciseRow {
   id: string;
   template_id: string;
@@ -303,27 +300,6 @@ export async function attachTemplateToProgram(
     ts,
     args.template_id
   );
-}
-
-/**
- * Classify a template as main / sub / free.
- *   - free: no program_id
- *   - sub:  program_id set AND another template in the same program shares this name
- *   - main: program_id set AND it's the only template with this name in the program
- *           (or the canonical "primary" — for slice 5 we treat the first attached as main)
- *
- * Slice 5 keeps this simple: any Template with program_id set is "main" for its
- * (name, program_id, sub_tag) tuple unless a sibling with the same name shares
- * the program — then ALL siblings (including this one) are "sub" except the
- * one matching its program's "primary cell" (the first cell using this name).
- * For now, the simpler heuristic: free vs (main + sub) — UI can refine later.
- */
-export function classifyTemplate(args: {
-  program_id: string | null;
-  sameNameSiblingCount: number;
-}): TemplateKind {
-  if (args.program_id == null) return 'free';
-  return args.sameNameSiblingCount > 1 ? 'sub' : 'main';
 }
 
 /**

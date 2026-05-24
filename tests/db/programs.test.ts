@@ -1,7 +1,6 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import {
   attachTemplateToProgram,
-  classifyTemplate,
   createTemplate,
   listTemplates,
 } from '../../src/adapters/sqlite/templateRepository';
@@ -175,22 +174,3 @@ describe('programRepository', () => {
   });
 });
 
-describe('templateRepository — classifyTemplate', () => {
-  it('returns free when no program', () => {
-    expect(
-      classifyTemplate({ program_id: null, sameNameSiblingCount: 1 })
-    ).toBe('free');
-  });
-
-  it('returns main when in program with no siblings', () => {
-    expect(
-      classifyTemplate({ program_id: 'p1', sameNameSiblingCount: 1 })
-    ).toBe('main');
-  });
-
-  it('returns sub when in program with same-name siblings', () => {
-    expect(
-      classifyTemplate({ program_id: 'p1', sameNameSiblingCount: 2 })
-    ).toBe('sub');
-  });
-});
