@@ -43,6 +43,23 @@ export async function setSetting<T>(
   );
 }
 
+/**
+ * Remove an `app_settings` row outright.
+ *
+ * Used by Card 12R `editSnapshotPersistence` — commit / discard /
+ * focus-restore / discardSession-cascade paths all need to drop the
+ * `session_edit_snapshot_${id}` key cleanly (vs writing `"null"`,
+ * which would leave a phantom row + confuse later getSetting callers).
+ *
+ * No-op when the key doesn't exist (DELETE is idempotent).
+ */
+export async function deleteSetting(
+  db: Database,
+  key: string
+): Promise<void> {
+  await db.runAsync(`DELETE FROM app_settings WHERE key = ?`, key);
+}
+
 /** Returns the user's unit preference, defaulting to 'kg' when unset. */
 export async function getUnitPreference(db: Database): Promise<UnitPreference> {
   const v = await getSetting<UnitPreference>(db, UNIT_KEY);

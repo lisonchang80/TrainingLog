@@ -465,6 +465,8 @@ export const strings = {
       inProgress: '· 進行中',
       todayOutsideProgram: '今天不在 Program 範圍內',
       hideUnchecked: '隱藏未打勾',
+      // Card 12R / Round G — force-kill recovery toast on session detail focus.
+      editSnapshotRestored: '上次未完成編輯已還原',
       // cluster A/B switcher disabled hints
       alreadyASide: '已是 A 側',
       alreadyBSide: '已是 B 側',
@@ -1056,6 +1058,8 @@ export const strings = {
       inProgress: '· In progress',
       todayOutsideProgram: 'Today is outside the Program range',
       hideUnchecked: 'Hide unchecked',
+      // Card 12R / Round G — force-kill recovery toast on session detail focus.
+      editSnapshotRestored: 'Restored your unfinished edits',
       alreadyASide: 'Already A side',
       alreadyBSide: 'Already B side',
       excludeSupersets: 'Exclude supersets',

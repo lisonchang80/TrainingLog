@@ -97,6 +97,17 @@ import {
   computeDeleteConfirmMessage,
   shouldShowEditChip,
 } from '@/src/domain/session/sessionDetailLabels';
+import {
+  editSnapshotKey,
+  isEditSnapshotStale,
+  validateStoredEditSnapshot,
+  type StoredEditSnapshot,
+} from '@/src/domain/session/editSnapshotPersistence';
+import {
+  deleteSetting,
+  getSetting,
+  setSetting,
+} from '@/src/adapters/sqlite/settingsRepository';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
@@ -365,6 +376,21 @@ export default function SessionDetailScreen() {
       }
       setEditSnapshot(snap);
       setEditMode(true);
+      // Card 12R / Round G Q1 — also persist to app_settings so an App
+      // force-kill mid-edit can be recovered on next focus. Q2c 「覆蓋
+      // 新 baseline」: setSetting uses INSERT OR REPLACE so each
+      // enterEditMode overwrites any previous snapshot. Fire-and-forget;
+      // if persist throws we still allow the in-memory edit to proceed.
+      try {
+        await setSetting<StoredEditSnapshot>(db, editSnapshotKey(id), {
+          snap,
+          savedAt: Date.now(),
+        });
+      } catch (persistErr) {
+        // Non-fatal — log only. Worst case: this edit session won't be
+        // recoverable on force-kill, but the edit itself proceeds.
+        console.warn('[Card 12R] persist editSnapshot failed:', persistErr);
+      }
     } catch (e) {
       Alert.alert(t('alert', 'editFailed'), e instanceof Error ? e.message : String(e));
     }
@@ -374,7 +400,14 @@ export default function SessionDetailScreen() {
     // Edit ops 已陸續直寫 DB；commit 等同清掉 snapshot 即可。
     setEditSnapshot(null);
     setEditMode(false);
-  }, []);
+    // Card 12R — commit path 也清掉持久化 snapshot，避免下次 focus 又
+    // restore 到 commit 前的 baseline。
+    if (id) {
+      deleteSetting(db, editSnapshotKey(id)).catch((e) => {
+        console.warn('[Card 12R] commit deleteSetting failed:', e);
+      });
+    }
+  }, [db, id]);
 
   // attemptExitEditMode：return true 表示「已 (或將) 退出 edit mode」、false
   // 表示「使用者選擇繼續編輯，沒退出」。caller 可依此決定要不要繼續做後續事
@@ -387,6 +420,15 @@ export default function SessionDetailScreen() {
         onExited();
         return;
       }
+      // Card 12R: persistent snapshot 在所有 exit path 都要清掉
+      // (silent no-dirty / Alert discard / commit) — 避免下次 focus
+      // restore 到已經被使用者放棄/接受的 baseline。
+      const clearPersistedSnapshot = () => {
+        if (!id) return;
+        deleteSetting(db, editSnapshotKey(id)).catch((e) => {
+          console.warn('[Card 12R] exit deleteSetting failed:', e);
+        });
+      };
       const currentState = {
         session: {
           started_at: session?.started_at ?? editSnapshot.session.started_at,
@@ -438,6 +480,7 @@ export default function SessionDetailScreen() {
       if (!sessionSnapshotDirty(currentState, snapState)) {
         setEditSnapshot(null);
         setEditMode(false);
+        clearPersistedSnapshot();
         onExited();
         return;
       }
@@ -462,13 +505,14 @@ export default function SessionDetailScreen() {
               }
               setEditSnapshot(null);
               setEditMode(false);
+              clearPersistedSnapshot();
               onExited();
             },
           },
         ],
       );
     },
-    [editSnapshot, session, sessionExercises, sets, db, load],
+    [editSnapshot, session, sessionExercises, sets, db, id, load],
   );
 
   // Drain picker mailbox on focus — when [+ 動作] flow returns from
@@ -532,6 +576,59 @@ export default function SessionDetailScreen() {
         }
       })();
     }, [db, id, load]),
+  );
+
+  // ── Card 12R / Round G — force-kill recovery for edit mode snapshot ──
+  // 如果上次 enterEditMode 後 App 被 force-kill / OS 殺 process，閉到
+  // commit/discard 兩個清理 path、persistent snapshot 會殘留在 app_settings.
+  // 進 detail focus 時：
+  //   1. 讀 session_edit_snapshot_${id} key
+  //   2. 若 stale (>=7 天 per Q2a) → silent delete only
+  //   3. 若 fresh → restoreSessionFromSnapshot + delete key + load() + toast
+  //   4. 一律「不」自動進 edit mode，user 可重新 [編] 進入
+  //
+  // 用 ref 保證 per-id 只跑一次（避免 focus 重複觸發），且若 user
+  // 此刻已在 edit mode（其他途徑進入）不會 silently overwrite 他的編輯。
+  const snapshotRestoreCheckedRef = useRef<string | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      if (snapshotRestoreCheckedRef.current === id) return;
+      snapshotRestoreCheckedRef.current = id;
+      void (async () => {
+        let stored: StoredEditSnapshot | null = null;
+        try {
+          const raw = await getSetting<unknown>(db, editSnapshotKey(id));
+          stored = validateStoredEditSnapshot(raw);
+        } catch (e) {
+          console.warn('[Card 12R] read editSnapshot failed:', e);
+          return;
+        }
+        if (!stored) return;
+        if (isEditSnapshotStale(stored.savedAt, Date.now())) {
+          // >7d — silent discard, never restore (per Q2a).
+          await deleteSetting(db, editSnapshotKey(id)).catch(() => {});
+          return;
+        }
+        if (editMode) {
+          // User 此刻已在 edit mode（罕見：跳離後快速回來且 enterEditMode
+          // 已重設新 snapshot）— 不要 silently overwrite，本次跳過、留鑰
+          // 給之後再 check 一輪。
+          snapshotRestoreCheckedRef.current = null;
+          return;
+        }
+        try {
+          await restoreSessionFromSnapshot(db, stored.snap);
+          await deleteSetting(db, editSnapshotKey(id));
+          await load();
+          toastRef.current?.show(t('status', 'editSnapshotRestored'), {
+            icon: 'info',
+          });
+        } catch (e) {
+          console.warn('[Card 12R] restore editSnapshot failed:', e);
+        }
+      })();
+    }, [db, id, editMode, load]),
   );
 
   const stats = useMemo(() => {

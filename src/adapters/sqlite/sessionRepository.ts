@@ -1,5 +1,6 @@
 import type { Database } from '../../db/types';
 import type { Session } from '../../domain/session/types';
+import { editSnapshotKey } from '../../domain/session/editSnapshotPersistence';
 import { listBodyMetrics } from './bodyMetricRepository';
 import { getReusableSupersetWithExercises } from './supersetRepository';
 
@@ -527,6 +528,14 @@ export async function discardSession(
       session_id
     );
     await db.runAsync(`DELETE FROM session WHERE id = ?`, session_id);
+    // Card 12R / Round G Q2b cascade — discardSession 等於「該 session
+    // 從未發生」，因此也清掉可能殘留的 edit-mode snapshot row（FK semantic、
+    // 避免 orphan）。setSetting / deleteSetting 用 INSERT OR REPLACE /
+    // DELETE，沒有 row 也是 no-op，不會 throw。
+    await db.runAsync(
+      `DELETE FROM app_settings WHERE key = ?`,
+      editSnapshotKey(session_id)
+    );
   });
 }
 
