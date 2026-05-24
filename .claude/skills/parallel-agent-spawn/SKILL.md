@@ -85,7 +85,18 @@ Restore each test in the SAME commit as the impl it tests. This keeps every comm
 
 Don't try to apply the agent's patch directly — context won't match. Instead:
 
-1. Read agent's diff for **intent** only: `git show <agent-branch> -- <path>`
+1. Read agent's diff for **intent** only — but use the focused diff against the agent's OWN parent, not against your current tip:
+
+   ```bash
+   # Focused: shows ONLY the semantic change the agent made.
+   git diff <agent-commit>^..<agent-commit> -- <path> > /tmp/intent.patch
+
+   # Misleading: includes every change the trunk made between merge-base and tip.
+   git diff HEAD..<agent-commit> -- <path>
+   ```
+
+   Real case (TrainingLog 2026-05-24, Slice 10g Phase 4 big): agent commit was 295/-153 LOC against its parent — readable in one pass. The same commit against current tip was 525/-2668 because the trunk had advanced ~100 commits since the agent's parent. The 525/-2668 diff would have looked like "this commit deletes Card 12R + Card 10R + body row" which is just trunk drift, not agent intent.
+
 2. Read CURRENT file to understand current structure
 3. Write your own edit against current state, reusing the extracted new files as building blocks (helpers, components, etc.)
 4. Commit logical unit, let pre-commit hook gate (tsc + jest)
@@ -107,4 +118,4 @@ If `git diff --stat` shows the agent's changes are mostly modifications to evolv
 ## References
 
 - `.claude/skills/overnight-parallel-agents/SKILL.md` — prevention rules (item #23 base-check prompt template, item #24 broad-search collision pattern)
-- TrainingLog 2026-05-24 incident: Card 10R agent A + Slice 10g agent B salvaged via this recipe; salvage commits `61f0d79..16d043a` recovered 14 of 17 cherry-picks + 6 manual-redo commits; index.tsx idle 3-section was scoped out as Phase 4 big (separate session).
+- TrainingLog 2026-05-24 incident: Card 10R agent A + Slice 10g agent B salvaged via this recipe; salvage commits `61f0d79..16d043a` recovered 14 of 17 cherry-picks + 6 manual-redo commits. Phase 4 big (index.tsx idle 3-section, the largest existing-file modification, deferred) was completed same day in a separate session as commit `973c50a`, using the Step 5 focused-diff technique above — agent's 295/-153 LOC intent was ported manually in ~15 min vs the original 40-60 min estimate.
