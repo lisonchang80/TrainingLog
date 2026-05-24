@@ -621,25 +621,32 @@ function SideContainer({
         })}
       </Svg>
 
-      {/* Muscle name labels — plain Text, no background. */}
-      {items.map((item) => (
-        <View
-          key={`label-${item.m}`}
-          style={[
-            styles.muscleLabel,
-            {
-              left: labelLeft,
-              top: item.labelY - LABEL_HEIGHT / 2,
-              alignItems: labelOnLeft ? 'flex-end' : 'flex-start',
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={{ fontSize: LABEL_FONT_SIZE, color: COLOR_LABEL_TEXT }}>
-            {tMuscle(item.m)}
-          </Text>
-        </View>
-      ))}
+      {/* Muscle name labels — plain Text, no background. Text colour mirrors
+          the muscle's quintile fill (legend swatch colour) so the user can
+          read frequency at a glance from the label itself. Untrained
+          muscles fall back to neutral grey for legibility. */}
+      {items.map((item) => {
+        const q = mQuintile.get(item.m);
+        const textColor = q == null ? COLOR_LABEL_TEXT : QUINTILE_COLORS[q];
+        return (
+          <View
+            key={`label-${item.m}`}
+            style={[
+              styles.muscleLabel,
+              {
+                left: labelLeft,
+                top: item.labelY - LABEL_HEIGHT / 2,
+                alignItems: labelOnLeft ? 'flex-end' : 'flex-start',
+              },
+            ]}
+            pointerEvents="none"
+          >
+            <Text style={{ fontSize: LABEL_FONT_SIZE, color: textColor, fontWeight: '600' }}>
+              {tMuscle(item.m)}
+            </Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
