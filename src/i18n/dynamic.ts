@@ -59,6 +59,23 @@ export function tUsedNSessions(n: number): string {
   return isEn() ? `· Used in ${n} sessions` : `· 已使用 ${n} 次`;
 }
 
+/**
+ * 訓練 tab 計劃訓練 row 的「N 個動作」副標 (ADR-0024 § 2.a)。
+ * Plural form left as singular `exercise` only when n === 1 in en.
+ */
+export function tExerciseCount(n: number): string {
+  if (isEn()) return n === 1 ? `${n} exercise` : `${n} exercises`;
+  return `${n} 個動作`;
+}
+
+/**
+ * 訓練 tab 計劃訓練 row 的 accessibilityLabel (ADR-0024 § 2.a)。
+ * 例：`開始今天計劃：PPL Push` / `Start today's plan: PPL Push`.
+ */
+export function tA11yStartPlanned(name: string): string {
+  return isEn() ? `Start today's plan: ${name}` : `開始今天計劃：${name}`;
+}
+
 /** Inline month-only label on stats x-axis. `5月` / `May`. */
 export function tMonthOfYear(month1To12: number): string {
   if (isEn()) {

@@ -147,6 +147,11 @@ export const strings = {
       addExercisePlain: '新增動作',
       addCustomExercise: '新增自訂動作',
       addRecord: '新增記錄',
+      // ADR-0024 § 2.b — 訓練 tab 空白訓練 CTA + busy 狀態 + 計劃訓練 empty CTA。
+      startFreestyle: '+ 開始空白訓練',
+      starting: '開始中…',
+      gotoPrograms: '前往 Programs',
+      createOrActivateProgram: '建立 / 啟用計劃',
       editExercise: '編輯動作',
       editSession: '編輯訓練',
       editSuperset: '編輯超級組',
@@ -228,6 +233,10 @@ export const strings = {
       session: 'Session',
       library: '動作庫',
       history: '訓練紀錄',
+      // ADR-0024 § 2 — 訓練 tab idle 三區塊 section headers.
+      plannedTraining: '計劃訓練',
+      freestyleTraining: '空白訓練',
+      templateTraining: '模板訓練',
       exerciseDetail: '動作詳情',
       exerciseHistory: '動作歷史',
       exerciseChart: '動作圖表',
@@ -464,6 +473,9 @@ export const strings = {
       restDay: '休息日',
       inProgress: '· 進行中',
       todayOutsideProgram: '今天不在 Program 範圍內',
+      // ADR-0024 § 2.a — 訓練 tab 計劃訓練 區塊狀態文案。
+      noActiveProgram: '沒有啟用的計劃',
+      todayRest: '今天休息 💤',
       hideUnchecked: '隱藏未打勾',
       // Card 12R / Round G — force-kill recovery toast on session detail focus.
       editSnapshotRestored: '上次未完成編輯已還原',
@@ -744,6 +756,11 @@ export const strings = {
       addExercisePlain: 'Add Exercise',
       addCustomExercise: 'Add Custom Exercise',
       addRecord: 'Add Record',
+      // ADR-0024 § 2.b — 訓練 tab freestyle CTA + busy state + planned empty CTA.
+      startFreestyle: '+ Start Freestyle',
+      starting: 'Starting…',
+      gotoPrograms: 'Go to Programs',
+      createOrActivateProgram: 'Create / activate program',
       editExercise: 'Edit Exercise',
       editSession: 'Edit Session',
       editSuperset: 'Edit Superset',
@@ -823,6 +840,10 @@ export const strings = {
       session: 'Session',
       library: 'Library',
       history: 'History',
+      // ADR-0024 § 2 — Training tab idle 3-section headers.
+      plannedTraining: 'Planned Training',
+      freestyleTraining: 'Freestyle Training',
+      templateTraining: 'Templates',
       exerciseDetail: 'Exercise Details',
       exerciseHistory: 'Exercise History',
       exerciseChart: 'Exercise Chart',
@@ -1057,6 +1078,9 @@ export const strings = {
       restDay: 'Rest Day',
       inProgress: '· In progress',
       todayOutsideProgram: 'Today is outside the Program range',
+      // ADR-0024 § 2.a — Training tab planned-training section state copy.
+      noActiveProgram: 'No active program',
+      todayRest: 'Rest day 💤',
       hideUnchecked: 'Hide unchecked',
       // Card 12R / Round G — force-kill recovery toast on session detail focus.
       editSnapshotRestored: 'Restored your unfinished edits',

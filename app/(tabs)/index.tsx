@@ -102,10 +102,7 @@ import {
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
-import {
-  latestPerMetric,
-  validateBodyMetric,
-} from '@/src/domain/body/bodyMetricManager';
+import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
 import type { BodyMetric, UnitPreference } from '@/src/domain/body/types';
 import {
   formatWeight,
@@ -119,6 +116,9 @@ import {
   utcMsToIsoDate,
 } from '@/src/domain/program/programManager';
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
+import { resolveTodayPlan, type TodayPlan } from '@/src/domain/training/todayPlan';
+import { TemplateListSection } from '@/components/training/template-list-section';
+import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import {
   IDLE,
   canRecordSet,
@@ -136,8 +136,9 @@ import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
 import type { BucketKey, PRDelta } from '@/src/domain/pr/types';
 import {
   t,
+  tA11yStartPlanned,
+  tExerciseCount,
   tExerciseNoteHeader,
-  tLastBodyweightLine,
   tPrDeltaLine,
   tRemoveExerciseFromSessionPrompt,
   tRemoveSupersetFromSessionPrompt,
@@ -180,8 +181,6 @@ export default function TodayScreen() {
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
   const [bwSnapshotKg, setBwSnapshotKg] = useState<number | null>(null);
-  const [prePromptVisible, setPrePromptVisible] = useState(false);
-  const [preBwInput, setPreBwInput] = useState('');
   // Body data editor sheet (slice 10c overnight #4 第 3 點) — replaces the
   // previous inline panel. Opened from header ⋯ menu「Body data」.
   const [bodySheetVisible, setBodySheetVisible] = useState(false);
@@ -413,69 +412,61 @@ export default function TodayScreen() {
     }, [refresh, db])
   );
 
-  const onShowPrePrompt = () => {
-    // Pre-fill with latest bw if available, in user's display unit.
-    const latest = latestPerMetric(bodyMetrics);
-    setPreBwInput(
-      latest.bodyweight_kg != null
-        ? kgToDisplay(latest.bodyweight_kg, unit).toFixed(1)
-        : ''
-    );
-    setPrePromptVisible(true);
-  };
-
-  const onCancelPrePrompt = () => {
-    setPrePromptVisible(false);
-    setPreBwInput('');
-  };
-
-  const onConfirmPrePrompt = async (skipBw: boolean) => {
-    let bwKg: number | null = null;
-    if (!skipBw) {
-      bwKg = parseWeightInput(preBwInput, unit);
-      if (bwKg == null) {
-        Alert.alert(t('alert', 'invalidBodyweight'), t('alert', 'enterPositiveOrSkip'));
-        return;
-      }
-      if (bwKg <= 0 || bwKg > 500) {
-        Alert.alert(t('alert', 'invalidBodyweight'), t('alert', 'mustBeWithin500Kg'));
-        return;
-      }
-    }
+  /**
+   * Start a freestyle session — ADR-0024 § 2.b. No more pre-prompt: we just
+   * createSession; the adapter auto-pulls the latest body_metric as the
+   * snapshot (slice 10g.5). If the user has no body_metric on record the
+   * snapshot stays null until an assisted exercise gets appended (10g.6
+   * modal block).
+   */
+  const onStartFreestyle = async () => {
     setBusy(true);
     try {
       const id = randomUUID();
       const started_at = Date.now();
-      await createSession(db, {
-        id,
-        started_at,
-        bodyweight_snapshot_kg: bwKg,
-      });
-      // If user supplied bw, also record as a body_metric so the trend chart
-      // sees it. Skip mode doesn't write a body_metric.
-      if (bwKg != null) {
-        await insertBodyMetric(
-          db,
-          {
-            recorded_at: started_at,
-            bodyweight_kg: bwKg,
-            pbf: null,
-            smm_kg: null,
-          },
-          randomUUID
-        );
-      }
+      await createSession(db, { id, started_at });
       setSessionState(startState({ id, started_at }));
       setSetsInSession([]);
       setPlan([]);
-      setBwSnapshotKg(bwKg);
-      setPrePromptVisible(false);
-      setPreBwInput('');
-      // Reload body metrics so latestPerMetric reflects the new entry.
-      const bms = await listBodyMetrics(db);
-      setBodyMetrics(bms);
+      // Re-read so we surface the snapshot the adapter auto-pulled (latest
+      // body_metric or null).
+      const after = await getActiveSession(db);
+      setBwSnapshotKg(after?.bodyweight_snapshot_kg ?? null);
     } catch (e) {
-      Alert.alert('Could not start session', e instanceof Error ? e.message : String(e));
+      Alert.alert(
+        t('alert', 'cannotStartSession'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Start the active program's today template — ADR-0024 § 2.a. Unlike the
+   * 模板訓練 row (which needs StartTemplateSheet because program/sub_tag must
+   * be picked), here both come from the program cell — atomic start, no
+   * sheet. Sets the snapshot via the same adapter auto-pull as freestyle.
+   */
+  const onStartPlanned = async (
+    template_id: string,
+    program_id: string | null,
+    sub_tag: string | null,
+  ) => {
+    setBusy(true);
+    try {
+      await startSessionFromTemplate(db, {
+        template_id,
+        uuid: randomUUID,
+        program_id: program_id ?? undefined,
+        sub_tag: sub_tag ?? null,
+      });
+      await refresh();
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotStartSession'),
+        e instanceof Error ? e.message : String(e),
+      );
     } finally {
       setBusy(false);
     }
@@ -1656,96 +1647,113 @@ export default function TodayScreen() {
   }
 
   if (sessionState.status === 'idle') {
-    const latest = latestPerMetric(bodyMetrics);
+    // ADR-0024 § 2 三區塊：計劃訓練 / 空白訓練 / 模板訓練
+    const todayPlan: TodayPlan = resolveTodayPlan({
+      active: activeProgram,
+      today: utcMsToIsoDate(Date.now()),
+      templatesById,
+    });
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.flex}>
-          <ScrollView
-            contentContainerStyle={styles.idleBody}
-            keyboardShouldPersistTaps="handled">
-            <Text style={styles.heading}>Today</Text>
-            {programBanner}
-            {!prePromptVisible ? (
-              <>
-                <Text style={styles.idleHint}>No session in progress.</Text>
+        <ScrollView
+          contentContainerStyle={styles.idleScroll}
+          keyboardShouldPersistTaps="handled">
+          <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+          {programBanner}
+
+          {/* (a) 計劃訓練 — ADR-0024 § 2.a */}
+          <View style={styles.section}>
+            <Text style={styles.sectionHeading}>
+              {t('page', 'plannedTraining')}
+            </Text>
+            {todayPlan.kind === 'no-program' && (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyTextBlock}>
+                  {t('status', 'noActiveProgram')}
+                </Text>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={onShowPrePrompt}
-                  disabled={busy}
+                  accessibilityLabel={t('button', 'gotoPrograms')}
+                  onPress={() => router.push('/programs')}
                   style={({ pressed }) => [
-                    styles.startBtn,
-                    busy && styles.btnDisabled,
+                    styles.secondaryBtn,
                     pressed && styles.btnPressed,
                   ]}>
-                  <Text style={styles.startBtnText}>Start Session</Text>
+                  <Text style={styles.secondaryBtnText}>
+                    {t('button', 'createOrActivateProgram')}
+                  </Text>
                 </Pressable>
-              </>
-            ) : (
-              <View style={styles.prePromptBox}>
-                <Text style={styles.prePromptHeading}>Pre-session</Text>
-                <Text style={styles.prePromptHint}>
-                  {t('status', 'prePromptBwHint')}
-                  {latest.bodyweight_kg != null
-                    ? tLastBodyweightLine(formatWeight(latest.bodyweight_kg, unit))
-                    : ''}
-                </Text>
-                <Text style={styles.label}>{t('domain', 'bodyweight')} ({unit})</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="decimal-pad"
-                  value={preBwInput}
-                  onChangeText={setPreBwInput}
-                  placeholder={
-                    latest.bodyweight_kg != null
-                      ? kgToDisplay(latest.bodyweight_kg, unit).toFixed(1)
-                      : '70.0'
-                  }
-                  placeholderTextColor="#999"
-                  autoFocus
-                />
-                <View style={styles.prePromptActionsWrapper}>
-                  <View style={styles.prePromptSecondaryRow}>
-                    <Pressable
-                      onPress={onCancelPrePrompt}
-                      disabled={busy}
-                      style={({ pressed }) => [
-                        styles.secondaryBtn,
-                        busy && styles.btnDisabled,
-                        pressed && styles.btnPressed,
-                      ]}>
-                      <Text style={styles.secondaryBtnText}>{t('common', 'cancel')}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => onConfirmPrePrompt(true)}
-                      disabled={busy}
-                      style={({ pressed }) => [
-                        styles.secondaryBtn,
-                        busy && styles.btnDisabled,
-                        pressed && styles.btnPressed,
-                      ]}>
-                      <Text style={styles.secondaryBtnText}>{t('common', 'skip')}</Text>
-                    </Pressable>
-                  </View>
-                  <Pressable
-                    onPress={() => onConfirmPrePrompt(false)}
-                    disabled={busy}
-                    style={({ pressed }) => [
-                      styles.startBtn,
-                      styles.prePromptConfirmBtn,
-                      busy && styles.btnDisabled,
-                      pressed && styles.btnPressed,
-                    ]}>
-                    <Text style={styles.startBtnText}>
-                      {busy ? 'Starting…' : 'Confirm & Start'}
-                    </Text>
-                  </Pressable>
-                </View>
               </View>
             )}
-          </ScrollView>
-        </KeyboardAvoidingView>
+            {todayPlan.kind === 'rest' && (
+              <View style={styles.restRow}>
+                <Text style={styles.restRowText}>
+                  {t('status', 'todayRest')}
+                </Text>
+              </View>
+            )}
+            {todayPlan.kind === 'template' && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={tA11yStartPlanned(todayPlan.template.name)}
+                onPress={() =>
+                  onStartPlanned(
+                    todayPlan.template.id,
+                    activeProgram?.program.id ?? null,
+                    todayPlan.cell.sub_tag,
+                  )
+                }
+                disabled={busy}
+                style={({ pressed }) => [
+                  styles.plannedRow,
+                  busy && styles.btnDisabled,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.plannedRowName}>
+                  {todayPlan.template.name}
+                </Text>
+                <Text style={styles.plannedRowDetails}>
+                  {tExerciseCount(todayPlan.template.exerciseCount)}
+                  {todayPlan.cell.sub_tag ? ` · ${todayPlan.cell.sub_tag}` : ''}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* (b) 空白訓練 — ADR-0024 § 2.b */}
+          <View style={styles.section}>
+            <Text style={styles.sectionHeading}>
+              {t('page', 'freestyleTraining')}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('button', 'startFreestyle')}
+              onPress={onStartFreestyle}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.startBtn,
+                busy && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.startBtnText}>
+                {busy ? t('button', 'starting') : t('button', 'startFreestyle')}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* (c) 模板訓練 — ADR-0024 § 2.c */}
+          {/*
+            Tap a row → open the editor for now; the start-template sheet
+            (ADR-0024 § 2.c) lands in a follow-up slice. Keeping the
+            onPickTemplate wired makes the future swap a one-liner.
+          */}
+          <TemplateListSection
+            heading={t('page', 'templateTraining')}
+            onPickTemplate={(tpl) => {
+              router.push(`/template/${tpl.id}`);
+            }}
+          />
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -1758,7 +1766,7 @@ export default function TodayScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <View style={styles.sessionHeader}>
-          <Text style={styles.heading}>Today</Text>
+          <Text style={styles.heading}>{t('tabs', 'training')}</Text>
           <View style={styles.sessionHeaderActions}>
             <Pressable
               accessibilityRole="button"
@@ -2832,10 +2840,37 @@ function ExerciseCard({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   flex: { flex: 1 },
-  idleBody: { padding: 24, gap: 12, flex: 1, justifyContent: 'center' },
+  // ADR-0024 § 2 — 3-section idle scroll (replaces the old centered idleBody).
+  idleScroll: { padding: 24, gap: 20, paddingBottom: 48 },
+  section: { gap: 8 },
+  sectionHeading: { fontSize: 18, fontWeight: '700' },
+  emptyBox: {
+    padding: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.06)',
+    gap: 10,
+    alignItems: 'stretch',
+  },
+  emptyTextBlock: { fontSize: 14, opacity: 0.7, textAlign: 'center' },
+  restRow: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,127,127,0.18)',
+    alignItems: 'center',
+  },
+  restRowText: { fontSize: 14, opacity: 0.7 },
+  plannedRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(10,126,164,0.12)',
+    gap: 4,
+  },
+  plannedRowName: { fontSize: 16, fontWeight: '700', color: '#0a7ea4' },
+  plannedRowDetails: { fontSize: 13, opacity: 0.75 },
   scrollBody: { padding: 24, gap: 12, paddingBottom: 48 },
   heading: { fontSize: 28, fontWeight: '700' },
-  idleHint: { fontSize: 16, opacity: 0.65, marginBottom: 16, textAlign: 'center' },
   label: { fontSize: 14, fontWeight: '500', marginTop: 12, opacity: 0.7 },
   pillsRow: { gap: 8, paddingVertical: 4 },
   pill: {
@@ -3150,18 +3185,6 @@ const styles = StyleSheet.create({
   },
   programBannerName: { fontSize: 14, fontWeight: '700', color: '#0a7ea4' },
   programBannerCell: { fontSize: 13 },
-  prePromptBox: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    gap: 8,
-    marginVertical: 8,
-  },
-  prePromptHeading: { fontSize: 18, fontWeight: '700' },
-  prePromptHint: { fontSize: 13, opacity: 0.8 },
-  prePromptActionsWrapper: { gap: 8, marginTop: 4 },
-  prePromptSecondaryRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  prePromptConfirmBtn: { width: '100%' },
   secondaryBtn: {
     paddingVertical: 14,
     paddingHorizontal: 14,
