@@ -50,7 +50,7 @@ Round E grill 走 22 個 sub-decision、user 提出激進重構方向：把 Toda
 - 整 list 攤開（無 accordion），mirror 現 Templates tab 的 `listTemplateGroupsByName` dedupe by name + scroll。
 - 區塊 heading 右上角 `[+ 新建模板]` btn（mirror 現 Templates tab 慣例）。
 - 模板數 = 0 → 顯示「沒有模板，點 [+ 新建] 開始建立」CTA + 隱藏 list 容器、保留 [+ New] btn。
-- Tap row → 開現有 `StartTemplateSheet`（不動 sheet 本身）→ pick (program, sub_tag) → `startSessionFromTemplate` → 切換到 in-session view。
+- Tap row → 開現有 `StartTemplateSheet`（不動 sheet 本身）→ pick (program, sub_tag) → `startSessionFromTemplate` → 切換到 in-session view。(slice 10g.c0fe3a4 ship — wire at `app/(tabs)/index.tsx:2038`)
 - **Sticky last-selected (program, sub_tag) 維持 GLOBAL** — 不翻盤現有 `start_dialog_last_program_id` / `start_dialog_last_sub_tag` 兩個 single key 設計。理由：code 已 ship、無 user complaint、改 per-template 成本（per-key naming + load logic + 空間隨 template 數增長）vs 收益不明顯，未來痛了再翻。
 
 ### 3. In-session view 處理（Mode switch）
