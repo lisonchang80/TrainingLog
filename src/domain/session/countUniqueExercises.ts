@@ -20,7 +20,7 @@
  *   → 5 session_exercise rows, but 3 unique exercises {CC, CD, BP}.
  */
 
-export interface CountUniqueExercisesInput {
+interface CountUniqueExercisesInput {
   exercise_id: string;
 }
 

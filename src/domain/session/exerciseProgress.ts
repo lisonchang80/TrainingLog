@@ -46,7 +46,7 @@ export interface ExerciseProgressInput {
   parent_set_id: string | null;
 }
 
-export interface ExerciseProgress {
+interface ExerciseProgress {
   /** Count of completed "set units" — working logged + dropset HEAD logged. */
   setsDone: number;
   /** Count of total "set units" — working rows + dropset HEAD rows. */

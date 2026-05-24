@@ -13,7 +13,7 @@
  * detail-page write path is a sibling concern (sheet only emits via onSave).
  */
 
-export type TimeEditValidation =
+type TimeEditValidation =
   | { valid: true; duration_sec: number }
   | { valid: false; reason: 'NON_POSITIVE' };
 

@@ -17,7 +17,7 @@
  * hide the switcher when `total === 1`.
  */
 
-export type SameDayNavState = {
+type SameDayNavState = {
   /** Session ids sharing the same date as `currentId`. */
   ids: readonly string[];
   /** `currentId`'s index within `ids`. */

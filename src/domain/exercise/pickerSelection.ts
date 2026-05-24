@@ -8,7 +8,7 @@
  * displayed selection count matches unique selections).
  */
 
-export type PickerSelection = readonly string[];
+type PickerSelection = readonly string[];
 
 export const EMPTY_SELECTION: PickerSelection = [];
 

@@ -29,7 +29,7 @@
  * Once the column lands, only the call sites change.
  */
 
-export interface DefaultTemplateNameInput {
+interface DefaultTemplateNameInput {
   /** Optional explicit user-set session title; null when none. */
   sessionTitle?: string | null;
   /** Optional name of the template the session is linked to; null when freestyle. */
@@ -46,7 +46,7 @@ export function computeDefaultTemplateName(input: DefaultTemplateNameInput): str
   return input.dateLabel;
 }
 
-export interface DeleteConfirmInput {
+interface DeleteConfirmInput {
   /**
    * The session's display name (whatever the header is showing — title
    * or dateLabel). Caller passes this in; helper just embeds it in the

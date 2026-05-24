@@ -74,13 +74,13 @@ export function fromRow(
       };
 }
 
-export interface PerExerciseSummary {
+interface PerExerciseSummary {
   exercise_id: string;
   exercise_name: string;
   setCount: number;
 }
 
-export interface SessionSummary {
+interface SessionSummary {
   totalSets: number;
   exerciseCount: number;
   /** null while the session is still open. */

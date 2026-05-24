@@ -29,14 +29,14 @@ export interface ReorderableSessionExercise {
   parent_id: string | null;
 }
 
-export interface SessionReorderRow {
+interface SessionReorderRow {
   /** Parent / solo `session_exercise.id`. Cluster children never appear. */
   id: string;
   /** Display name. `"A + B"` for cluster, plain name for solo. */
   name: string;
 }
 
-export interface SessionReorderRowsResult {
+interface SessionReorderRowsResult {
   rows: SessionReorderRow[];
   /** parent `session_exercise.id` → child `session_exercise.id`. */
   childByParent: Map<string, string>;

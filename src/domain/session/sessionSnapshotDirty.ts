@@ -21,19 +21,19 @@
  * id-key both sides so order doesn't matter.
  */
 
-export interface DirtyCheckSession {
+interface DirtyCheckSession {
   started_at: number;
   ended_at: number | null;
 }
 
-export interface DirtyCheckSessionExercise {
+interface DirtyCheckSessionExercise {
   id: string;
   ordering: number;
   parent_id: string | null;
   rest_sec: number | null;
 }
 
-export interface DirtyCheckSet {
+interface DirtyCheckSet {
   id: string;
   weight_kg: number | null;
   reps: number | null;

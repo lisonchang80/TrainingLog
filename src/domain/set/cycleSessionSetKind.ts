@@ -31,7 +31,7 @@ export interface CycleSessionSetInput {
   weight_kg: number | null;
 }
 
-export type CycleSessionSetOp =
+type CycleSessionSetOp =
   /** Patch an existing set row (set_kind and/or parent_set_id). */
   | {
       type: 'update';

@@ -54,7 +54,7 @@ export interface SessionSetLayoutInput {
   ordering: number;
 }
 
-export interface SessionSetGroup {
+interface SessionSetGroup {
   /** The head row — anchor for swipe gestures + ✓ button. */
   head: SessionSetLayoutInput;
   /** Follower rows (only populated for dropset chains; empty otherwise). */
@@ -65,7 +65,7 @@ export interface SessionSetGroup {
   followerIndices: number[];
 }
 
-export interface SessionSetLayout {
+interface SessionSetLayout {
   /** id → display label ('熱' / '1' / 'D1' / '' / …). */
   labels: Map<string, string>;
   /** Groups in sorted ordering. */

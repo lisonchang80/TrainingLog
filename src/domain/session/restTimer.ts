@@ -25,7 +25,7 @@
  * to fresh") and cancelTimer.
  */
 
-export type RestTimerStatus = 'idle' | 'running' | 'finished';
+type RestTimerStatus = 'idle' | 'running' | 'finished';
 
 export interface RestTimerState {
   status: RestTimerStatus;
