@@ -65,6 +65,21 @@ When the user uses vague or overloaded terms, propose a precise canonical term. 
 
 When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.
 
+### Visualize on demand — ASCII before/after + comparison table
+
+When the user prompts「視覺化」/「視覺化這段」/「draw it」/「show me」mid-grill, **don't fall back to bullet-list trade-offs** — they're asking for spatial reasoning. Render:
+
+1. **Initial state** — ASCII art of the current UI / data structure
+2. **After-state per option** — one ASCII art block per option showing what changes (highlight ★ / ⚠️ / ← arrows for transitions)
+3. **Comparison table** — invariant count, code surface, edge-case behavior, alignment with prior ADR decisions
+4. **Re-ask the same question** — repeat `AskUserQuestion` with the same options but updated descriptions reflecting the viz reveal
+
+Why this matters: 視覺化 prompts repeatedly land at decision points where text-only options look symmetric but a diagram reveals which option is "1-tap mutates 4 rows" vs "0 rows". TrainingLog Round B Q1 (cluster root cycle): user picked A' (children DELETE + toast) over my plan's recommendation B (block + toast) ONLY after seeing the ASCII viz showed B was "2-tap 1 cluster" vs A' was "1-tap visible toast" — text trade-offs alone would have left B as the default.
+
+**Diff structure** (the part that matters): each option's ASCII should show the **column / row that changes**. Don't redraw unchanged regions — focus reader attention on the delta.
+
+**Anti-pattern**: pasting a generic "before/after" block then giving text-only trade-offs underneath. The viz is the trade-off; the table sharpens it; the bullet list is redundant.
+
 ### Cross-reference with code
 
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
