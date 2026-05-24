@@ -137,16 +137,21 @@ type StartTemplateSheetProps = {
 };
 
 /**
- * The reserved「無 Program」row, surfaced in the picker as「通用」(round 35
- * polish — naming consistency with template-meta-sheet's 通用 chip). The
- * underlying DB row still stores `name = '無'` per v017 seed; we only
+ * The reserved「無 Program」row, surfaced in the picker as「通用 / Default」
+ * (round 35 polish — naming consistency with template-meta-sheet's 通用 chip).
+ * The underlying DB row still stores `name = '無'` per v017 seed; we only
  * remap the display label locally — changing the seed would ripple through
  * other sheets that read the program's name directly.
+ *
+ * Phase 4.5 final: `name` is now resolved at render time via `t('common',
+ * 'default')` so locale switches re-render the label correctly.
  */
-const NONE_OPTION: ProgramOption = {
-  id: RESERVED_NONE_PROGRAM_ID,
-  name: '通用',
-};
+function makeNoneOption(): ProgramOption {
+  return {
+    id: RESERVED_NONE_PROGRAM_ID,
+    name: t('common', 'default'),
+  };
+}
 
 export function StartTemplateSheet({
   visible,
@@ -166,7 +171,7 @@ export function StartTemplateSheet({
   // somehow returned it (shouldn't — programRepository filters it out, but
   // defending against future regressions).
   const periodOptions: ProgramOption[] = [
-    NONE_OPTION,
+    makeNoneOption(),
     ...programs.filter((p) => p.id !== RESERVED_NONE_PROGRAM_ID),
   ];
 
