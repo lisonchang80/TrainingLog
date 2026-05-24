@@ -110,6 +110,20 @@ const QUINTILE_COLORS: readonly string[] = [
 ];
 
 /**
+ * Same hue family as QUINTILE_COLORS but darker (Tailwind ~-700/-800 tones)
+ * so the muscle-name labels stay legible on the white background.
+ * Pairing convention mirrors `muscle-body-tagger.tsx`'s BTN_THEME pattern
+ * (light fill + matching dark text).
+ */
+const QUINTILE_TEXT_COLORS: readonly string[] = [
+  '#1D4ED8', // Q1 blue-700  ← #BFDBFE
+  '#1E40AF', // Q2 blue-800  ← #93C5FD
+  '#B45309', // Q3 amber-700 ← #FCD34D
+  '#C2410C', // Q4 orange-700 ← #FB923C
+  '#991B1B', // Q5 red-800   ← #EF4444
+];
+
+/**
  * Color array fed to the underlying Body component. Index 0 = zero/idle, and
  * indices 1..5 align with TrainingLog's Quintile 0..4 (offset by 1 because
  * `intensity: 0` reads back as "unhighlighted" from the package's POV).
@@ -621,13 +635,13 @@ function SideContainer({
         })}
       </Svg>
 
-      {/* Muscle name labels — plain Text, no background. Text colour mirrors
-          the muscle's quintile fill (legend swatch colour) so the user can
-          read frequency at a glance from the label itself. Untrained
-          muscles fall back to neutral grey for legibility. */}
+      {/* Muscle name labels — plain Text, no background. Text colour uses
+          QUINTILE_TEXT_COLORS (darker variant of the legend hue) so the
+          label stays legible on white while still signalling the bucket.
+          Untrained muscles fall back to neutral grey. */}
       {items.map((item) => {
         const q = mQuintile.get(item.m);
-        const textColor = q == null ? COLOR_LABEL_TEXT : QUINTILE_COLORS[q];
+        const textColor = q == null ? COLOR_LABEL_TEXT : QUINTILE_TEXT_COLORS[q];
         return (
           <View
             key={`label-${item.m}`}
