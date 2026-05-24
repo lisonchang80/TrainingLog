@@ -285,3 +285,14 @@ Session UI/UX integral redesign grill 拍板把「session 頂層**無 stats**」
 - **session 底部 bar** 仍只剩 `[⊕ 加動作]`
 
 詳細決策邏輯與拒絕的替代方案見 ADR-0019 § Q6。
+
+---
+
+## 2026-05-24 Cross-link — ADR-0019 Round D Amendment
+
+Set-logger plan finalization grill (Round D) 拍板 4 條決策關於 session-flow picker UX（URL param 命名 / duplicate RS block / multi-select uniformity / auto-expand last appended card）。這 4 條皆屬 ADR-0019 § Q7 + slice 10c Phase 5 scope（in-session 加動作 + cluster 來源唯一性 + 動作卡 collapsed/expanded 模型），**ADR-0012 本身的 schema / per-row gesture / dropset cluster 拍板均不受影響**。
+
+唯一語意關聯點：Q4「auto-expand LAST appended card」延伸了 ADR-0019 Q3 a-1「Session 進入時動作卡全 collapsed default」的行為 — multi-pick 後新增的卡自動展開最後一張（per Q3 c-2 only-one-expanded 模型），但 ADR-0012 per-exercise card 結構 / set row affordance 不變。
+
+詳見 ADR-0019 § Round D Amendment (2026-05-24)。
+
