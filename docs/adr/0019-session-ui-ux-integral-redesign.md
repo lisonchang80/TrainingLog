@@ -165,7 +165,7 @@ Cluster 是**單一 block**（含 A+B 兩 side、cycle row 共 ✓，per Q8 + St
 **Cluster 來源完整列表（只剩兩條）**：
 
 1. **Template snapshot 路徑**（既有）：Template-based session create 時，`snapshotForSession` 把 template 內的 cluster 結構（含 `parent_id` + `reusable_superset_id`）複製進 session_exercise — 用 ADR-0018 v014 schema 路徑。
-2. **In-session 動作庫 RS picker 路徑**（本 ADR 新增）：session 進行中 user tap `[⊕ 加動作]` → `/library?mode=picker&targetSessionId=xxx` → 動作庫頂部 Tab 切到「超級組」(K1) → tap RS card → 整 RS explode 成 2 個 `session_exercise` row 加進當前 session（parent_id + reusable_superset_id 同 template explode pattern）
+2. **In-session 動作庫 RS picker 路徑**（本 ADR 新增）：session 進行中 user tap `[⊕ 加動作]` → `/library?mode=picker&targetSessionId=xxx` → 動作庫頂部 Tab 切到「超級組」(K1) → tap RS card → 整 RS explode 成 2 個 `session_exercise` row 加進當前 session（parent_id + reusable_superset_id 同 template explode pattern）（**Round D 修訂 2026-05-24**：URL param 訂正為 `sessionId=`（codebase 為真）；same-RS 已在 session 內存在則 **BLOCK**（3-layer lock：SQL throw + UI dim + integration test），不可重複 append。詳見本 ADR § Round D Amendment Q1 + Q2）
 
 **Ad-hoc cluster 模型撤銷**：session 中**沒有**「手動把兩個 solo 動作標成 cluster」的 affordance；如果 user 想做臨場 superset，要嘛事前在動作庫建一個 RS（B1 picker 內即時新建），要嘛跑 freestyle pair 兩個 solo set（不會出 cluster 結構，僅相鄰執行）。
 
@@ -184,7 +184,7 @@ Cluster 是**單一 block**（含 A+B 兩 side、cycle row 共 ✓，per Q8 + St
 
 ### Q7 寄生子題拍板
 
-- **(i) K1 picker UI** — Tab 切換（頂部 `[動作]` / `[超級組]` 兩 tab）；動作 tab 是既有 ADR-0017 v2 Exercise grid，超級組 tab 是 ADR-0017 Q10 既有 RS list + 「+ 新建超級組」按鈕
+- **(i) K1 picker UI** — Tab 切換（頂部 `[動作]` / `[超級組]` 兩 tab）；動作 tab 是既有 ADR-0017 v2 Exercise grid，超級組 tab 是 ADR-0017 Q10 既有 RS list + 「+ 新建超級組」按鈕（**Round D 修訂 2026-05-24**：兩個 tab 都支援 **multi-select**（`exerciseIds[]` + `reusableSupersetIds[]` 兩個 array，per `pickerBridge.PickerPayload`）；user 按 [完成] 才 commit、`consumePick` drain 兩個 array；multi-pick 完成後自動展開最後一張 appended 卡。詳見本 ADR § Round D Amendment Q3 + Q4）
 - **(ii) B1 picker 內即時新建 RS** — picker 內按 `[+ 新建超級組]` → 進 `/superset/new` flow（per ADR-0017 Q10）→ 命名 → 立刻加入當前 session（cross-route round-trip 沿用 ADR-0017 9.8b grill Q7 既設計的 `newlyCreatedSupersetId` mailbox 機制）
 - **(iii) L1 自動保存到 Library** — 新建 RS 不論在哪個 mode（template editor picker / session picker）都自動成為 RS entity（INSERT `superset` + `superset_exercise` rows），下次也可挑（per ADR-0017 Q10 「`use_count` cached」既設計）
 - **(iv) W1 ADR-0018 顯式 amendment** — 「Cd-B ad-hoc 用例由『即時新建 RS』承擔；session-side `reusable_superset_id IS NULL` 只剩 backfill β'-skipped 場景」（見本 ADR § 翻盤的既有拍板）
@@ -711,7 +711,7 @@ ADR-0014 sibling rename propagation 隨 🔀 一起 moot — 不再需要 in-ses
 **Phase 5** — Session chrome（commit `ca0f3fe` + revert `<this-commit>`）
 - Header 右上 `[⋯][完成]`：[⋯] ActionSheet → 放棄訓練 → `discardSession` cascade delete；[完成] 替換原 bottom End Session
 - Bottom sticky bar `[+ 動作][傳至手錶 ⌚]`：跳出 ScrollView 之外
-- [+ 動作] `router.push('/exercise-picker?mode=picker')` → LibraryScreen multi-select → `submitPick` → `consumePick` 在 Today 的 `useFocusEffect` drain → `appendSessionExercise` per id（ordering=MAX+1, planned_sets=3）。**初版用 SwapExerciseSheet quick picker**，user 反映該對齊 template editor 全頁動作庫 → 改走 exercise-picker route（per ADR-0017 統一 picker convention）。
+- [+ 動作] `router.push('/exercise-picker?mode=picker')` → LibraryScreen multi-select → `submitPick` → `consumePick` 在 Today 的 `useFocusEffect` drain → `appendSessionExercise` per id（ordering=MAX+1, planned_sets=3）。**初版用 SwapExerciseSheet quick picker**，user 反映該對齊 template editor 全頁動作庫 → 改走 exercise-picker route（per ADR-0017 統一 picker convention）。（**Round D 修訂 2026-05-24**：`consumePick` 尾段擴充 +1 line `setExpandedExerciseId(lastAppendedId)` — multi-pick 後自動展開最後一張新增的卡，配合 Q3 c-2「only-one-expanded」。詳見本 ADR § Round D Amendment Q4）
 - [傳至手錶] placeholder Alert（slice 13 WatchConnectivity wires real）
 
 **Schema drift fix**: spec `/tmp/slice-10c-ship-spec-2026-05-16.md` L311「no migration」是樂觀假設；Q9 per-set notes 必須 v018 ADD COLUMN「notes」到 runtime `set` table（template_set 從 v009 就有）。第一個 schema-touching commit 是 Phase 2 commit 7c `4ff79e0`。
