@@ -129,7 +129,7 @@ const BODY_COLORS: ReadonlyArray<string> = [
 // Re-export so callers can keep importing MuscleRole from one place.
 export type { MuscleRole };
 
-export interface MuscleBodyTaggerProps {
+interface MuscleBodyTaggerProps {
   /** M_* → role map. Highlighted muscles only. */
   highlight: Map<string, MuscleRole>;
   /** Render mode. Defaults to 'readonly'. */

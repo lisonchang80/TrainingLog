@@ -142,7 +142,7 @@ const BODY_COLORS: ReadonlyArray<string> = [
 
 export type Quintile = 0 | 1 | 2 | 3 | 4;
 
-export interface BodyHeatmapProps {
+interface BodyHeatmapProps {
   /**
    * m_id → quintile bucket (0..4) for non-zero muscles.
    * Muscles absent from this map render in zero-grey (the body's default).

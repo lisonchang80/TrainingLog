@@ -22,7 +22,7 @@ import { useDatabase } from '@/components/database-provider';
 import { updateSessionTitle } from '@/src/adapters/sqlite/sessionRepository';
 import { t } from '@/src/i18n';
 
-export interface SessionTitleEditorProps {
+interface SessionTitleEditorProps {
   sessionId: string;
   initialTitle: string;
   placeholder?: string;
