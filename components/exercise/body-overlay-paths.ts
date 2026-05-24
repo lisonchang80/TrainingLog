@@ -315,40 +315,59 @@ export const PATH_LOWER_CHEST =
  * Bicep sub-division — partition the package's verbatim biceps slug path into
  * LATERAL (long head, outer) + MEDIAL (short head, inner) halves via
  * `<ClipPath>` so the combined fill exactly equals the underlying belly
- * silhouette (no gap, no overflow). Mirrors the DELTOID treatment above.
+ * silhouette (no gap, no overflow). Mirrors the DELTOID treatment above but
+ * uses a DIAGONAL split line (not vertical) per user coord-picker keypoints,
+ * matching the actual long/short head fiber direction.
  *
- * The two path strings are byte-for-byte copies of the
+ * The two PACKAGE paths are byte-for-byte copies of the
  * `react-native-body-highlighter` package's `biceps` slug paths
- * (node_modules/.../bodyFront.js). The consumer wraps each in
- * `<Defs><ClipPath id="..."><Path d={...}/></ClipPath></Defs>` and then
- * renders two `<Rect>` elements (one per half) clipped to it — `Rect`
- * covers the full bounding box, the clip restricts paint to the belly shape.
+ * (node_modules/.../bodyFront.js).
  *
- * SPLIT_X constants are the horizontal midpoint of each path's bounding box
- * (computed offline via Bezier sampling, /tmp/bicep-bbox.mjs):
- *   FRONT_L bicep: x ∈ [181.79, 222.99] → mid 202.39
- *   FRONT_R bicep: x ∈ [505.39, 546.48] → mid 525.93
- * Each bicep belly is ~41 units wide; long head (lateral, outer) and short
- * head (medial, inner) each take ~half. PACKAGE biceps are not strict mirrors
- * about chest centerline x=362 (L+R mid sums to 728.32 → effective mirror axis
- * x=364.16, same minor asymmetry as deltoid).
+ * Round 2 (2026-05-24, user coord-picker via bicep-coord-picker.html):
+ *   L arm diagonal endpoints:
+ *     top (214.5, 406.5) — chest-side upper
+ *     bot (183.5, 492.5) — body-edge lower
+ *   R arm diagonal endpoints (mirror about x=364, verified):
+ *     top (513.5, 406.5)
+ *     bot (544.5, 492.0)
+ *   Slope |dx/dy| ≈ 0.36 — head fibers run from supraglenoid/coracoid
+ *   tubercle (top, near shoulder centerline) outward toward elbow.
  *
- * Per-arm geometry (chest centerline x=362; lateral = "outer", away from body
+ * Implementation: each "half" is a TRAPEZOID polygon extrapolated to
+ * y=395..510 (covering bicep bbox y∈[406, 493] with buffer) and x extending
+ * past bicep bbox so the ClipPath cleanly cuts the silhouette. The diagonal
+ * edge coordinates are SHARED byte-for-byte between LATERAL + MEDIAL halves
+ * so SVG anti-alias closes without gap (same trick as chest round 20 cubic).
+ *
+ *   L diagonal extrapolated: top (218.6, 395), bot (177.2, 510)
+ *   R diagonal extrapolated: top (509.4, 395), bot (550.8, 510)
+ *
+ * Per-arm anatomy (chest centerline x≈362; lateral = "outer", away from body
  * centerline; medial = "inner", toward body centerline):
  *   FRONT_L (viewer's left, subject's right) :
- *     LATERAL (long head)  = LEFT  half (x ≤ SPLIT, far from chest)
- *     MEDIAL (short head)  = RIGHT half (x ≥ SPLIT, near chest)
+ *     LATERAL (long head)  = polygon LEFT of diagonal (far from chest)
+ *     MEDIAL (short head)  = polygon RIGHT of diagonal (near chest)
  *   FRONT_R (viewer's right, subject's left) :
- *     MEDIAL (short head)  = LEFT  half (x ≤ SPLIT, near chest)
- *     LATERAL (long head)  = RIGHT half (x ≥ SPLIT, far from chest)
+ *     MEDIAL (short head)  = polygon LEFT of diagonal (near chest)
+ *     LATERAL (long head)  = polygon RIGHT of diagonal (far from chest)
  */
 export const PACKAGE_BICEP_L =
   'M189.52 492.51c-2.43.62-7.38.57-7.51-3.08-.56-16.01-.42-35.49 5.11-50.26 3.19-8.54 13.89-30.22 23.27-32.72 10.08-2.68 12.68 16.59 12.6 22.8-.22 15.98-7.51 34.79-15.05 48.71-4.29 7.94-9.95 12.38-18.42 14.55z';
 export const PACKAGE_BICEP_R =
   'M526.69 486.31c-9.9-8.61-17.75-33.21-20.65-47.73-1.41-7.06-1.34-29.61 8.58-32.16 10.33-2.66 23.81 25.34 26.6 32.91q2.6 7.04 3.6 16.13 1.62 14.66 1.66 32.28c.03 11.04-16.45 1.48-19.79-1.43z';
 
-export const SPLIT_X_BICEP_L = 202.4;
-export const SPLIT_X_BICEP_R = 525.9;
+/** L arm LATERAL half (long head / outer) — trapezoid west of diagonal. */
+export const PATH_BICEP_L_LATERAL_HALF =
+  'M150 395 L218.6 395 L177.2 510 L150 510 Z';
+/** L arm MEDIAL half (short head / inner) — trapezoid east of diagonal. */
+export const PATH_BICEP_L_MEDIAL_HALF =
+  'M218.6 395 L250 395 L250 510 L177.2 510 Z';
+/** R arm MEDIAL half (short head / inner) — trapezoid west of diagonal. */
+export const PATH_BICEP_R_MEDIAL_HALF =
+  'M480 395 L509.4 395 L550.8 510 L480 510 Z';
+/** R arm LATERAL half (long head / outer) — trapezoid east of diagonal. */
+export const PATH_BICEP_R_LATERAL_HALF =
+  'M509.4 395 L580 395 L580 510 L550.8 510 Z';
 
 /**
  * Deltoid sub-division — partition the package's verbatim deltoid slug path

@@ -77,10 +77,12 @@ import {
   PATH_REAR_DELT_BACK_FILL_R,
   PATH_UPPER_CHEST,
   PATH_UPPER_GLUTE,
+  PATH_BICEP_L_LATERAL_HALF,
+  PATH_BICEP_L_MEDIAL_HALF,
+  PATH_BICEP_R_LATERAL_HALF,
+  PATH_BICEP_R_MEDIAL_HALF,
   SPLIT_X_BACK_DELT_L,
   SPLIT_X_BACK_DELT_R,
-  SPLIT_X_BICEP_L,
-  SPLIT_X_BICEP_R,
   SPLIT_X_FRONT_DELT_L,
   SPLIT_X_FRONT_DELT_R,
 } from './body-overlay-paths';
@@ -306,9 +308,10 @@ function FrontOverlay({
   //     → anterior (M_FRONT_DELT) at x ≥ SPLIT, lateral (M_MID_DELT) at x ≤ SPLIT
   //   FRONT_R (viewer's right, subject's left): MEDIAL = left half of bbox
   //     → anterior (M_FRONT_DELT) at x ≤ SPLIT, lateral (M_MID_DELT) at x ≥ SPLIT
-  // Biceps sub-division via ClipPath partition (round 1, 2026-05-24):
-  //   LEFT arm  : lateral left  half = LONG  head, medial right half = SHORT head
-  //   RIGHT arm : medial  left  half = SHORT head, lateral right half = LONG  head
+  // Biceps sub-division via ClipPath partition (round 2, 2026-05-24, user
+  // coord-picker diagonal):
+  //   LEFT arm  : trapezoid west of diagonal = LONG  (lateral), east = SHORT (medial)
+  //   RIGHT arm : trapezoid west of diagonal = SHORT (medial),  east = LONG  (lateral)
   const frontDeltFill = roleSubFill(M_FRONT_DELT, DELT_SIBS, highlight);
   const midDeltFill = roleSubFill(M_MID_DELT, DELT_SIBS, highlight);
   const longBicepFill = roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight);
@@ -338,37 +341,25 @@ function FrontOverlay({
       {/* Chest split */}
       <Path d={PATH_UPPER_CHEST} fill={roleSubFill(M_UPPER_CHEST, CHEST_SIBS, highlight)} />
       <Path d={PATH_LOWER_CHEST} fill={roleSubFill(M_LOWER_CHEST, CHEST_SIBS, highlight)} />
-      {/* Bicep split — LEFT arm: lateral half (long head) + medial half (short head) */}
-      <Rect
-        x={0}
-        y={0}
-        width={SPLIT_X_BICEP_L}
-        height={1448}
+      {/* Bicep diagonal split — LEFT arm: lateral half (long) + medial half (short) */}
+      <Path
+        d={PATH_BICEP_L_LATERAL_HALF}
         fill={longBicepFill}
         clipPath="url(#tagger-bicep-l)"
       />
-      <Rect
-        x={SPLIT_X_BICEP_L}
-        y={0}
-        width={724 - SPLIT_X_BICEP_L}
-        height={1448}
+      <Path
+        d={PATH_BICEP_L_MEDIAL_HALF}
         fill={shortBicepFill}
         clipPath="url(#tagger-bicep-l)"
       />
-      {/* Bicep split — RIGHT arm: medial half (short head) + lateral half (long head) */}
-      <Rect
-        x={0}
-        y={0}
-        width={SPLIT_X_BICEP_R}
-        height={1448}
+      {/* Bicep diagonal split — RIGHT arm: medial half (short) + lateral half (long) */}
+      <Path
+        d={PATH_BICEP_R_MEDIAL_HALF}
         fill={shortBicepFill}
         clipPath="url(#tagger-bicep-r)"
       />
-      <Rect
-        x={SPLIT_X_BICEP_R}
-        y={0}
-        width={724 - SPLIT_X_BICEP_R}
-        height={1448}
+      <Path
+        d={PATH_BICEP_R_LATERAL_HALF}
         fill={longBicepFill}
         clipPath="url(#tagger-bicep-r)"
       />
