@@ -14,6 +14,7 @@ function mkSession(id: string, isoLocal: string): Session {
     started_at: new Date(isoLocal).getTime(),
     ended_at: null,
     bodyweight_snapshot_kg: null,
+    title: '',
   };
 }
 

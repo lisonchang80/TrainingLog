@@ -211,6 +211,9 @@ export const strings = {
       // Phase 4.5 batch 1 — accessibilityLabel: ✓/○ button toggling set logged state.
       a11yMarkSetDone: '標記這組完成',
       a11yUncheckSetDone: '取消完成這組',
+      // Card 11 / ADR-0014 — accessibilityLabel: in-session header tap-to-edit
+      // session title.
+      a11yTapEditTitle: '點擊編輯訓練標題',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: '建立中…',
       addProgram: '新增計畫',
@@ -343,6 +346,9 @@ export const strings = {
       bodyBack: '背面',
       // Phase 4.5 final sweep — set-note sheet placeholder.
       setNotePlaceholder: '這組想留下什麼？（例：RPE 8、左肘有點緊）',
+      // Card 11 / ADR-0014 — in-session header tap-to-edit title placeholder
+      // (freestyle / un-named session).
+      sessionTitlePlaceholder: '自由訓練',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -819,6 +825,9 @@ export const strings = {
       // Phase 4.5 batch 1 — accessibilityLabel: ✓/○ button toggling set logged state.
       a11yMarkSetDone: 'Mark this set done',
       a11yUncheckSetDone: 'Uncheck this set',
+      // Card 11 / ADR-0014 — accessibilityLabel: in-session header tap-to-edit
+      // session title.
+      a11yTapEditTitle: 'Tap to edit session title',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: 'Creating…',
       addProgram: 'Add Program',
@@ -948,6 +957,9 @@ export const strings = {
       bodyBack: 'Back',
       // Phase 4.5 final sweep — set-note sheet placeholder.
       setNotePlaceholder: 'What to remember about this set? (e.g. RPE 8, left elbow tight)',
+      // Card 11 / ADR-0014 — in-session header tap-to-edit title placeholder
+      // (freestyle / un-named session).
+      sessionTitlePlaceholder: 'Freestyle session',
     },
 
     alert: {

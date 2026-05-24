@@ -77,6 +77,7 @@ describe('setRepository — Set write/read round-trip (slice 1)', () => {
       started_at: 1_700_000_000_000,
       ended_at: 1_700_000_000_000,
       bodyweight_snapshot_kg: null,
+      title: '',
     });
   });
 

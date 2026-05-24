@@ -22,7 +22,17 @@ async function resolveBwSnapshot(db: Database): Promise<number | null> {
 
 export async function createSession(
   db: Database,
-  args: { id: string; started_at: number; bodyweight_snapshot_kg?: number | null }
+  args: {
+    id: string;
+    started_at: number;
+    bodyweight_snapshot_kg?: number | null;
+    /**
+     * Card 11 / ADR-0014. Optional display title; defaults to '' which the UI
+     * renders as the freestyle placeholder. `startSessionFromTemplate` passes
+     * `template.name` so template-based sessions arrive pre-named.
+     */
+    title?: string;
+  }
 ): Promise<void> {
   // ADR-0024 § 4 — if the caller didn't supply a snapshot explicitly, pull
   // the latest body_metric. Passing an explicit `null` (or any number) wins
@@ -33,10 +43,31 @@ export async function createSession(
       : args.bodyweight_snapshot_kg;
 
   await db.runAsync(
-    `INSERT INTO session (id, started_at, bodyweight_snapshot_kg) VALUES (?, ?, ?)`,
+    `INSERT INTO session (id, started_at, bodyweight_snapshot_kg, title)
+     VALUES (?, ?, ?, ?)`,
     args.id,
     args.started_at,
-    snapshot
+    snapshot,
+    args.title ?? ''
+  );
+}
+
+/**
+ * Update one session's display title. Card 11 / ADR-0014 — wired from the
+ * in-session header tap-to-edit. Empty string is allowed (= freestyle /
+ * placeholder); caller is responsible for the trim. No-op when no row
+ * matches the given id (defensive — the UI guards via getSessionId, but a
+ * stale snapshot calling this on a discarded session won't throw).
+ */
+export async function updateSessionTitle(
+  db: Database,
+  sessionId: string,
+  title: string
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session SET title = ? WHERE id = ?`,
+    title,
+    sessionId
   );
 }
 
@@ -85,7 +116,7 @@ export async function endSession(
 
 export async function getSession(db: Database, id: string): Promise<Session | null> {
   return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session WHERE id = ?`,
     id
   );
@@ -100,7 +131,7 @@ export async function getSession(db: Database, id: string): Promise<Session | nu
  */
 export async function getActiveSession(db: Database): Promise<Session | null> {
   return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session
       WHERE ended_at IS NULL
       ORDER BY started_at DESC
@@ -111,7 +142,7 @@ export async function getActiveSession(db: Database): Promise<Session | null> {
 /** All sessions, newest first. Used by the History tab list. */
 export async function listSessions(db: Database): Promise<Session[]> {
   return db.getAllAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session
       ORDER BY started_at DESC`
   );

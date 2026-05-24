@@ -118,6 +118,7 @@ import {
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
 import { resolveTodayPlan, type TodayPlan } from '@/src/domain/training/todayPlan';
 import { TemplateListSection } from '@/components/training/template-list-section';
+import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import {
   IDLE,
@@ -181,6 +182,13 @@ export default function TodayScreen() {
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
   const [bwSnapshotKg, setBwSnapshotKg] = useState<number | null>(null);
+  /**
+   * Card 11 / ADR-0014 — session.title for the in-session header tap-to-edit
+   * editor. Sourced from `active.title` on refresh; updates land via
+   * `SessionTitleEditor`'s onUpdated callback so we don't re-query the DB
+   * just to reflect the user's own keystroke.
+   */
+  const [sessionTitle, setSessionTitle] = useState<string>('');
   // Body data editor sheet (slice 10c overnight #4 第 3 點) — replaces the
   // previous inline panel. Opened from header ⋯ menu「Body data」.
   const [bodySheetVisible, setBodySheetVisible] = useState(false);
@@ -282,6 +290,7 @@ export default function TodayScreen() {
       setSetsInSession(sets);
       setPlan(planned);
       setBwSnapshotKg(active.bodyweight_snapshot_kg ?? null);
+      setSessionTitle(active.title ?? '');
       // Fetch all-time history for each planned exercise + compute its PR
       // snapshot once per refresh. Per-exercise queries — cheap given the
       // typical session has <10 planned exercises.
@@ -299,6 +308,7 @@ export default function TodayScreen() {
       setSetsInSession([]);
       setPlan([]);
       setBwSnapshotKg(null);
+      setSessionTitle('');
       setPrSnapshotById({});
     }
   }, [db]);
@@ -1527,6 +1537,7 @@ export default function TodayScreen() {
                   setSetsInSession([]);
                   setPlan([]);
                   setBwSnapshotKg(null);
+                  setSessionTitle('');
                   setLastPRDelta(null);
                   setLastPRExerciseName('');
                   setPrSnapshotById({});
@@ -1766,7 +1777,26 @@ export default function TodayScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <View style={styles.sessionHeader}>
-          <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+          {/* Card 11 / ADR-0014 — in-session header session.title tap-to-edit.
+              Falls back to the static training tab title when no session is
+              active (defense-in-depth: this branch is gated by in_progress,
+              but getSessionId can still return null in a transient state). */}
+          {(() => {
+            const session_id = getSessionId(sessionState);
+            if (!session_id) {
+              return (
+                <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+              );
+            }
+            return (
+              <SessionTitleEditor
+                sessionId={session_id}
+                initialTitle={sessionTitle}
+                placeholder={t('page', 'sessionTitlePlaceholder')}
+                onUpdated={setSessionTitle}
+              />
+            );
+          })()}
           <View style={styles.sessionHeaderActions}>
             <Pressable
               accessibilityRole="button"

@@ -205,7 +205,15 @@ export async function startSessionFromTemplate(
     // the snapshot column when no explicit value is supplied. Keep the
     // omission deliberate; passing `bodyweight_snapshot_kg: undefined` here
     // routes through the same auto-pull path.
-    await createSession(db, { id: session_id, started_at });
+    //
+    // Card 11 / ADR-0014 — pre-seed session.title with the template name so
+    // the in-session header reads sensibly from the first frame (vs. having
+    // to ALTER it later via updateSessionTitle).
+    await createSession(db, {
+      id: session_id,
+      started_at,
+      title: template.name,
+    });
     for (const row of snapshots) {
       await insertSessionExercise(db, { ...row });
     }
