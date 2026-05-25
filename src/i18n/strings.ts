@@ -290,6 +290,8 @@ export const strings = {
       programNameExample: '例：增肌-Q1',
       // Phase 5 — settings Language section header
       languageSection: '語言',
+      // ADR-0025 — settings Color Theme section header (placed above languageSection).
+      colorThemeSection: '色彩主題',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: '顯示單位',
       unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
@@ -522,6 +524,10 @@ export const strings = {
       languageAuto: '自動偵測',
       languageZh: '中文（繁體）',
       languageEn: 'English',
+      // ADR-0025 — settings Color Theme radio labels (system / light / dark).
+      themeSystem: '自動（跟隨系統）',
+      themeLight: '淺色',
+      themeDark: '深色',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: '還沒有計畫。按「新建」啟動 6 步建立精靈。',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
@@ -990,6 +996,8 @@ export const strings = {
       programNameExample: 'e.g. Hypertrophy-Q1',
       // Phase 5 — settings Language section header
       languageSection: 'Language',
+      // ADR-0025 — settings Color Theme section header (placed above languageSection).
+      colorThemeSection: 'Color Theme',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: 'Unit Preference',
       unitPreferenceHint:
@@ -1215,6 +1223,10 @@ export const strings = {
       languageAuto: 'Auto-detect',
       languageZh: 'Traditional Chinese',
       languageEn: 'English',
+      // ADR-0025 — settings Color Theme radio labels (system / light / dark).
+      themeSystem: 'Auto (follow system)',
+      themeLight: 'Light',
+      themeDark: 'Dark',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: 'No programs yet. Tap "New" to launch the 6-step wizard.',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
