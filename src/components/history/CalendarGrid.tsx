@@ -45,6 +45,7 @@ import {
 } from '../../domain/calendar/monthGrid';
 import { t } from '@/src/i18n';
 import { tYearMonthTitle } from '@/src/i18n/dynamic';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 export type { CalendarDayCell };
 
@@ -89,6 +90,8 @@ export function CalendarGrid({
   renderCell,
   canGoNext: canGoNextProp,
 }: CalendarGridProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerDate, setPickerDate] = useState<Date>(
     () => new Date(year, month - 1, 1)
@@ -239,87 +242,109 @@ export function CalendarGrid({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  titleBtn: { paddingHorizontal: 12, paddingVertical: 4 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  navBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navBtnDisabled: { opacity: 0.3 },
-  navBtnText: { fontSize: 20, fontWeight: '600', color: '#111827' },
-  navBtnTextDisabled: { color: '#9CA3AF' },
-  weekdayRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 4,
-  },
-  weekdayLabel: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#6B7280',
-    paddingVertical: 3,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 4,
-    paddingBottom: 4,
-  },
-  cellWrap: { width: `${100 / 7}%` },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#fff',
-    paddingTop: 12,
-    paddingBottom: 24,
-    paddingHorizontal: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 4,
-    color: '#111827',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    gap: 12,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  modalCancelText: { fontSize: 16, fontWeight: '600', color: '#6B7280' },
-  modalDoneBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  modalDoneText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-});
+/**
+ * ADR-0025 — token-driven calendar chrome. Weekday header / month nav /
+ * picker modal all flow from tokens.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 6,
+    },
+    titleBtn: { paddingHorizontal: 12, paddingVertical: 4 },
+    headerTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    navBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    navBtnDisabled: { opacity: 0.3 },
+    navBtnText: {
+      fontSize: 20,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    navBtnTextDisabled: { color: tokens.text.tertiary },
+    weekdayRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 4,
+    },
+    weekdayLabel: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 11,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      paddingVertical: 3,
+    },
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      paddingHorizontal: 4,
+      paddingBottom: 4,
+    },
+    cellWrap: { width: `${100 / 7}%` },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    modalSheet: {
+      backgroundColor: tokens.bg.modal,
+      paddingTop: 12,
+      paddingBottom: 24,
+      paddingHorizontal: 16,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+    },
+    modalTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      textAlign: 'center',
+      marginBottom: 4,
+      color: tokens.text.primary,
+    },
+    modalActions: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      gap: 12,
+    },
+    modalCancelBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    modalCancelText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    modalDoneBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      backgroundColor: tokens.action.primary,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    modalDoneText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: tokens.action.onPrimary,
+    },
+  });
+}

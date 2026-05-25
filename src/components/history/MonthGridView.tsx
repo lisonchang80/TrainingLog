@@ -39,6 +39,7 @@ import {
 } from '@/src/domain/calendar/monthGrid';
 import { CalendarGrid } from './CalendarGrid';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface EnrichedSession {
   id: string;
@@ -80,12 +81,18 @@ function displaySessionTitle(s: EnrichedSession): string {
   return t('domain', 'freestyle');
 }
 
+// ADR-0025 — 「自由訓練」(no-template) semantic gray indicator. Kept as
+// raw hex because the visual intent is specifically a neutral mid-gray
+// chip (not a primary surface), and we want it to read the same in both
+// themes — the contrast with FREESTYLE_TEXT below carries the meaning.
 const FREESTYLE_BG = '#D1D5DB';
 const FREESTYLE_TEXT = '#374151';
 
 export default function MonthGridView() {
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -184,13 +191,14 @@ export default function MonthGridView() {
           cell={cell}
           bucket={bucket ?? null}
           sessionCount={sessionCount}
+          styles={styles}
           onPress={() => {
             if (bucket) onTapDay(bucket);
           }}
         />
       );
     },
-    [byDate, onTapDay]
+    [byDate, onTapDay, styles]
   );
 
   return (
@@ -209,11 +217,13 @@ function DayCellView({
   cell,
   bucket,
   sessionCount,
+  styles,
   onPress,
 }: {
   cell: CalendarDayCell;
   bucket: DayBucket | null;
   sessionCount: number;
+  styles: ReturnType<typeof makeStyles>;
   onPress: () => void;
 }) {
   const main = bucket?.main ?? null;
@@ -282,50 +292,66 @@ function DayCellView({
 
 const CELL_HEIGHT = 76;
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  cell: {
-    height: CELL_HEIGHT,
-    padding: 2,
-    borderColor: 'rgba(127,127,127,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  cellOutMonth: { opacity: 0.4 },
-  cellPressed: { opacity: 0.7 },
-  cellTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  dayNumWrap: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayNumToday: { backgroundColor: '#34C759' },
-  dayNum: { fontSize: 12, fontWeight: '600', color: '#111827' },
-  dayNumOut: { color: '#9CA3AF' },
-  dayNumTodayText: { color: '#fff' },
-  plusN: { fontSize: 9, color: '#9CA3AF', fontWeight: '600' },
-  chipStack: { gap: 2, marginTop: 1 },
-  chip: { borderRadius: 4, paddingHorizontal: 2, paddingVertical: 1 },
-  chipCapacity: { backgroundColor: '#34C759' },
-  chipCapacityText: {
-    color: '#fff',
-    fontSize: 8,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  chipTitleText: {
-    color: '#fff',
-    fontSize: 8,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  subtitle: { fontSize: 8, color: '#6B7280', textAlign: 'center' },
-});
+/**
+ * ADR-0025 — calendar cell chrome flows from tokens. The session chip BG
+ * uses per-template color_hex (data-driven), so we don't tokenize that —
+ * the surrounding cell borders / day-number / subtitle DO use tokens so
+ * dark mode is legible.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1 },
+    cell: {
+      height: CELL_HEIGHT,
+      padding: 2,
+      borderColor: tokens.border.subtle,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    cellOutMonth: { opacity: 0.4 },
+    cellPressed: { opacity: 0.7 },
+    cellTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    dayNumWrap: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dayNumToday: { backgroundColor: tokens.action.success },
+    dayNum: { fontSize: 12, fontWeight: '600', color: tokens.text.primary },
+    dayNumOut: { color: tokens.text.tertiary },
+    dayNumTodayText: { color: tokens.action.onPrimary },
+    plusN: {
+      fontSize: 9,
+      color: tokens.text.tertiary,
+      fontWeight: '600',
+    },
+    chipStack: { gap: 2, marginTop: 1 },
+    chip: { borderRadius: 4, paddingHorizontal: 2, paddingVertical: 1 },
+    chipCapacity: { backgroundColor: tokens.action.success },
+    chipCapacityText: {
+      color: tokens.action.onPrimary,
+      fontSize: 8,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    chipTitleText: {
+      color: tokens.action.onPrimary,
+      fontSize: 8,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 8,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+    },
+  });
+}
 
 // Suppress lint warning for currently-unused todayISO import; reserved
 // for future "今天" jump button.
