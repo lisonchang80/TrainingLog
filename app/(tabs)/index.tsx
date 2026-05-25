@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -135,7 +135,10 @@ import {
   STICKY_KEY_LAST_SUB_TAG as LAST_SUB_TAG_KEY,
 } from '@/src/domain/training/templateListGroups';
 import { TemplateListSection } from '@/components/training/template-list-section';
-import { SessionTitleEditor } from '@/components/session/session-title-editor';
+import {
+  SessionTitleEditor,
+  type SessionTitleEditorHandle,
+} from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import {
   IDLE,
@@ -211,6 +214,15 @@ export default function TodayScreen() {
    * just to reflect the user's own keystroke.
    */
   const [sessionTitle, setSessionTitle] = useState<string>('');
+  /**
+   * Bug F4 (2026-05-25) — ref to the in-session SessionTitleEditor so the
+   * ⋯ menu trigger can call `blur()` BEFORE opening the ActionSheet. This
+   * fires the editor's commit-on-blur so any pending edit is persisted to
+   * the DB before focus is stolen by the secondary surface. The editor
+   * exposes a `SessionTitleEditorHandle` via `forwardRef` (see
+   * `components/session/session-title-editor.tsx`).
+   */
+  const editorRef = useRef<SessionTitleEditorHandle>(null);
   // Body data editor sheet (slice 10c overnight #4 第 3 點) — replaces the
   // previous inline panel. Opened from header ⋯ menu「Body data」.
   const [bodySheetVisible, setBodySheetVisible] = useState(false);
@@ -1793,6 +1805,11 @@ export default function TodayScreen() {
    * Cancel is index 0; more items可以陸續加。
    */
   const onHeaderMenuPress = () => {
+    // Bug F4 — blur the title editor FIRST so any pending edit commits to
+    // the DB before the ActionSheet steals focus. No-op when not in edit
+    // mode. See `components/session/session-title-editor.tsx` for the
+    // exposed `blur()` handle.
+    editorRef.current?.blur();
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options: [t('common', 'cancel'), t('button', 'bodyData'), t('button', 'discardSession')],
@@ -2088,6 +2105,7 @@ export default function TodayScreen() {
             }
             return (
               <SessionTitleEditor
+                ref={editorRef}
                 sessionId={session_id}
                 initialTitle={sessionTitle}
                 placeholder={t('page', 'sessionTitlePlaceholder')}
