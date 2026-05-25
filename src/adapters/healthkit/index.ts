@@ -26,3 +26,7 @@ export {
 } from './permission';
 
 export type { HKPermissionState, HKReadScope, HKWriteScope } from './types';
+
+// --- agent-A-reader-13c BEGIN ---
+export { queryHeartRateSamples, aggregateActiveEnergyBurned } from './reader';
+// --- agent-A-reader-13c END ---
