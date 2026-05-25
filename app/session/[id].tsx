@@ -766,7 +766,7 @@ export default function SessionDetailScreen() {
           });
           await load();
         } catch (e) {
-          Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+          Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
         } finally {
           setBusy(false);
         }
@@ -802,7 +802,7 @@ export default function SessionDetailScreen() {
         reps: repsNum,
       });
       if (err) {
-        Alert.alert('Invalid input', err);
+        Alert.alert(t('alert', 'invalidInput'), err);
         return;
       }
       setBusy(true);
@@ -815,7 +815,7 @@ export default function SessionDetailScreen() {
         });
         await load();
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
@@ -849,7 +849,7 @@ export default function SessionDetailScreen() {
           ),
         );
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db],
@@ -922,7 +922,7 @@ export default function SessionDetailScreen() {
         }
         await load();
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, sets, load],
@@ -935,7 +935,7 @@ export default function SessionDetailScreen() {
         await deleteSet(db, set_id);
         await load();
       } catch (e) {
-        Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, load],
@@ -972,7 +972,7 @@ export default function SessionDetailScreen() {
         }
         await load();
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
@@ -1103,7 +1103,7 @@ export default function SessionDetailScreen() {
         await deleteClusterCycle(db, args);
         await load();
       } catch (e) {
-        Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, load],
@@ -1129,7 +1129,7 @@ export default function SessionDetailScreen() {
         }
         await load();
       } catch (e) {
-        Alert.alert('Clone failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'cloneFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, load],
@@ -1198,7 +1198,7 @@ export default function SessionDetailScreen() {
         });
         await load();
       } catch (e) {
-        Alert.alert('Add cycle failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'addCycleFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db, id, sets, load],
@@ -1212,7 +1212,7 @@ export default function SessionDetailScreen() {
           curr.map((s) => (s.id === set_id ? { ...s, notes } : s)),
         );
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       }
     },
     [db],
@@ -1825,7 +1825,7 @@ export default function SessionDetailScreen() {
               </Text>
             )}
             {shouldShowEditChip(editMode) ? (
-              <View style={styles.editChip} accessibilityLabel="編輯模式">
+              <View style={styles.editChip} accessibilityLabel={t('button', 'a11yEditMode')}>
                 <Text style={styles.editChipText}>編</Text>
               </View>
             ) : null}

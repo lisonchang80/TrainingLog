@@ -828,7 +828,7 @@ export default function TodayScreen() {
   ) => {
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
-      Alert.alert('No active session');
+      Alert.alert(t('alert', 'noActiveSession'));
       return;
     }
     // Defaults priority chain (ADR-0012/0016 動作記憶):
@@ -862,7 +862,7 @@ export default function TodayScreen() {
         const sets = await listSetsBySession(db, session_id);
         setSetsInSession(sets);
       } catch (e) {
-        Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
@@ -904,7 +904,7 @@ export default function TodayScreen() {
       reps: repsNum,
     });
     if (err) {
-      Alert.alert('Invalid input', err);
+      Alert.alert(t('alert', 'invalidInput'), err);
       return;
     }
 
@@ -922,7 +922,7 @@ export default function TodayScreen() {
       // so the PR ceremony should fire only when user marks the set complete.
       // Per user 「還沒打勾就跳出ＰＲ！」 (smoke 2026-05-17 ultra-late).
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -966,7 +966,7 @@ export default function TodayScreen() {
         ),
       );
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -1062,7 +1062,7 @@ export default function TodayScreen() {
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -1079,7 +1079,7 @@ export default function TodayScreen() {
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
     } catch (e) {
-      Alert.alert('Delete failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -1137,7 +1137,7 @@ export default function TodayScreen() {
       setSetsInSession(sets);
       // PR detection moved to onToggleLogged — new rows start unlogged.
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -1383,7 +1383,7 @@ export default function TodayScreen() {
       setSetsInSession(sets);
     } catch (e) {
       Alert.alert(
-        'Delete failed',
+        t('alert', 'deleteFailed'),
         e instanceof Error ? e.message : String(e),
       );
     }
@@ -1430,7 +1430,7 @@ export default function TodayScreen() {
       setSetsInSession(sets);
     } catch (e) {
       Alert.alert(
-        'Clone failed',
+        t('alert', 'cloneFailed'),
         e instanceof Error ? e.message : String(e),
       );
     }
@@ -1520,7 +1520,7 @@ export default function TodayScreen() {
       setSetsInSession(sets);
     } catch (e) {
       Alert.alert(
-        'Add cycle failed',
+        t('alert', 'addCycleFailed'),
         e instanceof Error ? e.message : String(e),
       );
     }
@@ -1540,7 +1540,7 @@ export default function TodayScreen() {
         curr.map((s) => (s.id === set_id ? { ...s, notes } : s)),
       );
     } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -1785,7 +1785,7 @@ export default function TodayScreen() {
                     await refresh();
                   } catch (e) {
                     Alert.alert(
-                      'Delete failed',
+                      t('alert', 'deleteFailed'),
                       e instanceof Error ? e.message : String(e),
                     );
                   }
@@ -1900,7 +1900,7 @@ export default function TodayScreen() {
       await finalizeEndAndRoute(session_id);
     } catch (e) {
       Alert.alert(
-        'Could not end session',
+        t('alert', 'endSessionFailed'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -2116,7 +2116,7 @@ export default function TodayScreen() {
           <View style={styles.sessionHeaderActions}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Session menu"
+              accessibilityLabel={t('button', 'a11ySessionMenu')}
               onPress={onHeaderMenuPress}
               hitSlop={8}
               style={({ pressed }) => [
@@ -2638,7 +2638,7 @@ export default function TodayScreen() {
               );
             } catch (e) {
               Alert.alert(
-                'Save failed',
+                t('alert', 'saveFailed'),
                 e instanceof Error ? e.message : String(e),
               );
             }

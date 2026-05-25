@@ -217,6 +217,12 @@ export const strings = {
       // Card 11 / ADR-0014 — accessibilityLabel: in-session header tap-to-edit
       // session title.
       a11yTapEditTitle: '點擊編輯訓練標題',
+      // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: in-session header
+      // ⋯ menu (Today screen `onHeaderMenuPress`).
+      a11ySessionMenu: '訓練選單',
+      // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: detail-page edit
+      // mode toggle button (session/[id].tsx sticky bar).
+      a11yEditMode: '編輯模式',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: '建立中…',
       addProgram: '新增計畫',
@@ -444,6 +450,11 @@ export const strings = {
       invalidPbf: 'PBF 應為 0–100 %',
       invalidSmm: 'SMM 數值不合理（應為 0–200 kg）',
       invalidInput: '輸入無效',
+      // 2026-05-25 wave 2 i18n sweep — Alert.alert titles previously hardcoded
+      // in app/(tabs)/index.tsx + app/session/[id].tsx error paths.
+      cloneFailed: '複製失敗',
+      addCycleFailed: '新增週期失敗',
+      endSessionFailed: '無法結束訓練',
       variantExists: '變體已存在',
       notEnoughDataPoints: '此時段資料點不足，至少需 2 次 Session。',
       defaultVariantUndeletable:
@@ -929,6 +940,12 @@ export const strings = {
       // Card 11 / ADR-0014 — accessibilityLabel: in-session header tap-to-edit
       // session title.
       a11yTapEditTitle: 'Tap to edit session title',
+      // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: in-session header
+      // ⋯ menu (Today screen `onHeaderMenuPress`).
+      a11ySessionMenu: 'Session menu',
+      // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: detail-page edit
+      // mode toggle button (session/[id].tsx sticky bar).
+      a11yEditMode: 'Edit mode',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: 'Creating…',
       addProgram: 'Add Program',
@@ -1152,6 +1169,11 @@ export const strings = {
       invalidPbf: 'PBF must be 0–100 %',
       invalidSmm: 'Invalid SMM (must be 0–200 kg)',
       invalidInput: 'Invalid input',
+      // 2026-05-25 wave 2 i18n sweep — Alert.alert titles previously hardcoded
+      // in app/(tabs)/index.tsx + app/session/[id].tsx error paths.
+      cloneFailed: 'Clone failed',
+      addCycleFailed: 'Add cycle failed',
+      endSessionFailed: 'Could not end session',
       variantExists: 'Variant already exists',
       notEnoughDataPoints: 'Not enough data points for this period. At least 2 sessions are required.',
       defaultVariantUndeletable:
