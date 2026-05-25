@@ -9,6 +9,9 @@
  *   - 部位     → first_combo + pr_per_mg
  *   - 訓練目的 → pr_per_bucket
  *   - 里程碑   → session_count
+ *
+ * ADR-0025 — all colors flow from useTheme().tokens. Unlocked cell uses
+ * action.warning (amber/gold trophy feel); locked cell uses bg.elevated.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
@@ -22,6 +25,7 @@ import {
 } from '@/src/adapters/sqlite/achievementRepository';
 import type { AchievementDefinitionRow } from '@/src/domain/achievement/types';
 import { getLocale, t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type FilterKey = 'all' | 'mg' | 'bucket' | 'milestone';
 
@@ -70,6 +74,8 @@ function formatUnlockDate(ms: number): string {
 
 export function AchievementsPanel() {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [defs, setDefs] = useState<AchievementDefinitionRow[]>([]);
   const [unlocks, setUnlocks] = useState<AchievementUnlockRow[]>([]);
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -155,44 +161,53 @@ export function AchievementsPanel() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  filterRow: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  filterChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  filterChipActive: { backgroundColor: '#111827' },
-  filterChipText: { fontSize: 13, color: '#374151', fontWeight: '500' },
-  filterChipTextActive: { color: '#fff', fontWeight: '700' },
-  summary: { fontSize: 12, color: '#6B7280', paddingHorizontal: 16, paddingVertical: 8 },
-  gridContainer: { paddingHorizontal: 12, paddingBottom: 24, gap: 8 },
-  gridRow: { gap: 8 },
-  cell: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 10,
-    minHeight: 92,
-    gap: 4,
-  },
-  cellUnlocked: {
-    backgroundColor: '#FFEDD5',
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-  },
-  cellLocked: {
-    backgroundColor: 'rgba(127,127,127,0.08)',
-  },
-  cellName: { fontSize: 13, fontWeight: '700', color: '#111827' },
-  cellNameLocked: { color: '#6B7280' },
-  cellDesc: { fontSize: 11, color: '#6B7280' },
-  cellStatus: { fontSize: 11, marginTop: 'auto', color: '#9CA3AF' },
-  cellStatusUnlocked: { color: '#B45309', fontWeight: '700' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    filterRow: {
+      flexDirection: 'row',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingTop: 12,
+    },
+    filterChip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+    },
+    filterChipActive: { backgroundColor: tokens.action.primary },
+    filterChipText: { fontSize: 13, color: tokens.text.secondary, fontWeight: '500' },
+    filterChipTextActive: { color: tokens.action.onPrimary, fontWeight: '700' },
+    summary: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    gridContainer: { paddingHorizontal: 12, paddingBottom: 24, gap: 8 },
+    gridRow: { gap: 8 },
+    cell: {
+      flex: 1,
+      padding: 12,
+      borderRadius: 10,
+      minHeight: 92,
+      gap: 4,
+    },
+    cellUnlocked: {
+      // Subtle amber tint over elevated bg — works in both modes (the
+      // border carries the warning hue, fill is just a soft tint).
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: 1,
+      borderColor: tokens.action.warning,
+    },
+    cellLocked: {
+      backgroundColor: tokens.bg.elevated,
+    },
+    cellName: { fontSize: 13, fontWeight: '700', color: tokens.text.primary },
+    cellNameLocked: { color: tokens.text.tertiary },
+    cellDesc: { fontSize: 11, color: tokens.text.secondary },
+    cellStatus: { fontSize: 11, marginTop: 'auto', color: tokens.text.tertiary },
+    cellStatusUnlocked: { color: tokens.action.warning, fontWeight: '700' },
+  });
+}
