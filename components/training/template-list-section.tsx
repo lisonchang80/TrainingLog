@@ -22,7 +22,7 @@
 
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -38,6 +38,7 @@ import {
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { listTemplateGroupsByName } from '@/src/domain/training/templateListGroups';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface Props {
   /**
@@ -57,6 +58,8 @@ export function TemplateListSection({
 }: Props): React.ReactElement {
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [rows, setRows] = useState<TemplateSummary[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -140,39 +143,49 @@ function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
-const styles = StyleSheet.create({
-  section: { gap: 8 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  heading: { fontSize: 18, fontWeight: '700' },
-  newBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: '#0a7ea4',
-  },
-  newBtnText: { color: 'white', fontSize: 14, fontWeight: '600' },
-  list: { gap: 8 },
-  emptyBox: {
-    padding: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    alignItems: 'center',
-  },
-  emptyText: { fontSize: 14, opacity: 0.7, textAlign: 'center' },
-  row: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    gap: 4,
-  },
-  rowPressed: { opacity: 0.85 },
-  rowName: { fontSize: 16, fontWeight: '600' },
-  rowDetails: { fontSize: 13, opacity: 0.7 },
-  btnDisabled: { opacity: 0.5 },
-  btnPressed: { opacity: 0.85 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    section: { gap: 8 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    heading: { fontSize: 18, fontWeight: '700', color: tokens.text.primary },
+    newBtn: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: tokens.action.primary,
+    },
+    newBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    list: { gap: 8 },
+    emptyBox: {
+      padding: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+    },
+    row: {
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 4,
+    },
+    rowPressed: { opacity: 0.85 },
+    rowName: { fontSize: 16, fontWeight: '600', color: tokens.text.primary },
+    rowDetails: { fontSize: 13, color: tokens.text.secondary },
+    btnDisabled: { opacity: 0.5 },
+    btnPressed: { opacity: 0.85 },
+  });
+}
