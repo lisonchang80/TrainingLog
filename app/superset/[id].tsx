@@ -4,7 +4,7 @@ import {
   useNavigation,
   useRouter,
 } from 'expo-router';
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -32,6 +32,16 @@ import {
   tUsedNSessions,
   tViewExerciseDetails,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the 3 components in this file that share one
+ * memoised style sheet.
+ */
+function useSupersetStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Reusable Superset detail page (ADR-0017 Q17 / slice 9.8a).
@@ -53,6 +63,7 @@ export default function SupersetDetailScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
+  const styles = useSupersetStyles();
   const [data, setData] = useState<ReusableSupersetWithExercises | null>(null);
   // Slice 10c #24 — dynamic session count (replaces `superset.use_count`,
   // which only bumps on Template explode and under-counts real usage).
@@ -84,7 +95,7 @@ export default function SupersetDetailScreen() {
         <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
       </Pressable>
     ),
-    [router]
+    [router, styles.headerBack]
   );
 
   useLayoutEffect(() => {
@@ -212,6 +223,7 @@ function ExerciseTile({
   exercise: Exercise | undefined;
   onPress: (() => void) | undefined;
 }) {
+  const styles = useSupersetStyles();
   if (!exercise) {
     return (
       <View style={[styles.tile, styles.tileEmpty]}>
@@ -256,6 +268,7 @@ function FooterButton({
   disabled?: boolean;
   destructive?: boolean;
 }) {
+  const styles = useSupersetStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -278,71 +291,101 @@ function FooterButton({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 20, gap: 12 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  colorDot: { width: 14, height: 14, borderRadius: 7 },
-  heading: { fontSize: 26, fontWeight: '700', flexShrink: 1 },
-  subheading: { fontSize: 14, opacity: 0.7, marginBottom: 4 },
-  placeholder: { fontSize: 14, opacity: 0.6, padding: 24 },
-  exercisesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    marginTop: 12,
-  },
-  tile: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 14,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    alignItems: 'center',
-  },
-  tileEmpty: {
-    opacity: 0.5,
-  },
-  tileMissing: { fontSize: 13, opacity: 0.5, fontStyle: 'italic' },
-  tileThumb: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    overflow: 'hidden',
-    marginBottom: 8,
-    backgroundColor: '#fff',
-  },
-  tileThumbImage: { width: '100%', height: '100%' },
-  tileThumbPlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tileThumbInitial: { color: '#fff', fontSize: 32, fontWeight: '700' },
-  tileName: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
-  plus: { fontSize: 22, fontWeight: '600', opacity: 0.7 },
-  headerBack: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '400',
-    paddingHorizontal: 8,
-  },
-  footer: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.3)',
-    backgroundColor: 'rgba(255,255,255,0.0)',
-  },
-  footerBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  footerBtnPressed: { opacity: 0.4 },
-  footerBtnText: { fontSize: 16, fontWeight: '500', color: '#0a7ea4' },
-  footerBtnTextDisabled: { color: 'rgba(127,127,127,0.5)' },
-  footerBtnTextDestructive: { color: '#DC2626' },
-  pressed: { opacity: 0.7 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 20, gap: 12 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    colorDot: { width: 14, height: 14, borderRadius: 7 },
+    heading: {
+      fontSize: 26,
+      fontWeight: '700',
+      flexShrink: 1,
+      color: tokens.text.primary,
+    },
+    subheading: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    placeholder: { fontSize: 14, color: tokens.text.secondary, padding: 24 },
+    exercisesRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      marginTop: 12,
+    },
+    tile: {
+      flex: 1,
+      borderRadius: 14,
+      padding: 14,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    tileEmpty: {
+      opacity: 0.5,
+    },
+    tileMissing: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+    },
+    tileThumb: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      overflow: 'hidden',
+      marginBottom: 8,
+      backgroundColor: tokens.bg.surface,
+    },
+    tileThumbImage: { width: '100%', height: '100%' },
+    tileThumbPlaceholder: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // White letter on data-driven `hashColor()` bg — kept literal because
+    // the placeholder swatch is intentionally accent-colored (see palette.ts).
+    tileThumbInitial: { color: '#fff', fontSize: 32, fontWeight: '700' },
+    tileName: {
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    plus: {
+      fontSize: 22,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    headerBack: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '400',
+      paddingHorizontal: 8,
+    },
+    footer: {
+      flexDirection: 'row',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.default,
+      backgroundColor: 'transparent',
+    },
+    footerBtn: {
+      flex: 1,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    footerBtnPressed: { opacity: 0.4 },
+    footerBtnText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: tokens.action.primary,
+    },
+    footerBtnTextDisabled: { color: tokens.text.disabled },
+    footerBtnTextDestructive: { color: tokens.action.destructive },
+    pressed: { opacity: 0.7 },
+  });
+}
