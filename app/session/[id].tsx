@@ -27,6 +27,8 @@ import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { HRZoneChart } from '@/components/session/hr-zone-chart';
+import type { HRSample } from '@/components/session/hr-zone-chart.behavior';
+import { queryHeartRateSamples } from '@/src/adapters/healthkit';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
 import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { ClusterCard } from '@/components/session/cluster-card';
@@ -264,6 +266,15 @@ export default function SessionDetailScreen() {
     [navState, goToSibling],
   );
   const [session, setSession] = useState<SessionWithHK | null>(null);
+  /**
+   * Slice 13c C4 — HR samples from HealthKit (live fetch each detail
+   * page open per Q2). `null` = still loading OR query failed OR no
+   * permission OR no samples in range; chart shows grey overlay + empty
+   * hint in all these cases (Phase A behaviour preserved). `[]` (empty
+   * array) also triggers overlay — only a populated array draws the
+   * polyline.
+   */
+  const [hrSamples, setHrSamples] = useState<HRSample[] | null>(null);
   const [sets, setSets] = useState<SessionSetWithExercise[]>([]);
   const [sessionExercises, setSessionExercises] = useState<
     SessionExerciseRowWithName[]
@@ -418,6 +429,29 @@ export default function SessionDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Slice 13c C4 — HR samples live fetch (per Q2 + Q9). Fires when session
+  // is loaded AND has ended (historical view). In-session live HR is
+  // deferred to slice 13d (per Q4) — for active sessions, samples stays
+  // null so the chart keeps its Phase A grey overlay. Reader never throws
+  // (Q8): rejection / no permission / no data all return [], which the
+  // chart treats the same as null (overlay + empty hint).
+  useEffect(() => {
+    if (!session || session.ended_at == null) {
+      setHrSamples(null);
+      return;
+    }
+    let cancelled = false;
+    const startedAt = session.started_at;
+    const endedAt = session.ended_at;
+    (async () => {
+      const samples = await queryHeartRateSamples(startedAt, endedAt);
+      if (!cancelled) setHrSamples(samples.length > 0 ? samples : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   // ── Edit mode 進入 / 提交 / 捨棄 三條 path（2026-05-20 night transactional fix）──
   // 用戶反映「修改後按返回未按完成編輯仍然被記錄」。Snapshot/restore approach:
@@ -1954,7 +1988,7 @@ export default function SessionDetailScreen() {
 
                 <Text style={styles.section}>{t('page', 'hrZoneSection')}</Text>
                 <HRZoneChart
-                  samples={null}
+                  samples={hrSamples}
                   hrmax={HRMAX_PLACEHOLDER}
                   durationSec={Math.max(
                     0,
@@ -2026,7 +2060,7 @@ export default function SessionDetailScreen() {
 
                 <Text style={styles.section}>{t('page', 'hrZoneSection')}</Text>
                 <HRZoneChart
-                  samples={null}
+                  samples={hrSamples}
                   hrmax={HRMAX_PLACEHOLDER}
                   durationSec={Math.max(
                     0,
