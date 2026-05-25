@@ -1,3 +1,4 @@
+import { useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,6 +20,16 @@ import {
 import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import { shouldFireFinishEdge } from './rest-timer-modal.behavior';
+
+/**
+ * Slice 13a C7 — rest timer finish-edge sound. 0.3s sine 440Hz beep with
+ * 5ms attack/decay envelope, normalised ~-3 dB to avoid clipping. Required
+ * once at module-eval via `require()` so Metro bundles the asset and the
+ * `useAudioPlayer` hook below resolves synchronously on mount.
+ */
+const REST_TIMER_DONE_SOUND = require('@/assets/sounds/rest-timer-done.wav');
+
 /**
  * Rest timer modal (ADR-0019 Q2 R1 v1, slice 10c — Agent C).
  *
@@ -32,10 +43,11 @@ import { useTheme, type ThemeTokens } from '@/src/theme';
  * Behaviour:
  *   - 1-second tick re-derives remaining_ms from the wall clock
  *     (`tickTimer` is robust to event-loop jitter).
- *   - On finished transition (now >= end_at): fire a Haptics notification
- *     once + auto-dismiss after a brief flash (300ms). The "短音" half of
- *     Q2.3 (c) F1 is deferred — expo-av integration not in this slice's
- *     scope. Documented as a slice 10d / 13 follow-up.
+ *   - On finished transition (now >= end_at): fire a Haptics notification +
+ *     play a 0.3s sine 440Hz beep (`assets/sounds/rest-timer-done.wav`)
+ *     once, then auto-dismiss after a brief flash (400ms). 短音 piece of
+ *     Q2.3 (c) F1 — deferred from slice 10d, landed in slice 13a per
+ *     ADR-0019 § Phase A Amendment.
  *   - User re-tap ✓ on the same set or different set → parent re-calls
  *     `<RestTimerModal restSec={...}` with a fresh trigger key`. We
  *     restart with the new value (Q2.3 (b) M1).
@@ -137,9 +149,13 @@ export function RestTimerModal({
     return () => sub.remove();
   }, [visible]);
 
-  // Fire haptic on the running → finished edge (once).
+  // Slice 13a C7 — finish-edge sound player. Hook owns lifecycle: source
+  // loaded on mount, released automatically on unmount.
+  const finishPlayer = useAudioPlayer(REST_TIMER_DONE_SOUND);
+
+  // Fire haptic + beep on the running → finished edge (once per cycle).
   useEffect(() => {
-    if (state.status === 'finished' && !firedFinishHapticRef.current) {
+    if (shouldFireFinishEdge(state.status, firedFinishHapticRef.current)) {
       firedFinishHapticRef.current = true;
       // Fire-and-forget — expo-haptics resolves on iOS, no-ops gracefully.
       void Haptics.notificationAsync(
@@ -147,13 +163,22 @@ export function RestTimerModal({
       ).catch(() => {
         /* swallow — haptic failure must not break the modal */
       });
+      // Seek to 0 first so consecutive triggers (rare; the modal is one-shot
+      // per cycle) replay from the start instead of from the previous play's
+      // end position.
+      void finishPlayer
+        .seekTo(0)
+        .then(() => finishPlayer.play())
+        .catch(() => {
+          /* swallow — sound failure must not break the modal */
+        });
       // Auto-dismiss after a brief flash so the user sees "00:00" land.
       const id = setTimeout(() => {
         onSkip();
       }, 400);
       return () => clearTimeout(id);
     }
-  }, [state.status, onSkip]);
+  }, [state.status, onSkip, finishPlayer]);
 
   return (
     <Modal
