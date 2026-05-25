@@ -35,7 +35,7 @@
  * program_id / sub_tag，所以 caller 仍可以用 Alert.prompt 改名。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -59,6 +59,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
 import { getLocale, t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Inline dynamic helper — 4-variant template-meta-sheet help hint copy.
@@ -155,6 +156,8 @@ export function TemplateMetaSheet({
   // Default title resolved at call time so locale switches at runtime propagate.
   const resolvedTitle = title ?? t('button', 'saveAsTemplate');
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [name, setName] = useState(defaultName);
   const [programId, setProgramId] = useState<string | null>(
     defaultProgramId ?? null,
@@ -451,7 +454,7 @@ export function TemplateMetaSheet({
                   value={name}
                   onChangeText={setName}
                   placeholder={defaultName}
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={tokens.text.tertiary}
                 />
               </View>
             )}
@@ -467,6 +470,7 @@ export function TemplateMetaSheet({
                     setCustomProgramMode(false);
                     setProgramId(null);
                   }}
+                  styles={styles}
                 />
                 {programList.map((p) => (
                   <Chip
@@ -477,6 +481,7 @@ export function TemplateMetaSheet({
                       setCustomProgramMode(false);
                       setProgramId(p.id);
                     }}
+                    styles={styles}
                   />
                 ))}
                 <Pressable
@@ -499,7 +504,7 @@ export function TemplateMetaSheet({
                     value={customProgramName}
                     onChangeText={setCustomProgramName}
                     placeholder={t('page', 'newProgramNamePlaceholder')}
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={tokens.text.tertiary}
                     maxLength={60}
                     editable={!creatingProgram}
                   />
@@ -537,6 +542,7 @@ export function TemplateMetaSheet({
                       setCustomMode(false);
                       setSubTag(null);
                     }}
+                    styles={styles}
                   />
                   {[...subTags, ...localSubTags].map((tag) => (
                     <Chip
@@ -547,6 +553,7 @@ export function TemplateMetaSheet({
                         setCustomMode(false);
                         setSubTag(tag);
                       }}
+                      styles={styles}
                     />
                   ))}
                   <Pressable
@@ -569,7 +576,7 @@ export function TemplateMetaSheet({
                       value={customSubTag}
                       onChangeText={setCustomSubTag}
                       placeholder={t('page', 'newIntensityWithExamplePlaceholder')}
-                      placeholderTextColor="#9ca3af"
+                      placeholderTextColor={tokens.text.tertiary}
                     />
                     <Pressable
                       onPress={handleConfirmNewSubTag}
@@ -598,14 +605,18 @@ export function TemplateMetaSheet({
   );
 }
 
+type Styles = ReturnType<typeof makeStyles>;
+
 function Chip({
   label,
   active,
   onPress,
+  styles,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  styles: Styles;
 }) {
   return (
     <Pressable
@@ -619,138 +630,145 @@ function Chip({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-    maxHeight: '85%',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-  },
-  topBarBtnDisabled: {
-    opacity: 0.4,
-  },
-  topBarConfirm: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  body: {
-    padding: 16,
-    gap: 16,
-  },
-  field: {
-    gap: 6,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    opacity: 0.7,
-    fontWeight: '600',
-  },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#f9fafb',
-  },
-  inlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-  },
-  inlineInput: {
-    flex: 1,
-  },
-  inlineConfirm: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-  },
-  inlineConfirmDisabled: {
-    opacity: 0.4,
-  },
-  inlineConfirmText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,122,255,0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,122,255,0.2)',
-  },
-  chipActive: {
-    backgroundColor: 'rgba(0,122,255,0.25)',
-    borderColor: '#007AFF',
-  },
-  chipText: {
-    fontSize: 13,
-    color: '#007AFF',
-  },
-  chipTextActive: {
-    color: '#0050B3',
-    fontWeight: '600',
-  },
-  /**
-   * Primary CTA chip for「新增計畫」/「新增強度」— always blue-solid white-text
-   * regardless of active state (so the entry point stands out from toggle
-   * chips). Active state darkens the fill slightly to signal「現在在新增模式」.
-   */
-  addCta: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: '#007AFF',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#007AFF',
-  },
-  addCtaActive: {
-    backgroundColor: '#0050B3',
-    borderColor: '#0050B3',
-  },
-  addCtaText: {
-    fontSize: 13,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  hint: {
-    fontSize: 11,
-    opacity: 0.6,
-  },
-});
+/**
+ * ADR-0025 — token-driven styles. The «新增計畫 / 新增強度» CTA chip stays
+ * action.primary regardless of `addCtaActive` (which previously darkened to
+ * `#0050B3`); the darker state now drops a step via `opacity: 0.85` rather
+ * than introducing a brand-darker shade we'd have to add as a new token.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+      maxHeight: '85%',
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+    },
+    topBarBtnDisabled: {
+      opacity: 0.4,
+    },
+    topBarConfirm: {
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    body: {
+      padding: 16,
+      gap: 16,
+    },
+    field: {
+      gap: 6,
+    },
+    fieldLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      fontSize: 15,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.surface,
+    },
+    inlineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 6,
+    },
+    inlineInput: {
+      flex: 1,
+    },
+    inlineConfirm: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: tokens.action.primary,
+    },
+    inlineConfirmDisabled: {
+      opacity: 0.4,
+    },
+    inlineConfirmText: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    chipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.subtle,
+    },
+    chipActive: {
+      backgroundColor: tokens.action.primary,
+      borderColor: tokens.action.primary,
+    },
+    chipText: {
+      fontSize: 13,
+      color: tokens.action.primary,
+    },
+    chipTextActive: {
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    /**
+     * Primary CTA chip for「新增計畫」/「新增強度」— always blue-solid white-text
+     * regardless of active state (so the entry point stands out from toggle
+     * chips). Active state darkens via opacity (was `#0050B3`).
+     */
+    addCta: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      backgroundColor: tokens.action.primary,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.primary,
+    },
+    addCtaActive: {
+      opacity: 0.85,
+    },
+    addCtaText: {
+      fontSize: 13,
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    hint: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+    },
+  });
+}
