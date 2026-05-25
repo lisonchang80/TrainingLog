@@ -100,6 +100,16 @@ import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 import { getLocale, t as tt, tExercise } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the 3 components in this file that all read
+ * the same memoised StyleSheet.
+ */
+function useEditorStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Inline dynamic helpers for template-editor-view. Kept local rather than
@@ -193,6 +203,8 @@ export default function TemplateEditorView() {
   const importFromDay = fromDay != null ? Number(fromDay) : null;
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useEditorStyles();
 
   /** Display override resolver — undefined = no override; null = 通用 / no
    *  intensity; string = explicit value. */
@@ -1743,7 +1755,7 @@ export default function TemplateEditorView() {
                               {
                                 key: 'del-superset-row',
                                 label: tt('button', 'swipeDelete'),
-                                color: '#FF3B30',
+                                color: tokens.action.destructive,
                                 onPress: () =>
                                   deleteSupersetRowAt(parent.id, childIds, i),
                               },
@@ -1752,14 +1764,14 @@ export default function TemplateEditorView() {
                               {
                                 key: 'clone-superset-row',
                                 label: tt('button', 'swipeAdd'),
-                                color: '#34C759',
+                                color: tokens.action.success,
                                 onPress: () =>
                                   cloneSupersetRowAt(parent.id, childIds, i),
                               },
                               {
                                 key: 'note-superset-row',
                                 label: tt('button', 'swipeNote'),
-                                color: '#007AFF',
+                                color: tokens.action.primary,
                                 onPress: () => {
                                   if (parentSet)
                                     openSetNoteEditor(parent.id, parentSet);
@@ -2261,6 +2273,7 @@ export default function TemplateEditorView() {
 }
 
 function SectionHeader({ label }: { label: string }) {
+  const styles = useEditorStyles();
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHr} />
@@ -2357,6 +2370,8 @@ function ExerciseBody({
   onConfirmReorderSets,
   compact,
 }: ExerciseBodyProps) {
+  const { tokens } = useTheme();
+  const styles = useEditorStyles();
   // 「{warmup}熱+{working}組」— 對齊 wave 12 (2026-05-20) 的「1 chain = 1
   // unit」進度條規則：每個 working row 算 1 組、每條 dropset chain HEAD 算
   // 1 組、follower row 不另計（被 head 吸收）。pre-fix 用 `kind !== 'warmup'`
@@ -2501,7 +2516,7 @@ function ExerciseBody({
                     {
                       key: 'delete-cluster',
                       label: tt('button', 'swipeDelete'),
-                      color: '#FF3B30',
+                      color: tokens.action.destructive,
                       onPress: () => onDeleteCluster(head.id),
                     },
                   ];
@@ -2509,13 +2524,13 @@ function ExerciseBody({
                     {
                       key: 'add-cluster',
                       label: tt('button', 'swipeAdd'),
-                      color: '#34C759',
+                      color: tokens.action.success,
                       onPress: () => onAddClusterAfter(head.id),
                     },
                     {
                       key: 'note-cluster',
                       label: tt('button', 'swipeNote'),
-                      color: '#007AFF',
+                      color: tokens.action.primary,
                       onPress: () => onShowSetNote(head),
                     },
                   ];
@@ -2566,7 +2581,7 @@ function ExerciseBody({
                   {
                     key: 'delete-set',
                     label: tt('button', 'swipeDelete'),
-                    color: '#FF3B30',
+                    color: tokens.action.destructive,
                     onPress: () => onDeleteSet(head.id),
                   },
                 ];
@@ -2574,13 +2589,13 @@ function ExerciseBody({
                   {
                     key: 'clone-set',
                     label: tt('button', 'swipeAdd'),
-                    color: '#34C759',
+                    color: tokens.action.success,
                     onPress: () => onCloneSetAfter(head.id),
                   },
                   {
                     key: 'note',
                     label: tt('button', 'swipeNote'),
-                    color: '#007AFF',
+                    color: tokens.action.primary,
                     onPress: () => onShowSetNote(head),
                   },
                 ];
@@ -2653,9 +2668,10 @@ function ExerciseBody({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
   gestureRoot: { flex: 1 },
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: tokens.bg.base },
   flexFill: { flex: 1 },
   empty: {
     flex: 1,
@@ -2664,9 +2680,9 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 12,
   },
-  emptyText: { fontSize: 15, color: '#6B7280' },
+  emptyText: { fontSize: 15, color: tokens.text.secondary },
   backBtn: { paddingVertical: 6, paddingHorizontal: 10 },
-  backBtnText: { fontSize: 15, color: '#007AFF', fontWeight: '500' },
+  backBtnText: { fontSize: 15, color: tokens.action.primary, fontWeight: '500' },
   muted: { fontSize: 14, opacity: 0.6, padding: 24 },
   topBar: {
     flexDirection: 'row',
@@ -2674,13 +2690,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.2)',
+    borderBottomColor: tokens.border.subtle,
     gap: 8,
   },
   topBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   topBtnDisabled: { opacity: 0.4 },
-  topBtnText: { fontSize: 15, color: '#007AFF' },
-  topBtnTextDisabled: { color: '#9CA3AF' },
+  topBtnText: { fontSize: 15, color: tokens.action.primary },
+  topBtnTextDisabled: { color: tokens.text.tertiary },
   topBtnSave: { fontWeight: '700' },
   topCenter: { flex: 1, gap: 4, alignItems: 'center' },
   // overnight #45 第 4 點 — name row: [swatch][nameInput] horizontal layout.
@@ -2692,9 +2708,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     minWidth: 140,
     paddingVertical: 2,
+    color: tokens.text.primary,
   },
   colorSwatch: { width: 14, height: 14, borderRadius: 7 },
-  tripleText: { fontSize: 12, color: '#6b7280' },
+  tripleText: { fontSize: 12, color: tokens.text.secondary },
   body: { padding: 12, gap: 8, paddingBottom: 80 },
   sectionHeader: {
     flexDirection: 'row',
@@ -2706,18 +2723,18 @@ const styles = StyleSheet.create({
   sectionHr: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#D1D5DB',
+    backgroundColor: tokens.border.default,
   },
-  sectionLabel: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  sectionLabel: { fontSize: 12, color: tokens.text.secondary, fontWeight: '600' },
   emptySection: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: tokens.text.tertiary,
     fontStyle: 'italic',
     paddingHorizontal: 12,
   },
   exCard: {
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
+    backgroundColor: tokens.bg.elevated,
     overflow: 'hidden',
   },
   supersetTag: {
@@ -2731,17 +2748,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignSelf: 'flex-start',
   },
-  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600' },
+  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   // overnight #45 第 1 點 — cluster header mirror session layout (decoupled
   // styles, own copy). Row 1: tag (alignSelf flex-start). Row 2: 標題分行。
   clusterText: { flex: 1, gap: 4 },
   clusterTagRow: { flexDirection: 'row', alignItems: 'center' },
-  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20, color: tokens.text.primary },
   clusterPlus: { fontSize: 14, opacity: 0.5 },
   supersetColName: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#374151',
+    color: tokens.text.primary,
     paddingHorizontal: 4,
     paddingTop: 8,
     paddingBottom: 2,
@@ -2805,7 +2822,7 @@ const styles = StyleSheet.create({
   exClusterSharedLabelText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#374151',
+    color: tokens.text.primary,
   },
   // Column-header spacer matching shared `#` btn column width.
   exClusterSharedLabelSpacer: { width: 28 },
@@ -2814,7 +2831,7 @@ const styles = StyleSheet.create({
   exSuperDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    backgroundColor: 'rgba(127,127,127,0.35)',
+    backgroundColor: tokens.border.default,
   },
   exHeader: {
     flexDirection: 'row',
@@ -2830,19 +2847,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  exName: { flexShrink: 1, fontSize: 15, fontWeight: '600' },
+  exName: { flexShrink: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   exNameCompact: { fontSize: 13 },
-  exSummary: { fontSize: 12, color: '#6B7280' },
-  exChevron: { fontSize: 11, color: '#9CA3AF' },
+  exSummary: { fontSize: 12, color: tokens.text.secondary },
+  exChevron: { fontSize: 11, color: tokens.text.tertiary },
   exGearBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  exGear: { fontSize: 16, color: '#9CA3AF' },
+  exGear: { fontSize: 16, color: tokens.text.tertiary },
   setsBox: {
     paddingHorizontal: 12,
     paddingBottom: 10,
     // overnight #52 — 規格 A: solo row 間距 gap 4→12（setsBox standard）
     gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
     paddingTop: 8,
   },
   // overnight #52 — 規格 B (cluster): cycle gap 4→8
@@ -2901,16 +2918,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 2,
   },
-  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: '#FF9500' },
+  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: tokens.action.warning },
   dropsetTailBtnDisabled: { opacity: 0.35 },
-  dropsetTailBtnTextDisabled: { color: '#9CA3AF' },
+  dropsetTailBtnTextDisabled: { color: tokens.text.tertiary },
   exFooterBtns: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   supersetFooter: {
     flexDirection: 'row',
@@ -2919,7 +2936,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   exFooterBtnsCompact: { marginTop: 6, paddingTop: 6, gap: 4 },
   exFooterBtn: {
@@ -2927,11 +2944,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 6,
-    backgroundColor: 'rgba(0,122,255,0.10)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
   },
   exFooterBtnCompact: { paddingVertical: 4, paddingHorizontal: 4 },
-  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
+  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: tokens.action.primary },
   exFooterBtnTextCompact: { fontSize: 10 },
   actionBar: {
     position: 'absolute',
@@ -2942,25 +2959,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
     gap: 6,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.modal,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.2)',
+    borderTopColor: tokens.border.subtle,
   },
   actionBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(0,122,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
   },
-  actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
+  actionBtnText: { fontSize: 13, fontWeight: '600', color: tokens.action.primary },
   sheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.modal,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -2972,16 +2989,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sheetTitle: { fontSize: 16, fontWeight: '700' },
-  sheetCancel: { fontSize: 15, color: '#007AFF' },
-  sheetDone: { fontSize: 15, color: '#007AFF', fontWeight: '600' },
+  sheetTitle: { fontSize: 16, fontWeight: '700', color: tokens.text.primary },
+  sheetCancel: { fontSize: 15, color: tokens.action.primary },
+  sheetDone: { fontSize: 15, color: tokens.action.primary, fontWeight: '600' },
   noteInput: {
     minHeight: 96,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: tokens.bg.elevated,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    color: tokens.text.primary,
     textAlignVertical: 'top',
   },
   restEditorRow: {
@@ -2995,9 +3013,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: 'rgba(0,122,255,0.10)',
+    backgroundColor: tokens.bg.elevated,
   },
-  restStepBtnText: { fontSize: 15, fontWeight: '600', color: '#007AFF' },
+  restStepBtnText: { fontSize: 15, fontWeight: '600', color: tokens.action.primary },
   restValueWrap: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -3005,16 +3023,16 @@ const styles = StyleSheet.create({
     minWidth: 90,
     justifyContent: 'center',
   },
-  restValue: { fontSize: 40, fontWeight: '700', color: '#111827' },
+  restValue: { fontSize: 40, fontWeight: '700', color: tokens.text.primary },
   restValueInput: {
     fontSize: 40,
     fontWeight: '700',
-    color: '#111827',
+    color: tokens.text.primary,
     minWidth: 80,
     textAlign: 'center',
     paddingVertical: 0,
   },
-  restValueUnit: { fontSize: 16, color: '#6B7280' },
+  restValueUnit: { fontSize: 16, color: tokens.text.secondary },
   paletteGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3030,13 +3048,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   paletteCheck: { color: '#fff', fontSize: 26, fontWeight: '700' },
-  sheetFootnote: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+  sheetFootnote: { fontSize: 11, color: tokens.text.secondary, textAlign: 'center' },
   exercisePickerScroll: { maxHeight: 360 },
   exercisePickerRow: {
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.15)',
+    borderBottomColor: tokens.border.subtle,
   },
-  exercisePickerName: { fontSize: 15, fontWeight: '500' },
-});
+  exercisePickerName: { fontSize: 15, fontWeight: '500', color: tokens.text.primary },
+  });
+}
