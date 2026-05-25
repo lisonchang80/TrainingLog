@@ -13,14 +13,19 @@
  * the persisted value via `initialTitle` (re-mounting / re-keying with a
  * fresh initial is the way to externally reset). Empty strings are valid
  * and round-trip as ''.
+ *
+ * ADR-0025 — colors come from `useTheme().tokens`. The previous default
+ * `Text` color (system primary) and hard-coded `#9ca3af` placeholder were
+ * unreadable in dark mode.
  */
 
-import { useState, useRef } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
 import { updateSessionTitle } from '@/src/adapters/sqlite/sessionRepository';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface SessionTitleEditorProps {
   sessionId: string;
@@ -36,6 +41,8 @@ export function SessionTitleEditor({
   onUpdated,
 }: SessionTitleEditorProps) {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initialTitle);
   const inputRef = useRef<TextInput>(null);
@@ -68,7 +75,7 @@ export function SessionTitleEditor({
         autoFocus
         returnKeyType="done"
         placeholder={placeholder}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={tokens.text.tertiary}
         style={styles.input}
       />
     );
@@ -95,31 +102,35 @@ export function SessionTitleEditor({
   );
 }
 
-const styles = StyleSheet.create({
-  touch: {
-    // Take the same horizontal slot the old <Text style={styles.heading}>
-    // occupied — bounded so the header's right-side action cluster keeps
-    // its slot. flexShrink lets the title truncate (numberOfLines=1) rather
-    // than push the actions off-screen.
-    flexShrink: 1,
-  },
-  heading: {
-    // Mirror app/(tabs)/index.tsx → styles.heading (fontSize 28, weight 700).
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  placeholder: {
-    fontStyle: 'italic',
-    opacity: 0.5,
-  },
-  input: {
-    fontSize: 28,
-    fontWeight: '700',
-    paddingVertical: 0,
-    // Same horizontal slot — let the input grow to fill what the action
-    // cluster doesn't claim. paddingVertical 0 keeps the baseline aligned
-    // with the surrounding header buttons.
-    flexShrink: 1,
-    flexGrow: 1,
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    touch: {
+      // Take the same horizontal slot the old <Text style={styles.heading}>
+      // occupied — bounded so the header's right-side action cluster keeps
+      // its slot. flexShrink lets the title truncate (numberOfLines=1) rather
+      // than push the actions off-screen.
+      flexShrink: 1,
+    },
+    heading: {
+      // Mirror app/(tabs)/index.tsx → styles.heading (fontSize 28, weight 700).
+      fontSize: 28,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    placeholder: {
+      fontStyle: 'italic',
+      opacity: 0.5,
+    },
+    input: {
+      fontSize: 28,
+      fontWeight: '700',
+      paddingVertical: 0,
+      color: tokens.text.primary,
+      // Same horizontal slot — let the input grow to fill what the action
+      // cluster doesn't claim. paddingVertical 0 keeps the baseline aligned
+      // with the surrounding header buttons.
+      flexShrink: 1,
+      flexGrow: 1,
+    },
+  });
+}
