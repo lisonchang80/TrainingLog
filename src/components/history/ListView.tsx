@@ -26,7 +26,7 @@
  */
 
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -37,6 +37,7 @@ import {
 } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 import { listSessions } from '@/src/adapters/sqlite/sessionRepository';
 import { listSetsBySession } from '@/src/adapters/sqlite/setRepository';
 import {
@@ -57,7 +58,20 @@ import {
 import { t } from '@/src/i18n';
 import { tNExerciseCount } from '@/src/i18n/dynamic';
 
+/**
+ * Side-bar color for freestyle / pre-backfill template rows. Stays literal
+ * — it's a data-viz palette fallback (a neutral grey companion to the 12
+ * template palette colors), not UI chrome.
+ */
 const FREESTYLE_COLOR = '#D1D5DB';
+
+/**
+ * DRY hook — every Row + the parent FlatList share the same memoised styles.
+ */
+function useListStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 interface SessionLinkedTriple {
   template_id: string;
@@ -120,6 +134,7 @@ function formatDateParts(ms: number): { primary: string; year: string } {
 export default function ListView() {
   const db = useDatabase();
   const router = useRouter();
+  const styles = useListStyles();
   const [rows, setRows] = useState<RowVM[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -210,6 +225,7 @@ interface RowProps {
 }
 
 function Row({ vm, onPress }: RowProps) {
+  const styles = useListStyles();
   const { session, sets, triple, tplColor, extraSameDay } = vm;
   const { primary: dateMD, year: dateYear } = formatDateParts(session.started_at);
 
@@ -282,66 +298,68 @@ function Row({ vm, onPress }: RowProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-    gap: 8,
-  },
-  emptyContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  emptyText: { fontSize: 15, opacity: 0.6, textAlign: 'center' },
-  row: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    borderRadius: 10,
-    overflow: 'hidden',
-    minHeight: 64,
-    alignItems: 'stretch',
-  },
-  rowPressed: { opacity: 0.85 },
-  sideBar: {
-    width: 6,
-    alignSelf: 'stretch',
-  },
-  dateCol: {
-    width: 56,
-    paddingVertical: 10,
-    paddingLeft: 10,
-    paddingRight: 4,
-    justifyContent: 'center',
-  },
-  dateMD: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  dateYear: { fontSize: 11, color: '#6B7280', marginTop: 1 },
-  mainCol: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-    gap: 2,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  titleFreestyle: { color: '#6B7280' },
-  subtitle: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  volCol: {
-    minWidth: 72,
-    paddingVertical: 10,
-    paddingRight: 14,
-    paddingLeft: 4,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  volNumber: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  volUnit: { fontSize: 11, color: '#6B7280', marginTop: 1 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    listContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 24,
+      gap: 8,
+    },
+    emptyContent: {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    emptyText: { fontSize: 15, color: tokens.text.secondary, textAlign: 'center' },
+    row: {
+      flexDirection: 'row',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      overflow: 'hidden',
+      minHeight: 64,
+      alignItems: 'stretch',
+    },
+    rowPressed: { opacity: 0.85 },
+    sideBar: {
+      width: 6,
+      alignSelf: 'stretch',
+    },
+    dateCol: {
+      width: 56,
+      paddingVertical: 10,
+      paddingLeft: 10,
+      paddingRight: 4,
+      justifyContent: 'center',
+    },
+    dateMD: { fontSize: 16, fontWeight: '700', color: tokens.text.primary },
+    dateYear: { fontSize: 11, color: tokens.text.secondary, marginTop: 1 },
+    mainCol: {
+      flex: 1,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+      gap: 2,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    titleFreestyle: { color: tokens.text.secondary },
+    subtitle: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+    },
+    volCol: {
+      minWidth: 72,
+      paddingVertical: 10,
+      paddingRight: 14,
+      paddingLeft: 4,
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    volNumber: { fontSize: 17, fontWeight: '700', color: tokens.text.primary },
+    volUnit: { fontSize: 11, color: tokens.text.secondary, marginTop: 1 },
+  });
+}
