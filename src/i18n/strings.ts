@@ -126,6 +126,11 @@ export const strings = {
       // Phase 4.5 audit (2026-05-24) — Stats panel period selector chips.
       year: '年',
       month: '月',
+      // Slice 13 Phase A (2026-05-25) — HR + kcal scaffold; see ADR-0019.
+      heartRate: '心率',
+      kcal: '大卡',
+      bpm: 'BPM',
+      hrZone: '心率區間',
     },
 
     /** UI button / CTA / action label。包括 wizard nav、cluster ⚙️ 選單 item。 */
@@ -364,6 +369,8 @@ export const strings = {
       // Card 11 / ADR-0014 — in-session header tap-to-edit title placeholder
       // (freestyle / un-named session).
       sessionTitlePlaceholder: '自由訓練',
+      // Slice 13 Phase A (2026-05-25) — detail page HR zone section header.
+      hrZoneSection: '心率區間',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -591,6 +598,11 @@ export const strings = {
       muscleRoleSecondary: '次要',
       muscleRoleInactive: '未活化',
       noSessionsYetHint: '尚無 Session — 到 Today 分頁開始第一次訓練。',
+      // Slice 13 Phase A (2026-05-25) — HR chart + kcal placeholder hints
+      // shown when HealthKit / Apple Watch data is unavailable (pre-Phase B).
+      hrChartEmptyHint: '需 Apple Watch 同步心率資料',
+      hrZoneSummary: '本次訓練心率區間分佈',
+      kcalEmpty: '需 Apple Watch 同步活動數據',
     },
 
     /**
@@ -852,6 +864,11 @@ export const strings = {
       // Phase 4.5 audit (2026-05-24) — Stats panel period selector chips.
       year: 'Year',
       month: 'Month',
+      // Slice 13 Phase A (2026-05-25) — HR + kcal scaffold; see ADR-0019.
+      heartRate: 'Heart rate',
+      kcal: 'kcal',
+      bpm: 'BPM',
+      hrZone: 'HR zone',
     },
 
     button: {
@@ -1082,6 +1099,8 @@ export const strings = {
       // Card 11 / ADR-0014 — in-session header tap-to-edit title placeholder
       // (freestyle / un-named session).
       sessionTitlePlaceholder: 'Freestyle session',
+      // Slice 13 Phase A (2026-05-25) — detail page HR zone section header.
+      hrZoneSection: 'Heart rate zones',
     },
 
     alert: {
@@ -1301,6 +1320,11 @@ export const strings = {
       muscleRoleSecondary: 'Secondary',
       muscleRoleInactive: 'Inactive',
       noSessionsYetHint: 'No sessions yet — start one in the Today tab.',
+      // Slice 13 Phase A (2026-05-25) — HR chart + kcal placeholder hints
+      // shown when HealthKit / Apple Watch data is unavailable (pre-Phase B).
+      hrChartEmptyHint: 'Apple Watch HR sync required',
+      hrZoneSummary: 'Heart rate zone distribution',
+      kcalEmpty: 'Apple Watch activity data required',
     },
 
     equipment: {

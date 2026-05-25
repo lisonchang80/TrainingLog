@@ -17,6 +17,12 @@
  */
 
 import type { SetKind } from '../set/setLabels';
+import {
+  bucketSamples,
+  computeHRmax,
+  type HRSample,
+  type ZoneSummary,
+} from './hrZones';
 
 // ── Shared volume input ───────────────────────────────────────────────────────
 
@@ -86,6 +92,17 @@ interface DetailPageStatsInput {
   sets: SessionVolumeInput[];
   /** Optional clock for in-progress sessions; defaults to Date.now(). */
   now?: () => number;
+  /**
+   * Optional HR samples — Phase B HealthKit ingest will populate; Phase A
+   * call sites omit → avgHr / maxHr / zones return NULL.
+   * See ADR-0019 § Slice 13 Phase A Amendment.
+   */
+  hrSamples?: HRSample[];
+  /**
+   * Optional user age for HRmax estimation. Required alongside `hrSamples`
+   * for zone bucketing to run; omitting either yields NULL HR outputs.
+   */
+  userAge?: number;
 }
 
 interface DetailPageStats {
@@ -97,16 +114,53 @@ interface DetailPageStats {
   exerciseCount: number;
   /** HealthKit kcal column (v016); null = no data yet → UI shows '—'. */
   kcal: number | null;
+  /**
+   * Average BPM across all samples (rounded). NULL when no HR samples /
+   * userAge passed (Phase A — see ADR-0019 § Slice 13 Phase A Amendment).
+   */
+  avgHr: number | null;
+  /** Peak BPM across all samples. NULL when no HR data (Phase A). */
+  maxHr: number | null;
+  /**
+   * Time-in-zone breakdown for each Z1-Z5 band (always length 5 when present).
+   * NULL when no HR data (Phase A); UI renders chart canvas + legend skeleton
+   * only without a populated zones array.
+   */
+  zones: ZoneSummary[] | null;
 }
 
 export function computeDetailPageStats(input: DetailPageStatsInput): DetailPageStats {
   const endTs = input.session.ended_at ?? (input.now ?? Date.now)();
   const durationMs = Math.max(0, endTs - input.session.started_at);
+
+  let avgHr: number | null = null;
+  let maxHr: number | null = null;
+  let zones: ZoneSummary[] | null = null;
+  if (
+    input.hrSamples &&
+    input.hrSamples.length > 0 &&
+    typeof input.userAge === 'number' &&
+    input.userAge > 0
+  ) {
+    let sumBpm = 0;
+    let peak = 0;
+    for (const s of input.hrSamples) {
+      sumBpm += s.bpm;
+      if (s.bpm > peak) peak = s.bpm;
+    }
+    avgHr = Math.round(sumBpm / input.hrSamples.length);
+    maxHr = peak;
+    zones = bucketSamples(input.hrSamples, computeHRmax(input.userAge));
+  }
+
   return {
     durationMs,
     volume: computeSessionVolume(input.sets),
     exerciseCount: input.exerciseCount,
     kcal: input.session.kcal,
+    avgHr,
+    maxHr,
+    zones,
   };
 }
 
