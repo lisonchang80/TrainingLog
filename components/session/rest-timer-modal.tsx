@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   type AppStateStatus,
@@ -17,6 +17,7 @@ import {
   type RestTimerState,
 } from '@/src/domain/session/restTimer';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Rest timer modal (ADR-0019 Q2 R1 v1, slice 10c — Agent C).
@@ -76,6 +77,8 @@ export function RestTimerModal({
   onSkip,
   onCancel,
 }: RestTimerModalProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [state, setState] = useState<RestTimerState>(() =>
     startTimer(rest_sec, Date.now()),
   );
@@ -188,58 +191,65 @@ export function RestTimerModal({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  card: {
-    width: '76%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#555',
-    marginBottom: 8,
-  },
-  countdown: {
-    fontSize: 64,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 1,
-  },
-  sub: {
-    fontSize: 13,
-    color: '#777',
-    marginTop: 6,
-  },
-  actions: {
-    flexDirection: 'row',
-    marginTop: 20,
-    gap: 12,
-  },
-  btn: {
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 999,
-  },
-  btnPrimary: {
-    backgroundColor: '#1A1A1A',
-  },
-  btnPrimaryText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  btnPressed: {
-    opacity: 0.7,
-  },
-});
+/**
+ * ADR-0025 — token-driven styles. Backdrop overlay (rgba black) intentionally
+ * stays raw — it's a translucent dim layer over a transparent Modal, not a
+ * theme surface (same convention as settings.tsx modalBackdrop).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    card: {
+      width: '76%',
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 16,
+      paddingVertical: 24,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      marginBottom: 8,
+    },
+    countdown: {
+      fontSize: 64,
+      fontWeight: '700',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+      letterSpacing: 1,
+    },
+    sub: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      marginTop: 6,
+    },
+    actions: {
+      flexDirection: 'row',
+      marginTop: 20,
+      gap: 12,
+    },
+    btn: {
+      paddingVertical: 10,
+      paddingHorizontal: 24,
+      borderRadius: 999,
+    },
+    btnPrimary: {
+      backgroundColor: tokens.action.primary,
+    },
+    btnPrimaryText: {
+      color: tokens.action.onPrimary,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    btnPressed: {
+      opacity: 0.7,
+    },
+  });
+}
