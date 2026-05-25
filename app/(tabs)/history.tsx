@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,6 +7,7 @@ import { AchievementsPanel } from '@/components/achievements-panel';
 import MonthGridView from '@/src/components/history/MonthGridView';
 import ListView from '@/src/components/history/ListView';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryMode = 'calendar' | 'list';
@@ -46,6 +47,8 @@ function historyModeLabel(m: HistoryMode): string {
  * `ListView` carries the dense escape-hatch table now.
  */
 export default function HistoryScreen() {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [tab, setTab] = useState<SubTab>('history');
   const [mode, setMode] = useState<HistoryMode>('calendar');
 
@@ -97,41 +100,56 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8, gap: 12 },
-  heading: { fontSize: 28, fontWeight: '700' },
-  subTabRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    padding: 4,
-    gap: 4,
-  },
-  subTabBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  subTabBtnActive: { backgroundColor: '#fff' },
-  subTabBtnText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
-  subTabBtnTextActive: { color: '#111827', fontWeight: '700' },
-  modeRow: {
-    flexDirection: 'row',
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 8,
-    padding: 3,
-    gap: 4,
-  },
-  modeBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 18,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  modeBtnActive: { backgroundColor: '#fff' },
-  modeBtnText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
-  modeBtnTextActive: { color: '#111827', fontWeight: '700' },
-});
+/**
+ * ADR-0025 — segmented control surfaces use `bg.elevated` for the track and
+ * `bg.surface` for the active pill (small contrast bump), with action.primary
+ * text on active. Matches iOS segmented control feel in both light + dark.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    header: { paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8, gap: 12 },
+    heading: { fontSize: 28, fontWeight: '700', color: tokens.text.primary },
+    subTabRow: {
+      flexDirection: 'row',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      padding: 4,
+      gap: 4,
+    },
+    subTabBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    subTabBtnActive: { backgroundColor: tokens.bg.surface },
+    subTabBtnText: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: tokens.text.secondary,
+    },
+    subTabBtnTextActive: { color: tokens.text.primary, fontWeight: '700' },
+    modeRow: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 8,
+      padding: 3,
+      gap: 4,
+    },
+    modeBtn: {
+      paddingVertical: 6,
+      paddingHorizontal: 18,
+      borderRadius: 6,
+      alignItems: 'center',
+    },
+    modeBtnActive: { backgroundColor: tokens.bg.surface },
+    modeBtnText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.secondary,
+    },
+    modeBtnTextActive: { color: tokens.text.primary, fontWeight: '700' },
+  });
+}
