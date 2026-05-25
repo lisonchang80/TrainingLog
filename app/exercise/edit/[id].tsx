@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,6 +21,7 @@ import type {
   MuscleGroup,
 } from '@/src/domain/exercise/types';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Custom Exercise edit screen — thin wrapper around `<CustomExerciseForm>`.
@@ -32,6 +33,8 @@ export default function EditExerciseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [original, setOriginal] = useState<ExerciseWithMuscles | null>(null);
   const [initial, setInitial] = useState<CustomExerciseInitial | null>(null);
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -122,13 +125,15 @@ export default function EditExerciseScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  headerCancel: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    paddingHorizontal: 8,
-  },
-  placeholderWrap: { padding: 24 },
-  placeholder: { fontSize: 14, opacity: 0.6 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    headerCancel: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      paddingHorizontal: 8,
+    },
+    placeholderWrap: { padding: 24 },
+    placeholder: { fontSize: 14, color: tokens.text.secondary },
+  });
+}
