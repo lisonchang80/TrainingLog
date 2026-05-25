@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.TrainingLog"
+      "bundleIdentifier": "com.lisonchang.TrainingLog"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,7 +42,15 @@
       ],
       "expo-sqlite",
       "@react-native-community/datetimepicker",
-      "expo-localization"
+      "expo-localization",
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "TrainingLog 需要讀取 Apple Watch 訓練心率與消耗熱量、用於詳情頁統計。",
+          "healthUpdatePermission": "TrainingLog 會在無 Apple Watch 紀錄時、把訓練 session 寫入健康資料，讓 Fitness App 顯示完整訓練紀錄。",
+          "isClinicalDataEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
