@@ -46,6 +46,15 @@ import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the many sub-components in this file.
+ */
+function useHistoryStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Inline dynamic helpers — kept local rather than added to `src/i18n/dynamic.ts`
@@ -206,6 +215,7 @@ export default function ExerciseHistoryScreen() {
   const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
   const router = useRouter();
+  const styles = useHistoryStyles();
   const initialClusterMode = useMemo(
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
@@ -262,7 +272,7 @@ export default function ExerciseHistoryScreen() {
         </Pressable>
       ),
     }),
-    [router]
+    [router, styles.headerBack]
   );
 
   if (!id) return null;
@@ -344,6 +354,7 @@ function PagingShell({
   currentSeIdB: string | null;
 }) {
   const router = useRouter();
+  const styles = useHistoryStyles();
   // RN ScrollView doesn't accept a percent-based contentOffset, so we
   // measure the viewport on first onLayout and use that as the page
   // width. Until then we render with width=0 children (collapsed)
@@ -489,6 +500,7 @@ function HistoryPageContent({
   currentSeIdB: string | null;
 }) {
   const router = useRouter();
+  const styles = useHistoryStyles();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [hasClusterRows, setHasClusterRows] = useState(false);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
@@ -1064,6 +1076,7 @@ function HeaderCard({
   partnerName: string | null;
   currentSide: ClusterSide;
 }) {
+  const styles = useHistoryStyles();
   // Boundary dim — arrow pointing at the current side's edge has no
   // further partner to swap to. Pure-logic in clusterSwitcher.ts.
   const leftDisabled = switcherArrowDisabled(currentSide, 'left');
@@ -1247,6 +1260,7 @@ function FilterChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useHistoryStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -1280,6 +1294,7 @@ function SubTagChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useHistoryStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -1309,6 +1324,7 @@ function ClusterModeSegmented({
   value: ClusterFilterMode;
   onChange: (mode: ClusterFilterMode) => void;
 }) {
+  const styles = useHistoryStyles();
   return (
     <View style={styles.segmentedWrap}>
       {CLUSTER_FILTER_MODES.map((mode) => {
@@ -1370,6 +1386,7 @@ function SessionRow({
   rowIsCluster: boolean;
   onReplay: () => void;
 }) {
+  const styles = useHistoryStyles();
   const topSet = session.sets
     .map((s) => ({
       set: s,
@@ -1537,247 +1554,291 @@ function loadTypeDisplay(loadType: string): string {
   return loadType;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  pager: { flex: 1 },
-  scroll: { padding: 16, paddingBottom: 36, gap: 12 },
-  empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic', paddingVertical: 12 },
-  headerCard: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    gap: 4,
-  },
-  headerName: { fontSize: 22, fontWeight: '700' },
-  headerSubline: { fontSize: 13, opacity: 0.75 },
-  headerLoadType: { fontSize: 12, opacity: 0.65, marginBottom: 4 },
-  prList: { marginTop: 8, gap: 6 },
-  prHeadingRow: { paddingVertical: 4 },
-  prHeading: { fontSize: 12, fontWeight: '700', opacity: 0.7 },
-  prRow: {
-    gap: 2,
-    paddingVertical: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  prBucket: { fontSize: 13, fontWeight: '700', color: '#0a7ea4' },
-  prValue: { fontSize: 13 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  filterChip: {
-    flex: 1,
-    paddingVertical: 5,
-    paddingHorizontal: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 56,
-  },
-  filterChipActive: { backgroundColor: '#0a7ea4' },
-  filterChipText: { fontSize: 12, fontWeight: '600' },
-  filterChipTextActive: { color: 'white' },
-  filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
-  filterChipSubtextActive: { color: 'white', opacity: 0.85 },
-  segmentedWrap: {
-    flexDirection: 'row',
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    padding: 2,
-  },
-  segmentedBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  segmentedBtnActive: { backgroundColor: '#0a7ea4' },
-  segmentedText: { fontSize: 13, fontWeight: '500' },
-  segmentedTextActive: { color: 'white' },
-  advancedWrap: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    overflow: 'hidden',
-  },
-  advancedHeader: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-  },
-  advancedHeaderText: { fontSize: 14, fontWeight: '600', flex: 1 },
-  advancedHeaderBadge: {
-    fontSize: 11,
-    color: '#0a7ea4',
-    fontWeight: '600',
-  },
-  advancedBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    gap: 8,
-  },
-  advancedLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.7,
-    marginTop: 6,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.2)',
-  },
-  dropdownText: { flex: 1, fontSize: 14 },
-  dropdownChevron: { fontSize: 14, opacity: 0.5 },
-  subTagChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-  },
-  subTagChipActive: { backgroundColor: '#0a7ea4' },
-  subTagChipText: { fontSize: 13, fontWeight: '500' },
-  subTagChipTextActive: { color: 'white' },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#0a7ea4' },
-  actionBtnSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.4)',
-  },
-  actionBtnTextPrimary: { fontSize: 14, color: 'white', fontWeight: '600' },
-  actionBtnTextSecondary: { fontSize: 14, color: '#333', fontWeight: '500' },
-  sessionCard: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    gap: 4,
-  },
-  sessionRowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  sessionDateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  sessionDate: { fontSize: 14, fontWeight: '600' },
-  sessionMeta: { fontSize: 12, opacity: 0.7 },
-  // Wave 14 (2026-05-21) — purple「超」chip on cluster session rows.
-  // Palette mirrors components/session/cluster-card.tsx::supersetTag
-  // (#5856D6 iOS system indigo/purple, white text, 4px corners). Keep
-  // these in sync if either palette changes.
-  supersetTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    backgroundColor: '#5856D6',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  topSetLine: { fontSize: 13 },
-  expandedBox: {
-    marginTop: 6,
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-    gap: 4,
-  },
-  bwLine: { fontSize: 12, opacity: 0.7 },
-  setLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  // Slice 10c overnight #22 — set-kind label column (熱 / 1 / D1 …)
-  // replaces the previous `#{ordering}` text. Slightly bolder + larger
-  // than the old caption so "熱" / "D2" are immediately readable on the
-  // expanded card; same fixed width keeps the value column aligned.
-  setLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    opacity: 0.85,
-    width: 28,
-  },
-  setText: { fontSize: 13, flex: 1 },
-  setBucket: { fontSize: 11, opacity: 0.7 },
-  // Slice 10c overnight #21 —「再次訓練」button (SessionRow expanded).
-  // iOS-system blue + white text, centered, modest padding so it doesn't
-  // dominate the set list above it.
-  replayBtn: {
-    marginTop: 8,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  replayBtnText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  headerBack: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '400',
-    paddingHorizontal: 8,
-  },
-  // Slice 10c overnight #12 — A↔B switcher relocated to body title row.
-  // Arrow Pressables flank the exercise name; tap either to swap to partner.
-  headerNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  headerArrow: {
-    color: '#007AFF',
-    fontSize: 28,
-    fontWeight: '400',
-    paddingHorizontal: 4,
-  },
-  // Slice 10c overnight #13 — dim boundary arrow (current side has no
-  // further partner to swap to). 0.3 matches iOS toolbar disabled-tint feel.
-  headerArrowDisabled: { opacity: 0.3 },
-  headerNameInRow: { flex: 1, textAlign: 'center' },
-  btnPressed: { opacity: 0.85 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 16,
-    gap: 4,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  modalRow: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  modalRowText: { fontSize: 15 },
-  modalRowTextActive: { color: '#0a7ea4', fontWeight: '600' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    pager: { flex: 1 },
+    scroll: { padding: 16, paddingBottom: 36, gap: 12 },
+    empty: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontStyle: 'italic',
+      paddingVertical: 12,
+    },
+    headerCard: {
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      gap: 4,
+    },
+    headerName: { fontSize: 22, fontWeight: '700', color: tokens.text.primary },
+    headerSubline: { fontSize: 13, color: tokens.text.secondary },
+    headerLoadType: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    prList: { marginTop: 8, gap: 6 },
+    prHeadingRow: { paddingVertical: 4 },
+    prHeading: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    prRow: {
+      gap: 2,
+      paddingVertical: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    prBucket: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: tokens.action.primary,
+    },
+    prValue: { fontSize: 13, color: tokens.text.primary },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+    filterChip: {
+      flex: 1,
+      paddingVertical: 5,
+      paddingHorizontal: 4,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 56,
+    },
+    filterChipActive: { backgroundColor: tokens.action.primary },
+    filterChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    filterChipTextActive: { color: tokens.action.onPrimary },
+    filterChipSubtext: {
+      fontSize: 10,
+      fontWeight: '400',
+      color: tokens.text.secondary,
+      marginTop: 1,
+    },
+    filterChipSubtextActive: { color: tokens.action.onPrimary, opacity: 0.85 },
+    segmentedWrap: {
+      flexDirection: 'row',
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      padding: 2,
+    },
+    segmentedBtn: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      alignItems: 'center',
+    },
+    segmentedBtnActive: { backgroundColor: tokens.action.primary },
+    segmentedText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    segmentedTextActive: { color: tokens.action.onPrimary },
+    advancedWrap: {
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      overflow: 'hidden',
+    },
+    advancedHeader: {
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+    },
+    advancedHeaderText: {
+      fontSize: 14,
+      fontWeight: '600',
+      flex: 1,
+      color: tokens.text.primary,
+    },
+    advancedHeaderBadge: {
+      fontSize: 11,
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    advancedBody: {
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+      gap: 8,
+    },
+    advancedLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      marginTop: 6,
+    },
+    dropdown: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+    },
+    dropdownText: { flex: 1, fontSize: 14, color: tokens.text.primary },
+    dropdownChevron: { fontSize: 14, color: tokens.text.tertiary },
+    subTagChip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      backgroundColor: tokens.bg.elevated,
+    },
+    subTagChipActive: { backgroundColor: tokens.action.primary },
+    subTagChipText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    subTagChipTextActive: { color: tokens.action.onPrimary },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    actionBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    actionBtnPrimary: { backgroundColor: tokens.action.primary },
+    actionBtnSecondary: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+    },
+    actionBtnTextPrimary: {
+      fontSize: 14,
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    actionBtnTextSecondary: {
+      fontSize: 14,
+      color: tokens.text.primary,
+      fontWeight: '500',
+    },
+    sessionCard: {
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 4,
+    },
+    sessionRowHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    sessionDateRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    sessionDate: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    sessionMeta: { fontSize: 12, color: tokens.text.secondary },
+    // Wave 14 (2026-05-21) — purple「超」chip on cluster session rows.
+    // Palette mirrors components/session/cluster-card.tsx::supersetTag
+    // (#5856D6 iOS system indigo/purple, white text). Kept literal as
+    // an INTENTIONAL semantic accent (cross-mode constant brand color).
+    supersetTag: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#fff',
+      backgroundColor: '#5856D6',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    topSetLine: { fontSize: 13, color: tokens.text.primary },
+    expandedBox: {
+      marginTop: 6,
+      paddingTop: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+      gap: 4,
+    },
+    bwLine: { fontSize: 12, color: tokens.text.secondary },
+    setLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    setLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      width: 28,
+    },
+    setText: { fontSize: 13, flex: 1, color: tokens.text.primary },
+    setBucket: { fontSize: 11, color: tokens.text.secondary },
+    replayBtn: {
+      marginTop: 8,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    replayBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    headerBack: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '400',
+      paddingHorizontal: 8,
+    },
+    headerNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    headerArrow: {
+      color: tokens.action.primary,
+      fontSize: 28,
+      fontWeight: '400',
+      paddingHorizontal: 4,
+    },
+    headerArrowDisabled: { opacity: 0.3 },
+    headerNameInRow: { flex: 1, textAlign: 'center' },
+    btnPressed: { opacity: 0.85 },
+    modalOverlay: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 14,
+      padding: 16,
+      gap: 4,
+    },
+    modalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 8,
+      color: tokens.text.primary,
+    },
+    modalRow: {
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    modalRowText: { fontSize: 15, color: tokens.text.primary },
+    modalRowTextActive: { color: tokens.action.primary, fontWeight: '600' },
+  });
+}
