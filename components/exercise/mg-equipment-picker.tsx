@@ -12,10 +12,11 @@
  *   - 大分類 picker: 4×3 grid, 11 MG + 1 implicit empty (flex-wrap leaves blank)
  *   - 用具 picker: 4×2 grid, 8 Equipment fills exactly
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 export interface PickerCell {
   id: string;
@@ -39,6 +40,8 @@ export function MgEquipmentPicker({
   onSelect,
   onClose,
 }: MgEquipmentPickerProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   return (
     <Modal
       visible={visible}
@@ -83,68 +86,72 @@ export function MgEquipmentPicker({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    width: '100%',
-    alignSelf: 'stretch',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  done: {
-    fontSize: 15,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  cell: {
-    width: '22%',
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 0,
-  },
-  cellActive: {
-    backgroundColor: '#34C759',
-  },
-  cellText: {
-    fontSize: 14,
-    lineHeight: 16,
-    color: '#374151',
-    fontWeight: '500',
-    textAlign: 'center',
-    textAlignVertical: 'center',
-    width: '100%',
-    includeFontPadding: false,
-  },
-  cellTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      // Modal scrim — kept literal; iOS HIG uses a fixed black dim regardless
+      // of mode so the underlying surface darkens consistently.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      width: '100%',
+      alignSelf: 'stretch',
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 32,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    done: {
+      fontSize: 15,
+      color: tokens.action.primary,
+      fontWeight: '500',
+    },
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    cell: {
+      width: '22%',
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 0,
+    },
+    cellActive: {
+      backgroundColor: tokens.action.success,
+    },
+    cellText: {
+      fontSize: 14,
+      lineHeight: 16,
+      color: tokens.text.primary,
+      fontWeight: '500',
+      textAlign: 'center',
+      textAlignVertical: 'center',
+      width: '100%',
+      includeFontPadding: false,
+    },
+    cellTextActive: {
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+  });
+}
