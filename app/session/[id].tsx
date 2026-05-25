@@ -27,6 +27,7 @@ import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
+import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { ClusterCard } from '@/components/session/cluster-card';
 import {
   SetRowContent,
@@ -82,6 +83,7 @@ import {
   convertSessionToTemplate,
   getSessionLinkedTemplateTriple,
 } from '@/src/adapters/sqlite/templateRepository';
+import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import {
   getExerciseNotes,
   updateExerciseNotes,
@@ -332,6 +334,17 @@ export default function SessionDetailScreen() {
     sub_tag: string | null;
   } | null>(null);
 
+  // ADR-0014 + ADR-0019 Q10 — header subtitle 「週期 · 強度」. Resolved from the
+  // session's linked template (most-common non-null `session_exercise.template_id`).
+  // `null` for freestyle sessions (no row carries a template_id) — caller hides
+  // the subtitle row entirely. Refreshed inside `load()` so it stays in sync
+  // with any edit-mode commit that adds/removes template-backed rows.
+  const [sessionTemplateInfo, setSessionTemplateInfo] = useState<{
+    template_name: string;
+    program_name: string | null;
+    sub_tag: string | null;
+  } | null>(null);
+
   const load = useCallback(async () => {
     if (!id) return;
     try {
@@ -364,6 +377,25 @@ export default function SessionDetailScreen() {
         setRsById(new Map(entries));
       } else {
         setRsById(new Map());
+      }
+
+      // ADR-0014 + ADR-0019 Q10 — header subtitle 「週期 · 強度」. Best-effort:
+      // if the lookup fails (e.g. linked template deleted between calls) we
+      // silently clear so the subtitle row vanishes instead of stalling
+      // the page. Freestyle sessions naturally resolve to null here.
+      try {
+        const linked = await getSessionLinkedTemplateTriple(db, id);
+        setSessionTemplateInfo(
+          linked
+            ? {
+                template_name: linked.template_name,
+                program_name: linked.program_name,
+                sub_tag: linked.sub_tag,
+              }
+            : null,
+        );
+      } catch {
+        setSessionTemplateInfo(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1562,11 +1594,6 @@ export default function SessionDetailScreen() {
     [db, id, load],
   );
 
-  const titleText = useMemo(() => {
-    if (!session) return 'Session';
-    return formatDateLabel(session.started_at);
-  }, [session]);
-
   // Edit mode body — full active session UI parity.
   const renderEditBody = () => {
     if (!session) return null;
@@ -1778,12 +1805,42 @@ export default function SessionDetailScreen() {
           style={styles.headerBackBtn}>
           <Text style={styles.headerBackText}>{t('common', 'backArrow')}</Text>
         </Pressable>
-        <View style={styles.headerTitleRow}>
-          <Text style={styles.headerTitleText}>{titleText}</Text>
-          {shouldShowEditChip(editMode) ? (
-            <View style={styles.editChip} accessibilityLabel="編輯模式">
-              <Text style={styles.editChipText}>編</Text>
-            </View>
+        <View style={styles.headerTitleCol}>
+          <View style={styles.headerTitleRow}>
+            {session ? (
+              <SessionTitleEditor
+                sessionId={session.id}
+                initialTitle={session.title ?? ''}
+                placeholder={t('domain', 'freestyle')}
+                size="nav"
+                onUpdated={(newTitle) =>
+                  setSession((s) => (s ? { ...s, title: newTitle } : s))
+                }
+              />
+            ) : (
+              <Text
+                style={styles.headerTitleText}
+                numberOfLines={1}
+                ellipsizeMode="tail">
+                {t('status', 'loading')}
+              </Text>
+            )}
+            {shouldShowEditChip(editMode) ? (
+              <View style={styles.editChip} accessibilityLabel="編輯模式">
+                <Text style={styles.editChipText}>編</Text>
+              </View>
+            ) : null}
+          </View>
+          {sessionTemplateInfo ? (
+            <Text
+              style={styles.headerSubtitle}
+              numberOfLines={1}
+              ellipsizeMode="tail">
+              {formatTemplateTriple(
+                sessionTemplateInfo.program_name,
+                sessionTemplateInfo.sub_tag,
+              )}
+            </Text>
           ) : null}
         </View>
         {editMode ? (
@@ -3038,8 +3095,17 @@ function makeStyles(tokens: ThemeTokens) {
       textAlign: 'center',
       color: tokens.text.primary,
     },
-    headerTitleRow: {
+    // ADR-0014 + ADR-0019 Q10 — header title column hosts title row +
+    // optional subtitle 「週期 · 強度」. flex:1 owns the middle slot so
+    // back / done buttons keep their right slot intact; column 'center'
+    // alignment matches iOS nav-bar conventions.
+    headerTitleCol: {
       flex: 1,
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 2,
+    },
+    headerTitleRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -3049,6 +3115,11 @@ function makeStyles(tokens: ThemeTokens) {
       fontSize: 17,
       fontWeight: '700',
       color: tokens.text.primary,
+    },
+    headerSubtitle: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      maxWidth: '100%',
     },
     // Editing chip — kept raw `#FF375F` brand pink, identical in both
     // modes so it stays attention-grabbing as a mutation-mode flag.
