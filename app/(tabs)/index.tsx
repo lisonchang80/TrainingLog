@@ -416,6 +416,14 @@ export default function TodayScreen() {
         void (async () => {
           const active = await getActiveSession(db);
           if (!active) return;
+          // TODO(ADR-0024 § 4 assisted modal block, slice 10g 落地): before
+          // calling `appendSessionExercise` for any `load_type === 'assisted'`
+          // exercise, gate via `needsBwSnapshotForAppend({ load_type,
+          // snapshot_kg })` (from `@/src/domain/session/assistedBlockGuard`).
+          // If returns true, surface a blocking modal「請先輸入體重」+
+          // TextInput + 儲存 → write through `insertBodyMetric` then refresh
+          // `session.bodyweight_snapshot_kg`. Pure helper is ready; UI side
+          // pending.
           try {
             // ADR-0019 Round D Amendment Q4 — track lastAppendedId so we can
             // auto-expand the LAST appended exercise card after the loop.
@@ -480,7 +488,7 @@ export default function TodayScreen() {
             }
           } catch (e) {
             Alert.alert(
-              'Add failed',
+              t('alert', 'addExerciseFailed'),
               e instanceof Error ? e.message : String(e),
             );
           }
@@ -3003,8 +3011,10 @@ function ExerciseCard({
                         // (followers' parent_set_id points at this head;
                         // deleteSet on the head leaves orphans, but the
                         // reload pulls them too and they render as
-                        // standalone — TODO ADR for cascade semantics).
-                        // For now match prior behavior: just delete the head.
+                        // standalone). Cascade semantics are pending G1
+                        // grill round (Dropset CASCADE + 右滑「+」behaviour
+                        // — see backlog 2026-05-25). For now match prior
+                        // behavior: just delete the head.
                         onPress: () => onDeleteSet(head.id),
                       },
                     ]}

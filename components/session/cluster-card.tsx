@@ -629,8 +629,9 @@ function makeStyles(tokens: ThemeTokens) {
       backgroundColor: tokens.bg.elevated,
       borderRadius: 10,
       overflow: 'hidden',
-      // Slice 10c overnight #6: 砍掉左側 RS 彩色 border，與 solo card 一致。
-      // colorHex prop 暫保留（無視覺效果，留待未來再用）。
+      // Slice 10c overnight #6 + 2026-05-25 G3 walk-back: 砍掉左側 RS 彩色
+      // border，與 solo card 一致；`colorHex` prop 已從 ClusterCardProps 完全
+      // 移除，不再保留 placeholder（G3 amendment in ADR-0019 § Q8 c）。
     },
     clusterCardExpanded: {
       backgroundColor: tokens.bg.surface,

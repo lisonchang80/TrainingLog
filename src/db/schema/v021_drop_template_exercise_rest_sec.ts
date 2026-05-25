@@ -20,8 +20,9 @@ import type { Database } from '../types';
  * Note: this only drops the **template_exercise** orphan. The sibling column
  * `session_exercise.rest_sec` (also added by v016) IS the canonical
  * session-side store — it is widely read across `app/(tabs)/index.tsx`,
- * `app/session/[id].tsx`, `sessionRepository.ts`, `computeSessionDiff.ts`,
- * `sessionSnapshotDirty.ts`, etc. — and is intentionally untouched here.
+ * `app/session/[id].tsx`, `sessionRepository.ts`, `sessionSnapshotDirty.ts`,
+ * etc. — and is intentionally untouched here. (`computeSessionDiff.ts` used
+ * to be on this list but was removed in G4+G5 walk-back, 2026-05-25.)
  *
  * Why phased now (slice 10c follow-up): the orphan caused readability noise
  * (multiple JSDoc disclaimers in templateRepository.ts + templateManager.ts
