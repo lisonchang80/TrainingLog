@@ -55,6 +55,18 @@ import {
   tNCycles,
   tNDays,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY helper. Programs tab has many sub-component functions
+ * (ProgramGrid, CellWrapper, DropdownButton, PickerModal, TemplatePicker,
+ * SubTagPicker, StartDateModal). Each calls this instead of repeating the
+ * useTheme + useMemo pair. Mirrors the library.tsx pattern.
+ */
+function useProgramsStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Programs tab — wave 15 (2026-05-21) full UX rewrite per user spec:
@@ -125,6 +137,7 @@ type PickerState =
 export default function ProgramsScreen() {
   const db = useDatabase();
   const router = useRouter();
+  const styles = useProgramsStyles();
   const [shown, setShown] = useState<ProgramWithCells | null>(null);
   const [allPrograms, setAllPrograms] = useState<ProgramSummary[]>([]);
   const [allTemplates, setAllTemplates] = useState<TemplateSummary[]>([]);
@@ -1059,6 +1072,7 @@ function ProgramGrid({
   ) => void;
   onTapRestCell: (cycle_index: number, day_index: number) => void;
 }) {
+  const styles = useProgramsStyles();
   const cellMap = useMemo(() => buildCellMap(program.cells), [program.cells]);
   const { cycle_count, cycle_length, start_date } = program.program;
 
@@ -1238,6 +1252,7 @@ function CellWrapper({
   onDragEnd: (absX: number, absY: number) => void;
   children: React.ReactNode;
 }) {
+  const styles = useProgramsStyles();
   const ref = useRef<View>(null);
   const measure = useCallback(() => {
     if (!ref.current) return;
@@ -1313,6 +1328,7 @@ function DropdownButton({
   value: string;
   onPress: () => void;
 }) {
+  const styles = useProgramsStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -1348,6 +1364,7 @@ function PickerModal({
   onPick: (key: string) => void;
   onClose: () => void;
 }) {
+  const styles = useProgramsStyles();
   return (
     <Modal
       visible={visible}
@@ -1412,6 +1429,7 @@ function TemplatePicker({
   onCreateNew: () => void;
   onClose: () => void;
 }) {
+  const styles = useProgramsStyles();
   return (
     <Modal
       visible={visible}
@@ -1497,6 +1515,8 @@ function SubTagPicker({
   onPick: (sub_tag: string | null) => void;
   onClose: () => void;
 }) {
+  const styles = useProgramsStyles();
+  const { tokens } = useTheme();
   const [adding, setAdding] = useState(false);
   const [input, setInput] = useState('');
 
@@ -1566,6 +1586,7 @@ function SubTagPicker({
                   value={input}
                   onChangeText={setInput}
                   placeholder={t('page', 'newIntensityName')}
+                  placeholderTextColor={tokens.text.tertiary}
                   style={styles.modalInput}
                   autoFocus
                   onSubmitEditing={onConfirmNew}
@@ -1637,6 +1658,7 @@ function StartDateModal({
   onPick: (iso: string) => void;
   onClose: () => void;
 }) {
+  const styles = useProgramsStyles();
   const [draft, setDraft] = useState<Date>(() => parseIsoToLocalDate(initialIso));
 
   // Reset draft every time the sheet opens so cancel-then-reopen shows the
@@ -1704,280 +1726,328 @@ function StartDateModal({
 void SUB_TAG_NONE_KEY;
 void SUB_TAG_NEW_KEY;
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 16, gap: 8, paddingBottom: 36 },
-  heading: { fontSize: 28, fontWeight: '700' },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  headerButtons: { flexDirection: 'row', gap: 8 },
-  newBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: '#0a7ea4',
-  },
-  newBtnText: { color: 'white', fontWeight: '600' },
-  editBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,126,164,0.18)',
-  },
-  editBtnActive: { backgroundColor: '#0a7ea4' },
-  editBtnText: { color: '#0a7ea4', fontWeight: '600' },
-  editBtnTextActive: { color: 'white' },
-  empty: {
-    fontSize: 14,
-    opacity: 0.6,
-    fontStyle: 'italic',
-    padding: 24,
-  },
-  programName: { fontSize: 20, fontWeight: '600' },
-  inactiveTag: { fontSize: 13, opacity: 0.6, fontWeight: '400' },
-  metaLine: { fontSize: 12, opacity: 0.7, marginBottom: 8 },
-  // ── Edit controls (3 dropdowns) ─────────────────────────────────────
-  editControls: {
-    flexDirection: 'row',
-    gap: 8,
-    marginVertical: 6,
-  },
-  dropdown: {
-    flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(10,126,164,0.4)',
-    backgroundColor: 'rgba(10,126,164,0.06)',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    gap: 2,
-  },
-  dropdownLabel: { fontSize: 10, fontWeight: '700', opacity: 0.55 },
-  dropdownValue: { fontSize: 13, fontWeight: '600' },
-  // ── Picker modal ────────────────────────────────────────────────────
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    gap: 4,
-    maxHeight: '70%',
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  modalSubtitle: {
-    fontSize: 12,
-    opacity: 0.65,
-    marginBottom: 4,
-  },
-  modalList: { maxHeight: 400 },
-  modalRow: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  modalRowRest: { backgroundColor: 'rgba(127,127,127,0.06)' },
-  modalRowAdd: { backgroundColor: 'rgba(10,126,164,0.04)' },
-  modalRowText: { fontSize: 15 },
-  modalRowTextActive: { color: '#0a7ea4', fontWeight: '700' },
-  modalRowTextAdd: { fontSize: 15, color: '#0a7ea4', fontWeight: '600' },
-  modalRowSubtle: { fontSize: 12, opacity: 0.55, fontWeight: '400' },
-  modalAddRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-    alignItems: 'center',
-  },
-  modalInput: {
-    flex: 1,
-    fontSize: 15,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 6,
-  },
-  modalAddBtn: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 6,
-  },
-  modalAddBtnText: { color: 'white', fontWeight: '600' },
-  // ── Grid ────────────────────────────────────────────────────────────
-  grid: { gap: 4 },
-  gridRow: { flexDirection: 'row', gap: 4 },
-  rowLabel: {
-    width: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowLabelText: { fontSize: 10, fontWeight: '700', opacity: 0.65 },
-  // Apply buttons (edit mode only) — wave 15 user feedback: arrow-only
-  // (▼/▶) icons instead of「套用」text. Tighter padding so the apply row
-  // doesn't claim a full cell height; left column shares row-label width
-  // so cells don't shrink in edit mode.
-  applyBtnTop: {
-    flex: 1,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(10,126,164,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(10,126,164,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  applyBtnLeft: {
-    width: 18,
-    paddingVertical: 4,
-    paddingHorizontal: 0,
-    borderRadius: 4,
-    backgroundColor: 'rgba(10,126,164,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(10,126,164,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  applyBtnText: { fontSize: 12, fontWeight: '700', color: '#0a7ea4' },
-  // ── Cell (column stack of 3 sub-cells: date / template / sub_tag) ──
-  cell: {
-    flex: 1,
-    borderRadius: 6,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    overflow: 'hidden',
-    minHeight: 64,
-  },
-  cellPressed: { opacity: 0.55 },
-  cellDate: {
-    paddingVertical: 3,
-    alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.08)',
-  },
-  cellDateText: { fontSize: 10, fontWeight: '700', opacity: 0.75 },
-  cellTemplate: {
-    flex: 1,
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cellTemplateText: {
-    fontSize: 9,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  cellTag: {
-    paddingVertical: 3,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.05)',
-  },
-  cellTagText: { fontSize: 8, opacity: 0.7, textAlign: 'center' },
-  cellRest: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(127,127,127,0.04)',
-  },
-  cellRestText: {
-    fontSize: 11,
-    fontStyle: 'italic',
-    opacity: 0.5,
-  },
-  // ── Wave 17 — drag-swap visual feedback ────────────────────────────
-  cellDragged: {
-    opacity: 0.3,
-  },
-  cellHover: {
-    borderWidth: 2,
-    borderColor: '#0a7ea4',
-    backgroundColor: 'rgba(10,126,164,0.15)',
-  },
-  dragPreview: {
-    position: 'absolute',
-    width: 72,
-    height: 56,
-    borderRadius: 6,
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#0a7ea4',
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
-    // Slight scale by margins (avoid transform: scale to keep coords simple).
-  },
-  dragPreviewRest: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    opacity: 0.5,
-  },
-  dragPreviewTpl: {
-    fontSize: 10,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  dragPreviewTag: {
-    fontSize: 9,
-    opacity: 0.7,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  // ── Wave 17 — start date picker modal ──────────────────────────────
-  startDatePickerWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
-  },
-  startDateButtons: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  startDateBtnCancel: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 6,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    alignItems: 'center',
-  },
-  startDateBtnCancelText: { fontSize: 14, fontWeight: '600', opacity: 0.7 },
-  startDateBtnConfirm: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 6,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-  },
-  startDateBtnConfirmText: { fontSize: 14, fontWeight: '700', color: 'white' },
-  btnPressed: { opacity: 0.85 },
-});
+/**
+ * ADR-0025 — all colors flow from theme tokens. Layout (flex / padding /
+ * radius) stays in StyleSheet for perf; colors are interpolated per-token.
+ * Modal scrim stays literal (standard overlay convention, both modes).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 16, gap: 8, paddingBottom: 36 },
+    heading: { fontSize: 28, fontWeight: '700', color: tokens.text.primary },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 8,
+    },
+    headerButtons: { flexDirection: 'row', gap: 8 },
+    newBtn: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: tokens.action.primary,
+    },
+    newBtnText: { color: tokens.action.onPrimary, fontWeight: '600' },
+    editBtn: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+    },
+    editBtnActive: { backgroundColor: tokens.action.primary },
+    editBtnText: { color: tokens.action.primary, fontWeight: '600' },
+    editBtnTextActive: { color: tokens.action.onPrimary },
+    empty: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontStyle: 'italic',
+      padding: 24,
+    },
+    programName: { fontSize: 20, fontWeight: '600', color: tokens.text.primary },
+    inactiveTag: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      fontWeight: '400',
+    },
+    metaLine: { fontSize: 12, color: tokens.text.secondary, marginBottom: 8 },
+    // ── Edit controls (3 dropdowns) ─────────────────────────────────────
+    editControls: {
+      flexDirection: 'row',
+      gap: 8,
+      marginVertical: 6,
+    },
+    dropdown: {
+      flex: 1,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.primary,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      gap: 2,
+    },
+    dropdownLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    dropdownValue: { fontSize: 13, fontWeight: '600', color: tokens.text.primary },
+    // ── Picker modal ────────────────────────────────────────────────────
+    modalOverlay: {
+      flex: 1,
+      // Fixed-dark scrim — standard modal overlay convention.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 12,
+      padding: 16,
+      gap: 4,
+      maxHeight: '70%',
+    },
+    modalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 4,
+      color: tokens.text.primary,
+    },
+    modalSubtitle: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    modalList: { maxHeight: 400 },
+    modalRow: {
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    modalRowRest: { backgroundColor: tokens.bg.elevated },
+    modalRowAdd: { backgroundColor: tokens.bg.elevated },
+    modalRowText: { fontSize: 15, color: tokens.text.primary },
+    modalRowTextActive: { color: tokens.action.primary, fontWeight: '700' },
+    modalRowTextAdd: {
+      fontSize: 15,
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    modalRowSubtle: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      fontWeight: '400',
+    },
+    modalAddRow: {
+      flexDirection: 'row',
+      gap: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+      alignItems: 'center',
+    },
+    modalInput: {
+      flex: 1,
+      fontSize: 15,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      borderRadius: 6,
+      color: tokens.text.primary,
+    },
+    modalAddBtn: {
+      backgroundColor: tokens.action.primary,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 6,
+    },
+    modalAddBtnText: { color: tokens.action.onPrimary, fontWeight: '600' },
+    // ── Grid ────────────────────────────────────────────────────────────
+    grid: { gap: 4 },
+    gridRow: { flexDirection: 'row', gap: 4 },
+    rowLabel: {
+      width: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rowLabelText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    // Apply buttons (edit mode only) — wave 15 user feedback: arrow-only
+    // (▼/▶) icons instead of「套用」text. Tighter padding so the apply row
+    // doesn't claim a full cell height; left column shares row-label width
+    // so cells don't shrink in edit mode.
+    applyBtnTop: {
+      flex: 1,
+      paddingVertical: 2,
+      borderRadius: 4,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    applyBtnLeft: {
+      width: 18,
+      paddingVertical: 4,
+      paddingHorizontal: 0,
+      borderRadius: 4,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    applyBtnText: { fontSize: 12, fontWeight: '700', color: tokens.action.primary },
+    // ── Cell (column stack of 3 sub-cells: date / template / sub_tag) ──
+    cell: {
+      flex: 1,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.elevated,
+      overflow: 'hidden',
+      minHeight: 64,
+    },
+    cellPressed: { opacity: 0.55 },
+    cellDate: {
+      paddingVertical: 3,
+      alignItems: 'center',
+      backgroundColor: tokens.bg.surface,
+    },
+    cellDateText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    cellTemplate: {
+      flex: 1,
+      paddingVertical: 4,
+      paddingHorizontal: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cellTemplateText: {
+      fontSize: 9,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    cellTag: {
+      paddingVertical: 3,
+      paddingHorizontal: 4,
+      alignItems: 'center',
+      backgroundColor: tokens.bg.surface,
+    },
+    cellTagText: {
+      fontSize: 8,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+    },
+    cellRest: {
+      flex: 1,
+      paddingVertical: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tokens.bg.surface,
+    },
+    cellRestText: {
+      fontSize: 11,
+      fontStyle: 'italic',
+      color: tokens.text.tertiary,
+    },
+    // ── Wave 17 — drag-swap visual feedback ────────────────────────────
+    cellDragged: {
+      opacity: 0.3,
+    },
+    cellHover: {
+      borderWidth: 2,
+      borderColor: tokens.action.primary,
+      backgroundColor: tokens.bg.elevated,
+    },
+    dragPreview: {
+      position: 'absolute',
+      width: 72,
+      height: 56,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.surface,
+      borderWidth: 1,
+      borderColor: tokens.action.primary,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 6,
+      // Slight scale by margins (avoid transform: scale to keep coords simple).
+    },
+    dragPreviewRest: {
+      fontSize: 12,
+      fontStyle: 'italic',
+      color: tokens.text.tertiary,
+    },
+    dragPreviewTpl: {
+      fontSize: 10,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    dragPreviewTag: {
+      fontSize: 9,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      marginTop: 2,
+    },
+    // ── Wave 17 — start date picker modal ──────────────────────────────
+    startDatePickerWrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 4,
+    },
+    startDateButtons: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    startDateBtnCancel: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    startDateBtnCancelText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    startDateBtnConfirm: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 6,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+    },
+    startDateBtnConfirmText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.action.onPrimary,
+    },
+    btnPressed: { opacity: 0.85 },
+  });
+}
