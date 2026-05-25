@@ -3006,15 +3006,17 @@ function ExerciseCard({
                         // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
                         // exercise card 級 / cluster 整 row 級 confirm 不動。
                         //
-                        // Slice 10c overnight #61: when this is a dropset
-                        // chain HEAD, deleting cascades the whole chain
-                        // (followers' parent_set_id points at this head;
-                        // deleteSet on the head leaves orphans, but the
-                        // reload pulls them too and they render as
-                        // standalone). Cascade semantics are pending G1
-                        // grill round (Dropset CASCADE + 右滑「+」behaviour
-                        // — see backlog 2026-05-25). For now match prior
-                        // behavior: just delete the head.
+                        // Dropset chain HEAD swipe-delete: cascades the whole
+                        // chain via `deleteSet` (setRepository.ts:101-115,
+                        // commit 3fe066a 2026-05-20). Schema
+                        // `set.parent_set_id` is intentionally FK-less;
+                        // cascade is app-layer in a transaction (also NULLs
+                        // achievement_unlock.set_id back-refs for any logged
+                        // sets in the chain). Followers / non-head rows:
+                        // `deleteSet` is a no-op cascade (no rows with
+                        // parent_set_id = follower_id), safe to call
+                        // uniformly. G1 grill 2026-05-25 ratified — see
+                        // ADR-0019 § G1 amendment.
                         onPress: () => onDeleteSet(head.id),
                       },
                     ]}
