@@ -1029,3 +1029,65 @@ Grill round D（set-logger implementation plan finalization）resolved 4 decisio
 | 2026-05-24 | Q7 § In-session 動作庫 RS picker 路徑 — duplicate RS behavior | ❌ supersede "do not block" plan | 3-layer lock 已落定（SQL throw + UI dim + integration test） |
 | 2026-05-24 | Q7 (i) K1 picker selection mode | ❌ supersede "single-shot RS" plan | `pickerBridge.PickerPayload.reusableSupersetIds: string[]` 既為 array shape |
 | 2026-05-24 | Slice 10c § Phase 5 consumePick post-append behavior | ➕ extend "auto-expand last appended" | New behavior (no prior decision in ADR-0019 / ADR-0017) |
+
+### 2026-05-26 Slice 13c Amendment — HK reader + writer + 歷史頁 wire
+
+**主軸**：slice 13c 是 Phase B 的「功能完成 slice」——iPhone 端把 13b 拉好的 HK 權限基礎變成真資料：(1) `HealthKitReader` 從 HK 撈 HR samples + activeEnergyBurned aggregate、(2) `HealthKitWriter` 於 session finish 時補寫一筆 `HKWorkoutType` 進 Fitness app、(3) 歷史詳情頁 HR chart + kcal tile 由 Phase A 的 placeholder / overlay 翻成真資料渲染。**In-session live HR / kcal、SwiftUI Watch app、`HKWorkoutSession` lifecycle 全部 deferred to slice 13d**——13c 只動 iPhone 端、不碰 native target / WatchConnectivity。本 slice ship 後 Fitness app 的「體能訓練」tab 會 100% 覆蓋 13b 之後完成的所有 session（13b 之前的舊 session 永遠 `kcal=NULL` / `healthkit_workout_uuid=NULL`、不補）。ADR-0008 § HealthKit 整合「Watch 寫 HKWorkout」原 v1 設計不動、13c 是 iPhone 補寫補集（per slice 13b Q8 已拍）。
+
+#### slice 13c 拍板 grill Q1-Q12（2026-05-26 ratified by user）
+
+| Q | Topic | Decision |
+|---|-------|----------|
+| Q1 | Scope | 4-pack：HR reader + kcal reader + HKWorkout writer + 歷史頁 wire |
+| Q2 | HR fetch 策略 | **Live fetch each detail page open**（不 cache、HK = source of truth；user 重進詳情頁就重 query、避免 stale）|
+| Q3 | Time range | `session.start_at → session.end_at`（active session 不適用本 slice、active live HR 留 13d）|
+| Q4 | In-session live HR/kcal | **Deferred to slice 13d**（需配 SwiftUI Watch app + WatchConnectivity + `HKWorkoutSession` 才有意義）|
+| Q5 | kcal storage | Persist to `session.kcal` column on finish（finish 時一次性 query active energy aggregate + 寫 column、之後詳情頁不再重 query）|
+| Q6 | HKWorkout 寫入欄位 | `activityType=functionalStrengthTraining`（Fitness app「體能訓練」/ /\|\| icon）+ `totalEnergyBurned={quantity: session.kcal, unit: 'kcal'}` + `metadata={ HKMetadataKeyWorkoutBrandName: session.title, HKMetadataKeyExternalUUID: session.id }` |
+| Q6.5 | 「總大卡 ≠ 動態大卡」差異化 | 依 Apple HK 個人資料（生日 / 性別 / 身高 / 體重）自動算 basal samples；TrainingLog **不額外寫 `basalEnergyBurned`**。User 未填 HK 個人資料時兩值相等（如使用者本人 = 訓記場景）|
+| Q7 | Writer 時機 | finish button 內 synchronous `await`——寫完 HKWorkout 才 `router.push` 詳情頁（fail-stop UX、避免 user 進詳情頁時 uuid 還沒落）|
+| Q8 | 寫失敗 / 無權限處理 | **Best-effort 三層**：(1) `session` DB row 一定先存；(2) HK write 失敗 → silent skip（`uuid=NULL` / `kcal=NULL`）；(3) UI 不彈 alert。Recovery 路徑 = user 重 finish 別場 session 或去 Settings 翻 HK toggle、不在 13c 處理 retry |
+| Q9 | HR chart wire | 詳情頁 `useEffect` mount → `queryHeartRateSamples(start, end)` → setState → `<HRZoneChart samples={data} />`。Phase A 既有的 zone bands / axes / grid 不動、只把中央 grey overlay 換成真 polyline |
+| Q10 | Commit chain | **5 commits**（C1 reader / C2 writer / C3 finish wire / C4 detail page wire / C5 ADR amendment）|
+| Q11 | Backfill 既有 session | **不補**：13b 之前 finish 的 session 永遠 `kcal=NULL` / `healthkit_workout_uuid=NULL`、歷史頁顯「—」kcal + HR chart grey overlay（既有 Phase A 行為原樣 fallthrough）|
+| Q12 | 真機 smoke matrix | 8 項（見下）|
+
+#### slice 13c 5-commit chain
+
+| # | Commit title | 摘要 |
+|---|--------|------|
+| C1 | `feat(slice-13c): HealthKit reader (HR samples + active energy aggregate)` | `src/adapters/healthkit/reader.ts` 新增 + `index.ts` re-export + `tests/adapters/healthkit/reader.test.ts`（mock Kingstinct API）|
+| C2 | `feat(slice-13c): HealthKit workout writer` | `src/adapters/healthkit/writer.ts` 新增（`saveWorkout` wrapper、metadata 組裝）+ `index.ts` re-export + `tests/adapters/healthkit/writer.test.ts` |
+| C3 | `feat(slice-13c): wire session finish flow → kcal persist + HKWorkout write` | `app/(tabs)/index.tsx` `finalizeEndAndRoute` 改：先 `endSession` → query activeEnergy aggregate → `sessionRepository.setKcal(sessionId, kcal)` → `writer.saveWorkout(...)` → `sessionRepository.setHealthKitWorkoutUuid(sessionId, uuid)` → `router.push`。`src/adapters/sqlite/sessionRepository.ts` 加 `setKcal` / `setHealthKitWorkoutUuid` setter（兩個 idempotent UPDATE）|
+| C4 | `feat(slice-13c): detail page HR chart real data + kcal column read` | `app/session/[id].tsx` mount `useEffect` query HR samples + read `session.kcal` column → 4-tile kcal tile 真值 + `<HRZoneChart samples={data} />` 真 polyline；`uuid IS NULL` / 無 sample 走既有 Phase A fallback（「—」+ grey overlay）|
+| C5 | `docs(adr-0019): Slice 13c amendment` | 本 amendment（含 grill table + commit chain + smoke matrix + 13d preview）|
+
+#### 8 項真機 smoke matrix
+
+| # | 描述 | Pass 條件 |
+|---|------|-----------|
+| S1 | 開新 session → 完成幾組 → finish → 進詳情頁 | 4-tile kcal tile 顯示真值（不是「—」）、<5 秒內出現 |
+| S2 | 同 S1、進詳情頁 | HR chart 顯示真 sample polyline（zone bands / axes / grid 維持 Phase A layout 不變）|
+| S3 | 開 Apple Fitness app → 體能訓練 tab | 新增一筆 workout、顯示 `session.title`（例：「腿 (蹲)」）+ duration + kcal |
+| S4 | 同一 session 詳情頁進去 → 退出 → 再進去 | HKWorkout 不重複寫（`session.healthkit_workout_uuid IS NOT NULL` guard 生效）|
+| S5 | Settings 把 HK 權限拒絕 / 移除 → 開新 session → finish | session DB row 仍存、詳情頁 kcal 顯「—」、HR chart grey overlay、無 alert（per Q8 best-effort）|
+| S6 | 不戴 Apple Watch（HK 無 HR samples）→ 開 session → finish | 詳情頁 HR chart grey overlay（既有 Phase A 行為 fallthrough）、kcal tile 顯「—」（無 active energy aggregate）|
+| S7 | 開 13b 之前的舊 session（uuid=NULL、kcal=NULL）詳情頁 | kcal tile「—」+ HR chart grey overlay（per Q11 不 backfill）|
+| S8 | finish 後重裝 app → 重開詳情頁 | uuid persist（從 DB column 讀）、Fitness app workout 不被重寫 |
+
+#### Test count delta（estimate）
+
+1574 → **~1585-90**（reader test +6 / writer test +5 / 邊界 case +N）。具體數字依實作拍板、commit message 內填真值；超出 estimate ±5 不視為 spec drift。
+
+#### Slice 13d preview（Phase B 收尾）
+
+13c ship 後進入 Phase B 收尾 slice 13d：
+
+- **SwiftUI Watch app 新 Xcode target**（bundleId `com.lisonchang.TrainingLog.watchkitapp`、native target、不走 RN-for-watchOS per ADR-0008）
+- **WatchConnectivity bridge**（iPhone ↔ Watch state sync、protocol 選型 grill 13d 拍）
+- **`HKWorkoutSession` lifecycle on Watch**（start / pause / end）→ Watch 寫 active energy + HR 進 HK、iPhone 自動拿到（per ADR-0008 § HealthKit「HKWorkoutSession 啟動點 = Watch 端」）
+- **In-session live HR / kcal**（5-tile Watch variant 真資料、不再是 Phase A `dev_simulate_watch_tracked` toggle 模擬）
+- **Watch picker UI**（user requirement 2026-05-25：可以從 Watch 開啟「計劃訓練 / 模板訓練」、不必先掏 iPhone）
+- **Phase A `dev_simulate_watch_tracked` setting key + Settings toggle 第一個 commit 移除**（per slice 13b § Phase A → Phase B 轉換點規約、13b 暫留作 regression guard、13d 真 Watch session 自然 trigger 5-tile-watch variant 後即可砍）
+
+ADR-0008 § HealthKit 整合「Watch 寫 HKWorkout」與本 slice 13c「iPhone 補寫 HKWorkout」的覆蓋率分工 amendment 留給 slice 13d ship 時補（屆時 Watch session 真上線、補寫路徑只在 Watch 不可用時 fallback）。
