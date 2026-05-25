@@ -2204,7 +2204,6 @@ export default function TodayScreen() {
                           key={p.id}
                           group={group}
                           isExpanded={isExpanded}
-                          colorHex={p.reusable_superset_color_hex}
                           onToggleExpand={() =>
                             setExpandedExerciseId(isExpanded ? null : p.id)
                           }

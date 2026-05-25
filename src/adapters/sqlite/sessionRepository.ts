@@ -576,22 +576,6 @@ export interface SessionExerciseRowWithName extends SessionExerciseRow {
    */
   exercise_load_type: 'loaded' | 'bodyweight' | 'assisted';
   /**
-   * Reusable Superset accent color (per ADR-0019 Q8 (c) H1 — RS-color left
-   * vertical bar on cluster card). NULL when:
-   *   - row is solo (reusable_superset_id IS NULL), OR
-   *   - row is cluster but the source RS row has color_hex NULL (manual /
-   *     ad-hoc cluster, or RS created without a color choice).
-   *
-   * Both A and B sides of a cluster carry the same RS id, so this column
-   * resolves to the same value on both sides — the cluster card consumer
-   * reads it off the A (parent) row.
-   *
-   * Slice 10c overnight 第 2 點 — cluster color threading. LEFT JOIN so
-   * solo rows still come back (the previous INNER-style behavior was an
-   * accident of not joining at all).
-   */
-  reusable_superset_color_hex: string | null;
-  /**
    * Per-exercise global notes (ADR-0013 + ADR-0017 amendment — owned by
    * `exercise.notes`, shared across all templates/sessions using this
    * exercise). NULL or empty string = no notes; UI renders inline notes
@@ -614,11 +598,9 @@ export async function listSessionExercisesWithName(
             se.parent_id, se.reusable_superset_id, se.rest_sec,
             e.name      AS exercise_name,
             e.load_type AS exercise_load_type,
-            e.notes     AS exercise_notes,
-            rs.color_hex AS reusable_superset_color_hex
+            e.notes     AS exercise_notes
        FROM session_exercise se
        JOIN exercise e ON e.id = se.exercise_id
-       LEFT JOIN superset rs ON rs.id = se.reusable_superset_id
       WHERE se.session_id = ?
       ORDER BY se.ordering ASC`,
     session_id

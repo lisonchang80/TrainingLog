@@ -75,16 +75,6 @@ type ClusterCardProps = {
   group: ClusterCardGroup;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  /**
-   * RS accent color for the left vertical bar (per ADR-0019 Q8 (c) H1).
-   * Threaded from `session_exercise.reusable_superset_id` → `superset.color_hex`
-   * via `listSessionExercisesWithName`'s LEFT JOIN. NULL → fall back to the
-   * neutral accent (`#b35900`) — applies to manual/ad-hoc clusters whose
-   * source RS has no color, and to RS rows that were never colored.
-   *
-   * Slice 10c overnight 第 2 點 — cluster color threading.
-   */
-  colorHex?: string | null;
   /** Atomic "tap-✓ this cycle" — flips both sides via repo. */
   onToggleCycleLogged: (args: {
     a_set_id: string;
@@ -164,7 +154,6 @@ export function ClusterCard({
   onCycleClusterCycleSetKind,
   onShowClusterSetNote,
   onConfirmReorderCycles,
-  colorHex,
 }: ClusterCardProps): React.ReactElement {
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
@@ -194,16 +183,11 @@ export function ClusterCard({
   const completedCycles = progress.done;
   const totalCycles = progress.total;
 
-  // ADR-0019 Q8 (c) H1 — left vertical bar in RS color. Threaded prop
-  // overrides the neutral fallback baked into styles.clusterCard.
-  const borderLeftColor = colorHex ?? undefined;
-
   return (
     <View
       style={[
         styles.clusterCard,
         isExpanded && styles.clusterCardExpanded,
-        borderLeftColor ? { borderLeftColor } : null,
       ]}
     >
       <View style={styles.clusterCardHeader}>

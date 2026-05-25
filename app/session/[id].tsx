@@ -1632,7 +1632,6 @@ export default function SessionDetailScreen() {
             key={p.id}
             group={renderGroup}
             isExpanded={isExpanded}
-            colorHex={p.reusable_superset_color_hex}
             onToggleExpand={() =>
               setExpandedExerciseId(isExpanded ? null : p.id)
             }
