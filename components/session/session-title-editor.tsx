@@ -23,12 +23,25 @@
  * updated. The `useEffect` sync below fixes that; tap-to-edit also seeds
  * `selection` to cursor-at-end so the user can immediately append.
  *
+ * Bug F4 (2026-05-25): exposes an imperative `blur()` via `forwardRef` +
+ * `useImperativeHandle` so call sites that open a secondary surface (e.g.
+ * the in-session ⋯ menu) can commit-on-blur the title editor BEFORE the
+ * new surface steals focus. Wiring at call sites is per-screen — see
+ * `SessionTitleEditorHandle` in `./session-title-editor.behavior.ts`.
+ *
  * ADR-0025 — colors come from `useTheme().tokens`. The previous default
  * `Text` color (system primary) and hard-coded `#9ca3af` placeholder were
  * unreadable in dark mode.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Pressable, StyleSheet, Text, TextInput } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
@@ -39,7 +52,13 @@ import { useTheme, type ThemeTokens } from '@/src/theme';
 import {
   decideCommit,
   nextDraftOnPropSync,
+  type SessionTitleEditorHandle,
 } from './session-title-editor.behavior';
+
+// Re-export the imperative handle type so call sites can
+// `import { SessionTitleEditorHandle } from '@/components/session/session-title-editor'`
+// without needing to know about the bare-TS sibling.
+export type { SessionTitleEditorHandle };
 
 interface SessionTitleEditorProps {
   sessionId: string;
@@ -56,13 +75,13 @@ interface SessionTitleEditorProps {
   size?: 'hero' | 'nav';
 }
 
-export function SessionTitleEditor({
-  sessionId,
-  initialTitle,
-  placeholder,
-  onUpdated,
-  size = 'hero',
-}: SessionTitleEditorProps) {
+export const SessionTitleEditor = forwardRef<
+  SessionTitleEditorHandle,
+  SessionTitleEditorProps
+>(function SessionTitleEditor(
+  { sessionId, initialTitle, placeholder, onUpdated, size = 'hero' },
+  ref,
+) {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens, size), [tokens, size]);
@@ -78,6 +97,20 @@ export function SessionTitleEditor({
     const next = nextDraftOnPropSync({ initialTitle, draft, editing });
     if (next !== null) setDraft(next);
   }, [initialTitle, draft, editing]);
+
+  // F4 — expose blur() so call sites that open a secondary surface (kebab
+  // menu, sheet) can commit the title BEFORE the new surface mounts. The
+  // ref-current optional-chain makes this a no-op when not in edit mode
+  // (no TextInput rendered → inputRef.current is null).
+  useImperativeHandle(
+    ref,
+    () => ({
+      blur: () => {
+        inputRef.current?.blur();
+      },
+    }),
+    [],
+  );
 
   const commit = async () => {
     // Delegate the persist-vs-noop decision to `decideCommit` (pure,
@@ -141,7 +174,7 @@ export function SessionTitleEditor({
       </Text>
     </Pressable>
   );
-}
+});
 
 function makeStyles(tokens: ThemeTokens, size: 'hero' | 'nav') {
   // `'hero'` matches Today's session header `styles.heading` (fontSize 28).

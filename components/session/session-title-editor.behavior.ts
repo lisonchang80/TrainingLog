@@ -78,3 +78,24 @@ export function decideCommit(input: CommitDecisionInput): CommitDecision {
     shouldPersist: next !== input.initialTitle,
   };
 }
+
+/**
+ * Imperative handle exposed via the component's `useImperativeHandle`
+ * (Bug F4, 2026-05-25). Currently exposes `blur()` so call sites that
+ * open a secondary surface (e.g. the in-session ⋯ menu) can commit-on-blur
+ * the title editor BEFORE the new surface steals focus — otherwise the
+ * keyboard stays up and the field remains in a half-focused state after
+ * the menu closes.
+ *
+ * Kept minimal; future surface needs (e.g. focus()) can extend.
+ *
+ * Lives here (not in the .tsx) so tests can assert the contract without
+ * pulling React Native into the jest environment.
+ */
+export interface SessionTitleEditorHandle {
+  /**
+   * Trigger blur on the underlying TextInput (commit-on-blur fires + edit
+   * mode exits). Safe no-op when not currently in edit mode.
+   */
+  blur: () => void;
+}

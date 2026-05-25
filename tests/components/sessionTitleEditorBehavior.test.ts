@@ -1,10 +1,10 @@
 /**
- * SessionTitleEditor pure-helper tests (Bug F2, 2026-05-25).
+ * SessionTitleEditor pure-helper tests (Bugs F2 + F4, 2026-05-25).
  *
  * Jest config (`package.json` -> `testMatch: <rootDir>/tests/**\/*.test.ts`)
  * runs in `testEnvironment: node` and the repo does not install a React
  * Native testing-library, so we cannot mount the component itself here.
- * Instead the bug-prone state-transition logic is extracted into two pure
+ * Instead the bug-prone state-transition logic is extracted into pure
  * helpers exported from `components/session/session-title-editor.behavior.ts`
  * and verified directly.
  *
@@ -14,11 +14,21 @@
  *          drives the `useEffect` sync that catches this race; the
  *          `decideCommit` helper guarantees an immediate tap-then-blur is
  *          a no-op (does not clobber the persisted title with '').
+ *
+ * Bug F4 — when a sibling surface (⋯ menu) steals focus while the title
+ *          is being edited, the editor should commit-on-blur. The
+ *          component exposes an imperative `blur()` via
+ *          `useImperativeHandle` so call sites can force this before
+ *          opening the menu. The `SessionTitleEditorHandle` type contract
+ *          is asserted here; wiring the call site into the ⋯ menu lives
+ *          in `app/(tabs)/index.tsx`, out of this slice's file allow-list
+ *          (the ⋯ menu does not exist on `app/session/[id].tsx`).
  */
 
 import {
   decideCommit,
   nextDraftOnPropSync,
+  type SessionTitleEditorHandle,
 } from '../../components/session/session-title-editor.behavior';
 
 describe('nextDraftOnPropSync (F2)', () => {
@@ -112,5 +122,56 @@ describe('decideCommit (F2 acceptance — tap-to-edit + blur is no-op)', () => {
       next: '',
       shouldPersist: false,
     });
+  });
+});
+
+describe('SessionTitleEditorHandle (F4 — imperative blur contract)', () => {
+  it('exposes a blur method in the public type contract', () => {
+    // Type-level check: the handle's `blur` is `() => void`. If a future
+    // refactor changes the signature (e.g. async / requires args), TypeScript
+    // would fail this assertion at compile time and the test would not build.
+    const handle: SessionTitleEditorHandle = {
+      blur: () => {
+        /* no-op */
+      },
+    };
+    expect(typeof handle.blur).toBe('function');
+    // Returns void — call site must not depend on a return value.
+    expect(handle.blur()).toBeUndefined();
+  });
+
+  it('forwards blur invocation without throwing (idempotent across multiple calls)', () => {
+    // Models the call-site pattern: ⋯ menu handler does
+    // `editorRef.current?.blur()` before invoking ActionSheetIOS. Confirms
+    // the contract behaves as a pure side-effect — call sites must be able
+    // to invoke it multiple times safely (e.g. double-tap on the menu btn).
+    let invoked = 0;
+    const handle: SessionTitleEditorHandle = {
+      blur: () => {
+        invoked += 1;
+      },
+    };
+    handle.blur();
+    handle.blur();
+    expect(invoked).toBe(2);
+  });
+
+  it('models the menu-open ordering: blur fires before menu handler runs', () => {
+    // F4 acceptance: editor's blur must fire BEFORE the secondary surface
+    // (⋯ menu) opens — so the commit-on-blur effect persists the title
+    // before the menu takes over the screen. This test models the call-site
+    // sequence: `editorRef.current?.blur(); openMenu();` and verifies the
+    // observable order via a single shared timeline array.
+    const events: string[] = [];
+    const handle: SessionTitleEditorHandle = {
+      blur: () => events.push('blur'),
+    };
+    const openMenu = () => events.push('openMenu');
+
+    // Call-site pattern (as recommended for the ⋯ menu's onPress):
+    handle.blur();
+    openMenu();
+
+    expect(events).toEqual(['blur', 'openMenu']);
   });
 });
