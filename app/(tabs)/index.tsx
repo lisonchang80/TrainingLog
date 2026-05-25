@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -167,6 +167,7 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -180,6 +181,9 @@ import {
 export default function TodayScreen() {
   const db = useDatabase();
   const router = useRouter();
+  // ADR-0025 — all colors flow from useTheme().tokens via makeStyles below.
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SessionSetWithExercise[]>([]);
@@ -2781,6 +2785,10 @@ function ExerciseCard({
    */
   onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
 }): React.ReactElement {
+  // ADR-0025 — pull tokens locally so styles match parent (single token
+  // source via Context; ExerciseCard re-renders when parent does).
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   // Slice 10c overnight #61 — labels + groups via single helper. Replaces
   // the prior `displaySetLabel`-based path (which collapsed dropset → 'D').
   // Now dropset HEAD renders `D{N}` and follower renders '' (mirror
@@ -3161,73 +3169,99 @@ function ExerciseCard({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
+/**
+ * ADR-0025 — index.tsx styles are token-driven. The previous module-level
+ * `const styles = StyleSheet.create(...)` was hoisted into this factory
+ * so both TodayScreen and ExerciseCard can derive matching styles from
+ * the same tokens via useTheme(). Layout (flex/padding/radius) stays
+ * untouched; only colors changed.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: tokens.bg.base },
   flex: { flex: 1 },
   // ADR-0024 § 2 — 3-section idle scroll (replaces the old centered idleBody).
   idleScroll: { padding: 24, gap: 20, paddingBottom: 48 },
   section: { gap: 8 },
-  sectionHeading: { fontSize: 18, fontWeight: '700' },
+  sectionHeading: { fontSize: 18, fontWeight: '700', color: tokens.text.primary },
   emptyBox: {
     padding: 16,
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.06)',
+    backgroundColor: tokens.bg.elevated,
     gap: 10,
     alignItems: 'stretch',
   },
-  emptyTextBlock: { fontSize: 14, opacity: 0.7, textAlign: 'center' },
+  emptyTextBlock: {
+    fontSize: 14,
+    color: tokens.text.secondary,
+    textAlign: 'center',
+  },
   restRow: {
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.18)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
   },
-  restRowText: { fontSize: 14, opacity: 0.7 },
+  restRowText: { fontSize: 14, color: tokens.text.secondary },
   plannedRow: {
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 10,
-    backgroundColor: 'rgba(10,126,164,0.12)',
+    backgroundColor: tokens.bg.elevated,
     gap: 4,
   },
-  plannedRowName: { fontSize: 16, fontWeight: '700', color: '#0a7ea4' },
-  plannedRowDetails: { fontSize: 13, opacity: 0.75 },
+  plannedRowName: { fontSize: 16, fontWeight: '700', color: tokens.action.primary },
+  plannedRowDetails: { fontSize: 13, color: tokens.text.secondary },
   scrollBody: { padding: 24, gap: 12, paddingBottom: 48 },
-  heading: { fontSize: 28, fontWeight: '700' },
-  label: { fontSize: 14, fontWeight: '500', marginTop: 12, opacity: 0.7 },
+  heading: { fontSize: 28, fontWeight: '700', color: tokens.text.primary },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 12,
+    color: tokens.text.secondary,
+  },
   pillsRow: { gap: 8, paddingVertical: 4 },
   pill: {
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
+    backgroundColor: tokens.bg.elevated,
   },
-  pillActive: { backgroundColor: '#0a7ea4' },
-  pillText: { fontSize: 14, fontWeight: '500' },
-  pillTextActive: { color: 'white' },
+  pillActive: { backgroundColor: tokens.action.primary },
+  pillText: { fontSize: 14, fontWeight: '500', color: tokens.text.primary },
+  pillTextActive: { color: tokens.action.onPrimary },
   input: {
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
+    backgroundColor: tokens.bg.elevated,
     fontSize: 18,
+    color: tokens.text.primary,
   },
   startBtn: {
     paddingVertical: 18,
     borderRadius: 12,
-    backgroundColor: '#0a7ea4',
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
   },
-  startBtnText: { color: 'white', fontSize: 18, fontWeight: '700' },
+  startBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 18,
+    fontWeight: '700',
+  },
   endBtn: {
     marginTop: 24,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: 'rgba(220,53,69,0.95)',
+    backgroundColor: tokens.action.destructive,
     alignItems: 'center',
   },
-  endBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  endBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
   sessionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3246,22 +3280,30 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
-  headerIconBtnText: { fontSize: 22, fontWeight: '700', color: '#6b7280' },
+  headerIconBtnText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: tokens.text.secondary,
+  },
   headerDoneBtn: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#0a7ea4',
+    backgroundColor: tokens.action.primary,
   },
-  headerDoneBtnText: { color: 'white', fontSize: 14, fontWeight: '700' },
+  headerDoneBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   bottomStickyBar: {
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderTopColor: tokens.border.subtle,
+    backgroundColor: tokens.bg.elevated,
   },
   bottomStickyBtn: {
     flex: 1,
@@ -3269,15 +3311,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
-  bottomStickyBtnPrimary: { backgroundColor: '#0a7ea4' },
-  bottomStickyBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
+  bottomStickyBtnPrimary: { backgroundColor: tokens.action.primary },
+  bottomStickyBtnSecondary: { backgroundColor: tokens.bg.surface },
   bottomStickyBtnTextPrimary: {
-    color: 'white',
+    color: tokens.action.onPrimary,
     fontSize: 15,
     fontWeight: '700',
   },
   bottomStickyBtnTextSecondary: {
-    color: '#0a7ea4',
+    color: tokens.action.primary,
     fontSize: 15,
     fontWeight: '700',
   },
@@ -3293,22 +3335,35 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 8,
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.06)',
+    backgroundColor: tokens.bg.elevated,
   },
-  emptyPlanTitle: { fontSize: 15, fontWeight: '600', opacity: 0.75 },
-  emptyPlanBody: { fontSize: 13, opacity: 0.55, textAlign: 'center' },
-  planMark: { fontSize: 18, width: 22, textAlign: 'center' },
+  emptyPlanTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: tokens.text.secondary,
+  },
+  emptyPlanBody: {
+    fontSize: 13,
+    color: tokens.text.tertiary,
+    textAlign: 'center',
+  },
+  planMark: {
+    fontSize: 18,
+    width: 22,
+    textAlign: 'center',
+    color: tokens.text.primary,
+  },
   planText: { flex: 1 },
-  planName: { fontSize: 15, fontWeight: '600' },
-  planDetails: { fontSize: 12, opacity: 0.7 },
+  planName: { fontSize: 15, fontWeight: '600', color: tokens.text.primary },
+  planDetails: { fontSize: 12, color: tokens.text.secondary },
   // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
   exerciseCard: {
-    backgroundColor: 'rgba(127,127,127,0.10)',
+    backgroundColor: tokens.bg.elevated,
     borderRadius: 10,
     overflow: 'hidden',
   },
   exerciseCardExpanded: {
-    backgroundColor: 'rgba(127,127,127,0.14)',
+    backgroundColor: tokens.bg.surface,
   },
   exerciseCardHeader: {
     flexDirection: 'row',
@@ -3324,7 +3379,7 @@ const styles = StyleSheet.create({
   },
   exerciseCardChevron: {
     fontSize: 14,
-    opacity: 0.5,
+    color: tokens.text.tertiary,
     width: 18,
     textAlign: 'right',
   },
@@ -3336,7 +3391,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  exerciseCardGearText: { fontSize: 18 },
+  exerciseCardGearText: { fontSize: 18, color: tokens.text.primary },
   exerciseCardProgressBar: {
     marginTop: 4,
     width: '100%',
@@ -3355,7 +3410,7 @@ const styles = StyleSheet.create({
   },
   exerciseCardVolume: {
     fontSize: 11,
-    opacity: 0.55,
+    color: tokens.text.tertiary,
     marginTop: 2,
   },
   exerciseCardTitleRow: {
@@ -3370,7 +3425,7 @@ const styles = StyleSheet.create({
     // 「容量」prefix. fontSize 12 (原 13) — 在 ~75px 寬內可容 9999/9999.
     fontSize: 12,
     fontWeight: '600',
-    opacity: 0.7,
+    color: tokens.text.secondary,
     minWidth: 76,
     textAlign: 'right',
   },
@@ -3381,12 +3436,12 @@ const styles = StyleSheet.create({
   },
   exerciseCardPRText: {
     fontSize: 12,
-    color: '#b35900',
+    color: tokens.action.warning,
   },
   exerciseCardPREmphasis: {
     fontWeight: '700',
     textDecorationLine: 'underline',
-    color: '#b35900',
+    color: tokens.action.warning,
   },
   exerciseCardBody: {
     paddingHorizontal: 12,
@@ -3396,11 +3451,13 @@ const styles = StyleSheet.create({
   },
   exerciseCardEmpty: {
     fontSize: 13,
-    opacity: 0.55,
+    color: tokens.text.tertiary,
     fontStyle: 'italic',
     paddingVertical: 8,
   },
   // Slice 10e bundle 1 — inline notes callout in expanded session card.
+  // Semantic warm-amber accent intentionally retained (sticky-note feel);
+  // ADR-0025 keeps warm-tone callouts as their own design intent.
   exerciseCardNotes: {
     backgroundColor: '#FEF3C7', // amber-100 — gentle highlight, mirror sticky-note feel
     borderLeftWidth: 3,
@@ -3424,7 +3481,7 @@ const styles = StyleSheet.create({
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
   exerciseCardSetRowDragActive: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: tokens.bg.surface,
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -3452,18 +3509,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(127,127,127,0.18)',
+    backgroundColor: tokens.bg.surface,
   },
   completeBtnDone: {
-    backgroundColor: '#28a745',
+    backgroundColor: tokens.action.success,
   },
   completeBtnText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#6b7280',
+    color: tokens.text.secondary,
   },
   completeBtnTextDone: {
-    color: 'white',
+    color: tokens.action.onPrimary,
   },
   /**
    * Slice 10c overnight #61 — same width as completeBtn so dropset
@@ -3484,18 +3541,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   exerciseCardFooterBtnPrimary: {
-    backgroundColor: '#0a7ea4',
+    backgroundColor: tokens.action.primary,
   },
   exerciseCardFooterBtnSecondary: {
-    backgroundColor: 'rgba(127,127,127,0.18)',
+    backgroundColor: tokens.bg.surface,
   },
   exerciseCardFooterBtnTextPrimary: {
-    color: 'white',
+    color: tokens.action.onPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
   exerciseCardFooterBtnTextSecondary: {
-    color: '#0a7ea4',
+    color: tokens.action.primary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -3503,27 +3560,41 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 10,
-    backgroundColor: 'rgba(10,126,164,0.12)',
+    backgroundColor: tokens.bg.elevated,
     gap: 4,
     marginVertical: 8,
   },
-  programBannerName: { fontSize: 14, fontWeight: '700', color: '#0a7ea4' },
-  programBannerCell: { fontSize: 13 },
+  programBannerName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: tokens.action.primary,
+  },
+  programBannerCell: { fontSize: 13, color: tokens.text.primary },
   secondaryBtn: {
     paddingVertical: 14,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.18)',
+    backgroundColor: tokens.bg.surface,
     alignItems: 'center',
   },
-  secondaryBtnText: { fontSize: 14, fontWeight: '600' },
+  secondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: tokens.text.primary,
+  },
   linkBtn: { paddingVertical: 4, paddingHorizontal: 8 },
-  linkBtnText: { fontSize: 13, color: '#0a7ea4', fontWeight: '600' },
+  linkBtnText: {
+    fontSize: 13,
+    color: tokens.action.primary,
+    fontWeight: '600',
+  },
   exerciseHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  // Semantic warm-amber PR banner intentionally retained (alert-on-record feel);
+  // ADR-0025 keeps warm-tone callouts as their own design intent.
   prBanner: {
     marginTop: 12,
     padding: 12,
@@ -3538,8 +3609,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  prBannerTitle: { fontSize: 15, fontWeight: '700' },
-  prBannerBucket: { fontSize: 13, fontWeight: '700', color: '#b35900', marginTop: 2 },
-  prBannerLine: { fontSize: 13, marginLeft: 6 },
-  prBannerAllTime: { fontSize: 12, fontWeight: '700', color: '#b35900' },
-});
+  prBannerTitle: { fontSize: 15, fontWeight: '700', color: tokens.text.primary },
+  prBannerBucket: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: tokens.action.warning,
+    marginTop: 2,
+  },
+  prBannerLine: { fontSize: 13, marginLeft: 6, color: tokens.text.primary },
+  prBannerAllTime: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: tokens.action.warning,
+  },
+  });
+}
