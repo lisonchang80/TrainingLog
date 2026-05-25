@@ -99,6 +99,33 @@ export async function endSession(
   );
 }
 
+/**
+ * Persist HealthKit-side data after session finish (slice 13c C3).
+ *
+ * `kcal` = sum of activeEnergyBurned in [started_at, ended_at] (from
+ * `aggregateActiveEnergyBurned`); `healthkit_workout_uuid` = uuid returned
+ * by `saveTrainingLogWorkout` (HKWorkout row Apple Fitness app surfaces).
+ *
+ * Both are nullable — when HK permission denied or write fails, the finish
+ * flow passes `null` for the missing piece (Q8 best-effort). Detail page
+ * shows '—' for NULL kcal + grey overlay for missing HR chart.
+ */
+export async function setSessionHealthKitData(
+  db: Database,
+  args: {
+    id: string;
+    kcal: number | null;
+    healthkit_workout_uuid: string | null;
+  }
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session SET kcal = ?, healthkit_workout_uuid = ? WHERE id = ?`,
+    args.kcal,
+    args.healthkit_workout_uuid,
+    args.id
+  );
+}
+
 export async function getSession(db: Database, id: string): Promise<Session | null> {
   return db.getFirstAsync<Session>(
     `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title

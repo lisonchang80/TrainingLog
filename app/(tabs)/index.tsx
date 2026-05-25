@@ -35,12 +35,18 @@ import {
   discardSession,
   endSession,
   getActiveSession,
+  getSession,
   listSessionExercisesWithName,
   appendReusableSupersetToSession,
   reorderSessionExercises,
+  setSessionHealthKitData,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
+import {
+  aggregateActiveEnergyBurned,
+  saveTrainingLogWorkout,
+} from '@/src/adapters/healthkit';
 import {
   getAutoPopupRestTimer,
   getDevSimulateWatchTracked,
@@ -1902,6 +1908,33 @@ export default function TodayScreen() {
       });
     } catch (e) {
       console.warn('[achievements] evaluate failed:', e);
+    }
+    // Slice 13c C3 — HealthKit sync (Q5 persist kcal + Q6 saveWorkout).
+    // Best-effort (Q8): any failure → session DB row still saved, UI silent
+    // skip, detail page shows '—' kcal + grey HR overlay. Per Q11, only
+    // sessions finished from 13c onwards get this; older sessions stay NULL.
+    try {
+      const session = await getSession(db, session_id);
+      if (session && session.ended_at != null) {
+        const kcal = await aggregateActiveEnergyBurned(
+          session.started_at,
+          session.ended_at,
+        );
+        const uuid = await saveTrainingLogWorkout({
+          startMs: session.started_at,
+          endMs: session.ended_at,
+          kcal,
+          title: session.title,
+          sessionId: session.id,
+        });
+        await setSessionHealthKitData(db, {
+          id: session_id,
+          kcal,
+          healthkit_workout_uuid: uuid,
+        });
+      }
+    } catch (e) {
+      console.warn('[healthkit] finish sync failed:', e);
     }
     setLastPRDelta(null);
     setLastPRExerciseName('');
