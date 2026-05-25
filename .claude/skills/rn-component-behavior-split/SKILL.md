@@ -143,12 +143,20 @@ Tested in `tests/components/hrZoneChart.test.ts` (18 tests).
 
 Tested in `tests/components/sessionStatsPanel.variants.test.ts` (11 tests).
 
-### 4. `rest-timer-modal.behavior.ts` (Slice 13a C7)
+### 4. `rest-timer-modal.behavior.ts` (Slice 13a C7 + F7 follow-up)
 
 - `shouldFireFinishEdge(status, alreadyFired)` — one-shot transition guard
 
-Tested in `tests/components/restTimerSound.test.ts` (4 of 6 tests; the
-other 2 verify the wav asset exists + is < 50 KB).
+Tested in `tests/components/restTimerSound.test.ts` (9 tests total: 4 ×
+predicate cases + 3 × F7 regression contract documentation + 2 × wav asset
+sanity).
+
+**Lesson from F7 (manual smoke 2026-05-25)**: the pure predicate is correct,
+but the modal's `useEffect` dep list originally included unstable refs
+(`onSkip` inline closure + `useAudioPlayer` return value), causing the
+predicate to be observed mid-state-reset on the second ✓-tap cycle and
+fire haptic + sound immediately instead of after countdown. See anti-pattern
+section for the diagnostic + fix pattern.
 
 ## Anti-patterns
 
@@ -160,6 +168,24 @@ other 2 verify the wav asset exists + is < 50 KB).
   in the JSX (refactor threshold: ≥ 2 helpers / decisions → split)
 - ❌ Re-implementing the same decision in the test (test should import
   the helper, not duplicate the logic)
+- ❌ **Putting inline-closure props (e.g. `onSkip={() => close()}`) or
+  unstable hook returns (e.g. `useAudioPlayer(...)` return value) in a
+  useEffect dep list that ALSO consumes pure-TS predicates from the
+  behavior module.** The predicate is correct in isolation, but a
+  dep-list churn forces the effect to re-run on every parent render —
+  and if there's ANY other effect that resets a guard ref (`firedFlag`,
+  `lastSeenKey`, etc.) on the same commit, the predicate gets called with
+  stale state + freshly-reset guard and fires a side effect that should
+  have been gated. Bug F7 (slice 13a 2026-05-25) hit this exactly:
+  `shouldFireFinishEdge('finished', false) → true` is the correct
+  contract, but the modal observed it during the window between
+  `[triggerKey]` effect resetting the guard and `setState(running)`
+  committing. Fix: use refs for unstable values, keep the effect deps
+  to just the pure-state signal (`[state.status]`).
+
+  **Symptom you can grep for**: any `useEffect(() => {...}, [...])`
+  where the dep list contains a prop or a hook return AND the body
+  reads a `*.current` ref that is reset elsewhere in the component.
 
 ## File-allow-list discipline
 
