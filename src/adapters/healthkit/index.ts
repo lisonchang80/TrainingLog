@@ -27,6 +27,9 @@ export {
 
 export type { HKPermissionState, HKReadScope, HKWriteScope } from './types';
 
-// --- agent-A-reader-13c BEGIN ---
+// Slice 13c — reader (HR samples + active energy aggregate)
 export { queryHeartRateSamples, aggregateActiveEnergyBurned } from './reader';
-// --- agent-A-reader-13c END ---
+
+// Slice 13c — writer (HKWorkout save)
+export { saveTrainingLogWorkout } from './writer';
+export type { WorkoutWriteInput } from './writer';
