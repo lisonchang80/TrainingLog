@@ -15,6 +15,7 @@ import {
   t,
   tEquipment,
   tMuscleGroup,
+  tExercise,
   tLoadType,
   strings,
   type Locale,
@@ -193,6 +194,72 @@ describe('tMuscleGroup', () => {
   test('zh locale passes through unchanged', () => {
     expect(tMuscleGroup('胸')).toBe('胸');
     expect(tMuscleGroup('外側二頭')).toBe('外側二頭');
+  });
+});
+
+describe('tExercise', () => {
+  // The 66-entry seed map lives in strings.{zh,en}.exercise; we sample-test
+  // a handful per muscle group rather than enumerating every key (the
+  // shape-invariant + defensive-fallback sweeps above already iterate the
+  // full set automatically).
+
+  test('zh locale: built-in compound names map to zh display labels', () => {
+    expect(tExercise('Bench Press')).toBe('槓鈴臥推');
+    expect(tExercise('Deadlift')).toBe('硬舉');
+    expect(tExercise('Pull-up')).toBe('引體向上');
+    expect(tExercise('Back Squat')).toBe('槓鈴深蹲');
+    expect(tExercise('Overhead Press')).toBe('肩推');
+  });
+
+  test('zh locale: equipment-prefixed variants are distinct', () => {
+    expect(tExercise('Bench Press')).toBe('槓鈴臥推');
+    expect(tExercise('Dumbbell Bench Press')).toBe('啞鈴臥推');
+    expect(tExercise('Incline Bench Press')).toBe('上斜槓鈴臥推');
+    expect(tExercise('Decline Bench Press')).toBe('下斜槓鈴臥推');
+    // Each must be unique — no accidental dup mapping.
+    const set = new Set([
+      tExercise('Bench Press'),
+      tExercise('Dumbbell Bench Press'),
+      tExercise('Incline Bench Press'),
+      tExercise('Decline Bench Press'),
+    ]);
+    expect(set.size).toBe(4);
+  });
+
+  test('zh locale: dip-family names use 雙槓臂屈伸 (user-locked)', () => {
+    expect(tExercise('Chest Dip')).toBe('雙槓臂屈伸');
+    expect(tExercise('Assisted Dip')).toBe('輔助雙槓臂屈伸');
+  });
+
+  test('zh locale: simplified-char names round-trip exactly', () => {
+    // User locked '仰卧臂屈伸' (simplified 卧, not traditional 臥) — preserve.
+    expect(tExercise('Skull Crusher')).toBe('仰卧臂屈伸');
+  });
+
+  test('zh locale: lunge variant is 弓箭步 (user-locked, not 弓步蹲)', () => {
+    expect(tExercise('Lunge')).toBe('弓箭步');
+  });
+
+  test('en locale: built-in names pass through as identity', () => {
+    setLocale('en');
+    expect(tExercise('Bench Press')).toBe('Bench Press');
+    expect(tExercise('Pull-up')).toBe('Pull-up');
+    expect(tExercise('Skull Crusher')).toBe('Skull Crusher');
+  });
+
+  test('fallback: unknown user-created exercise name passes through in both locales', () => {
+    // 用戶自建的動作 — name 不在 v006 seed mapping，應該 verbatim 顯示。
+    expect(tExercise('Pec Deck')).toBe('Pec Deck');
+    expect(tExercise('我的自訂動作')).toBe('我的自訂動作');
+    setLocale('en');
+    expect(tExercise('Pec Deck')).toBe('Pec Deck');
+    expect(tExercise('我的自訂動作')).toBe('我的自訂動作');
+  });
+
+  test('fallback: empty string returns empty (no crash)', () => {
+    expect(tExercise('')).toBe('');
+    setLocale('en');
+    expect(tExercise('')).toBe('');
   });
 });
 
