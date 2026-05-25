@@ -19,7 +19,7 @@
  * component without further changes.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -28,6 +28,7 @@ import {
   type KeypadMode,
 } from '@/src/domain/keypad';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type NumericKeypadProps = {
   visible: boolean;
@@ -51,6 +52,8 @@ export function NumericKeypad({
   onConfirm,
   onCancel,
 }: NumericKeypadProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [buffer, setBuffer] = useState(() => String(initialValue));
 
   // Reset buffer whenever the modal re-opens with a (potentially) new value.
@@ -146,78 +149,81 @@ export function NumericKeypad({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-  },
-  topBarConfirm: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  display: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-  },
-  displayText: {
-    fontSize: 36,
-    fontWeight: '300',
-    color: '#111827',
-    fontVariant: ['tabular-nums'],
-  },
-  grid: {
-    paddingHorizontal: 8,
-    paddingTop: 12,
-    gap: 8,
-  },
-  gridRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  keyBtn: {
-    flex: 1,
-    height: 56,
-    borderRadius: 8,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  keyBtnPressed: {
-    backgroundColor: '#e5e7eb',
-  },
-  keyBtnText: {
-    fontSize: 24,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  keySpacer: {
-    flex: 1,
-    height: 56,
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+    },
+    topBarConfirm: {
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    display: {
+      paddingVertical: 24,
+      alignItems: 'center',
+      backgroundColor: tokens.bg.elevated,
+    },
+    displayText: {
+      fontSize: 36,
+      fontWeight: '300',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    grid: {
+      paddingHorizontal: 8,
+      paddingTop: 12,
+      gap: 8,
+    },
+    gridRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    keyBtn: {
+      flex: 1,
+      height: 56,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    keyBtnPressed: {
+      backgroundColor: tokens.bg.surface,
+    },
+    keyBtnText: {
+      fontSize: 24,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    keySpacer: {
+      flex: 1,
+      height: 56,
+    },
+  });
+}
