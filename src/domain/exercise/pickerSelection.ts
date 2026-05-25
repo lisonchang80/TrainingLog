@@ -8,7 +8,7 @@
  * displayed selection count matches unique selections).
  */
 
-export type PickerSelection = readonly string[];
+type PickerSelection = readonly string[];
 
 export const EMPTY_SELECTION: PickerSelection = [];
 
@@ -38,9 +38,4 @@ export function isSelected(state: PickerSelection, id: string): boolean {
 /** Insertion-order rank: 0-based; -1 if not selected. */
 export function selectionRank(state: PickerSelection, id: string): number {
   return state.indexOf(id);
-}
-
-/** Returns true when selection is empty — used to disable the 完成 footer. */
-export function isEmpty(state: PickerSelection): boolean {
-  return state.length === 0;
 }

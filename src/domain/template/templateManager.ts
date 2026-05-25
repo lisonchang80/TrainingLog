@@ -100,7 +100,7 @@ export function validateTemplate(t: TemplateData): string | null {
   return null;
 }
 
-export interface SessionExerciseSnapshot {
+interface SessionExerciseSnapshot {
   id: string;
   session_id: string;
   exercise_id: string;
@@ -203,4 +203,31 @@ export function snapshotForSession(args: {
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Display helper — triple identity (ADR-0003)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format the (program_name, sub_tag) pair for display in template UI
+ * (editor header, list rows, etc). Triple identity per ADR-0003: two
+ * templates can share the same `name` but differ in (program_id, sub_tag),
+ * so the user needs to see the disambiguator inline.
+ *
+ * Format (拍板 = Format A):
+ *   (null, null)        → '通用'
+ *   ('推日訓練', null)   → '推日訓練'
+ *   (null, 'TEST-1')    → '通用 · TEST-1'
+ *   ('推日訓練', 'TEST-1') → '推日訓練 · TEST-1'
+ *
+ * Separator is U+00B7 (middle dot · ).
+ */
+export function formatTemplateTriple(
+  program_name: string | null,
+  sub_tag: string | null
+): string {
+  const p = program_name ?? '通用';
+  if (!sub_tag) return p;
+  return `${p} · ${sub_tag}`;
 }

@@ -16,6 +16,7 @@ const buildRecord = (
   session_ended_at: 60_000,
   exercise_id: 'ex-1',
   mg_id: 'mg-chest',
+  m_ids: [],
   volume: 100,
   is_logged: true,
   ...override,

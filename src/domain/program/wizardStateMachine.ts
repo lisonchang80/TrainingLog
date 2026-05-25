@@ -34,10 +34,18 @@ export const WIZARD_STEPS = [
 
 export type WizardStep = (typeof WIZARD_STEPS)[number];
 
-export interface WizardDraft {
+interface WizardDraft {
   /** Program-level fields. */
   name: string;
+  /** @deprecated wave 18 — main_tag UX removed; field kept for back-compat (always null). */
   main_tag: string | null;
+  /**
+   * 強度 labels to pre-register into `program_sub_tag` dictionary on create.
+   * Wave 18 NameAndTag step lets user type multiple strengths with +/-;
+   * onConfirm loops these and calls `recordProgramSubTag` per entry.
+   * Empty array is valid (= no strengths pre-registered).
+   */
+  sub_tags: string[];
   cycle_length: number;
   cycle_count: number;
   start_date: IsoDate | null;
@@ -59,6 +67,7 @@ export function initialWizardState(today: IsoDate): WizardState {
     draft: {
       name: '',
       main_tag: null,
+      sub_tags: [],
       cycle_length: 7,
       cycle_count: 4,
       start_date: today,

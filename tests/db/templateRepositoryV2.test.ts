@@ -373,6 +373,81 @@ describe('templateRepository v2 — commitTemplateDraft', () => {
     // sets unchanged by id (no rewrite)
     expect(got!.exercises[0].sets.map((s) => s.id)).toEqual(['s1', 's2']);
   });
+
+  // overnight #45 第 2 點 — cluster parent row 設 notes/rest_seconds 不會 leak
+  // 到 B 側 child row。模擬 template editor 的 cluster gear menu 用戶體驗：
+  // 用戶 ⚙️ 編輯 cluster 的「備註」/ 「休息時間」 → 只更新 parent (A) 的
+  // template_exercise row，B child row 的 rest_seconds 仍是 null。Notes 透過
+  // step 6 per-exercise global UPDATE 寫進 A 的 exercise.notes，B 的 exercise
+  // notes 不動。
+  it('cluster parent rest_seconds + notes write does NOT leak to child row', async () => {
+    const committed = await seedEmptyTemplate();
+    // Seed cluster: parent A (bench) + child B (ohp), 1 set each, paired
+    // via parent_id linkage. rs_id stays null here — the cluster invariant
+    // we're testing (parent's metadata doesn't leak to child) is independent
+    // of the reusable_superset_id FK constraint.
+    const seeded: Template = {
+      ...committed,
+      exercises: [
+        makeEx({
+          id: 'te-A',
+          template_id: 'tpl-1',
+          exercise_id: benchId,
+          ordering: 0,
+          sets: [makeSet({ id: 'sA1', position: 0, reps: 8, weight: 80 })],
+        }),
+        makeEx({
+          id: 'te-B',
+          template_id: 'tpl-1',
+          exercise_id: ohpId,
+          ordering: 1,
+          parent_id: 'te-A',
+          sets: [makeSet({ id: 'sB1', position: 0, reps: 8, weight: 40 })],
+        }),
+      ],
+    };
+    await commitTemplateDraft(db, { committed, draft: seeded, now: frozenNow(1000) });
+    const baseline = await getTemplateFull(db, 'tpl-1');
+    expect(baseline!.exercises[0].rest_seconds).toBeNull();
+    expect(baseline!.exercises[1].rest_seconds).toBeNull();
+
+    // User opens cluster ⚙️ menu, sets rest_seconds=150 and notes='cluster
+    // tempo: 3-1-2' (both stored on parent row).
+    const edited: Template = {
+      ...baseline!,
+      exercises: [
+        { ...baseline!.exercises[0], rest_seconds: 150, notes: 'cluster tempo: 3-1-2' },
+        { ...baseline!.exercises[1] },
+      ],
+    };
+    await commitTemplateDraft(db, {
+      committed: baseline!,
+      draft: edited,
+      now: frozenNow(2000),
+    });
+
+    // Verify: parent row has rest_seconds=150 + A's exercise.notes updated;
+    // child row's rest_seconds STILL null; B's exercise.notes untouched.
+    const parentRow = await db.getFirstAsync<{ rest_seconds: number | null }>(
+      `SELECT rest_seconds FROM template_exercise WHERE id = 'te-A'`,
+    );
+    const childRow = await db.getFirstAsync<{ rest_seconds: number | null }>(
+      `SELECT rest_seconds FROM template_exercise WHERE id = 'te-B'`,
+    );
+    expect(parentRow!.rest_seconds).toBe(150);
+    expect(childRow!.rest_seconds).toBeNull();
+
+    const aNotes = await db.getFirstAsync<{ notes: string | null }>(
+      `SELECT notes FROM exercise WHERE id = ?`,
+      benchId,
+    );
+    const bNotes = await db.getFirstAsync<{ notes: string | null }>(
+      `SELECT notes FROM exercise WHERE id = ?`,
+      ohpId,
+    );
+    expect(aNotes!.notes).toBe('cluster tempo: 3-1-2');
+    expect(bNotes!.notes).toBeNull();
+  });
 });
 
 describe('templateRepository v2 — per-Exercise global notes (ADR-0017 amendment)', () => {

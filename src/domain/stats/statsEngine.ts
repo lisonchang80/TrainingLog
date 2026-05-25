@@ -16,7 +16,6 @@
 import type {
   CapacityBucket,
   DurationBucket,
-  DurationStats,
   PercentileBucket,
   PeriodBucketBoundary,
   PeriodScale,
@@ -49,53 +48,36 @@ export function mgFrequencyOverPeriod(
 }
 
 /**
- * Per-MG sum of volume across logged sets. Sets with `volume == null`
- * (e.g. assisted with no bw_snapshot) are skipped.
+ * Per-Muscle (M-layer) count of distinct Sessions where at least one logged set
+ * hit that muscle as a PRIMARY mover. Mirrors `mgFrequencyOverPeriod` but
+ * iterates `r.m_ids[]` (m:n) instead of the single `r.mg_id`.
+ *
+ * Multiple sets within the same Session targeting the same muscle → still +1
+ * only. Sets with an empty `m_ids` array (custom exercises lacking muscle
+ * mapping) are ignored.
+ *
+ * Added overnight 5/23 to drive the M-level body heatmap (ADR-0010 muscle
+ * layer + ADR-0009 §人體部位圖).
  */
-export function mgCapacityOverPeriod(
+export function mFrequencyOverPeriod(
   records: readonly StatsSetRecord[]
 ): Map<string, number> {
+  // m_id → Set<session_id>
+  const acc = new Map<string, Set<string>>();
+  for (const r of records) {
+    if (!r.is_logged) continue;
+    for (const mId of r.m_ids) {
+      let s = acc.get(mId);
+      if (!s) {
+        s = new Set();
+        acc.set(mId, s);
+      }
+      s.add(r.session_id);
+    }
+  }
   const out = new Map<string, number>();
-  for (const r of records) {
-    if (!r.is_logged || r.mg_id == null || r.volume == null) continue;
-    out.set(r.mg_id, (out.get(r.mg_id) ?? 0) + r.volume);
-  }
+  for (const [m, sessions] of acc) out.set(m, sessions.size);
   return out;
-}
-
-/**
- * Duration stats over the period.
- *
- * Source priority per ADR-0009: iPhone session.ended_at − started_at is
- * primary. HKWorkout.duration fallback isn't wired in v1 (Watch lands later).
- *
- * Sessions with ended_at == null (still in-progress) are excluded.
- * Sessions with non-positive duration (clock skew / mis-recorded) are excluded.
- */
-export function durationStatsOverPeriod(
-  records: readonly StatsSetRecord[]
-): DurationStats {
-  // Build session_id → duration map (one duration per session).
-  const seen = new Map<string, number>();
-  for (const r of records) {
-    if (seen.has(r.session_id)) continue;
-    if (r.session_ended_at == null) continue;
-    const dur = r.session_ended_at - r.session_started_at;
-    if (dur <= 0) continue;
-    seen.set(r.session_id, dur);
-  }
-  const durations = Array.from(seen.values());
-  if (durations.length === 0) {
-    return { total_ms: 0, avg_ms: 0, longest_ms: 0, session_count: 0 };
-  }
-  const total = durations.reduce((s, d) => s + d, 0);
-  const longest = Math.max(...durations);
-  return {
-    total_ms: total,
-    avg_ms: Math.round(total / durations.length),
-    longest_ms: longest,
-    session_count: durations.length,
-  };
 }
 
 // ---- 6-period histogram helpers (slice 9 smoke #5/#6) -----------------------

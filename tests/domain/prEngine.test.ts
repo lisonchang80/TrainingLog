@@ -1,4 +1,4 @@
-import { detectPRBreaks, aggregateBucketPRs } from '../../src/domain/pr/prEngine';
+import { detectPRBreaks } from '../../src/domain/pr/prEngine';
 import { classifyBucket, BUCKETS, sortBreaksForDisplay } from '../../src/domain/pr/buckets';
 import type { SetForPR } from '../../src/domain/pr/types';
 
@@ -249,41 +249,3 @@ describe('sortBreaksForDisplay — UI priority order', () => {
   });
 });
 
-describe('aggregateBucketPRs — Exercise History header source', () => {
-  it('returns one snapshot per bucket that has at least one qualifying set', () => {
-    const sets: SetForPR[] = [
-      A_LOADED(100, 5), // strength
-      A_LOADED(105, 5), // strength — beats prev
-      A_LOADED(80, 10), // hypertrophy
-      A_LOADED(85, 8), // hypertrophy — heavier weight, but volume 680 < 800
-      B_BW(0, 20), // pure bw — excluded
-    ];
-    const snaps = aggregateBucketPRs(sets);
-    expect(snaps).toHaveLength(2);
-    const byKey = Object.fromEntries(snaps.map((s) => [s.bucket, s]));
-    expect(byKey.strength.weight_best).toBe(105);
-    expect(byKey.strength.volume_best).toBe(525);
-    expect(byKey.hypertrophy.weight_best).toBe(85);
-    expect(byKey.hypertrophy.volume_best).toBe(800);
-    expect(byKey.hypertrophy.volume_best_weight).toBe(80);
-    expect(byKey.hypertrophy.volume_best_reps).toBe(10);
-  });
-
-  it('output ordered max_strength → endurance', () => {
-    const sets: SetForPR[] = [
-      A_LOADED(50, 20), // endurance
-      A_LOADED(120, 3), // max_strength
-      A_LOADED(80, 10), // hypertrophy
-    ];
-    const snaps = aggregateBucketPRs(sets);
-    expect(snaps.map((s) => s.bucket)).toEqual([
-      'max_strength',
-      'hypertrophy',
-      'endurance',
-    ]);
-  });
-
-  it('empty input → empty array', () => {
-    expect(aggregateBucketPRs([])).toEqual([]);
-  });
-});

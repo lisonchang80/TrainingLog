@@ -52,6 +52,10 @@ async function pickThreeExercises(
 /**
  * Convenience: insert one set into an existing session.
  * Caller already created the session.
+ *
+ * Sets `is_logged = 1` post-insert (history queries filter by it per
+ * slice 10c overnight #10 — a row without is_logged=1 is "planned but
+ * not yet performed" and is invisible to history).
  */
 async function seedSet(
   db: BetterSqliteDatabase,
@@ -76,6 +80,7 @@ async function seedSet(
     ordering: args.ordering,
     created_at: args.created_at ?? NOW_MS + args.ordering,
   });
+  await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, args.set_id);
 }
 
 // --------------------------------------------------------------------------

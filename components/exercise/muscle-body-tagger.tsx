@@ -1,0 +1,866 @@
+/**
+ * MuscleBodyTagger — library-based replacement for MuscleDiagramTagged
+ * (slice 10c smoke iteration).
+ *
+ * Mirrors `components/body-heatmap.tsx` (which uses the same
+ * `react-native-body-highlighter` package) — the same 14-slug collapsed
+ * vocabulary, the same color-override pattern (emit an entry for EVERY slug
+ * so the package's hardcoded asset `color: "#3f3f3f"` is suppressed), and the
+ * same front+back side-by-side layout.
+ *
+ * Two modes:
+ *   - 'readonly'   : disables onBodyPartPress; pure highlight display.
+ *   - 'tap-cycle'  : forwards taps to `onTap(mId)`. The CYCLE LOGIC
+ *                    (untagged → primary → secondary → untagged) lives in
+ *                    the CALLER, not this component — the caller already
+ *                    owns the primary/secondary state and decides the
+ *                    promotion / demotion semantics.
+ *
+ * Color tokens preserve the existing MuscleDiagramTagged palette so the
+ * detail page + custom-exercise-form look continues to match:
+ *   primary   → #F26B3A (orange)
+ *   secondary → #7CB6E0 (blue)
+ *
+ * When 2+ M_* collapse onto a single slug (e.g. all three deltoid heads →
+ * `deltoids`), primary wins over secondary — the visual emphasises the
+ * "hottest" role across the group.
+ */
+import React, { useMemo } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook shared by 3 components (MuscleBodyTagger,
+ * SideHeader, LegendItem) that all read from the same StyleSheet.
+ */
+function useBodyTaggerStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
+import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
+import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
+
+import {
+  M_ABS,
+  M_BACK,
+  M_BICEP_LONG,
+  M_BICEP_SHORT,
+  M_CALF,
+  M_FOREARM,
+  M_FRONT_DELT,
+  M_HAMSTRING,
+  M_LOWER_BACK,
+  M_LOWER_CHEST,
+  M_LOWER_GLUTE,
+  M_MID_DELT,
+  M_OBLIQUE,
+  M_QUAD,
+  M_REAR_DELT,
+  M_TRAP,
+  M_TRICEP,
+  M_UPPER_CHEST,
+  M_UPPER_GLUTE,
+} from '@/src/db/seed/v006ExerciseLibrary';
+import type { MuscleRole } from '@/src/domain/exercise/types';
+import { t, tMuscle } from '@/src/i18n';
+import {
+  BACK_ANCHORS,
+  FRONT_ANCHORS,
+  fanLayout,
+  vbToBodyLocalX,
+  vbToBodyLocalY,
+} from './body-anchors';
+import {
+  BICEP_PATTERN,
+  BICEPS_SIBS,
+  bicepSplitX,
+  CHEST_SIBS,
+  COLOR_ABS_DETAIL,
+  COLOR_BODY_BASE,
+  DELT_SIBS,
+  GLUTE_SIBS,
+  PACKAGE_BICEP_L,
+  PACKAGE_BICEP_R,
+  PACKAGE_DELT_BACK_L,
+  PACKAGE_DELT_BACK_R,
+  PACKAGE_DELT_FRONT_L,
+  PACKAGE_DELT_FRONT_R,
+  PATH_ABS_LINEA_ALBA,
+  PATH_ABS_TENDINOUS_BOTTOM,
+  PATH_ABS_TENDINOUS_MIDDLE,
+  PATH_ABS_TENDINOUS_TOP,
+  PATH_FRONT_DELT_CHEST_FILL_L,
+  PATH_FRONT_DELT_CHEST_FILL_R,
+  PATH_LOWER_CHEST,
+  PATH_LOWER_GLUTE,
+  PATH_MID_DELT_PEAK_BACK_L,
+  PATH_MID_DELT_PEAK_BACK_R,
+  PATH_MID_DELT_PEAK_FRONT_L,
+  PATH_MID_DELT_PEAK_FRONT_R,
+  PATH_REAR_DELT_BACK_FILL_L,
+  PATH_REAR_DELT_BACK_FILL_R,
+  PATH_UPPER_CHEST,
+  PATH_UPPER_GLUTE,
+  PATH_BICEP_L_LATERAL_HALF,
+  PATH_BICEP_L_MEDIAL_HALF,
+  PATH_BICEP_R_LATERAL_HALF,
+  PATH_BICEP_R_MEDIAL_HALF,
+  PATH_HEAD_OUTLINE_BACK,
+  PATH_HEAD_OUTLINE_FRONT,
+  SPLIT_X_BACK_DELT_L,
+  SPLIT_X_BACK_DELT_R,
+  SPLIT_X_FRONT_DELT_L,
+  SPLIT_X_FRONT_DELT_R,
+} from './body-overlay-paths';
+
+// ---------------------------------------------------------------------------
+// Color tokens — preserve existing MuscleDiagramTagged palette
+// ---------------------------------------------------------------------------
+
+const COLOR_PRIMARY = '#F26B3A';
+const COLOR_SECONDARY = '#7CB6E0';
+const COLOR_SKIN = '#E5E5E5';
+const COLOR_OUTLINE = '#9CA3AF';
+// COLOR_BODY_BASE imported from body-overlay-paths (single source of truth so
+// the overlay's "split visible" fallback exactly matches the underlying slug).
+
+/**
+ * Color array fed to the underlying Body component. Index 0 = body base,
+ * 1 = primary (orange), 2 = secondary (blue). The `intensity` field on
+ * each ExtendedBodyPart picks the index; we still pass `color` explicitly
+ * to defeat the package's hardcoded asset `color: "#3f3f3f"`.
+ */
+const BODY_COLORS: ReadonlyArray<string> = [
+  COLOR_BODY_BASE,
+  COLOR_PRIMARY,
+  COLOR_SECONDARY,
+];
+
+// Re-export so callers can keep importing MuscleRole from one place.
+export type { MuscleRole };
+
+interface MuscleBodyTaggerProps {
+  /** M_* → role map. Highlighted muscles only. */
+  highlight: Map<string, MuscleRole>;
+  /** Render mode. Defaults to 'readonly'. */
+  mode?: 'readonly' | 'tap-cycle';
+  /** Called when user taps a muscle (only fires in tap-cycle mode). */
+  onTap?: (mId: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// M_* → package Slug mapping (14 unique slugs after collapse)
+//
+// The package only ships 23 slugs and bundles head-groups (e.g. anterior /
+// lateral / posterior deltoid all live under `deltoids`). When 2+ M_*
+// constants collapse onto the same slug, the slug's role = whichever role
+// wins (primary > secondary > untagged) so the visual surfaces the most
+// emphatic tag.
+// ---------------------------------------------------------------------------
+
+const M_TO_SLUG: Record<string, Slug> = {
+  [M_TRAP]: 'trapezius',
+  [M_FRONT_DELT]: 'deltoids',
+  [M_MID_DELT]: 'deltoids',
+  [M_REAR_DELT]: 'deltoids',
+  [M_UPPER_CHEST]: 'chest',
+  [M_LOWER_CHEST]: 'chest',
+  [M_BICEP_LONG]: 'biceps',
+  [M_BICEP_SHORT]: 'biceps',
+  [M_TRICEP]: 'triceps',
+  [M_FOREARM]: 'forearm',
+  [M_ABS]: 'abs',
+  [M_OBLIQUE]: 'obliques',
+  [M_BACK]: 'upper-back',
+  [M_LOWER_BACK]: 'lower-back',
+  [M_QUAD]: 'quadriceps',
+  [M_HAMSTRING]: 'hamstring',
+  [M_UPPER_GLUTE]: 'gluteal',
+  [M_LOWER_GLUTE]: 'gluteal',
+  [M_CALF]: 'calves',
+};
+
+/**
+ * Reverse index: slug → all M_* ids that collapse onto it. Used by the
+ * tap handler so a single tap on the (collapsed) `deltoids` slug can
+ * forward tap events for each of the three deltoid M_* ids — the caller
+ * then decides what to do with the group (typical: cycle all three in
+ * lock-step, matching what the legacy SVG already did via per-head
+ * buttons that happened to share visuals).
+ */
+const SLUG_TO_M_IDS: Map<Slug, string[]> = (() => {
+  const out = new Map<Slug, string[]>();
+  for (const [m, slug] of Object.entries(M_TO_SLUG)) {
+    const arr = out.get(slug);
+    if (arr) arr.push(m);
+    else out.set(slug, [m]);
+  }
+  return out;
+})();
+
+/**
+ * All slugs rendered by the package (across front + back assets). Used to
+ * force-override every part's `color` since the package's asset data ships
+ * with a baked-in `color: "#3f3f3f"` per part that takes precedence over
+ * the component's `defaultFill` prop. Mirrors the list in body-heatmap.tsx.
+ */
+const ALL_SLUGS: ReadonlyArray<Slug> = [
+  'abs', 'adductors', 'ankles', 'biceps', 'calves', 'chest', 'deltoids',
+  'feet', 'forearm', 'gluteal', 'hamstring', 'hands', 'hair', 'head',
+  'knees', 'lower-back', 'neck', 'obliques', 'quadriceps', 'tibialis',
+  'trapezius', 'triceps', 'upper-back',
+];
+
+const SKIN_SLUGS: ReadonlySet<Slug> = new Set<Slug>(['head', 'hair', 'hands', 'feet']);
+
+/**
+ * Map a hex color back to an `intensity` index understood by the Body
+ * component. Index alignment: 0 = body base, 1 = primary, 2 = secondary.
+ */
+function colorToIntensity(color: string): number {
+  if (color === COLOR_PRIMARY) return 1;
+  if (color === COLOR_SECONDARY) return 2;
+  return 0;
+}
+
+/**
+ * Collapse the 19 M_* roles onto the package's slug vocabulary
+ * (primary > secondary tiebreak), then emit an entry for EVERY slug —
+ * highlighted ones get the role color, the rest get the light body base
+ * (or skin-tone for head/hair/hands/feet).
+ */
+/**
+ * Side-aware M_* exclusions: deltoids slug spans 3 anatomical heads but the
+ * package renders deltoids once per view. Front view's deltoid cap visually
+ * represents front + mid (lateral) heads only; back view's deltoid cap
+ * represents rear + mid heads only. So picking ONLY M_REAR_DELT shouldn't
+ * light up the FRONT shoulder — it's a different muscle in real anatomy.
+ */
+function isMSidedExcluded(m: string, side: 'front' | 'back'): boolean {
+  if (side === 'front' && m === M_REAR_DELT) return true;
+  if (side === 'back' && m === M_FRONT_DELT) return true;
+  return false;
+}
+
+/**
+ * Slugs whose underlying region is bundled across 2+ M_* constants. For these
+ * the overlay (FrontOverlay/BackOverlay) does the actual sub-region colouring,
+ * so the package's slug fill is forced to COLOR_BODY_BASE — otherwise picking
+ * only one sub-head (e.g. M_REAR_DELT) would still flood the full deltoid cap
+ * because the role-promotion logic propagates to the parent slug.
+ */
+const COLLAPSED_SLUGS: ReadonlySet<Slug> = new Set<Slug>([
+  'chest',
+  'biceps',
+  'deltoids',
+  'gluteal',
+]);
+
+function buildData(highlight: Map<string, MuscleRole>, side: 'front' | 'back'): ExtendedBodyPart[] {
+  const slugRole = new Map<Slug, MuscleRole>();
+  for (const [m, slug] of Object.entries(M_TO_SLUG)) {
+    if (isMSidedExcluded(m, side)) continue;
+    const role = highlight.get(m);
+    if (!role) continue;
+    const prev = slugRole.get(slug);
+    // primary wins over secondary, secondary wins over untagged.
+    if (!prev || role === 'primary') slugRole.set(slug, role);
+  }
+  const out: ExtendedBodyPart[] = [];
+  for (const slug of ALL_SLUGS) {
+    const role = slugRole.get(slug);
+    if (role && !COLLAPSED_SLUGS.has(slug)) {
+      // Non-collapsed slugs: render with role color directly.
+      const color = role === 'primary' ? COLOR_PRIMARY : COLOR_SECONDARY;
+      out.push({ slug, color, intensity: colorToIntensity(color) });
+    } else {
+      // Collapsed slugs (chest/biceps/deltoids/gluteal): the overlay paints
+      // the actual region, so leave the underlying slug at body-base. Other
+      // unhighlighted slugs also fall here.
+      const fill = SKIN_SLUGS.has(slug) ? COLOR_SKIN : COLOR_BODY_BASE;
+      out.push({ slug, color: fill });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-division overlay (role-aware)
+//
+// Mirrors the structure in body-heatmap.tsx but emits role colours
+// (primary/secondary) instead of quintile colours. The path geometry +
+// sibling-group constants come from the shared `body-overlay-paths` module.
+// ---------------------------------------------------------------------------
+
+/**
+ * Role-aware sibling fill. If the M_* has its own role → primary/secondary
+ * colour. Otherwise if ANY sibling M_* (sharing the same package slug) is
+ * highlighted → render COLOR_BODY_BASE so the split line stays visible
+ * against the sibling's filled region. If no sibling is highlighted →
+ * 'none' (transparent), letting the underlying body-base show through.
+ */
+function roleSubFill(
+  m: string,
+  siblings: readonly string[],
+  highlight: Map<string, MuscleRole>
+): string {
+  const role = highlight.get(m);
+  if (role === 'primary') return COLOR_PRIMARY;
+  if (role === 'secondary') return COLOR_SECONDARY;
+  if (siblings.some((s) => highlight.has(s))) return COLOR_BODY_BASE;
+  return 'none';
+}
+
+/**
+ * Body render scale — single source of truth so the SVG overlay
+ * (positioned absolutely over the Body) uses the same dimensions as the
+ * package's wrapper (width=200*scale, height=400*scale).
+ *
+ * 2026-05-24 fan-layout redesign: shrink body to leave room for callout
+ * labels on the outer side of each container (front: labels left, back:
+ * labels right). The sub-overlay still uses the same scale so the role
+ * colours track the body exactly (塗色不跑位).
+ */
+const BODY_SCALE = 0.5;
+const BODY_WIDTH_PX = 200 * BODY_SCALE; // 100
+const BODY_HEIGHT_PX = 400 * BODY_SCALE; // 200
+
+const LABEL_LANE_WIDTH = 80;
+const LABEL_WIDTH = 70;
+const LABEL_HEIGHT = 18;
+const SIDE_WIDTH = LABEL_LANE_WIDTH + BODY_WIDTH_PX; // 180
+const LANE_Y_MIN = LABEL_HEIGHT / 2; // 9
+const LANE_Y_MAX = BODY_HEIGHT_PX - LABEL_HEIGHT / 2; // 191
+const LABEL_FONT_SIZE = 11;
+
+// Per-side label colour theme (matches old MuscleDiagramTagged palette).
+const BTN_THEME = {
+  inactive: { fill: '#F3F4F6', stroke: '#D1D5DB', text: '#374151' },
+  primary: { fill: '#FED7AA', stroke: '#F26B3A', text: '#C2410C' },
+  secondary: { fill: '#BFDBFE', stroke: '#7CB6E0', text: '#1E40AF' },
+};
+function btnThemeFor(role: MuscleRole | undefined) {
+  if (role === 'primary') return BTN_THEME.primary;
+  if (role === 'secondary') return BTN_THEME.secondary;
+  return BTN_THEME.inactive;
+}
+
+// Anchor table + layout helpers are now in `./body-anchors` so the same
+// 19-M_* anchor data is reused by `body-heatmap.tsx`. fanLayout is called
+// with a per-mode predicate (readonly = only highlighted; tap-cycle = all).
+
+/**
+ * Front-side overlay paths (chest split, biceps split per-arm, deltoids
+ * front+mid). Positioned absolutely over the package's front body.
+ */
+function FrontOverlay({
+  highlight,
+  scale,
+}: {
+  highlight: Map<string, MuscleRole>;
+  scale: number;
+}) {
+  // Front deltoid sub-division via ClipPath partition:
+  //   FRONT_L (viewer's left, subject's right): MEDIAL = right half of bbox
+  //     → anterior (M_FRONT_DELT) at x ≥ SPLIT, lateral (M_MID_DELT) at x ≤ SPLIT
+  //   FRONT_R (viewer's right, subject's left): MEDIAL = left half of bbox
+  //     → anterior (M_FRONT_DELT) at x ≤ SPLIT, lateral (M_MID_DELT) at x ≥ SPLIT
+  // Biceps sub-division via ClipPath partition (round 2, 2026-05-24, user
+  // coord-picker diagonal):
+  //   LEFT arm  : trapezoid west of diagonal = LONG  (lateral), east = SHORT (medial)
+  //   RIGHT arm : trapezoid west of diagonal = SHORT (medial),  east = LONG  (lateral)
+  const frontDeltFill = roleSubFill(M_FRONT_DELT, DELT_SIBS, highlight);
+  const midDeltFill = roleSubFill(M_MID_DELT, DELT_SIBS, highlight);
+  const longBicepFill = roleSubFill(M_BICEP_LONG, BICEPS_SIBS, highlight);
+  const shortBicepFill = roleSubFill(M_BICEP_SHORT, BICEPS_SIBS, highlight);
+  return (
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="0 0 724 1448"
+      pointerEvents="none"
+    >
+      <Defs>
+        <ClipPath id="delt-front-l">
+          <Path d={PACKAGE_DELT_FRONT_L} />
+        </ClipPath>
+        <ClipPath id="delt-front-r">
+          <Path d={PACKAGE_DELT_FRONT_R} />
+        </ClipPath>
+        <ClipPath id="tagger-bicep-l">
+          <Path d={PACKAGE_BICEP_L} />
+        </ClipPath>
+        <ClipPath id="tagger-bicep-r">
+          <Path d={PACKAGE_BICEP_R} />
+        </ClipPath>
+      </Defs>
+      {/* Chest split */}
+      <Path d={PATH_UPPER_CHEST} fill={roleSubFill(M_UPPER_CHEST, CHEST_SIBS, highlight)} />
+      <Path d={PATH_LOWER_CHEST} fill={roleSubFill(M_LOWER_CHEST, CHEST_SIBS, highlight)} />
+      {/* Bicep split — A2 (diagonal, default) or B_* (vertical SPLIT_X).
+          Toggle via BICEP_PATTERN in body-overlay-paths.ts. */}
+      {BICEP_PATTERN === 'A2' ? (
+        <>
+          {/* LEFT arm: lateral half (long) + medial half (short) */}
+          <Path d={PATH_BICEP_L_LATERAL_HALF} fill={longBicepFill} clipPath="url(#tagger-bicep-l)" />
+          <Path d={PATH_BICEP_L_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#tagger-bicep-l)" />
+          {/* RIGHT arm: medial half (short) + lateral half (long) */}
+          <Path d={PATH_BICEP_R_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#tagger-bicep-r)" />
+          <Path d={PATH_BICEP_R_LATERAL_HALF} fill={longBicepFill} clipPath="url(#tagger-bicep-r)" />
+        </>
+      ) : (
+        (() => {
+          const split = bicepSplitX();
+          if (!split) return null;
+          return (
+            <>
+              {/* LEFT arm: long head (lateral, west of SPLIT) + short head (medial, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.l} height={1448} fill={longBicepFill} clipPath="url(#tagger-bicep-l)" />
+              <Rect x={split.l} y={0} width={724 - split.l} height={1448} fill={shortBicepFill} clipPath="url(#tagger-bicep-l)" />
+              {/* RIGHT arm: short head (medial, west of SPLIT) + long head (lateral, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.r} height={1448} fill={shortBicepFill} clipPath="url(#tagger-bicep-r)" />
+              <Rect x={split.r} y={0} width={724 - split.r} height={1448} fill={longBicepFill} clipPath="url(#tagger-bicep-r)" />
+            </>
+          );
+        })()
+      )}
+      {/* Front view LEFT shoulder: lateral half (mid delt) + medial half (front delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#delt-front-l)"
+      />
+      <Rect
+        x={SPLIT_X_FRONT_DELT_L}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#delt-front-l)"
+      />
+      {/* Front view RIGHT shoulder: medial half (front delt) + lateral half (mid delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#delt-front-r)"
+      />
+      <Rect
+        x={SPLIT_X_FRONT_DELT_R}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#delt-front-r)"
+      />
+      {/* UNCLIPPED delt extensions — drawn on top of everything so the package's
+          chest / trapezius slugs cannot mask these regions. Each path is a
+          small fan / cap that extends the visual delt coverage beyond the
+          package's slug silhouette. See body-overlay-paths.ts for geometry. */}
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_L} fill={frontDeltFill} />
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_R} fill={frontDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_R} fill={midDeltFill} />
+      {/* Abs 6-pack detail — Pattern C unclipped stroke layer. Only render
+          when M_ABS is highlighted; lines stay inside the abs slug bbox. */}
+      {highlight.has(M_ABS) ? (
+        <>
+          <Path
+            d={PATH_ABS_LINEA_ALBA}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_TOP}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_MIDDLE}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_BOTTOM}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        </>
+      ) : null}
+      {/* Head outline — package's border path skips head/hair; trace the
+          slug paths once more here as a stroke-only layer. */}
+      <Path
+        d={PATH_HEAD_OUTLINE_FRONT}
+        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Back-side overlay paths (rear+mid delts, upper/lower gluteal). Positioned
+ * absolutely over the package's back body.
+ */
+function BackOverlay({
+  highlight,
+  scale,
+}: {
+  highlight: Map<string, MuscleRole>;
+  scale: number;
+}) {
+  // Back deltoid sub-division via ClipPath partition:
+  //   BACK_L (viewer's left, subject's right): MEDIAL = right half of bbox
+  //     → posterior (M_REAR_DELT) at x ≥ SPLIT, lateral (M_MID_DELT) at x ≤ SPLIT
+  //   BACK_R (viewer's right, subject's left): MEDIAL = left half of bbox
+  //     → posterior (M_REAR_DELT) at x ≤ SPLIT, lateral (M_MID_DELT) at x ≥ SPLIT
+  const rearDeltFill = roleSubFill(M_REAR_DELT, DELT_SIBS, highlight);
+  const midDeltFill = roleSubFill(M_MID_DELT, DELT_SIBS, highlight);
+  return (
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="724 0 724 1448"
+      pointerEvents="none"
+    >
+      <Defs>
+        <ClipPath id="delt-back-l">
+          <Path d={PACKAGE_DELT_BACK_L} />
+        </ClipPath>
+        <ClipPath id="delt-back-r">
+          <Path d={PACKAGE_DELT_BACK_R} />
+        </ClipPath>
+      </Defs>
+      {/* Back view LEFT shoulder: lateral half (mid delt) + medial half (rear delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_L - 724}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#delt-back-l)"
+      />
+      <Rect
+        x={SPLIT_X_BACK_DELT_L}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_L}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#delt-back-l)"
+      />
+      {/* Back view RIGHT shoulder: medial half (rear delt) + lateral half (mid delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_R - 724}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#delt-back-r)"
+      />
+      <Rect
+        x={SPLIT_X_BACK_DELT_R}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#delt-back-r)"
+      />
+      {/* UNCLIPPED delt extensions — drawn on top of everything so the package's
+          trapezius / upper-back slugs cannot mask these regions. Each path is a
+          small fan / cap that extends the visual delt coverage beyond the
+          package's slug silhouette. See body-overlay-paths.ts for geometry. */}
+      <Path d={PATH_REAR_DELT_BACK_FILL_L} fill={rearDeltFill} />
+      <Path d={PATH_REAR_DELT_BACK_FILL_R} fill={rearDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_R} fill={midDeltFill} />
+      {/* Gluteal split */}
+      <Path d={PATH_UPPER_GLUTE} fill={roleSubFill(M_UPPER_GLUTE, GLUTE_SIBS, highlight)} />
+      <Path d={PATH_LOWER_GLUTE} fill={roleSubFill(M_LOWER_GLUTE, GLUTE_SIBS, highlight)} />
+      {/* Head outline — same stroke-only layer as FrontOverlay. */}
+      <Path
+        d={PATH_HEAD_OUTLINE_BACK}
+        fill="none"
+        stroke={COLOR_OUTLINE}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
+    </Svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SideContainer — body + fan-layout labels for one view (front / back)
+// ---------------------------------------------------------------------------
+
+interface SideContainerProps {
+  side: 'front' | 'back';
+  highlight: Map<string, MuscleRole>;
+  mode: 'readonly' | 'tap-cycle';
+  onTap: ((mId: string) => void) | undefined;
+  data: ExtendedBodyPart[];
+  handlePress: ((part: ExtendedBodyPart) => void) | undefined;
+}
+
+function SideContainer({
+  side,
+  highlight,
+  mode,
+  onTap,
+  data,
+  handlePress,
+}: SideContainerProps): React.JSX.Element {
+  const styles = useBodyTaggerStyles();
+  const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
+  const items = React.useMemo(
+    () =>
+      fanLayout(
+        anchors,
+        mode === 'readonly' ? (a) => highlight.has(a.m) : () => true,
+        LANE_Y_MIN,
+        LANE_Y_MAX
+      ),
+    [anchors, highlight, mode]
+  );
+
+  // Per-side layout: front has label lane on LEFT, body on RIGHT;
+  // back has body on LEFT, label lane on RIGHT.
+  const labelOnLeft = side === 'front';
+  const bodyLeft = labelOnLeft ? LABEL_LANE_WIDTH : 0;
+  const labelLeft = labelOnLeft ? 4 : SIDE_WIDTH - LABEL_WIDTH - 4;
+  const labelRight = labelLeft + LABEL_WIDTH;
+  const railX = labelOnLeft ? LABEL_LANE_WIDTH - 4 : BODY_WIDTH_PX + 4;
+  const leaderStart = labelOnLeft ? labelRight : labelLeft;
+
+  const bodyProps = mode === 'tap-cycle' && handlePress ? { onBodyPartPress: handlePress } : {};
+
+  return (
+    <View style={{ width: SIDE_WIDTH, height: BODY_HEIGHT_PX, position: 'relative' }}>
+      {/* Body — package's <Svg> + our role overlay, both at BODY_SCALE. */}
+      <View style={{ position: 'absolute', left: bodyLeft, top: 0 }}>
+        <Body
+          side={side}
+          gender="male"
+          data={data}
+          colors={BODY_COLORS}
+          scale={BODY_SCALE}
+          border={COLOR_OUTLINE}
+          defaultFill={COLOR_BODY_BASE}
+          defaultStroke={COLOR_OUTLINE}
+          {...bodyProps}
+        />
+        {side === 'front' ? (
+          <FrontOverlay highlight={highlight} scale={BODY_SCALE} />
+        ) : (
+          <BackOverlay highlight={highlight} scale={BODY_SCALE} />
+        )}
+      </View>
+
+      {/* Leader polylines — non-interactive overlay across the whole container. */}
+      <Svg
+        style={{ position: 'absolute', left: 0, top: 0 }}
+        width={SIDE_WIDTH}
+        height={BODY_HEIGHT_PX}
+        pointerEvents="none"
+      >
+        {items.map((item) => {
+          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side, BODY_WIDTH_PX);
+          const ay = vbToBodyLocalY(item.vbY, BODY_HEIGHT_PX);
+          return (
+            <Polyline
+              key={`leader-${item.m}`}
+              points={`${leaderStart},${item.labelY} ${railX},${item.labelY} ${ax},${ay}`}
+              stroke={COLOR_OUTLINE}
+              strokeWidth={0.6}
+              fill="none"
+            />
+          );
+        })}
+      </Svg>
+
+      {/* Label Pressables — fan-layout positions, tappable in tap-cycle mode. */}
+      {items.map((item) => {
+        const role = highlight.get(item.m);
+        const theme = btnThemeFor(role);
+        const tappable = mode === 'tap-cycle' && !!onTap;
+        return (
+          <Pressable
+            key={`label-${item.m}`}
+            disabled={!tappable}
+            onPress={tappable ? () => onTap!(item.m) : undefined}
+            accessibilityRole={tappable ? 'button' : undefined}
+            accessibilityLabel={`${tMuscle(item.m)} ${role ?? ''}`.trim()}
+            style={({ pressed }) => [
+              styles.label,
+              {
+                left: labelLeft,
+                top: item.labelY - LABEL_HEIGHT / 2,
+                backgroundColor: theme.fill,
+                borderColor: theme.stroke,
+                opacity: pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Text style={{ fontSize: LABEL_FONT_SIZE, color: theme.text, fontWeight: '600' }}>
+              {tMuscle(item.m)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public component
+// ---------------------------------------------------------------------------
+
+export function MuscleBodyTagger({
+  highlight,
+  mode = 'readonly',
+  onTap,
+}: MuscleBodyTaggerProps): React.JSX.Element {
+  const styles = useBodyTaggerStyles();
+  const frontData = React.useMemo(() => buildData(highlight, 'front'), [highlight]);
+  const backData = React.useMemo(() => buildData(highlight, 'back'), [highlight]);
+
+  const handlePress = React.useCallback(
+    (part: ExtendedBodyPart) => {
+      if (mode !== 'tap-cycle' || !onTap) return;
+      const slug = part.slug;
+      if (!slug) return;
+      const mIds = SLUG_TO_M_IDS.get(slug);
+      if (!mIds) return; // slug not part of our tagging vocab (e.g. head)
+      for (const mId of mIds) onTap(mId);
+    },
+    [mode, onTap]
+  );
+
+  const handlePressBound = mode === 'tap-cycle' ? handlePress : undefined;
+
+  return (
+    <View>
+      <View style={styles.row}>
+        <View style={styles.column}>
+          <SideHeader side="front" label={t('page', 'bodyFront')} />
+          <SideContainer
+            side="front"
+            highlight={highlight}
+            mode={mode}
+            onTap={onTap}
+            data={frontData}
+            handlePress={handlePressBound}
+          />
+        </View>
+        <View style={styles.column}>
+          <SideHeader side="back" label={t('page', 'bodyBack')} />
+          <SideContainer
+            side="back"
+            highlight={highlight}
+            mode={mode}
+            onTap={onTap}
+            data={backData}
+            handlePress={handlePressBound}
+          />
+        </View>
+      </View>
+      <View style={styles.legendRow}>
+        <LegendItem color={COLOR_PRIMARY} label={t('status', 'muscleRolePrimary')} />
+        <LegendItem color={COLOR_SECONDARY} label={t('status', 'muscleRoleSecondary')} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * SideHeader — places the 正面/背面 label centered over the body lane only,
+ * not over the label lane. Uses a flex row with a spacer the width of the
+ * label lane and a fixed-width body slot that centers the label text.
+ */
+function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) {
+  const styles = useBodyTaggerStyles();
+  const labelOnLeft = side === 'front';
+  return (
+    <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
+      {labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
+      <View style={{ width: BODY_WIDTH_PX, alignItems: 'center' }}>
+        <Text style={styles.sideLabel}>{label}</Text>
+      </View>
+      {!labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
+    </View>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  const styles = useBodyTaggerStyles();
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.swatch, { backgroundColor: color }]} />
+      <Text style={styles.legendText}>{label}</Text>
+    </View>
+  );
+}
+
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    column: {
+      alignItems: 'center',
+    },
+    sideLabel: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    label: {
+      position: 'absolute',
+      width: LABEL_WIDTH,
+      height: LABEL_HEIGHT,
+      borderWidth: 1,
+      borderRadius: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    legendRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+      marginTop: 8,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    swatch: {
+      width: 12,
+      height: 12,
+      borderRadius: 3,
+    },
+    legendText: {
+      fontSize: 12,
+      color: tokens.text.primary,
+    },
+  });
+}

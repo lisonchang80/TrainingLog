@@ -360,4 +360,55 @@ describe('Template + snapshot isolation (slice 3)', () => {
     expect(planned[1]?.exercise_id).toBe(squat.id);
     expect(planned[1]?.rest_sec).toBeNull();
   });
+
+  // 2026-05-20 overnight #56 (ADR-0015 § Storage 設計) — createTemplate
+  // auto-derives template.color_hex from the name when callers omit it,
+  // mirroring the v020 backfill for pre-existing rows.
+  describe('createTemplate auto-derives color_hex from name', () => {
+    it('omitted color_hex → deterministic palette color via name hash', async () => {
+      await createTemplate(db, { id: 'tpl-auto', name: 'Push Day', now: () => 100 });
+      const row = await db.getFirstAsync<{ color_hex: string }>(
+        `SELECT color_hex FROM template WHERE id = ?`,
+        'tpl-auto'
+      );
+      expect(row?.color_hex).toMatch(/^#[0-9A-F]{6}$/);
+      // Same name → same color on a second template (deterministic).
+      await createTemplate(db, { id: 'tpl-auto-2', name: 'Push Day', now: () => 200 });
+      const row2 = await db.getFirstAsync<{ color_hex: string }>(
+        `SELECT color_hex FROM template WHERE id = ?`,
+        'tpl-auto-2'
+      );
+      expect(row2?.color_hex).toBe(row?.color_hex);
+    });
+
+    it('empty-string color_hex falls back to name-hashed color', async () => {
+      await createTemplate(db, {
+        id: 'tpl-empty',
+        name: 'Pull Day',
+        color_hex: '',
+        now: () => 100,
+      });
+      const row = await db.getFirstAsync<{ color_hex: string }>(
+        `SELECT color_hex FROM template WHERE id = ?`,
+        'tpl-empty'
+      );
+      expect(row?.color_hex).toMatch(/^#[0-9A-F]{6}$/);
+      // No longer the v009 sentinel.
+      expect(row?.color_hex).not.toBe('');
+    });
+
+    it('explicit non-empty color_hex is preserved verbatim', async () => {
+      await createTemplate(db, {
+        id: 'tpl-explicit',
+        name: 'Legs Day',
+        color_hex: '#FF00AA',
+        now: () => 100,
+      });
+      const row = await db.getFirstAsync<{ color_hex: string }>(
+        `SELECT color_hex FROM template WHERE id = ?`,
+        'tpl-explicit'
+      );
+      expect(row?.color_hex).toBe('#FF00AA');
+    });
+  });
 });

@@ -107,30 +107,6 @@ export function latestPerMetric(metrics: BodyMetric[]): {
   return { bodyweight_kg: bw, pbf, smm_kg: smm };
 }
 
-/**
- * Group body metrics by the calendar day they fall on.
- *
- * `dayKey` is the ISO local date (YYYY-MM-DD) for the recorded_at timestamp.
- * Multiple readings on the same day end up in the same group; ordering inside
- * each group preserves recorded_at ascending.
- */
-export function groupByDay(
-  metrics: BodyMetric[],
-  toDayKey: (ms: number) => string
-): Map<string, BodyMetric[]> {
-  const sorted = sortByRecordedAt(metrics, 'asc');
-  const byDay = new Map<string, BodyMetric[]>();
-  for (const m of sorted) {
-    const key = toDayKey(m.recorded_at);
-    const list = byDay.get(key);
-    if (list) {
-      list.push(m);
-    } else {
-      byDay.set(key, [m]);
-    }
-  }
-  return byDay;
-}
 
 /**
  * Default chart visibility — all three series shown on first load.

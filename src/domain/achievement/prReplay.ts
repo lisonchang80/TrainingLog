@@ -42,7 +42,7 @@ export interface ReplaySetRecord {
   created_at: number;
 }
 
-export interface ReplaySetFlags {
+interface ReplaySetFlags {
   set_id: string;
   bucket: BucketKey | null;
   weight_pr_broken: boolean;
@@ -51,12 +51,12 @@ export interface ReplaySetFlags {
   qualified: boolean;
 }
 
-export interface CumulativeCounts {
+interface CumulativeCounts {
   per_mg: Map<string, { weight: number; volume: number }>;
   per_bucket: Map<BucketKey, { weight: number; volume: number }>;
 }
 
-export interface ReplayResult {
+interface ReplayResult {
   flagsBySetId: Map<string, ReplaySetFlags>;
   cumulative: CumulativeCounts;
 }

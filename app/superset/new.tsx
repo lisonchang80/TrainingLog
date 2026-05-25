@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -34,8 +35,21 @@ import {
   defaultSupersetName,
   validateReusableSupersetDraft,
 } from '@/src/domain/superset/supersetManager';
-import { insertReusableSuperset } from '@/src/adapters/sqlite/supersetRepository';
+import {
+  findExistingReusableSupersetByPair,
+  insertReusableSuperset,
+} from '@/src/adapters/sqlite/supersetRepository';
 import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
+import { t, tEquipment, tExercise, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook shared by 7 components in this file.
+ */
+function useNewSupersetStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Reusable Superset creation page (ADR-0017 Q10 / slice 9.8a).
@@ -53,6 +67,8 @@ export default function NewSupersetScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
+  const { tokens } = useTheme();
+  const styles = useNewSupersetStyles();
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
@@ -139,6 +155,31 @@ export default function NewSupersetScreen() {
     if (errors.length > 0) return;
     setSubmitting(true);
     try {
+      // Slice 10c #26 — UI pre-check for duplicate (A, B) pair (order-
+      // insensitive). insertReusableSuperset has a last-line DB guard that
+      // throws, but a pre-check gives a friendlier alert with a「前往」
+      // button to the existing template. Race: if two creates land
+      // simultaneously, the DB throw is the final guard.
+      const existingId = await findExistingReusableSupersetByPair(
+        db,
+        draft.exercise_ids[0],
+        draft.exercise_ids[1]
+      );
+      if (existingId !== null) {
+        // `finally` below resets `submitting`; no need to flip it manually.
+        Alert.alert(
+          t('alert', 'duplicateSupersetPair'),
+          t('alert', 'openExistingSupersetQ'),
+          [
+            { text: t('common', 'cancel'), style: 'cancel' },
+            {
+              text: t('common', 'go'),
+              onPress: () => router.push(`/superset/${existingId}`),
+            },
+          ]
+        );
+        return;
+      }
       const newId = await insertReusableSuperset(
         db,
         draft,
@@ -165,7 +206,7 @@ export default function NewSupersetScreen() {
       <View style={styles.topBar}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="取消"
+          accessibilityLabel={t('common', 'cancel')}
           onPress={() => router.back()}
           style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
           <Text style={styles.cancelBtnText}>✕</Text>
@@ -173,8 +214,8 @@ export default function NewSupersetScreen() {
         <View style={styles.searchWrap}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            placeholder="輸入動作名字搜索"
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholder={t('page', 'searchExercises')}
+            placeholderTextColor={tokens.text.tertiary}
             value={search}
             onChangeText={setSearch}
             style={styles.searchInput}
@@ -213,7 +254,7 @@ export default function NewSupersetScreen() {
       <View style={styles.footer}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="組合"
+          accessibilityLabel={t('button', 'combine')}
           onPress={onCombine}
           disabled={selection.length !== 2 || submitting}
           style={({ pressed }) => [
@@ -222,7 +263,7 @@ export default function NewSupersetScreen() {
             pressed && selection.length === 2 && styles.pressed,
           ]}>
           <Text style={styles.combineBtnText}>
-            組合 ({selection.length}/2)
+            {t('button', 'combine')} ({selection.length}/2)
           </Text>
         </Pressable>
       </View>
@@ -237,21 +278,22 @@ function SelectedChipRow({
   selected: Exercise[];
   onRemove: (id: string) => void;
 }) {
+  const styles = useNewSupersetStyles();
   return (
     <View style={styles.chipRow}>
-      <Text style={styles.chipRowLabel}>已選擇</Text>
+      <Text style={styles.chipRowLabel}>{t('status', 'selected')}</Text>
       {selected.length === 0 ? (
-        <Text style={styles.chipRowHint}>請選 2 個動作</Text>
+        <Text style={styles.chipRowHint}>{t('alert', 'pickTwoExercises')}</Text>
       ) : (
         selected.map((ex) => (
           <Pressable
             key={ex.id}
             accessibilityRole="button"
-            accessibilityLabel={`移除 ${ex.name}`}
+            accessibilityLabel={tRemoveExercise(tExercise(ex.name))}
             onPress={() => onRemove(ex.id)}
             style={styles.chip}>
             <Text style={styles.chipText} numberOfLines={1}>
-              {ex.name}
+              {tExercise(ex.name)}
             </Text>
             <Text style={styles.chipRemove}>✕</Text>
           </Pressable>
@@ -270,6 +312,7 @@ function MgSidebar({
   selectedMgId: string | null;
   onSelectMg: (id: string) => void;
 }) {
+  const styles = useNewSupersetStyles();
   return (
     <View style={styles.sidebarWrap}>
       <ScrollView
@@ -290,7 +333,7 @@ function MgSidebar({
                   styles.sidebarText,
                   isActive && styles.sidebarTextActive,
                 ]}>
-                {mg.name}
+                {tMuscleGroup(mg.name)}
               </Text>
             </Pressable>
           );
@@ -307,6 +350,7 @@ function EquipmentChipRow({
   value: Equipment | null;
   onChange: (eq: Equipment | null) => void;
 }) {
+  const styles = useNewSupersetStyles();
   return (
     <View style={styles.equipRowOuter}>
       <ScrollView
@@ -314,14 +358,14 @@ function EquipmentChipRow({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.equipRow}>
         <EquipmentChipBtn
-          label="全部"
+          label={t('common', 'all')}
           active={value === null}
           onPress={() => onChange(null)}
         />
         {EQUIPMENT_VALUES.map((eq) => (
           <EquipmentChipBtn
             key={eq}
-            label={eq}
+            label={tEquipment(eq)}
             active={value === eq}
             onPress={() => onChange(value === eq ? null : eq)}
           />
@@ -340,6 +384,7 @@ function EquipmentChipBtn({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useNewSupersetStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -369,10 +414,11 @@ function ExercisePickerGrid({
   selection: readonly string[];
   onTap: (id: string) => void;
 }) {
+  const styles = useNewSupersetStyles();
   if (exercises.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>沒有符合條件的動作</Text>
+        <Text style={styles.emptyText}>{t('status', 'noExercisesMatch')}</Text>
       </View>
     );
   }
@@ -428,6 +474,7 @@ function ExercisePickerCard({
   rank: number;
   onPress: () => void;
 }) {
+  const styles = useNewSupersetStyles();
   const thumbnail = exercise.media_path;
   return (
     <Pressable
@@ -452,15 +499,16 @@ function ExercisePickerCard({
         )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {exercise.name}
+        {tExercise(exercise.name)}
       </Text>
     </Pressable>
   );
 }
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
+  const styles = useNewSupersetStyles();
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.thumbPlaceholder, { backgroundColor: bg }]}>
       <Text style={styles.thumbInitial}>{ch}</Text>
@@ -472,195 +520,227 @@ const SIDEBAR_WIDTH = 92;
 const CARD_GAP = 10;
 const CONTENT_H_PADDING = 12;
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 10,
-  },
-  cancelBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelBtnText: { color: '#fff', fontSize: 20, fontWeight: '600', lineHeight: 22 },
-  searchWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.20)',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    height: 40,
-  },
-  searchIcon: { fontSize: 14, marginRight: 6, color: 'rgba(255,255,255,0.6)' },
-  searchInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 15,
-    padding: 0,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chipRowLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
-  chipRowHint: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(52,199,89,0.18)',
-    borderRadius: 14,
-    paddingLeft: 10,
-    paddingRight: 6,
-    height: 28,
-    gap: 6,
-    maxWidth: 180,
-  },
-  chipText: { color: '#34C759', fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  chipRemove: {
-    color: 'rgba(52,199,89,0.85)',
-    fontSize: 14,
-    fontWeight: '700',
-    paddingHorizontal: 2,
-  },
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: tokens.bg.base },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      gap: 10,
+    },
+    cancelBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cancelBtnText: {
+      color: tokens.text.primary,
+      fontSize: 20,
+      fontWeight: '600',
+      lineHeight: 22,
+    },
+    searchWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 999,
+      paddingHorizontal: 14,
+      height: 40,
+    },
+    searchIcon: {
+      fontSize: 14,
+      marginRight: 6,
+      color: tokens.text.secondary,
+    },
+    searchInput: {
+      flex: 1,
+      color: tokens.text.primary,
+      fontSize: 15,
+      padding: 0,
+    },
+    chipRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    chipRowLabel: { color: tokens.text.secondary, fontSize: 13 },
+    chipRowHint: { color: tokens.text.tertiary, fontSize: 13 },
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      // Selected-state chip uses success-tint (semantic green pairing with
+      // the success-colored combine button below).
+      backgroundColor: 'rgba(52,199,89,0.18)',
+      borderRadius: 14,
+      paddingLeft: 10,
+      paddingRight: 6,
+      height: 28,
+      gap: 6,
+      maxWidth: 180,
+    },
+    chipText: {
+      color: tokens.action.success,
+      fontSize: 13,
+      fontWeight: '600',
+      flexShrink: 1,
+    },
+    chipRemove: {
+      color: tokens.action.success,
+      fontSize: 14,
+      fontWeight: '700',
+      paddingHorizontal: 2,
+      opacity: 0.85,
+    },
 
-  body: { flex: 1, flexDirection: 'row' },
+    body: { flex: 1, flexDirection: 'row' },
 
-  sidebarWrap: { width: SIDEBAR_WIDTH, overflow: 'hidden' },
-  sidebar: { flex: 1 },
-  sidebarContent: { paddingVertical: 12 },
-  sidebarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 42,
-    paddingLeft: 12,
-  },
-  sidebarActiveBar: {
-    position: 'absolute',
-    left: 0,
-    top: 8,
-    bottom: 8,
-    width: 3,
-    backgroundColor: '#34C759',
-    borderRadius: 2,
-  },
-  sidebarText: { color: 'rgba(255,255,255,0.55)', fontSize: 17, fontWeight: '500' },
-  sidebarTextActive: { color: '#fff', fontWeight: '700' },
+    sidebarWrap: { width: SIDEBAR_WIDTH, overflow: 'hidden' },
+    sidebar: { flex: 1 },
+    sidebarContent: { paddingVertical: 12 },
+    sidebarRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: 42,
+      paddingLeft: 12,
+    },
+    sidebarActiveBar: {
+      position: 'absolute',
+      left: 0,
+      top: 8,
+      bottom: 8,
+      width: 3,
+      backgroundColor: tokens.action.success,
+      borderRadius: 2,
+    },
+    sidebarText: {
+      color: tokens.text.secondary,
+      fontSize: 17,
+      fontWeight: '500',
+    },
+    sidebarTextActive: { color: tokens.text.primary, fontWeight: '700' },
 
-  content: { flex: 1, flexDirection: 'column', minWidth: 0 },
-  equipRowOuter: { height: 56 },
-  equipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  equipChip: {
-    paddingHorizontal: 14,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(127,127,127,0.20)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
-  equipText: { color: 'rgba(255,255,255,0.75)', fontSize: 14 },
-  equipTextActive: { color: '#34C759', fontWeight: '600' },
+    content: { flex: 1, flexDirection: 'column', minWidth: 0 },
+    equipRowOuter: { height: 56 },
+    equipRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    equipChip: {
+      paddingHorizontal: 14,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
+    equipText: { color: tokens.text.secondary, fontSize: 14 },
+    equipTextActive: { color: tokens.action.success, fontWeight: '600' },
 
-  gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
-  gridContent: {
-    paddingHorizontal: CONTENT_H_PADDING,
-    paddingBottom: 24,
-    gap: CARD_GAP,
-    alignItems: 'stretch',
-  },
-  gridRow: {
-    flexDirection: 'row',
-    alignSelf: 'stretch',
-    gap: CARD_GAP,
-  },
-  card: {
-    flexShrink: 0,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-    borderRadius: 14,
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  cardSelected: {
-    borderColor: '#34C759',
-    backgroundColor: 'rgba(52,199,89,0.15)',
-  },
-  selectedBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#34C759',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  thumbWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  thumbImage: { width: '100%', height: '100%' },
-  thumbPlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  thumbInitial: { color: '#fff', fontSize: 36, fontWeight: '700' },
-  cardName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+    gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
+    gridContent: {
+      paddingHorizontal: CONTENT_H_PADDING,
+      paddingBottom: 24,
+      gap: CARD_GAP,
+      alignItems: 'stretch',
+    },
+    gridRow: {
+      flexDirection: 'row',
+      alignSelf: 'stretch',
+      gap: CARD_GAP,
+    },
+    card: {
+      flexShrink: 0,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 14,
+      padding: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    cardSelected: {
+      borderColor: tokens.action.success,
+      backgroundColor: 'rgba(52,199,89,0.15)',
+    },
+    selectedBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: tokens.action.success,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    selectedBadgeText: {
+      color: tokens.action.onPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    thumbWrap: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      backgroundColor: tokens.bg.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      marginBottom: 8,
+    },
+    thumbImage: { width: '100%', height: '100%' },
+    thumbPlaceholder: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // Letter on data-driven hashColor() bg — literal (accent swatch).
+    thumbInitial: { color: '#fff', fontSize: 36, fontWeight: '700' },
+    cardName: {
+      color: tokens.text.primary,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
 
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyText: { color: 'rgba(255,255,255,0.55)', fontSize: 15 },
-  pressed: { opacity: 0.7 },
+    empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+    emptyText: { color: tokens.text.secondary, fontSize: 15 },
+    pressed: { opacity: 0.7 },
 
-  footer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.15)',
-  },
-  combineBtn: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#34C759',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  combineBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  combineBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-});
+    footer: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    combineBtn: {
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: tokens.action.success,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    combineBtnDisabled: {
+      backgroundColor: tokens.bg.elevated,
+    },
+    combineBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+  });
+}

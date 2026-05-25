@@ -5,7 +5,12 @@
  * session start time and bw snapshot (needed for load_type='assisted'
  * effective-load math).
  *
- * Includes only `is_skipped = 0` sets.
+ * Includes only `is_skipped = 0 AND is_logged = 1` sets. The `is_logged = 1`
+ * filter (slice 10c overnight #10) is the source-of-truth definition of
+ * "this set actually happened" — planned-but-unticked rows from an
+ * in-progress session must NOT bleed into the historical aggregate. Session
+ * `ended_at` is intentionally NOT a gate: a user can complete a set
+ * (✓-tap → is_logged=1) and we surface it immediately, even mid-session.
  */
 
 import type { Database } from '../../db/types';
@@ -13,9 +18,10 @@ import type { LoadType } from '../../domain/exercise/types';
 import type { BucketKey } from '../../domain/pr/types';
 import { BUCKETS, classifyBucket } from '../../domain/pr/buckets';
 import type { RepBucketChip } from '../../domain/exercise/repBucketFilter';
+import type { SetKind } from '../../domain/set/setLabels';
 
 /** One row per set; fields needed by PR / Volume engines + UI display. */
-export interface ExerciseHistorySet {
+interface ExerciseHistorySet {
   set_id: string;
   session_id: string;
   session_started_at: number;
@@ -26,6 +32,44 @@ export interface ExerciseHistorySet {
   ordering: number;
   created_at: number;
   load_type: LoadType;
+  /**
+   * v015 lifecycle column — 'warmup' | 'working' | 'dropset'. Slice 10c
+   * overnight #22: surfaced to history rows so the expanded session card
+   * can render per-row labels (熱 / 1 / 2 / D1 …) via
+   * `computeHistorySetLabels`. (Previously the column was unused by this
+   * query path and the type for the parallel `ExerciseHistoryRow` shape
+   * still pegs it to `null` — only `ExerciseHistorySet` carries the real
+   * enum today.)
+   */
+  set_kind: SetKind;
+  /**
+   * v015 lifecycle column — dropset followers reference their head's
+   * `set.id`; `null` for cluster heads / warmup / working rows. Slice 10c
+   * overnight #22 surfaces it so future dropset-chain rendering can find
+   * the head without an extra query.
+   */
+  parent_set_id: string | null;
+  /**
+   * True iff the originating `session_exercise` belongs to a cluster (slice 10c).
+   * Drives the 3-段 cluster filter on the timeline list — see
+   * `domain/exercise/clusterFilter.ts`.
+   */
+  is_in_cluster: boolean;
+  /**
+   * The cluster partner's `exercise_id` if this set's `session_exercise`
+   * belongs to a cluster, NULL otherwise (solo row).
+   *
+   * - A side (this `session_exercise` is the parent): partner = its child's `exercise_id`
+   * - B side (this `session_exercise.parent_id != NULL`): partner = parent's `exercise_id`
+   * - solo: NULL
+   *
+   * Surfaced 2026-05-21 wave 14 to gate the「↻ 再次訓練」button on
+   * source/target shape compatibility (solo→solo / cluster→same-partner cluster).
+   * Source row with a different partner means the cluster replay helper
+   * wouldn't find a B-side source row anyway — pre-emptive UI gate avoids
+   * the「找不到該超級組 B 側來源卡」alert.
+   */
+  cluster_partner_exercise_id: string | null;
 }
 
 /**
@@ -63,7 +107,12 @@ export async function listExerciseHistorySets(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySet[]> {
-  return db.getAllAsync<ExerciseHistorySet>(
+  type Row = Omit<ExerciseHistorySet, 'is_in_cluster' | 'set_kind'> & {
+    is_in_cluster: number;
+    // v015 column — sqlite returns the raw string 'warmup' | 'working' | 'dropset'.
+    set_kind: SetKind;
+  };
+  const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -73,15 +122,43 @@ export async function listExerciseHistorySets(
             s.reps         AS reps,
             s.ordering     AS ordering,
             s.created_at   AS created_at,
-            e.load_type    AS load_type
+            e.load_type    AS load_type,
+            s.set_kind     AS set_kind,
+            s.parent_set_id AS parent_set_id,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN (
+                SELECT seP.exercise_id FROM session_exercise seP
+                 WHERE seP.id = se.parent_id
+              )
+              ELSE (
+                SELECT seC.exercise_id FROM session_exercise seC
+                 WHERE seC.parent_id = se.id
+                 LIMIT 1
+              )
+            END AS cluster_partner_exercise_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id
   );
+  return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }
 
 /**
@@ -98,7 +175,11 @@ export async function listExerciseHistoryBySession(
   db: Database,
   exercise_id: string
 ): Promise<ExerciseHistorySession[]> {
-  const rows = await db.getAllAsync<HistorySetWithSessionMeta>(
+  type RawRow = Omit<HistorySetWithSessionMeta, 'is_in_cluster' | 'set_kind'> & {
+    is_in_cluster: number;
+    set_kind: SetKind;
+  };
+  const rows = await db.getAllAsync<RawRow>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -109,18 +190,42 @@ export async function listExerciseHistoryBySession(
             s.ordering     AS ordering,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
+            s.set_kind     AS set_kind,
+            s.parent_set_id AS parent_set_id,
             se.template_id AS template_id,
             t.program_id   AS program_id,
-            t.sub_tag      AS sub_tag
+            t.sub_tag      AS sub_tag,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN (
+                SELECT seP.exercise_id FROM session_exercise seP
+                 WHERE seP.id = se.parent_id
+              )
+              ELSE (
+                SELECT seC.exercise_id FROM session_exercise seC
+                 WHERE seC.parent_id = se.id
+                 LIMIT 1
+              )
+            END AS cluster_partner_exercise_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
        LEFT JOIN session_exercise se
-         ON se.session_id = s.session_id
-        AND se.exercise_id = s.exercise_id
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
        LEFT JOIN template t ON t.id = se.template_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY ss.started_at DESC, s.ordering ASC`,
     exercise_id
   );
@@ -144,9 +249,10 @@ export async function listExerciseHistoryBySession(
       grouped.set(r.session_id, sess);
       order.push(r.session_id);
     }
-    // Strip JOIN columns from the set row before pushing
-    const { template_id, program_id, sub_tag, ...setRow } = r;
-    sess.sets.push(setRow);
+    // Strip JOIN-only columns from the set row before pushing; coerce
+    // SQLite 0/1 to boolean for is_in_cluster.
+    const { template_id, program_id, sub_tag, is_in_cluster, ...rest } = r;
+    sess.sets.push({ ...rest, is_in_cluster: is_in_cluster === 1 });
   }
 
   return order.map((id) => grouped.get(id)!);
@@ -170,6 +276,7 @@ export async function listProgramsForExercise(
        JOIN program p  ON p.id = t.program_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
       ORDER BY p.name ASC`,
     exercise_id
   );
@@ -194,7 +301,7 @@ export async function getExerciseHistoryHeader(
   const totalRow = await db.getFirstAsync<{ n: number }>(
     `SELECT COUNT(DISTINCT session_id) AS n
        FROM "set"
-      WHERE exercise_id = ? AND is_skipped = 0`,
+      WHERE exercise_id = ? AND is_skipped = 0 AND is_logged = 1`,
     exercise_id
   );
 
@@ -205,6 +312,7 @@ export async function getExerciseHistoryHeader(
        JOIN session ss ON ss.id = s.session_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND ss.started_at >= ?`,
     exercise_id,
     cutoff
@@ -243,9 +351,9 @@ export async function getExerciseHistoryHeader(
 // ---------------------------------------------------------------------------
 
 /** Filter chip values matching `RepBucketChip`. `'all'` widens to every set. */
-export type ExerciseHistoryBucketFilter = RepBucketChip;
+type ExerciseHistoryBucketFilter = RepBucketChip;
 
-export interface QueryExerciseHistoryOptions {
+interface QueryExerciseHistoryOptions {
   /** `'all'` (default) or one of the 5 `BucketKey`s. */
   repBucket?: ExerciseHistoryBucketFilter;
   /** Max rows to return; defaults to 200. Use `Number.POSITIVE_INFINITY` for unbounded (NOT recommended). */
@@ -263,7 +371,7 @@ export interface QueryExerciseHistoryOptions {
  * `rep_bucket` is derived from `reps` via the same provider used by PR
  * engine (`classifyBucket`). May be `null` for invalid / null reps.
  */
-export interface ExerciseHistoryRow {
+interface ExerciseHistoryRow {
   session_id: string;
   /** session.started_at — unix ms; the "date" the work was performed. */
   session_started_at: number;
@@ -280,6 +388,13 @@ export interface ExerciseHistoryRow {
   load_type: LoadType;
   /** session.bodyweight_snapshot_kg — null when unset. */
   bw_snapshot_kg: number | null;
+  /**
+   * True iff the originating `session_exercise` belongs to a cluster (A side =
+   * parent of another se row in the same session, OR B side = `parent_id` set).
+   * Drives the 3-段 cluster filter on the history / chart pages (slice 10c —
+   * see `domain/exercise/clusterFilter.ts`).
+   */
+  is_in_cluster: boolean;
 }
 
 const DEFAULT_LIMIT = 200;
@@ -341,8 +456,14 @@ export async function queryExerciseHistory(
     ordering: number;
     load_type: LoadType;
     bw_snapshot_kg: number | null;
+    /** 0 / 1 from SQLite — coerced to boolean below. */
+    is_in_cluster: number;
   };
 
+  // is_in_cluster: cluster B (parent_id != NULL) OR cluster A (this se's id
+  // is referenced by another se's parent_id within the same session). The
+  // LEFT JOIN matches on `set.session_exercise_id` first (v019+, supports
+  // multiple `(session_id, exercise_id)` cards) — see slice 10c #24.
   const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
@@ -351,12 +472,26 @@ export async function queryExerciseHistory(
             s.weight_kg    AS weight_kg,
             s.ordering     AS ordering,
             e.load_type    AS load_type,
-            ss.bodyweight_snapshot_kg AS bw_snapshot_kg
+            ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
-        AND s.is_skipped = 0${bucket.sql}
+        AND s.is_skipped = 0
+        AND s.is_logged = 1${bucket.sql}
       ORDER BY ss.started_at DESC, s.ordering ASC, s.id ASC
       LIMIT ? OFFSET ?`,
     exerciseId,
@@ -376,7 +511,39 @@ export async function queryExerciseHistory(
     ordering: r.ordering,
     load_type: r.load_type,
     bw_snapshot_kg: r.bw_snapshot_kg,
+    is_in_cluster: r.is_in_cluster === 1,
   }));
+}
+
+/**
+ * Does this exercise ever appear in a cluster (A side or B side) across all
+ * sessions? Used by the history / chart UI to decide whether to render the
+ * 3-段 cluster filter segmented control — if false, all bars would be identical
+ * so the control is hidden.
+ *
+ * Slice 10c — replaces the standalone `/superset-history/[id]` route. Cheap
+ * EXISTS query; no need to cache. Returns false for unknown exercise_id.
+ */
+export async function hasClusterHistory(
+  db: Database,
+  exerciseId: string
+): Promise<boolean> {
+  const row = await db.getFirstAsync<{ flag: number }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM session_exercise se
+        WHERE se.exercise_id = ?
+          AND (
+            se.parent_id IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM session_exercise se2
+               WHERE se2.parent_id = se.id
+            )
+          )
+     ) AS flag`,
+    exerciseId
+  );
+  return (row?.flag ?? 0) === 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -424,10 +591,10 @@ export async function queryExerciseHistory(
  * type alias so Function B's signature can evolve independently if v014
  * adds rs-id-specific filters (e.g. "cluster intent only").
  */
-export type QueryReusableSupersetHistoryOptions = QueryExerciseHistoryOptions;
+type QueryReusableSupersetHistoryOptions = QueryExerciseHistoryOptions;
 
 /** One side of a reusable-superset cluster pairing within a single session. */
-export interface ReusableSupersetSide {
+interface ReusableSupersetSide {
   /** position in the reusable superset's slot table — 0 = "A", 1 = "B". */
   position: 0 | 1;
   exercise_id: string;
@@ -438,7 +605,7 @@ export interface ReusableSupersetSide {
 }
 
 /** One session's pairing — both A and B sides if both were performed. */
-export interface ReusableSupersetHistoryRow {
+interface ReusableSupersetHistoryRow {
   session_id: string;
   /** session.started_at — unix ms. */
   session_started_at: number;
@@ -545,6 +712,7 @@ export async function queryReusableSupersetHistory(
                                    AND se.exercise_id = s.exercise_id
           WHERE se.reusable_superset_id = ?
             AND s.is_skipped = 0
+            AND s.is_logged = 1
             AND s.exercise_id IN (?, ?)
 
          UNION ALL
@@ -573,6 +741,7 @@ export async function queryReusableSupersetHistory(
             AND se.template_id IS NOT NULL
             AND te.reusable_superset_id = ?
             AND s.is_skipped = 0
+            AND s.is_logged = 1
             AND s.exercise_id IN (?, ?)
        )
       ORDER BY session_started_at DESC, ordering ASC, set_id ASC`,
@@ -620,6 +789,10 @@ export async function queryReusableSupersetHistory(
       ordering: r.ordering,
       load_type: r.load_type,
       bw_snapshot_kg: r.bw_snapshot_kg,
+      // Function B is invoked from a reusable-superset surface — every row it
+      // returns is by definition in a cluster. (The deprecated `/superset-*`
+      // routes are the only callers; slice 10c step 5 deletes them.)
+      is_in_cluster: true,
     };
     if (r.exercise_id === slotA.exercise_id) b.sideA.push(setRow);
     else if (r.exercise_id === slotB.exercise_id) b.sideB.push(setRow);
@@ -678,7 +851,10 @@ export async function listPriorSetsForExercise(
   exercise_id: string,
   before_created_at: number
 ): Promise<ExerciseHistorySet[]> {
-  return db.getAllAsync<ExerciseHistorySet>(
+  type Row = Omit<ExerciseHistorySet, 'is_in_cluster'> & {
+    is_in_cluster: number;
+  };
+  const rows = await db.getAllAsync<Row>(
     `SELECT s.id           AS set_id,
             s.session_id   AS session_id,
             ss.started_at  AS session_started_at,
@@ -688,15 +864,30 @@ export async function listPriorSetsForExercise(
             s.reps         AS reps,
             s.ordering     AS ordering,
             s.created_at   AS created_at,
-            e.load_type    AS load_type
+            e.load_type    AS load_type,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM session_exercise se2
+                 WHERE se2.parent_id = se.id
+              ) THEN 1
+              ELSE 0
+            END AS is_in_cluster
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+       LEFT JOIN session_exercise se
+         ON (se.id = s.session_exercise_id)
+         OR (s.session_exercise_id IS NULL
+             AND se.session_id = s.session_id
+             AND se.exercise_id = s.exercise_id)
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND s.created_at < ?
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id,
     before_created_at
   );
+  return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }

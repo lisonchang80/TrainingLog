@@ -20,7 +20,7 @@
 
 import type { LoadType } from '../exercise/types';
 
-export interface E1RMInput {
+interface E1RMInput {
   weight_kg: number | null;
   reps: number | null;
   load_type: LoadType;

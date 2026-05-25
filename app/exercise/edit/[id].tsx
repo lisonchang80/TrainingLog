@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,6 +20,8 @@ import type {
   ExerciseWithMuscles,
   MuscleGroup,
 } from '@/src/domain/exercise/types';
+import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Custom Exercise edit screen — thin wrapper around `<CustomExerciseForm>`.
@@ -31,6 +33,8 @@ export default function EditExerciseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [original, setOriginal] = useState<ExerciseWithMuscles | null>(null);
   const [initial, setInitial] = useState<CustomExerciseInitial | null>(null);
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -73,19 +77,19 @@ export default function EditExerciseScreen() {
       <SafeAreaView style={styles.container}>
         <Stack.Screen
           options={{
-            title: '編輯動作',
+            title: t('button', 'editExercise'),
             headerLeft: () => (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="取消"
+                accessibilityLabel={t('common', 'cancel')}
                 onPress={() => router.back()}>
-                <Text style={styles.headerCancel}>取消</Text>
+                <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
               </Pressable>
             ),
           }}
         />
         <View style={styles.placeholderWrap}>
-          <Text style={styles.placeholder}>內建動作目前無可編輯內容。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'builtinExerciseNoEdit')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -95,9 +99,9 @@ export default function EditExerciseScreen() {
   if (!initial) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ title: '編輯動作' }} />
+        <Stack.Screen options={{ title: t('button', 'editExercise') }} />
         <View style={styles.placeholderWrap}>
-          <Text style={styles.placeholder}>載入中…</Text>
+          <Text style={styles.placeholder}>{t('status', 'loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -111,7 +115,7 @@ export default function EditExerciseScreen() {
 
   return (
     <CustomExerciseForm
-      title="編輯動作"
+      title={t('button', 'editExercise')}
       initial={initial}
       existingNames={existingNames}
       muscleGroups={muscleGroups}
@@ -121,13 +125,15 @@ export default function EditExerciseScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  headerCancel: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    paddingHorizontal: 8,
-  },
-  placeholderWrap: { padding: 24 },
-  placeholder: { fontSize: 14, opacity: 0.6 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    headerCancel: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      paddingHorizontal: 8,
+    },
+    placeholderWrap: { padding: 24 },
+    placeholder: { fontSize: 14, color: tokens.text.secondary },
+  });
+}

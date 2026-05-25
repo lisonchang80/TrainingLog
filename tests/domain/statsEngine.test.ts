@@ -1,8 +1,6 @@
 import {
   capacityHistogramByMg,
   durationHistogram,
-  durationStatsOverPeriod,
-  mgCapacityOverPeriod,
   mgFrequencyOverPeriod,
   percentileBucketize,
 } from '../../src/domain/stats/statsEngine';
@@ -18,6 +16,7 @@ const buildRecord = (
   session_ended_at: 1_001_000,
   exercise_id: 'ex-1',
   mg_id: 'mg-chest',
+  m_ids: [],
   volume: 100,
   is_logged: true,
   ...override,
@@ -53,71 +52,6 @@ describe('mgFrequencyOverPeriod', () => {
       buildRecord({ session_id: 's1', set_id: 'a', mg_id: null }),
     ];
     expect(mgFrequencyOverPeriod(records).size).toBe(0);
-  });
-});
-
-describe('mgCapacityOverPeriod', () => {
-  it('sums volume per MG', () => {
-    const records: StatsSetRecord[] = [
-      buildRecord({ session_id: 's1', set_id: 'a', mg_id: 'mg-chest', volume: 500 }),
-      buildRecord({ session_id: 's1', set_id: 'b', mg_id: 'mg-chest', volume: 300 }),
-      buildRecord({ session_id: 's2', set_id: 'c', mg_id: 'mg-back', volume: 700 }),
-    ];
-    const out = mgCapacityOverPeriod(records);
-    expect(out.get('mg-chest')).toBe(800);
-    expect(out.get('mg-back')).toBe(700);
-  });
-
-  it('skips null volume (e.g. assisted with no snapshot)', () => {
-    const records: StatsSetRecord[] = [
-      buildRecord({ session_id: 's1', set_id: 'a', mg_id: 'mg-chest', volume: 500 }),
-      buildRecord({ session_id: 's1', set_id: 'b', mg_id: 'mg-chest', volume: null }),
-    ];
-    expect(mgCapacityOverPeriod(records).get('mg-chest')).toBe(500);
-  });
-});
-
-describe('durationStatsOverPeriod', () => {
-  it('aggregates total / avg / longest', () => {
-    const records: StatsSetRecord[] = [
-      buildRecord({
-        session_id: 's1',
-        set_id: 'a',
-        session_started_at: 0,
-        session_ended_at: 60_000,
-      }),
-      buildRecord({
-        session_id: 's2',
-        set_id: 'b',
-        session_started_at: 100_000,
-        session_ended_at: 140_000,
-      }),
-    ];
-    const out = durationStatsOverPeriod(records);
-    expect(out.session_count).toBe(2);
-    expect(out.total_ms).toBe(100_000); // 60k + 40k
-    expect(out.avg_ms).toBe(50_000);
-    expect(out.longest_ms).toBe(60_000);
-  });
-
-  it('excludes in-progress sessions (ended_at null)', () => {
-    const records: StatsSetRecord[] = [
-      buildRecord({ session_id: 's1', set_id: 'a', session_ended_at: null }),
-      buildRecord({
-        session_id: 's2',
-        set_id: 'b',
-        session_started_at: 0,
-        session_ended_at: 30_000,
-      }),
-    ];
-    const out = durationStatsOverPeriod(records);
-    expect(out.session_count).toBe(1);
-    expect(out.total_ms).toBe(30_000);
-  });
-
-  it('returns zeros for empty range', () => {
-    const out = durationStatsOverPeriod([]);
-    expect(out).toEqual({ total_ms: 0, avg_ms: 0, longest_ms: 0, session_count: 0 });
   });
 });
 
@@ -159,49 +93,6 @@ describe('percentileBucketize', () => {
   });
 });
 
-describe('durationStatsOverPeriod — clock skew', () => {
-  it('excludes sessions with non-positive duration', () => {
-    const records: StatsSetRecord[] = [
-      // ended_at < started_at → negative duration (clock skew)
-      {
-        session_id: 's-bad',
-        set_id: 'a',
-        session_started_at: 100_000,
-        session_ended_at: 50_000,
-        exercise_id: 'ex-1',
-        mg_id: 'mg-chest',
-        volume: 100,
-        is_logged: true,
-      },
-      // duration = 0 → also excluded
-      {
-        session_id: 's-zero',
-        set_id: 'b',
-        session_started_at: 100_000,
-        session_ended_at: 100_000,
-        exercise_id: 'ex-1',
-        mg_id: 'mg-chest',
-        volume: 100,
-        is_logged: true,
-      },
-      // valid
-      {
-        session_id: 's-ok',
-        set_id: 'c',
-        session_started_at: 0,
-        session_ended_at: 60_000,
-        exercise_id: 'ex-1',
-        mg_id: 'mg-chest',
-        volume: 100,
-        is_logged: true,
-      },
-    ];
-    const out = durationStatsOverPeriod(records);
-    expect(out.session_count).toBe(1);
-    expect(out.total_ms).toBe(60_000);
-  });
-});
-
 describe('histogram functions on empty / single inputs', () => {
   const now = new Date(2026, 4, 8);
 
@@ -225,6 +116,7 @@ describe('histogram functions on empty / single inputs', () => {
         session_ended_at: new Date(2026, 4, 5).getTime() + 60_000,
         exercise_id: 'ex-1',
         mg_id: 'mg-chest',
+        m_ids: [],
         volume: 500,
         is_logged: false,
       },

@@ -1,10 +1,7 @@
 import {
-  bumpUseCount,
   createReusableSuperset,
   defaultSupersetName,
   explodeSupersetForTemplate,
-  recolorReusableSuperset,
-  renameReusableSuperset,
   validateReusableSupersetDraft,
 } from '../../src/domain/superset/supersetManager';
 import type { Exercise } from '../../src/domain/exercise/types';
@@ -128,46 +125,6 @@ describe('supersetManager — createReusableSuperset', () => {
       { superset_id: 'id-1', position: 0, exercise_id: 'ex-bench' },
       { superset_id: 'id-1', position: 1, exercise_id: 'ex-row' },
     ]);
-  });
-});
-
-describe('supersetManager — rename / recolor / bump', () => {
-  const base = {
-    id: 's-1',
-    name: 'Old',
-    color_hex: '#34c759',
-    use_count: 3,
-    created_at: 1000,
-    updated_at: 1000,
-  };
-
-  it('renameReusableSuperset trims + bumps updated_at', () => {
-    expect(renameReusableSuperset(base, '  New  ', () => 2000)).toEqual({
-      ...base,
-      name: 'New',
-      updated_at: 2000,
-    });
-  });
-
-  it('recolorReusableSuperset overwrites color + bumps updated_at', () => {
-    expect(recolorReusableSuperset(base, null, () => 2000)).toEqual({
-      ...base,
-      color_hex: null,
-      updated_at: 2000,
-    });
-  });
-
-  it('bumpUseCount increments by 1 + bumps updated_at', () => {
-    expect(bumpUseCount(base, () => 2000)).toEqual({
-      ...base,
-      use_count: 4,
-      updated_at: 2000,
-    });
-  });
-
-  it('rename does NOT touch use_count or exercise pair', () => {
-    const renamed = renameReusableSuperset(base, 'Other', () => 2000);
-    expect(renamed.use_count).toBe(3);
   });
 });
 

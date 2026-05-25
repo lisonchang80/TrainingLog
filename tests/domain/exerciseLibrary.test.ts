@@ -2,7 +2,6 @@ import {
   filterExercises,
   inferLoadType,
   muscleHighlightMap,
-  partitionMuscleLinksByRole,
   validateCustomExerciseDraft,
 } from '../../src/domain/exercise/exerciseLibrary';
 import type {
@@ -257,20 +256,6 @@ describe('exerciseLibrary — inferLoadType (Slice 9.7 ADR-0017 Q11 amendment)',
     for (const eq of loadedEquipments) {
       expect(inferLoadType(eq)).toBe('loaded');
     }
-  });
-});
-
-describe('exerciseLibrary — partitionMuscleLinksByRole', () => {
-  it('splits primary vs secondary preserving order', () => {
-    const links: ExerciseMuscleLink[] = [
-      { exercise_id: 'e1', muscle_id: 'a', role: 'primary' },
-      { exercise_id: 'e1', muscle_id: 'b', role: 'secondary' },
-      { exercise_id: 'e1', muscle_id: 'c', role: 'primary' },
-    ];
-    expect(partitionMuscleLinksByRole(links)).toEqual({
-      primary: ['a', 'c'],
-      secondary: ['b'],
-    });
   });
 });
 

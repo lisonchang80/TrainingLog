@@ -1,7 +1,6 @@
 import {
   EMPTY_SELECTION,
   addSelection,
-  isEmpty,
   isSelected,
   removeSelection,
   selectionRank,
@@ -76,7 +75,7 @@ describe('pickerSelection — toggleSelection', () => {
   });
 });
 
-describe('pickerSelection — isSelected / selectionRank / isEmpty', () => {
+describe('pickerSelection — isSelected / selectionRank', () => {
   it('isSelected reflects membership', () => {
     expect(isSelected(['a', 'b'], 'a')).toBe(true);
     expect(isSelected(['a', 'b'], 'z')).toBe(false);
@@ -88,11 +87,5 @@ describe('pickerSelection — isSelected / selectionRank / isEmpty', () => {
     expect(selectionRank(['a', 'b', 'c'], 'b')).toBe(1);
     expect(selectionRank(['a', 'b', 'c'], 'c')).toBe(2);
     expect(selectionRank(['a', 'b'], 'z')).toBe(-1);
-  });
-
-  it('isEmpty true on empty array', () => {
-    expect(isEmpty(EMPTY_SELECTION)).toBe(true);
-    expect(isEmpty([])).toBe(true);
-    expect(isEmpty(['a'])).toBe(false);
   });
 });

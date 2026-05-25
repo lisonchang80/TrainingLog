@@ -15,6 +15,7 @@ import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import type { CustomExerciseDraft } from '@/src/domain/exercise/exerciseLibrary';
 import type { MuscleGroup } from '@/src/domain/exercise/types';
 import { submitNewlyCreated } from '@/src/domain/exercise/pickerBridge';
+import { t } from '@/src/i18n';
 
 const INITIAL_DRAFT: CustomExerciseInitial = {
   name: '',
@@ -46,7 +47,7 @@ export default function NewExerciseScreen() {
 
   return (
     <CustomExerciseForm
-      title="新增自訂動作"
+      title={t('button', 'addCustomExercise')}
       initial={INITIAL_DRAFT}
       existingNames={existingNames}
       muscleGroups={muscleGroups}

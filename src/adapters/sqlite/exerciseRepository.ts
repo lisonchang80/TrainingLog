@@ -19,3 +19,23 @@ export async function listExercises(db: Database): Promise<Exercise[]> {
       ORDER BY name ASC`
   );
 }
+
+/**
+ * Lookup helper used by the cluster A↔B switcher on the per-Exercise history /
+ * chart pages (slice 10c overnight #11). Given an exercise_id, returns the
+ * exercise's display name, or `null` when no row matches.
+ *
+ * Cheap single-row SELECT; safe to call inline from `refresh()`. No archived
+ * filter — the switcher needs the name regardless of archive state so that a
+ * past cluster partner that has since been archived still resolves.
+ */
+export async function getExerciseName(
+  db: Database,
+  exercise_id: string
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM exercise WHERE id = ? LIMIT 1`,
+    exercise_id
+  );
+  return row?.name ?? null;
+}

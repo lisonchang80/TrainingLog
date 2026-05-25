@@ -32,7 +32,14 @@ import {
   listMuscleGroups,
   listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
-import { listReusableSupersetsWithExercises } from '@/src/adapters/sqlite/supersetRepository';
+import {
+  getActiveSession,
+  listSessionUsedExercises,
+} from '@/src/adapters/sqlite/sessionRepository';
+import {
+  getReusableSupersetSessionCounts,
+  listReusableSupersetsWithExercises,
+} from '@/src/adapters/sqlite/supersetRepository';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
   clearNewlyCreatedSuperset,
@@ -48,6 +55,18 @@ import {
   selectionRank,
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
+import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY helper for the 10 components in this file that all need
+ * the same memoised style sheet. Each sub-component calls `useLibStyles()`
+ * instead of repeating the useTheme + useMemo pair.
+ */
+function useLibStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Library screen (slice 9.6 / ADR-0017 Q1, Q6, Q7, Q15).
@@ -64,8 +83,21 @@ import {
 export default function LibraryScreen() {
   const db = useDatabase();
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  // ADR-0025 — pull tokens here so we can use the raw value for
+  // `placeholderTextColor` (inline prop, not in StyleSheet).
+  const { tokens } = useTheme();
+  const styles = useLibStyles();
+  const params = useLocalSearchParams<{ mode?: string; sessionId?: string }>();
   const isPickerMode = params.mode === 'picker';
+  // 2026-05-20 edit-parity audit: when picker is opened from session detail
+  // edit mode, the URL carries `?sessionId=<id>` so the dim layer can target
+  // THAT session (possibly an ended one) instead of falling back to
+  // `getActiveSession`. Empty / missing param keeps original Today-screen
+  // behaviour (active session lookup).
+  const pickerSessionIdParam =
+    typeof params.sessionId === 'string' && params.sessionId.length > 0
+      ? params.sessionId
+      : null;
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
@@ -82,6 +114,12 @@ export default function LibraryScreen() {
   const [supersets, setSupersets] = useState<ReusableSupersetWithExercises[]>(
     []
   );
+  // Slice 10c #24 — dynamic RS "N 次" badge: real session count keyed on
+  // `session_exercise.reusable_superset_id`, NOT `superset.use_count` (which
+  // is only bumped on Template explode and so under-counts actual usage).
+  const [supersetCounts, setSupersetCounts] = useState<Map<string, number>>(
+    new Map()
+  );
 
   const [selectedMgId, setSelectedMgId] = useState<string | null>(null);
   const [isSupersetTab, setIsSupersetTab] = useState(false);
@@ -97,6 +135,16 @@ export default function LibraryScreen() {
   const [supersetSelection, setSupersetSelection] = useState<readonly string[]>(
     EMPTY_SELECTION
   );
+  // Slice 10c #20 — items already inside the in-progress session render
+  // dimmed + tap-disabled (but ⓘ stays live) so the user can't add a
+  // duplicate. Solo and RS buckets are independent (see
+  // listSessionUsedExercises doc). Empty sets in browse mode = nothing dims.
+  const [disabledExerciseIds, setDisabledExerciseIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [disabledSupersetIds, setDisabledSupersetIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   // Drop any stale picker-mode mailbox on mount so a prior abandoned pick
   // does not leak into a fresh picker session.
@@ -108,12 +156,13 @@ export default function LibraryScreen() {
   }, [isPickerMode]);
 
   const refresh = useCallback(async () => {
-    const [{ exercises, links }, mgs, ms, counts, ss] = await Promise.all([
+    const [{ exercises, links }, mgs, ms, counts, ss, sCounts] = await Promise.all([
       listExercisesWithLinks(db),
       listMuscleGroups(db),
       listMuscles(db),
       getExerciseSessionCounts(db),
       listReusableSupersetsWithExercises(db),
+      getReusableSupersetSessionCounts(db),
     ]);
     setExercises(exercises);
     setLinks(links);
@@ -121,6 +170,7 @@ export default function LibraryScreen() {
     setMuscles(ms);
     setSessionCounts(counts);
     setSupersets(ss);
+    setSupersetCounts(sCounts);
     // Default to first MG on first load if none selected yet.
     if (selectedMgId === null && !isSupersetTab && mgs.length > 0) {
       setSelectedMgId(mgs[0].id);
@@ -144,7 +194,36 @@ export default function LibraryScreen() {
       if (newSupId && isPickerMode) {
         setSupersetSelection((prev) => addSelection(prev, newSupId));
       }
-    }, [refresh, isPickerMode])
+      // #20 — only in picker mode do we look up "already in this session"
+      // for the dim/disable layer. Browse mode keeps both sets empty so
+      // the library tab never dims anything.
+      //
+      // 2026-05-20 edit-parity audit: prefer explicit `?sessionId=<id>` URL
+      // param (session detail edit mode) over `getActiveSession` so the dim
+      // layer reflects the SESSION BEING EDITED rather than whatever is
+      // currently active. Falls back to active session when no param —
+      // preserves the Today-screen picker flow.
+      if (isPickerMode) {
+        void (async () => {
+          let targetSessionId: string | null = pickerSessionIdParam;
+          if (!targetSessionId) {
+            const active = await getActiveSession(db);
+            targetSessionId = active?.id ?? null;
+          }
+          if (!targetSessionId) {
+            setDisabledExerciseIds(new Set());
+            setDisabledSupersetIds(new Set());
+            return;
+          }
+          const used = await listSessionUsedExercises(db, targetSessionId);
+          setDisabledExerciseIds(used.solo_exercise_ids);
+          setDisabledSupersetIds(used.rs_template_ids);
+        })();
+      } else {
+        setDisabledExerciseIds(new Set());
+        setDisabledSupersetIds(new Set());
+      }
+    }, [refresh, isPickerMode, db, pickerSessionIdParam])
   );
 
   const subMuscles = useMemo(() => {
@@ -182,6 +261,10 @@ export default function LibraryScreen() {
 
   const onCardTap = (ex: Exercise) => {
     if (isPickerMode) {
+      // Safety net for race conditions (focus refresh mid-pick) — disabled
+      // items are also ignored at the props level via `disabled={true}` on
+      // the card Pressable, but if a tap somehow lands here we refuse it.
+      if (disabledExerciseIds.has(ex.id)) return;
       setSelection((prev) => toggleSelection(prev, ex.id));
     } else {
       router.push(`/exercise/${ex.id}`);
@@ -204,6 +287,7 @@ export default function LibraryScreen() {
 
   const onSupersetCardTap = (s: ReusableSupersetWithExercises) => {
     if (isPickerMode) {
+      if (disabledSupersetIds.has(s.superset.id)) return;
       setSupersetSelection((prev) => toggleSelection(prev, s.superset.id));
     } else {
       router.push(`/superset/${s.superset.id}`);
@@ -218,7 +302,7 @@ export default function LibraryScreen() {
         {isPickerMode && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="取消"
+            accessibilityLabel={t('common', 'cancel')}
             onPress={onPickerCancel}
             style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelBtnText}>✕</Text>
@@ -227,8 +311,8 @@ export default function LibraryScreen() {
         <View style={styles.searchWrap}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
-            placeholder="輸入動作名字搜索"
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholder={t('page', 'searchExercises')}
+            placeholderTextColor={tokens.text.tertiary}
             value={search}
             onChangeText={setSearch}
             style={styles.searchInput}
@@ -238,7 +322,7 @@ export default function LibraryScreen() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isSupersetTab ? '建立超級組' : '新增動作'}
+          accessibilityLabel={isSupersetTab ? t('button', 'createSuperset') : t('button', 'addExercisePlain')}
           onPress={() =>
             router.push(isSupersetTab ? '/superset/new' : '/exercise/new')
           }
@@ -262,10 +346,12 @@ export default function LibraryScreen() {
           {isSupersetTab ? (
             <SupersetGrid
               supersets={supersets}
+              counts={supersetCounts}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
               onTap={onSupersetCardTap}
               selection={isPickerMode ? supersetSelection : null}
+              disabledIds={disabledSupersetIds}
               onInfoPress={
                 isPickerMode
                   ? (s) => router.push(`/superset/${s.superset.id}`)
@@ -285,6 +371,7 @@ export default function LibraryScreen() {
                 cardHeight={cardHeight}
                 onTap={onCardTap}
                 selection={isPickerMode ? selection : null}
+                disabledIds={disabledExerciseIds}
                 onInfoPress={
                   isPickerMode
                     ? (ex) => router.push(`/exercise/${ex.id}`)
@@ -299,7 +386,7 @@ export default function LibraryScreen() {
         <View style={styles.pickerFooter}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="完成"
+            accessibilityLabel={t('common', 'done')}
             onPress={onPickerDone}
             disabled={pickerTotal === 0}
             style={({ pressed }) => [
@@ -308,7 +395,7 @@ export default function LibraryScreen() {
               pressed && styles.pressed,
             ]}>
             <Text style={styles.pickerDoneBtnText}>
-              完成{pickerTotal > 0 ? ` (${pickerTotal})` : ''}
+              {t('common', 'done')}{pickerTotal > 0 ? ` (${pickerTotal})` : ''}
             </Text>
           </Pressable>
         </View>
@@ -331,6 +418,7 @@ interface SidebarProps {
 }
 
 function Sidebar(props: SidebarProps) {
+  const styles = useLibStyles();
   const {
     muscleGroups,
     selectedMgId,
@@ -361,7 +449,7 @@ function Sidebar(props: SidebarProps) {
                   styles.sidebarText,
                   isActive && styles.sidebarTextActive,
                 ]}>
-                {mg.name}
+                {tMuscleGroup(mg.name)}
               </Text>
             </Pressable>
             {isActive &&
@@ -378,7 +466,7 @@ function Sidebar(props: SidebarProps) {
                       styles.sidebarSubText,
                       selectedMuscleId === m.id && styles.sidebarSubTextActive,
                     ]}>
-                    {m.name}
+                    {tMuscleGroup(m.name)}
                   </Text>
                 </Pressable>
               ))}
@@ -395,7 +483,7 @@ function Sidebar(props: SidebarProps) {
             styles.sidebarText,
             isSupersetTab && styles.sidebarTextActive,
           ]}>
-          超級組
+          {t('domain', 'superset')}
         </Text>
       </Pressable>
     </ScrollView>
@@ -412,6 +500,7 @@ function EquipmentChipRow({
   value: Equipment | null;
   onChange: (eq: Equipment | null) => void;
 }) {
+  const styles = useLibStyles();
   return (
     <View style={styles.equipRowOuter}>
       <ScrollView
@@ -419,14 +508,14 @@ function EquipmentChipRow({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.equipRow}>
         <EquipmentChip
-          label="全部"
+          label={t('common', 'all')}
           active={value === null}
           onPress={() => onChange(null)}
         />
         {EQUIPMENT_VALUES.map((eq) => (
           <EquipmentChip
             key={eq}
-            label={eq}
+            label={tEquipment(eq)}
             active={value === eq}
             onPress={() => onChange(value === eq ? null : eq)}
           />
@@ -445,6 +534,7 @@ function EquipmentChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useLibStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -470,6 +560,7 @@ function ExerciseGrid({
   cardHeight,
   onTap,
   selection,
+  disabledIds,
   onInfoPress,
 }: {
   exercises: Exercise[];
@@ -478,14 +569,20 @@ function ExerciseGrid({
   cardHeight: number;
   onTap: (ex: Exercise) => void;
   selection: readonly string[] | null;
+  /** Slice 10c #20 — ids that are already in the in-progress session.
+   *  Cards in this set render dim (opacity 0.4) with the main Pressable
+   *  disabled, but the ⓘ button stays live for detail preview. Always
+   *  pass an empty Set in browse mode. */
+  disabledIds: Set<string>;
   /** When set, each card renders a small ⓘ button (bottom-right) that
    *  navigates to the exercise's detail page without affecting selection. */
   onInfoPress: ((ex: Exercise) => void) | null;
 }) {
+  const styles = useLibStyles();
   if (exercises.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>沒有符合條件的動作</Text>
+        <Text style={styles.emptyText}>{t('status', 'noExercisesMatch')}</Text>
       </View>
     );
   }
@@ -511,6 +608,7 @@ function ExerciseGrid({
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].id) : false}
             rank={selection ? selectionRank(selection, pair[0].id) : -1}
+            disabled={disabledIds.has(pair[0].id)}
             onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
@@ -522,6 +620,7 @@ function ExerciseGrid({
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].id) : false}
               rank={selection ? selectionRank(selection, pair[1].id) : -1}
+              disabled={disabledIds.has(pair[1].id)}
               onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
@@ -541,6 +640,7 @@ function ExerciseCard({
   onPress,
   selected,
   rank,
+  disabled,
   onInfoPress,
 }: {
   exercise: Exercise;
@@ -550,27 +650,33 @@ function ExerciseCard({
   onPress: () => void;
   selected: boolean;
   rank: number;
+  /** Slice 10c #20 — already in the in-progress session. Whole card dims;
+   *  main Pressable disabled (no toggle); ⓘ stays live. */
+  disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  const styles = useLibStyles();
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
   const thumbnail = exercise.media_path;
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.card,
         { width, height },
         selected && styles.cardSelected,
+        disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
       {hasCues && (
         <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
-          <Text style={styles.cuesPillText}>講解</Text>
+          <Text style={styles.cuesPillText}>{t('button', 'cues')}</Text>
         </View>
       )}
       {sessionCount > 0 && (
-        <Text style={styles.countBadge}>{sessionCount} 次</Text>
+        <Text style={styles.countBadge}>{tNSessions(sessionCount)}</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>
@@ -585,13 +691,13 @@ function ExerciseCard({
         )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {exercise.name}
+        {tExercise(exercise.name)}
       </Text>
-      {hasCues && <Text style={styles.cardCueLink}>查看動作要點</Text>}
+      {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="查看動作詳情"
+          accessibilityLabel={t('button', 'viewExerciseDetails')}
           onPress={onInfoPress}
           hitSlop={8}
           style={({ pressed }) => [
@@ -606,9 +712,12 @@ function ExerciseCard({
 }
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
+  const styles = useLibStyles();
   // Hash-color circle with first character — ADR-0017 Q8 v1 placeholder.
+  // hash uses raw DB name so the color is stable across locales;
+  // displayed initial uses tExercise() so zh seeds show the zh first char.
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.thumbPlaceholder, { backgroundColor: bg }]}>
       <Text style={styles.thumbInitial}>{ch}</Text>
@@ -620,26 +729,33 @@ function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
 
 function SupersetGrid({
   supersets,
+  counts,
   cardWidth,
   cardHeight,
   onTap,
   selection,
+  disabledIds,
   onInfoPress,
 }: {
   supersets: ReusableSupersetWithExercises[];
+  /** Slice 10c #24 — dynamic per-RS session count (`session_exercise.reusable_superset_id`-keyed). */
+  counts: Map<string, number>;
   cardWidth: number;
   cardHeight: number;
   onTap: (s: ReusableSupersetWithExercises) => void;
   /** Non-null = picker mode (toggle on tap, render badge); null = browse mode. */
   selection: readonly string[] | null;
+  /** Slice 10c #20 — RS template ids already in the in-progress session. */
+  disabledIds: Set<string>;
   /** Non-null = picker mode (render ⓘ for detail preview); null = browse mode. */
   onInfoPress: ((s: ReusableSupersetWithExercises) => void) | null;
 }) {
+  const styles = useLibStyles();
   if (supersets.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>尚未建立超級組</Text>
-        <Text style={styles.emptySubText}>點右上角「+」建立新的超級組</Text>
+        <Text style={styles.emptyText}>{t('status', 'noSupersetsYet')}</Text>
+        <Text style={styles.emptySubText}>{t('status', 'noSupersetsHint')}</Text>
       </View>
     );
   }
@@ -658,21 +774,25 @@ function SupersetGrid({
         <View key={i} style={styles.gridRow}>
           <SupersetCard
             item={pair[0]}
+            count={counts.get(pair[0].superset.id) ?? 0}
             width={cardWidth}
             height={cardHeight}
             onPress={() => onTap(pair[0])}
             selected={selection ? isSelected(selection, pair[0].superset.id) : false}
             rank={rankOf(pair[0])}
+            disabled={disabledIds.has(pair[0].superset.id)}
             onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
           />
           {pair[1] ? (
             <SupersetCard
               item={pair[1]}
+              count={counts.get(pair[1].superset.id) ?? 0}
               width={cardWidth}
               height={cardHeight}
               onPress={() => onTap(pair[1])}
               selected={selection ? isSelected(selection, pair[1].superset.id) : false}
               rank={rankOf(pair[1])}
+              disabled={disabledIds.has(pair[1].superset.id)}
               onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
             />
           ) : (
@@ -686,21 +806,30 @@ function SupersetGrid({
 
 function SupersetCard({
   item,
+  count,
   width,
   height,
   onPress,
   selected,
   rank,
+  disabled,
   onInfoPress,
 }: {
   item: ReusableSupersetWithExercises;
+  /** Slice 10c #24 — dynamic session count (ended sessions with at least one
+   *  logged set against this RS template). Replaces `superset.use_count`. */
+  count: number;
   width: number;
   height: number;
   onPress: () => void;
   selected: boolean;
   rank: number;
+  /** Slice 10c #20 — already in the in-progress session. Whole card dims;
+   *  main Pressable disabled (no toggle); ⓘ stays live. */
+  disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  const styles = useLibStyles();
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
   const exA = exercises[0];
@@ -709,16 +838,18 @@ function SupersetCard({
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.card,
         styles.supersetCard,
         { width, height },
         selected && styles.cardSelected,
+        disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
       <View style={[styles.supersetColorBar, { backgroundColor: barColor }]} />
-      {superset.use_count > 0 && (
-        <Text style={styles.countBadge}>{superset.use_count} 次</Text>
+      {count > 0 && (
+        <Text style={styles.countBadge}>{tNSessions(count)}</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>
@@ -735,7 +866,7 @@ function SupersetCard({
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="查看超級組詳情"
+          accessibilityLabel={t('button', 'viewSupersetDetails')}
           onPress={onInfoPress}
           hitSlop={8}
           style={({ pressed }) => [
@@ -750,6 +881,7 @@ function SupersetCard({
 }
 
 function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
+  const styles = useLibStyles();
   if (!exercise) {
     return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
   }
@@ -762,7 +894,7 @@ function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
     );
   }
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.supersetMiniThumb, { backgroundColor: bg }]}>
       <Text style={styles.supersetMiniThumbInitial}>{ch}</Text>
@@ -776,8 +908,20 @@ const SIDEBAR_WIDTH = 92;
 const CARD_GAP = 10;
 const CONTENT_H_PADDING = 12;
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
+/**
+ * ADR-0025 — library.tsx was originally built dark-only (#fff text + #000 bg
+ * + green #34C759 accent everywhere). Every color now flows from tokens.
+ * The green accent maps to `action.success` (semantic "selected / add" in
+ * the library context — picker-mode selection badge, sidebar active rail,
+ * add-exercise FAB).
+ *
+ * The two `#fff` circle backgrounds (thumb + miniThumb) map to bg.surface
+ * — in dark mode that becomes a slightly elevated dark circle that hosts
+ * either an Image (fits) or a hash-colored letter overlay (overrides).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: tokens.bg.base },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -789,15 +933,19 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.20)',
+    backgroundColor: tokens.bg.elevated,
     borderRadius: 999,
     paddingHorizontal: 14,
     height: 40,
   },
-  searchIcon: { fontSize: 14, marginRight: 6, color: 'rgba(255,255,255,0.6)' },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: 6,
+    color: tokens.text.secondary,
+  },
   searchInput: {
     flex: 1,
-    color: '#fff',
+    color: tokens.text.primary,
     fontSize: 15,
     padding: 0,
   },
@@ -805,20 +953,30 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addBtnText: { color: '#fff', fontSize: 24, fontWeight: '600', lineHeight: 26 },
+  addBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 26,
+  },
   cancelBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cancelBtnText: { color: '#fff', fontSize: 20, fontWeight: '600', lineHeight: 22 },
+  cancelBtnText: {
+    color: tokens.text.primary,
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
 
   body: { flex: 1, flexDirection: 'row' },
 
@@ -837,18 +995,22 @@ const styles = StyleSheet.create({
     top: 8,
     bottom: 8,
     width: 3,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     borderRadius: 2,
   },
-  sidebarText: { color: 'rgba(255,255,255,0.55)', fontSize: 17, fontWeight: '500' },
-  sidebarTextActive: { color: '#fff', fontWeight: '700' },
+  sidebarText: {
+    color: tokens.text.tertiary,
+    fontSize: 17,
+    fontWeight: '500',
+  },
+  sidebarTextActive: { color: tokens.text.primary, fontWeight: '700' },
   sidebarSubRow: {
     height: 36,
     paddingLeft: 24,
     justifyContent: 'center',
   },
-  sidebarSubText: { color: 'rgba(255,255,255,0.45)', fontSize: 15 },
-  sidebarSubTextActive: { color: '#34C759', fontWeight: '600' },
+  sidebarSubText: { color: tokens.text.tertiary, fontSize: 15 },
+  sidebarSubTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   content: { flex: 1, flexDirection: 'column', minWidth: 0 },
   equipRowOuter: { height: 56 },
@@ -863,13 +1025,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(127,127,127,0.20)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Semitransparent success tint kept as-is (success token at 18% alpha) —
+  // the active-chip overlay needs to read clearly against the page base in
+  // both themes; using bg.elevated here would lose the "this is selected"
+  // signal. Token-friendly variants use rgba of the success hex.
   equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
-  equipText: { color: 'rgba(255,255,255,0.75)', fontSize: 14 },
-  equipTextActive: { color: '#34C759', fontWeight: '600' },
+  equipText: { color: tokens.text.secondary, fontSize: 14 },
+  equipTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
   gridContent: {
@@ -885,7 +1051,7 @@ const styles = StyleSheet.create({
   },
   card: {
     flexShrink: 0,
-    backgroundColor: 'rgba(127,127,127,0.15)',
+    backgroundColor: tokens.bg.elevated,
     borderRadius: 14,
     padding: 10,
     alignItems: 'center',
@@ -893,9 +1059,19 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
+  // Same rationale as equipChipActive — semitransparent success accent for
+  // a clear "selected" affordance independent of theme.
   cardSelected: {
-    borderColor: '#34C759',
+    borderColor: tokens.action.success,
     backgroundColor: 'rgba(52,199,89,0.15)',
+  },
+  /** Slice 10c #20 — exercise/RS already in the in-progress session. Dim
+   *  the whole card so the user sees it but can't tap to add a duplicate.
+   *  ⓘ button overlay is rendered separately (after this Pressable's child
+   *  tree) and keeps its own opacity / hitSlop, so the detail-preview path
+   *  remains usable even when the card body is dimmed. */
+  cardDisabled: {
+    opacity: 0.4,
   },
   selectedBadge: {
     position: 'absolute',
@@ -904,11 +1080,15 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  selectedBadgeText: {
+    color: tokens.action.onPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   infoBtn: {
     position: 'absolute',
     top: 6,
@@ -918,33 +1098,37 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: tokens.bg.surface,
   },
-  infoBtnText: { color: '#fff', fontSize: 18, lineHeight: 20 },
+  infoBtnText: { color: tokens.text.primary, fontSize: 18, lineHeight: 20 },
   cuesPill: {
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   /** Shift right when ⓘ button occupies top-left (picker mode). */
   cuesPillWithInfo: { left: 40 },
-  cuesPillText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  cuesPillText: {
+    color: tokens.action.onPrimary,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   countBadge: {
     position: 'absolute',
     top: 10,
     right: 12,
-    color: 'rgba(255,255,255,0.85)',
+    color: tokens.text.secondary,
     fontSize: 13,
   },
   thumbWrap: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -957,9 +1141,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Letter inside hash-colored placeholder. Kept white because the
+  // hashColor() palette is dark/saturated so white-on-color reads either
+  // way (the parent View overrides backgroundColor with `bg`).
   thumbInitial: { color: '#fff', fontSize: 36, fontWeight: '700' },
   cardName: {
-    color: '#fff',
+    color: tokens.text.primary,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
@@ -992,29 +1179,30 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   supersetMiniThumbEmpty: {
-    backgroundColor: 'rgba(127,127,127,0.3)',
+    backgroundColor: tokens.bg.elevated,
   },
+  // See thumbInitial comment — white letter sits on hash-colored bg.
   supersetMiniThumbInitial: {
     color: '#fff',
     fontSize: 20,
     fontWeight: '700',
   },
   cardCueLink: {
-    color: 'rgba(255,255,255,0.55)',
+    color: tokens.text.tertiary,
     fontSize: 12,
     marginTop: 4,
   },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyText: { color: 'rgba(255,255,255,0.55)', fontSize: 15 },
+  emptyText: { color: tokens.text.tertiary, fontSize: 15 },
   emptySubText: {
-    color: 'rgba(255,255,255,0.35)',
+    color: tokens.text.disabled,
     fontSize: 12,
     marginTop: 6,
     textAlign: 'center',
@@ -1026,17 +1214,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   pickerDoneBtn: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pickerDoneBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
   },
-  pickerDoneBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-});
+  pickerDoneBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  });
+}

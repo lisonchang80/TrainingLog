@@ -25,6 +25,7 @@ import {
   bucketBoundaries,
   capacityHistogramByMg,
   durationHistogram,
+  mFrequencyOverPeriod,
   mgFrequencyOverPeriod,
   percentileBucketize,
 } from '@/src/domain/stats/statsEngine';
@@ -34,17 +35,29 @@ import type {
   PeriodScale,
   StatsSetRecord,
 } from '@/src/domain/stats/types';
-import { MUSCLE_GROUP_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
+import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
+import { t, tMuscleGroup } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * Period selector labels. Backed by `domain.year/month/week` keys in
+ * `strings.ts`. Year/Month added 2026-05-24 (Phase 4.5 audit sweep);
+ * `domain.week` predates them.
+ */
+function periodLabel(p: PeriodScale): string {
+  if (p === 'year') return t('domain', 'year');
+  if (p === 'month') return t('domain', 'month');
+  return t('domain', 'week');
+}
 
 interface PeriodChoice {
   key: PeriodScale;
-  label: string;
 }
 
 const PERIOD_CHOICES: readonly PeriodChoice[] = [
-  { key: 'year', label: '年' },
-  { key: 'month', label: '月' },
-  { key: 'week', label: '週' },
+  { key: 'year' },
+  { key: 'month' },
+  { key: 'week' },
 ];
 
 function formatDurationShort(ms: number): string {
@@ -85,6 +98,8 @@ function formatAnchorLabel(d: Date): string {
 
 export function StatsPanel() {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
   // Anchor date drives the histogram X-axis. Default = today at 00:00 local.
@@ -152,6 +167,27 @@ export function StatsPanel() {
     nonZeroMgs.forEach((x, i) => out.set(x.mg, buckets[i] as Quintile));
     return out;
   }, [freqByMg]);
+  // M-level (細部位) heatmap derivation — mirrors the MG-level logic above
+  // but iterates the M-layer (19 anatomical muscles per ADR-0010) instead of
+  // the 11 muscle groups. `StatsSetRecord.m_ids` is the primary-role muscle
+  // list per set, populated by the stats repository via the `exercise_muscle`
+  // m:n table.
+  const freqByM = useMemo(
+    () => mFrequencyOverPeriod(currentBucketRecords),
+    [currentBucketRecords]
+  );
+  const mQuintile = useMemo(() => {
+    const out = new Map<string, Quintile>();
+    const nonZeroMs: { m: string; count: number }[] = [];
+    for (const m of MUSCLE_SEEDS) {
+      const c = freqByM.get(m.id) ?? 0;
+      if (c > 0) nonZeroMs.push({ m: m.id, count: c });
+    }
+    if (nonZeroMs.length === 0) return out;
+    const buckets = percentileBucketize(nonZeroMs.map((x) => x.count));
+    nonZeroMs.forEach((x, i) => out.set(x.m, buckets[i] as Quintile));
+    return out;
+  }, [freqByM]);
   const totalSessionsCurrent = useMemo(() => {
     const s = new Set<string>();
     for (const r of currentBucketRecords) s.add(r.session_id);
@@ -218,7 +254,7 @@ export function StatsPanel() {
                 styles.periodBtnText,
                 period === p.key && styles.periodBtnTextActive,
               ]}>
-              {p.label}
+              {periodLabel(p.key)}
             </Text>
           </Pressable>
         ))}
@@ -229,7 +265,7 @@ export function StatsPanel() {
         <Pressable
           style={styles.anchorBtn}
           onPress={() => setShowPicker((s) => !s)}>
-          <Text style={styles.anchorBtnLabel}>錨點</Text>
+          <Text style={styles.anchorBtnLabel}>{t('status', 'anchor')}</Text>
           <Text style={styles.anchorBtnDate}>{formatAnchorLabel(anchorDate)}</Text>
           <Text style={styles.anchorBtnCaret}>{showPicker ? '▴' : '▾'}</Text>
         </Pressable>
@@ -240,7 +276,7 @@ export function StatsPanel() {
               setAnchorDate(startOfDay(new Date()));
               setShowPicker(false);
             }}>
-            <Text style={styles.anchorTodayText}>今天</Text>
+            <Text style={styles.anchorTodayText}>{t('status', 'today')}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -258,29 +294,37 @@ export function StatsPanel() {
 
       {/* Body heatmap */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>訓練部位概況 · {currentBucket.label}</Text>
-        <Text style={styles.cardSubtitle}>顏色 = per-Session 次數分位</Text>
-        <BodyHeatmap mgQuintile={mgQuintile} mgCount={freqByMg} />
+        <Text style={styles.cardTitle}>{t('page', 'bodyOverview')} · {currentBucket.label}</Text>
+        <Text style={styles.cardSubtitle}>{t('status', 'heatmapSubtitle')}</Text>
+        {/* P1 (overnight 5/23 anatomy M-level): BodyHeatmap props rename
+            mgQuintile→mQuintile + mgCount→mCount. Real M-level frequency
+            wiring lands in P2 (extends StatsSetRecord with m_ids[] +
+            mFrequencyOverPeriod). For now we pass empty maps so the heatmap
+            renders the anatomical M-level silhouette in zero-grey. */}
+        <BodyHeatmap mQuintile={mQuintile} mCount={freqByM} />
         <BodyHeatmapLegend />
         {totalSessionsCurrent === 0 ? (
-          <Text style={styles.emptyText}>本期間尚無 Session</Text>
+          <Text style={styles.emptyText}>{t('status', 'noTrainingThisPeriod')}</Text>
         ) : null}
       </View>
 
       {/* Per-MG capacity histograms */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>各部位容量 · 近 6 期</Text>
+        <Text style={styles.cardTitle}>{t('page', 'capacityByMg')}</Text>
         <Text style={styles.cardSubtitle}>
-          顯示有訓練的部位 · 紅虛線 = 6 期平均
+          {t('status', 'capacityMgSubtitle')}
         </Text>
         {mgRows.length === 0 ? (
-          <Text style={styles.emptyText}>近 6 期尚無訓練容量</Text>
+          <Text style={styles.emptyText}>{t('status', 'noCapacityRecent')}</Text>
         ) : (
           <View style={styles.mgGrid}>
             {mgRows.map((row) => (
               <View key={row.mg_id} style={styles.mgCell}>
                 <View style={styles.mgCellHeader}>
-                  <Text style={styles.mgCellName}>{row.mg_name}</Text>
+                  {/* Round-trip mg_id through tMuscleGroup so EN locale shows
+                      Chest/Back/etc. Falls back to row.mg_name (zh literal)
+                      when the mg_id has no dictionary entry. */}
+                  <Text style={styles.mgCellName}>{tMuscleGroup(row.mg_id) !== row.mg_id ? tMuscleGroup(row.mg_id) : row.mg_name}</Text>
                   <Text style={styles.mgCellTotal}>
                     {formatCapacityShort(row.total) || '—'}
                   </Text>
@@ -301,9 +345,9 @@ export function StatsPanel() {
 
       {/* Duration histogram */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>運動時長 · 近 6 期</Text>
+        <Text style={styles.cardTitle}>{t('page', 'durationOverPeriod')}</Text>
         <Text style={styles.cardSubtitle}>
-          每根長條 = 該期累計時長 · 紅虛線 = 6 期平均
+          {t('status', 'durationSubtitle')}
         </Text>
         <MiniBarChart
           data={durationBuckets.map((b) => ({ label: b.label, value: b.total_ms }))}
@@ -323,79 +367,101 @@ export function StatsPanel() {
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { padding: 16, gap: 12 },
-  periodRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    padding: 4,
-    gap: 4,
-  },
-  periodBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  periodBtnActive: { backgroundColor: '#fff' },
-  periodBtnText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
-  periodBtnTextActive: { color: '#111827', fontWeight: '700' },
-  anchorRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  anchorBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  anchorBtnLabel: { fontSize: 13, color: '#6B7280' },
-  anchorBtnDate: { flex: 1, fontSize: 14, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
-  anchorBtnCaret: { fontSize: 14, color: '#6B7280' },
-  anchorTodayBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: '#111827',
-    borderRadius: 10,
-  },
-  anchorTodayText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  pickerWrap: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 4,
-  },
-  card: {
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    borderRadius: 12,
-    padding: 14,
-    gap: 8,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700' },
-  cardSubtitle: { fontSize: 12, color: '#6B7280' },
-  emptyText: { fontSize: 13, color: '#6B7280', textAlign: 'center', paddingVertical: 16 },
-  mgGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  mgCell: {
-    width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 8,
-    gap: 4,
-  },
-  mgCellHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  mgCellName: { fontSize: 13, fontWeight: '700' },
-  mgCellTotal: { fontSize: 11, color: '#6B7280', fontVariant: ['tabular-nums'] },
-  durationFootnote: {
-    fontSize: 11,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-});
+/**
+ * ADR-0025 — all chrome colors flow from tokens. Histogram bar colors
+ * (#6366F1 indigo for capacity, #10B981 emerald for duration) stay
+ * literal because they're data-viz palette per-MG / per-metric.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    scroll: { padding: 16, gap: 12 },
+    periodRow: {
+      flexDirection: 'row',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      padding: 4,
+      gap: 4,
+    },
+    periodBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    periodBtnActive: { backgroundColor: tokens.bg.surface },
+    periodBtnText: { fontSize: 14, fontWeight: '500', color: tokens.text.secondary },
+    periodBtnTextActive: { color: tokens.text.primary, fontWeight: '700' },
+    anchorRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    anchorBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+    },
+    anchorBtnLabel: { fontSize: 13, color: tokens.text.secondary },
+    anchorBtnDate: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    anchorBtnCaret: { fontSize: 14, color: tokens.text.secondary },
+    anchorTodayBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      backgroundColor: tokens.action.primary,
+      borderRadius: 10,
+    },
+    anchorTodayText: { color: tokens.action.onPrimary, fontSize: 13, fontWeight: '700' },
+    pickerWrap: {
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 12,
+      paddingVertical: 4,
+    },
+    card: {
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 12,
+      padding: 14,
+      gap: 8,
+    },
+    cardTitle: { fontSize: 15, fontWeight: '700', color: tokens.text.primary },
+    cardSubtitle: { fontSize: 12, color: tokens.text.secondary },
+    emptyText: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      paddingVertical: 16,
+    },
+    mgGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    mgCell: {
+      width: '48%',
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 8,
+      padding: 8,
+      gap: 4,
+    },
+    mgCellHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+    mgCellName: { fontSize: 13, fontWeight: '700', color: tokens.text.primary },
+    mgCellTotal: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      fontVariant: ['tabular-nums'],
+    },
+    durationFootnote: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      marginTop: 4,
+    },
+  });
+}

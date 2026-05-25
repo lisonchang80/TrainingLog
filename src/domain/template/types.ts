@@ -95,5 +95,18 @@ export interface Template {
   name: string;
   /** 12-color palette hex code (ADR-0015). Empty string = unset / hash-derived fallback. */
   color_hex: string;
+  /**
+   * Triple identity field (ADR-0003): the Program this template is assigned
+   * to. NULL = 通用 (no program). Optional on the type so legacy callers
+   * that build a Template draft without loading this field remain valid;
+   * `getTemplateFull` always populates it (NULL → null).
+   */
+  program_id?: string | null;
+  /**
+   * Triple identity field (ADR-0003): sub-program intensity tag (e.g.
+   * 'TEST-1'). NULL = no intensity. Optional on the type for the same
+   * reason as `program_id`.
+   */
+  sub_tag?: string | null;
   exercises: TemplateExercise[];
 }

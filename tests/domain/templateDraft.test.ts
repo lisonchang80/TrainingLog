@@ -2,7 +2,6 @@ import {
   cloneTemplate,
   templatesEqual,
   computeTemplateDiff,
-  diffIsEmpty,
 } from '../../src/domain/template/templateDraft';
 import type { Template } from '../../src/domain/template/types';
 
@@ -130,13 +129,6 @@ describe('templateDraft — templatesEqual', () => {
 });
 
 describe('templateDraft — computeTemplateDiff', () => {
-  it('empty diff when committed === draft', () => {
-    const c = buildTemplate();
-    const d = cloneTemplate(c);
-    const diff = computeTemplateDiff({ committed: c, draft: d });
-    expect(diffIsEmpty(diff)).toBe(true);
-  });
-
   it('captures template-level rename + recolor as templatePatch', () => {
     const c = buildTemplate();
     const d = cloneTemplate(c);

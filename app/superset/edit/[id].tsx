@@ -3,7 +3,7 @@ import {
   useNavigation,
   useRouter,
 } from 'expo-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -20,6 +20,8 @@ import {
   getReusableSupersetWithExercises,
   updateReusableSupersetName,
 } from '@/src/adapters/sqlite/supersetRepository';
+import { t, tSaveOrSaving } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Reusable Superset edit page (ADR-0017 Q10 / slice 9.8a).
@@ -38,26 +40,28 @@ export default function EditSupersetScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [original, setOriginal] = useState<ReusableSuperset | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: '編輯超級組',
+      title: t('button', 'editSuperset'),
       // Modal presentation has no native back arrow on iOS — surface an
       // explicit「取消」on the left so user can dismiss without learning
       // the swipe-down gesture.
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="取消"
+          accessibilityLabel={t('common', 'cancel')}
           onPress={() => router.back()}>
-          <Text style={styles.headerCancel}>取消</Text>
+          <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
         </Pressable>
       ),
     });
-  }, [navigation, router]);
+  }, [navigation, router, styles.headerCancel]);
 
   useEffect(() => {
     if (!id) return;
@@ -73,9 +77,9 @@ export default function EditSupersetScreen() {
   const trimmedName = name.trim();
   const nameError =
     trimmedName.length === 0
-      ? '請輸入超級組名稱'
+      ? t('page', 'enterSupersetName')
       : trimmedName.length > 60
-        ? '超級組名稱請少於 60 字元'
+        ? t('alert', 'supersetNameMaxLen')
         : null;
   const isDirty = original ? trimmedName !== original.name : false;
   const canSave = nameError === null && isDirty && !saving;
@@ -97,7 +101,7 @@ export default function EditSupersetScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.body}>
-          <Text style={styles.placeholder}>超級組不存在或已刪除。</Text>
+          <Text style={styles.placeholder}>{t('alert', 'supersetNotFound')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -107,12 +111,12 @@ export default function EditSupersetScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.section}>
-          <Text style={styles.label}>超級組名稱</Text>
+          <Text style={styles.label}>{t('domain', 'supersetName')}</Text>
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="輸入超級組名稱"
-            placeholderTextColor="rgba(127,127,127,0.6)"
+            placeholder={t('page', 'enterSupersetNameShort')}
+            placeholderTextColor={tokens.text.tertiary}
             style={styles.input}
             maxLength={60}
             autoCorrect={false}
@@ -122,7 +126,7 @@ export default function EditSupersetScreen() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="保存"
+          accessibilityLabel={t('common', 'save')}
           onPress={onSave}
           disabled={!canSave}
           style={({ pressed }) => [
@@ -130,38 +134,54 @@ export default function EditSupersetScreen() {
             !canSave && styles.saveBtnDisabled,
             pressed && canSave && styles.pressed,
           ]}>
-          <Text style={styles.saveBtnText}>保存</Text>
+          <Text style={styles.saveBtnText}>{tSaveOrSaving(saving)}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 20, gap: 16 },
-  section: { gap: 8 },
-  label: { fontSize: 14, opacity: 0.7, fontWeight: '500' },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  errorText: { fontSize: 13, color: '#DC2626' },
-  placeholder: { fontSize: 14, opacity: 0.6, padding: 24 },
-  saveBtn: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#34C759',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  saveBtnDisabled: { backgroundColor: 'rgba(127,127,127,0.3)' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  pressed: { opacity: 0.7 },
-  headerCancel: { fontSize: 16, color: '#007AFF', paddingHorizontal: 12 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 20, gap: 16 },
+    section: { gap: 8 },
+    label: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontWeight: '500',
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 16,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.surface,
+    },
+    errorText: { fontSize: 13, color: tokens.action.destructive },
+    placeholder: { fontSize: 14, color: tokens.text.secondary, padding: 24 },
+    saveBtn: {
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: tokens.action.success,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 12,
+    },
+    saveBtnDisabled: { backgroundColor: tokens.bg.elevated },
+    saveBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    pressed: { opacity: 0.7 },
+    headerCancel: {
+      fontSize: 16,
+      color: tokens.action.primary,
+      paddingHorizontal: 12,
+    },
+  });
+}

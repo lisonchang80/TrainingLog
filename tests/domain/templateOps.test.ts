@@ -2,12 +2,16 @@ import {
   addSet,
   updateSet,
   deleteSet,
-  reorderSets,
+  reorderTemplateExercises,
+  reorderTemplateSetsByGroups,
+  reorderTemplateClusterCycles,
   cycleSetKind,
+  cycleSetKindAcrossExercises,
   deleteSupersetRowAt,
   cloneSupersetRowAt,
   addClusterAfter,
   isClusterFollower,
+  isTemplateDeletable,
 } from '../../src/domain/template/templateOps';
 import type {
   TemplateExercise,
@@ -209,49 +213,6 @@ describe('templateOps — deleteSet', () => {
   });
 });
 
-describe('templateOps — reorderSets', () => {
-  it('moves a single working set to the new index', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 's1', position: 0 }),
-        makeSet({ id: 's2', position: 1 }),
-        makeSet({ id: 's3', position: 2 }),
-      ],
-    });
-    const out = reorderSets(ex, 's1', 2);
-    expect(out.sets.map((s) => s.id)).toEqual(['s2', 's3', 's1']);
-    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
-  });
-
-  it('moves a cluster as one unit (head + followers stay contiguous)', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 'w1', position: 0, kind: 'working' }),
-        makeSet({ id: 'h1', position: 1, kind: 'dropset' }),
-        makeSet({ id: 'f1', position: 2, kind: 'dropset', parent_set_id: 'h1' }),
-        makeSet({ id: 'w2', position: 3, kind: 'working' }),
-      ],
-    });
-    const out = reorderSets(ex, 'h1', 0);
-    expect(out.sets.map((s) => s.id)).toEqual(['h1', 'f1', 'w1', 'w2']);
-  });
-
-  it('moves the whole cluster even when target is a follower', () => {
-    const ex = makeEx({
-      id: 'ex-1',
-      sets: [
-        makeSet({ id: 'w1', position: 0, kind: 'working' }),
-        makeSet({ id: 'h1', position: 1, kind: 'dropset' }),
-        makeSet({ id: 'f1', position: 2, kind: 'dropset', parent_set_id: 'h1' }),
-      ],
-    });
-    const out = reorderSets(ex, 'f1', 0);
-    expect(out.sets.map((s) => s.id)).toEqual(['h1', 'f1', 'w1']);
-  });
-});
-
 describe('templateOps — cycleSetKind', () => {
   it('working → warmup: only kind flips', () => {
     const ex = makeEx({
@@ -314,6 +275,196 @@ describe('templateOps — cycleSetKind', () => {
     });
     const out = cycleSetKind(ex, 'f1', deterministicIdGen());
     expect(out).toEqual(ex);
+  });
+});
+
+describe('templateOps — cycleSetKindAcrossExercises', () => {
+  // Slice 10c Phase 2 commit 3: cluster-aware wrapper. Solo dispatch
+  // routes to per-exercise cycleSetKind; reusable cluster mirrors
+  // warmup ↔ working across all sibling members at the same set index.
+
+  it('solo: working → warmup via wrapper (delegates to per-ex cycleSetKind)', () => {
+    const exercises = [
+      makeEx({
+        id: 'solo',
+        sets: [makeSet({ id: 's1', position: 0, kind: 'working' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'solo',
+      's1',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('warmup');
+  });
+
+  it('solo: warmup → dropset(head + follower) via wrapper', () => {
+    const exercises = [
+      makeEx({
+        id: 'solo',
+        sets: [makeSet({ id: 's1', position: 0, kind: 'warmup', reps: 6, weight: 40 })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'solo',
+      's1',
+      deterministicIdGen('cyc'),
+    );
+    expect(out[0].sets).toHaveLength(2);
+    expect(out[0].sets[0]).toMatchObject({ id: 's1', kind: 'dropset', parent_set_id: null });
+    expect(out[0].sets[1]).toMatchObject({
+      id: 'cyc-1',
+      kind: 'dropset',
+      parent_set_id: 's1',
+      reps: 6,
+      weight: 40,
+    });
+  });
+
+  it('cluster: warmup → working mirrors to sibling at same idx', () => {
+    // Two-side reusable cluster (parent + child, both stamped rs_id='rs-1').
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [
+          makeSet({ id: 'pA0', position: 0, kind: 'warmup' }),
+          makeSet({ id: 'pA1', position: 1, kind: 'working' }),
+        ],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [
+          makeSet({ id: 'cB0', position: 0, kind: 'warmup' }),
+          makeSet({ id: 'cB1', position: 1, kind: 'working' }),
+        ],
+      }),
+    ];
+    // Tap row 0 (warmup) on parent — should flip both pA0 and cB0 to working.
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('working'); // parent row 0
+    expect(out[1].sets[0].kind).toBe('working'); // child row 0 mirrored
+    expect(out[0].sets[1].kind).toBe('working'); // row 1 untouched (was working)
+    expect(out[1].sets[1].kind).toBe('working'); // row 1 untouched
+  });
+
+  it('cluster: working → warmup mirrors to sibling at same idx', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'working' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'working' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'child',
+      'cB0',
+      deterministicIdGen(),
+    );
+    // Tap on child row should mirror to parent too.
+    expect(out[0].sets[0].kind).toBe('warmup');
+    expect(out[1].sets[0].kind).toBe('warmup');
+  });
+
+  it('cluster: defensive — non-warmup state cycles to warmup (dropset stray)', () => {
+    // Shouldn't happen in practice (cluster restricts warmup ↔ working),
+    // but if a stray dropset slips through, cycle routes it to warmup so
+    // the next tap resumes the normal warmup ↔ working ping-pong.
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'dropset' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'dropset' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[0].sets[0].kind).toBe('warmup');
+    expect(out[1].sets[0].kind).toBe('warmup');
+  });
+
+  it('cluster: leaves non-cluster exercises untouched', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'warmup' })],
+      }),
+      makeEx({
+        id: 'child',
+        parent_id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'cB0', position: 0, kind: 'warmup' })],
+      }),
+      makeEx({
+        id: 'unrelated',
+        sets: [makeSet({ id: 'u0', position: 0, kind: 'warmup' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'pA0',
+      deterministicIdGen(),
+    );
+    expect(out[2].sets[0].kind).toBe('warmup'); // unrelated unchanged
+    expect(out[2]).toBe(exercises[2]); // referential equality preserved
+  });
+
+  it('returns input unchanged (referential equality) when ex_id not found', () => {
+    const exercises = [
+      makeEx({ id: 'a', sets: [makeSet({ id: 's1', position: 0, kind: 'working' })] }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'nonexistent',
+      's1',
+      deterministicIdGen(),
+    );
+    expect(out).toBe(exercises);
+  });
+
+  it('cluster: returns input unchanged when set_id not found in target ex', () => {
+    const exercises = [
+      makeEx({
+        id: 'parent',
+        reusable_superset_id: 'rs-1',
+        sets: [makeSet({ id: 'pA0', position: 0, kind: 'warmup' })],
+      }),
+    ];
+    const out = cycleSetKindAcrossExercises(
+      exercises,
+      'parent',
+      'nonexistent-set',
+      deterministicIdGen(),
+    );
+    expect(out).toBe(exercises);
   });
 });
 
@@ -441,5 +592,244 @@ describe('templateOps — isClusterFollower', () => {
       isClusterFollower(makeSet({ id: 'x', kind: 'dropset', parent_set_id: null }))
     ).toBe(false);
     expect(isClusterFollower(makeSet({ id: 'x', kind: 'working' }))).toBe(false);
+  });
+});
+
+// overnight #45 第 3 點 — parent-level reorder helper (used by the editor's
+// 排序動作 modal onConfirm path). Pure-domain tests: solo↔solo swap, cluster
+// keep paired, safety guard for missing parents.
+describe('templateOps — reorderTemplateExercises', () => {
+  it('simple swap: solo↔solo reorders parents + reassigns ordering 0..N', () => {
+    const ex1 = makeEx({ id: 'p1', ordering: 0 });
+    const ex2 = makeEx({ id: 'p2', ordering: 1 });
+    const ex3 = makeEx({ id: 'p3', ordering: 2 });
+    const out = reorderTemplateExercises([ex1, ex2, ex3], ['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.id)).toEqual(['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
+  });
+
+  it('cluster keeps A+B paired: parent at new position, child stays adjacent', () => {
+    // Layout: [solo S1, cluster (parent P + child C), solo S2]
+    const s1 = makeEx({ id: 's1', ordering: 0 });
+    const p = makeEx({
+      id: 'p',
+      ordering: 1,
+      reusable_superset_id: 'rs-1',
+    });
+    const c = makeEx({
+      id: 'c',
+      ordering: 2,
+      parent_id: 'p',
+      reusable_superset_id: 'rs-1',
+    });
+    const s2 = makeEx({ id: 's2', ordering: 3 });
+    // User reorders parents: [cluster, S2, S1] → child must follow cluster
+    // parent (not split).
+    const out = reorderTemplateExercises([s1, p, c, s2], ['p', 's2', 's1']);
+    expect(out.map((e) => e.id)).toEqual(['p', 'c', 's2', 's1']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2, 3]);
+    // Verify parent_id linkage preserved + reusable_superset_id intact (cluster
+    // pair invariant).
+    expect(out[0].reusable_superset_id).toBe('rs-1');
+    expect(out[1].parent_id).toBe('p');
+    expect(out[1].reusable_superset_id).toBe('rs-1');
+  });
+
+  it('safety: missing parent ids appended at end (no silent drops)', () => {
+    // orderedParentIds omits 'p2' — must still appear in output (appended).
+    const p1 = makeEx({ id: 'p1', ordering: 0 });
+    const p2 = makeEx({ id: 'p2', ordering: 1 });
+    const p3 = makeEx({ id: 'p3', ordering: 2 });
+    const out = reorderTemplateExercises([p1, p2, p3], ['p3', 'p1']);
+    // p2 appended at end; full set of parent ids preserved.
+    expect(out.map((e) => e.id).sort()).toEqual(['p1', 'p2', 'p3']);
+    // Specified ones come first in given order, missing appended.
+    expect(out.map((e) => e.id)).toEqual(['p3', 'p1', 'p2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isTemplateDeletable — slice 10c overnight #46 第 1 點
+// ---------------------------------------------------------------------------
+
+describe('isTemplateDeletable', () => {
+  it('returns false when both program_id and sub_tag are null', () => {
+    expect(isTemplateDeletable({ program_id: null, sub_tag: null })).toBe(false);
+  });
+
+  it('returns false when only sub_tag is null (program set)', () => {
+    // 截圖場景: 用戶看到「刪除模板」可點但其實是「通用強度」base — 不可刪
+    expect(isTemplateDeletable({ program_id: 'p1', sub_tag: null })).toBe(false);
+  });
+
+  it('returns false when only program_id is null (sub_tag set)', () => {
+    expect(isTemplateDeletable({ program_id: null, sub_tag: 'hiit' })).toBe(false);
+  });
+
+  it('returns true when both program_id and sub_tag are set', () => {
+    expect(isTemplateDeletable({ program_id: 'p1', sub_tag: 'hiit' })).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderTemplateSetsByGroups — slice 10c overnight #49
+// ---------------------------------------------------------------------------
+
+describe('templateOps — reorderTemplateSetsByGroups', () => {
+  it('reorders 3 solo sets by group ids and re-keys position 0..N', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'a', position: 0 }),
+        makeSet({ id: 'b', position: 1 }),
+        makeSet({ id: 'c', position: 2 }),
+      ],
+    });
+    const out = reorderTemplateSetsByGroups(ex, ['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.id)).toEqual(['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('dropset cluster (head + followers) moves as one unit', () => {
+    // Layout: [head H + follower F1 + follower F2, solo S]
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'H', kind: 'dropset', parent_set_id: null, position: 0 }),
+        makeSet({ id: 'F1', kind: 'dropset', parent_set_id: 'H', position: 1 }),
+        makeSet({ id: 'F2', kind: 'dropset', parent_set_id: 'H', position: 2 }),
+        makeSet({ id: 'S', position: 3 }),
+      ],
+    });
+    // User drags so solo S goes first, then the whole cluster H+F1+F2 second.
+    // Followers must stay attached to head H in original order.
+    const out = reorderTemplateSetsByGroups(ex, ['S', 'H']);
+    expect(out.sets.map((s) => s.id)).toEqual(['S', 'H', 'F1', 'F2']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2, 3]);
+    // Follower parent_set_id linkage preserved.
+    expect(out.sets[2].parent_set_id).toBe('H');
+    expect(out.sets[3].parent_set_id).toBe('H');
+  });
+
+  it('safety: missing group id is appended at the end (no silent drops)', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'a', position: 0 }),
+        makeSet({ id: 'b', position: 1 }),
+        makeSet({ id: 'c', position: 2 }),
+      ],
+    });
+    // orderedGroupIds omits 'b' — full set must still appear.
+    const out = reorderTemplateSetsByGroups(ex, ['c', 'a']);
+    expect(out.sets.map((s) => s.id)).toEqual(['c', 'a', 'b']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderTemplateClusterCycles — slice 10c overnight #49
+// ---------------------------------------------------------------------------
+
+describe('templateOps — reorderTemplateClusterCycles', () => {
+  it('symmetric 3 cycles: cycle order [c3, c1, c2] reorders both sides in lockstep', () => {
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // Cycle keys = a_set.id (A side present everywhere).
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1', 'a2']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
+    expect(out.exA.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('asymmetric A=3 / B=2: long-side-only cycle key is A.id, both sides reorder without cross-contamination', () => {
+    // A has 3 sets, B has 2 → cycles = [(a1,b1),(a2,b2),(a3,null)].
+    // Key for cycle 3 falls back to a3.id.
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+      ],
+    });
+    // Move the A-only cycle (cycle 3) to the front.
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1', 'a2']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    // B side: cycle 3 had no b_set → skipped; b1 then b2 retain pairing.
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b1', 'b2']);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1]);
+  });
+
+  it('asymmetric A=2 / B=3: B-only short-side cycle key is B.id, both sides reorder without cross-contamination', () => {
+    // A=2, B=3 → cycles = [(a1,b1),(a2,b2),(null,b3)]. Key for cycle 3 = b3.
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // Move the B-only cycle 3 to the front.
+    const out = reorderTemplateClusterCycles(exA, exB, ['b3', 'a1', 'a2']);
+    // A side: cycle 3 had no a_set → skipped; a1 then a2.
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a1', 'a2']);
+    // B side: b3 first, b1, b2.
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
+    expect(out.exB.sets.map((s) => s.position)).toEqual([0, 1, 2]);
+  });
+
+  it('safety: missing cycle keys appended at end (no silent drops)', () => {
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+        makeSet({ id: 'a3', position: 2 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+        makeSet({ id: 'b3', position: 2 }),
+      ],
+    });
+    // orderedCycleKeys only mentions 2 of 3 cycles — third must be appended.
+    const out = reorderTemplateClusterCycles(exA, exB, ['a3', 'a1']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
   });
 });

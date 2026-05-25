@@ -293,15 +293,17 @@ describe('exerciseLibraryRepository', () => {
       session_id: string,
       exercise_id: string,
       ordering: number,
-      is_skipped: number
+      is_skipped: number,
+      is_logged: number = 1
     ) => {
       await db.runAsync(
-        `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering, created_at)
-         VALUES (?, ?, ?, 50, 5, ?, ?, ?)`,
+        `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps, is_skipped, is_logged, ordering, created_at)
+         VALUES (?, ?, ?, 50, 5, ?, ?, ?, ?)`,
         id,
         session_id,
         exercise_id,
         is_skipped,
+        is_logged,
         ordering,
         Date.now()
       );
@@ -311,7 +313,7 @@ describe('exerciseLibraryRepository', () => {
       expect(await getExerciseSessionCount(db, BENCH)).toBe(0);
     });
 
-    it('counts distinct sessions with at least one done set', async () => {
+    it('counts distinct sessions with at least one ✓ logged set', async () => {
       await insertSession('s1', 1000);
       await insertSession('s2', 2000);
       await insertSet('set-1', 's1', BENCH, 0, 0);
@@ -326,14 +328,28 @@ describe('exerciseLibraryRepository', () => {
       expect(await getExerciseSessionCount(db, BENCH)).toBe(0);
     });
 
-    it('counts session when at least one set is done and others skipped', async () => {
+    it('counts session when at least one set is ✓ logged and others skipped', async () => {
       await insertSession('s1', 1000);
       await insertSet('set-1', 's1', BENCH, 0, 1); // skipped
-      await insertSet('set-2', 's1', BENCH, 1, 0); // done
+      await insertSet('set-2', 's1', BENCH, 1, 0); // logged
       expect(await getExerciseSessionCount(db, BENCH)).toBe(1);
     });
 
-    it('getExerciseSessionCounts returns map of all exercises with done sets', async () => {
+    // 方向 A (用戶 5/18 拍板) — 純 planned 但未 ✓ 完成的 set 不算
+    it('ignores unlogged sets — session with ONLY planned-but-unlogged sets does not count', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 0, 0); // not skipped, not logged
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(0);
+    });
+
+    it('counts session when at least one set is ✓ logged and others are planned-but-unlogged', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 0, 0); // planned only
+      await insertSet('set-2', 's1', BENCH, 1, 0, 1); // ✓ logged
+      expect(await getExerciseSessionCount(db, BENCH)).toBe(1);
+    });
+
+    it('getExerciseSessionCounts returns map of all exercises with ✓ logged sets', async () => {
       await insertSession('s1', 1000);
       await insertSession('s2', 2000);
       await insertSet('set-1', 's1', BENCH, 0, 0);
@@ -342,13 +358,20 @@ describe('exerciseLibraryRepository', () => {
       const counts = await getExerciseSessionCounts(db);
       expect(counts.get(BENCH)).toBe(2);
       expect(counts.get(ROW)).toBe(1);
-      // exercises with no done sets are absent from the map (UI hides 0)
+      // exercises with no ✓ logged sets are absent from the map (UI hides 0)
       expect(counts.has('00000000-0000-4000-8000-000000000099')).toBe(false);
     });
 
     it('getExerciseSessionCounts excludes exercises with only skipped sets', async () => {
       await insertSession('s1', 1000);
       await insertSet('set-1', 's1', BENCH, 0, 1);
+      const counts = await getExerciseSessionCounts(db);
+      expect(counts.has(BENCH)).toBe(false);
+    });
+
+    it('getExerciseSessionCounts excludes exercises with only planned-but-unlogged sets (方向 A)', async () => {
+      await insertSession('s1', 1000);
+      await insertSet('set-1', 's1', BENCH, 0, 0, 0); // planned, not logged
       const counts = await getExerciseSessionCounts(db);
       expect(counts.has(BENCH)).toBe(false);
     });

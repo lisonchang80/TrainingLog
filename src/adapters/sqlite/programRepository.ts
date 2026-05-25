@@ -20,7 +20,7 @@ import { RESERVED_NONE_PROGRAM_ID } from '../../db/seed/v017ProgramNone';
  * a future slice may add a unique index when name-level propagation lands).
  */
 
-export interface ProgramRow extends ProgramCore {
+interface ProgramRow extends ProgramCore {
   created_at: number;
   updated_at: number;
 }
@@ -106,6 +106,14 @@ export async function getActiveProgram(
  * `is_active` is forced to 0 here — call `setActiveProgram(id)` afterwards
  * if the caller wants to flip the flag (which also de-activates any other
  * active program in the same transaction).
+ *
+ * Name uniqueness: SELECT-then-throw guard against case-insensitive trimmed
+ * dup names. Throws `Error('DUPLICATE_PROGRAM_NAME')` if `LOWER(TRIM(name))`
+ * collides with an existing row. Mirror the `insertReusableSuperset` pattern
+ * (round 26) — we don't add a SQL UNIQUE constraint because SQLite's
+ * case-insensitive UNIQUE indexes require COLLATE NOCASE on the column and
+ * we'd need a migration. UI is expected to surface this as an Alert so the
+ * user can rename + retry inline.
  */
 export async function createProgram(
   db: Database,
@@ -116,6 +124,15 @@ export async function createProgram(
   }
 ): Promise<void> {
   const ts = (args.now ?? Date.now)();
+  // Dup guard — case-insensitive + trim match. Reserved「無」 (RESERVED_NONE_PROGRAM_ID)
+  // is included in this scan so users can't shadow it either.
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM program WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1`,
+    args.program.name
+  );
+  if (existing) {
+    throw new Error('DUPLICATE_PROGRAM_NAME');
+  }
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `INSERT INTO program
@@ -187,6 +204,615 @@ export async function deleteProgram(db: Database, id: string): Promise<void> {
     );
     await db.runAsync(`DELETE FROM program_cell WHERE program_id = ?`, id);
     await db.runAsync(`DELETE FROM program WHERE id = ?`, id);
+  });
+}
+
+/**
+ * Wave 18g (2026-05-22) — overwrite an existing Program with new wizard
+ * output. Per user spec (Phase 6 / `/tmp/phase6-overwrite-program-plan.md`):
+ *
+ *   - Replace program metadata (name / cycle_length / cycle_count /
+ *     start_date / main_tag). `is_active` is intentionally preserved so
+ *     overwriting the active program doesn't silently deactivate it.
+ *   - Replace cells entirely (DELETE old, INSERT new from
+ *     `expandWizardDraft` output).
+ *   - Replace sub_tag dictionary entirely (DELETE program_sub_tag rows,
+ *     re-INSERT from `new_sub_tags` via INSERT OR IGNORE).
+ *   - Finished session rows (program_id referenced indirectly via
+ *     `session_exercise.template_id → template.program_id`) are NOT
+ *     touched — historical session lineage stays intact.
+ *
+ * Active session guard: if any in-progress session (`ended_at IS NULL`)
+ * has a `session_exercise` whose template currently belongs to this
+ * program, throws `Error('PROGRAM_HAS_ACTIVE_SESSION')`. The UI is
+ * expected to catch this and Alert the user to finish or discard the
+ * session first.
+ *
+ * Caller responsibilities (mirror create-program flow):
+ *   - Pre-expand wizard draft into `new_cells` via `expandWizardDraft`.
+ *   - After successful overwrite, attach the picked templates to the
+ *     program via `attachTemplateToProgram` (this helper doesn't reach
+ *     into the template table — keeps the boundary clean).
+ *
+ * Templates previously attached to this program but absent from the new
+ * `dayPlans` are NOT orphaned by this helper — they keep their
+ * `template.program_id` reference. The user can manually orphan them via
+ * the template editor if desired. This is intentionally less destructive
+ * than `deleteProgram`.
+ */
+export async function overwriteProgram(
+  db: Database,
+  args: {
+    program_id: string;
+    new_program: ProgramCore;
+    new_cells: ProgramCell[];
+    new_sub_tags: string[];
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+
+  // Active session guard — check before opening a transaction so the
+  // thrown error doesn't roll back any state. We traverse session →
+  // session_exercise → template.program_id (sessions don't carry a
+  // direct program_id — the relationship is reconstructed via the
+  // linked templates per ADR-0018).
+  const active = await db.getFirstAsync<{ id: string }>(
+    `SELECT s.id FROM session s
+       INNER JOIN session_exercise se ON se.session_id = s.id
+       INNER JOIN template t ON t.id = se.template_id
+      WHERE s.ended_at IS NULL
+        AND t.program_id = ?
+      LIMIT 1`,
+    args.program_id,
+  );
+  if (active) {
+    throw new Error('PROGRAM_HAS_ACTIVE_SESSION');
+  }
+
+  await db.withTransactionAsync(async () => {
+    // DELETE then re-INSERT pattern. The schema is sparse — only rows
+    // present in `new_cells` get persisted (rest days stay missing).
+    await db.runAsync(
+      `DELETE FROM program_cell WHERE program_id = ?`,
+      args.program_id,
+    );
+    // sub_tag dictionary is a label store (v022) — full replace mirrors
+    // the wizard's "Step 1 typed labels are the new truth" semantics.
+    await db.runAsync(
+      `DELETE FROM program_sub_tag WHERE program_id = ?`,
+      args.program_id,
+    );
+    // Update program metadata in place — id + is_active preserved.
+    await db.runAsync(
+      `UPDATE program SET
+         name = ?,
+         main_tag = ?,
+         cycle_length = ?,
+         cycle_count = ?,
+         start_date = ?,
+         updated_at = ?
+       WHERE id = ?`,
+      args.new_program.name,
+      args.new_program.main_tag,
+      args.new_program.cycle_length,
+      args.new_program.cycle_count,
+      args.new_program.start_date,
+      ts,
+      args.program_id,
+    );
+    // Insert new cells.
+    for (const c of args.new_cells) {
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        c.id,
+        c.program_id,
+        c.cycle_index,
+        c.day_index,
+        c.template_id,
+        c.sub_tag,
+      );
+    }
+    // Re-INSERT sub_tag dictionary. INSERT OR IGNORE is defensive — we
+    // just DELETE'd everything but the helper guards against any
+    // caller-side duplicates in `new_sub_tags`.
+    for (const tag of args.new_sub_tags) {
+      if (!tag || tag.length === 0) continue;
+      await db.runAsync(
+        `INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
+           VALUES (?, ?, ?)`,
+        args.program_id,
+        tag,
+        ts,
+      );
+    }
+  });
+}
+
+/**
+ * Wave 15 (2026-05-21) — count of cells with `template_id != null` that
+ * would be lost if the program were resized to `(new_cycle_length,
+ * new_cycle_count)`. Cells with NULL template_id are 「休息」 = no
+ * meaningful content, so they don't count toward the "this will erase
+ * content" warning shown by the edit-mode resize Alert.
+ */
+export async function countFilledCellsOutsideBounds(
+  db: Database,
+  args: {
+    program_id: string;
+    new_cycle_length: number;
+    new_cycle_count: number;
+  }
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM program_cell
+      WHERE program_id = ?
+        AND (cycle_index >= ? OR day_index >= ?)
+        AND template_id IS NOT NULL`,
+    args.program_id,
+    args.new_cycle_count,
+    args.new_cycle_length
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Wave 15 (2026-05-21) — atomic resize of a program's grid dimensions.
+ * Updates `cycle_length` / `cycle_count` on the program row and DELETEs
+ * any `program_cell` rows that fall outside the new bounds.
+ *
+ * New positions (within new bounds, no existing row) are NOT inserted —
+ * the renderer treats missing rows as 「休息」 and any subsequent edit
+ * (column-apply / row-apply / single-cell edit) uses `upsertCell` to
+ * lazily INSERT when content first lands. Keeping the table sparse keeps
+ * `getProgram` quick on large programs.
+ *
+ * `cycle_length` is CHECK 3-14 per ADR-0004 (v005 schema); `cycle_count`
+ * is CHECK >= 1. Caller is responsible for validating the user input
+ * before calling — the SQLite CHECK will throw but the message won't be
+ * friendly to surface.
+ */
+export async function resizeProgram(
+  db: Database,
+  args: {
+    program_id: string;
+    new_cycle_length: number;
+    new_cycle_count: number;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `DELETE FROM program_cell
+        WHERE program_id = ?
+          AND (cycle_index >= ? OR day_index >= ?)`,
+      args.program_id,
+      args.new_cycle_count,
+      args.new_cycle_length
+    );
+    await db.runAsync(
+      `UPDATE program
+         SET cycle_length = ?,
+             cycle_count = ?,
+             updated_at = ?
+       WHERE id = ?`,
+      args.new_cycle_length,
+      args.new_cycle_count,
+      ts,
+      args.program_id
+    );
+  });
+}
+
+/**
+ * Wave 15 (2026-05-21) — upsert by (program_id, cycle_index, day_index).
+ * Used by edit-mode column/row apply + single-cell edits (Phase 3-4).
+ *
+ * Behaviour:
+ *   - If a `program_cell` exists at this position → UPDATE template_id +
+ *     sub_tag in place.
+ *   - Else → INSERT a new row with a caller-provided `uuid` (kept out of
+ *     the helper to preserve the same pattern as createProgram).
+ *
+ * Returns the cell's id (existing or newly-inserted). `now` defaults to
+ * Date.now and ticks program.updated_at so listPrograms ordering stays
+ * correct.
+ */
+/**
+ * Round 15 polish — record a (program_id, sub_tag) pair in the persistent
+ * `program_sub_tag` label dictionary. INSERT OR IGNORE so duplicates are
+ * silent no-ops. The picker reads from this table so 強度 labels persist
+ * across overwrite cycles (e.g. row swapped from II-2 → II-1; user can
+ * still see II-2 as a chip option to swap back).
+ *
+ * No-op when `sub_tag` is null / empty — only meaningful labels are
+ * registered. Safe to call inside a transaction (single statement).
+ */
+export async function recordProgramSubTag(
+  db: Database,
+  program_id: string,
+  sub_tag: string | null,
+  now?: () => number,
+): Promise<void> {
+  if (sub_tag == null || sub_tag.length === 0) return;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
+       VALUES (?, ?, ?)`,
+    program_id,
+    sub_tag,
+    (now ?? Date.now)(),
+  );
+}
+
+/**
+ * Round 15 polish — list every (program_id, sub_tag) that's ever been
+ * registered for this program, sorted alphabetically. Used by the Programs
+ * tab row apply picker so user-typed labels persist even after no cell or
+ * template currently references them.
+ */
+export async function listProgramSubTags(
+  db: Database,
+  program_id: string,
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT sub_tag FROM program_sub_tag
+      WHERE program_id = ?
+      ORDER BY sub_tag ASC`,
+    program_id,
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
+export async function upsertCell(
+  db: Database,
+  args: {
+    program_id: string;
+    cycle_index: number;
+    day_index: number;
+    template_id: string | null;
+    sub_tag: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM program_cell
+      WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+    args.program_id,
+    args.cycle_index,
+    args.day_index
+  );
+  let cell_id: string;
+  if (existing) {
+    cell_id = existing.id;
+    await db.runAsync(
+      `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+      args.template_id,
+      args.sub_tag,
+      cell_id
+    );
+  } else {
+    cell_id = args.uuid();
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      cell_id,
+      args.program_id,
+      args.cycle_index,
+      args.day_index,
+      args.template_id,
+      args.sub_tag
+    );
+  }
+  await db.runAsync(
+    `UPDATE program SET updated_at = ? WHERE id = ?`,
+    ts,
+    args.program_id
+  );
+  // Register sub_tag in the persistent per-program label dictionary so it
+  // survives overwrite cycles (round 15 fix).
+  await recordProgramSubTag(db, args.program_id, args.sub_tag, args.now);
+  return cell_id;
+}
+
+/**
+ * Wave 15 (2026-05-21) — bulk apply a template (or 休息) to an entire
+ * column (day_index axis). For every cycle_index in [0, cycle_count) the
+ * cell at (cycle_index, day_index) is upserted.
+ *
+ * Per user spec Q3:
+ *   - `template_id = X`: set template, preserve each row's existing
+ *     sub_tag. Cells that don't exist yet get sub_tag=NULL.
+ *   - `template_id = null` (休息): clear both template_id AND sub_tag
+ *     since rest occupies both visual slots.
+ *
+ * Round 15 polish (2026-05-21) — optional `sub_tag_override` (discriminated
+ * via presence on the args object so `null` ≠ `undefined`):
+ *   - omitted → preserve per-row sub_tag (Q3 default, used by the existing
+ *     ▼ picker → "pick existing template" path).
+ *   - present (string OR null) → write this value to every row in the
+ *     column, overriding whatever was there. Used by the programs tab
+ *     "+ 建立新模板" → 「建立並導入」 path (column kind) so the freshly-
+ *     created template's sub_tag propagates to all cells in the column —
+ *     otherwise the new sub_tag never lands anywhere and the row picker
+ *     stays empty for newly-created programs.
+ */
+export async function applyTemplateToColumn(
+  db: Database,
+  args: {
+    program_id: string;
+    day_index: number;
+    template_id: string | null;
+    /** Present in args = override every row's sub_tag (even with null). */
+    sub_tag_override?: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  const prog = await db.getFirstAsync<{ cycle_count: number }>(
+    `SELECT cycle_count FROM program WHERE id = ?`,
+    args.program_id
+  );
+  if (!prog) return;
+  const isRest = args.template_id == null;
+  // Detect "key present" vs absent so callers can pass null to clear.
+  const hasOverride = Object.prototype.hasOwnProperty.call(
+    args,
+    'sub_tag_override',
+  );
+  await db.withTransactionAsync(async () => {
+    for (let c = 0; c < prog.cycle_count; c++) {
+      const existing = await db.getFirstAsync<{
+        id: string;
+        sub_tag: string | null;
+      }>(
+        `SELECT id, sub_tag FROM program_cell
+          WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+        args.program_id,
+        c,
+        args.day_index
+      );
+      const new_sub_tag = isRest
+        ? null
+        : hasOverride
+          ? (args.sub_tag_override ?? null)
+          : (existing?.sub_tag ?? null);
+      if (existing) {
+        await db.runAsync(
+          `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+          args.template_id,
+          new_sub_tag,
+          existing.id
+        );
+      } else if (!isRest) {
+        // Don't INSERT a sparse rest row when applying rest to an empty
+        // position — the renderer treats missing rows as rest already.
+        await db.runAsync(
+          `INSERT INTO program_cell
+             (id, program_id, cycle_index, day_index, template_id, sub_tag)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          args.uuid(),
+          args.program_id,
+          c,
+          args.day_index,
+          args.template_id,
+          new_sub_tag
+        );
+      }
+    }
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id
+    );
+    // Register the override sub_tag in the persistent label dictionary so
+    // it survives subsequent overwrite (round 15 fix). Only applies when
+    // caller passed an explicit override (otherwise per-row sub_tags are
+    // preserved per cell and individually registered via upsertCell).
+    if (hasOverride && args.sub_tag_override != null) {
+      await recordProgramSubTag(
+        db,
+        args.program_id,
+        args.sub_tag_override,
+        args.now,
+      );
+    }
+  });
+}
+
+/**
+ * Wave 15 (2026-05-21) — bulk apply a sub_tag to an entire row
+ * (cycle_index axis). Only cells with `template_id != NULL` are touched —
+ * rest cells skip per user spec Q3「避開休息」.
+ */
+export async function applyTagToRow(
+  db: Database,
+  args: {
+    program_id: string;
+    cycle_index: number;
+    sub_tag: string | null;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE program_cell
+          SET sub_tag = ?
+        WHERE program_id = ?
+          AND cycle_index = ?
+          AND template_id IS NOT NULL`,
+      args.sub_tag,
+      args.program_id,
+      args.cycle_index
+    );
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id
+    );
+    // Register the row-apply sub_tag in the persistent label dictionary so
+    // it survives later swap to another sub_tag (round 15 fix). Even if
+    // applyTagToRow updates 0 rows (row was all-rest), the label still
+    // lands in the dictionary for future picker chip listing.
+    await recordProgramSubTag(db, args.program_id, args.sub_tag, args.now);
+  });
+}
+
+/**
+ * Wave 17 (2026-05-21) — update a program's `start_date` in place. Used by
+ * the edit-mode 「起始日」 dropdown (Q1c) so user can shift the entire grid
+ * forward / backward in time without re-running the wizard.
+ *
+ * Cells are NOT moved — they stay at their (cycle_index, day_index)
+ * positions; only their displayed date labels shift (computed from the new
+ * start_date via `cellDate` in the renderer).
+ *
+ * `start_date` MUST be a valid `YYYY-MM-DD` string. SQLite doesn't enforce
+ * this at the column level (TEXT NOT NULL with default 'today'); caller is
+ * responsible for validating before calling.
+ *
+ * No-op when the program doesn't exist.
+ */
+export async function updateProgramStartDate(
+  db: Database,
+  args: {
+    program_id: string;
+    start_date: string;
+    now?: () => number;
+  },
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  await db.runAsync(
+    `UPDATE program SET start_date = ?, updated_at = ? WHERE id = ?`,
+    args.start_date,
+    ts,
+    args.program_id,
+  );
+}
+
+/**
+ * Wave 17 (2026-05-21) — atomic swap of (template_id, sub_tag) between two
+ * cells at (cycle_a, day_a) and (cycle_b, day_b) within the same program.
+ * Used by edit-mode long-press-drag-swap (Q1 (a) — single-cell swap, dates
+ * stay fixed).
+ *
+ * The schema is sparse — missing rows render as 「休息」. So the four cases:
+ *   1. Both rows exist → UPDATE A.content ← B.content, UPDATE B.content ← A.content
+ *   2. Only A row exists → INSERT new row at B with A's content; DELETE A
+ *      (keep table sparse — empty cells don't get filler rows)
+ *   3. Only B row exists → mirror of case 2
+ *   4. Neither row exists → no-op (rest ↔ rest is still rest)
+ *
+ * No-op if (cycle_a, day_a) === (cycle_b, day_b) — swapping a cell with
+ * itself does nothing.
+ *
+ * sub_tag dictionary (`program_sub_tag`, v022) is auto-registered for any
+ * non-null sub_tag landing in either destination — though in practice both
+ * tags are already in the dictionary since they came from existing cells.
+ */
+export async function swapProgramCells(
+  db: Database,
+  args: {
+    program_id: string;
+    a: { cycle_index: number; day_index: number };
+    b: { cycle_index: number; day_index: number };
+    uuid: () => string;
+    now?: () => number;
+  },
+): Promise<void> {
+  if (
+    args.a.cycle_index === args.b.cycle_index &&
+    args.a.day_index === args.b.day_index
+  ) {
+    return;
+  }
+  const ts = (args.now ?? Date.now)();
+  await db.withTransactionAsync(async () => {
+    const cellA = await db.getFirstAsync<{
+      id: string;
+      template_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT id, template_id, sub_tag FROM program_cell
+        WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+      args.program_id,
+      args.a.cycle_index,
+      args.a.day_index,
+    );
+    const cellB = await db.getFirstAsync<{
+      id: string;
+      template_id: string | null;
+      sub_tag: string | null;
+    }>(
+      `SELECT id, template_id, sub_tag FROM program_cell
+        WHERE program_id = ? AND cycle_index = ? AND day_index = ?`,
+      args.program_id,
+      args.b.cycle_index,
+      args.b.day_index,
+    );
+    if (cellA && cellB) {
+      // Both exist — straight swap of content.
+      await db.runAsync(
+        `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+        cellB.template_id,
+        cellB.sub_tag,
+        cellA.id,
+      );
+      await db.runAsync(
+        `UPDATE program_cell SET template_id = ?, sub_tag = ? WHERE id = ?`,
+        cellA.template_id,
+        cellA.sub_tag,
+        cellB.id,
+      );
+    } else if (cellA && !cellB) {
+      // A has content, B is rest — move A's content to B, DELETE A so
+      // the table stays sparse (empty cells aren't persisted).
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        args.uuid(),
+        args.program_id,
+        args.b.cycle_index,
+        args.b.day_index,
+        cellA.template_id,
+        cellA.sub_tag,
+      );
+      await db.runAsync(`DELETE FROM program_cell WHERE id = ?`, cellA.id);
+    } else if (!cellA && cellB) {
+      // Mirror of case 2.
+      await db.runAsync(
+        `INSERT INTO program_cell
+           (id, program_id, cycle_index, day_index, template_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        args.uuid(),
+        args.program_id,
+        args.a.cycle_index,
+        args.a.day_index,
+        cellB.template_id,
+        cellB.sub_tag,
+      );
+      await db.runAsync(`DELETE FROM program_cell WHERE id = ?`, cellB.id);
+    }
+    // Both missing → no-op
+    await db.runAsync(
+      `UPDATE program SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.program_id,
+    );
+    // Re-register sub_tags in the dictionary (mostly no-op; defensive in
+    // case a stale label slipped through earlier wave migrations).
+    const subA = cellA?.sub_tag ?? null;
+    const subB = cellB?.sub_tag ?? null;
+    if (subA != null) await recordProgramSubTag(db, args.program_id, subA, args.now);
+    if (subB != null) await recordProgramSubTag(db, args.program_id, subB, args.now);
   });
 }
 

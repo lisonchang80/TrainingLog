@@ -9,6 +9,7 @@ import type {
   TemplateSet,
 } from '../../domain/template/types';
 import type { MemoryCandidate } from '../../domain/template/templateMemory';
+import { colorForTemplateName } from '../../domain/template/templateColor';
 
 /**
  * Persistence layer for Templates and their exercise rows.
@@ -33,10 +34,7 @@ export interface TemplateSummary extends TemplateRow {
   exerciseCount: number;
 }
 
-/** Classification derived from (program_id, sub_tag), per ADR-0003. */
-export type TemplateKind = 'main' | 'sub' | 'free';
-
-export interface TemplateExerciseRow {
+interface TemplateExerciseRow {
   id: string;
   template_id: string;
   exercise_id: string;
@@ -62,6 +60,225 @@ export async function listTemplates(db: Database): Promise<TemplateSummary[]> {
 }
 
 /**
+ * Templates list view — dedupes by `name`, keeping the most-recent-edited
+ * variant as the representative. Mirrors `listTemplates` shape but groups
+ * by ADR-0003 three-tuple identity's name component. Used by Templates tab
+ * UI (一個 name 一條 row); other callers (today / program / wizard) still
+ * use `listTemplates` to see every variant.
+ *
+ * Rationale (round 41 polish, Q1 = B): ADR-0003 三元組 identity 保留現況 —
+ * same name + different (program, sub_tag) IS a distinct template row. But
+ * the Templates tab's list view was getting visually swamped (e.g. 4 same-
+ * named clones after picking 4 different sub_tags). Dedupe collapses each
+ * name to ONE row; the user re-picks the (計劃, 強度) inside the start sheet
+ * via `findTemplateByTriple` lookup-or-spawn. The non-list callers (today
+ * panel / program editor / wizard) keep using `listTemplates` because they
+ * legitimately need every variant.
+ *
+ * Representative selection (Q1 = B): the sibling with the highest
+ * `updated_at`. SQL pattern: correlated subquery `t.updated_at = (SELECT
+ * MAX(t2.updated_at) FROM template t2 WHERE t2.name = t.name)`. Stable
+ * across re-renders because edits bump `updated_at` and the latest edit
+ * naturally wins. No variant-count badge (Q2 = B).
+ */
+export async function listTemplateGroupsByName(
+  db: Database
+): Promise<TemplateSummary[]> {
+  return db.getAllAsync<TemplateSummary>(
+    `SELECT t.id, t.name, t.created_at, t.updated_at,
+            t.program_id, t.sub_tag,
+            COUNT(te.id) AS exerciseCount
+       FROM template t
+       LEFT JOIN template_exercise te ON te.template_id = t.id
+      WHERE t.updated_at = (
+        SELECT MAX(t2.updated_at) FROM template t2 WHERE t2.name = t.name
+      )
+      GROUP BY t.id
+      ORDER BY t.updated_at DESC`
+  );
+}
+
+/**
+ * Slice 10c overnight #54 — list every same-name template variant (every
+ * ADR-0003 三元組 sibling sharing `name`). Used by the Templates tab list
+ * swipe-to-delete entry: the list is dedupe-by-name (`listTemplateGroupsByName`)
+ * so a single row represents a whole name group, but the actual delete must
+ * cascade across every variant under that name. The confirm Alert also
+ * enumerates each variant's triple so the user sees what they're nuking.
+ *
+ * Returned rows mirror `TemplateRow` (id + name + timestamps + program_id +
+ * sub_tag) — no `exerciseCount` since the caller doesn't need per-variant
+ * counts, just the triple identity for the Alert + the id to feed `deleteTemplate`.
+ *
+ * Ordered by `updated_at DESC` so the most-recent-edited variant lists first
+ * in the Alert body (matches `listTemplateGroupsByName`'s representative-
+ * picking — the user sees the same row they swiped first).
+ */
+export async function listTemplateVariantsByName(
+  db: Database,
+  name: string
+): Promise<TemplateRow[]> {
+  return db.getAllAsync<TemplateRow>(
+    `SELECT id, name, created_at, updated_at, program_id, sub_tag
+       FROM template
+      WHERE name = ?
+      ORDER BY updated_at DESC`,
+    name
+  );
+}
+
+/**
+ * Distinct non-null `template.sub_tag` values across all templates, sorted
+ * ascending. Feeds the 強度 picker in the start-template bottom sheet
+ * (ADR-0019 §Q9.1a). Empty list when no template has a sub_tag yet — the
+ * caller renders an empty intensity list + 「+ 新增強度」 affordance.
+ */
+export async function listDistinctSubTags(db: Database): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT DISTINCT sub_tag FROM template
+      WHERE sub_tag IS NOT NULL AND sub_tag != ''
+      ORDER BY sub_tag ASC`
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
+/**
+ * Per-program distinct sub_tags. Similar to listDistinctSubTags but scoped
+ * to a single program_id. Returns empty array when no template under that
+ * program has a sub_tag yet — caller renders the intensity chip row with
+ * only the「通用」(null) chip + 「+ 新增強度」 affordance.
+ *
+ * Used by 另存模板 TemplateMetaSheet (5/18 polish): when the user selects
+ * a specific program, the 強度標籤 chip list should only surface sub_tags
+ * already used within THAT program — not the cross-program union. Picking
+ * 「通用」(program_id = null) hides the whole 強度標籤 section per the
+ * sheet's UI spec, so this helper is not called for the null case.
+ */
+export async function listDistinctSubTagsByProgram(
+  db: Database,
+  program_id: string
+): Promise<string[]> {
+  const rows = await db.getAllAsync<{ sub_tag: string }>(
+    `SELECT DISTINCT sub_tag FROM template
+      WHERE program_id = ?
+        AND sub_tag IS NOT NULL
+        AND sub_tag != ''
+      ORDER BY sub_tag ASC`,
+    program_id
+  );
+  return rows.map((r) => r.sub_tag);
+}
+
+/**
+ * NULL-safe lookup of a template by its (name, program_id, sub_tag) identity
+ * triple (ADR-0003). Returns the matching row's `{ id }` or `null` when no
+ * match exists.
+ *
+ * Used by round 38 polish — `templates.tsx::onStart` lookup-or-spawn rule:
+ * when the user picks a (program, sub_tag) that doesn't match the sheet
+ * template's own triple, we first probe for an existing sibling under that
+ * triple (e.g. the clone #37 spawned earlier) before falling back to a fresh
+ * `cloneTemplateWithSubTag`. Without this lookup, picking an EXISTING
+ * sub_tag chip would still send `startSessionFromTemplate` at the source
+ * row and a later「儲存模板」 would silently overwrite the source.
+ *
+ * NULL handling: both `program_id` and `sub_tag` are nullable per schema; the
+ * SQL applies the standard `(col IS NULL AND ? IS NULL) OR col = ?` idiom to
+ * each so binding NULL on either column matches an actual NULL row (SQL `=`
+ * never matches NULL otherwise).
+ */
+export async function findTemplateByTriple(
+  db: Database,
+  args: {
+    name: string;
+    program_id: string | null;
+    sub_tag: string | null;
+  }
+): Promise<{ id: string } | null> {
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template
+      WHERE name = ?
+        AND ((program_id IS NULL AND ? IS NULL) OR program_id = ?)
+        AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
+      LIMIT 1`,
+    args.name,
+    args.program_id,
+    args.program_id,
+    args.sub_tag,
+    args.sub_tag
+  );
+  return row ?? null;
+}
+
+/**
+ * Resolve a session's "linked template" identity (name + program + sub_tag)
+ * for the Today banner during an in-progress session (5/19 polish #43).
+ *
+ * "Linked template" = the most common non-null `session_exercise.template_id`
+ * among the session's rows; tie-break by earliest `ordering` for determinism
+ * (mirrors `convertSessionToTemplate`'s `linkedTemplateId` resolution, with
+ * the tie-break tightened so the order of identically-counted templates is
+ * stable). Returns `null` for a freestyle session (no row carries a non-null
+ * template_id) — caller renders 「自由訓練」.
+ *
+ * The second SELECT joins `program` to resolve `program.name` (may be NULL
+ * when the template lives under the「通用」program or none); `template.sub_tag`
+ * is read directly.
+ */
+export async function getSessionLinkedTemplateTriple(
+  db: Database,
+  session_id: string
+): Promise<{
+  template_id: string;
+  template_name: string;
+  program_id: string | null;
+  program_name: string | null;
+  sub_tag: string | null;
+} | null> {
+  // Step 1: most-common non-null template_id; tie-break by earliest ordering
+  // for deterministic ordering when two templates share the same row count.
+  const head = await db.getFirstAsync<{ template_id: string }>(
+    `SELECT template_id
+       FROM session_exercise
+      WHERE session_id = ? AND template_id IS NOT NULL
+      GROUP BY template_id
+      ORDER BY COUNT(*) DESC, MIN(ordering) ASC
+      LIMIT 1`,
+    session_id
+  );
+  if (!head) return null;
+
+  // Step 2: hydrate (template_name, program_id, program_name, sub_tag).
+  // 2026-05-20 overnight #55 (slice 10c 另存模板 prefill): include `program_id`
+  // so callers building a sheet's program-picker initial state can match
+  // against the existing programs list. The Today banner caller only uses
+  // `program_name` for display; adding `program_id` is backwards-compatible.
+  const row = await db.getFirstAsync<{
+    template_name: string;
+    program_id: string | null;
+    program_name: string | null;
+    sub_tag: string | null;
+  }>(
+    `SELECT t.name AS template_name,
+            t.program_id AS program_id,
+            p.name AS program_name,
+            t.sub_tag AS sub_tag
+       FROM template t
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE t.id = ?`,
+    head.template_id
+  );
+  if (!row) return null;
+  return {
+    template_id: head.template_id,
+    template_name: row.template_name,
+    program_id: row.program_id ?? null,
+    program_name: row.program_name ?? null,
+    sub_tag: row.sub_tag ?? null,
+  };
+}
+
+/**
  * Attach a Template to a Program with a given sub_tag. Per ADR-0003 the
  * (name, program_id, sub_tag) triple becomes the Template's new identity.
  * Caller should ensure (name, program_id, sub_tag) is unique within the DB.
@@ -83,27 +300,6 @@ export async function attachTemplateToProgram(
     ts,
     args.template_id
   );
-}
-
-/**
- * Classify a template as main / sub / free.
- *   - free: no program_id
- *   - sub:  program_id set AND another template in the same program shares this name
- *   - main: program_id set AND it's the only template with this name in the program
- *           (or the canonical "primary" — for slice 5 we treat the first attached as main)
- *
- * Slice 5 keeps this simple: any Template with program_id set is "main" for its
- * (name, program_id, sub_tag) tuple unless a sibling with the same name shares
- * the program — then ALL siblings (including this one) are "sub" except the
- * one matching its program's "primary cell" (the first cell using this name).
- * For now, the simpler heuristic: free vs (main + sub) — UI can refine later.
- */
-export function classifyTemplate(args: {
-  program_id: string | null;
-  sameNameSiblingCount: number;
-}): TemplateKind {
-  if (args.program_id == null) return 'free';
-  return args.sameNameSiblingCount > 1 ? 'sub' : 'main';
 }
 
 /**
@@ -145,16 +341,34 @@ export async function getTemplate(
   return { id: tpl.id, name: tpl.name, exercises };
 }
 
+/**
+ * Create a new Template row.
+ *
+ * `color_hex` is optional — when omitted or passed as an empty string we
+ * auto-derive a deterministic color via `colorForTemplateName(name)` so the
+ * new history calendar view (ADR-0015 § Storage 設計) always has a non-empty
+ * color to render. Existing callers that don't pass `color_hex` are
+ * unaffected at the type level (the field is optional) and now silently
+ * receive a name-hashed color instead of the v009 `DEFAULT ''` sentinel.
+ *
+ * Callers that pass an explicit non-empty `color_hex` (e.g. when cloning a
+ * sibling and wanting to share its color) keep their value verbatim.
+ */
 export async function createTemplate(
   db: Database,
-  args: { id: string; name: string; now?: () => number }
+  args: { id: string; name: string; color_hex?: string; now?: () => number }
 ): Promise<void> {
   const ts = (args.now ?? Date.now)();
+  const color =
+    args.color_hex !== undefined && args.color_hex !== ''
+      ? args.color_hex
+      : colorForTemplateName(args.name);
   await db.runAsync(
-    `INSERT INTO template (id, name, created_at, updated_at)
-     VALUES (?, ?, ?, ?)`,
+    `INSERT INTO template (id, name, color_hex, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
     args.id,
     args.name,
+    color,
     ts,
     ts
   );
@@ -174,14 +388,48 @@ export async function updateTemplateName(
 }
 
 /**
- * Permanently remove a Template and all its exercise rows. Past Sessions
- * snapshotted from this template are NOT touched (their `session_exercise`
- * rows still hold a stale `template_id` reference; we never join back from
- * Session → Template, so a dangling pointer is harmless).
+ * Permanently remove a Template along with its full child cascade (per
+ * simulator-db-query SKILL Step 4): template_set → template_exercise →
+ * template. We also clean up `session_exercise.template_id` dangling
+ * pointers so 5/19 morning wave's `lookup-or-spawn` flow (#38/#42) cannot
+ * bite a ghost id — ENDED sessions get their pointer set to NULL while
+ * ACTIVE sessions (`ended_at IS NULL`) are left untouched (an in-progress
+ * session keeps its 'started from this template' link until it finishes).
+ *
+ * Session history is unaffected: `session_exercise` rows remain with their
+ * full snapshot of name/ordering/sets so the session detail page still
+ * renders as before; only the back-pointer to the now-deleted template is
+ * cleared.
+ *
+ * Wrapped in a single transaction so a mid-cascade failure rolls back
+ * cleanly and the three template tables stay consistent.
  */
 export async function deleteTemplate(db: Database, id: string): Promise<void> {
   await db.withTransactionAsync(async () => {
+    // 1. Dangling pointer cleanup on session_exercise.template_id, excluding
+    //    active sessions (ended_at IS NULL) per simulator-db-query SOP.
+    await db.runAsync(
+      `UPDATE session_exercise
+          SET template_id = NULL
+        WHERE template_id = ?
+          AND session_id NOT IN (
+            SELECT id FROM session WHERE ended_at IS NULL
+          )`,
+      id
+    );
+    // 2. template_set is referenced from template_exercise; drop it first so
+    //    the cascade is explicit and tests don't have to rely on
+    //    foreign_keys=ON ON DELETE CASCADE.
+    await db.runAsync(
+      `DELETE FROM template_set
+        WHERE template_exercise_id IN (
+          SELECT id FROM template_exercise WHERE template_id = ?
+        )`,
+      id
+    );
+    // 3. template_exercise.
     await db.runAsync(`DELETE FROM template_exercise WHERE template_id = ?`, id);
+    // 4. template row itself.
     await db.runAsync(`DELETE FROM template WHERE id = ?`, id);
   });
 }
@@ -232,37 +480,6 @@ export async function addTemplateExercise(
     args.template_id
   );
   return { id, ordering };
-}
-
-/**
- * Toggle the evergreen flag on a single template_exercise row. Used by the
- * editor's star/zone toggle. No-op when the row is already in the requested
- * state. Bumps the parent template's `updated_at`.
- */
-export async function setTemplateExerciseEvergreen(
-  db: Database,
-  args: {
-    template_exercise_id: string;
-    is_evergreen: 0 | 1;
-    now?: () => number;
-  }
-): Promise<void> {
-  const ts = (args.now ?? Date.now)();
-  const row = await db.getFirstAsync<{ template_id: string }>(
-    `SELECT template_id FROM template_exercise WHERE id = ?`,
-    args.template_exercise_id
-  );
-  if (!row) return;
-  await db.runAsync(
-    `UPDATE template_exercise SET is_evergreen = ? WHERE id = ?`,
-    args.is_evergreen,
-    args.template_exercise_id
-  );
-  await db.runAsync(
-    `UPDATE template SET updated_at = ? WHERE id = ?`,
-    ts,
-    row.template_id
-  );
 }
 
 /** Remove one exercise row from a Template by its row id. No-op if missing. */
@@ -330,7 +547,12 @@ export async function getTemplateFull(
     id: string;
     name: string;
     color_hex: string;
-  }>(`SELECT id, name, color_hex FROM template WHERE id = ?`, id);
+    program_id: string | null;
+    sub_tag: string | null;
+  }>(
+    `SELECT id, name, color_hex, program_id, sub_tag FROM template WHERE id = ?`,
+    id
+  );
   if (!tpl) return null;
 
   // Notes is sourced from `exercise.notes` (per-Exercise global) per
@@ -363,7 +585,14 @@ export async function getTemplateFull(
   );
 
   if (exRows.length === 0) {
-    return { id: tpl.id, name: tpl.name, color_hex: tpl.color_hex, exercises: [] };
+    return {
+      id: tpl.id,
+      name: tpl.name,
+      color_hex: tpl.color_hex,
+      program_id: tpl.program_id ?? null,
+      sub_tag: tpl.sub_tag ?? null,
+      exercises: [],
+    };
   }
 
   const setRows = await db.getAllAsync<{
@@ -418,6 +647,8 @@ export async function getTemplateFull(
     id: tpl.id,
     name: tpl.name,
     color_hex: tpl.color_hex,
+    program_id: tpl.program_id ?? null,
+    sub_tag: tpl.sub_tag ?? null,
     exercises,
   };
 }
@@ -797,6 +1028,515 @@ export async function queryMemoryCandidates(
     limit
   );
   return hydrateMemoryCandidates(db, exRows);
+}
+
+// ===========================================================================
+// Slice 10c — convertSessionToTemplate (ADR-0019 Q10 儲存模板 / 另存模板)
+// ===========================================================================
+
+/**
+ * Persist a session's current exercise/set structure as a Template
+ * (ADR-0019 Q10「儲存模板」/「另存模板」action bar buttons).
+ *
+ * Two modes:
+ *  - **create** (另存模板) — INSERT a brand new template named `template_name`
+ *    + INSERT one `template_exercise` per session_exercise row + INSERT one
+ *    `template_set` row per `set` row. Does NOT touch any existing
+ *    `session_exercise.template_id` link (the session stays bound to its
+ *    original template, if any).
+ *  - **update** (儲存模板) — overwrite the session's *linked* template with
+ *    the session's current structure. "Linked template" = the most common
+ *    non-null `session_exercise.template_id` among the session's rows; if
+ *    none exists (freestyle session), this falls back to create-mode
+ *    semantics AND links the session's rows to the new template by updating
+ *    every `session_exercise.template_id = <new_id>` so future Save-back
+ *    flows recognize the session as templated.
+ *
+ * Returns the resulting `template_id` either way. Caller is responsible
+ * for prompting the user for `template_name` and for any UI feedback.
+ *
+ * Cluster / rest_sec / set_kind preservation:
+ *  - `session_exercise.parent_id` is REMAPPED to the corresponding new
+ *    `template_exercise.id` (two-pass remap, mirrors `snapshotForSession`).
+ *  - `session_exercise.reusable_superset_id` is copied verbatim.
+ *  - `session_exercise.rest_sec` is written to `template_exercise.rest_seconds`
+ *    (the canonical v009 column; v016's orphan `template_exercise.rest_sec`
+ *    column stays NULL per slice 10b bridge convention).
+ *  - `set.set_kind` / `set.parent_set_id` / `set.notes` map to
+ *    `template_set.set_kind` / `parent_set_id` / `notes`.
+ *  - `set.is_skipped` rows are SKIPPED (an explicit user-skipped set should
+ *    not become part of the template's prescribed structure).
+ *
+ * Ordering: session_exercise rows are taken in their existing `ordering`
+ * sequence; template_exercise `ordering` is reset to a 1..N contiguous
+ * sequence (same as new templates created elsewhere — e.g. the editor).
+ *
+ * `uuid` is REQUIRED — same convention as the rest of this repo (Hermes
+ * lacks crypto.randomUUID). Pass a deterministic stub in tests.
+ *
+ * Single transaction: partial failure rolls back cleanly.
+ *
+ * Slice 10c Phase 7-detail-page commit.
+ */
+export async function convertSessionToTemplate(
+  db: Database,
+  args: {
+    session_id: string;
+    template_name: string;
+    mode: 'update' | 'create';
+    /**
+     * Only used when a brand-new template row is INSERTed (mode='create'
+     * or mode='update' falling back to create because session has no
+     * linked template). When updating an existing template row, these are
+     * ignored — the template inherits its prior program_id / sub_tag.
+     *
+     * 2026-05-18: 另存模板 bottom sheet 引導用戶填這 3 元組。
+     */
+    program_id?: string | null;
+    sub_tag?: string | null;
+    uuid: () => string;
+    now?: () => number;
+  },
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+  const createProgramId = args.program_id ?? null;
+  const createSubTag = args.sub_tag ?? null;
+
+  // Step 1: gather the session's exercise + set state.
+  type SeRow = {
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    planned_sets: number;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+    template_id: string | null;
+  };
+  const seRows = await db.getAllAsync<SeRow>(
+    `SELECT id, exercise_id, ordering, planned_sets, is_evergreen,
+            parent_id, reusable_superset_id, rest_sec, template_id
+       FROM session_exercise
+      WHERE session_id = ?
+      ORDER BY ordering ASC`,
+    args.session_id,
+  );
+
+  type SetRow = {
+    id: string;
+    exercise_id: string;
+    session_exercise_id: string | null;
+    weight_kg: number | null;
+    reps: number | null;
+    ordering: number;
+    is_skipped: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    parent_set_id: string | null;
+    notes: string | null;
+  };
+  const setRows = await db.getAllAsync<SetRow>(
+    `SELECT id, exercise_id, session_exercise_id, weight_kg, reps, ordering, is_skipped,
+            set_kind, parent_set_id, notes
+       FROM "set"
+      WHERE session_id = ? AND is_skipped = 0
+      ORDER BY exercise_id ASC, ordering ASC`,
+    args.session_id,
+  );
+
+  // Step 2: determine target template_id.
+  // "Linked template" = most common non-null template_id across se rows.
+  // Tie-break: first encountered in `ordering` order.
+  let linkedTemplateId: string | null = null;
+  if (args.mode === 'update') {
+    const counts = new Map<string, number>();
+    for (const r of seRows) {
+      if (r.template_id != null) {
+        counts.set(r.template_id, (counts.get(r.template_id) ?? 0) + 1);
+      }
+    }
+    if (counts.size > 0) {
+      let bestId: string | null = null;
+      let bestCount = 0;
+      for (const [id, c] of counts) {
+        if (c > bestCount) {
+          bestCount = c;
+          bestId = id;
+        }
+      }
+      linkedTemplateId = bestId;
+    }
+  }
+
+  const isUpdatingExisting = args.mode === 'update' && linkedTemplateId != null;
+  const newTemplateId = isUpdatingExisting
+    ? (linkedTemplateId as string)
+    : args.uuid();
+
+  // 2026-05-20 overnight #55 (slice 10c 另存模板): dup-triple guard for the
+  // create path (and update-fallback-to-create when no linked template
+  // existed). Mirrors `cloneTemplateWithSubTag`'s pattern — if a template row
+  // already exists with the same (name, program_id, sub_tag) triple we throw
+  // `DUPLICATE_TEMPLATE_TRIPLE` so the UI can surface an Alert and keep the
+  // sheet open for inline rename + retry. Updating an existing template (when
+  // `isUpdatingExisting` is true) skips this — we're overwriting the linked
+  // row in place, so the dup check would falsely match the same row.
+  if (!isUpdatingExisting) {
+    const existing = await findTemplateByTriple(db, {
+      name: args.template_name,
+      program_id: createProgramId,
+      sub_tag: createSubTag,
+    });
+    if (existing) {
+      throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+    }
+  }
+
+  // Step 3: pre-compute new template_exercise ids + parent_id remap.
+  const idByOldSe = new Map<string, string>(); // old session_exercise.id → new template_exercise.id
+  for (const se of seRows) {
+    idByOldSe.set(se.id, args.uuid());
+  }
+
+  // Step 4: run the conversion in one transaction.
+  await db.withTransactionAsync(async () => {
+    if (isUpdatingExisting) {
+      // Wipe the old template's exercises (cascades to template_set via v009 FK).
+      await db.runAsync(
+        `DELETE FROM template_exercise WHERE template_id = ?`,
+        newTemplateId,
+      );
+      // Rename + bump updated_at on the existing template row.
+      await db.runAsync(
+        `UPDATE template SET name = ?, updated_at = ? WHERE id = ?`,
+        args.template_name,
+        ts,
+        newTemplateId,
+      );
+    } else {
+      // Create-mode (or update-mode-fallback-to-create when no linked
+      // template existed). INSERT a new template row.
+      //
+      // program_id / sub_tag 由 caller 透過 args 帶入 (TemplateMetaSheet 引導
+      // 用戶填的「歸屬計畫」/「強度標籤」)。NULL 表示「不指定」 — 對應 ADR-0003
+      // 的 free template。
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        newTemplateId,
+        args.template_name,
+        ts,
+        ts,
+        createProgramId,
+        createSubTag,
+      );
+    }
+
+    // INSERT one template_exercise row per session_exercise + its sets.
+    let exOrdering = 1;
+    for (const se of seRows) {
+      const newExId = idByOldSe.get(se.id)!;
+      const remappedParentId =
+        se.parent_id != null ? idByOldSe.get(se.parent_id) ?? null : null;
+
+      // Materialise this exercise's sets from set rows. v019 schema (slice
+      // 10c #17) adds `set.session_exercise_id` for 精準的 per-card isolation;
+      // we prefer that when available and fall back to `exercise_id` match
+      // only for pre-v019 untagged rows. This is essential for RS pairs that
+      // share an exercise (e.g. RS1=Bench+Chest + RS2=Cable+Chest both
+      // contain Chest Dip — without session_exercise_id isolation each card
+      // sees the other RS's Chest Dip sets and the resulting template ends
+      // up with both cards holding the merged set list).
+      // Pattern mirrors #17 / #23 / #24 / #27 wave fixes.
+      const exSets = setRows.filter(
+        (s) =>
+          s.session_exercise_id === se.id ||
+          (s.session_exercise_id == null && s.exercise_id === se.exercise_id),
+      );
+
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+        newExId,
+        newTemplateId,
+        se.exercise_id,
+        exOrdering,
+        Math.max(exSets.length, se.planned_sets),
+        se.is_evergreen,
+        remappedParentId,
+        se.rest_sec,
+        se.reusable_superset_id,
+        ts,
+      );
+
+      // INSERT template_set rows for this exercise's recorded sets.
+      // Two-pass: first pass with parent_set_id = NULL to satisfy the FK
+      // (the row a parent_set_id points to must already exist; in
+      // practice dropset heads are always at position N-1 of their cluster
+      // and followers point UP, but we don't want to rely on that — easier
+      // to map ids and rewrite in a second pass).
+      const setIdRemap = new Map<string, string>(); // old set.id → new template_set.id
+      for (let i = 0; i < exSets.length; i++) {
+        const oldSet = exSets[i];
+        const newSetId = args.uuid();
+        setIdRemap.set(oldSet.id, newSetId);
+        await db.runAsync(
+          `INSERT INTO template_set
+             (id, template_exercise_id, position, set_kind, reps, weight,
+              parent_set_id, notes)
+           VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+          newSetId,
+          newExId,
+          i,
+          oldSet.set_kind,
+          oldSet.reps ?? 0,
+          oldSet.weight_kg ?? 0,
+          oldSet.notes,
+        );
+      }
+      // Second pass: rewrite parent_set_id for any dropset followers.
+      for (const oldSet of exSets) {
+        if (oldSet.parent_set_id == null) continue;
+        const newId = setIdRemap.get(oldSet.id);
+        const newParentId = setIdRemap.get(oldSet.parent_set_id);
+        if (!newId || !newParentId) continue;
+        await db.runAsync(
+          `UPDATE template_set SET parent_set_id = ? WHERE id = ?`,
+          newParentId,
+          newId,
+        );
+      }
+
+      exOrdering++;
+    }
+
+    // Update-mode-fallback-to-create: link the session's rows to the new
+    // template so future Save-back flows recognize it as templated.
+    if (args.mode === 'update' && !isUpdatingExisting) {
+      await db.runAsync(
+        `UPDATE session_exercise SET template_id = ? WHERE session_id = ?`,
+        newTemplateId,
+        args.session_id,
+      );
+    }
+  });
+
+  return newTemplateId;
+}
+
+/**
+ * Clone an existing Template into a new row under a new (program_id, sub_tag)
+ * pair. The new template's `name` is inherited from the source — ADR-0003 三
+ *元組 (name, program_id, sub_tag) provides identity, so the same display name
+ * across different (program, sub_tag) cells is intentional.
+ *
+ * Used by the start-template-sheet「新增強度」inline flow (round 37 polish):
+ * tapping「建立」spawns a clone bound to the chosen program + new sub_tag so
+ * the upcoming session links to the clone — overwrites land on the new row,
+ * the source template stays untouched.
+ *
+ * Dup guard: SELECT-then-throw against the (name, program_id, sub_tag)
+ * triple — `Error('DUPLICATE_TEMPLATE_TRIPLE')`. Mirrors createProgram /
+ * insertReusableSuperset patterns. UI surfaces this as an Alert so the user
+ * can rename the sub_tag and retry inline.
+ *
+ * Copies (full deep clone):
+ *   - template_exercise rows: ordering, default_sets/reps/weight_kg,
+ *     is_evergreen, parent_id (REMAPPED via old→new id Map),
+ *     reusable_superset_id (verbatim), rest_seconds, updated_at.
+ *   - template_set rows: position, set_kind, reps, weight,
+ *     parent_set_id (REMAPPED via old→new id Map), notes.
+ *
+ * Single transaction: partial failure rolls back cleanly. Returns the new
+ * template id.
+ *
+ * Note: source `template.color_hex` is NOT cloned — the new row's color_hex
+ * uses the schema default ('') so the renderer falls back to hash-of-name,
+ * keeping the visual coupling to the name (siblings share color). Caller can
+ * recolor via applyRecolorSiblings if needed.
+ */
+export async function cloneTemplateWithSubTag(
+  db: Database,
+  args: {
+    source_template_id: string;
+    new_program_id: string;
+    /**
+     * Target sub_tag for the new clone. May be `null` to spawn a 通用-sub_tag
+     * variant under a specific program (round 38 polish — `onStart`
+     * lookup-or-spawn invokes this when the user picks (some program, 通用)
+     * and no existing sibling has that triple yet).
+     */
+    new_sub_tag: string | null;
+    uuid: () => string;
+    now?: () => number;
+  }
+): Promise<string> {
+  const ts = (args.now ?? Date.now)();
+
+  // Step 1: load source template header.
+  const source = await db.getFirstAsync<{
+    id: string;
+    name: string;
+  }>(`SELECT id, name FROM template WHERE id = ?`, args.source_template_id);
+  if (!source) {
+    throw new Error('SOURCE_TEMPLATE_NOT_FOUND');
+  }
+
+  // Step 2: dup guard against (name, program_id, sub_tag) triple. `program_id`
+  // is required non-null per signature, but `new_sub_tag` may be null (round
+  // 38 polish — 通用-sub_tag spawn) so the sub_tag predicate uses the
+  // IS-NULL-safe idiom; otherwise SQL `=` would never match an actual NULL
+  // row and the dup guard would silently leak past a NULL/NULL collision.
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template
+      WHERE name = ?
+        AND program_id = ?
+        AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
+      LIMIT 1`,
+    source.name,
+    args.new_program_id,
+    args.new_sub_tag,
+    args.new_sub_tag
+  );
+  if (existing) {
+    throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+  }
+
+  // Step 3: load source template_exercise + template_set rows.
+  type SrcExRow = {
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    default_sets: number;
+    default_reps: number | null;
+    default_weight_kg: number | null;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    rest_seconds: number | null;
+    reusable_superset_id: string | null;
+  };
+  const exRows = await db.getAllAsync<SrcExRow>(
+    `SELECT id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, is_evergreen, parent_id, rest_seconds,
+            reusable_superset_id
+       FROM template_exercise
+      WHERE template_id = ?
+      ORDER BY ordering ASC`,
+    args.source_template_id
+  );
+
+  type SrcSetRow = {
+    id: string;
+    template_exercise_id: string;
+    position: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    reps: number;
+    weight: number;
+    parent_set_id: string | null;
+    notes: string | null;
+  };
+  const setRows =
+    exRows.length === 0
+      ? []
+      : await db.getAllAsync<SrcSetRow>(
+          `SELECT ts.id, ts.template_exercise_id, ts.position, ts.set_kind,
+                  ts.reps, ts.weight, ts.parent_set_id, ts.notes
+             FROM template_set ts
+             JOIN template_exercise te ON te.id = ts.template_exercise_id
+            WHERE te.template_id = ?
+            ORDER BY ts.template_exercise_id, ts.position ASC`,
+          args.source_template_id
+        );
+
+  // Step 4: pre-compute id remaps (old → new).
+  const newTemplateId = args.uuid();
+  const exIdRemap = new Map<string, string>();
+  for (const r of exRows) {
+    exIdRemap.set(r.id, args.uuid());
+  }
+  const setIdRemap = new Map<string, string>();
+  for (const r of setRows) {
+    setIdRemap.set(r.id, args.uuid());
+  }
+
+  // Step 5: run the clone in one transaction.
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      newTemplateId,
+      source.name,
+      ts,
+      ts,
+      args.new_program_id,
+      args.new_sub_tag
+    );
+
+    // template_exercise rows — remap id + parent_id.
+    for (const r of exRows) {
+      const newExId = exIdRemap.get(r.id)!;
+      const remappedParentId =
+        r.parent_id != null ? exIdRemap.get(r.parent_id) ?? null : null;
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        newExId,
+        newTemplateId,
+        r.exercise_id,
+        r.ordering,
+        r.default_sets,
+        r.default_reps,
+        r.default_weight_kg,
+        r.is_evergreen,
+        remappedParentId,
+        r.rest_seconds,
+        r.reusable_superset_id,
+        ts
+      );
+    }
+
+    // template_set rows — two-pass to satisfy FK on parent_set_id (some
+    // dropset followers may point to a set inserted later in the loop).
+    // Pass 1: insert with parent_set_id = NULL.
+    for (const r of setRows) {
+      const newSetId = setIdRemap.get(r.id)!;
+      const newExId = exIdRemap.get(r.template_exercise_id);
+      if (!newExId) continue; // dangling — shouldn't happen, defensive.
+      await db.runAsync(
+        `INSERT INTO template_set
+           (id, template_exercise_id, position, set_kind, reps, weight,
+            parent_set_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+        newSetId,
+        newExId,
+        r.position,
+        r.set_kind,
+        r.reps,
+        r.weight,
+        r.notes
+      );
+    }
+    // Pass 2: rewrite parent_set_id for dropset followers.
+    for (const r of setRows) {
+      if (r.parent_set_id == null) continue;
+      const newSetId = setIdRemap.get(r.id);
+      const newParentId = setIdRemap.get(r.parent_set_id);
+      if (!newSetId || !newParentId) continue;
+      await db.runAsync(
+        `UPDATE template_set SET parent_set_id = ? WHERE id = ?`,
+        newParentId,
+        newSetId
+      );
+    }
+  });
+
+  return newTemplateId;
 }
 
 /**

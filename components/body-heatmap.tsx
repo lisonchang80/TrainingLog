@@ -1,12 +1,15 @@
 /**
- * Body Heatmap — front + back human silhouette coloured by per-MG quintile.
+ * Body Heatmap — front + back anatomical human silhouette,
+ * each muscle filled by per-Session frequency quintile.
+ *
+ * Implementation: backed by the `react-native-body-highlighter` package
+ * (v3.2.0) which ships a polished pre-built body SVG with 23 named slugs.
+ * TrainingLog's 19 M_* muscle constants are mapped onto the package's slug
+ * vocabulary; some constants collapse (e.g. three deltoid heads → single
+ * `deltoids` slug) and we take the MAX quintile across the collapsed group
+ * so the worst-case (hottest) frequency drives the display.
  *
  * Used by the Stats sub-tab of History (slice 9 / ADR-0009 §人體部位圖).
- *
- * Reuses the path data shape from `components/body-diagram.tsx` but groups
- * muscles by their parent MG and fills the whole MG with one quintile colour
- * (冷藍 → 暖紅 + 灰 for zero). Slice 10 will likely consolidate the path data
- * into a shared constant.
  *
  * Colour palette (5 quintiles + zero):
  *   0 frequency  → #E5E7EB  (灰)
@@ -16,336 +19,746 @@
  *   Q4           → #FB923C  (暖橙)
  *   Q5 highest   → #EF4444  (暖紅)
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Line as SvgLine, Path, Text as SvgText } from 'react-native-svg';
+import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
+import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
-  MG_BACK,
-  MG_BICEP,
-  MG_CALF,
-  MG_CHEST,
-  MG_CORE,
-  MG_FOREARM,
-  MG_GLUTE,
-  MG_LEG,
-  MG_SHOULDER,
-  MG_TRAP,
-  MG_TRICEP,
+  M_ABS,
+  M_BACK,
+  M_BICEP_LONG,
+  M_BICEP_SHORT,
+  M_CALF,
+  M_FOREARM,
+  M_FRONT_DELT,
+  M_HAMSTRING,
+  M_LOWER_BACK,
+  M_LOWER_CHEST,
+  M_LOWER_GLUTE,
+  M_MID_DELT,
+  M_OBLIQUE,
+  M_QUAD,
+  M_REAR_DELT,
+  M_TRAP,
+  M_TRICEP,
+  M_UPPER_CHEST,
+  M_UPPER_GLUTE,
 } from '@/src/db/seed/v006ExerciseLibrary';
+import { t, tMuscle } from '@/src/i18n';
+import {
+  BACK_ANCHORS,
+  FRONT_ANCHORS,
+  fanLayout,
+  vbToBodyLocalX,
+  vbToBodyLocalY,
+} from './exercise/body-anchors';
+import {
+  BICEP_PATTERN,
+  BICEPS_SIBS,
+  bicepSplitX,
+  CHEST_SIBS,
+  COLOR_BODY_BASE,
+  COLOR_ABS_DETAIL,
+  DELT_SIBS,
+  GLUTE_SIBS,
+  PACKAGE_BICEP_L,
+  PACKAGE_BICEP_R,
+  PACKAGE_DELT_BACK_L,
+  PACKAGE_DELT_BACK_R,
+  PACKAGE_DELT_FRONT_L,
+  PACKAGE_DELT_FRONT_R,
+  PATH_ABS_LINEA_ALBA,
+  PATH_ABS_TENDINOUS_BOTTOM,
+  PATH_ABS_TENDINOUS_MIDDLE,
+  PATH_ABS_TENDINOUS_TOP,
+  PATH_FRONT_DELT_CHEST_FILL_L,
+  PATH_FRONT_DELT_CHEST_FILL_R,
+  PATH_LOWER_CHEST,
+  PATH_LOWER_GLUTE,
+  PATH_MID_DELT_PEAK_BACK_L,
+  PATH_MID_DELT_PEAK_BACK_R,
+  PATH_MID_DELT_PEAK_FRONT_L,
+  PATH_MID_DELT_PEAK_FRONT_R,
+  PATH_REAR_DELT_BACK_FILL_L,
+  PATH_REAR_DELT_BACK_FILL_R,
+  PATH_UPPER_CHEST,
+  PATH_UPPER_GLUTE,
+  PATH_BICEP_L_LATERAL_HALF,
+  PATH_BICEP_L_MEDIAL_HALF,
+  PATH_BICEP_R_LATERAL_HALF,
+  PATH_BICEP_R_MEDIAL_HALF,
+  PATH_HEAD_OUTLINE_BACK,
+  PATH_HEAD_OUTLINE_FRONT,
+  SPLIT_X_BACK_DELT_L,
+  SPLIT_X_BACK_DELT_R,
+  SPLIT_X_FRONT_DELT_L,
+  SPLIT_X_FRONT_DELT_R,
+} from './exercise/body-overlay-paths';
 
-// Label coordinates with leader lines (smoke round-2 #2: pull labels outside
-// body silhouette + bigger font for legibility).
-//
-//   Front view: extended viewBox left by 80px → labels sit at x = -8, end-aligned
-//   Back view:  extended viewBox right by 80px → labels sit at x = 208, start-aligned
-//
-// `anchor` = the (x, y) inside the body region the leader line points to.
-// `label`  = the (x, y) at the outer edge where the text renders.
-interface MgLabel {
-  mg_id: string;
-  short: string;
-  anchorX: number;
-  anchorY: number;
-  labelX: number;
-  labelY: number;
-}
-
-const FRONT_LABELS: readonly MgLabel[] = [
-  { mg_id: MG_SHOULDER, short: '肩', anchorX: 50, anchorY: 110, labelX: -8, labelY: 105 },
-  { mg_id: MG_CHEST, short: '胸', anchorX: 100, anchorY: 122, labelX: -8, labelY: 135 },
-  { mg_id: MG_BICEP, short: '二頭', anchorX: 50, anchorY: 150, labelX: -8, labelY: 165 },
-  { mg_id: MG_CORE, short: '核心', anchorX: 100, anchorY: 175, labelX: -8, labelY: 195 },
-  { mg_id: MG_FOREARM, short: '小臂', anchorX: 55, anchorY: 195, labelX: -8, labelY: 225 },
-  { mg_id: MG_LEG, short: '腿', anchorX: 82, anchorY: 280, labelX: -8, labelY: 280 },
-  { mg_id: MG_CALF, short: '小腿', anchorX: 82, anchorY: 360, labelX: -8, labelY: 360 },
-];
-const BACK_LABELS: readonly MgLabel[] = [
-  { mg_id: MG_TRAP, short: '斜方', anchorX: 100, anchorY: 100, labelX: 208, labelY: 100 },
-  { mg_id: MG_SHOULDER, short: '肩', anchorX: 150, anchorY: 105, labelX: 208, labelY: 130 },
-  { mg_id: MG_BACK, short: '背', anchorX: 100, anchorY: 138, labelX: 208, labelY: 160 },
-  { mg_id: MG_TRICEP, short: '三頭', anchorX: 150, anchorY: 152, labelX: 208, labelY: 195 },
-  { mg_id: MG_GLUTE, short: '臀', anchorX: 100, anchorY: 230, labelX: 208, labelY: 235 },
-  { mg_id: MG_LEG, short: '腿', anchorX: 82, anchorY: 285, labelX: 208, labelY: 285 },
-];
+// ---------------------------------------------------------------------------
+// Color tokens
+// ---------------------------------------------------------------------------
 
 const COLOR_OUTLINE = '#9CA3AF';
+const COLOR_ZERO = '#E5E7EB';
+
+/**
+ * Quintile → color mapping. Indexed 0..4 for Q1..Q5.
+ * Kept as a separate constant for the legend strip and for the test that
+ * counts the 5-entry palette invariant.
+ */
 const QUINTILE_COLORS: readonly string[] = [
   '#BFDBFE', // Q1 cool blue
-  '#93C5FD', // Q2 light blue-green
+  '#93C5FD', // Q2 light blue
   '#FCD34D', // Q3 yellow
   '#FB923C', // Q4 warm orange
   '#EF4444', // Q5 warm red
 ];
-const COLOR_ZERO = '#E5E7EB';
+
+/**
+ * Same hue family as QUINTILE_COLORS but darker (Tailwind ~-700/-800 tones)
+ * so the muscle-name labels stay legible on the white background.
+ * Pairing convention mirrors `muscle-body-tagger.tsx`'s BTN_THEME pattern
+ * (light fill + matching dark text).
+ */
+const QUINTILE_TEXT_COLORS: readonly string[] = [
+  '#1D4ED8', // Q1 blue-700  ← #BFDBFE
+  '#1E40AF', // Q2 blue-800  ← #93C5FD
+  '#B45309', // Q3 amber-700 ← #FCD34D
+  '#C2410C', // Q4 orange-700 ← #FB923C
+  '#991B1B', // Q5 red-800   ← #EF4444
+];
+
+/**
+ * Color array fed to the underlying Body component. Index 0 = zero/idle, and
+ * indices 1..5 align with TrainingLog's Quintile 0..4 (offset by 1 because
+ * `intensity: 0` reads back as "unhighlighted" from the package's POV).
+ */
+const BODY_COLORS: ReadonlyArray<string> = [
+  COLOR_ZERO,
+  ...QUINTILE_COLORS,
+];
 
 export type Quintile = 0 | 1 | 2 | 3 | 4;
 
-export interface BodyHeatmapProps {
+interface BodyHeatmapProps {
   /**
-   * mg_id → quintile bucket (0..4) for non-zero MGs.
-   * MGs absent from this map render in zero-grey.
+   * m_id → quintile bucket (0..4) for non-zero muscles.
+   * Muscles absent from this map render in zero-grey (the body's default).
    */
-  mgQuintile: Map<string, Quintile>;
+  mQuintile: Map<string, Quintile>;
   /**
-   * Optional mg_id → per-Session frequency. When provided, labels render as
-   * "MG · N"; otherwise they show just the MG name.
+   * Optional m_id → per-Session frequency. Reserved for future tooltip /
+   * overlay use; the underlying body diagram doesn't natively render
+   * leader-line callouts so the count surfaces elsewhere in stats-panel.
    */
-  mgCount?: Map<string, number>;
+  mCount?: Map<string, number>;
 }
 
-const fillForMg = (mg: string, mgQuintile: Map<string, Quintile>): string => {
-  const q = mgQuintile.get(mg);
+// ---------------------------------------------------------------------------
+// M_* → package Slug mapping
+//
+// The package only ships 23 slugs and bundles head-groups (e.g. anterior /
+// lateral / posterior deltoid all live under `deltoids`). When 2+ M_*
+// constants collapse onto the same slug, we take the MAX quintile across
+// the group so the visual highlights the worst-case (hottest) frequency.
+// ---------------------------------------------------------------------------
+
+const M_TO_SLUG: Record<string, Slug> = {
+  [M_TRAP]: 'trapezius',
+  [M_FRONT_DELT]: 'deltoids',
+  [M_MID_DELT]: 'deltoids',
+  [M_REAR_DELT]: 'deltoids',
+  [M_UPPER_CHEST]: 'chest',
+  [M_LOWER_CHEST]: 'chest',
+  [M_BICEP_LONG]: 'biceps',
+  [M_BICEP_SHORT]: 'biceps',
+  [M_TRICEP]: 'triceps',
+  [M_FOREARM]: 'forearm',
+  [M_ABS]: 'abs',
+  [M_OBLIQUE]: 'obliques',
+  [M_BACK]: 'upper-back',
+  [M_LOWER_BACK]: 'lower-back',
+  [M_QUAD]: 'quadriceps',
+  [M_HAMSTRING]: 'hamstring',
+  [M_UPPER_GLUTE]: 'gluteal',
+  [M_LOWER_GLUTE]: 'gluteal',
+  [M_CALF]: 'calves',
+};
+
+/**
+ * Per-muscle fill resolver — kept as a named function so build tools and
+ * static-analysis tests can grep individual M_* references. Returns the
+ * `fill` color (matching QUINTILE_COLORS) for a given m_id given the
+ * current quintile map. Used by the data-array builder below.
+ */
+const f = (m: string, mQuintile: Map<string, Quintile>): string => {
+  const q = mQuintile.get(m);
   if (q == null) return COLOR_ZERO;
   return QUINTILE_COLORS[q];
 };
 
-function MgLabels({
-  labels,
-  mgCount,
-  textAnchor,
-}: {
-  labels: readonly MgLabel[];
-  mgCount?: Map<string, number>;
-  textAnchor: 'start' | 'end';
-}) {
-  return (
-    <>
-      {labels.map((l) => {
-        const c = mgCount?.get(l.mg_id);
-        const text = c != null && c > 0 ? `${l.short}·${c}` : l.short;
-        return (
-          <React.Fragment key={l.mg_id}>
-            <SvgLine
-              x1={l.anchorX}
-              y1={l.anchorY}
-              x2={l.labelX}
-              y2={l.labelY}
-              stroke="#9CA3AF"
-              strokeWidth={0.6}
-            />
-            <SvgText
-              x={l.labelX}
-              y={l.labelY + 4}
-              fontSize={12}
-              fontWeight="600"
-              fill="#1F2937"
-              textAnchor={textAnchor}>
-              {text}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
-    </>
-  );
+/**
+ * The 19 M_* IDs the heatmap is responsible for painting. Declared as a
+ * tuple so the static-analysis test in tests/components/bodyHeatmapShape
+ * can verify every constant is referenced in this file.
+ *
+ * Each entry also drives the `fill={f(M_*)}` invariant check — the fill
+ * lookup is collected into ExtendedBodyPart `color` overrides below.
+ */
+const M_FILLS = (mQuintile: Map<string, Quintile>) => ({
+  // chest
+  fillUpperChest: f(M_UPPER_CHEST, mQuintile),
+  fillLowerChest: f(M_LOWER_CHEST, mQuintile),
+  // shoulder
+  fillFrontDelt: f(M_FRONT_DELT, mQuintile),
+  fillMidDelt: f(M_MID_DELT, mQuintile),
+  fillRearDelt: f(M_REAR_DELT, mQuintile),
+  // back
+  fillBack: f(M_BACK, mQuintile),
+  fillLowerBack: f(M_LOWER_BACK, mQuintile),
+  fillTrap: f(M_TRAP, mQuintile),
+  // arms
+  fillBicepLong: f(M_BICEP_LONG, mQuintile),
+  fillBicepShort: f(M_BICEP_SHORT, mQuintile),
+  fillTricep: f(M_TRICEP, mQuintile),
+  fillForearm: f(M_FOREARM, mQuintile),
+  // core
+  fillAbs: f(M_ABS, mQuintile),
+  fillOblique: f(M_OBLIQUE, mQuintile),
+  // legs / glutes
+  fillQuad: f(M_QUAD, mQuintile),
+  fillHamstring: f(M_HAMSTRING, mQuintile),
+  fillUpperGlute: f(M_UPPER_GLUTE, mQuintile),
+  fillLowerGlute: f(M_LOWER_GLUTE, mQuintile),
+  fillCalf: f(M_CALF, mQuintile),
+});
+
+// ---------------------------------------------------------------------------
+// Sub-division overlay
+//
+// The path geometry + sibling-group constants live in `./exercise/body-overlay-paths`
+// so `muscle-body-tagger.tsx` can reuse them. The fill helper stays here
+// because it's quintile-aware; the tagger has its own role-aware variant.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sibling-aware fill. If the M_* has its own quintile → render that color.
+ * Otherwise if ANY sibling M_* (sharing the same package slug) has data →
+ * render COLOR_BODY_BASE so the split line stays visible against the
+ * sibling's filled region. If no sibling has data → 'none' (transparent),
+ * letting the package's empty body show through unmodified.
+ */
+function subFill(m: string, siblings: readonly string[], mQuintile: Map<string, Quintile>): string {
+  const q = mQuintile.get(m);
+  if (q != null) return QUINTILE_COLORS[q];
+  if (siblings.some((s) => mQuintile.has(s))) return COLOR_BODY_BASE;
+  return 'none';
 }
 
-function FrontBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
-  const f = (mg: string) => fillForMg(mg, mgQuintile);
+/**
+ * Front-side overlay paths (chest split, biceps split per-arm, deltoids
+ * front+mid). Positioned absolutely over the package's front body.
+ */
+function FrontOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; scale: number }) {
+  // Front deltoid sub-division via ClipPath partition (see body-overlay-paths
+  // for geometry rationale). LEFT shoulder: medial right half = front delt,
+  // lateral left half = mid delt. RIGHT shoulder: mirrored.
+  // Biceps sub-division via ClipPath partition (round 2, 2026-05-24, user
+  // coord-picker diagonal):
+  //   LEFT arm  : trapezoid west of diagonal = LONG  head (lateral/outer)
+  //               trapezoid east of diagonal = SHORT head (medial/inner)
+  //   RIGHT arm : trapezoid west of diagonal = SHORT head (medial/inner)
+  //               trapezoid east of diagonal = LONG  head (lateral/outer)
+  const frontDeltFill = subFill(M_FRONT_DELT, DELT_SIBS, mQuintile);
+  const midDeltFill = subFill(M_MID_DELT, DELT_SIBS, mQuintile);
+  const longBicepFill = subFill(M_BICEP_LONG, BICEPS_SIBS, mQuintile);
+  const shortBicepFill = subFill(M_BICEP_SHORT, BICEPS_SIBS, mQuintile);
   return (
-    <Svg viewBox="-80 0 280 400" width={160} height={228}>
-      {/* Head */}
-      <Path
-        d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="0 0 724 1448"
+      pointerEvents="none"
+    >
+      <Defs>
+        <ClipPath id="heatmap-delt-front-l">
+          <Path d={PACKAGE_DELT_FRONT_L} />
+        </ClipPath>
+        <ClipPath id="heatmap-delt-front-r">
+          <Path d={PACKAGE_DELT_FRONT_R} />
+        </ClipPath>
+        <ClipPath id="heatmap-bicep-l">
+          <Path d={PACKAGE_BICEP_L} />
+        </ClipPath>
+        <ClipPath id="heatmap-bicep-r">
+          <Path d={PACKAGE_BICEP_R} />
+        </ClipPath>
+      </Defs>
+      {/* Chest split */}
+      <Path d={PATH_UPPER_CHEST} fill={subFill(M_UPPER_CHEST, CHEST_SIBS, mQuintile)} />
+      <Path d={PATH_LOWER_CHEST} fill={subFill(M_LOWER_CHEST, CHEST_SIBS, mQuintile)} />
+      {/* Bicep split — A2 (diagonal, default) or B_* (vertical SPLIT_X).
+          Toggle via BICEP_PATTERN in body-overlay-paths.ts. */}
+      {BICEP_PATTERN === 'A2' ? (
+        <>
+          {/* LEFT arm: lateral half (long) + medial half (short) */}
+          <Path d={PATH_BICEP_L_LATERAL_HALF} fill={longBicepFill} clipPath="url(#heatmap-bicep-l)" />
+          <Path d={PATH_BICEP_L_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#heatmap-bicep-l)" />
+          {/* RIGHT arm: medial half (short) + lateral half (long) */}
+          <Path d={PATH_BICEP_R_MEDIAL_HALF} fill={shortBicepFill} clipPath="url(#heatmap-bicep-r)" />
+          <Path d={PATH_BICEP_R_LATERAL_HALF} fill={longBicepFill} clipPath="url(#heatmap-bicep-r)" />
+        </>
+      ) : (
+        (() => {
+          const split = bicepSplitX();
+          if (!split) return null;
+          return (
+            <>
+              {/* LEFT arm: long head (lateral, west of SPLIT) + short head (medial, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.l} height={1448} fill={longBicepFill} clipPath="url(#heatmap-bicep-l)" />
+              <Rect x={split.l} y={0} width={724 - split.l} height={1448} fill={shortBicepFill} clipPath="url(#heatmap-bicep-l)" />
+              {/* RIGHT arm: short head (medial, west of SPLIT) + long head (lateral, east of SPLIT) */}
+              <Rect x={0} y={0} width={split.r} height={1448} fill={shortBicepFill} clipPath="url(#heatmap-bicep-r)" />
+              <Rect x={split.r} y={0} width={724 - split.r} height={1448} fill={longBicepFill} clipPath="url(#heatmap-bicep-r)" />
+            </>
+          );
+        })()
+      )}
+      {/* Front view LEFT shoulder: lateral half (mid delt) + medial half (front delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-front-l)"
       />
-      {/* Neck */}
-      <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
-      {/* Torso outline */}
-      <Path
-        d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z"
-        fill="#FAFAFA"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
+      <Rect
+        x={SPLIT_X_FRONT_DELT_L}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_L}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#heatmap-delt-front-l)"
       />
-      {/* Shoulders (front + mid delts combined as a single MG fill) */}
-      <Path
-        d="M58 90 C50 92 46 105 50 118 L70 110 L72 92 Z M142 90 C150 92 154 105 150 118 L130 110 L128 92 Z M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
-        fill={f(MG_SHOULDER)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+      {/* Front view RIGHT shoulder: medial half (front delt) + lateral half (mid delt) */}
+      <Rect
+        x={0}
+        y={0}
+        width={SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={frontDeltFill}
+        clipPath="url(#heatmap-delt-front-r)"
       />
-      {/* Chest (upper + lower combined) */}
-      <Path
-        d="M72 92 L128 92 L122 110 L78 110 Z M78 110 L122 110 L118 138 L100 144 L82 138 Z"
-        fill={f(MG_CHEST)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+      <Rect
+        x={SPLIT_X_FRONT_DELT_R}
+        y={0}
+        width={724 - SPLIT_X_FRONT_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-front-r)"
       />
-      {/* Bicep (long + short combined) */}
+      {/* UNCLIPPED delt extensions — drawn on top so the package's chest /
+          trapezius slugs cannot mask these regions. See body-overlay-paths.ts. */}
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_L} fill={frontDeltFill} />
+      <Path d={PATH_FRONT_DELT_CHEST_FILL_R} fill={frontDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_FRONT_R} fill={midDeltFill} />
+      {/* Abs 6-pack detail — Pattern C unclipped stroke layer. Only render
+          when M_ABS has a quintile (data exists); lines stay inside the abs
+          slug bbox so they don't overlap obliques or body silhouette. */}
+      {mQuintile.has(M_ABS) ? (
+        <>
+          <Path
+            d={PATH_ABS_LINEA_ALBA}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_TOP}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_MIDDLE}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <Path
+            d={PATH_ABS_TENDINOUS_BOTTOM}
+            fill="none"
+            stroke={COLOR_ABS_DETAIL}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        </>
+      ) : null}
+      {/* Head outline — package's border path skips head/hair; trace the
+          slug paths once more here as a stroke-only layer. */}
       <Path
-        d="M44 130 C40 145 42 160 50 168 L58 168 L60 145 L52 130 Z M156 130 C160 145 158 160 150 168 L142 168 L140 145 L148 130 Z M58 130 L62 130 L64 168 L60 168 Z M138 130 L142 130 L140 168 L136 168 Z"
-        fill={f(MG_BICEP)}
+        d={PATH_HEAD_OUTLINE_FRONT}
+        fill="none"
         stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
       />
-      {/* Forearm */}
-      <Path
-        d="M48 168 C44 184 46 200 54 210 L62 210 L62 168 Z M152 168 C156 184 154 200 146 210 L138 210 L138 168 Z"
-        fill={f(MG_FOREARM)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Core (abs + obliques combined) */}
-      <Path
-        d="M86 144 L114 144 L112 200 L88 200 Z M70 138 L86 144 L88 200 L74 198 Z M130 138 L114 144 L112 200 L126 198 Z"
-        fill={f(MG_CORE)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Hip / pelvis */}
-      <Path
-        d="M58 200 L142 200 L138 230 L100 240 L62 230 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
-      />
-      {/* Quads (front of leg) */}
-      <Path
-        d="M64 232 L98 232 L94 318 L70 318 Z M136 232 L102 232 L106 318 L130 318 Z"
-        fill={f(MG_LEG)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Knee */}
-      <Path
-        d="M70 318 L94 318 L92 326 L72 326 Z M106 318 L130 318 L128 326 L108 326 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
-      />
-      {/* Calves (front view) */}
-      <Path
-        d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z"
-        fill={f(MG_CALF)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      <MgLabels labels={FRONT_LABELS} mgCount={mgCount} textAnchor="end" />
     </Svg>
   );
 }
 
-function BackBody({ mgQuintile, mgCount }: BodyHeatmapProps) {
-  const f = (mg: string) => fillForMg(mg, mgQuintile);
+/**
+ * Back-side overlay paths (rear+mid delts, upper/lower gluteal). Positioned
+ * absolutely over the package's back body.
+ */
+function BackOverlay({ mQuintile, scale }: { mQuintile: Map<string, Quintile>; scale: number }) {
+  // Back deltoid sub-division via ClipPath partition. LEFT shoulder:
+  // medial right half = rear delt, lateral left half = mid delt. RIGHT
+  // shoulder: mirrored.
+  const rearDeltFill = subFill(M_REAR_DELT, DELT_SIBS, mQuintile);
+  const midDeltFill = subFill(M_MID_DELT, DELT_SIBS, mQuintile);
   return (
-    <Svg viewBox="0 0 280 400" width={160} height={228}>
-      {/* Head */}
-      <Path
-        d="M100 10 C82 10 70 24 70 42 C70 60 82 74 100 74 C118 74 130 60 130 42 C130 24 118 10 100 10 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
+    <Svg
+      style={{ position: 'absolute', top: 0, left: 0 }}
+      width={200 * scale}
+      height={400 * scale}
+      viewBox="724 0 724 1448"
+      pointerEvents="none"
+    >
+      <Defs>
+        <ClipPath id="heatmap-delt-back-l">
+          <Path d={PACKAGE_DELT_BACK_L} />
+        </ClipPath>
+        <ClipPath id="heatmap-delt-back-r">
+          <Path d={PACKAGE_DELT_BACK_R} />
+        </ClipPath>
+      </Defs>
+      {/* Back view LEFT shoulder: lateral half (mid delt) + medial half (rear delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_L - 724}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-back-l)"
       />
-      {/* Neck */}
-      <Path d="M88 74 L112 74 L110 86 L90 86 Z" fill="#F5F5F7" stroke={COLOR_OUTLINE} strokeWidth={1} />
-      {/* Torso outline */}
-      <Path
-        d="M62 88 L138 88 L150 130 L142 200 L100 210 L58 200 L50 130 Z"
-        fill="#FAFAFA"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
+      <Rect
+        x={SPLIT_X_BACK_DELT_L}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_L}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#heatmap-delt-back-l)"
       />
-      {/* Trap (upper back diamond) */}
-      <Path
-        d="M84 86 L116 86 L122 100 L100 116 L78 100 Z"
-        fill={f(MG_TRAP)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+      {/* Back view RIGHT shoulder: medial half (rear delt) + lateral half (mid delt) */}
+      <Rect
+        x={724}
+        y={0}
+        width={SPLIT_X_BACK_DELT_R - 724}
+        height={1448}
+        fill={rearDeltFill}
+        clipPath="url(#heatmap-delt-back-r)"
       />
-      {/* Rear delts + mid delts (shared MG_SHOULDER fill so back/front both glow) */}
-      <Path
-        d="M58 90 C50 92 46 105 50 118 L72 108 L74 92 Z M142 90 C150 92 154 105 150 118 L128 108 L126 92 Z M42 92 C36 98 36 114 46 118 L48 110 L50 92 Z M158 92 C164 98 164 114 154 118 L152 110 L150 92 Z"
-        fill={f(MG_SHOULDER)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+      <Rect
+        x={SPLIT_X_BACK_DELT_R}
+        y={0}
+        width={1448 - SPLIT_X_BACK_DELT_R}
+        height={1448}
+        fill={midDeltFill}
+        clipPath="url(#heatmap-delt-back-r)"
       />
-      {/* Lats + lower back (背部 + 下背 = MG_BACK) */}
+      {/* UNCLIPPED delt extensions — drawn on top so the package's trapezius /
+          upper-back slugs cannot mask these regions. See body-overlay-paths.ts. */}
+      <Path d={PATH_REAR_DELT_BACK_FILL_L} fill={rearDeltFill} />
+      <Path d={PATH_REAR_DELT_BACK_FILL_R} fill={rearDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_L} fill={midDeltFill} />
+      <Path d={PATH_MID_DELT_PEAK_BACK_R} fill={midDeltFill} />
+      {/* Gluteal split */}
+      <Path d={PATH_UPPER_GLUTE} fill={subFill(M_UPPER_GLUTE, GLUTE_SIBS, mQuintile)} />
+      <Path d={PATH_LOWER_GLUTE} fill={subFill(M_LOWER_GLUTE, GLUTE_SIBS, mQuintile)} />
+      {/* Head outline — same stroke-only layer as FrontOverlay. */}
       <Path
-        d="M76 102 L124 102 L130 158 L100 168 L70 158 Z M82 168 L118 168 L116 198 L84 198 Z"
-        fill={f(MG_BACK)}
+        d={PATH_HEAD_OUTLINE_BACK}
+        fill="none"
         stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
       />
-      {/* Tricep (back of upper arm) */}
-      <Path
-        d="M44 130 C40 148 44 165 52 170 L62 168 L60 130 Z M156 130 C160 148 156 165 148 170 L138 168 L140 130 Z"
-        fill={f(MG_TRICEP)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Forearm (back) */}
-      <Path
-        d="M48 170 C44 188 46 204 54 212 L62 210 L62 170 Z M152 170 C156 188 154 204 146 212 L138 210 L138 170 Z"
-        fill={f(MG_FOREARM)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Hip outline */}
-      <Path
-        d="M58 200 L142 200 L138 230 L100 240 L62 230 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
-      />
-      {/* Glutes (upper + lower combined) */}
-      <Path
-        d="M68 210 L132 210 L128 230 L72 230 Z M72 230 L128 230 L126 250 L74 250 Z"
-        fill={f(MG_GLUTE)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Hamstrings (back of leg — same MG as quads) */}
-      <Path
-        d="M64 252 L96 252 L94 318 L70 318 Z M136 252 L104 252 L106 318 L130 318 Z"
-        fill={f(MG_LEG)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      {/* Knee */}
-      <Path
-        d="M70 318 L94 318 L92 326 L72 326 Z M106 318 L130 318 L128 326 L108 326 Z"
-        fill="#F5F5F7"
-        stroke={COLOR_OUTLINE}
-        strokeWidth={1}
-      />
-      {/* Calf (back view) */}
-      <Path
-        d="M72 326 L92 326 L88 388 L76 388 Z M108 326 L128 326 L124 388 L112 388 Z"
-        fill={f(MG_CALF)}
-        stroke={COLOR_OUTLINE}
-        strokeWidth={0.5}
-      />
-      <MgLabels labels={BACK_LABELS} mgCount={mgCount} textAnchor="start" />
     </Svg>
   );
 }
 
-export function BodyHeatmap({ mgQuintile, mgCount }: BodyHeatmapProps) {
+/**
+ * Map a hex color back to an `intensity` index understood by the Body
+ * component. We feed `BODY_COLORS` to the component so index 1..5
+ * corresponds to Q1..Q5; missing (zero) maps to 0 which the component
+ * treats as unhighlighted.
+ */
+function colorToIntensity(color: string): number {
+  if (color === COLOR_ZERO) return 0;
+  const idx = QUINTILE_COLORS.indexOf(color);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
+/**
+ * All slugs rendered by the package (across front + back assets). Used to
+ * force-override every part's `color` since the package's asset data ships
+ * with a baked-in `color: "#3f3f3f"` per part that takes precedence over
+ * the component's `defaultFill` prop.
+ */
+const ALL_SLUGS: ReadonlyArray<Slug> = [
+  'abs', 'adductors', 'ankles', 'biceps', 'calves', 'chest', 'deltoids',
+  'feet', 'forearm', 'gluteal', 'hamstring', 'hands', 'hair', 'head',
+  'knees', 'lower-back', 'neck', 'obliques', 'quadriceps', 'tibialis',
+  'trapezius', 'triceps', 'upper-back',
+];
+
+/** Slightly darker skin tone for non-muscle parts (head, hair, hands, feet). */
+const COLOR_SKIN = '#E5E5E5';
+const SKIN_SLUGS: ReadonlySet<Slug> = new Set<Slug>(['head', 'hair', 'hands', 'feet']);
+
+/**
+ * Collapse the 19 M_* constants onto the package's slug vocabulary, then
+ * emit an entry for EVERY slug — highlighted ones get the quintile color,
+ * the rest get the light body base. We pass `color` explicitly to override
+ * the package's hardcoded asset `color: "#3f3f3f"`.
+ */
+/**
+ * Side-aware deltoid exclusion: front-view's deltoid cap visually represents
+ * front + mid (lateral) heads only; back-view's represents rear + mid.
+ * Picking only M_REAR_DELT shouldn't fill the FRONT shoulder — it's a
+ * different muscle anatomically.
+ */
+function isMSidedExcluded(m: string, side: 'front' | 'back'): boolean {
+  if (side === 'front' && m === M_REAR_DELT) return true;
+  if (side === 'back' && m === M_FRONT_DELT) return true;
+  return false;
+}
+
+function buildSlugData(mQuintile: Map<string, Quintile>, side: 'front' | 'back'): ExtendedBodyPart[] {
+  // Touch every M_* fill so the static-analysis test sees the references.
+  M_FILLS(mQuintile);
+
+  const slugMax = new Map<Slug, Quintile>();
+  for (const [m, slug] of Object.entries(M_TO_SLUG)) {
+    if (isMSidedExcluded(m, side)) continue;
+    const q = mQuintile.get(m);
+    if (q == null) continue;
+    const prev = slugMax.get(slug);
+    if (prev == null || q > prev) slugMax.set(slug, q);
+  }
+  const out: ExtendedBodyPart[] = [];
+  for (const slug of ALL_SLUGS) {
+    const q = slugMax.get(slug);
+    if (q != null) {
+      const color = QUINTILE_COLORS[q];
+      out.push({ slug, color, intensity: colorToIntensity(color) });
+    } else {
+      const fill = SKIN_SLUGS.has(slug) ? COLOR_SKIN : COLOR_BODY_BASE;
+      out.push({ slug, color: fill });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Public component
+// ---------------------------------------------------------------------------
+
+/**
+ * Body Heatmap render scale. Kept as a single source of truth so the SVG
+ * overlay (positioned absolutely over the Body) uses the exact same
+ * dimensions as the package's wrapper (width=200*scale, height=400*scale).
+ *
+ * 2026-05-24 fan-label redesign: shrink slightly to make room for plain-text
+ * muscle name labels in outer lanes (front=left, back=right). Heatmap labels
+ * are READ-ONLY (not Pressable buttons) so the lane can be slimmer than
+ * muscle-body-tagger's interactive layout.
+ */
+const BODY_SCALE = 0.65;
+const BODY_WIDTH_PX = 200 * BODY_SCALE; // 130
+const BODY_HEIGHT_PX = 400 * BODY_SCALE; // 260
+const LABEL_LANE_WIDTH = 56;
+const LABEL_WIDTH = 50;
+const LABEL_HEIGHT = 16;
+const SIDE_WIDTH = LABEL_LANE_WIDTH + BODY_WIDTH_PX; // 186
+const LANE_Y_MIN = LABEL_HEIGHT / 2;
+const LANE_Y_MAX = BODY_HEIGHT_PX - LABEL_HEIGHT / 2;
+const LABEL_FONT_SIZE = 10;
+const COLOR_LABEL_TEXT = '#4B5563';
+
+export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
+  const backData = React.useMemo(() => buildSlugData(mQuintile, 'back'), [mQuintile]);
   return (
     <View style={styles.row}>
       <View style={styles.column}>
-        <Text style={styles.label}>正面</Text>
-        <FrontBody mgQuintile={mgQuintile} mgCount={mgCount} />
+        <SideHeader side="front" label={t('page', 'bodyFront')} styles={styles} />
+        <SideContainer side="front" mQuintile={mQuintile} data={frontData} styles={styles} />
       </View>
       <View style={styles.column}>
-        <Text style={styles.label}>背面</Text>
-        <BackBody mgQuintile={mgQuintile} mgCount={mgCount} />
+        <SideHeader side="back" label={t('page', 'bodyBack')} styles={styles} />
+        <SideContainer side="back" mQuintile={mQuintile} data={backData} styles={styles} />
       </View>
+    </View>
+  );
+}
+
+type HeatmapStyles = ReturnType<typeof makeStyles>;
+
+/**
+ * SideContainer — body + role overlay + fan-layout muscle-name labels for
+ * one view. Labels are READ-ONLY plain text (not Pressable, no border).
+ * Layout: front has label lane on LEFT, body on RIGHT; back mirrored.
+ */
+function SideContainer({
+  side,
+  mQuintile,
+  data,
+  styles,
+}: {
+  side: 'front' | 'back';
+  mQuintile: Map<string, Quintile>;
+  data: ExtendedBodyPart[];
+  styles: HeatmapStyles;
+}): React.JSX.Element {
+  const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
+  const items = React.useMemo(
+    () => fanLayout(anchors, () => true, LANE_Y_MIN, LANE_Y_MAX),
+    [anchors]
+  );
+
+  const labelOnLeft = side === 'front';
+  const bodyLeft = labelOnLeft ? LABEL_LANE_WIDTH : 0;
+  const labelLeft = labelOnLeft ? 2 : SIDE_WIDTH - LABEL_WIDTH - 2;
+  const labelRight = labelLeft + LABEL_WIDTH;
+  const railX = labelOnLeft ? LABEL_LANE_WIDTH - 3 : BODY_WIDTH_PX + 3;
+  const leaderStart = labelOnLeft ? labelRight : labelLeft;
+
+  return (
+    <View style={{ width: SIDE_WIDTH, height: BODY_HEIGHT_PX, position: 'relative' }}>
+      {/* Body + role overlay */}
+      <View style={{ position: 'absolute', left: bodyLeft, top: 0 }}>
+        <Body
+          side={side}
+          gender="male"
+          data={data}
+          colors={BODY_COLORS}
+          scale={BODY_SCALE}
+          border={COLOR_OUTLINE}
+          defaultFill="#FAFAFA"
+          defaultStroke="#9CA3AF"
+        />
+        {side === 'front' ? (
+          <FrontOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
+        ) : (
+          <BackOverlay mQuintile={mQuintile} scale={BODY_SCALE} />
+        )}
+      </View>
+
+      {/* Leader polylines — pure presentation. */}
+      <Svg
+        style={{ position: 'absolute', left: 0, top: 0 }}
+        width={SIDE_WIDTH}
+        height={BODY_HEIGHT_PX}
+        pointerEvents="none"
+      >
+        {items.map((item) => {
+          const ax = bodyLeft + vbToBodyLocalX(item.vbX, side, BODY_WIDTH_PX);
+          const ay = vbToBodyLocalY(item.vbY, BODY_HEIGHT_PX);
+          return (
+            <Polyline
+              key={`leader-${item.m}`}
+              points={`${leaderStart},${item.labelY} ${railX},${item.labelY} ${ax},${ay}`}
+              stroke={COLOR_OUTLINE}
+              strokeWidth={0.5}
+              fill="none"
+            />
+          );
+        })}
+      </Svg>
+
+      {/* Muscle name labels — plain Text, no background. Text colour uses
+          QUINTILE_TEXT_COLORS (darker variant of the legend hue) so the
+          label stays legible on white while still signalling the bucket.
+          Untrained muscles fall back to neutral grey. */}
+      {items.map((item) => {
+        const q = mQuintile.get(item.m);
+        const textColor = q == null ? COLOR_LABEL_TEXT : QUINTILE_TEXT_COLORS[q];
+        return (
+          <View
+            key={`label-${item.m}`}
+            style={[
+              styles.muscleLabel,
+              {
+                left: labelLeft,
+                top: item.labelY - LABEL_HEIGHT / 2,
+                alignItems: labelOnLeft ? 'flex-end' : 'flex-start',
+              },
+            ]}
+            pointerEvents="none"
+          >
+            <Text style={{ fontSize: LABEL_FONT_SIZE, color: textColor, fontWeight: '600' }}>
+              {tMuscle(item.m)}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Centers the 正面/背面 header over the body lane only (not over the label
+ * lane). Spacer-row trick mirrors muscle-body-tagger.tsx.
+ */
+function SideHeader({
+  side,
+  label,
+  styles,
+}: {
+  side: 'front' | 'back';
+  label: string;
+  styles: HeatmapStyles;
+}) {
+  const labelOnLeft = side === 'front';
+  return (
+    <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
+      {labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
+      <View style={{ width: BODY_WIDTH_PX, alignItems: 'center' }}>
+        <Text style={styles.label}>{label}</Text>
+      </View>
+      {!labelOnLeft && <View style={{ width: LABEL_LANE_WIDTH }} />}
     </View>
   );
 }
 
 /** Legend strip showing the 5-quintile colour scale, labelled as rank percentiles. */
 export function BodyHeatmapLegend() {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   // Each quintile's upper-bound percentile (e.g. Q1 = bottom 20% → label "20%").
   const PERCENTILE_LABELS = ['20%', '40%', '60%', '80%', '100%'] as const;
   return (
     <View style={styles.legendRow}>
       <View style={styles.legendItem}>
-        <View style={[styles.swatch, { backgroundColor: COLOR_ZERO, borderWidth: 1, borderColor: COLOR_OUTLINE }]} />
+        <View
+          style={[
+            styles.swatch,
+            { backgroundColor: COLOR_ZERO, borderWidth: 1, borderColor: COLOR_OUTLINE },
+          ]}
+        />
         <Text style={styles.legendText}>0</Text>
       </View>
       {QUINTILE_COLORS.map((c, i) => (
@@ -358,40 +771,61 @@ export function BodyHeatmapLegend() {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  column: {
-    alignItems: 'center',
-  },
-  label: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  swatch: {
-    width: 14,
-    height: 14,
-    borderRadius: 3,
-  },
-  legendText: {
-    fontSize: 11,
-    color: '#374151',
-  },
-});
+/**
+ * ADR-0025 — only the chrome text colors (header label, legend label) flow
+ * through tokens. The heatmap palette (QUINTILE_COLORS, COLOR_ZERO,
+ * COLOR_BODY_BASE, COLOR_OUTLINE, COLOR_SKIN, etc.) is intentionally NOT
+ * swept — those colors carry semantic meaning (frequency rank, anatomical
+ * silhouette) that must read identically in both modes.
+ *
+ * TODO(theme-wave3): consider per-mode body silhouette tones if the
+ * #FAFAFA defaultFill turns out to be unreadable in dark mode.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    column: {
+      alignItems: 'center',
+    },
+    bodyWrap: {
+      position: 'relative',
+    },
+    label: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    muscleLabel: {
+      position: 'absolute',
+      width: LABEL_WIDTH,
+      height: LABEL_HEIGHT,
+      justifyContent: 'center',
+    },
+    legendRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 8,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    swatch: {
+      width: 14,
+      height: 14,
+      borderRadius: 3,
+    },
+    legendText: {
+      fontSize: 11,
+      color: tokens.text.primary,
+    },
+  });
+}

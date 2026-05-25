@@ -108,7 +108,7 @@ export interface ValidationError {
   message: string;
 }
 
-export interface ValidateOptions {
+interface ValidateOptions {
   /**
    * Names of non-archived exercises that already exist. Names compared
    * case-insensitively after trim — "Bench Press" collides with "bench press".
@@ -182,23 +182,6 @@ export function validateCustomExerciseDraft(
   }
 
   return errors;
-}
-
-/**
- * Group muscle links by role. Helper for UI rendering.
- *
- * Returns sorted arrays preserving the input link order for stability.
- */
-export function partitionMuscleLinksByRole(
-  links: ExerciseMuscleLink[]
-): { primary: string[]; secondary: string[] } {
-  const primary: string[] = [];
-  const secondary: string[] = [];
-  for (const l of links) {
-    if (l.role === 'primary') primary.push(l.muscle_id);
-    else if (l.role === 'secondary') secondary.push(l.muscle_id);
-  }
-  return { primary, secondary };
 }
 
 /**

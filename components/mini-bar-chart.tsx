@@ -7,17 +7,24 @@
  *
  * Pure presentational — caller hands in 6 BarData entries (oldest → newest)
  * and an optional average line value. Render via react-native-svg.
+ *
+ * ADR-0025 — chart chrome (track / axis label / bar value label / avg line
+ * label) now uses theme tokens. The default `barColor` stays as a chart
+ * palette indigo and `avgLine` keeps an explicit red — both are data-viz
+ * colors, not UI chrome, so they're kept literal (callers may override).
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
-export interface BarData {
+interface BarData {
   label: string;
   value: number;
 }
 
-export interface MiniBarChartProps {
+interface MiniBarChartProps {
   data: readonly BarData[];
   /** Y value for a horizontal dashed avg line. Skipped if undefined / 0. */
   avgLine?: number;
@@ -41,19 +48,22 @@ const PAD_BOTTOM = 28; // extra space for rotated X-axis labels
 // Without this, the first label (e.g. "2021") gets clipped to "021".
 const PAD_LEFT = 22;
 const PAD_RIGHT = 4;
+/** Chart-only data-viz colors — intentionally literal (not theme tokens). */
 const AVG_LINE_COLOR = '#EF4444';
-const TRACK_COLOR = '#E5E7EB';
+const DEFAULT_BAR_COLOR = '#6366F1';
 
 export function MiniBarChart({
   data,
   avgLine,
   width,
   height,
-  barColor = '#6366F1',
+  barColor = DEFAULT_BAR_COLOR,
   formatAvg = (n) => String(Math.round(n)),
   formatBarValue = (n) => String(Math.round(n)),
   showBarValues = false,
 }: MiniBarChartProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const usableHeight = height - PAD_TOP - PAD_BOTTOM;
   const usableWidth = width - PAD_LEFT - PAD_RIGHT;
   const max = Math.max(
@@ -77,7 +87,7 @@ export function MiniBarChart({
           y1={PAD_TOP + usableHeight}
           x2={width - PAD_RIGHT}
           y2={PAD_TOP + usableHeight}
-          stroke={TRACK_COLOR}
+          stroke={tokens.border.subtle}
           strokeWidth={1}
         />
         {/* Bars */}
@@ -123,7 +133,7 @@ export function MiniBarChart({
               x={cx}
               y={cy}
               fontSize={10}
-              fill="#6B7280"
+              fill={tokens.text.secondary}
               textAnchor="end"
               transform={`rotate(-30 ${cx} ${cy})`}>
               {d.label}
@@ -143,32 +153,34 @@ export function MiniBarChart({
       ) : null}
       {/* Avg line label (top-right corner) */}
       {avgLine != null && avgLine > 0 ? (
-        <Text style={styles.avgLabel}>平均 {formatAvg(avgLine)}</Text>
+        <Text style={styles.avgLabel}>{t('status', 'avgPrefix')} {formatAvg(avgLine)}</Text>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  // (X-axis labels are now SvgText inside the Svg — see render above.)
-  barValueRow: {
-    position: 'absolute',
-    top: 0,
-    flexDirection: 'row',
-  },
-  barValueLabel: {
-    flex: 1,
-    fontSize: 9,
-    textAlign: 'center',
-    color: '#374151',
-    fontVariant: ['tabular-nums'],
-  },
-  avgLabel: {
-    position: 'absolute',
-    top: 0,
-    right: 4,
-    fontSize: 9,
-    color: AVG_LINE_COLOR,
-    fontWeight: '600',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    // (X-axis labels are now SvgText inside the Svg — see render above.)
+    barValueRow: {
+      position: 'absolute',
+      top: 0,
+      flexDirection: 'row',
+    },
+    barValueLabel: {
+      flex: 1,
+      fontSize: 9,
+      textAlign: 'center',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    avgLabel: {
+      position: 'absolute',
+      top: 0,
+      right: 4,
+      fontSize: 9,
+      color: AVG_LINE_COLOR,
+      fontWeight: '600',
+    },
+  });
+}

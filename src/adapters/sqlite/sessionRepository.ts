@@ -1,15 +1,73 @@
 import type { Database } from '../../db/types';
 import type { Session } from '../../domain/session/types';
+import { editSnapshotKey } from '../../domain/session/editSnapshotPersistence';
+import { listBodyMetrics } from './bodyMetricRepository';
+import { getReusableSupersetWithExercises } from './supersetRepository';
+
+/**
+ * Resolve the bodyweight snapshot for a new Session per ADR-0024 § 4:
+ * "session 開始時 system 自動 snapshot 的 latest body_metric, 無時效性限制".
+ *
+ * Implementation note: `listBodyMetrics` returns rows in `recorded_at ASC`
+ * order (tuned for the body-trend chart consumer), so "latest" is `.at(-1)`,
+ * NOT `.at(0)` as the ADR pseudocode reads. ADR doc follow-up flagged.
+ *
+ * Returns null when the user has no body_metric on record — the assisted
+ * modal (ADR-0024 § 4 補丁) handles the blocking case in the UI layer.
+ */
+async function resolveBwSnapshot(db: Database): Promise<number | null> {
+  const rows = await listBodyMetrics(db);
+  return rows.at(-1)?.bodyweight_kg ?? null;
+}
 
 export async function createSession(
   db: Database,
-  args: { id: string; started_at: number; bodyweight_snapshot_kg?: number | null }
+  args: {
+    id: string;
+    started_at: number;
+    bodyweight_snapshot_kg?: number | null;
+    /**
+     * Card 11 / ADR-0014. Optional display title; defaults to '' which the UI
+     * renders as the freestyle placeholder. `startSessionFromTemplate` passes
+     * `template.name` so template-based sessions arrive pre-named.
+     */
+    title?: string;
+  }
 ): Promise<void> {
+  // ADR-0024 § 4 — if the caller didn't supply a snapshot explicitly, pull
+  // the latest body_metric. Passing an explicit `null` (or any number) wins
+  // over auto-pull so test fixtures and migrations stay deterministic.
+  const snapshot =
+    args.bodyweight_snapshot_kg === undefined
+      ? await resolveBwSnapshot(db)
+      : args.bodyweight_snapshot_kg;
+
   await db.runAsync(
-    `INSERT INTO session (id, started_at, bodyweight_snapshot_kg) VALUES (?, ?, ?)`,
+    `INSERT INTO session (id, started_at, bodyweight_snapshot_kg, title)
+     VALUES (?, ?, ?, ?)`,
     args.id,
     args.started_at,
-    args.bodyweight_snapshot_kg ?? null
+    snapshot,
+    args.title ?? ''
+  );
+}
+
+/**
+ * Update one session's display title. Card 11 / ADR-0014 — wired from the
+ * in-session header tap-to-edit. Empty string is allowed (= freestyle /
+ * placeholder); caller is responsible for the trim. No-op when no row
+ * matches the given id (defensive — the UI guards via getSessionId, but a
+ * stale snapshot calling this on a discarded session won't throw).
+ */
+export async function updateSessionTitle(
+  db: Database,
+  sessionId: string,
+  title: string
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session SET title = ? WHERE id = ?`,
+    title,
+    sessionId
   );
 }
 
@@ -43,7 +101,7 @@ export async function endSession(
 
 export async function getSession(db: Database, id: string): Promise<Session | null> {
   return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session WHERE id = ?`,
     id
   );
@@ -58,7 +116,7 @@ export async function getSession(db: Database, id: string): Promise<Session | nu
  */
 export async function getActiveSession(db: Database): Promise<Session | null> {
   return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session
       WHERE ended_at IS NULL
       ORDER BY started_at DESC
@@ -69,7 +127,7 @@ export async function getActiveSession(db: Database): Promise<Session | null> {
 /** All sessions, newest first. Used by the History tab list. */
 export async function listSessions(db: Database): Promise<Session[]> {
   return db.getAllAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
        FROM session
       ORDER BY started_at DESC`
   );
@@ -80,7 +138,7 @@ export async function listSessions(db: Database): Promise<Session[]> {
  * captured at Session start (slice 3). `template_id` is nullable so a
  * "blank" Session (started without a Template) holds zero rows here.
  */
-export interface SessionExerciseRow {
+interface SessionExerciseRow {
   id: string;
   session_id: string;
   exercise_id: string;
@@ -141,18 +199,371 @@ export async function insertSessionExercise(
   );
 }
 
-export async function listSessionExercises(
+/**
+ * Picker dim/disable input — what the current in-progress session already
+ * contains, partitioned so the [+動作] picker can render the right items
+ * as "已在訓練中" (dim + tap-disabled, ⓘ still tappable for detail
+ * preview).
+ *
+ * Rule recap (user pinned 2026-05-18):
+ *   - Solo: 1 session × same exercise_id allows at most 1 solo card
+ *   - RS:   1 session × same RS template allows at most 1 instance (multiple
+ *           different RS templates can coexist)
+ *   - Solo and RS are independent — solo Cable Crossover + RS(Cable+Dip)
+ *     may live side-by-side; RS A-side Cable does NOT dim the solo Cable
+ *     picker entry (and vice versa)
+ *
+ * Implementation: only rows with `reusable_superset_id IS NULL` count
+ * toward solo conflicts; rows where it's NOT NULL contribute to the RS
+ * template set (distinct on the template id, both A and B sides collapse
+ * to the same id).
+ */
+interface SessionUsedExercises {
+  /** session_exercise.exercise_id where reusable_superset_id IS NULL. */
+  solo_exercise_ids: Set<string>;
+  /** Distinct session_exercise.reusable_superset_id (NOT NULL only). */
+  rs_template_ids: Set<string>;
+}
+
+export async function listSessionUsedExercises(
   db: Database,
   session_id: string
-): Promise<SessionExerciseRow[]> {
-  return db.getAllAsync<SessionExerciseRow>(
-    `SELECT id, session_id, exercise_id, ordering,
-            planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
-            parent_id, reusable_superset_id, rest_sec
+): Promise<SessionUsedExercises> {
+  const rows = await db.getAllAsync<{
+    exercise_id: string;
+    reusable_superset_id: string | null;
+  }>(
+    `SELECT exercise_id, reusable_superset_id
        FROM session_exercise
-      WHERE session_id = ?
-      ORDER BY ordering ASC`,
+      WHERE session_id = ?`,
     session_id
+  );
+  const solo = new Set<string>();
+  const rs = new Set<string>();
+  for (const r of rows) {
+    if (r.reusable_superset_id == null) {
+      solo.add(r.exercise_id);
+    } else {
+      rs.add(r.reusable_superset_id);
+    }
+  }
+  return { solo_exercise_ids: solo, rs_template_ids: rs };
+}
+
+/**
+ * Delete one session_exercise + all of its sets (per ADR-0019 ⚙️ menu's
+ * 🗑️ option). Manual cascade because the v003 FK between set and
+ * session_exercise is via (exercise_id, session_id) not a real CASCADE.
+ *
+ * Slice 10c Phase 4 commit 17 introduced this.
+ *
+ * v019 isolation fix (slice 10c #17): the set DELETE now scopes by
+ * `session_exercise_id = ?` (the card-scoped column from v019). When two
+ * session_exercise rows in the same session shared an `exercise_id` (e.g.
+ * RS A-side Cable Crossover + a solo Cable Crossover card) the prior
+ * `WHERE session_id = ? AND exercise_id = ?` would wipe BOTH cards' sets
+ * — a leak. The fallback `OR (session_exercise_id IS NULL AND ...)` arm
+ * keeps the old behavior alive for any legacy / pre-v019 rows the
+ * migration's backfill couldn't tag; those rows still respond to the
+ * coarse (session, exercise) filter exactly as they did pre-#17.
+ *
+ * rest_sec / set_kind / parent_set_id state on the orphaned sets is
+ * gone with them — no need to clean up elsewhere.
+ */
+export async function deleteSessionExerciseAndSets(
+  db: Database,
+  args: { session_id: string; exercise_id: string; session_exercise_id: string }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    // 清 achievement_unlock 的 set_id back-ref，避免被刪 set 撞 FK constraint。
+    // (v008 schema: `achievement_unlock.set_id TEXT REFERENCES "set"(id)`、無 ON DELETE)
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (
+          SELECT id FROM "set"
+           WHERE session_exercise_id = ?
+              OR (session_exercise_id IS NULL
+                  AND session_id = ?
+                  AND exercise_id = ?)
+        )`,
+      args.session_exercise_id,
+      args.session_id,
+      args.exercise_id
+    );
+    await db.runAsync(
+      `DELETE FROM "set"
+        WHERE session_exercise_id = ?
+           OR (session_exercise_id IS NULL
+               AND session_id = ?
+               AND exercise_id = ?)`,
+      args.session_exercise_id,
+      args.session_id,
+      args.exercise_id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE id = ?`,
+      args.session_exercise_id
+    );
+  });
+}
+
+/**
+ * Update one session_exercise's rest_sec (per ADR-0019 ⚙️ menu's ⏱️
+ * option). NULL means "use default" (60s) at the UI layer.
+ *
+ * Slice 10c Phase 4 commit 18.
+ */
+/**
+ * Reorder session_exercise rows within one session (per ADR-0019 Q10).
+ * Caller passes the new desired sequence of session_exercise IDs; we
+ * assign ordering = (1, 2, 3, ...) in that order via batch UPDATE.
+ *
+ * Slice 10c Phase 6 commit 30. Within a transaction so partial failure
+ * rolls back cleanly. No constraint on `ordering` so intermediate
+ * duplicates are fine — final state has the correct sequence.
+ */
+export async function reorderSessionExercises(
+  db: Database,
+  args: { session_id: string; orderedIds: string[] }
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    for (let i = 0; i < args.orderedIds.length; i++) {
+      await db.runAsync(
+        `UPDATE session_exercise SET ordering = ?
+          WHERE id = ? AND session_id = ?`,
+        i + 1,
+        args.orderedIds[i],
+        args.session_id
+      );
+    }
+  });
+}
+
+/**
+ * Append one ad-hoc exercise to an in-progress session (per ADR-0019 Q15
+ * bottom sticky bar [+ 動作]). Order goes to MAX(ordering)+1 within the
+ * session. planned_sets defaults to 3 (typical user expectation when
+ * adding mid-session). template_id stays null since this is ad-hoc.
+ *
+ * Slice 10c Phase 5 commit 28.
+ */
+export async function appendSessionExercise(
+  db: Database,
+  args: {
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    planned_sets?: number;
+  }
+): Promise<void> {
+  // Defensive guard (slice 10c #20) — picker UI is supposed to dim already-
+  // used solo exercises so this throw should never fire in practice, but if
+  // a race / future caller / test bug slips through we'd rather hard-fail
+  // than create a second card the user can't easily distinguish from the
+  // first. Scoped to solo only (reusable_superset_id IS NULL); RS-spawned
+  // rows are a different bucket.
+  const dup = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND reusable_superset_id IS NULL
+      LIMIT 1`,
+    args.session_id,
+    args.exercise_id
+  );
+  if (dup) {
+    throw new Error('duplicate solo exercise in session');
+  }
+  const row = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM session_exercise
+      WHERE session_id = ?`,
+    args.session_id
+  );
+  const ordering = (row?.max_ordering ?? 0) + 1;
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, NULL, NULL)`,
+    args.id,
+    args.session_id,
+    args.exercise_id,
+    ordering,
+    args.planned_sets ?? 3
+  );
+}
+
+/**
+ * Append a Reusable Superset (RS) into an in-progress session as a cluster
+ * pair — 2 session_exercise rows linked via `parent_id` chain, both sharing
+ * `reusable_superset_id`. Mirrors the template editor's RS-explode pattern.
+ *
+ * Layout produced:
+ *   - A row (cluster parent): ordering = MAX+1, parent_id = null,
+ *     reusable_superset_id = rs.id
+ *   - B row (cluster follower): ordering = MAX+2, parent_id = A.id,
+ *     reusable_superset_id = rs.id
+ *
+ * Reads RS via `getReusableSupersetWithExercises(db, rs_id)` — throws if
+ * not found or doesn't have exactly 2 exercises (data-quality bug).
+ *
+ * No transaction here — caller can wrap multiple RS appends in one if
+ * atomicity matters. For [+動作] picker single-shot pick this is fine.
+ *
+ * Slice 10c — fix「超級組出不來」(2026-05-17 ultra-late) — Today consumePick
+ * handler was processing only `exerciseIds`, silently dropping
+ * `reusableSupersetIds`. This func is the missing link.
+ */
+export async function appendReusableSupersetToSession(
+  db: Database,
+  args: {
+    session_id: string;
+    reusable_superset_id: string;
+    uuid: () => string;
+  }
+): Promise<{ a_id: string; b_id: string }> {
+  const rs = await getReusableSupersetWithExercises(db, args.reusable_superset_id);
+  if (!rs) {
+    throw new Error(
+      `appendReusableSupersetToSession: RS "${args.reusable_superset_id}" not found`
+    );
+  }
+  if (rs.exercises.length !== 2) {
+    throw new Error(
+      `appendReusableSupersetToSession: RS "${args.reusable_superset_id}" has ${rs.exercises.length} exercises, expected 2`
+    );
+  }
+
+  // Defensive guard (slice 10c #20) — picker UI dims already-used RS
+  // templates so this throw should never fire, but if a race / future
+  // caller bug slips through we fail loud rather than silently insert a
+  // second cluster pair sharing the same RS template id.
+  const dup = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND reusable_superset_id = ?
+      LIMIT 1`,
+    args.session_id,
+    args.reusable_superset_id
+  );
+  if (dup) {
+    throw new Error('duplicate RS in session');
+  }
+
+  const row = await db.getFirstAsync<{ max_ordering: number | null }>(
+    `SELECT MAX(ordering) AS max_ordering FROM session_exercise
+      WHERE session_id = ?`,
+    args.session_id
+  );
+  const baseOrdering = row?.max_ordering ?? 0;
+  const a_id = args.uuid();
+  const b_id = args.uuid();
+
+  // A side — cluster parent.
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, 3, NULL, NULL, NULL, 0, NULL, ?, NULL)`,
+    a_id,
+    args.session_id,
+    rs.exercises[0].id,
+    baseOrdering + 1,
+    args.reusable_superset_id
+  );
+  // B side — follower, parent_id = A.
+  await db.runAsync(
+    `INSERT INTO session_exercise
+       (id, session_id, exercise_id, ordering,
+        planned_sets, planned_reps, planned_weight_kg, template_id, is_evergreen,
+        parent_id, reusable_superset_id, rest_sec)
+     VALUES (?, ?, ?, ?, 3, NULL, NULL, NULL, 0, ?, ?, NULL)`,
+    b_id,
+    args.session_id,
+    rs.exercises[1].id,
+    baseOrdering + 2,
+    a_id,
+    args.reusable_superset_id
+  );
+
+  return { a_id, b_id };
+}
+
+/**
+ * 放棄訓練 — discard an in-progress session entirely (per ADR-0019 Q15
+ * Header [⋯] menu). Removes every set, every session_exercise, then the
+ * session row itself in one transaction. No undo; caller must confirm.
+ *
+ * Slice 10c Phase 5 commit 26.
+ *
+ * Achievement back-ref handling (2026-05-20 wave 12 完工):
+ *   v008 schema declares `achievement_unlock.session_id NOT NULL REFERENCES
+ *   session(id)` and `achievement_unlock.set_id REFERENCES "set"(id)` — both
+ *   FKs lack `ON DELETE` actions. Naively deleting the session's rows trips
+ *   FOREIGN KEY constraint failed whenever a PR / first-combo unlocked during
+ *   the session.
+ *
+ *   Semantic decision: discardSession means "this session never happened",
+ *   so unlocks earned within it are revoked (the `achievement_definition_id
+ *   UNIQUE` constraint allows re-unlocking in a future session — no leak).
+ *
+ *   Order of operations (all inside the existing transaction):
+ *     1. NULL `set_id` on any unlock OUTSIDE this session that happens to
+ *        point at a set inside this session (defensive — production
+ *        achievementRepository writes session_id+set_id from the same
+ *        context so this should be a no-op, but the schema doesn't enforce
+ *        the invariant).
+ *     2. DELETE all unlocks for this session (handles both back-refs in
+ *        one shot since their session_id matches).
+ *     3-5. Original cascade: sets → session_exercise → session.
+ */
+export async function discardSession(
+  db: Database,
+  session_id: string
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+         WHERE set_id IN (SELECT id FROM "set" WHERE session_id = ?)
+           AND session_id != ?`,
+      session_id,
+      session_id
+    );
+    await db.runAsync(
+      `DELETE FROM achievement_unlock WHERE session_id = ?`,
+      session_id
+    );
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_id = ?`,
+      session_id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE session_id = ?`,
+      session_id
+    );
+    await db.runAsync(`DELETE FROM session WHERE id = ?`, session_id);
+    // Card 12R / Round G Q2b cascade — discardSession 等於「該 session
+    // 從未發生」，因此也清掉可能殘留的 edit-mode snapshot row（FK semantic、
+    // 避免 orphan）。setSetting / deleteSetting 用 INSERT OR REPLACE /
+    // DELETE，沒有 row 也是 no-op，不會 throw。
+    await db.runAsync(
+      `DELETE FROM app_settings WHERE key = ?`,
+      editSnapshotKey(session_id)
+    );
+  });
+}
+
+export async function updateSessionExerciseRestSec(
+  db: Database,
+  session_exercise_id: string,
+  rest_sec: number | null
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session_exercise SET rest_sec = ? WHERE id = ?`,
+    rest_sec,
+    session_exercise_id
   );
 }
 
@@ -164,6 +575,16 @@ export interface SessionExerciseRowWithName extends SessionExerciseRow {
    * kg, assisted subtracts kg from BW).
    */
   exercise_load_type: 'loaded' | 'bodyweight' | 'assisted';
+  /**
+   * Per-exercise global notes (ADR-0013 + ADR-0017 amendment — owned by
+   * `exercise.notes`, shared across all templates/sessions using this
+   * exercise). NULL or empty string = no notes; UI renders inline notes
+   * box in expanded session card body when non-empty.
+   *
+   * Slice 10e bundle 1 — surface notes in session 上下文 (was previously
+   * only visible in template editor 📝 indicator).
+   */
+  exercise_notes: string | null;
 }
 
 /** Same as `listSessionExercises` but joins exercise.name + load_type for UI display. */
@@ -176,11 +597,212 @@ export async function listSessionExercisesWithName(
             se.planned_sets, se.planned_reps, se.planned_weight_kg, se.template_id, se.is_evergreen,
             se.parent_id, se.reusable_superset_id, se.rest_sec,
             e.name      AS exercise_name,
-            e.load_type AS exercise_load_type
+            e.load_type AS exercise_load_type,
+            e.notes     AS exercise_notes
        FROM session_exercise se
        JOIN exercise e ON e.id = se.exercise_id
       WHERE se.session_id = ?
       ORDER BY se.ordering ASC`,
     session_id
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Session snapshot / restore — transactional edit mode (2026-05-20 night)
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * 在進入歷史 session 詳情頁的「編輯訓練」模式時 snapshot 整個 session 的可變
+ * 狀態（session.started_at / ended_at + 所有 session_exercise + 所有 set
+ * + achievement_unlock 對該 session 的 back-ref）。`restoreSessionFromSnapshot`
+ * 可用此 snapshot 在使用者按「返回（捨棄修改）」時還原。
+ *
+ * 為什麼不單純走 SQLite BEGIN TRANSACTION + ROLLBACK：UI 期間 session 仍要
+ * 被其他 query 讀取（畫面渲染、stats、PR）、長期持有交易會把 DB lock 起來、
+ * expo-sqlite 也不支援跨 async 邊界的手動交易。snapshot-restore 用獨立交易
+ * 在 commit 點觸發、不影響中間的 read。
+ *
+ * 為什麼也 snapshot achievement_unlock：fix(set-delete) wave 之後刪除登錄
+ * 過的 set 會 UPDATE achievement_unlock SET set_id = NULL，這個副作用必須
+ * 也能還原 — 不然 restore 後 set 回來、unlock 對應仍是 NULL 不一致。
+ */
+export interface SessionSnapshot {
+  session: {
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+  };
+  sessionExercises: ReadonlyArray<{
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    ordering: number;
+    planned_sets: number;
+    planned_reps: number | null;
+    planned_weight_kg: number | null;
+    template_id: string | null;
+    is_evergreen: number;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
+    rest_sec: number | null;
+  }>;
+  sets: ReadonlyArray<{
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    is_skipped: number;
+    ordering: number;
+    created_at: number;
+    set_kind: string;
+    parent_set_id: string | null;
+    is_logged: number;
+    notes: string | null;
+    session_exercise_id: string | null;
+  }>;
+  achievementUnlocks: ReadonlyArray<{ id: number; set_id: string }>;
+}
+
+export async function captureSessionSnapshot(
+  db: Database,
+  session_id: string
+): Promise<SessionSnapshot | null> {
+  const session = await db.getFirstAsync<{
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+  }>(
+    `SELECT id, started_at, ended_at FROM session WHERE id = ?`,
+    session_id
+  );
+  if (!session) return null;
+
+  const sessionExercises = await db.getAllAsync<
+    SessionSnapshot['sessionExercises'][number]
+  >(
+    `SELECT id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id, is_evergreen, parent_id,
+            reusable_superset_id, rest_sec
+       FROM session_exercise
+      WHERE session_id = ?`,
+    session_id
+  );
+
+  const sets = await db.getAllAsync<SessionSnapshot['sets'][number]>(
+    `SELECT id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering,
+            created_at, set_kind, parent_set_id, is_logged, notes,
+            session_exercise_id
+       FROM "set"
+      WHERE session_id = ?`,
+    session_id
+  );
+
+  const achievementUnlocks = await db.getAllAsync<{
+    id: number;
+    set_id: string;
+  }>(
+    `SELECT id, set_id FROM achievement_unlock
+      WHERE set_id IS NOT NULL
+        AND set_id IN (SELECT id FROM "set" WHERE session_id = ?)`,
+    session_id
+  );
+
+  return { session, sessionExercises, sets, achievementUnlocks };
+}
+
+/**
+ * Atomic 還原：把 session 的 (session row 時間欄位 + 所有 session_exercise
+ * + 所有 set + 該 session 範圍內的 achievement_unlock 反向指標) 還原到
+ * snapshot 拍照時的狀態。Edit mode 「返回 → 捨棄修改」走這條 path。
+ *
+ * 流程：
+ *   1. 清掉當前 session 範圍內 achievement_unlock.set_id back-ref（避免
+ *      被刪的 set 撞 FK；同 fix(set-delete) 註解）
+ *   2. DELETE 當前 session 的 set + session_exercise
+ *   3. UPDATE session.started_at / ended_at 還原（DateTimePickerSheet 改的）
+ *   4. 重新 INSERT snapshot 的 session_exercise rows
+ *   5. 重新 INSERT snapshot 的 set rows（含 is_logged / notes / parent_set_id
+ *      等所有欄位、保留原 id）
+ *   6. 重連 achievement_unlock.set_id back-ref（snapshot 拍的時候 set 還在
+ *      原 id、restore 後 set 用相同 id 回來、所以 back-ref 可恢復）
+ */
+export async function restoreSessionFromSnapshot(
+  db: Database,
+  snapshot: SessionSnapshot
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE achievement_unlock SET set_id = NULL
+        WHERE set_id IN (SELECT id FROM "set" WHERE session_id = ?)`,
+      snapshot.session.id
+    );
+    await db.runAsync(
+      `DELETE FROM "set" WHERE session_id = ?`,
+      snapshot.session.id
+    );
+    await db.runAsync(
+      `DELETE FROM session_exercise WHERE session_id = ?`,
+      snapshot.session.id
+    );
+
+    await db.runAsync(
+      `UPDATE session SET started_at = ?, ended_at = ? WHERE id = ?`,
+      snapshot.session.started_at,
+      snapshot.session.ended_at,
+      snapshot.session.id
+    );
+
+    for (const se of snapshot.sessionExercises) {
+      await db.runAsync(
+        `INSERT INTO session_exercise
+           (id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id, is_evergreen, parent_id,
+            reusable_superset_id, rest_sec)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        se.id,
+        se.session_id,
+        se.exercise_id,
+        se.ordering,
+        se.planned_sets,
+        se.planned_reps,
+        se.planned_weight_kg,
+        se.template_id,
+        se.is_evergreen,
+        se.parent_id,
+        se.reusable_superset_id,
+        se.rest_sec
+      );
+    }
+
+    for (const s of snapshot.sets) {
+      await db.runAsync(
+        `INSERT INTO "set"
+           (id, session_id, exercise_id, weight_kg, reps, is_skipped,
+            ordering, created_at, set_kind, parent_set_id, is_logged,
+            notes, session_exercise_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        s.id,
+        s.session_id,
+        s.exercise_id,
+        s.weight_kg,
+        s.reps,
+        s.is_skipped,
+        s.ordering,
+        s.created_at,
+        s.set_kind,
+        s.parent_set_id,
+        s.is_logged,
+        s.notes,
+        s.session_exercise_id
+      );
+    }
+
+    for (const unlock of snapshot.achievementUnlocks) {
+      await db.runAsync(
+        `UPDATE achievement_unlock SET set_id = ? WHERE id = ?`,
+        unlock.set_id,
+        unlock.id
+      );
+    }
+  });
 }

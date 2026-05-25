@@ -29,6 +29,8 @@ UPDATE session
    );
 ```
 
+> (slice 10c 5/24 ship as v023 — `src/db/schema/v023_session_title.ts` + `components/session/session-title-editor.tsx`)
+
 | 欄位 | 表 | 性質 | 寫入規則 |
 |---|---|---|---|
 | `title` | `session` | mutable，frozen-on-create | Template-based: session create 時複製 template.name；Freestyle: 起始 ''；之後使用者可任改（in-session / 歷史頁） |
@@ -48,7 +50,11 @@ UPDATE session
 
 ## 歷史詳情頁三按鈕
 
+> (2026-05-18 wave 12 翻盤：擴為 4-button sticky bar + edit-mode swap，詳見 ADR-0019 ledger)
+
 ### 按鈕 1：「儲存模板」（覆蓋既有 Template + sibling rename 連動）
+
+> **2026-05-18 wave 12 修訂**：4-branch 收斂為 silent overwrite linked template（無 diff prompt / 無 sibling rename）；Freestyle 升級改走「另存模板」(TemplateMetaSheet)。詳見 ADR-0019 翻盤 ledger 2026-05-18 row。
 
 依 session 來源 + title 是否手動改過，分四種行為：
 
@@ -86,6 +92,8 @@ UPDATE session
 
 ## Save-back 共存（跟 ADR-0002 分工）
 
+> **2026-05-18 wave 12 修訂**：Save-back dialog 整題砍除、Save-back domain/repo/screen pipeline 退場；模板入口移至詳情頁 sticky 4-button bar。詳見 ADR-0019 翻盤 ledger 2026-05-18 row。
+
 兩個 trigger 點正交分工：
 
 | 機制 | trigger 點 | 處理 | 來源 |
@@ -116,11 +124,14 @@ ADR-0013 既有 story #184「freestyle session 結束時可選『存為 template
 
 ## In-session 編輯入口
 
+> (slice 10c 5/24 ship as v023 — `src/db/schema/v023_session_title.ts` + `components/session/session-title-editor.tsx`)
+
 `timer header` 顯示 session.title（空 → UI fallback「自由訓練」），tap header → 編輯框 → UPDATE session.title。
 
 - 隨時可改，無 draft staging（跟 ADR-0013 notes 編輯同 in-place pattern）
 - 編輯**不觸發**任何 dialog / Save-back / sibling 連動（改 session.title 而已）
 - 即時 UPDATE，無 commit/cancel 雙態
+- **per ADR-0019 § slice 10d E2 翻盤**：history detail (`session/[id].tsx`) edit mode 編輯既有 set 時**不**觸發 rest-timer modal — edit 屬 post-hoc 修訂，跟 in-session 即時 logging 上下文不同；`enableRestTimer` flag 刻意不存在，Today 與 detail screens timer state 完全獨立
 
 跟 ADR-0012 set logger 哲學一致：「Session 在運動中編輯，要快速、即時 → 摩擦極力消除」。
 

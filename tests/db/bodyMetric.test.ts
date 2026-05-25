@@ -192,7 +192,11 @@ describe('Slice 7 — body_metric + settings + bw_snapshot', () => {
       expect(s?.bodyweight_snapshot_kg).toBe(72.5);
     });
 
-    it('createSession defaults to null when not supplied', async () => {
+    it('createSession resolves to null when no body_metric exists (auto-pull yields nothing)', async () => {
+      // ADR-0024 § 4 auto-pull semantics: omitting bodyweight_snapshot_kg
+      // routes through listBodyMetrics().at(-1) — an empty table resolves
+      // to null, which is what the assisted-modal block (Phase 4) then
+      // intercepts.
       await createSession(db, { id: sessionId, started_at: 1000 });
       const s = await getSession(db, sessionId);
       expect(s?.bodyweight_snapshot_kg).toBeNull();

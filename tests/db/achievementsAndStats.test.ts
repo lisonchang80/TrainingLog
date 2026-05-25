@@ -33,7 +33,7 @@ import {
   listUnlocks,
 } from '../../src/adapters/sqlite/achievementRepository';
 import { loadStatsSetRecords } from '../../src/adapters/sqlite/statsRepository';
-import { mgFrequencyOverPeriod, mgCapacityOverPeriod } from '../../src/domain/stats/statsEngine';
+import { mgFrequencyOverPeriod } from '../../src/domain/stats/statsEngine';
 
 describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
   let db: BetterSqliteDatabase;
@@ -215,10 +215,6 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
     const freq = mgFrequencyOverPeriod(recs);
     expect(freq.get('mg-chest')).toBe(1);
     expect(freq.get('mg-leg')).toBe(1);
-
-    const cap = mgCapacityOverPeriod(recs);
-    expect(cap.get('mg-chest')).toBe(50 * 8);
-    expect(cap.get('mg-leg')).toBe(100 * 5);
 
     // Range covering only day 2
     const recsDay2 = await loadStatsSetRecords(db, {

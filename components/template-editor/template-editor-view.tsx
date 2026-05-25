@@ -29,7 +29,6 @@
 
 import { randomUUID } from 'expo-crypto';
 import {
-  Stack,
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
@@ -47,16 +46,26 @@ import {
   View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
+import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
 import {
   applyRecolorSiblings,
   applyRenameSiblings,
+  attachTemplateToProgram,
   commitTemplateDraft,
+  deleteTemplate,
+  findTemplateByTriple,
   getTemplateFull,
   queryMemoryCandidates,
   queryReusableSupersetMemory,
@@ -66,8 +75,17 @@ import {
   incrementUseCount,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManager';
+import { computeTemplateClusterStat } from '@/src/domain/template/clusterStat';
 import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
+import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
+import {
+  cycleSetKindAcrossExercises,
+  isTemplateDeletable,
+  reorderTemplateClusterCycles,
+  reorderTemplateExercises,
+  reorderTemplateSetsByGroups,
+} from '@/src/domain/template/templateOps';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
 import type {
@@ -78,12 +96,55 @@ import type {
 } from '@/src/domain/template/types';
 
 import { PALETTE, hashColor } from './palette';
-import { SwipeableSetRow, type SwipeAction } from './swipeable-set-row';
+import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
+import { SetRowContent } from '../shared/set-row-content';
+import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
+import { getLocale, t as tt, tExercise } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
-const SECTION_LABEL: Record<ExerciseSection, string> = {
-  general: '一般動作',
-  evergreen: '常設動作',
-};
+/**
+ * ADR-0025 — DRY hook for the 3 components in this file that all read
+ * the same memoised StyleSheet.
+ */
+function useEditorStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
+
+/**
+ * Inline dynamic helpers for template-editor-view. Kept local rather than
+ * added to `src/i18n/dynamic.ts` (editor-only usage).
+ */
+function tEditorDeleteTemplateBody(name: string, triple: string): string {
+  return getLocale() === 'en'
+    ? `"${name}" (${triple}) will be permanently deleted. This cannot be undone.\n\nOnly this (program · intensity) variant is deleted; other siblings with the same name are preserved.\nHistorical session records are unaffected.`
+    : `將永久刪除「${name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`;
+}
+
+function tEditorDeleteClusterBody(name: string): string {
+  return getLocale() === 'en'
+    ? `Superset "${name}" and all paired sets will be deleted.`
+    : `將刪除超級組「${name}」及配對動作的所有 sets。`;
+}
+
+function tEditorDeleteSoloBody(name: string): string {
+  return getLocale() === 'en'
+    ? `"${name}" and all its sets will be deleted.`
+    : `將刪除「${name}」及其所有 sets。`;
+}
+
+function tEditorRestLabel(seconds: number): string {
+  return getLocale() === 'en' ? `Rest Time (${seconds}s)` : `休息時間（${seconds}s）`;
+}
+
+// SECTION_LABEL — section header labels (一般動作 / 常設動作). The constant
+// stayed zh-only during Phase 4 cleanup; Phase 4.5 batch 2 wraps it as
+// a getter so the locale switch propagates without changing render sites.
+function getSectionLabel(section: ExerciseSection): string {
+  const en = getLocale() === 'en';
+  if (section === 'general') return en ? 'General Exercises' : '一般動作';
+  return en ? 'Evergreen Exercises' : '常設動作';
+}
 
 function newId(prefix: string): string {
   if (typeof randomUUID === 'function') {
@@ -102,9 +163,61 @@ function colorForTemplate(t: Template): string {
 }
 
 export default function TemplateEditorView() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `dpid` / `dst` = display program_id / display sub_tag (#50 C1):
+  // 用戶當初在 start-template-sheet 選的 (P, S)；fallback 路徑下 editor 載入
+  // representative 但 header 仍顯示 user's pick。sentinel `__none__` 表
+  // explicitly NULL (通用 program / no intensity)，param 不存在 = no override
+  // → fallback to actual draft.program_id / draft.sub_tag。
+  const {
+    id,
+    dpid,
+    dst,
+    fromProgram,
+    fromKind,
+    fromCycle,
+    fromDay,
+    fromSubTag,
+  } = useLocalSearchParams<{
+    id: string;
+    dpid?: string;
+    dst?: string;
+    // Programs tab "+ 建立新模板" import context (round 15 polish).
+    // When present the editor enters "import mode": top-right action becomes
+    // 「建立並導入」, draft.program_id pre-fills to fromProgram, and tap-save
+    // redirects to /(tabs)/programs with apply params instead of staying.
+    fromProgram?: string;
+    fromKind?: 'cell' | 'column';
+    fromCycle?: string;
+    fromDay?: string;
+    fromSubTag?: string;
+  }>();
+  const importMode =
+    fromProgram != null && fromKind != null && fromDay != null;
+  const importFromProgramId = fromProgram
+    ? decodeURIComponent(fromProgram)
+    : null;
+  const importFromSubTag = fromSubTag
+    ? decodeURIComponent(fromSubTag)
+    : null;
+  const importFromCycle = fromCycle != null ? Number(fromCycle) : null;
+  const importFromDay = fromDay != null ? Number(fromDay) : null;
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useEditorStyles();
+
+  /** Display override resolver — undefined = no override; null = 通用 / no
+   *  intensity; string = explicit value. */
+  const displayProgramOverride: string | null | undefined = dpid === undefined
+    ? undefined
+    : dpid === '__none__'
+      ? null
+      : decodeURIComponent(dpid);
+  const displaySubTagOverride: string | null | undefined = dst === undefined
+    ? undefined
+    : dst === '__none__'
+      ? null
+      : decodeURIComponent(dst);
 
   const [committed, setCommitted] = useState<Template | null>(null);
   const [draft, setDraft] = useState<Template | null>(null);
@@ -116,6 +229,7 @@ export default function TemplateEditorView() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
   const [exerciseLibrary, setExerciseLibrary] = useState<Exercise[]>([]);
+  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [noteEditing, setNoteEditing] = useState<
     | {
         target:
@@ -129,6 +243,16 @@ export default function TemplateEditorView() {
     ex_id: string;
     draft: number;
   } | null>(null);
+  // overnight #45 第 3 點 — 排序動作 modal 開關（mirror app/(tabs)/index.tsx
+  // 的 reorderSheetOpen pattern；長按卡片 header + ⚙️「移動動作」共用入口）。
+  const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
+  // Round 15 polish — 儲存 / 建立並導入 都先跳 TemplateMetaSheet 讓使用者選
+  // (program, sub_tag)。`saveSheetMode` 為 null = 不跳；'save' = 跑完
+  // persistDraft + Alert 留在編輯器；'import' = 跑完 persistDraft + router.replace
+  // 回 programs tab 帶 apply context。
+  const [saveSheetMode, setSaveSheetMode] = useState<'save' | 'import' | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -139,9 +263,10 @@ export default function TemplateEditorView() {
         return;
       }
       try {
-        const [tpl, lib] = await Promise.all([
+        const [tpl, lib, progs] = await Promise.all([
           getTemplateFull(db, id),
           listExercises(db),
+          listPrograms(db),
         ]);
         if (cancelled) return;
         if (!tpl) {
@@ -150,8 +275,23 @@ export default function TemplateEditorView() {
           return;
         }
         setCommitted(tpl);
-        setDraft(cloneTemplate(tpl));
+        // Import mode pre-fill (round 15 polish, programs tab "+ 建立新模板"):
+        // a brand-new template loaded here has program_id=null + sub_tag=null
+        // from createTemplate. If the user entered via the programs picker,
+        // hydrate program_id from the cell's program so the new template
+        // auto-attaches to it (Q3a). User can still change it in the editor
+        // — final draft.program_id wins at import time.
+        const initialDraft = cloneTemplate(tpl);
+        if (
+          importMode &&
+          tpl.program_id == null &&
+          importFromProgramId != null
+        ) {
+          initialDraft.program_id = importFromProgramId;
+        }
+        setDraft(initialDraft);
         setExerciseLibrary(lib);
+        setPrograms(progs);
         setLoaded(true);
       } catch (e) {
         if (cancelled) return;
@@ -176,9 +316,9 @@ export default function TemplateEditorView() {
       onExit();
       return;
     }
-    Alert.alert('捨棄變更？', '尚未儲存的修改將會遺失。', [
-      { text: '繼續編輯', style: 'cancel' },
-      { text: '捨棄', style: 'destructive', onPress: onExit },
+    Alert.alert(tt('alert', 'discardChangesQ'), tt('alert', 'discardChangesLong'), [
+      { text: tt('button', 'editKeep'), style: 'cancel' },
+      { text: tt('button', 'discardSimple'), style: 'destructive', onPress: onExit },
     ]);
   }, [dirty, onExit]);
 
@@ -224,24 +364,208 @@ export default function TemplateEditorView() {
     return true;
   }, [committed, draft, db]);
 
-  const onSave = useCallback(async () => {
+  // Open TemplateMetaSheet — both 儲存 and 建立並導入 routes go through it
+  // so the user can confirm / change (program, sub_tag) before commit.
+  // saveSheetMode determines the post-confirm behaviour.
+  const onSave = useCallback(() => {
     if (!dirty || !draft || busy) return;
-    setBusy(true);
-    try {
-      await persistDraft();
-      // Re-hydrate to pick up DB-side timestamps / cascaded sibling changes.
-      const refreshed = id ? await getTemplateFull(db, id) : null;
-      if (refreshed) {
-        setCommitted(refreshed);
-        setDraft(cloneTemplate(refreshed));
+    setSaveSheetMode('save');
+  }, [dirty, draft, busy]);
+
+  const onCreateAndImport = useCallback(() => {
+    if (!draft || busy || !importMode) return;
+    setSaveSheetMode('import');
+  }, [draft, busy, importMode]);
+
+  /**
+   * TemplateMetaSheet 確認 — 套用 (program_id, sub_tag) 進 draft 後跑 commit。
+   * 兩種模式：
+   *   - 'save'   → persistDraft + Alert「已儲存」+ 留在編輯器
+   *   - 'import' → persistDraft + router.replace 回 programs tab 帶 apply params
+   *
+   * 「建立並導入」允許 !dirty commit (使用者可能完全沒改、純粹按 import 把
+   * 預設 (program, sub_tag) 寫回 cell)。「儲存」沿用 dirty guard。
+   */
+  const onSaveSheetConfirm = useCallback(
+    async (args: {
+      name: string;
+      program_id: string | null;
+      sub_tag: string | null;
+    }) => {
+      if (!draft || busy) return;
+      const mode = saveSheetMode;
+      if (!mode) return;
+      setBusy(true);
+      try {
+        // Apply sheet's (name, program_id, sub_tag) to draft. We mutate the
+        // working draft directly via setDraft so persistDraft sees the new
+        // values; the next render shows them in the header label too.
+        const patchedDraft: Template = {
+          ...draft,
+          name: args.name || draft.name,
+          program_id: args.program_id,
+          sub_tag: args.sub_tag,
+        };
+        setDraft(patchedDraft);
+        // Dup-triple guard: changing (name, program_id, sub_tag) must not
+        // collide with an existing sibling. Mirror convertSessionToTemplate
+        // pattern (findTemplateByTriple + throw DUPLICATE_TEMPLATE_TRIPLE).
+        const classificationChanging =
+          patchedDraft.name !== committed?.name ||
+          patchedDraft.program_id !== committed?.program_id ||
+          patchedDraft.sub_tag !== committed?.sub_tag;
+        if (classificationChanging) {
+          const existing = await findTemplateByTriple(db, {
+            name: patchedDraft.name,
+            program_id: patchedDraft.program_id ?? null,
+            sub_tag: patchedDraft.sub_tag ?? null,
+          });
+          if (existing && existing.id !== patchedDraft.id) {
+            throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+          }
+        }
+
+        // persistDraft reads `draft` from closure — pass an inline commit
+        // using the patched draft directly via commitTemplateDraft to avoid
+        // a stale-closure race. We replicate the rename-siblings + commit +
+        // use_count bump dance with patchedDraft. `now` is a function thunk
+        // per the repo helper signatures (() => Date.now()).
+        const now = () => Date.now();
+        if (committed && patchedDraft.name !== committed.name) {
+          await applyRenameSiblings(db, {
+            oldName: committed.name,
+            newName: patchedDraft.name,
+            now,
+          });
+        }
+        // ★ commitTemplateDraft 只寫 name / color_hex / updated_at + exercises,
+        // 不寫 program_id / sub_tag。identity 三元組改動必須走
+        // attachTemplateToProgram（同一個 UPDATE template SET program_id=?,
+        // sub_tag=?, updated_at=? 的 helper）。在 commit 之前先 attach 確保
+        // re-hydrate 的 row 帶到新的 classification。
+        if (classificationChanging) {
+          await attachTemplateToProgram(db, {
+            template_id: patchedDraft.id,
+            program_id: patchedDraft.program_id ?? null,
+            sub_tag: patchedDraft.sub_tag ?? null,
+            now,
+          });
+        }
+        if (committed) {
+          await commitTemplateDraft(db, {
+            committed,
+            draft: patchedDraft,
+            now,
+          });
+          const committedIds = new Set(committed.exercises.map((e) => e.id));
+          const bumps = patchedDraft.exercises.filter(
+            (e) =>
+              !committedIds.has(e.id) &&
+              e.parent_id === null &&
+              e.reusable_superset_id !== null,
+          );
+          for (const row of bumps) {
+            await incrementUseCount(db, row.reusable_superset_id as string, now);
+          }
+        }
+        // Re-hydrate so any DB-side cascade lands in committed.
+        const refreshed = id ? await getTemplateFull(db, id) : null;
+        if (refreshed) {
+          setCommitted(refreshed);
+          setDraft(cloneTemplate(refreshed));
+        }
+        if (mode === 'save') {
+          setSaveSheetMode(null);
+          Alert.alert(tt('status', 'saved'), '', [{ text: tt('common', 'ok') }]);
+        } else {
+          // import mode — redirect with apply params.
+          const finalProgramId =
+            refreshed?.program_id ?? patchedDraft.program_id ?? null;
+          const finalSubTag =
+            refreshed?.sub_tag ?? patchedDraft.sub_tag ?? null;
+          const params = new URLSearchParams();
+          params.set('applyTpl', encodeURIComponent(id));
+          params.set(
+            'applyProgram',
+            finalProgramId == null
+              ? '__none__'
+              : encodeURIComponent(finalProgramId),
+          );
+          params.set(
+            'applySubTag',
+            finalSubTag == null
+              ? '__none__'
+              : encodeURIComponent(finalSubTag),
+          );
+          params.set('applyKind', fromKind!);
+          params.set('applyDay', String(importFromDay!));
+          if (fromKind === 'cell' && importFromCycle != null) {
+            params.set('applyCycle', String(importFromCycle));
+          }
+          if (importFromSubTag != null && finalSubTag == null) {
+            params.set('applySubTag', encodeURIComponent(importFromSubTag));
+          }
+          setSaveSheetMode(null);
+          router.replace(`/(tabs)/programs?${params.toString()}`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
+          Alert.alert(
+            tt('alert', 'variantExists'),
+            tt('alert', 'duplicateTemplateTripleEditorBody'),
+          );
+        } else {
+          Alert.alert(tt('alert', 'saveFailed'), msg);
+        }
+      } finally {
+        setBusy(false);
       }
-      Alert.alert('已儲存', '', [{ text: 'OK' }]);
-    } catch (e) {
-      Alert.alert('Save failed', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [dirty, draft, busy, persistDraft, id, db]);
+    },
+    [
+      draft,
+      busy,
+      saveSheetMode,
+      committed,
+      db,
+      id,
+      fromKind,
+      importFromCycle,
+      importFromDay,
+      importFromSubTag,
+      router,
+    ],
+  );
+
+  const onDeleteTemplate = useCallback(() => {
+    if (!id || !draft || busy) return;
+    const programName = draft.program_id
+      ? programs.find((p) => p.id === draft.program_id)?.name ?? tt('common', 'default')
+      : null;
+    const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
+    Alert.alert(
+      tt('alert', 'deleteTemplateQ'),
+      tEditorDeleteTemplateBody(draft.name, triple),
+      [
+        { text: tt('common', 'cancel'), style: 'cancel' },
+        {
+          text: tt('common', 'delete'),
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await deleteTemplate(db, id);
+              router.back();
+            } catch (e) {
+              Alert.alert(tt('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [id, draft, busy, db, programs, router]);
 
   const onStartSession = useCallback(async () => {
     if (!id || !draft || busy) return;
@@ -250,13 +574,13 @@ export default function TemplateEditorView() {
       const active = await getActiveSession(db);
       if (active) {
         Alert.alert(
-          'Session already in progress',
-          'End the current session in the Today tab before starting a new one.',
+          tt('alert', 'sessionAlreadyInProgress'),
+          tt('alert', 'endActiveSessionFirst'),
         );
         return;
       }
       if (draft.exercises.length === 0) {
-        Alert.alert('Add at least one exercise before starting a session.');
+        Alert.alert(tt('alert', 'addExerciseFirst'));
         return;
       }
       if (dirty) {
@@ -265,7 +589,7 @@ export default function TemplateEditorView() {
       await startSessionFromTemplate(db, { template_id: id, uuid: randomUUID });
       router.replace('/');
     } catch (e) {
-      Alert.alert('Start failed', e instanceof Error ? e.message : String(e));
+      Alert.alert(tt('alert', 'cannotStartSession'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -414,8 +738,8 @@ export default function TemplateEditorView() {
         ).length;
         if (clusterSize <= 2) {
           Alert.alert(
-            '無法刪除',
-            'Dropset cluster 至少需要 2 組（head + 1 follower）。如要整組刪除，請左滑 cluster head。',
+            tt('alert', 'cannotDelete'),
+            tt('alert', 'dropsetMinimum'),
           );
           return ex;
         }
@@ -536,99 +860,15 @@ export default function TemplateEditorView() {
     });
   };
 
+  // Slice 10c Phase 2 commit 3 — delegate to pure ops. Cluster mirror +
+  // solo dispatch lives in `cycleSetKindAcrossExercises` so the session
+  // set logger (Phase 2+) can share the exact same logic.
   const cycleSetKind = (ex_id: string, set_id: string) => {
     if (!draft) return;
-
-    // Reusable cluster (rs_id NOT NULL) — slice 9.8b grill Q5 sub-(iii):
-    // only warmup ↔ working (no dropset, which would break sets-length
-    // parallel invariant), and the sibling row's same-position set MUST
-    // mirror the change so "一列 = 一組" reads coherently.
-    const targetEx = draft.exercises.find((e) => e.id === ex_id);
-    if (targetEx && targetEx.reusable_superset_id !== null) {
-      const idx = targetEx.sets.findIndex((s) => s.id === set_id);
-      if (idx === -1) return;
-      const currentKind = targetEx.sets[idx].kind;
-      // Only warmup ↔ working; ignore dropset state (shouldn't exist in a
-      // reusable cluster, but defensive: if encountered, normalize to working).
-      const newKind: TemplateSet['kind'] =
-        currentKind === 'warmup' ? 'working' : 'warmup';
-      // Cluster head = parent_id ?? own id. All cluster members share that
-      // anchor; flip the set at `idx` on each member.
-      const clusterHead = targetEx.parent_id ?? targetEx.id;
-      setDraft({
-        ...draft,
-        exercises: draft.exercises.map((ex) => {
-          const inCluster = ex.id === clusterHead || ex.parent_id === clusterHead;
-          if (!inCluster) return ex;
-          if (idx >= ex.sets.length) return ex;
-          return {
-            ...ex,
-            sets: ex.sets.map((s, i) =>
-              i === idx ? { ...s, kind: newKind } : s,
-            ),
-          };
-        }),
-      });
-      return;
-    }
-
     setDraft({
       ...draft,
-      exercises: draft.exercises.map((ex) => {
-        if (ex.id !== ex_id) return ex;
-        const idx = ex.sets.findIndex((s) => s.id === set_id);
-        if (idx === -1) return ex;
-        const s = ex.sets[idx];
-        const isFollower =
-          s.kind === 'dropset' && (s.parent_set_id ?? null) !== null;
-        if (isFollower) return ex;
-
-        if (s.kind === 'working') {
-          return {
-            ...ex,
-            sets: ex.sets.map((x) =>
-              x.id === set_id ? { ...x, kind: 'warmup' as const } : x,
-            ),
-          };
-        }
-        if (s.kind === 'warmup') {
-          const newFollower: TemplateSet = {
-            id: newId('set'),
-            position: s.position + 0.5,
-            kind: 'dropset',
-            reps: s.reps,
-            weight: s.weight,
-            parent_set_id: s.id,
-            notes: null,
-          };
-          const updated = ex.sets.map((x) =>
-            x.id === set_id
-              ? { ...x, kind: 'dropset' as const, parent_set_id: null }
-              : x,
-          );
-          return {
-            ...ex,
-            sets: normalizePositions([
-              ...updated.slice(0, idx + 1),
-              newFollower,
-              ...updated.slice(idx + 1),
-            ]),
-          };
-        }
-        // dropset head → working + CASCADE delete followers
-        const headId = s.id;
-        return {
-          ...ex,
-          sets: normalizePositions(
-            ex.sets
-              .filter((x) => x.id === headId || x.parent_set_id !== headId)
-              .map((x) =>
-                x.id === set_id
-                  ? { ...x, kind: 'working' as const, parent_set_id: null }
-                  : x,
-              ),
-          ),
-        };
+      exercises: cycleSetKindAcrossExercises(draft.exercises, ex_id, set_id, {
+        uuid: () => newId('set'),
       }),
     });
   };
@@ -724,23 +964,123 @@ export default function TemplateEditorView() {
     });
   };
 
+  // overnight #45 第 3 點 — 排序動作 modal handler。Mirror session pattern
+  // (app/(tabs)/index.tsx:2092 ReorderExercisesSheet)：長按 ex 卡 header
+  // 或 ⚙️「移動動作」打開 modal、用戶長按列拖拽 → 完成 commit 新 ordering。
+  // template editor 為 draft-based 編輯模型，不直寫 DB；改 draft.exercises
+  // 的 ordering（parents 重排 + children 留在 parent 旁、保留 parent_id 對），
+  // 等用戶按右上「儲存」走 commitTemplateDraft path（既有邏輯會 UPDATE
+  // template_exercise.ordering）。
   const showReorderPlaceholder = () => {
-    Alert.alert(
-      '長按拖排序',
-      '尚未實作（v1 ship 階段補）。',
-    );
+    setReorderSheetOpen(true);
   };
 
+  // Build the parent-row list for the reorder modal: 1 row per parent
+  // (solo or cluster-parent). Cluster 顯示 "A + B" 名稱 (mirror header
+  // layout)。Children rows 不出現 — sheet 只動 parent ordering；A+B 配對
+  // 不可拆是 cluster 不變式。
+  const reorderParents = useMemo(() => {
+    if (!draft) return [];
+    return draft.exercises
+      .filter((e) => e.parent_id == null)
+      .map((parent) => {
+        const childNames = draft.exercises
+          .filter((c) => c.parent_id === parent.id)
+          .map((c) => (c.name ? tExercise(c.name) : '(動作)'));
+        const parentName = parent.name ? tExercise(parent.name) : '(動作)';
+        const name = childNames.length === 0
+          ? parentName
+          : [parentName, ...childNames].join(' + ');
+        return { id: parent.id, name };
+      });
+  }, [draft]);
+
+  const onConfirmReorder = (orderedParentIds: string[]) => {
+    setReorderSheetOpen(false);
+    if (!draft) return;
+    // Pure-domain helper handles rebuild + ordering re-key + safety guard
+    // (missing parents appended). Exercised by tests in templateOps.test.ts.
+    const rebuilt = reorderTemplateExercises(draft.exercises, orderedParentIds);
+    setDraft({ ...draft, exercises: rebuilt });
+  };
+
+  // overnight #49 — inline 長按拖曳 reorder for SETS within a solo card.
+  // Mirror session pattern (app/(tabs)/index.tsx:2432 onDragEnd path), but
+  // works on draft (no DB write — commitTemplateDraft on 儲存 will UPDATE
+  // template_set.position). Pure helper `reorderTemplateSetsByGroups` handles
+  // dropset cluster cohesion (head + followers stay contiguous as 1 group).
+  const onConfirmReorderSets = useCallback(
+    (ex_id: string, orderedGroupIds: string[]) => {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          exercises: prev.exercises.map((e) =>
+            e.id === ex_id
+              ? reorderTemplateSetsByGroups(e, orderedGroupIds)
+              : e,
+          ),
+        };
+      });
+    },
+    [],
+  );
+
+  // overnight #49 — inline 長按拖曳 reorder for cluster CYCLES (A+B paired).
+  // Mirror session pattern (components/session/cluster-card.tsx:291 + the
+  // session-level onConfirmReorderCycles handler at app/(tabs)/index.tsx:1825).
+  // Pure helper `reorderTemplateClusterCycles` walks both sides in lockstep so
+  // a cycle drag never breaks the A.sets[i] ↔ B.sets[i] pairing.
+  const onConfirmReorderClusterCycles = useCallback(
+    (
+      parent_id: string,
+      child_id: string,
+      orderedCycleKeys: string[],
+    ) => {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const exA = prev.exercises.find((e) => e.id === parent_id);
+        const exB = prev.exercises.find((e) => e.id === child_id);
+        if (!exA || !exB) return prev;
+        const next = reorderTemplateClusterCycles(exA, exB, orderedCycleKeys);
+        return {
+          ...prev,
+          exercises: prev.exercises.map((e) => {
+            if (e.id === parent_id) return next.exA;
+            if (e.id === child_id) return next.exB;
+            return e;
+          }),
+        };
+      });
+    },
+    [],
+  );
+
+  // Template editor 「動作歷史」 button → exercise-history page (slice 9.5 stub
+  // 落地, 2026-05-21 wave 13 mini wave). Template editor is design-time so we
+  // don't have a `session_exercise_id` to pass — caller pattern mirrors
+  // `app/superset/[id].tsx::FooterButton` (no `currentSeId*` params).
+  //
+  // Solo card → clusterMode=exclude_cluster (mirror session detail page solo
+  // card at app/session/[id].tsx:1547).
+  // Cluster card → clusterMode=cluster_only + partner + side=A (mirror session
+  // detail page cluster card at app/session/[id].tsx:1437). For manual clusters
+  // with N>1 children, treat children[0] as B side (matches how the cluster
+  // header reads pair info in `computeTemplateClusterStat`).
   const showExerciseHistory = (ex: TemplateExercise) => {
-    Alert.alert(
-      `${ex.name ?? '(動作)'}· 動作歷史`,
-      'production 會跳到動作歷史頁。slice 9.5 暫顯示對話框。',
-    );
+    router.push(`/exercise-history/${ex.exercise_id}?clusterMode=exclude_cluster`);
   };
 
   const showSupersetHistory = (parent: TemplateExercise, children: TemplateExercise[]) => {
-    const names = [parent.name ?? '(動作)', ...children.map((c) => c.name ?? '(動作)')].join(' + ');
-    Alert.alert(`${names} · 動作歷史`, 'production 整 superset 跨動作歷史。');
+    const b = children[0];
+    if (!b) {
+      // Defensive: no B side → fall back to solo view.
+      router.push(`/exercise-history/${parent.exercise_id}?clusterMode=exclude_cluster`);
+      return;
+    }
+    router.push(
+      `/exercise-history/${parent.exercise_id}?clusterMode=cluster_only&partner=${b.exercise_id}&side=A`,
+    );
   };
 
   const openExerciseNoteEditor = (ex: TemplateExercise) => {
@@ -819,68 +1159,59 @@ export default function TemplateEditorView() {
 
   const deleteExercise = (ex: TemplateExercise) => {
     if (!draft) return;
-    Alert.alert(
-      '確認刪除？',
-      `將刪除「${ex.name ?? '(動作)'}」及其所有 sets。`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '刪除',
-          style: 'destructive',
-          onPress: () => {
-            setDraft({
-              ...draft,
-              exercises: draft.exercises.filter(
-                (e) => e.id !== ex.id && e.parent_id !== ex.id,
-              ),
-            });
-          },
+    // overnight #45 第 2 點 — cluster (rs_id NOT NULL) parent row 觸發
+    // ⚙️ 刪除 → cascade-delete A+B 整 cluster（mirror session #18 behavior）。
+    // 既有 filter 已正確處理（parent_id === ex.id 的 children 一併刪），
+    // 只是 alert copy 要點明刪超級組以對齊 session UX。
+    const isCluster = draft.exercises.some((e) => e.parent_id === ex.id);
+    const title = isCluster ? tt('alert', 'deleteSupersetQ') : tt('alert', 'confirmDeleteQ');
+    const exName = ex.name ? tExercise(ex.name) : tt('common', 'unknownExercise');
+    const body = isCluster
+      ? tEditorDeleteClusterBody(exName)
+      : tEditorDeleteSoloBody(exName);
+    Alert.alert(title, body, [
+      { text: tt('common', 'cancel'), style: 'cancel' },
+      {
+        text: tt('common', 'delete'),
+        style: 'destructive',
+        onPress: () => {
+          setDraft({
+            ...draft,
+            exercises: draft.exercises.filter(
+              (e) => e.id !== ex.id && e.parent_id !== ex.id,
+            ),
+          });
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const openGearMenu = (ex: TemplateExercise) => {
-    // Reusable cluster lock (ADR-0016 amendment / slice 9.8b grill Q5):
-    // rs_id NOT NULL → 動作組合鎖死, the only ⚙-menu actions are toggling
-    // the section (cluster moves as a pair via existing groupHeadId logic)
-    // and deleting the whole cluster. Notes / rest_seconds / 移動 are
-    // intentionally hidden because they imply per-row mutation that breaks
-    // the locked-pair invariant.
-    if (ex.reusable_superset_id !== null) {
-      const options = [
-        ex.section === 'general' ? '設為常設運動' : '設為一般運動',
-        '刪除',
-        '取消',
-      ];
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: ex.name ?? undefined,
-          options,
-          destructiveButtonIndex: 1,
-          cancelButtonIndex: 2,
-        },
-        (idx) => {
-          if (idx === 0) toggleSection(ex.id);
-          else if (idx === 1) deleteExercise(ex);
-        },
-      );
-      return;
-    }
-
+    // overnight #45 第 2 點 — 補 cluster gear menu 3 項 (新增/編輯備註、
+    // 休息時間、移動動作)。原設計把 rs_id NOT NULL 的 cluster metadata
+    // 全鎖死（ADR-0016 amendment / slice 9.8b grill Q5）— 該鎖過嚴。正解：
+    // cluster 內 A+B 兩動作「配對不可拆」是要保的（不能把 A 拆出 cluster
+    // 變 solo），但 cluster **外層位置可動**、cluster level metadata
+    // (parent 的 notes/rest_seconds) 也應可設，mirror session cluster card
+    // (app/(tabs)/index.tsx:1156-1164 cluster gear)。
+    //
+    // notes 是 per-Exercise GLOBAL（ADR-0017 amendment）— 透過 parent 的
+    // exercise_id 寫到 exercise.notes（A 側），mirror session 行為（session
+    // 也是用 parent.exercise_id 寫 exercise.notes）。rest_seconds 寫在
+    // template_exercise parent row 上、不 leak 到 children rows。
     const hasNotes = (ex.notes ?? '').trim().length > 0;
-    const restLabel = `休息時間（${ex.rest_seconds ?? 90}s）`;
+    const restLabel = tEditorRestLabel(ex.rest_seconds ?? 90);
     const options = [
-      hasNotes ? '編輯備註' : '新增備註',
+      hasNotes ? tt('button', 'editNote') : tt('button', 'addNote'),
       restLabel,
-      '移動動作',
-      ex.section === 'general' ? '設為常設運動' : '設為一般運動',
-      '刪除',
-      '取消',
+      tt('button', 'moveExercise'),
+      ex.section === 'general' ? tt('button', 'setAsEvergreen') : tt('button', 'setAsGeneral'),
+      tt('common', 'delete'),
+      tt('common', 'cancel'),
     ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: ex.name ?? undefined,
+        title: ex.name ? tExercise(ex.name) : undefined,
         options,
         destructiveButtonIndex: 4,
         cancelButtonIndex: 5,
@@ -888,8 +1219,7 @@ export default function TemplateEditorView() {
       (idx) => {
         if (idx === 0) openExerciseNoteEditor(ex);
         else if (idx === 1) openRestEditor(ex);
-        else if (idx === 2)
-          Alert.alert('移動動作', '尚未實作（v1 ship 階段補）。');
+        else if (idx === 2) showReorderPlaceholder();
         else if (idx === 3) toggleSection(ex.id);
         else if (idx === 4) deleteExercise(ex);
       },
@@ -1155,22 +1485,26 @@ export default function TemplateEditorView() {
   // Render
   // -----------------------------------------------------------------------
 
+  // Wave 18g smoke fix — headerShown is set statically at the layout
+  // level (app/_layout.tsx Stack.Screen name="template/[id]"). Inline
+  // `<Stack.Screen options={{ headerShown: false }} />` here caused a
+  // remount loop when this route was opened from inside the modal-
+  // presentation wizard (expo-router treats inline option changes inside
+  // a modal context as a "rebuild screen" trigger).
   if (!loaded) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <Text style={styles.muted}>Loading…</Text>
+        <Text style={styles.muted}>{tt('status', 'loading')}</Text>
       </SafeAreaView>
     );
   }
   if (missing || !draft || !committed) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>找不到此 template</Text>
+          <Text style={styles.emptyText}>{tt('alert', 'templateNotFound')}</Text>
           <Pressable style={styles.backBtn} onPress={onExit}>
-            <Text style={styles.backBtnText}>‹ 返回</Text>
+            <Text style={styles.backBtnText}>{tt('common', 'backArrow')}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -1208,31 +1542,74 @@ export default function TemplateEditorView() {
               onAddClusterAfter={(head_id) =>
                 addClusterAfter(parent.id, head_id)
               }
-              onLongPressRow={showReorderPlaceholder}
+              onLongPressHeader={() => setReorderSheetOpen(true)}
               onShowHistory={() => showExerciseHistory(parent)}
               onGearTap={() => openGearMenu(parent)}
               onShowSetNote={(set) => openSetNoteEditor(parent.id, set)}
               onShowExerciseNote={() => openExerciseNoteEditor(parent)}
               onCycleLabel={(s) => cycleSetKind(parent.id, s.id)}
+              onConfirmReorderSets={(orderedGroupIds) =>
+                onConfirmReorderSets(parent.id, orderedGroupIds)
+              }
             />
           </View>
         );
       }
       const isExpanded = expandedExId === parent.id;
-      const allNames = [parent.name ?? '(動作)', ...children.map((c) => c.name ?? '(動作)')].join(' + ');
+      // overnight #48 第 1 點 / wave 12 dropset 納入修正 (2026-05-20):
+      // cluster header 顯示「{warmup}熱+{working}組」用 cycle 概念算。1 chain =
+      // 1 unit — dropset HEAD 算 1 組、follower-only cycle 不另計。詳見
+      // `computeTemplateClusterStat` JSDoc。2-side rule → 只取 children[0]
+      // (mirror runtime groupClusterSides). 為空 cluster → 0熱+0組.
+      const clusterStat = computeTemplateClusterStat(
+        parent.sets.map((s) => ({
+          kind: s.kind,
+          parent_set_id: s.parent_set_id ?? null,
+        })),
+        (children[0]?.sets ?? []).map((s) => ({
+          kind: s.kind,
+          parent_set_id: s.parent_set_id ?? null,
+        })),
+      );
+      // overnight #45 第 1 點：mirror session cluster-card.tsx:216-224 layout
+      // — 「超」chip 獨佔行 1 + 標題分行（兩動作名 + 「 + 」連接）獨佔行 2。
+      // template 無 progress bar 概念，故只兩行（session 是三行 — chip / 標題 / progress）。
       return (
         <View key={parent.id} style={styles.exCard}>
           <View style={styles.exHeader}>
             <Pressable
               onPress={() => toggleExpanded(parent.id)}
+              onLongPress={() => setReorderSheetOpen(true)}
+              delayLongPress={400}
               style={styles.exHeaderTapZone}
               hitSlop={4}>
-              <Text style={styles.supersetTag}>超級組</Text>
-              <Text style={styles.supersetNames} numberOfLines={2}>
-                {allNames}
-              </Text>
-              <View style={styles.flexFill} />
-              {isExpanded ? <Text style={styles.exChevron}>▼</Text> : null}
+              <View style={styles.clusterText}>
+                {/*
+                  Row 1: 「超」chip + 「X熱+X組」+ ▼ 同列。把 stat 從標題列搬上來
+                  —— 標題往往被兩個動作名 + " + " 連接撐長到 3 行（如
+                  「Cable Crossover + Chest Dip」），同列再塞 stat / chevron
+                  會壓縮標題空間。用戶反饋：移走後標題拿到 row 2 full-width。
+                */}
+                <View style={styles.clusterTagRow}>
+                  <Text style={styles.supersetTag}>{tt('domain', 'supersetChip')}</Text>
+                  <View style={styles.flexFill} />
+                  <Text style={styles.exSummary}>
+                    {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
+                  </Text>
+                  {isExpanded ? (
+                    <Text style={styles.exChevron}>▼</Text>
+                  ) : null}
+                </View>
+                <Text style={styles.clusterName}>
+                  {parent.name ? tExercise(parent.name) : '(動作)'}
+                  {children.map((c) => (
+                    <Fragment key={c.id}>
+                      <Text style={styles.clusterPlus}> + </Text>
+                      {c.name ? tExercise(c.name) : '(動作)'}
+                    </Fragment>
+                  ))}
+                </Text>
+              </View>
             </Pressable>
             {parent.notes && parent.notes.trim().length > 0 ? (
               <Pressable
@@ -1251,7 +1628,9 @@ export default function TemplateEditorView() {
           </View>
           {isExpanded ? (
             <>
-              <View style={styles.exSuperRow}>
+              <View style={[styles.exSuperRow, styles.exSuperCycleRow]}>
+                {/* Leading spacer matching shared `#` btn column width (28). */}
+                <View style={styles.exClusterSharedLabelSpacer} />
                 <View style={styles.exSuperCol}>
                   <Text style={styles.supersetColName} numberOfLines={1}>
                     {parent.name ?? '(動作)'}
@@ -1272,13 +1651,35 @@ export default function TemplateEditorView() {
               </View>
               <View style={[styles.setsBox, styles.setsBoxCompact]}>
                 {(() => {
+                  // overnight #49 — cluster cycle inline drag. Two-side rule
+                  // (children[0]) mirrors session cluster-card.tsx::groupClusterSides
+                  // (slice 10c #45 amendment §A: cluster 內 A+B 配對不可拆).
+                  // Build cycle[] (paired rows) and feed NestableDraggableFlatList;
+                  // onDragEnd extracts key per cycle (a_set?.id ?? b_set?.id) and
+                  // delegates to pure helper `reorderTemplateClusterCycles`.
                   const parentMeta = computeExMeta(parent);
                   const childMetas = children.map((c) => computeExMeta(c));
-                  const maxSets = Math.max(
-                    parent.sets.length,
-                    ...children.map((c) => c.sets.length),
-                  );
                   const childIds = children.map((c) => c.id);
+                  const sideB = children[0] ?? null;
+                  const aLen = parent.sets.length;
+                  const bLen = sideB?.sets.length ?? 0;
+                  const maxSets = Math.max(aLen, bLen);
+
+                  interface CycleItem {
+                    key: string;
+                    cycle_idx: number; // = original index i (0-based)
+                  }
+                  const cycles: CycleItem[] = Array.from(
+                    { length: maxSets },
+                    (_, i) => ({
+                      key:
+                        parent.sets[i]?.id ??
+                        sideB?.sets[i]?.id ??
+                        `cycle-${i}`,
+                      cycle_idx: i,
+                    }),
+                  );
+
                   const renderCell = (
                     ex: TemplateExercise,
                     meta: ReturnType<typeof computeExMeta>,
@@ -1296,6 +1697,7 @@ export default function TemplateEditorView() {
                         set={s}
                         setLabel={meta.setLabels[i]}
                         compact
+                        hideLabel
                         isDropsetFollower={isDropsetFollower}
                         isClusterLast={isClusterLast}
                         minusDisabled={minusDisabled}
@@ -1316,76 +1718,155 @@ export default function TemplateEditorView() {
                       />
                     );
                   };
-                  return Array.from({ length: maxSets }, (_, i) => {
-                    const parentSet = parent.sets[i];
-                    const rowHasNote = !!(
-                      parentSet?.notes && parentSet.notes.trim().length > 0
-                    );
-                    return (
-                      <SwipeableSetRow
-                        key={i}
-                        swipeLeftActions={[
-                          {
-                            key: 'del-superset-row',
-                            label: '刪',
-                            color: '#FF3B30',
-                            onPress: () =>
-                              deleteSupersetRowAt(parent.id, childIds, i),
-                          },
-                        ]}
-                        swipeRightActions={[
-                          {
-                            key: 'clone-superset-row',
-                            label: '加',
-                            color: '#34C759',
-                            onPress: () =>
-                              cloneSupersetRowAt(parent.id, childIds, i),
-                          },
-                          {
-                            key: 'note-superset-row',
-                            label: '備註',
-                            color: '#007AFF',
-                            onPress: () => {
-                              if (parentSet)
-                                openSetNoteEditor(parent.id, parentSet);
-                            },
-                          },
-                        ]}
-                        onLongPress={showReorderPlaceholder}>
-                        <View style={styles.exSuperRow}>
-                          <View style={styles.exSuperCol}>
-                            {renderCell(parent, parentMeta, i)}
-                          </View>
-                          {children.map((child, ci) => (
-                            <Fragment key={child.id}>
-                              <View style={styles.exSuperDivider} />
-                              <View
-                                style={[
-                                  styles.exSuperCol,
-                                  styles.exSuperColWithLeftPad,
-                                ]}>
-                                {renderCell(child, childMetas[ci], i)}
-                              </View>
-                            </Fragment>
-                          ))}
-                          <View style={styles.supersetRowNoteSlot}>
-                            {rowHasNote ? (
-                              <Pressable
-                                onPress={() => {
+
+                  if (cycles.length === 0) return null;
+                  return (
+                    <NestableDraggableFlatList
+                      data={cycles}
+                      keyExtractor={(c) => c.key}
+                      activationDistance={20}
+                      onDragEnd={({ data }) => {
+                        const newKeys = data.map((c) => c.key);
+                        const oldKeys = cycles.map((c) => c.key);
+                        const changed = newKeys.some(
+                          (k, idx) => k !== oldKeys[idx],
+                        );
+                        if (changed && sideB) {
+                          onConfirmReorderClusterCycles(
+                            parent.id,
+                            sideB.id,
+                            newKeys,
+                          );
+                        }
+                      }}
+                      renderItem={({
+                        item: c,
+                        drag,
+                        isActive,
+                      }: RenderItemParams<CycleItem>) => {
+                        const i = c.cycle_idx;
+                        const parentSet = parent.sets[i];
+                        const rowHasNote = !!(
+                          parentSet?.notes && parentSet.notes.trim().length > 0
+                        );
+                        return (
+                          <SwipeableSetRow
+                            swipeLeftActions={[
+                              {
+                                key: 'del-superset-row',
+                                label: tt('button', 'swipeDelete'),
+                                color: tokens.action.destructive,
+                                onPress: () =>
+                                  deleteSupersetRowAt(parent.id, childIds, i),
+                              },
+                            ]}
+                            swipeRightActions={[
+                              {
+                                key: 'clone-superset-row',
+                                label: tt('button', 'swipeAdd'),
+                                color: tokens.action.success,
+                                onPress: () =>
+                                  cloneSupersetRowAt(parent.id, childIds, i),
+                              },
+                              {
+                                key: 'note-superset-row',
+                                label: tt('button', 'swipeNote'),
+                                color: tokens.action.primary,
+                                onPress: () => {
                                   if (parentSet)
                                     openSetNoteEditor(parent.id, parentSet);
-                                }}
-                                hitSlop={6}>
-                                <Text style={styles.setNoteIndicatorText}>
-                                  📝
-                                </Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
-                        </View>
-                      </SwipeableSetRow>
-                    );
-                  });
+                                },
+                              },
+                            ]}
+                            onLongPress={drag}>
+                            <View
+                              style={[
+                                styles.exSuperRow,
+                                styles.exSuperCycleRow,
+                                isActive && styles.dragActiveRow,
+                              ]}>
+                              {/*
+                                Shared `#` button at row start — mirror session
+                                cluster-card.tsx pattern (overnight #52 follow-up):
+                                A+B 共用一個 label，避免 row 內出現兩個 #。Tap
+                                觸發 cycleSetKindAcrossExercises（透過 cycleSetKind
+                                wrapper），cluster path 內自動 mirror 到對側、A 跟
+                                B 兩側 set_kind atomic flip。
+                                Disabled if both A and B sides have no set at idx i.
+                              */}
+                              {(() => {
+                                const sharedLabelSrc =
+                                  parent.sets[i] ?? children[0]?.sets[i] ?? null;
+                                const sharedLabel = sharedLabelSrc
+                                  ? parent.sets[i]
+                                    ? parentMeta.setLabels[i]
+                                    : childMetas[0]?.setLabels[i] ?? ''
+                                  : '';
+                                const disabled = sharedLabelSrc === null;
+                                return (
+                                  <Pressable
+                                    onPress={() => {
+                                      if (disabled || !sharedLabelSrc) return;
+                                      // Tap A side first (parent); if A empty, tap B side.
+                                      // cycleSetKindAcrossExercises auto-mirrors to the
+                                      // other side regardless of which is tapped.
+                                      const tapEx = parent.sets[i]
+                                        ? parent
+                                        : children[0];
+                                      cycleSetKind(tapEx.id, sharedLabelSrc.id);
+                                    }}
+                                    disabled={disabled}
+                                    hitSlop={6}
+                                    style={({ pressed }) => [
+                                      styles.exClusterSharedLabel,
+                                      pressed &&
+                                        !disabled &&
+                                        styles.exClusterSharedLabelPressed,
+                                      disabled &&
+                                        styles.exClusterSharedLabelDisabled,
+                                    ]}
+                                  >
+                                    <Text style={styles.exClusterSharedLabelText}>
+                                      {sharedLabel}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })()}
+                              <View style={styles.exSuperCol}>
+                                {renderCell(parent, parentMeta, i)}
+                              </View>
+                              {children.map((child, ci) => (
+                                <Fragment key={child.id}>
+                                  <View style={styles.exSuperDivider} />
+                                  <View
+                                    style={[
+                                      styles.exSuperCol,
+                                      styles.exSuperColWithLeftPad,
+                                    ]}>
+                                    {renderCell(child, childMetas[ci], i)}
+                                  </View>
+                                </Fragment>
+                              ))}
+                              <View style={styles.supersetRowNoteSlot}>
+                                {rowHasNote ? (
+                                  <Pressable
+                                    onPress={() => {
+                                      if (parentSet)
+                                        openSetNoteEditor(parent.id, parentSet);
+                                    }}
+                                    hitSlop={6}>
+                                    <Text style={styles.setNoteIndicatorText}>
+                                      📝
+                                    </Text>
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            </View>
+                          </SwipeableSetRow>
+                        );
+                      }}
+                    />
+                  );
                 })()}
               </View>
               <View style={styles.supersetFooter}>
@@ -1397,12 +1878,12 @@ export default function TemplateEditorView() {
                     )
                   }
                   style={styles.exFooterBtn}>
-                  <Text style={styles.exFooterBtnText}>新增 1 組</Text>
+                  <Text style={styles.exFooterBtnText}>{tt('button', 'addOneSet')}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => showSupersetHistory(parent, children)}
                   style={styles.exFooterBtn}>
-                  <Text style={styles.exFooterBtnText}>動作歷史</Text>
+                  <Text style={styles.exFooterBtnText}>{tt('page', 'exerciseHistory')}</Text>
                 </Pressable>
               </View>
             </>
@@ -1415,93 +1896,151 @@ export default function TemplateEditorView() {
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Stack.Screen options={{ headerShown: false }} />
+        {/* headerShown handled by layout (see app/_layout.tsx) — see comment
+            above the loading early-return for the modal-remount-loop context. */}
         <View style={styles.topBar}>
           <Pressable onPress={onCancel} style={styles.topBtn}>
-            <Text style={styles.topBtnText}>取消</Text>
+            <Text style={styles.topBtnText}>{tt('common', 'cancel')}</Text>
           </Pressable>
           <View style={styles.topCenter}>
-            <TextInput
-              value={draft.name}
-              onChangeText={updateName}
-              style={styles.nameInput}
-              placeholder="Template 名稱"
-            />
-            <View style={styles.metaRow}>
+            {/*
+              overnight #45 第 4 點 — 標題欄精簡。原 3 行 (name / [swatch] +
+              「per name 配色（同名連動）」/ triple)，精簡為 2 行：
+                row 1: [swatch] [name input]
+                row 2: triple (program · sub_tag)
+              刪「per name 配色（同名連動）」 — swatch 點開既有 colorPicker
+              modal，UX 一目了然不需註解。
+            */}
+            <View style={styles.nameRow}>
               <Pressable
                 onPress={() => setShowColorPicker(true)}
                 style={[
                   styles.colorSwatch,
                   { backgroundColor: colorForTemplate(draft) },
                 ]}
+                hitSlop={6}
               />
-              <Text style={styles.metaText}>per name 配色（同名連動）</Text>
+              <TextInput
+                value={draft.name}
+                onChangeText={updateName}
+                style={styles.nameInput}
+                placeholder={tt('page', 'templateNamePlaceholder')}
+              />
             </View>
+            <Text style={styles.tripleText}>
+              {/* #50 C1 — display override prefers URL query (user's pick in
+                  start-template-sheet) over actual draft.program_id/sub_tag.
+                  Fallback path (#50): editor loads representative but shows
+                  user's selection here. undefined = no override = use draft.
+                  Resolves program_id → program_name via local lookup. */}
+              {(() => {
+                const programIdForDisplay =
+                  displayProgramOverride === undefined
+                    ? draft.program_id ?? null
+                    : displayProgramOverride;
+                const subTagForDisplay =
+                  displaySubTagOverride === undefined
+                    ? draft.sub_tag ?? null
+                    : displaySubTagOverride;
+                const programNameForDisplay = programIdForDisplay
+                  ? programs.find((p) => p.id === programIdForDisplay)?.name ??
+                    tt('common', 'default')
+                  : null;
+                return formatTemplateTriple(
+                  programNameForDisplay,
+                  subTagForDisplay,
+                );
+              })()}
+            </Text>
           </View>
+          {/*
+            Import mode (programs tab "+ 建立新模板"): top-right action becomes
+            「建立並導入」 + always enabled (even when !dirty) — user may keep
+            defaults and still want to bind the (just-created) template back
+            into the originating programs cell/column.
+          */}
           <Pressable
-            onPress={onSave}
-            disabled={!dirty || busy}
-            style={[styles.topBtn, (!dirty || busy) && styles.topBtnDisabled]}>
+            onPress={importMode ? onCreateAndImport : onSave}
+            disabled={importMode ? busy : !dirty || busy}
+            style={[
+              styles.topBtn,
+              (importMode ? busy : !dirty || busy) && styles.topBtnDisabled,
+            ]}>
             <Text
               style={[
                 styles.topBtnText,
-                (!dirty || busy) && styles.topBtnTextDisabled,
+                (importMode ? busy : !dirty || busy) &&
+                  styles.topBtnTextDisabled,
                 styles.topBtnSave,
               ]}>
-              {busy ? '...' : '儲存'}
+              {busy ? '...' : importMode ? tt('button', 'createAndImport') : tt('common', 'save')}
             </Text>
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
-          <SectionHeader label={SECTION_LABEL.general} />
-          {renderSection('general', '（無一般動作）')}
+        {/*
+          overnight #49 — set/cycle 改 inline 長按拖曳。
+          外層 ScrollView 必須換成 NestableScrollContainer 才能讓 cluster /
+          solo body 內巢狀的 NestableDraggableFlatList 正確接住手勢 (mirror
+          session app/(tabs)/index.tsx:1648).
+        */}
+        <NestableScrollContainer contentContainerStyle={styles.body}>
+          <SectionHeader label={getSectionLabel('general')} />
+          {renderSection('general', tt('status', 'noGeneralExercises'))}
 
-          <SectionHeader label={SECTION_LABEL.evergreen} />
-          {renderSection('evergreen', '（無常設動作）')}
-        </ScrollView>
+          <SectionHeader label={getSectionLabel('evergreen')} />
+          {renderSection('evergreen', tt('status', 'noEvergreenExercises'))}
+        </NestableScrollContainer>
 
         <View style={styles.actionBar}>
           <Pressable
             style={styles.actionBtn}
             onPress={() => router.push('/exercise-picker?mode=picker')}>
-            <Text style={styles.actionBtnText}>+ 動作</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
             onPress={onStartSession}
             disabled={busy}>
-            <Text style={styles.actionBtnText}>開始訓練</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'startSession')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
             onPress={() => setShowColorPicker(true)}>
-            <Text style={styles.actionBtnText}>配色</Text>
+            <Text style={styles.actionBtnText}>{tt('button', 'selectColorAction')}</Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
-            onPress={() =>
+            onPress={() => {
+              // overnight #46 第 1 點 — 「通用」變體（program_id IS NULL OR
+              // sub_tag IS NULL）是 3-tier prefill resolver 的 base fallback、
+              // 不可刪。disabledButtonIndices = [1] 讓「刪除模板」灰字 + 點到 noop.
+              const canDelete = isTemplateDeletable({
+                program_id: draft.program_id ?? null,
+                sub_tag: draft.sub_tag ?? null,
+              });
               ActionSheetIOS.showActionSheetWithOptions(
                 {
                   title: draft.name,
-                  options: ['另存模板', '刪除模板', '取消'],
+                  options: [
+                    tt('button', 'saveAsTemplate'),
+                    tt('button', 'deleteTemplate'),
+                    tt('common', 'cancel'),
+                  ],
                   destructiveButtonIndex: 1,
                   cancelButtonIndex: 2,
+                  disabledButtonIndices: canDelete ? [] : [1],
                 },
                 (idx) => {
                   if (idx === 0)
                     Alert.alert(
-                      '另存模板',
-                      'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
+                      tt('button', 'saveAsTemplate'),
+                      tt('alert', 'saveAsTemplateStubBody'),
                     );
-                  else if (idx === 1)
-                    Alert.alert(
-                      '刪除模板',
-                      '請從 Templates list 進入 swipe-to-delete（slice 9.5 暫不實作 inline 刪除）。',
-                    );
+                  else if (idx === 1 && canDelete) onDeleteTemplate();
                 },
-              )
-            }>
+              );
+            }}>
             <Text style={styles.actionBtnText}>⋯</Text>
           </Pressable>
         </View>
@@ -1516,9 +2055,9 @@ export default function TemplateEditorView() {
             onPress={() => setShowColorPicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                <Text style={styles.sheetTitle}>選擇配色</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'selectColor')}</Text>
                 <Pressable onPress={() => setShowColorPicker(false)}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <View style={styles.paletteGrid}>
@@ -1540,7 +2079,7 @@ export default function TemplateEditorView() {
                 })}
               </View>
               <Text style={styles.sheetFootnote}>
-                選色後會 group-wide 連動所有同 name sibling templates。
+                {tt('status', 'colorPickerFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -1556,9 +2095,9 @@ export default function TemplateEditorView() {
             onPress={() => setShowExercisePicker(false)}>
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                <Text style={styles.sheetTitle}>選擇動作</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'selectExercise')}</Text>
                 <Pressable onPress={() => setShowExercisePicker(false)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
               </View>
               <ScrollView style={styles.exercisePickerScroll}>
@@ -1567,12 +2106,12 @@ export default function TemplateEditorView() {
                     key={ex.id}
                     onPress={() => onPickExercise(ex, 'general')}
                     style={styles.exercisePickerRow}>
-                    <Text style={styles.exercisePickerName}>{ex.name}</Text>
+                    <Text style={styles.exercisePickerName}>{tExercise(ex.name)}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
               <Text style={styles.sheetFootnote}>
-                點選動作即加入「一般動作區」；用 ⚙「設為常設」改類別。
+                {tt('status', 'exercisePickerFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -1589,11 +2128,11 @@ export default function TemplateEditorView() {
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Pressable onPress={() => setNoteEditing(null)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
-                <Text style={styles.sheetTitle}>備註</Text>
+                <Text style={styles.sheetTitle}>{tt('domain', 'note')}</Text>
                 <Pressable onPress={saveNote}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <TextInput
@@ -1603,17 +2142,63 @@ export default function TemplateEditorView() {
                     noteEditing ? { ...noteEditing, draft: t } : null,
                   )
                 }
-                placeholder="提示、cue、注意事項…"
+                placeholder={tt('page', 'noteEditorPlaceholder')}
                 multiline
                 autoFocus
                 style={styles.noteInput}
               />
               <Text style={styles.sheetFootnote}>
-                備註用於記錄動作 cue / 注意事項。
+                {tt('status', 'noteEditorFootnote')}
               </Text>
             </Pressable>
           </Pressable>
         </Modal>
+
+        <ReorderExercisesSheet
+          visible={reorderSheetOpen}
+          initialItems={reorderParents}
+          onConfirm={onConfirmReorder}
+          onCancel={() => setReorderSheetOpen(false)}
+        />
+
+        {/*
+          儲存 / 建立並導入 — round 15 polish (programs tab "+ 建立新模板").
+          The sheet confirms (program_id, sub_tag) at commit time; name is
+          edited inline in the editor body so we pass omitName=true. Title
+          adapts to mode so user sees which flow they're confirming.
+        */}
+        {/*
+          `defaultProgramDimensions` — import mode 才傳，讓 sheet 內的「+ 新增
+          計畫」inline helper 繼承 fromProgram 的 cycle dimensions / start_date，
+          避免新建 program 落回 1×3 預設值（round 15 bug fix）。session-detail
+          caller 不受影響（沒傳 = 保留既有最小預設）。
+        */}
+        <TemplateMetaSheet
+          visible={saveSheetMode != null}
+          title={saveSheetMode === 'import' ? tt('page', 'createAndImportSheet') : tt('page', 'saveTemplateSheet')}
+          omitName
+          defaultName={draft?.name ?? ''}
+          defaultProgramId={draft?.program_id ?? null}
+          defaultSubTag={draft?.sub_tag ?? null}
+          defaultProgramDimensions={(() => {
+            if (saveSheetMode !== 'import' || !importFromProgramId) {
+              return undefined;
+            }
+            const fromProg = programs.find(
+              (p) => p.id === importFromProgramId,
+            );
+            if (!fromProg) return undefined;
+            return {
+              cycle_length: fromProg.cycle_length,
+              cycle_count: fromProg.cycle_count,
+              start_date: fromProg.start_date,
+            };
+          })()}
+          programs={programs}
+          busy={busy}
+          onCancel={() => setSaveSheetMode(null)}
+          onConfirm={onSaveSheetConfirm}
+        />
 
         <Modal
           visible={restEditing != null}
@@ -1626,11 +2211,11 @@ export default function TemplateEditorView() {
             <Pressable style={styles.sheet}>
               <View style={styles.sheetHeader}>
                 <Pressable onPress={() => setRestEditing(null)}>
-                  <Text style={styles.sheetCancel}>取消</Text>
+                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
                 </Pressable>
-                <Text style={styles.sheetTitle}>休息時間</Text>
+                <Text style={styles.sheetTitle}>{tt('page', 'restTime')}</Text>
                 <Pressable onPress={saveRest}>
-                  <Text style={styles.sheetDone}>完成</Text>
+                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
                 </Pressable>
               </View>
               <View style={styles.restEditorRow}>
@@ -1677,7 +2262,7 @@ export default function TemplateEditorView() {
                 </Pressable>
               </View>
               <Text style={styles.sheetFootnote}>
-                Session 對此動作 set ✓ 後自動跳此秒數倒數。
+                {tt('status', 'restTimeFootnote')}
               </Text>
             </Pressable>
           </Pressable>
@@ -1688,164 +2273,12 @@ export default function TemplateEditorView() {
 }
 
 function SectionHeader({ label }: { label: string }) {
+  const styles = useEditorStyles();
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHr} />
       <Text style={styles.sectionLabel}>{label}</Text>
       <View style={styles.sectionHr} />
-    </View>
-  );
-}
-
-type SetRowContentProps = {
-  set: TemplateSet;
-  setLabel: string;
-  compact?: boolean;
-  isDropsetFollower: boolean;
-  isClusterLast: boolean;
-  minusDisabled: boolean;
-  hideNoteIndicator?: boolean;
-  onUpdateSet: (set_id: string, patch: Partial<TemplateSet>) => void;
-  onShowSetNote: (set: TemplateSet) => void;
-  onRemoveDropsetRow: (set_id: string) => void;
-  onAddDropsetRow: (set_id: string) => void;
-  onCycleLabel: (set: TemplateSet) => void;
-};
-
-function SetRowContent({
-  set,
-  setLabel,
-  compact,
-  isDropsetFollower,
-  isClusterLast,
-  minusDisabled,
-  hideNoteIndicator,
-  onUpdateSet,
-  onShowSetNote,
-  onRemoveDropsetRow,
-  onAddDropsetRow,
-  onCycleLabel,
-}: SetRowContentProps) {
-  const hasNote =
-    !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
-
-  // Local string buffers so the user can type partial values like "12."
-  // without the controlled <TextInput> immediately re-rendering the
-  // numeric round-trip (`Number("12.") === 12 → "12"` would eat the dot).
-  // Sync from prop when the *parsed* local value diverges from set.* — so
-  // external changes (cycleSetKind, cluster clone) refresh the field but a
-  // mid-typed "12." (which parses to set.weight = 12) is left alone.
-  const [repsText, setRepsText] = useState(() => String(set.reps));
-  const [weightText, setWeightText] = useState(() => String(set.weight));
-  useEffect(() => {
-    const local = Number(repsText);
-    if (Number.isFinite(local) && local === set.reps) return;
-    setRepsText(String(set.reps));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set.reps]);
-  useEffect(() => {
-    const local = Number(weightText);
-    if (Number.isFinite(local) && local === set.weight) return;
-    setWeightText(String(set.weight));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set.weight]);
-
-  const handleRepsChange = (t: string) => {
-    const cleaned = t.replace(/[^0-9]/g, '');
-    setRepsText(cleaned);
-    onUpdateSet(set.id, { reps: cleaned === '' ? 0 : Number(cleaned) });
-  };
-
-  const handleWeightChange = (t: string) => {
-    // Allow digits + at most one decimal point; strip everything else.
-    let cleaned = t.replace(/[^0-9.]/g, '');
-    const firstDot = cleaned.indexOf('.');
-    if (firstDot !== -1) {
-      cleaned =
-        cleaned.slice(0, firstDot + 1) +
-        cleaned.slice(firstDot + 1).replace(/\./g, '');
-    }
-    setWeightText(cleaned);
-    if (cleaned === '' || cleaned === '.') {
-      onUpdateSet(set.id, { weight: 0 });
-      return;
-    }
-    const parsed = Number(cleaned);
-    if (Number.isFinite(parsed)) {
-      onUpdateSet(set.id, { weight: parsed });
-    }
-  };
-
-  return (
-    <View style={styles.setRow}>
-      <Pressable
-        onPress={() => {
-          if (!isDropsetFollower) onCycleLabel(set);
-        }}
-        disabled={isDropsetFollower}
-        hitSlop={6}
-        style={({ pressed }) => [
-          compact ? styles.setLabelBtnCompact : styles.setLabelBtn,
-          isDropsetFollower && styles.setLabelBtnDisabled,
-          pressed && !isDropsetFollower && styles.setLabelBtnPressed,
-        ]}>
-        <Text
-          style={[
-            styles.setLabelText,
-            compact && styles.setLabelTextCompact,
-            isDropsetFollower && styles.setLabelTextDisabled,
-          ]}>
-          {setLabel}
-        </Text>
-      </Pressable>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={repsText}
-        onChangeText={handleRepsChange}
-        keyboardType="number-pad"
-      />
-      <Text style={styles.setUnit}>{compact ? '×' : 'reps'}</Text>
-      <TextInput
-        style={[styles.setInput, compact && styles.setInputCompact]}
-        value={weightText}
-        onChangeText={handleWeightChange}
-        keyboardType="decimal-pad"
-      />
-      <Text style={styles.setUnit}>kg</Text>
-      {hasNote ? (
-        <Pressable
-          onPress={() => onShowSetNote(set)}
-          style={styles.setNoteIndicator}
-          hitSlop={6}>
-          <Text style={styles.setNoteIndicatorText}>📝</Text>
-        </Pressable>
-      ) : null}
-      {isDropsetFollower ? (
-        <Pressable
-          onPress={() => onRemoveDropsetRow(set.id)}
-          disabled={minusDisabled}
-          style={[
-            styles.dropsetInlineBtn,
-            minusDisabled && styles.dropsetTailBtnDisabled,
-          ]}
-          hitSlop={6}>
-          <Text
-            style={[
-              styles.dropsetInlineBtnText,
-              minusDisabled && styles.dropsetTailBtnTextDisabled,
-            ]}>
-            −
-          </Text>
-        </Pressable>
-      ) : null}
-      {isDropsetFollower && isClusterLast ? (
-        <Pressable
-          onPress={() => onAddDropsetRow(set.id)}
-          style={styles.dropsetInlineBtn}
-          hitSlop={6}>
-          <Text style={styles.dropsetInlineBtnText}>+</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -1870,7 +2303,7 @@ function computeExMeta(ex: TemplateExercise) {
   let workIdx = 0;
   let clusterIdx = 0;
   const setLabels = ex.sets.map((s) => {
-    if (s.kind === 'warmup') return '熱';
+    if (s.kind === 'warmup') return tt('domain', 'warmupChip');
     if (s.kind === 'dropset') {
       if ((s.parent_set_id ?? null) === null) {
         clusterIdx += 1;
@@ -1896,12 +2329,23 @@ type ExerciseBodyProps = {
   onCloneSetAfter: (set_id: string) => void;
   onDeleteCluster: (head_set_id: string) => void;
   onAddClusterAfter: (head_set_id: string) => void;
-  onLongPressRow: () => void;
+  /**
+   * overnight #45 第 3 點 — 長按 card header 開啟「排序動作」modal
+   * (mirror session exercise-card pattern, app/(tabs)/index.tsx:2328).
+   */
+  onLongPressHeader: () => void;
   onShowHistory: () => void;
   onGearTap: () => void;
   onShowSetNote: (set: TemplateSet) => void;
   onShowExerciseNote: () => void;
   onCycleLabel: (set: TemplateSet) => void;
+  /**
+   * overnight #49 — set inline drag confirm. orderedGroupIds is the new
+   * order of group heads (solo set id OR cluster head id); the helper in
+   * `templateOps.reorderTemplateSetsByGroups` rebuilds the sets array so
+   * dropset followers stay attached to their head as one contiguous group.
+   */
+  onConfirmReorderSets: (orderedGroupIds: string[]) => void;
   compact?: boolean;
 };
 
@@ -1917,29 +2361,115 @@ function ExerciseBody({
   onCloneSetAfter,
   onDeleteCluster,
   onAddClusterAfter,
-  onLongPressRow,
+  onLongPressHeader,
   onShowHistory,
   onGearTap,
   onShowSetNote,
   onShowExerciseNote,
   onCycleLabel,
+  onConfirmReorderSets,
   compact,
 }: ExerciseBodyProps) {
+  const { tokens } = useTheme();
+  const styles = useEditorStyles();
+  // 「{warmup}熱+{working}組」— 對齊 wave 12 (2026-05-20) 的「1 chain = 1
+  // unit」進度條規則：每個 working row 算 1 組、每條 dropset chain HEAD 算
+  // 1 組、follower row 不另計（被 head 吸收）。pre-fix 用 `kind !== 'warmup'`
+  // 把整 chain 的每個 row 都當 1 組計、4×3 chain 顯示「12組」實際只有 4 個
+  // unit（用戶 reload 反映）。
   const warmups = exercise.sets.filter((s) => s.kind === 'warmup').length;
-  const workings = exercise.sets.filter((s) => s.kind !== 'warmup').length;
+  const workings = exercise.sets.filter(
+    (s) =>
+      s.kind === 'working' ||
+      (s.kind === 'dropset' && (s.parent_set_id ?? null) === null),
+  ).length;
   const { setLabels } = computeExMeta(exercise);
+
+  // overnight #49 — build groups for inline drag. A group = 1 solo set OR
+  // 1 dropset cluster (head + N followers). Each group renders as ONE
+  // draggable list item; followers never split from their head (cluster B3
+  // invariant). The id used as the drag key is the group's head id
+  // (= solo set id OR cluster head id) — same id space `reorderTemplateSetsByGroups`
+  // consumes.
+  interface SetGroup {
+    headId: string;
+    headIdx: number; // index of head row in exercise.sets
+    head: TemplateSet;
+    followers: TemplateSet[];
+    followerIndices: number[]; // for setLabels[i] lookup
+  }
+  const groups: SetGroup[] = (() => {
+    const out: SetGroup[] = [];
+    let i = 0;
+    while (i < exercise.sets.length) {
+      const s = exercise.sets[i];
+      const isDropset = s.kind === 'dropset';
+      const isFollower =
+        isDropset && (s.parent_set_id ?? null) !== null;
+      const isHead = isDropset && !isFollower;
+      if (isHead) {
+        const followers: TemplateSet[] = [];
+        const followerIndices: number[] = [];
+        let j = i + 1;
+        while (j < exercise.sets.length) {
+          const next = exercise.sets[j];
+          if (
+            next.kind === 'dropset' &&
+            next.parent_set_id === s.id
+          ) {
+            followers.push(next);
+            followerIndices.push(j);
+            j++;
+          } else {
+            break;
+          }
+        }
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers,
+          followerIndices,
+        });
+        i = j;
+      } else if (isFollower) {
+        // Orphan follower — should be unreachable. Treat as standalone so
+        // we never silently drop a row.
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers: [],
+          followerIndices: [],
+        });
+        i++;
+      } else {
+        out.push({
+          headId: s.id,
+          headIdx: i,
+          head: s,
+          followers: [],
+          followerIndices: [],
+        });
+        i++;
+      }
+    }
+    return out;
+  })();
 
   return (
     <>
       <View style={[styles.exHeader, compact && styles.exHeaderCompact]}>
         <Pressable
           onPress={onToggle}
+          onLongPress={onLongPressHeader}
+          delayLongPress={400}
           style={styles.exHeaderTapZone}
           hitSlop={4}>
           <Text
             style={[styles.exName, compact && styles.exNameCompact]}
             numberOfLines={1}>
-            {exercise.name ?? '(動作)'}
+            {exercise.name ? tExercise(exercise.name) : '(動作)'}
           </Text>
           {exercise.notes && exercise.notes.trim().length > 0 ? (
             <Pressable
@@ -1961,65 +2491,127 @@ function ExerciseBody({
       </View>
       {expanded ? (
         <View style={[styles.setsBox, compact && styles.setsBoxCompact]}>
-          {(() => {
-            const items: React.ReactNode[] = [];
-            let i = 0;
-            while (i < exercise.sets.length) {
-              const s = exercise.sets[i];
-              const isDropset = s.kind === 'dropset';
-              const isFollower =
-                isDropset && (s.parent_set_id ?? null) !== null;
-              const isHead = isDropset && !isFollower;
-
-              if (isHead) {
-                const headIdx = i;
-                const followerIndices: number[] = [];
-                let j = i + 1;
-                while (j < exercise.sets.length) {
-                  const next = exercise.sets[j];
-                  if (
-                    next.kind === 'dropset' &&
-                    next.parent_set_id === s.id
-                  ) {
-                    followerIndices.push(j);
-                    j++;
-                  } else {
-                    break;
-                  }
+          {groups.length === 0 ? null : (
+            <NestableDraggableFlatList
+              data={groups}
+              keyExtractor={(g) => g.headId}
+              activationDistance={20}
+              onDragEnd={({ data }) => {
+                const newIds = data.map((g) => g.headId);
+                const oldIds = groups.map((g) => g.headId);
+                const changed = newIds.some((id, idx) => id !== oldIds[idx]);
+                if (changed) onConfirmReorderSets(newIds);
+              }}
+              renderItem={({
+                item: g,
+                drag,
+                isActive,
+              }: RenderItemParams<SetGroup>) => {
+                const head = g.head;
+                const isCluster =
+                  head.kind === 'dropset' && head.parent_set_id === null;
+                if (isCluster) {
+                  const clusterSize = 1 + g.followers.length;
+                  const swipeLeftActions: SwipeAction[] = [
+                    {
+                      key: 'delete-cluster',
+                      label: tt('button', 'swipeDelete'),
+                      color: tokens.action.destructive,
+                      onPress: () => onDeleteCluster(head.id),
+                    },
+                  ];
+                  const swipeRightActions: SwipeAction[] = [
+                    {
+                      key: 'add-cluster',
+                      label: tt('button', 'swipeAdd'),
+                      color: tokens.action.success,
+                      onPress: () => onAddClusterAfter(head.id),
+                    },
+                    {
+                      key: 'note-cluster',
+                      label: tt('button', 'swipeNote'),
+                      color: tokens.action.primary,
+                      onPress: () => onShowSetNote(head),
+                    },
+                  ];
+                  return (
+                    <SwipeableSetRow
+                      swipeLeftActions={swipeLeftActions}
+                      swipeRightActions={swipeRightActions}
+                      onLongPress={drag}>
+                      <View
+                        style={[
+                          styles.clusterStack,
+                          isActive && styles.dragActiveRow,
+                        ]}>
+                        <SetRowContent
+                          set={head}
+                          setLabel={setLabels[g.headIdx]}
+                          compact={compact}
+                          isDropsetFollower={false}
+                          isClusterLast={false}
+                          minusDisabled={false}
+                          onUpdateSet={onUpdateSet}
+                          onShowSetNote={onShowSetNote}
+                          onRemoveDropsetRow={onRemoveDropsetRow}
+                          onAddDropsetRow={onAddDropsetRow}
+                          onCycleLabel={onCycleLabel}
+                        />
+                        {g.followers.map((fset, fIdx) => (
+                          <SetRowContent
+                            key={fset.id}
+                            set={fset}
+                            setLabel={setLabels[g.followerIndices[fIdx]]}
+                            compact={compact}
+                            isDropsetFollower
+                            isClusterLast={fIdx === g.followers.length - 1}
+                            minusDisabled={clusterSize <= 2}
+                            onUpdateSet={onUpdateSet}
+                            onShowSetNote={onShowSetNote}
+                            onRemoveDropsetRow={onRemoveDropsetRow}
+                            onAddDropsetRow={onAddDropsetRow}
+                            onCycleLabel={onCycleLabel}
+                          />
+                        ))}
+                      </View>
+                    </SwipeableSetRow>
+                  );
                 }
-                const clusterSize = 1 + followerIndices.length;
                 const swipeLeftActions: SwipeAction[] = [
                   {
-                    key: 'delete-cluster',
-                    label: '刪',
-                    color: '#FF3B30',
-                    onPress: () => onDeleteCluster(s.id),
+                    key: 'delete-set',
+                    label: tt('button', 'swipeDelete'),
+                    color: tokens.action.destructive,
+                    onPress: () => onDeleteSet(head.id),
                   },
                 ];
                 const swipeRightActions: SwipeAction[] = [
                   {
-                    key: 'add-cluster',
-                    label: '加',
-                    color: '#34C759',
-                    onPress: () => onAddClusterAfter(s.id),
+                    key: 'clone-set',
+                    label: tt('button', 'swipeAdd'),
+                    color: tokens.action.success,
+                    onPress: () => onCloneSetAfter(head.id),
                   },
                   {
-                    key: 'note-cluster',
-                    label: '備註',
-                    color: '#007AFF',
-                    onPress: () => onShowSetNote(s),
+                    key: 'note',
+                    label: tt('button', 'swipeNote'),
+                    color: tokens.action.primary,
+                    onPress: () => onShowSetNote(head),
                   },
                 ];
-                items.push(
+                return (
                   <SwipeableSetRow
-                    key={s.id}
                     swipeLeftActions={swipeLeftActions}
                     swipeRightActions={swipeRightActions}
-                    onLongPress={onLongPressRow}>
-                    <View style={styles.clusterStack}>
+                    onLongPress={drag}>
+                    <View
+                      style={[
+                        styles.setRowWrapper,
+                        isActive && styles.dragActiveRow,
+                      ]}>
                       <SetRowContent
-                        set={s}
-                        setLabel={setLabels[headIdx]}
+                        set={head}
+                        setLabel={setLabels[g.headIdx]}
                         compact={compact}
                         isDropsetFollower={false}
                         isClusterLast={false}
@@ -2030,96 +2622,12 @@ function ExerciseBody({
                         onAddDropsetRow={onAddDropsetRow}
                         onCycleLabel={onCycleLabel}
                       />
-                      {followerIndices.map((fi, fIdx) => {
-                        const fset = exercise.sets[fi];
-                        return (
-                          <SetRowContent
-                            key={fset.id}
-                            set={fset}
-                            setLabel={setLabels[fi]}
-                            compact={compact}
-                            isDropsetFollower
-                            isClusterLast={fIdx === followerIndices.length - 1}
-                            minusDisabled={clusterSize <= 2}
-                            onUpdateSet={onUpdateSet}
-                            onShowSetNote={onShowSetNote}
-                            onRemoveDropsetRow={onRemoveDropsetRow}
-                            onAddDropsetRow={onAddDropsetRow}
-                            onCycleLabel={onCycleLabel}
-                          />
-                        );
-                      })}
                     </View>
-                  </SwipeableSetRow>,
+                  </SwipeableSetRow>
                 );
-                i = j;
-              } else if (isFollower) {
-                items.push(
-                  <SetRowContent
-                    key={s.id}
-                    set={s}
-                    setLabel={setLabels[i]}
-                    compact={compact}
-                    isDropsetFollower
-                    isClusterLast
-                    minusDisabled
-                    onUpdateSet={onUpdateSet}
-                    onShowSetNote={onShowSetNote}
-                    onRemoveDropsetRow={onRemoveDropsetRow}
-                    onAddDropsetRow={onAddDropsetRow}
-                    onCycleLabel={onCycleLabel}
-                  />,
-                );
-                i++;
-              } else {
-                const swipeLeftActions: SwipeAction[] = [
-                  {
-                    key: 'delete-set',
-                    label: '刪',
-                    color: '#FF3B30',
-                    onPress: () => onDeleteSet(s.id),
-                  },
-                ];
-                const swipeRightActions: SwipeAction[] = [
-                  {
-                    key: 'clone-set',
-                    label: '加',
-                    color: '#34C759',
-                    onPress: () => onCloneSetAfter(s.id),
-                  },
-                  {
-                    key: 'note',
-                    label: '備註',
-                    color: '#007AFF',
-                    onPress: () => onShowSetNote(s),
-                  },
-                ];
-                items.push(
-                  <SwipeableSetRow
-                    key={s.id}
-                    swipeLeftActions={swipeLeftActions}
-                    swipeRightActions={swipeRightActions}
-                    onLongPress={onLongPressRow}>
-                    <SetRowContent
-                      set={s}
-                      setLabel={setLabels[i]}
-                      compact={compact}
-                      isDropsetFollower={false}
-                      isClusterLast={false}
-                      minusDisabled={false}
-                      onUpdateSet={onUpdateSet}
-                      onShowSetNote={onShowSetNote}
-                      onRemoveDropsetRow={onRemoveDropsetRow}
-                      onAddDropsetRow={onAddDropsetRow}
-                      onCycleLabel={onCycleLabel}
-                    />
-                  </SwipeableSetRow>,
-                );
-                i++;
-              }
-            }
-            return items;
-          })()}
+              }}
+            />
+          )}
           <View
             style={[
               styles.exFooterBtns,
@@ -2136,7 +2644,7 @@ function ExerciseBody({
                   styles.exFooterBtnText,
                   compact && styles.exFooterBtnTextCompact,
                 ]}>
-                新增 1 組
+                {tt('button', 'addOneSet')}
               </Text>
             </Pressable>
             <Pressable
@@ -2150,7 +2658,7 @@ function ExerciseBody({
                   styles.exFooterBtnText,
                   compact && styles.exFooterBtnTextCompact,
                 ]}>
-                動作歷史
+                {tt('page', 'exerciseHistory')}
               </Text>
             </Pressable>
           </View>
@@ -2160,9 +2668,10 @@ function ExerciseBody({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
   gestureRoot: { flex: 1 },
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: tokens.bg.base },
   flexFill: { flex: 1 },
   empty: {
     flex: 1,
@@ -2171,9 +2680,9 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 12,
   },
-  emptyText: { fontSize: 15, color: '#6B7280' },
+  emptyText: { fontSize: 15, color: tokens.text.secondary },
   backBtn: { paddingVertical: 6, paddingHorizontal: 10 },
-  backBtnText: { fontSize: 15, color: '#007AFF', fontWeight: '500' },
+  backBtnText: { fontSize: 15, color: tokens.action.primary, fontWeight: '500' },
   muted: { fontSize: 14, opacity: 0.6, padding: 24 },
   topBar: {
     flexDirection: 'row',
@@ -2181,25 +2690,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.2)',
+    borderBottomColor: tokens.border.subtle,
     gap: 8,
   },
   topBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   topBtnDisabled: { opacity: 0.4 },
-  topBtnText: { fontSize: 15, color: '#007AFF' },
-  topBtnTextDisabled: { color: '#9CA3AF' },
+  topBtnText: { fontSize: 15, color: tokens.action.primary },
+  topBtnTextDisabled: { color: tokens.text.tertiary },
   topBtnSave: { fontWeight: '700' },
   topCenter: { flex: 1, gap: 4, alignItems: 'center' },
+  // overnight #45 第 4 點 — name row: [swatch][nameInput] horizontal layout.
+  // swatch 縮成 12px、靠左貼 nameInput；nameInput 仍 center-aligned 文字。
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nameInput: {
     fontSize: 17,
     fontWeight: '700',
     textAlign: 'center',
     minWidth: 140,
     paddingVertical: 2,
+    color: tokens.text.primary,
   },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   colorSwatch: { width: 14, height: 14, borderRadius: 7 },
-  metaText: { fontSize: 11, color: '#6B7280' },
+  tripleText: { fontSize: 12, color: tokens.text.secondary },
   body: { padding: 12, gap: 8, paddingBottom: 80 },
   sectionHeader: {
     flexDirection: 'row',
@@ -2211,18 +2723,18 @@ const styles = StyleSheet.create({
   sectionHr: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#D1D5DB',
+    backgroundColor: tokens.border.default,
   },
-  sectionLabel: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  sectionLabel: { fontSize: 12, color: tokens.text.secondary, fontWeight: '600' },
   emptySection: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: tokens.text.tertiary,
     fontStyle: 'italic',
     paddingHorizontal: 12,
   },
   exCard: {
     borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
+    backgroundColor: tokens.bg.elevated,
     overflow: 'hidden',
   },
   supersetTag: {
@@ -2234,12 +2746,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     overflow: 'hidden',
+    alignSelf: 'flex-start',
   },
-  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600' },
+  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
+  // overnight #45 第 1 點 — cluster header mirror session layout (decoupled
+  // styles, own copy). Row 1: tag (alignSelf flex-start). Row 2: 標題分行。
+  clusterText: { flex: 1, gap: 4 },
+  clusterTagRow: { flexDirection: 'row', alignItems: 'center' },
+  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20, color: tokens.text.primary },
+  clusterPlus: { fontSize: 14, opacity: 0.5 },
   supersetColName: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#374151',
+    color: tokens.text.primary,
     paddingHorizontal: 4,
     paddingTop: 8,
     paddingBottom: 2,
@@ -2248,12 +2767,71 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
   },
+  // overnight #52 follow-up — cycle row wrapper (規格 B): paddingVertical 8 + gap 6
+  // (撐爆 fine-tune)。與 session cluster-card `cycleRow` 對齊；column-header 用 exSuperRow。
+  exSuperCycleRow: {
+    paddingVertical: 8,
+    gap: 6,
+    alignItems: 'center',
+  },
+  // Shared `#` button — mirror session cluster-card.tsx::sharedLabelBtn (28×22 fs:11).
+  // A+B 共用一個 label，tap 觸發 atomic A+B set_kind cycle (cycleSetKindAcrossExercises
+  // 自動 mirror). 視覺對齊 set-row-content.tsx `setLabelBtnCompact`.
+  exClusterSharedLabel: {
+    width: 28,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#f3f4f6',
+    borderLeftColor: '#d1d5db',
+    borderRightColor: '#9ca3af',
+    borderBottomColor: '#6b7280',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  exClusterSharedLabelPressed: {
+    backgroundColor: '#e5e7eb',
+    borderTopWidth: 2,
+    borderBottomWidth: 1,
+    borderTopColor: '#6b7280',
+    borderLeftColor: '#9ca3af',
+    borderRightColor: '#d1d5db',
+    borderBottomColor: '#f3f4f6',
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 1 }],
+  },
+  exClusterSharedLabelDisabled: {
+    backgroundColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  exClusterSharedLabelText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: tokens.text.primary,
+  },
+  // Column-header spacer matching shared `#` btn column width.
+  exClusterSharedLabelSpacer: { width: 28 },
   exSuperCol: { flex: 1, minWidth: 0 },
   exSuperColWithLeftPad: { paddingLeft: 6 },
   exSuperDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    backgroundColor: 'rgba(127,127,127,0.35)',
+    backgroundColor: tokens.border.default,
   },
   exHeader: {
     flexDirection: 'row',
@@ -2269,112 +2847,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  exName: { flexShrink: 1, fontSize: 15, fontWeight: '600' },
+  exName: { flexShrink: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   exNameCompact: { fontSize: 13 },
-  exSummary: { fontSize: 12, color: '#6B7280' },
-  exChevron: { fontSize: 11, color: '#9CA3AF' },
+  exSummary: { fontSize: 12, color: tokens.text.secondary },
+  exChevron: { fontSize: 11, color: tokens.text.tertiary },
   exGearBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  exGear: { fontSize: 16, color: '#9CA3AF' },
+  exGear: { fontSize: 16, color: tokens.text.tertiary },
   setsBox: {
     paddingHorizontal: 12,
     paddingBottom: 10,
-    gap: 4,
+    // overnight #52 — 規格 A: solo row 間距 gap 4→12（setsBox standard）
+    gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
     paddingTop: 8,
   },
-  setsBoxCompact: { paddingHorizontal: 8, paddingBottom: 8, paddingTop: 6 },
-  setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  setRowPlaceholder: { height: 32 },
-  clusterStack: { gap: 4 },
+  // overnight #52 — 規格 B (cluster): cycle gap 4→8
+  setsBoxCompact: {
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 6,
+    gap: 8,
+  },
+  // overnight #52 — placeholder 配合 compact row 增高 (label 24 + padV 8×2 ≈ 40)
+  setRowPlaceholder: { height: 40 },
+  // overnight #52 — solo set row wrapper（line 2216 bare <View> 取代用）
+  // 規格 A: paddingVertical 8（與 session exerciseCardSetRowWrapper 對齊）
+  setRowWrapper: { paddingVertical: 8 },
+  // dropset cluster head + followers 群組：spec A 內 paddingVertical 套在 wrapper、
+  // 群組內 head/follower 不再加（避免雙重 padding 撐爆 cluster）。
+  clusterStack: { gap: 4, paddingVertical: 8 },
+  // overnight #49 follow-up — drag-active visual feedback for inline reorder
+  // (set / cycle row 長按拖曳啟動時)。Mirror session 端
+  // `exerciseCardSetRowDragActive` / `cycleRowDragActive` 模式，用戶要求「跟
+  // session 一樣，長按可拖曳時變白色」。Background `#ffffff` 比 session 的
+  // `#f3f4f6` 更白，因為 template editor cluster card 內已是淡彩色 tinted 底，
+  // pure white 對比更明顯。
+  dragActiveRow: {
+    backgroundColor: '#ffffff',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    borderRadius: 8,
+  },
   supersetRowNoteSlot: {
     width: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  setLabelBtn: {
-    width: 32,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnCompact: {
-    width: 26,
-    height: 20,
-    borderRadius: 5,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnDisabled: {
-    backgroundColor: 'transparent',
-    borderTopColor: 'transparent',
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'transparent',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  setLabelBtnPressed: {
-    backgroundColor: '#e5e7eb',
-    borderTopWidth: 2,
-    borderBottomWidth: 1,
-    borderTopColor: '#6b7280',
-    borderLeftColor: '#9ca3af',
-    borderRightColor: '#d1d5db',
-    borderBottomColor: '#f3f4f6',
-    shadowOpacity: 0,
-    elevation: 0,
-    transform: [{ translateY: 1 }],
-  },
-  setLabelText: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 11 },
-  setLabelTextDisabled: { color: '#9ca3af' },
-  setInput: {
-    minWidth: 48,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: '#fff',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  setInputCompact: {
-    minWidth: 34,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-    fontSize: 11,
-  },
-  setUnit: { fontSize: 12, color: '#6B7280' },
-  setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
+  // Note: setRow / setLabelBtn{,Compact,Disabled,Pressed} / setLabelText{,Compact,Disabled} /
+  // setInput{,Compact} / setUnit / setNoteIndicator / dropsetInlineBtn{,Text} /
+  // dropsetTailBtn{Disabled,TextDisabled} now live in components/shared/set-row-content.tsx.
+  // setNoteIndicatorText kept here because the cluster card render (line ~1379) still uses it
+  // outside SetRowContent.
   setNoteIndicatorText: { fontSize: 14 },
   exNoteIndicator: {
     paddingHorizontal: 6,
@@ -2391,16 +2918,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 2,
   },
-  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: '#FF9500' },
+  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: tokens.action.warning },
   dropsetTailBtnDisabled: { opacity: 0.35 },
-  dropsetTailBtnTextDisabled: { color: '#9CA3AF' },
+  dropsetTailBtnTextDisabled: { color: tokens.text.tertiary },
   exFooterBtns: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   supersetFooter: {
     flexDirection: 'row',
@@ -2409,7 +2936,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   exFooterBtnsCompact: { marginTop: 6, paddingTop: 6, gap: 4 },
   exFooterBtn: {
@@ -2417,11 +2944,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 6,
-    backgroundColor: 'rgba(0,122,255,0.10)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
   },
   exFooterBtnCompact: { paddingVertical: 4, paddingHorizontal: 4 },
-  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
+  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: tokens.action.primary },
   exFooterBtnTextCompact: { fontSize: 10 },
   actionBar: {
     position: 'absolute',
@@ -2432,25 +2959,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
     gap: 6,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.modal,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.2)',
+    borderTopColor: tokens.border.subtle,
   },
   actionBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(0,122,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
   },
-  actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
+  actionBtnText: { fontSize: 13, fontWeight: '600', color: tokens.action.primary },
   sheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.modal,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -2462,16 +2989,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sheetTitle: { fontSize: 16, fontWeight: '700' },
-  sheetCancel: { fontSize: 15, color: '#007AFF' },
-  sheetDone: { fontSize: 15, color: '#007AFF', fontWeight: '600' },
+  sheetTitle: { fontSize: 16, fontWeight: '700', color: tokens.text.primary },
+  sheetCancel: { fontSize: 15, color: tokens.action.primary },
+  sheetDone: { fontSize: 15, color: tokens.action.primary, fontWeight: '600' },
   noteInput: {
     minHeight: 96,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: tokens.bg.elevated,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    color: tokens.text.primary,
     textAlignVertical: 'top',
   },
   restEditorRow: {
@@ -2485,9 +3013,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: 'rgba(0,122,255,0.10)',
+    backgroundColor: tokens.bg.elevated,
   },
-  restStepBtnText: { fontSize: 15, fontWeight: '600', color: '#007AFF' },
+  restStepBtnText: { fontSize: 15, fontWeight: '600', color: tokens.action.primary },
   restValueWrap: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -2495,16 +3023,16 @@ const styles = StyleSheet.create({
     minWidth: 90,
     justifyContent: 'center',
   },
-  restValue: { fontSize: 40, fontWeight: '700', color: '#111827' },
+  restValue: { fontSize: 40, fontWeight: '700', color: tokens.text.primary },
   restValueInput: {
     fontSize: 40,
     fontWeight: '700',
-    color: '#111827',
+    color: tokens.text.primary,
     minWidth: 80,
     textAlign: 'center',
     paddingVertical: 0,
   },
-  restValueUnit: { fontSize: 16, color: '#6B7280' },
+  restValueUnit: { fontSize: 16, color: tokens.text.secondary },
   paletteGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2520,13 +3048,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   paletteCheck: { color: '#fff', fontSize: 26, fontWeight: '700' },
-  sheetFootnote: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+  sheetFootnote: { fontSize: 11, color: tokens.text.secondary, textAlign: 'center' },
   exercisePickerScroll: { maxHeight: 360 },
   exercisePickerRow: {
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.15)',
+    borderBottomColor: tokens.border.subtle,
   },
-  exercisePickerName: { fontSize: 15, fontWeight: '500' },
-});
+  exercisePickerName: { fontSize: 15, fontWeight: '500', color: tokens.text.primary },
+  });
+}

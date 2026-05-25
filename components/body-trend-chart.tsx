@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
@@ -7,6 +8,8 @@ import type {
   UnitPreference,
 } from '@/src/domain/body/types';
 import { kgToDisplay } from '@/src/domain/body/unitConversion';
+import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Body Trend Chart — three series (bodyweight / PBF / SMM) on a dual-Y-axis
@@ -17,6 +20,12 @@ import { kgToDisplay } from '@/src/domain/body/unitConversion';
  *
  * Empty arrays are handled — renders a placeholder. Single-point series get
  * a dot but no line.
+ *
+ * ADR-0025 — chart chrome (axis / grid / labels / placeholder bg) flows
+ * through theme tokens. The three series colors (BW teal, PBF orange, SMM
+ * green) are intentionally fixed brand-data colors: they're exported via
+ * SERIES_COLORS for legend chips, and PBF specifically matches the body
+ * diagram primary hue.
  */
 
 const WIDTH = 320;
@@ -29,11 +38,10 @@ const PAD_RIGHT = 40;
 const CHART_W = WIDTH - PAD_LEFT - PAD_RIGHT;
 const CHART_H = HEIGHT - PAD_TOP - PAD_BOTTOM;
 
+/** Series palette — fixed brand-data colors, intentionally non-token. */
 const COLOR_BW = '#0a7ea4'; // teal
 const COLOR_PBF = '#F26B3A'; // orange (matches body diagram primary)
 const COLOR_SMM = '#5b8a3a'; // green
-const COLOR_AXIS = '#999';
-const COLOR_GRID = '#E5E5EA';
 
 interface Props {
   metrics: BodyMetric[];
@@ -47,12 +55,18 @@ interface SeriesPoint {
 }
 
 export function BodyTrendChart({ metrics, visibility, unit }: Props) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  // Chart chrome colors — theme-driven, computed here so SVG props read
+  // them from the same source as the StyleSheet.
+  const colorAxis = tokens.text.tertiary;
+  const colorGrid = tokens.border.subtle;
   if (metrics.length === 0) {
     return (
       <View style={[styles.placeholderBox, { width: WIDTH, height: HEIGHT }]}>
-        <Text style={styles.placeholderText}>尚無資料</Text>
+        <Text style={styles.placeholderText}>{t('status', 'noRecords')}</Text>
         <Text style={styles.placeholderHint}>
-          在上方輸入體重 / PBF / SMM 開始記錄
+          {t('status', 'bodyMetricsEmptyHint')}
         </Text>
       </View>
     );
@@ -123,7 +137,7 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
             x2={WIDTH - PAD_RIGHT}
             y1={y}
             y2={y}
-            stroke={COLOR_GRID}
+            stroke={colorGrid}
             strokeWidth={1}
           />
         ))}
@@ -134,7 +148,7 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
           x2={PAD_LEFT}
           y1={PAD_TOP}
           y2={HEIGHT - PAD_BOTTOM}
-          stroke={COLOR_AXIS}
+          stroke={colorAxis}
           strokeWidth={1}
         />
         {/* Y axis (right) */}
@@ -143,7 +157,7 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
           x2={WIDTH - PAD_RIGHT}
           y1={PAD_TOP}
           y2={HEIGHT - PAD_BOTTOM}
-          stroke={COLOR_AXIS}
+          stroke={colorAxis}
           strokeWidth={1}
         />
         {/* X axis */}
@@ -152,20 +166,20 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
           x2={WIDTH - PAD_RIGHT}
           y1={HEIGHT - PAD_BOTTOM}
           y2={HEIGHT - PAD_BOTTOM}
-          stroke={COLOR_AXIS}
+          stroke={colorAxis}
           strokeWidth={1}
         />
 
         {/* Left axis labels (weight unit) */}
         {weightVals.length > 0 && (
           <>
-            <SvgText x={PAD_LEFT - 6} y={PAD_TOP + 4} fontSize="10" textAnchor="end" fill={COLOR_AXIS}>
+            <SvgText x={PAD_LEFT - 6} y={PAD_TOP + 4} fontSize="10" textAnchor="end" fill={colorAxis}>
               {wMax.toFixed(1)}
             </SvgText>
-            <SvgText x={PAD_LEFT - 6} y={HEIGHT - PAD_BOTTOM} fontSize="10" textAnchor="end" fill={COLOR_AXIS}>
+            <SvgText x={PAD_LEFT - 6} y={HEIGHT - PAD_BOTTOM} fontSize="10" textAnchor="end" fill={colorAxis}>
               {wMin.toFixed(1)}
             </SvgText>
-            <SvgText x={4} y={PAD_TOP + CHART_H / 2} fontSize="9" fill={COLOR_AXIS}>
+            <SvgText x={4} y={PAD_TOP + CHART_H / 2} fontSize="9" fill={colorAxis}>
               {unit}
             </SvgText>
           </>
@@ -173,20 +187,20 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
         {/* Right axis labels (PBF) */}
         {visibility.pbf && pbfPoints.length > 0 && (
           <>
-            <SvgText x={WIDTH - PAD_RIGHT + 6} y={PAD_TOP + 4} fontSize="10" fill={COLOR_AXIS}>
+            <SvgText x={WIDTH - PAD_RIGHT + 6} y={PAD_TOP + 4} fontSize="10" fill={colorAxis}>
               {pbfMax.toFixed(1)}
             </SvgText>
-            <SvgText x={WIDTH - PAD_RIGHT + 6} y={HEIGHT - PAD_BOTTOM} fontSize="10" fill={COLOR_AXIS}>
+            <SvgText x={WIDTH - PAD_RIGHT + 6} y={HEIGHT - PAD_BOTTOM} fontSize="10" fill={colorAxis}>
               {pbfMin.toFixed(1)}
             </SvgText>
-            <SvgText x={WIDTH - PAD_RIGHT + 6} y={PAD_TOP + CHART_H / 2} fontSize="9" fill={COLOR_AXIS}>
+            <SvgText x={WIDTH - PAD_RIGHT + 6} y={PAD_TOP + CHART_H / 2} fontSize="9" fill={colorAxis}>
               %
             </SvgText>
           </>
         )}
 
         {/* X axis labels (first / last date) */}
-        <SvgText x={PAD_LEFT} y={HEIGHT - PAD_BOTTOM + 14} fontSize="9" fill={COLOR_AXIS}>
+        <SvgText x={PAD_LEFT} y={HEIGHT - PAD_BOTTOM + 14} fontSize="9" fill={colorAxis}>
           {formatDateShort(tMin)}
         </SvgText>
         <SvgText
@@ -194,7 +208,7 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
           y={HEIGHT - PAD_BOTTOM + 14}
           fontSize="9"
           textAnchor="end"
-          fill={COLOR_AXIS}>
+          fill={colorAxis}>
           {formatDateShort(tMax)}
         </SvgText>
 
@@ -241,15 +255,22 @@ export const SERIES_COLORS = {
   smm: COLOR_SMM,
 };
 
-const styles = StyleSheet.create({
-  container: { alignItems: 'flex-start' },
-  placeholderBox: {
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  placeholderText: { fontSize: 14, fontWeight: '600' },
-  placeholderHint: { fontSize: 12, opacity: 0.6, paddingHorizontal: 16, textAlign: 'center' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { alignItems: 'flex-start' },
+    placeholderBox: {
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    placeholderText: { fontSize: 14, fontWeight: '600', color: tokens.text.primary },
+    placeholderHint: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      paddingHorizontal: 16,
+      textAlign: 'center',
+    },
+  });
+}

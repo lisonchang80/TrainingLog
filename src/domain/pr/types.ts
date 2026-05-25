@@ -29,7 +29,7 @@ export interface BucketRange {
 }
 
 /** Two flavours of PR within a single bucket. */
-export type PRType = 'weight' | 'volume';
+type PRType = 'weight' | 'volume';
 
 /**
  * One PR break detected on a newly logged Set.

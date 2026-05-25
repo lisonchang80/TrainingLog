@@ -26,6 +26,8 @@ export function cloneTemplate(t: Template): Template {
     id: t.id,
     name: t.name,
     color_hex: t.color_hex,
+    program_id: t.program_id ?? null,
+    sub_tag: t.sub_tag ?? null,
     exercises: t.exercises.map((ex) => ({
       ...ex,
       sets: ex.sets.map((s) => ({ ...s })),
@@ -95,12 +97,12 @@ export function templatesEqual(a: Template, b: Template): boolean {
 // Diff: produce batch UPSERT-DELETE plan
 // ---------------------------------------------------------------------------
 
-export interface TemplatePatch {
+interface TemplatePatch {
   name?: string;
   color_hex?: string;
 }
 
-export interface TemplateExerciseInsert {
+interface TemplateExerciseInsert {
   id: string;
   template_id: string;
   exercise_id: string;
@@ -113,7 +115,7 @@ export interface TemplateExerciseInsert {
   reusable_superset_id: string | null;
 }
 
-export interface TemplateExerciseUpdate {
+interface TemplateExerciseUpdate {
   id: string;
   ordering?: number;
   section?: TemplateExercise['section'];
@@ -124,7 +126,7 @@ export interface TemplateExerciseUpdate {
   reusable_superset_id?: string | null;
 }
 
-export interface TemplateSetInsert {
+interface TemplateSetInsert {
   id: string;
   template_exercise_id: string;
   position: number;
@@ -135,7 +137,7 @@ export interface TemplateSetInsert {
   notes: string | null;
 }
 
-export interface TemplateSetUpdate {
+interface TemplateSetUpdate {
   id: string;
   position?: number;
   kind?: TemplateSet['kind'];
@@ -145,7 +147,7 @@ export interface TemplateSetUpdate {
   notes?: string | null;
 }
 
-export interface TemplateDiff {
+interface TemplateDiff {
   /** template-level fields that changed (name / color_hex). undefined = no change. */
   templatePatch: TemplatePatch | null;
   exerciseInserts: TemplateExerciseInsert[];
@@ -343,18 +345,3 @@ export function computeTemplateDiff(args: {
   };
 }
 
-/**
- * True iff `diff` would result in zero DB writes. Equivalent to
- * `templatesEqual(committed, draft)` but faster on small diffs.
- */
-export function diffIsEmpty(d: TemplateDiff): boolean {
-  return (
-    d.templatePatch === null &&
-    d.exerciseInserts.length === 0 &&
-    d.exerciseUpdates.length === 0 &&
-    d.exerciseDeletes.length === 0 &&
-    d.setInserts.length === 0 &&
-    d.setUpdates.length === 0 &&
-    d.setDeletes.length === 0
-  );
-}

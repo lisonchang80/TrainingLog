@@ -4,9 +4,12 @@ import {
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,13 +20,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { useDatabase } from '@/components/database-provider';
+import type { Database } from '@/src/db/types';
 import {
   getExerciseHistoryHeader,
+  hasClusterHistory,
   listExerciseHistoryBySession,
   listProgramsForExercise,
   type ExerciseHistoryHeader,
   type ExerciseHistorySession,
 } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { getExerciseName } from '@/src/adapters/sqlite/exerciseRepository';
 import { getUnitPreference } from '@/src/adapters/sqlite/settingsRepository';
 import { formatWeight, kgToDisplay } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -42,65 +48,325 @@ import {
   peekFilter,
   submitFilter,
 } from '@/src/domain/exercise/historyFilterMailbox';
+import {
+  CLUSTER_FILTER_MODES,
+  DEFAULT_CLUSTER_MODE,
+  clusterFilterLabel,
+  filterSetsByClusterMode,
+  parseClusterMode,
+  type ClusterFilterMode,
+} from '@/src/domain/exercise/clusterFilter';
+import {
+  parseSide,
+  sideToPageIndex,
+  pageIndexToSide,
+  switcherArrowDisabled,
+  type ClusterSide,
+} from '@/src/domain/exercise/clusterSwitcher';
+import { t, tExercise, tSwitchToPartner } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the many components in this file that share
+ * one memoised StyleSheet.
+ */
+function useChartStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
 
-const CHART_TITLE: Record<ChartMetric, string> = {
-  weight: '最大重量',
-  volume: '訓練容量',
-  e1rm: '1RM',
+/**
+ * PR bucket labels from `src/domain/pr/buckets.ts::bucketLabel` are raw zh
+ * literals (ADR-0007). Round-trip via this map to render localized variants
+ * without touching domain. Mirror of exercise-history page helper.
+ */
+const PR_BUCKET_ZH_TO_DOMAIN_KEY: Record<string, 'maxStrength' | 'strength' | 'hypertrophy' | 'muscularEndurance' | 'endurance'> = {
+  最大力量: 'maxStrength',
+  力量: 'strength',
+  增肌: 'hypertrophy',
+  肌耐力: 'muscularEndurance',
+  耐力: 'endurance',
 };
+function tPrBucketLabel(zhLabel: string): string {
+  const key = PR_BUCKET_ZH_TO_DOMAIN_KEY[zhLabel];
+  return key ? t('domain', key) : zhLabel;
+}
 
-const CHART_DESC: Record<ChartMetric, string> = {
-  weight: '（每次 Session 最重一組）',
-  volume: '（每次 Session 容量最大一組）',
-  e1rm: '（每次 Session 預估 1RM 最大值）',
-};
+function chartTitle(metric: ChartMetric): string {
+  if (metric === 'weight') return t('domain', 'maxWeight');
+  if (metric === 'volume') return t('domain', 'trainingVolume');
+  return '1RM';
+}
 
-const CHART_TOGGLE_LABEL: Record<ChartToggle, string> = {
-  weight: '重量',
-  volume: '容量',
-  e1rm: '1RM',
-  parallel: '並排',
-};
+function chartDesc(metric: ChartMetric): string {
+  if (metric === 'weight') return t('status', 'heaviestSetPerSession');
+  if (metric === 'volume') return t('status', 'highestVolumePerSession');
+  return t('status', 'maxEstimated1rmPerSession');
+}
+
+function chartToggleLabel(toggle: ChartToggle): string {
+  if (toggle === 'weight') return t('domain', 'weight');
+  if (toggle === 'volume') return t('domain', 'volume');
+  if (toggle === 'e1rm') return '1RM';
+  return t('button', 'sideBySide');
+}
 
 /**
  * Exercise Chart page (ADR-0017 Q14). Shares filter surface with history page
  * via historyFilterMailbox: rep bucket multi-select + Program 週期 / 強度.
  * Differs from history page in the 進階篩選 action row: 看歷史 / 取消篩選.
+ *
+ * Slice 10c overnight #16 — same A↔B cluster paging shell as the
+ * history page. When caller passes `partner=` + `clusterMode=cluster_only`,
+ * body is wrapped in a horizontal pagingEnabled ScrollView with two
+ * ChartPageContent instances. Chart queries are heavier (trend
+ * aggregation per metric), so per-side isolated state matters even
+ * more than on the history page.
  */
 export default function ExerciseChartScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const {
+    id,
+    clusterMode: clusterModeParam,
+    partner: partnerParam,
+    side: sideParam,
+  } = useLocalSearchParams<{
+    id: string;
+    clusterMode?: string;
+    partner?: string;
+    side?: 'A' | 'B';
+  }>();
+  const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
   const router = useRouter();
-  const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
+  const styles = useChartStyles();
+  const initialClusterMode = useMemo(
+    () => parseClusterMode(clusterModeParam),
+    [clusterModeParam]
+  );
+
+  // Shell-level name lookup so both PageContents render switcher arrows
+  // consistently (each side shows its own name; arrow points to partner).
+  const [partnerName, setPartnerName] = useState<string | null>(null);
+  const [selfName, setSelfName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [pName, sName] = await Promise.all([
+        partnerParam
+          ? getExerciseName(db, partnerParam)
+          : Promise.resolve(null),
+        id ? getExerciseName(db, id) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      setPartnerName(pName);
+      setSelfName(sName);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [db, id, partnerParam]);
+
   const screenOptions = useMemo(
     () => ({
-      title: '動作圖表',
+      title: t('page', 'exerciseChart'),
       headerBackVisible: false,
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="返回"
+          accessibilityLabel={t('common', 'backPlain')}
           onPress={() => router.back()}
           hitSlop={12}>
-          <Text style={styles.headerBack}>‹ 返回</Text>
+          <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
         </Pressable>
       ),
     }),
-    [router]
+    [router, styles.headerBack]
   );
+
+  if (!id) return null;
+
+  const pagingEnabled =
+    !!partnerParam && initialClusterMode === 'cluster_only';
+
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Stack.Screen options={screenOptions} />
+      {pagingEnabled ? (
+        <PagingShell
+          idA={id}
+          idB={partnerParam!}
+          initialSide={initialSide}
+          nameA={selfName}
+          nameB={partnerName}
+          initialClusterMode={initialClusterMode}
+          db={db}
+        />
+      ) : (
+        <ChartPageContent
+          db={db}
+          exerciseId={id}
+          partnerExerciseId={partnerParam ?? null}
+          partnerName={partnerName}
+          selfName={selfName}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={false}
+          currentSide="A"
+          onRequestSwap={undefined}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+/**
+ * Horizontal paging shell — mirror of exercise-history's PagingShell.
+ * Per-side isolated state matters extra here because chart trend builds
+ * are O(n_sessions × n_sets) per metric.
+ */
+function PagingShell({
+  idA,
+  idB,
+  initialSide,
+  nameA,
+  nameB,
+  initialClusterMode,
+  db,
+}: {
+  idA: string;
+  idB: string;
+  initialSide: ClusterSide;
+  nameA: string | null;
+  nameB: string | null;
+  initialClusterMode: ClusterFilterMode;
+  db: Database;
+}) {
+  const router = useRouter();
+  const styles = useChartStyles();
+  const [pageWidth, setPageWidth] = useState<number>(() =>
+    Dimensions.get('window').width
+  );
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [currentSide, setCurrentSide] = useState<ClusterSide>(initialSide);
+  const didInitialScrollRef = useRef(false);
+
+  const onLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => {
+      const w = e.nativeEvent.layout.width;
+      if (w > 0 && w !== pageWidth) setPageWidth(w);
+      if (!didInitialScrollRef.current && initialSide === 'B' && w > 0) {
+        scrollRef.current?.scrollTo({ x: w, y: 0, animated: false });
+        didInitialScrollRef.current = true;
+      } else if (!didInitialScrollRef.current && w > 0) {
+        didInitialScrollRef.current = true;
+      }
+    },
+    [initialSide, pageWidth]
+  );
+
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const idx = Math.round(x / Math.max(pageWidth, 1));
+      const nextSide = pageIndexToSide(idx);
+      if (nextSide !== currentSide) {
+        setCurrentSide(nextSide);
+        router.setParams({ side: nextSide });
+      }
+    },
+    [pageWidth, currentSide, router]
+  );
+
+  const onRequestSwap = useCallback(() => {
+    const targetSide: ClusterSide = currentSide === 'A' ? 'B' : 'A';
+    const targetX = sideToPageIndex(targetSide) * pageWidth;
+    scrollRef.current?.scrollTo({ x: targetX, y: 0, animated: true });
+    setCurrentSide(targetSide);
+    router.setParams({ side: targetSide });
+  }, [currentSide, pageWidth, router]);
+
+  return (
+    <ScrollView
+      ref={scrollRef}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      onLayout={onLayout}
+      onMomentumScrollEnd={onMomentumScrollEnd}
+      style={styles.pager}>
+      <View style={{ width: pageWidth }}>
+        <ChartPageContent
+          db={db}
+          exerciseId={idA}
+          partnerExerciseId={idB}
+          partnerName={nameB}
+          selfName={nameA}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={true}
+          currentSide={currentSide}
+          onRequestSwap={onRequestSwap}
+        />
+      </View>
+      <View style={{ width: pageWidth }}>
+        <ChartPageContent
+          db={db}
+          exerciseId={idB}
+          partnerExerciseId={idA}
+          partnerName={nameA}
+          selfName={nameB}
+          initialClusterMode={initialClusterMode}
+          showSwitcher={true}
+          currentSide={currentSide}
+          onRequestSwap={onRequestSwap}
+        />
+      </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * Per-page body: title with switcher + chips + segmented + advanced +
+ * period stats + metric toggle + chart card(s) + year filter. Owns its
+ * own DB fetch + filter state so two PageContents are fully isolated.
+ */
+function ChartPageContent({
+  db,
+  exerciseId,
+  partnerExerciseId,
+  partnerName,
+  selfName: _selfName,
+  initialClusterMode,
+  showSwitcher,
+  currentSide,
+  onRequestSwap,
+}: {
+  db: Database;
+  exerciseId: string;
+  partnerExerciseId: string | null;
+  partnerName: string | null;
+  selfName: string | null;
+  initialClusterMode: ClusterFilterMode;
+  showSwitcher: boolean;
+  currentSide: ClusterSide;
+  onRequestSwap: (() => void) | undefined;
+}) {
+  const router = useRouter();
+  const styles = useChartStyles();
+  const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
+  const [hasClusterRows, setHasClusterRows] = useState(false);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
 
-  // Filter state (mirrors mailbox)
   const [bucketFilters, setBucketFilters] = useState<Set<RepBucketChip>>(
     new Set()
   );
   const [programId, setProgramId] = useState<string | null>(null);
   const [subTagFilters, setSubTagFilters] = useState<Set<string>>(new Set());
+  const [clusterMode, setClusterMode] =
+    useState<ClusterFilterMode>(initialClusterMode);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [programPickerOpen, setProgramPickerOpen] = useState(false);
 
@@ -110,18 +376,20 @@ export default function ExerciseChartScreen() {
   );
 
   const refresh = useCallback(async () => {
-    if (!id) return;
-    const [h, ss, ps, u] = await Promise.all([
-      getExerciseHistoryHeader(db, id),
-      listExerciseHistoryBySession(db, id),
-      listProgramsForExercise(db, id),
+    if (!exerciseId) return;
+    const [h, ss, ps, u, has] = await Promise.all([
+      getExerciseHistoryHeader(db, exerciseId),
+      listExerciseHistoryBySession(db, exerciseId),
+      listProgramsForExercise(db, exerciseId),
       getUnitPreference(db),
+      hasClusterHistory(db, exerciseId),
     ]);
     setHeader(h);
     setSessions(ss);
     setPrograms(ps);
     setUnit(u);
-  }, [db, id]);
+    setHasClusterRows(has);
+  }, [db, exerciseId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -131,6 +399,7 @@ export default function ExerciseChartScreen() {
         setBucketFilters(new Set(f.buckets));
         setProgramId(f.programId);
         setSubTagFilters(new Set(f.subTags));
+        setClusterMode(f.clusterMode);
         if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
           setAdvancedOpen(true);
         }
@@ -142,12 +411,14 @@ export default function ExerciseChartScreen() {
     (
       buckets: Set<RepBucketChip>,
       pid: string | null,
-      tags: Set<string>
+      tags: Set<string>,
+      mode: ClusterFilterMode
     ) => {
       submitFilter({
         buckets,
         programId: pid,
         subTags: tags,
+        clusterMode: mode,
       });
     },
     []
@@ -173,19 +444,18 @@ export default function ExerciseChartScreen() {
         }
         return true;
       })
-      .map((s) => ({
-        ...s,
-        sets:
+      .map((s) => {
+        const bucketed =
           bucketFilters.size === 0
             ? s.sets
             : s.sets.filter((set) =>
                 [...bucketFilters].some((b) => matchesChip(set.reps, b))
-              ),
-      }))
+              );
+        const clustered = filterSetsByClusterMode(bucketed, clusterMode);
+        return { ...s, sets: clustered };
+      })
       .filter((s) => s.sets.length > 0);
-  }, [sessions, bucketFilters, programId, subTagFilters]);
-
-  if (!id) return null;
+  }, [sessions, bucketFilters, programId, subTagFilters, clusterMode]);
 
   const onBucketChipTap = (chip: RepBucketChip) => {
     setBucketFilters((prev) => {
@@ -197,9 +467,14 @@ export default function ExerciseChartScreen() {
       } else {
         next.add(chip);
       }
-      persistFilter(next, programId, subTagFilters);
+      persistFilter(next, programId, subTagFilters, clusterMode);
       return next;
     });
+  };
+
+  const onClusterModeTap = (mode: ClusterFilterMode) => {
+    setClusterMode(mode);
+    persistFilter(bucketFilters, programId, subTagFilters, mode);
   };
 
   const onSubTagTap = (tag: string) => {
@@ -207,7 +482,7 @@ export default function ExerciseChartScreen() {
       const next = new Set(prev);
       if (next.has(tag)) next.delete(tag);
       else next.add(tag);
-      persistFilter(bucketFilters, programId, next);
+      persistFilter(bucketFilters, programId, next, clusterMode);
       return next;
     });
   };
@@ -216,15 +491,19 @@ export default function ExerciseChartScreen() {
     setProgramId(newPid);
     const newSubTags = new Set<string>();
     setSubTagFilters(newSubTags);
-    persistFilter(bucketFilters, newPid, newSubTags);
+    persistFilter(bucketFilters, newPid, newSubTags, clusterMode);
     setProgramPickerOpen(false);
   };
 
   const onJumpToHistory = () => {
-    persistFilter(bucketFilters, programId, subTagFilters);
-    // replace (not push) to avoid stacking two modal screens — see ADR-0017
-    // Q14 amendment notes; two stacked modals crash on Metro R reload.
-    router.replace(`/exercise-history/${id}`);
+    persistFilter(bucketFilters, programId, subTagFilters, clusterMode);
+    // replace (not push) — see ADR-0017 Q14 amendment notes; carry
+    // partner + clusterMode + side so history page mirrors this paging
+    // shell on cold open.
+    const query = partnerExerciseId
+      ? `?clusterMode=${clusterMode}&partner=${partnerExerciseId}&side=${currentSide}`
+      : '';
+    router.replace(`/exercise-history/${exerciseId}${query}`);
   };
 
   const onClearAllFilters = () => {
@@ -233,6 +512,7 @@ export default function ExerciseChartScreen() {
     setBucketFilters(empty);
     setProgramId(null);
     setSubTagFilters(emptyTags);
+    setClusterMode(DEFAULT_CLUSTER_MODE);
     submitFilter(EMPTY_FILTER);
     clearFilter();
   };
@@ -240,18 +520,28 @@ export default function ExerciseChartScreen() {
   const selectedProgram = programs.find((p) => p.id === programId);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Stack.Screen options={screenOptions} />
+    <>
       <ScrollView contentContainerStyle={styles.scroll}>
         {!header ? (
-          <Text style={styles.empty}>找不到此動作。</Text>
+          <Text style={styles.empty}>{t('alert', 'exerciseNotFound')}</Text>
         ) : sessions.length === 0 ? (
-          <Text style={styles.empty}>
-            還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。
-          </Text>
+          <Text style={styles.empty}>{t('status', 'noHistoryYet')}</Text>
         ) : (
           <View style={{ gap: 12 }}>
-            {/* Bucket multi-select chips */}
+            {/* Body title with A↔B switcher arrows when paging; plain
+                name otherwise. Disabled boundary arrow per
+                switcherArrowDisabled() in clusterSwitcher.ts. */}
+            {showSwitcher ? (
+              <SwitcherTitle
+                name={tExercise(header.exercise_name)}
+                currentSide={currentSide}
+                onRequestSwap={onRequestSwap}
+                partnerName={partnerName ? tExercise(partnerName) : null}
+              />
+            ) : (
+              <Text style={styles.headerName}>{tExercise(header.exercise_name)}</Text>
+            )}
+
             <View style={styles.filterRow}>
               {REP_BUCKET_CHIPS.map((chip) => {
                 const active =
@@ -261,7 +551,7 @@ export default function ExerciseChartScreen() {
                 return (
                   <FilterChip
                     key={chip}
-                    label={chip === 'all' ? '全部' : bucketDomainLabel(chip)}
+                    label={chip === 'all' ? t('common', 'all') : tPrBucketLabel(bucketDomainLabel(chip))}
                     sublabel={chip === 'all' ? undefined : `${repRangeLabel(chip)}RM`}
                     active={active}
                     onPress={() => onBucketChipTap(chip)}
@@ -270,13 +560,16 @@ export default function ExerciseChartScreen() {
               })}
             </View>
 
-            {/* Advanced filter section (collapsible) */}
+            {hasClusterRows ? (
+              <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+            ) : null}
+
             <View style={styles.advancedWrap}>
               <Pressable
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
                 <Text style={styles.advancedHeaderText}>
-                  進階篩選 {advancedOpen ? '▲' : '▼'}
+                  {t('page', 'advancedFilter')} {advancedOpen ? '▲' : '▼'}
                 </Text>
                 {(programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
@@ -291,21 +584,21 @@ export default function ExerciseChartScreen() {
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>Program 主</Text>
+                  <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
                   <Pressable
                     style={styles.dropdown}
                     onPress={() => setProgramPickerOpen(true)}>
                     <Text style={styles.dropdownText}>
-                      {selectedProgram ? selectedProgram.name : '— 尚未選擇 —'}
+                      {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
                     </Text>
                     <Text style={styles.dropdownChevron}>▾</Text>
                   </Pressable>
 
                   {programId != null && (
                     <View>
-                      <Text style={styles.advancedLabel}>強度</Text>
+                      <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
                       {subTagOptions.length === 0 ? (
-                        <Text style={styles.empty}>此 Program 無 sub_tag 紀錄。</Text>
+                        <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
                       ) : (
                         <View style={styles.filterRow}>
                           {subTagOptions.map((tag) => (
@@ -329,7 +622,7 @@ export default function ExerciseChartScreen() {
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onJumpToHistory}>
-                      <Text style={styles.actionBtnTextPrimary}>看歷史</Text>
+                      <Text style={styles.actionBtnTextPrimary}>{t('button', 'viewHistory')}</Text>
                     </Pressable>
                     <Pressable
                       style={({ pressed }) => [
@@ -338,14 +631,13 @@ export default function ExerciseChartScreen() {
                         pressed && styles.btnPressed,
                       ]}
                       onPress={onClearAllFilters}>
-                      <Text style={styles.actionBtnTextSecondary}>取消篩選</Text>
+                      <Text style={styles.actionBtnTextSecondary}>{t('button', 'clearFilter')}</Text>
                     </Pressable>
                   </View>
                 </View>
               ) : null}
             </View>
 
-            {/* Period stats */}
             <PeriodStatsCard
               sessions={filteredSessions}
               header={header}
@@ -353,28 +645,26 @@ export default function ExerciseChartScreen() {
               yearFilter={yearFilter}
             />
 
-            {/* Metric toggle */}
             <View style={styles.metricToggle}>
-              {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((t) => (
+              {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((tog) => (
                 <Pressable
-                  key={t}
-                  onPress={() => setChartToggle(t)}
+                  key={tog}
+                  onPress={() => setChartToggle(tog)}
                   style={[
                     styles.metricToggleBtn,
-                    chartToggle === t && styles.metricToggleBtnActive,
+                    chartToggle === tog && styles.metricToggleBtnActive,
                   ]}>
                   <Text
                     style={[
                       styles.metricToggleText,
-                      chartToggle === t && styles.metricToggleTextActive,
+                      chartToggle === tog && styles.metricToggleTextActive,
                     ]}>
-                    {CHART_TOGGLE_LABEL[t]}
+                    {chartToggleLabel(tog)}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
-            {/* Chart card(s) */}
             {chartToggle === 'parallel'
               ? (['weight', 'volume', 'e1rm'] as const).map((m) => (
                   <ChartCard
@@ -399,7 +689,6 @@ export default function ExerciseChartScreen() {
             <YearFilterRow value={yearFilter} onChange={setYearFilter} />
           </View>
         )}
-
       </ScrollView>
 
       <Modal
@@ -411,14 +700,14 @@ export default function ExerciseChartScreen() {
           style={styles.modalOverlay}
           onPress={() => setProgramPickerOpen(false)}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>選擇 Program</Text>
+            <Text style={styles.modalTitle}>{t('page', 'selectProgram')}</Text>
             <Pressable
               style={styles.modalRow}
               onPress={() => onPickProgram(null)}>
-              <Text style={styles.modalRowText}>— 尚未選擇 —</Text>
+              <Text style={styles.modalRowText}>{t('common', 'notSelected')}</Text>
             </Pressable>
             {programs.length === 0 ? (
-              <Text style={styles.empty}>沒有可用的 Program。</Text>
+              <Text style={styles.empty}>{t('alert', 'noProgramsAvailable')}</Text>
             ) : (
               programs.map((p) => (
                 <Pressable
@@ -438,7 +727,62 @@ export default function ExerciseChartScreen() {
           </View>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </>
+  );
+}
+
+function SwitcherTitle({
+  name,
+  currentSide,
+  onRequestSwap,
+  partnerName,
+}: {
+  name: string;
+  currentSide: ClusterSide;
+  onRequestSwap: (() => void) | undefined;
+  partnerName: string | null;
+}) {
+  const styles = useChartStyles();
+  const leftDisabled = switcherArrowDisabled(currentSide, 'left');
+  const rightDisabled = switcherArrowDisabled(currentSide, 'right');
+  return (
+    <View style={styles.headerNameRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={leftDisabled ? t('status', 'alreadyASide') : tSwitchToPartner(partnerName ?? '')}
+        accessibilityState={{ disabled: leftDisabled }}
+        onPress={leftDisabled ? undefined : onRequestSwap}
+        disabled={leftDisabled || !onRequestSwap}
+        hitSlop={12}>
+        <Text
+          style={[
+            styles.headerArrow,
+            leftDisabled && styles.headerArrowDisabled,
+          ]}>
+          ‹
+        </Text>
+      </Pressable>
+      <Text
+        style={[styles.headerName, styles.headerNameInRow]}
+        numberOfLines={2}>
+        {name}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={rightDisabled ? t('status', 'alreadyBSide') : tSwitchToPartner(partnerName ?? '')}
+        accessibilityState={{ disabled: rightDisabled }}
+        onPress={rightDisabled ? undefined : onRequestSwap}
+        disabled={rightDisabled || !onRequestSwap}
+        hitSlop={12}>
+        <Text
+          style={[
+            styles.headerArrow,
+            rightDisabled && styles.headerArrowDisabled,
+          ]}>
+          ›
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -453,6 +797,7 @@ function FilterChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useChartStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -486,6 +831,7 @@ function SubTagChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useChartStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -501,6 +847,48 @@ function SubTagChip({
   );
 }
 
+/**
+ * iOS-style 3-段 segmented control — mirrors exercise-history page (slice 10c).
+ * Self-rolled to avoid a new dep; same styling as the page's metric toggle.
+ */
+function ClusterModeSegmented({
+  value,
+  onChange,
+}: {
+  value: ClusterFilterMode;
+  onChange: (mode: ClusterFilterMode) => void;
+}) {
+  const styles = useChartStyles();
+  return (
+    <View style={styles.segmentedWrap}>
+      {CLUSTER_FILTER_MODES.map((mode) => {
+        const active = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            style={({ pressed }) => [
+              styles.segmentedBtn,
+              active && styles.segmentedBtnActive,
+              pressed && styles.btnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}>
+            <Text
+              style={[
+                styles.segmentedText,
+                active && styles.segmentedTextActive,
+              ]}
+              numberOfLines={1}>
+              {clusterFilterLabel(mode)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function PeriodStatsCard({
   sessions,
   header,
@@ -512,6 +900,7 @@ function PeriodStatsCard({
   unit: UnitPreference;
   yearFilter: number | null;
 }) {
+  const styles = useChartStyles();
   const scopedSessions = useMemo(() => {
     if (yearFilter == null) return sessions;
     return sessions.filter(
@@ -526,9 +915,9 @@ function PeriodStatsCard({
   };
 
   const items: { label: string; metric: ChartMetric }[] = [
-    { label: '最大重量', metric: 'weight' },
-    { label: '最大容量', metric: 'volume' },
-    { label: '1RM 預測', metric: 'e1rm' },
+    { label: t('domain', 'maxWeight'), metric: 'weight' },
+    { label: t('domain', 'maxVolume'), metric: 'volume' },
+    { label: t('domain', 'oneRepMaxEstimate'), metric: 'e1rm' },
   ];
 
   return (
@@ -560,6 +949,7 @@ function ChartCard({
   unit: UnitPreference;
   yearFilter: number | null;
 }) {
+  const styles = useChartStyles();
   const scopedSessions = useMemo(() => {
     if (yearFilter == null) return sessions;
     return sessions.filter(
@@ -572,21 +962,21 @@ function ChartCard({
     [scopedSessions, header, metric]
   );
 
-  const yearBadge = yearFilter == null ? '全部' : `${yearFilter}`;
+  const yearBadge = yearFilter == null ? t('common', 'all') : `${yearFilter}`;
 
   return (
     <View style={styles.chartCard}>
       <View style={styles.chartTitleRow}>
         <View style={styles.chartTitleBlock}>
-          <Text style={styles.cardTitle}>{CHART_TITLE[metric]}</Text>
-          <Text style={styles.cardSubtitle}>{CHART_DESC[metric]}</Text>
+          <Text style={styles.cardTitle}>{chartTitle(metric)}</Text>
+          <Text style={styles.cardSubtitle}>{chartDesc(metric)}</Text>
         </View>
         <Text style={styles.yearBadge}>{yearBadge}</Text>
       </View>
       {points.length >= 2 ? (
         <TrendChart points={points} unit={unit} metric={metric} />
       ) : (
-        <Text style={styles.empty}>此時段資料點不足，至少需 2 次 Session。</Text>
+        <Text style={styles.empty}>{t('alert', 'notEnoughDataPoints')}</Text>
       )}
     </View>
   );
@@ -599,12 +989,13 @@ function YearFilterRow({
   value: number | null;
   onChange: (next: number | null) => void;
 }) {
+  const styles = useChartStyles();
   const thisYear = new Date().getFullYear();
   const options: { key: string; label: string; year: number | null }[] = [
-    { key: 'prev', label: '上一年', year: thisYear - 1 },
-    { key: 'cur', label: '今年', year: thisYear },
-    { key: 'next', label: '下一年', year: thisYear + 1 },
-    { key: 'all', label: '全部', year: null },
+    { key: 'prev', label: t('status', 'previousYear'), year: thisYear - 1 },
+    { key: 'cur', label: t('status', 'thisYear'), year: thisYear },
+    { key: 'next', label: t('status', 'nextYear'), year: thisYear + 1 },
+    { key: 'all', label: t('common', 'all'), year: null },
   ];
   return (
     <View style={styles.yearRow}>
@@ -634,6 +1025,7 @@ function TrendChart({
   unit: UnitPreference;
   metric: ChartMetric;
 }) {
+  const { tokens } = useTheme();
   const W = 320;
   const H = 196;
   const PT = 28;
@@ -667,8 +1059,8 @@ function TrendChart({
   return (
     <View>
       <Svg width={W} height={H}>
-        <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke="#aaa" strokeWidth={1} />
-        <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke="#aaa" strokeWidth={1} />
+        <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />
+        <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />
         {yTicks.map((v, idx) => {
           const y = scaleY(v);
           return (
@@ -677,13 +1069,13 @@ function TrendChart({
               x={PL - 4}
               y={y + 4}
               fontSize={10}
-              fill="#666"
+              fill={tokens.text.secondary}
               textAnchor="end">
               {yLabel(v)}
             </SvgText>
           );
         })}
-        <SvgText x={PL - 4} y={12} fontSize={10} fill="#666" textAnchor="end">
+        <SvgText x={PL - 4} y={12} fontSize={10} fill={tokens.text.secondary} textAnchor="end">
           {yAxisUnit}
         </SvgText>
         {xTicks.map((t, idx) => (
@@ -692,21 +1084,21 @@ function TrendChart({
             x={scaleX(t)}
             y={H - PB + 14}
             fontSize={10}
-            fill="#666"
+            fill={tokens.text.secondary}
             textAnchor={
               idx === 0 ? 'start' : idx === xTicks.length - 1 ? 'end' : 'middle'
             }>
             {formatDateTick(t)}
           </SvgText>
         ))}
-        <Polyline points={polyline} fill="none" stroke="#0a7ea4" strokeWidth={2} />
+        <Polyline points={polyline} fill="none" stroke={tokens.action.primary} strokeWidth={2} />
         {points.map((p, idx) => (
           <Circle
             key={idx}
             cx={scaleX(p.t)}
             cy={scaleY(p.value)}
             r={3.5}
-            fill="#0a7ea4"
+            fill={tokens.action.primary}
           />
         ))}
       </Svg>
@@ -800,175 +1192,274 @@ function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
   return `${display.toFixed(0)} ${unit}-reps`;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { padding: 16, paddingBottom: 36, gap: 12 },
-  empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic', paddingVertical: 12 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  filterChip: {
-    flex: 1,
-    paddingVertical: 5,
-    paddingHorizontal: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 56,
-  },
-  filterChipActive: { backgroundColor: '#0a7ea4' },
-  filterChipText: { fontSize: 12, fontWeight: '600' },
-  filterChipTextActive: { color: 'white' },
-  filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
-  filterChipSubtextActive: { color: 'white', opacity: 0.85 },
-  advancedWrap: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    overflow: 'hidden',
-  },
-  advancedHeader: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-  },
-  advancedHeaderText: { fontSize: 14, fontWeight: '600', flex: 1 },
-  advancedHeaderBadge: {
-    fontSize: 11,
-    color: '#0a7ea4',
-    fontWeight: '600',
-  },
-  advancedBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    gap: 8,
-  },
-  advancedLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.7,
-    marginTop: 6,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.2)',
-  },
-  dropdownText: { flex: 1, fontSize: 14 },
-  dropdownChevron: { fontSize: 14, opacity: 0.5 },
-  subTagChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-  },
-  subTagChipActive: { backgroundColor: '#0a7ea4' },
-  subTagChipText: { fontSize: 13, fontWeight: '500' },
-  subTagChipTextActive: { color: 'white' },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#0a7ea4' },
-  actionBtnSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.4)',
-  },
-  actionBtnTextPrimary: { fontSize: 14, color: 'white', fontWeight: '600' },
-  actionBtnTextSecondary: { fontSize: 14, color: '#333', fontWeight: '500' },
-  statsCard: {
-    flexDirection: 'row',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    gap: 8,
-  },
-  statsCell: { flex: 1, alignItems: 'center', gap: 4 },
-  statsLabel: { fontSize: 12, opacity: 0.7, fontWeight: '500' },
-  statsValue: { fontSize: 15, fontWeight: '700', color: '#0a7ea4' },
-  chartCard: {
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    gap: 8,
-  },
-  cardTitle: { fontSize: 16, fontWeight: '700' },
-  cardSubtitle: { fontSize: 11, opacity: 0.6, marginTop: 1 },
-  chartTitleBlock: { gap: 0, flex: 1 },
-  chartTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  yearBadge: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0a7ea4',
-    paddingLeft: 8,
-  },
-  metricToggle: {
-    flexDirection: 'row',
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    padding: 2,
-  },
-  metricToggleBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  metricToggleBtnActive: { backgroundColor: '#0a7ea4' },
-  metricToggleText: { fontSize: 13, fontWeight: '500' },
-  metricToggleTextActive: { color: 'white' },
-  yearRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
-  yearBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-  },
-  yearBtnActive: { backgroundColor: '#0a7ea4' },
-  yearBtnText: { fontSize: 13, fontWeight: '500' },
-  yearBtnTextActive: { color: 'white' },
-  headerBack: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '400',
-    paddingHorizontal: 8,
-  },
-  btnPressed: { opacity: 0.85 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 16,
-    gap: 4,
-  },
-  modalTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  modalRow: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  modalRowText: { fontSize: 15 },
-  modalRowTextActive: { color: '#0a7ea4', fontWeight: '600' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    pager: { flex: 1 },
+    scroll: { padding: 16, paddingBottom: 36, gap: 12 },
+    empty: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontStyle: 'italic',
+      paddingVertical: 12,
+    },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+    filterChip: {
+      flex: 1,
+      paddingVertical: 5,
+      paddingHorizontal: 4,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 56,
+    },
+    filterChipActive: { backgroundColor: tokens.action.primary },
+    filterChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    filterChipTextActive: { color: tokens.action.onPrimary },
+    filterChipSubtext: {
+      fontSize: 10,
+      fontWeight: '400',
+      color: tokens.text.secondary,
+      marginTop: 1,
+    },
+    filterChipSubtextActive: { color: tokens.action.onPrimary, opacity: 0.85 },
+    segmentedWrap: {
+      flexDirection: 'row',
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      padding: 2,
+    },
+    segmentedBtn: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      alignItems: 'center',
+    },
+    segmentedBtnActive: { backgroundColor: tokens.action.primary },
+    segmentedText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    segmentedTextActive: { color: tokens.action.onPrimary },
+    advancedWrap: {
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      overflow: 'hidden',
+    },
+    advancedHeader: {
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+    },
+    advancedHeaderText: {
+      fontSize: 14,
+      fontWeight: '600',
+      flex: 1,
+      color: tokens.text.primary,
+    },
+    advancedHeaderBadge: {
+      fontSize: 11,
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    advancedBody: {
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+      gap: 8,
+    },
+    advancedLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      marginTop: 6,
+    },
+    dropdown: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+    },
+    dropdownText: { flex: 1, fontSize: 14, color: tokens.text.primary },
+    dropdownChevron: { fontSize: 14, color: tokens.text.tertiary },
+    subTagChip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      backgroundColor: tokens.bg.elevated,
+    },
+    subTagChipActive: { backgroundColor: tokens.action.primary },
+    subTagChipText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    subTagChipTextActive: { color: tokens.action.onPrimary },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    actionBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    actionBtnPrimary: { backgroundColor: tokens.action.primary },
+    actionBtnSecondary: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+    },
+    actionBtnTextPrimary: {
+      fontSize: 14,
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    actionBtnTextSecondary: {
+      fontSize: 14,
+      color: tokens.text.primary,
+      fontWeight: '500',
+    },
+    statsCard: {
+      flexDirection: 'row',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      gap: 8,
+    },
+    statsCell: { flex: 1, alignItems: 'center', gap: 4 },
+    statsLabel: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      fontWeight: '500',
+    },
+    statsValue: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: tokens.action.primary,
+    },
+    chartCard: {
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      gap: 8,
+    },
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    cardSubtitle: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      marginTop: 1,
+    },
+    chartTitleBlock: { gap: 0, flex: 1 },
+    chartTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    yearBadge: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.action.primary,
+      paddingLeft: 8,
+    },
+    metricToggle: {
+      flexDirection: 'row',
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      padding: 2,
+    },
+    metricToggleBtn: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      alignItems: 'center',
+    },
+    metricToggleBtnActive: { backgroundColor: tokens.action.primary },
+    metricToggleText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    metricToggleTextActive: { color: tokens.action.onPrimary },
+    yearRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
+    yearBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    yearBtnActive: { backgroundColor: tokens.action.primary },
+    yearBtnText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    yearBtnTextActive: { color: tokens.action.onPrimary },
+    headerBack: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '400',
+      paddingHorizontal: 8,
+    },
+    headerName: { fontSize: 22, fontWeight: '700', color: tokens.text.primary },
+    headerNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    headerArrow: {
+      color: tokens.action.primary,
+      fontSize: 28,
+      fontWeight: '400',
+      paddingHorizontal: 4,
+    },
+    headerArrowDisabled: { opacity: 0.3 },
+    headerNameInRow: { flex: 1, textAlign: 'center' },
+    btnPressed: { opacity: 0.85 },
+    modalOverlay: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 14,
+      padding: 16,
+      gap: 4,
+    },
+    modalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 8,
+      color: tokens.text.primary,
+    },
+    modalRow: {
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    modalRowText: { fontSize: 15, color: tokens.text.primary },
+    modalRowTextActive: { color: tokens.action.primary, fontWeight: '600' },
+  });
+}

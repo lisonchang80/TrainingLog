@@ -1,0 +1,120 @@
+import {
+  sessionSnapshotDirty,
+  type DirtyCheckState,
+} from '../../src/domain/session/sessionSnapshotDirty';
+
+const baseSet = {
+  weight_kg: 80,
+  reps: 5,
+  is_skipped: 0,
+  ordering: 1,
+  set_kind: 'working',
+  parent_set_id: null,
+  is_logged: 1,
+  notes: null,
+  session_exercise_id: 'se1',
+};
+const baseSE = {
+  ordering: 1,
+  parent_id: null,
+  rest_sec: null,
+};
+function base(): DirtyCheckState {
+  return {
+    session: { started_at: 1000, ended_at: 2000 },
+    sessionExercises: [{ id: 'se1', ...baseSE }],
+    sets: [{ id: 's1', ...baseSet }],
+  };
+}
+
+describe('sessionSnapshotDirty', () => {
+  it('returns false when current matches snapshot exactly', () => {
+    expect(sessionSnapshotDirty(base(), base())).toBe(false);
+  });
+
+  it('detects session.started_at change', () => {
+    const cur = base();
+    cur.session.started_at = 1001;
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects session.ended_at change (number → null)', () => {
+    const cur = base();
+    cur.session.ended_at = null;
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects added set (length mismatch)', () => {
+    const cur = base();
+    cur.sets = [...cur.sets, { id: 's2', ...baseSet, ordering: 2 }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects removed set', () => {
+    const cur = base();
+    cur.sets = [];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects weight_kg change on same id', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, weight_kg: 90 }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects is_logged toggle', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, is_logged: 0 }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects set_kind change', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, set_kind: 'dropset' }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects parent_set_id change (null → string)', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, parent_set_id: 'head1' }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects notes change (null → string)', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, notes: 'a note' }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects sessionExercise ordering change', () => {
+    const cur = base();
+    cur.sessionExercises = [{ id: 'se1', ...baseSE, ordering: 2 }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects sessionExercise rest_sec change', () => {
+    const cur = base();
+    cur.sessionExercises = [{ id: 'se1', ...baseSE, rest_sec: 90 }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('detects sessionExercise replaced by different id (length match)', () => {
+    const cur = base();
+    cur.sessionExercises = [{ id: 'seOther', ...baseSE }];
+    expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  it('order-insensitive on sets array (id-keyed comparison)', () => {
+    const cur = base();
+    cur.sets = [
+      { id: 's2', ...baseSet, ordering: 2 },
+      { id: 's1', ...baseSet },
+    ];
+    const snap = base();
+    snap.sets = [
+      { id: 's1', ...baseSet },
+      { id: 's2', ...baseSet, ordering: 2 },
+    ];
+    expect(sessionSnapshotDirty(cur, snap)).toBe(false);
+  });
+});

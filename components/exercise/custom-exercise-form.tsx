@@ -37,9 +37,11 @@ import {
   type MuscleGroup,
   type MuscleRole,
 } from '@/src/domain/exercise/types';
+import { t, tEquipment, tMuscleGroup } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import { MgEquipmentPicker, type PickerCell } from './mg-equipment-picker';
-import { MuscleDiagramTagged } from './muscle-diagram-tagged';
+import { MuscleBodyTagger } from './muscle-body-tagger';
 
 export interface CustomExerciseInitial {
   name: string;
@@ -66,6 +68,8 @@ export function CustomExerciseForm({
   onSubmit,
   onCancel,
 }: CustomExerciseFormProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [name, setName] = useState(initial.name);
   const [mgId, setMgId] = useState(initial.muscleGroupId);
   const [equipment, setEquipment] = useState<Equipment>(initial.equipment);
@@ -119,14 +123,14 @@ export function CustomExerciseForm({
     if (!canSubmit || busy) return;
     const generalErrs = errors.filter((e) => e.field === 'general');
     if (generalErrs.length > 0) {
-      Alert.alert('無法儲存', generalErrs.map((e) => e.message).join('\n'));
+      Alert.alert(t('alert', 'cannotSave'), generalErrs.map((e) => e.message).join('\n'));
       return;
     }
     setBusy(true);
     try {
       await onSubmit(draft);
     } catch (err) {
-      Alert.alert('儲存失敗', err instanceof Error ? err.message : String(err));
+      Alert.alert(t('alert', 'saveFailed'), err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -142,16 +146,19 @@ export function CustomExerciseForm({
   const nameError = errors.find((e) => e.field === 'name');
 
   const mgPickerCells: PickerCell[] = useMemo(
-    () => muscleGroups.map((mg) => ({ id: mg.id, label: mg.name })),
+    () => muscleGroups.map((mg) => ({ id: mg.id, label: tMuscleGroup(mg.name) })),
     [muscleGroups]
   );
   const equipmentPickerCells: PickerCell[] = useMemo(
-    () => EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: eq })),
+    () => EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: tEquipment(eq) })),
     []
   );
 
   const mgLabel = useMemo(
-    () => muscleGroups.find((mg) => mg.id === mgId)?.name ?? '請選擇大分類',
+    () => {
+      const mg = muscleGroups.find((m) => m.id === mgId);
+      return mg ? tMuscleGroup(mg.name) : t('page', 'pickCategoryPlaceholder');
+    },
     [muscleGroups, mgId]
   );
 
@@ -163,15 +170,15 @@ export function CustomExerciseForm({
           headerLeft: () => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="取消"
+              accessibilityLabel={t('common', 'cancel')}
               onPress={onCancel}>
-              <Text style={styles.headerCancel}>取消</Text>
+              <Text style={styles.headerCancel}>{t('common', 'cancel')}</Text>
             </Pressable>
           ),
           headerRight: () => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="儲存"
+              accessibilityLabel={t('common', 'save')}
               onPress={handleSubmit}
               disabled={!canSubmit || busy}>
               <Text
@@ -179,7 +186,7 @@ export function CustomExerciseForm({
                   styles.headerSave,
                   (!canSubmit || busy) && styles.headerSaveDisabled,
                 ]}>
-                {busy ? '儲存中…' : '儲存'}
+                {busy ? t('common', 'saving') : t('common', 'save')}
               </Text>
             </Pressable>
           ),
@@ -187,10 +194,11 @@ export function CustomExerciseForm({
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Row 1: 名稱 */}
-        <Text style={styles.label}>名稱</Text>
+        <Text style={styles.label}>{t('page', 'nameFieldLabel')}</Text>
         <TextInput
-          accessibilityLabel="動作名稱"
-          placeholder="例：吊環划船"
+          accessibilityLabel={t('page', 'exerciseNameA11y')}
+          placeholder={t('page', 'exerciseNameExamplePlaceholder')}
+          placeholderTextColor={tokens.text.tertiary}
           value={name}
           onChangeText={setName}
           style={[styles.input, nameError && styles.inputError]}
@@ -201,10 +209,10 @@ export function CustomExerciseForm({
         {nameError && <Text style={styles.fieldError}>{nameError.message}</Text>}
 
         {/* Row 2: 大分類 picker row */}
-        <Text style={styles.label}>大分類</Text>
+        <Text style={styles.label}>{t('page', 'categoryLabel')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`大分類：${mgLabel}`}
+          accessibilityLabel={`${t('page', 'categoryLabel')}：${mgLabel}`}
           onPress={() => setShowMgPicker(true)}
           style={({ pressed }) => [
             styles.pickerRow,
@@ -218,33 +226,39 @@ export function CustomExerciseForm({
         </Pressable>
 
         {/* Row 3: 用具 picker row */}
-        <Text style={styles.label}>用具</Text>
+        <Text style={styles.label}>{t('page', 'equipmentLabel')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`用具：${equipment}`}
+          accessibilityLabel={`${t('page', 'equipmentLabel')}：${tEquipment(equipment)}`}
           onPress={() => setShowEquipmentPicker(true)}
           style={({ pressed }) => [
             styles.pickerRow,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.pickerRowText}>{equipment}</Text>
+          <Text style={styles.pickerRowText}>{tEquipment(equipment)}</Text>
           <Text style={styles.pickerRowChevron}>▾</Text>
         </Pressable>
 
-        {/* Row 4: 訓練部位 — 解剖圖 + 標籤同畫面（正面 / 背面並列） */}
-        <Text style={styles.label}>訓練部位（選填）</Text>
+        {/* Row 4: 訓練部位 — 按鈕格 + 解剖圖（reference 風格）*/}
+        <Text style={styles.label}>{t('page', 'muscleGroupOptionalLabel')}</Text>
         <Text style={styles.helper}>
-          點標籤切換：未選 → 主要(橘) → 次要(藍) → 取消。空白時動作詳情頁不顯示解剖圖。
+          {t('page', 'muscleTagHelper')}
         </Text>
 
+        {/* Tap-cycle 模式：點一次 → 主要 (橘)、再點 → 次要 (藍)、再點 → 取消。
+            cycleMuscleRole 已封裝 untagged → primary → secondary → untagged。 */}
         <View style={styles.diagramWrap}>
-          <MuscleDiagramTagged highlight={highlight} onTap={cycleMuscleRole} />
+          <MuscleBodyTagger
+            highlight={highlight}
+            mode="tap-cycle"
+            onTap={cycleMuscleRole}
+          />
         </View>
       </ScrollView>
 
       <MgEquipmentPicker
         visible={showMgPicker}
-        title="選擇大分類"
+        title={t('page', 'selectCategory')}
         cells={mgPickerCells}
         selectedId={mgId || null}
         onSelect={(id) => setMgId(id)}
@@ -252,7 +266,7 @@ export function CustomExerciseForm({
       />
       <MgEquipmentPicker
         visible={showEquipmentPicker}
-        title="選擇用具"
+        title={t('page', 'selectEquipment')}
         cells={equipmentPickerCells}
         selectedId={equipment}
         onSelect={(id) => setEquipment(id as Equipment)}
@@ -262,54 +276,66 @@ export function CustomExerciseForm({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  headerCancel: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    paddingHorizontal: 8,
-  },
-  headerSave: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '600',
-    paddingHorizontal: 8,
-  },
-  headerSaveDisabled: { color: '#9CA3AF' },
-  body: { padding: 20, gap: 8, paddingBottom: 40 },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 8,
-  },
-  helper: { fontSize: 12, color: '#6B7280', marginBottom: 4 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 15,
-  },
-  inputError: { borderColor: '#B91C1C' },
-  fieldError: { fontSize: 12, color: '#B91C1C', marginTop: 2 },
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    headerCancel: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      paddingHorizontal: 8,
+    },
+    headerSave: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '600',
+      paddingHorizontal: 8,
+    },
+    headerSaveDisabled: { color: tokens.text.tertiary },
+    body: { padding: 20, gap: 8, paddingBottom: 40 },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      marginTop: 8,
+    },
+    helper: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      padding: 10,
+      fontSize: 15,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.surface,
+    },
+    inputError: { borderColor: tokens.action.destructive },
+    fieldError: {
+      fontSize: 12,
+      color: tokens.action.destructive,
+      marginTop: 2,
+    },
 
-  pickerRow: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-  },
-  pickerRowEmpty: { borderColor: '#FCA5A5' },
-  pickerRowText: { fontSize: 15, color: '#111827' },
-  pickerRowTextEmpty: { color: '#9CA3AF' },
-  pickerRowChevron: { fontSize: 14, color: '#9CA3AF' },
+    pickerRow: {
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: tokens.bg.surface,
+    },
+    pickerRowEmpty: { borderColor: tokens.action.destructive },
+    pickerRowText: { fontSize: 15, color: tokens.text.primary },
+    pickerRowTextEmpty: { color: tokens.text.tertiary },
+    pickerRowChevron: { fontSize: 14, color: tokens.text.tertiary },
 
-  diagramWrap: { alignItems: 'center', marginVertical: 8 },
-  btnPressed: { opacity: 0.85 },
-});
+    diagramWrap: { alignItems: 'center', marginVertical: 8 },
+    btnPressed: { opacity: 0.85 },
+  });
+}

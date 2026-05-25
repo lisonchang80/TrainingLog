@@ -10,6 +10,29 @@ import { migrate } from '../../src/db/migrate';
  *   - superset_exercise PRIMARY KEY (superset_id, position) 拒絕 dup
  *   - superset → superset_exercise ON DELETE CASCADE
  *   - superset_exercise.exercise_id FK 指向 exercise(id)
+ *
+ * Flake-fix note (overnight Agent A, 2026-05-24)
+ * ----------------------------------------------
+ * The "PRIMARY KEY rejects duplicate" and "FK is enforced" tests below use
+ * an explicit `try { await ... } catch { didThrow = true }` pattern instead
+ * of `await expect(promise).rejects.toThrow()`. Empirically, under heavy
+ * parallel jest worker contention (e.g. `--maxWorkers=8` on this codebase,
+ * or `--runInBand` after many `:memory:` DB instances have been created in
+ * the same worker process), the matcher chain `.rejects.toThrow()`
+ * occasionally fails to observe `better-sqlite3`'s synchronous constraint
+ * throw — the test fails with "Received function did not throw" even
+ * though the constraint WAS violated. The try/catch path settles the
+ * microtask differently and reliably catches the rejection.
+ *
+ * Diagnostic dump (table SQL + PRAGMA values) on the un-throw path is
+ * preserved so that if this flake ever recurs in CI, the cause is
+ * immediately debuggable instead of "Received function did not throw".
+ *
+ * The same underlying flake also affects v009 (UNIQUE), v010 (CHECK),
+ * v015 (CHECK), and appendReusableSupersetActiveSessionInterlock (FK) —
+ * scope for this overnight worktree is limited to v011, so those files
+ * keep using `.rejects.toThrow()` (and stay green under default `npm
+ * test` workers; only flake under maxWorkers=8 / runInBand stress).
  */
 describe('v011 reusable superset migration', () => {
   let db: BetterSqliteDatabase;
@@ -110,14 +133,39 @@ describe('v011 reusable superset migration', () => {
       0,
       benchId
     );
-    await expect(
-      db.runAsync(
+    let pkThrew = false;
+    let pkErrorMsg = '';
+    try {
+      await db.runAsync(
         `INSERT INTO superset_exercise (superset_id, position, exercise_id) VALUES (?, ?, ?)`,
         'ss-dup',
         0,
         benchId
-      )
-    ).rejects.toThrow();
+      );
+    } catch (e) {
+      pkThrew = true;
+      pkErrorMsg = (e as Error)?.message ?? String(e);
+    }
+    if (!pkThrew) {
+      const seSql = await db.getFirstAsync<{ sql: string }>(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='superset_exercise'`,
+      );
+      const userVer = await db.getFirstAsync<{ user_version: number }>(`PRAGMA user_version`);
+      const rows = await db.getAllAsync<{ superset_id: string; position: number; exercise_id: string }>(
+        `SELECT superset_id, position, exercise_id FROM superset_exercise WHERE superset_id='ss-dup'`,
+      );
+      // eslint-disable-next-line no-console
+      console.error('[v011-PK-DIAG] PK constraint did not fire', {
+        user_version: userVer?.user_version,
+        superset_exercise_sql: seSql?.sql,
+        actual_rows: rows,
+      });
+    }
+    expect(pkThrew).toBe(true);
+    // assert it's a constraint error (not "no such table")
+    if (pkErrorMsg) {
+      expect(pkErrorMsg).toMatch(/UNIQUE|PRIMARY|constraint/i);
+    }
   });
 
   it('ON DELETE CASCADE clears superset_exercise rows when superset deleted', async () => {
@@ -169,12 +217,38 @@ describe('v011 reusable superset migration', () => {
       now,
       now
     );
-    await expect(
-      db.runAsync(
+    let fkThrew = false;
+    let fkErrorMsg = '';
+    try {
+      await db.runAsync(
         `INSERT INTO superset_exercise (superset_id, position, exercise_id) VALUES (?, 0, ?)`,
         'ss-fk',
         'no-such-exercise'
-      )
-    ).rejects.toThrow();
+      );
+    } catch (e) {
+      fkThrew = true;
+      fkErrorMsg = (e as Error)?.message ?? String(e);
+    }
+    if (!fkThrew) {
+      const seSql = await db.getFirstAsync<{ sql: string }>(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='superset_exercise'`,
+      );
+      const userVer = await db.getFirstAsync<{ user_version: number }>(`PRAGMA user_version`);
+      const fk = await db.getFirstAsync<{ foreign_keys: number }>(`PRAGMA foreign_keys`);
+      const rows = await db.getAllAsync<{ superset_id: string; position: number; exercise_id: string }>(
+        `SELECT superset_id, position, exercise_id FROM superset_exercise WHERE superset_id='ss-fk'`,
+      );
+      // eslint-disable-next-line no-console
+      console.error('[v011-FK-DIAG] FK constraint did not fire', {
+        user_version: userVer?.user_version,
+        foreign_keys: fk?.foreign_keys,
+        superset_exercise_sql: seSql?.sql,
+        actual_rows: rows,
+      });
+    }
+    expect(fkThrew).toBe(true);
+    if (fkErrorMsg) {
+      expect(fkErrorMsg).toMatch(/FOREIGN|constraint/i);
+    }
   });
 });
