@@ -18,6 +18,7 @@ import {
   ToastController,
   type ToastIcon,
 } from '@/src/domain/ui/toastController';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 export { ToastController } from '@/src/domain/ui/toastController';
 export type { ShowToastOptions, ToastIcon } from '@/src/domain/ui/toastController';
@@ -38,6 +39,10 @@ export type { ShowToastOptions, ToastIcon } from '@/src/domain/ui/toastControlle
  * This component is the React Native view layer only: it subscribes to the
  * controller, drives a fade/translate Animated value, and renders the floating
  * surface. Uses react-native's built-in Animated (no new dependency).
+ *
+ * ADR-0025 — the toast surface is intentionally a dark scrim in both modes
+ * (matches iOS system HUD convention — always dark regardless of light/dark
+ * mode). Icon background uses action.* tokens for semantic consistency.
  */
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -45,6 +50,7 @@ export type { ShowToastOptions, ToastIcon } from '@/src/domain/ui/toastControlle
 // ─────────────────────────────────────────────────────────────────────────
 
 export function ToastHost({ controller }: { controller: ToastController }) {
+  const { tokens } = useTheme();
   // Mirror controller state into React state so re-renders pick it up.
   // useSyncExternalStore would be cleaner but the controller intentionally
   // emits a new state OBJECT on every change anyway — a simple useEffect
@@ -113,7 +119,7 @@ export function ToastHost({ controller }: { controller: ToastController }) {
           onPress={onPress}
           style={styles.toastInner}
           accessibilityRole="alert">
-          {state.icon != null && <ToastIconView icon={state.icon} />}
+          {state.icon != null && <ToastIconView icon={state.icon} tokens={tokens} />}
           <Text style={styles.toastText} numberOfLines={2}>
             {state.message ?? ''}
           </Text>
@@ -123,12 +129,16 @@ export function ToastHost({ controller }: { controller: ToastController }) {
   );
 }
 
-function ToastIconView({ icon }: { icon: ToastIcon }) {
+function ToastIconView({ icon, tokens }: { icon: ToastIcon; tokens: ThemeTokens }) {
   if (icon == null) return null;
   const symbol =
     icon === 'success' ? '✓' : icon === 'error' ? '✕' : 'ⓘ';
   const color =
-    icon === 'success' ? '#34C759' : icon === 'error' ? '#FF3B30' : '#0A84FF';
+    icon === 'success'
+      ? tokens.action.success
+      : icon === 'error'
+        ? tokens.action.destructive
+        : tokens.action.primary;
   return (
     <View style={[styles.iconWrap, { backgroundColor: color }]}>
       <Text style={styles.iconText}>{symbol}</Text>
@@ -136,6 +146,11 @@ function ToastIconView({ icon }: { icon: ToastIcon }) {
   );
 }
 
+/**
+ * Static stylesheet — toast surface is intentionally a fixed dark scrim
+ * (iOS HUD pattern, both modes). Themed colors are applied inline above
+ * (only the icon background varies via action tokens).
+ */
 const styles = StyleSheet.create({
   host: {
     position: 'absolute',
@@ -150,6 +165,7 @@ const styles = StyleSheet.create({
     minWidth: 200,
     maxWidth: 360,
     borderRadius: 12,
+    // Fixed dark scrim — iOS system HUD convention, intentional non-token.
     backgroundColor: 'rgba(28,28,30,0.94)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -166,7 +182,8 @@ const styles = StyleSheet.create({
   },
   toastText: {
     flex: 1,
-    color: '#fff',
+    // Always-light text on dark scrim — intentional non-token.
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
   },
@@ -177,5 +194,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Always-light glyph on colored icon background — intentional non-token.
+  iconText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 });
