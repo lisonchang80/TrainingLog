@@ -39,5 +39,12 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
 /android
+
+# iOS — commit project but not pod cache / build artifacts (bare workflow per slice 13b)
+ios/Pods/
+ios/build/
+ios/.xcode.env.local
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/

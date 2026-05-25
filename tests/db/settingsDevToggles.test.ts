@@ -1,25 +1,24 @@
 /**
- * Slice 13a Phase A dev toggle round-trip tests.
+ * Slice 13a Phase A → 13b Phase B opener — `dev_simulate_watch_tracked` round-trip.
  *
- * Both toggles default OFF (vs auto_popup_rest_timer which is default ON
- * via v016 seed). No migration seed for these keys — `getSetting` returns
- * null on missing row, the getter coerces null → false.
+ * Originally tested both `watch_tracked` + `hk_granted` toggles; slice 13b
+ * deleted the HK-granted dev toggle in favor of the real
+ * `getAuthorizationState` reading from `hk_authorization_requested` (see
+ * `tests/adapters/healthkit/permission.test.ts`).
  *
- * REMOVE this test file in Phase B first commit alongside the settings
- * repository functions + Settings UI section (per ADR-0019 § Phase A
- * Amendment risks section).
+ * Watch tracked toggle survives to slice 13d as a 5-tile-watch UI regression
+ * guard (without it, the variant is unreachable on dev builds until a real
+ * `session.healthkit_workout_uuid` exists).
  */
 
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
 import {
-  getDevSimulateHKGranted,
   getDevSimulateWatchTracked,
-  setDevSimulateHKGranted,
   setDevSimulateWatchTracked,
 } from '../../src/adapters/sqlite/settingsRepository';
 
-describe('Slice 13a — dev_simulate_watch_tracked setting', () => {
+describe('Slice 13a → 13b — dev_simulate_watch_tracked setting', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
@@ -41,55 +40,5 @@ describe('Slice 13a — dev_simulate_watch_tracked setting', () => {
     expect(await getDevSimulateWatchTracked(db)).toBe(true);
     await setDevSimulateWatchTracked(db, false);
     expect(await getDevSimulateWatchTracked(db)).toBe(false);
-  });
-});
-
-describe('Slice 13a — dev_simulate_hk_granted setting', () => {
-  let db: BetterSqliteDatabase;
-
-  beforeEach(async () => {
-    db = new BetterSqliteDatabase(':memory:');
-    await migrate(db);
-  });
-
-  afterEach(() => {
-    db.close();
-  });
-
-  it('defaults to false on fresh DB (no migration seed)', async () => {
-    const v = await getDevSimulateHKGranted(db);
-    expect(v).toBe(false);
-  });
-
-  it('round-trips true ↔ false through the setter', async () => {
-    await setDevSimulateHKGranted(db, true);
-    expect(await getDevSimulateHKGranted(db)).toBe(true);
-    await setDevSimulateHKGranted(db, false);
-    expect(await getDevSimulateHKGranted(db)).toBe(false);
-  });
-});
-
-describe('Slice 13a dev toggles — keys are independent', () => {
-  let db: BetterSqliteDatabase;
-
-  beforeEach(async () => {
-    db = new BetterSqliteDatabase(':memory:');
-    await migrate(db);
-  });
-
-  afterEach(() => db.close());
-
-  it('toggling watch_tracked does not affect hk_granted (and vice versa)', async () => {
-    await setDevSimulateWatchTracked(db, true);
-    expect(await getDevSimulateWatchTracked(db)).toBe(true);
-    expect(await getDevSimulateHKGranted(db)).toBe(false);
-
-    await setDevSimulateHKGranted(db, true);
-    expect(await getDevSimulateWatchTracked(db)).toBe(true);
-    expect(await getDevSimulateHKGranted(db)).toBe(true);
-
-    await setDevSimulateWatchTracked(db, false);
-    expect(await getDevSimulateWatchTracked(db)).toBe(false);
-    expect(await getDevSimulateHKGranted(db)).toBe(true);
   });
 });

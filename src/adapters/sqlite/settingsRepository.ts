@@ -13,16 +13,34 @@ const UNIT_KEY = 'unit_preference';
 const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
 /**
- * Slice 13a Phase A dev toggles — REMOVE in Phase B first commit (per
- * ADR-0019 § Slice 13 Phase A Amendment risks section). These keys back
- * Settings > 開發者 switches that let us preview the Watch-tracked 5-tile
- * variant + HK-granted mock state without an actual Apple Watch / HealthKit
- * binding (those require Expo Dev Build).
+ * Slice 13a Phase A — `dev_simulate_watch_tracked` toggle.
  *
- * Both default OFF — fresh installs see the legacy 3-tile / no-HK state.
+ * Kept past slice 13b as a 5-tile-watch UI regression guard while slice 13d
+ * (Watch app scaffold + WatchConnectivity bridge) is still in flight — without
+ * this dev affordance the 5-tile-watch variant is unreachable on dev builds
+ * (no session has `healthkit_workout_uuid` set yet). Removed in slice 13d's
+ * first commit once real Watch sessions can flip the variant naturally.
+ *
+ * Counterpart `dev_simulate_hk_granted` was removed in slice 13b — the real
+ * `getAuthorizationState` reading from `hk_authorization_requested` replaces
+ * it (see `src/adapters/healthkit/permission.ts`).
  */
 const DEV_SIMULATE_WATCH_TRACKED_KEY = 'dev_simulate_watch_tracked';
-const DEV_SIMULATE_HK_GRANTED_KEY = 'dev_simulate_hk_granted';
+
+/**
+ * Slice 13b — local-only flag tracking whether the HealthKit permission
+ * dialog has been shown to the user at least once. iOS's HK API is
+ * one-shot: once the system dialog has been displayed for an app the
+ * same `initHealthKit()` call no longer triggers it (the user has to go
+ * to Settings.app → Privacy → Health → TrainingLog to change their
+ * answer). We persist this flag so the Settings 「Apple Health 整合」
+ * section can switch between the "Connect" CTA and the "已連結 / Open
+ * System Settings" view across launches.
+ *
+ * Distinct from `DEV_SIMULATE_HK_GRANTED_KEY` (Phase A dev toggle that
+ * gets deleted in B3 along with its repo getters/setters).
+ */
+const HK_AUTHORIZATION_REQUESTED_KEY = 'hk_authorization_requested';
 
 export async function getSetting<T>(
   db: Database,
@@ -138,21 +156,25 @@ export async function setDevSimulateWatchTracked(
 }
 
 /**
- * Slice 13a Phase A — read 模擬 HealthKit 授權 dev toggle.
+ * Slice 13b — has the HealthKit OS permission dialog been shown at least once?
  *
- * Phase A has no observable UI effect (preserves the slot for Phase B
- * permission gating). Documented + persisted so the Settings switch state
- * survives reloads; Phase B will branch HK-dependent UI on this flag (then
- * remove it once real HKHealthStore.authorizationStatus replaces the mock).
+ * `false` (default) → Settings shows the "Connect Apple Health" CTA, tapping
+ * it triggers `requestHKAuthorization` which shows the OS dialog.
+ * `true` → Settings shows the "已連結 Apple Health / Open System Settings"
+ * view. iOS won't re-show the dialog from `initHealthKit()` so the user has
+ * to go to Settings.app → 隱私 → 健康 to change their answer.
+ *
+ * Note: this flag tracks whether we ASKED, not whether we were GRANTED.
+ * iOS deliberately hides per-scope grant status (privacy / fingerprinting).
  */
-export async function getDevSimulateHKGranted(db: Database): Promise<boolean> {
-  const v = await getSetting<number | boolean>(db, DEV_SIMULATE_HK_GRANTED_KEY);
+export async function getHKAuthorizationRequested(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, HK_AUTHORIZATION_REQUESTED_KEY);
   return v === 1 || v === true;
 }
 
-export async function setDevSimulateHKGranted(
+export async function setHKAuthorizationRequested(
   db: Database,
-  enabled: boolean
+  requested: boolean
 ): Promise<void> {
-  await setSetting<number>(db, DEV_SIMULATE_HK_GRANTED_KEY, enabled ? 1 : 0);
+  await setSetting<number>(db, HK_AUTHORIZATION_REQUESTED_KEY, requested ? 1 : 0);
 }

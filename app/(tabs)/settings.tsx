@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -15,14 +16,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import {
+  getAuthorizationState,
+  requestHKAuthorization,
+  type HKPermissionState,
+} from '@/src/adapters/healthkit';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import {
   getAutoPopupRestTimer,
-  getDevSimulateHKGranted,
   getDevSimulateWatchTracked,
   getUnitPreference,
   setAutoPopupRestTimer,
-  setDevSimulateHKGranted,
   setDevSimulateWatchTracked,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
@@ -60,12 +64,19 @@ export default function SettingsScreen() {
    */
   const [autoPopup, setAutoPopup] = useState<boolean | null>(null);
   /**
-   * Slice 13a Phase A dev toggles (REMOVE in Phase B first commit).
-   * `null` = loading. Default false — Today keeps legacy 3-tile + no HK
-   * gating until the user opts in.
+   * Slice 13a Phase A → 13b — Watch-tracked dev toggle kept to slice 13d as a
+   * 5-tile-watch UI regression guard. `null` = loading.
    */
   const [devWatchTracked, setDevWatchTracked] = useState<boolean | null>(null);
-  const [devHKGranted, setDevHKGranted] = useState<boolean | null>(null);
+  /**
+   * Slice 13b — HealthKit permission state. `null` = loading.
+   * `'never'` → show "Connect Apple Health" CTA.
+   * `'requested'` → show "已連結 Apple Health" + "Open System Settings"
+   * shortcut (iOS won't re-show the OS dialog after first ask).
+   */
+  const [hkAuthState, setHkAuthState] = useState<HKPermissionState | null>(null);
+  /** Guard so double-tap on Connect doesn't fire two `initHealthKit` calls. */
+  const [hkConnecting, setHkConnecting] = useState(false);
   /**
    * Phase 5 — locale preference. `'auto'` follows device locale, `'zh'` /
    * `'en'` are explicit overrides. Backed by AsyncStorage via
@@ -83,18 +94,18 @@ export default function SettingsScreen() {
   const [bwBusy, setBwBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc, devWT, devHK] = await Promise.all([
+    const [u, popup, loc, devWT, hkState] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
       getDevSimulateWatchTracked(db),
-      getDevSimulateHKGranted(db),
+      getAuthorizationState(db),
     ]);
     setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
     setDevWatchTracked(devWT);
-    setDevHKGranted(devHK);
+    setHkAuthState(hkState);
   }, [db]);
 
   useFocusEffect(
@@ -117,17 +128,49 @@ export default function SettingsScreen() {
     await setAutoPopupRestTimer(db, next);
   };
 
-  // Slice 13a Phase A dev toggles — REMOVE in Phase B first commit
-  // (per ADR-0019 § Phase A Amendment risks). Optimistic write same as
-  // autoPopup pattern above.
+  // Slice 13a Phase A → 13b — Watch tracked dev toggle kept to slice 13d
+  // (5-tile-watch UI regression guard).
+  // TODO(slice-13d): remove this affordance once a real Apple Watch session
+  // writes session.healthkit_workout_uuid (the variant logic already branches
+  // on that column, see components/session/session-stats-panel.tsx).
   const onToggleDevWatchTracked = async (next: boolean) => {
     setDevWatchTracked(next);
     await setDevSimulateWatchTracked(db, next);
   };
 
-  const onToggleDevHKGranted = async (next: boolean) => {
-    setDevHKGranted(next);
-    await setDevSimulateHKGranted(db, next);
+  /**
+   * Slice 13b — trigger HealthKit OS permission dialog (first call) or
+   * no-op (subsequent calls; iOS won't re-show the dialog from initHealthKit).
+   *
+   * On success → mark `'requested'` so the UI flips to the "已連結" state +
+   * the "Open System Settings" shortcut.
+   * On error → leave `hkAuthState` unchanged (the user might tap again);
+   * surface error via Alert so they know to retry / file an issue.
+   */
+  const onConnectAppleHealth = async () => {
+    if (hkConnecting) return;
+    setHkConnecting(true);
+    try {
+      await requestHKAuthorization(db);
+      setHkAuthState('requested');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      Alert.alert(t('page', 'appleHealthSection'), message);
+    } finally {
+      setHkConnecting(false);
+    }
+  };
+
+  /**
+   * Slice 13b — open the iOS Settings → Privacy → Health → TrainingLog page
+   * so the user can change their per-scope answer. iOS deep-link URL is
+   * supported on iOS 14+; fall back to plain `app-settings:` (TrainingLog's
+   * own settings page) if the deep link is blocked by the OS version.
+   */
+  const onOpenSystemSettings = async () => {
+    const deepLink = 'App-Prefs:Privacy&path=HEALTH';
+    const canOpen = await Linking.canOpenURL(deepLink).catch(() => false);
+    await Linking.openURL(canOpen ? deepLink : 'app-settings:');
   };
 
   /**
@@ -308,10 +351,52 @@ export default function SettingsScreen() {
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
         <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
 
-        {/* Slice 13a Phase A — 開發者 section.
-            REMOVE this entire block in Phase B first commit once
-            HealthKit + Watch unlock real Watch-tracked + HK-granted
-            states (per ADR-0019 § Phase A Amendment risks). */}
+        {/* Slice 13b — Apple Health 整合 section. iOS one-shot dialog quirk
+            means the UI flips state-permanently on first tap (per Q6 grill).
+            Beyond first ask, only Settings.app deep link can change the per-
+            scope answer. */}
+        <Text style={styles.section}>{t('page', 'appleHealthSection')}</Text>
+        <Text style={styles.hint}>{t('status', 'appleHealthIntro')}</Text>
+        {hkAuthState === 'requested' ? (
+          <>
+            <Text style={styles.linkLabel}>
+              ✓ {t('status', 'appleHealthConnected')}
+            </Text>
+            <Text style={styles.hint}>{t('status', 'managePermissionHint')}</Text>
+            <Pressable
+              onPress={onOpenSystemSettings}
+              style={({ pressed }) => [
+                styles.linkRow,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.linkLabel}>
+                {t('button', 'openSystemSettings')}
+              </Text>
+              <Text style={styles.linkChevron}>›</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable
+            onPress={onConnectAppleHealth}
+            disabled={hkAuthState === null || hkConnecting}
+            style={({ pressed }) => [
+              styles.linkRow,
+              (hkAuthState === null || hkConnecting) && styles.btnDisabled,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.linkLabel}>
+              {t('button', 'connectAppleHealth')}
+            </Text>
+            <Text style={styles.linkChevron}>›</Text>
+          </Pressable>
+        )}
+
+        {/* Slice 13a Phase A → 13b — 開發者 section.
+            Watch tracked toggle kept to slice 13d as a 5-tile-watch UI
+            regression guard (without it, no session has
+            session.healthkit_workout_uuid set on dev builds and the variant
+            is unreachable). HK granted toggle removed in slice 13b (real
+            Apple Health 整合 section above replaces it). */}
         <Text style={styles.section}>{t('page', 'devSection')}</Text>
         <View style={styles.switchRow}>
           <View style={styles.switchLabelGroup}>
@@ -322,17 +407,6 @@ export default function SettingsScreen() {
             value={devWatchTracked ?? false}
             onValueChange={onToggleDevWatchTracked}
             disabled={devWatchTracked === null}
-          />
-        </View>
-        <View style={styles.switchRow}>
-          <View style={styles.switchLabelGroup}>
-            <Text style={styles.switchLabel}>{t('status', 'devSimulateHKGranted')}</Text>
-            <Text style={styles.hint}>{t('status', 'devSimulateHKGrantedHint')}</Text>
-          </View>
-          <Switch
-            value={devHKGranted ?? false}
-            onValueChange={onToggleDevHKGranted}
-            disabled={devHKGranted === null}
           />
         </View>
       </ScrollView>
