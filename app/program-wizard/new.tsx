@@ -58,6 +58,17 @@ import {
   tRemoveIntensity,
   tWeekdayLabels,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY helper. The wizard's many sub-component functions
+ * (NameAndTagPanel, CycleConfigPanel, …) each call this instead of
+ * repeating useTheme + useMemo. Mirrors the library.tsx pattern.
+ */
+function useWizStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * 6-step Program creation wizard. State machine logic lives in
@@ -71,6 +82,8 @@ import {
 export default function ProgramWizardScreen() {
   const db = useDatabase();
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useWizStyles();
   const today = utcMsToIsoDate(Date.now());
   const [state, setState] = useState<WizardState>(() => initialWizardState(today));
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
@@ -417,6 +430,7 @@ export default function ProgramWizardScreen() {
 }
 
 function StepHeader({ step }: { step: WizardStep }) {
+  const styles = useWizStyles();
   return (
     <View>
       <Text style={styles.stepLabel}>
@@ -471,6 +485,8 @@ function NameAndTagPanel({
   overwriteTarget: ProgramSummary | null;
   onLoadFromProgram: (programId: string) => Promise<void>;
 }) {
+  const { tokens } = useTheme();
+  const styles = useWizStyles();
   const [pending, setPending] = useState('');
   const [loadModalOpen, setLoadModalOpen] = useState(false);
   const addSubTag = () => {
@@ -513,7 +529,7 @@ function NameAndTagPanel({
         value={state.draft.name}
         onChangeText={(name) => setState(updateDraft(state, { name }))}
         placeholder={t('page', 'programNameExample')}
-        placeholderTextColor="#999"
+        placeholderTextColor={tokens.text.tertiary}
       />
       {overwriteTarget ? <OverwriteBanner target={overwriteTarget} /> : null}
       <ProgramPickerModal
@@ -554,7 +570,7 @@ function NameAndTagPanel({
           onSubmitEditing={addSubTag}
           returnKeyType="done"
           placeholder={t('page', 'intensityExample')}
-          placeholderTextColor="#999"
+          placeholderTextColor={tokens.text.tertiary}
         />
         <Pressable
           accessibilityRole="button"
@@ -580,6 +596,7 @@ function CycleConfigPanel({
   state: WizardState;
   setState: (s: WizardState) => void;
 }) {
+  const styles = useWizStyles();
   const update = (patch: Partial<WizardState['draft']>) =>
     setState(updateDraft(state, patch));
   return (
@@ -620,6 +637,7 @@ function DayPatternPanel({
   templates: TemplateSummary[];
   onCreateNewTemplate: () => Promise<void>;
 }) {
+  const styles = useWizStyles();
   const days = Array.from({ length: state.draft.cycle_length }, (_, i) => i);
   const planByDay = useMemo(() => {
     const m = new Map<number, { template_id: string | null }>();
@@ -727,6 +745,8 @@ function CycleSubTagsPanel({
   overwriteTarget: ProgramSummary | null;
 }) {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useWizStyles();
   // wave 18d: per-cycle ONE sub_tag picker (was per-(cycle, day) override).
   // We keep the underlying `overrides[]` shape unchanged so expandWizardDraft
   // and domain tests don't change — when user picks 強度 X for cycle c, we
@@ -929,7 +949,7 @@ function CycleSubTagsPanel({
                   }}
                   returnKeyType="done"
                   placeholder={t('page', 'intensityPlaceholder')}
-                  placeholderTextColor="#999"
+                  placeholderTextColor={tokens.text.tertiary}
                 />
                 <Pressable
                   accessibilityRole="button"
@@ -978,6 +998,7 @@ function CycleSubTagsPanel({
  * parent component's useEffect. User cancels by renaming away.
  */
 function OverwriteBanner({ target }: { target: ProgramSummary }) {
+  const styles = useWizStyles();
   return (
     <View style={styles.overwriteBanner}>
       <Text style={styles.overwriteBannerTitle}>
@@ -1001,6 +1022,7 @@ function ProgramPickerModal({
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
+  const styles = useWizStyles();
   return (
     <Modal
       visible={visible}
@@ -1056,6 +1078,7 @@ function PreviewPanel({
   state: WizardState;
   templates: TemplateSummary[];
 }) {
+  const styles = useWizStyles();
   const tplById = new Map(templates.map((t) => [t.id, t.name]));
   const overrideMap = new Map(
     state.draft.overrides.map((o) => [`${o.cycle_index}:${o.day_index}`, o.sub_tag])
@@ -1101,6 +1124,7 @@ function ConfirmPanel({
   state: WizardState;
   overwriteTarget: ProgramSummary | null;
 }) {
+  const styles = useWizStyles();
   const err = validateStep(state.draft, 'Confirm');
   return (
     <View style={styles.panel}>
@@ -1136,246 +1160,310 @@ function ConfirmPanel({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  flex: { flex: 1 },
-  body: { padding: 20, gap: 16, paddingBottom: 48 },
-  stepLabel: { fontSize: 12, fontWeight: '600', opacity: 0.6 },
-  stepTitle: { fontSize: 22, fontWeight: '700', marginTop: 4 },
-  progressTrack: { flexDirection: 'row', gap: 4, marginTop: 12 },
-  progressTick: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(127,127,127,0.25)',
-  },
-  progressTickActive: { backgroundColor: '#0a7ea4' },
-  panel: { gap: 10 },
-  label: { fontSize: 13, fontWeight: '500', marginTop: 6, opacity: 0.7 },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  loadProgramBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(10,126,164,0.10)',
-  },
-  loadProgramBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0a7ea4',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    maxHeight: '70%',
-    backgroundColor: 'white',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  modalTitle: { fontSize: 16, fontWeight: '700' },
-  modalClose: { fontSize: 14, color: '#0a7ea4', fontWeight: '600' },
-  modalList: { flexGrow: 0 },
-  modalEmpty: {
-    paddingVertical: 24,
-    textAlign: 'center',
-    opacity: 0.55,
-    fontSize: 13,
-  },
-  modalRow: {
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.25)',
-  },
-  modalRowName: { fontSize: 15, fontWeight: '600' },
-  modalRowMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
-  // Wave 18g (smoke-revision) — inline overwrite banner. Subtle red tint
-  // background + thin border so it reads as a warning but doesn't overpower
-  // the rest of Step 1's compact layout.
-  overwriteBanner: {
-    marginTop: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(220,53,69,0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(220,53,69,0.4)',
-    gap: 4,
-  },
-  overwriteBannerTitle: { fontSize: 13, fontWeight: '700', color: '#b3263a' },
-  overwriteBannerBody: { fontSize: 12, lineHeight: 17, opacity: 0.75 },
-  hint: { fontSize: 13, opacity: 0.7, marginBottom: 6 },
-  input: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    fontSize: 16,
-  },
-  subTagInput: { marginTop: 6 },
-  // Wave 18g smoke fix — 自訂 free-form input + 確認/取消 buttons in Step 4.
-  customRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  customInput: { flex: 1 },
-  customBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  customBtnSecondary: { backgroundColor: 'rgba(127,127,127,0.18)' },
-  customBtnSecondaryText: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  customBtnPrimary: { backgroundColor: '#0a7ea4' },
-  customBtnPrimaryText: { fontSize: 13, fontWeight: '700', color: 'white' },
-  tagChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 2,
-  },
-  tagChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,126,164,0.12)',
-    gap: 6,
-  },
-  tagChipText: { fontSize: 13, fontWeight: '600', color: '#0a7ea4' },
-  tagChipRemove: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(10,126,164,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tagChipRemoveText: {
-    color: '#0a7ea4',
-    fontSize: 16,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
-  tagAddRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 2,
-  },
-  tagAddInput: { flex: 1 },
-  tagAddBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0a7ea4',
-  },
-  tagAddBtnText: { color: 'white', fontSize: 22, fontWeight: '700', lineHeight: 24 },
-  dayCard: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    gap: 6,
-  },
-  dayLabel: { fontSize: 14, fontWeight: '600' },
-  pillsRow: { gap: 8, paddingVertical: 4 },
-  pill: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-  },
-  pillActive: { backgroundColor: '#0a7ea4' },
-  pillText: { fontSize: 13, fontWeight: '500' },
-  pillTextActive: { color: 'white' },
-  pillCreate: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#0a7ea4',
-    borderStyle: 'dashed',
-  },
-  pillCreateText: { color: '#0a7ea4', fontWeight: '600' },
-  cycleBlock: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    gap: 6,
-    marginBottom: 8,
-  },
-  cycleHeader: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  subTagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  subTagDayLabel: { width: 32, fontSize: 12, fontWeight: '600' },
-  subTagOverrideInput: { flex: 1, paddingVertical: 8 },
-  previewRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 6, gap: 4 },
-  previewCycleLabel: {
-    width: 22,
-    fontSize: 12,
-    fontWeight: '700',
-    paddingTop: 8,
-    opacity: 0.7,
-    textAlign: 'left',
-  },
-  previewCells: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 3,
-  },
-  previewCell: {
-    flex: 1,
-    minHeight: 48,
-    padding: 4,
-    borderRadius: 6,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  previewCellName: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
-  previewCellTag: { fontSize: 8, opacity: 0.65, marginTop: 2, textAlign: 'center' },
-  summaryCard: {
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    gap: 6,
-  },
-  summaryLine: { fontSize: 14 },
-  errorLine: { color: '#dc3545', fontSize: 14, marginTop: 8 },
-  headerBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  headerBtnPrimary: {
-    color: '#0a7ea4',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  headerBtnSecondary: {
-    color: '#6b7280',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  btnPressed: { opacity: 0.85 },
-  btnDisabled: { opacity: 0.5 },
-});
+/**
+ * ADR-0025 — all colors flow from theme tokens. Layout (flex/padding/radius)
+ * stays in StyleSheet for perf; colors interpolate per-token.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    flex: { flex: 1 },
+    body: { padding: 20, gap: 16, paddingBottom: 48 },
+    stepLabel: { fontSize: 12, fontWeight: '600', color: tokens.text.secondary },
+    stepTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      marginTop: 4,
+      color: tokens.text.primary,
+    },
+    progressTrack: { flexDirection: 'row', gap: 4, marginTop: 12 },
+    progressTick: {
+      flex: 1,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: tokens.bg.elevated,
+    },
+    progressTickActive: { backgroundColor: tokens.action.primary },
+    panel: { gap: 10 },
+    label: {
+      fontSize: 13,
+      fontWeight: '500',
+      marginTop: 6,
+      color: tokens.text.secondary,
+    },
+    labelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    loadProgramBtn: {
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.elevated,
+    },
+    loadProgramBtnText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.action.primary,
+    },
+    modalBackdrop: {
+      flex: 1,
+      // Fixed-dark scrim — standard modal overlay convention, both modes.
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'flex-end',
+    },
+    modalSheet: {
+      maxHeight: '70%',
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 24,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    modalTitle: { fontSize: 16, fontWeight: '700', color: tokens.text.primary },
+    modalClose: { fontSize: 14, color: tokens.action.primary, fontWeight: '600' },
+    modalList: { flexGrow: 0 },
+    modalEmpty: {
+      paddingVertical: 24,
+      textAlign: 'center',
+      color: tokens.text.secondary,
+      fontSize: 13,
+    },
+    modalRow: {
+      paddingVertical: 12,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    modalRowName: { fontSize: 15, fontWeight: '600', color: tokens.text.primary },
+    modalRowMeta: { fontSize: 12, color: tokens.text.secondary, marginTop: 2 },
+    // Wave 18g (smoke-revision) — inline overwrite banner. Subtle destructive
+    // tint background + thin border so it reads as a warning but doesn't
+    // overpower the rest of Step 1's compact layout.
+    overwriteBanner: {
+      marginTop: 4,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.destructive,
+      gap: 4,
+    },
+    overwriteBannerTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: tokens.action.destructive,
+    },
+    overwriteBannerBody: {
+      fontSize: 12,
+      lineHeight: 17,
+      color: tokens.text.secondary,
+    },
+    hint: { fontSize: 13, color: tokens.text.secondary, marginBottom: 6 },
+    input: {
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      fontSize: 16,
+      color: tokens.text.primary,
+    },
+    subTagInput: { marginTop: 6 },
+    // Wave 18g smoke fix — 自訂 free-form input + 確認/取消 buttons in Step 4.
+    customRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 6,
+    },
+    customInput: { flex: 1 },
+    customBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      minWidth: 60,
+      alignItems: 'center',
+    },
+    customBtnSecondary: { backgroundColor: tokens.bg.elevated },
+    customBtnSecondaryText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    customBtnPrimary: { backgroundColor: tokens.action.primary },
+    customBtnPrimaryText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: tokens.action.onPrimary,
+    },
+    tagChipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 2,
+    },
+    tagChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      gap: 6,
+    },
+    tagChipText: { fontSize: 13, fontWeight: '600', color: tokens.action.primary },
+    tagChipRemove: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tagChipRemoveText: {
+      color: tokens.action.primary,
+      fontSize: 16,
+      fontWeight: '700',
+      lineHeight: 18,
+    },
+    tagAddRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 2,
+    },
+    tagAddInput: { flex: 1 },
+    tagAddBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tokens.action.primary,
+    },
+    tagAddBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 22,
+      fontWeight: '700',
+      lineHeight: 24,
+    },
+    dayCard: {
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 6,
+    },
+    dayLabel: { fontSize: 14, fontWeight: '600', color: tokens.text.primary },
+    pillsRow: { gap: 8, paddingVertical: 4 },
+    pill: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.surface,
+    },
+    pillActive: { backgroundColor: tokens.action.primary },
+    pillText: { fontSize: 13, fontWeight: '500', color: tokens.text.primary },
+    pillTextActive: { color: tokens.action.onPrimary },
+    pillCreate: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: tokens.action.primary,
+      borderStyle: 'dashed',
+    },
+    pillCreateText: { color: tokens.action.primary, fontWeight: '600' },
+    cycleBlock: {
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 6,
+      marginBottom: 8,
+    },
+    cycleHeader: {
+      fontSize: 14,
+      fontWeight: '700',
+      marginBottom: 4,
+      color: tokens.text.primary,
+    },
+    subTagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    subTagDayLabel: {
+      width: 32,
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    subTagOverrideInput: { flex: 1, paddingVertical: 8 },
+    previewRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 6,
+      gap: 4,
+    },
+    previewCycleLabel: {
+      width: 22,
+      fontSize: 12,
+      fontWeight: '700',
+      paddingTop: 8,
+      color: tokens.text.secondary,
+      textAlign: 'left',
+    },
+    previewCells: {
+      flex: 1,
+      flexDirection: 'row',
+      gap: 3,
+    },
+    previewCell: {
+      flex: 1,
+      minHeight: 48,
+      padding: 4,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.elevated,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    previewCellName: {
+      fontSize: 10,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    previewCellTag: {
+      fontSize: 8,
+      color: tokens.text.tertiary,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    summaryCard: {
+      padding: 14,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 6,
+    },
+    summaryLine: { fontSize: 14, color: tokens.text.primary },
+    errorLine: { color: tokens.action.destructive, fontSize: 14, marginTop: 8 },
+    headerBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    headerBtnPrimary: {
+      color: tokens.action.primary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    headerBtnSecondary: {
+      color: tokens.text.secondary,
+      fontSize: 16,
+      fontWeight: '500',
+    },
+    btnPressed: { opacity: 0.85 },
+    btnDisabled: { opacity: 0.5 },
+  });
+}
