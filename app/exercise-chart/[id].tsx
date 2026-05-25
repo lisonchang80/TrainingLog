@@ -64,6 +64,16 @@ import {
   type ClusterSide,
 } from '@/src/domain/exercise/clusterSwitcher';
 import { t, tExercise, tSwitchToPartner } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the many components in this file that share
+ * one memoised StyleSheet.
+ */
+function useChartStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
@@ -131,6 +141,7 @@ export default function ExerciseChartScreen() {
   const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
   const router = useRouter();
+  const styles = useChartStyles();
   const initialClusterMode = useMemo(
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
@@ -172,7 +183,7 @@ export default function ExerciseChartScreen() {
         </Pressable>
       ),
     }),
-    [router]
+    [router, styles.headerBack]
   );
 
   if (!id) return null;
@@ -233,6 +244,7 @@ function PagingShell({
   db: Database;
 }) {
   const router = useRouter();
+  const styles = useChartStyles();
   const [pageWidth, setPageWidth] = useState<number>(() =>
     Dimensions.get('window').width
   );
@@ -341,6 +353,7 @@ function ChartPageContent({
   onRequestSwap: (() => void) | undefined;
 }) {
   const router = useRouter();
+  const styles = useChartStyles();
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [hasClusterRows, setHasClusterRows] = useState(false);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
@@ -729,6 +742,7 @@ function SwitcherTitle({
   onRequestSwap: (() => void) | undefined;
   partnerName: string | null;
 }) {
+  const styles = useChartStyles();
   const leftDisabled = switcherArrowDisabled(currentSide, 'left');
   const rightDisabled = switcherArrowDisabled(currentSide, 'right');
   return (
@@ -783,6 +797,7 @@ function FilterChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useChartStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -816,6 +831,7 @@ function SubTagChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useChartStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -842,6 +858,7 @@ function ClusterModeSegmented({
   value: ClusterFilterMode;
   onChange: (mode: ClusterFilterMode) => void;
 }) {
+  const styles = useChartStyles();
   return (
     <View style={styles.segmentedWrap}>
       {CLUSTER_FILTER_MODES.map((mode) => {
@@ -883,6 +900,7 @@ function PeriodStatsCard({
   unit: UnitPreference;
   yearFilter: number | null;
 }) {
+  const styles = useChartStyles();
   const scopedSessions = useMemo(() => {
     if (yearFilter == null) return sessions;
     return sessions.filter(
@@ -931,6 +949,7 @@ function ChartCard({
   unit: UnitPreference;
   yearFilter: number | null;
 }) {
+  const styles = useChartStyles();
   const scopedSessions = useMemo(() => {
     if (yearFilter == null) return sessions;
     return sessions.filter(
@@ -970,6 +989,7 @@ function YearFilterRow({
   value: number | null;
   onChange: (next: number | null) => void;
 }) {
+  const styles = useChartStyles();
   const thisYear = new Date().getFullYear();
   const options: { key: string; label: string; year: number | null }[] = [
     { key: 'prev', label: t('status', 'previousYear'), year: thisYear - 1 },
@@ -1005,6 +1025,7 @@ function TrendChart({
   unit: UnitPreference;
   metric: ChartMetric;
 }) {
+  const { tokens } = useTheme();
   const W = 320;
   const H = 196;
   const PT = 28;
@@ -1038,8 +1059,8 @@ function TrendChart({
   return (
     <View>
       <Svg width={W} height={H}>
-        <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke="#aaa" strokeWidth={1} />
-        <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke="#aaa" strokeWidth={1} />
+        <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />
+        <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />
         {yTicks.map((v, idx) => {
           const y = scaleY(v);
           return (
@@ -1048,13 +1069,13 @@ function TrendChart({
               x={PL - 4}
               y={y + 4}
               fontSize={10}
-              fill="#666"
+              fill={tokens.text.secondary}
               textAnchor="end">
               {yLabel(v)}
             </SvgText>
           );
         })}
-        <SvgText x={PL - 4} y={12} fontSize={10} fill="#666" textAnchor="end">
+        <SvgText x={PL - 4} y={12} fontSize={10} fill={tokens.text.secondary} textAnchor="end">
           {yAxisUnit}
         </SvgText>
         {xTicks.map((t, idx) => (
@@ -1063,21 +1084,21 @@ function TrendChart({
             x={scaleX(t)}
             y={H - PB + 14}
             fontSize={10}
-            fill="#666"
+            fill={tokens.text.secondary}
             textAnchor={
               idx === 0 ? 'start' : idx === xTicks.length - 1 ? 'end' : 'middle'
             }>
             {formatDateTick(t)}
           </SvgText>
         ))}
-        <Polyline points={polyline} fill="none" stroke="#0a7ea4" strokeWidth={2} />
+        <Polyline points={polyline} fill="none" stroke={tokens.action.primary} strokeWidth={2} />
         {points.map((p, idx) => (
           <Circle
             key={idx}
             cx={scaleX(p.t)}
             cy={scaleY(p.value)}
             r={3.5}
-            fill="#0a7ea4"
+            fill={tokens.action.primary}
           />
         ))}
       </Svg>
@@ -1171,207 +1192,274 @@ function formatVolume(kgVolume: number | null, unit: UnitPreference): string {
   return `${display.toFixed(0)} ${unit}-reps`;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  pager: { flex: 1 },
-  scroll: { padding: 16, paddingBottom: 36, gap: 12 },
-  empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic', paddingVertical: 12 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  filterChip: {
-    flex: 1,
-    paddingVertical: 5,
-    paddingHorizontal: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 56,
-  },
-  filterChipActive: { backgroundColor: '#0a7ea4' },
-  filterChipText: { fontSize: 12, fontWeight: '600' },
-  filterChipTextActive: { color: 'white' },
-  filterChipSubtext: { fontSize: 10, fontWeight: '400', opacity: 0.7, marginTop: 1 },
-  filterChipSubtextActive: { color: 'white', opacity: 0.85 },
-  segmentedWrap: {
-    flexDirection: 'row',
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    padding: 2,
-  },
-  segmentedBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  segmentedBtnActive: { backgroundColor: '#0a7ea4' },
-  segmentedText: { fontSize: 13, fontWeight: '500' },
-  segmentedTextActive: { color: 'white' },
-  advancedWrap: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    overflow: 'hidden',
-  },
-  advancedHeader: {
-    flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-  },
-  advancedHeaderText: { fontSize: 14, fontWeight: '600', flex: 1 },
-  advancedHeaderBadge: {
-    fontSize: 11,
-    color: '#0a7ea4',
-    fontWeight: '600',
-  },
-  advancedBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    gap: 8,
-  },
-  advancedLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.7,
-    marginTop: 6,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.2)',
-  },
-  dropdownText: { flex: 1, fontSize: 14 },
-  dropdownChevron: { fontSize: 14, opacity: 0.5 },
-  subTagChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(127,127,127,0.15)',
-  },
-  subTagChipActive: { backgroundColor: '#0a7ea4' },
-  subTagChipText: { fontSize: 13, fontWeight: '500' },
-  subTagChipTextActive: { color: 'white' },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  actionBtnPrimary: { backgroundColor: '#0a7ea4' },
-  actionBtnSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.4)',
-  },
-  actionBtnTextPrimary: { fontSize: 14, color: 'white', fontWeight: '600' },
-  actionBtnTextSecondary: { fontSize: 14, color: '#333', fontWeight: '500' },
-  statsCard: {
-    flexDirection: 'row',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    gap: 8,
-  },
-  statsCell: { flex: 1, alignItems: 'center', gap: 4 },
-  statsLabel: { fontSize: 12, opacity: 0.7, fontWeight: '500' },
-  statsValue: { fontSize: 15, fontWeight: '700', color: '#0a7ea4' },
-  chartCard: {
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    gap: 8,
-  },
-  cardTitle: { fontSize: 16, fontWeight: '700' },
-  cardSubtitle: { fontSize: 11, opacity: 0.6, marginTop: 1 },
-  chartTitleBlock: { gap: 0, flex: 1 },
-  chartTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  yearBadge: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0a7ea4',
-    paddingLeft: 8,
-  },
-  metricToggle: {
-    flexDirection: 'row',
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    padding: 2,
-  },
-  metricToggleBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  metricToggleBtnActive: { backgroundColor: '#0a7ea4' },
-  metricToggleText: { fontSize: 13, fontWeight: '500' },
-  metricToggleTextActive: { color: 'white' },
-  yearRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
-  yearBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    alignItems: 'center',
-  },
-  yearBtnActive: { backgroundColor: '#0a7ea4' },
-  yearBtnText: { fontSize: 13, fontWeight: '500' },
-  yearBtnTextActive: { color: 'white' },
-  headerBack: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '400',
-    paddingHorizontal: 8,
-  },
-  headerName: { fontSize: 22, fontWeight: '700' },
-  headerNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  headerArrow: {
-    color: '#007AFF',
-    fontSize: 28,
-    fontWeight: '400',
-    paddingHorizontal: 4,
-  },
-  headerArrowDisabled: { opacity: 0.3 },
-  headerNameInRow: { flex: 1, textAlign: 'center' },
-  btnPressed: { opacity: 0.85 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 16,
-    gap: 4,
-  },
-  modalTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  modalRow: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  modalRowText: { fontSize: 15 },
-  modalRowTextActive: { color: '#0a7ea4', fontWeight: '600' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    pager: { flex: 1 },
+    scroll: { padding: 16, paddingBottom: 36, gap: 12 },
+    empty: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontStyle: 'italic',
+      paddingVertical: 12,
+    },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+    filterChip: {
+      flex: 1,
+      paddingVertical: 5,
+      paddingHorizontal: 4,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 56,
+    },
+    filterChipActive: { backgroundColor: tokens.action.primary },
+    filterChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    filterChipTextActive: { color: tokens.action.onPrimary },
+    filterChipSubtext: {
+      fontSize: 10,
+      fontWeight: '400',
+      color: tokens.text.secondary,
+      marginTop: 1,
+    },
+    filterChipSubtextActive: { color: tokens.action.onPrimary, opacity: 0.85 },
+    segmentedWrap: {
+      flexDirection: 'row',
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      padding: 2,
+    },
+    segmentedBtn: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      alignItems: 'center',
+    },
+    segmentedBtnActive: { backgroundColor: tokens.action.primary },
+    segmentedText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    segmentedTextActive: { color: tokens.action.onPrimary },
+    advancedWrap: {
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      overflow: 'hidden',
+    },
+    advancedHeader: {
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+    },
+    advancedHeaderText: {
+      fontSize: 14,
+      fontWeight: '600',
+      flex: 1,
+      color: tokens.text.primary,
+    },
+    advancedHeaderBadge: {
+      fontSize: 11,
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    advancedBody: {
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+      gap: 8,
+    },
+    advancedLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      marginTop: 6,
+    },
+    dropdown: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+    },
+    dropdownText: { flex: 1, fontSize: 14, color: tokens.text.primary },
+    dropdownChevron: { fontSize: 14, color: tokens.text.tertiary },
+    subTagChip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      backgroundColor: tokens.bg.elevated,
+    },
+    subTagChipActive: { backgroundColor: tokens.action.primary },
+    subTagChipText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    subTagChipTextActive: { color: tokens.action.onPrimary },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    actionBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    actionBtnPrimary: { backgroundColor: tokens.action.primary },
+    actionBtnSecondary: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+    },
+    actionBtnTextPrimary: {
+      fontSize: 14,
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    actionBtnTextSecondary: {
+      fontSize: 14,
+      color: tokens.text.primary,
+      fontWeight: '500',
+    },
+    statsCard: {
+      flexDirection: 'row',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      gap: 8,
+    },
+    statsCell: { flex: 1, alignItems: 'center', gap: 4 },
+    statsLabel: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      fontWeight: '500',
+    },
+    statsValue: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: tokens.action.primary,
+    },
+    chartCard: {
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      gap: 8,
+    },
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    cardSubtitle: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      marginTop: 1,
+    },
+    chartTitleBlock: { gap: 0, flex: 1 },
+    chartTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    yearBadge: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.action.primary,
+      paddingLeft: 8,
+    },
+    metricToggle: {
+      flexDirection: 'row',
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+      padding: 2,
+    },
+    metricToggleBtn: {
+      flex: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      alignItems: 'center',
+    },
+    metricToggleBtnActive: { backgroundColor: tokens.action.primary },
+    metricToggleText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    metricToggleTextActive: { color: tokens.action.onPrimary },
+    yearRow: { flexDirection: 'row', gap: 4, marginTop: 4 },
+    yearBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    yearBtnActive: { backgroundColor: tokens.action.primary },
+    yearBtnText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    yearBtnTextActive: { color: tokens.action.onPrimary },
+    headerBack: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '400',
+      paddingHorizontal: 8,
+    },
+    headerName: { fontSize: 22, fontWeight: '700', color: tokens.text.primary },
+    headerNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    headerArrow: {
+      color: tokens.action.primary,
+      fontSize: 28,
+      fontWeight: '400',
+      paddingHorizontal: 4,
+    },
+    headerArrowDisabled: { opacity: 0.3 },
+    headerNameInRow: { flex: 1, textAlign: 'center' },
+    btnPressed: { opacity: 0.85 },
+    modalOverlay: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 14,
+      padding: 16,
+      gap: 4,
+    },
+    modalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 8,
+      color: tokens.text.primary,
+    },
+    modalRow: {
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+    },
+    modalRowText: { fontSize: 15, color: tokens.text.primary },
+    modalRowTextActive: { color: tokens.action.primary, fontWeight: '600' },
+  });
+}
