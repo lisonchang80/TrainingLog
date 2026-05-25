@@ -10,22 +10,36 @@
  *     the parent's local state stays in sync without a round-trip read.
  *
  * The component holds its own draft text in local state; the parent owns
- * the persisted value via `initialTitle` (re-mounting / re-keying with a
- * fresh initial is the way to externally reset). Empty strings are valid
- * and round-trip as ''.
+ * the persisted value via `initialTitle`. A `useEffect` syncs `draft ←
+ * initialTitle` whenever the prop changes outside edit mode, so an async
+ * refresh that lands AFTER first mount (e.g. session.title loaded from DB
+ * AFTER the `in_progress` branch first rendered with title='') still seeds
+ * the draft correctly. Empty strings are valid and round-trip as ''.
+ *
+ * Bug F2 (2026-05-25): tap-to-edit on a non-empty title used to render a
+ * blank TextField because the local `draft` state was initialised from
+ * `initialTitle` at first mount only — if the parent's title prop arrived
+ * AFTER the first render, `useState(initialTitle)` captured `''` and never
+ * updated. The `useEffect` sync below fixes that; tap-to-edit also seeds
+ * `selection` to cursor-at-end so the user can immediately append.
  *
  * ADR-0025 — colors come from `useTheme().tokens`. The previous default
  * `Text` color (system primary) and hard-coded `#9ca3af` placeholder were
  * unreadable in dark mode.
  */
 
-import { useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
 import { updateSessionTitle } from '@/src/adapters/sqlite/sessionRepository';
 import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
+
+import {
+  decideCommit,
+  nextDraftOnPropSync,
+} from './session-title-editor.behavior';
 
 interface SessionTitleEditorProps {
   sessionId: string;
@@ -56,15 +70,25 @@ export function SessionTitleEditor({
   const [draft, setDraft] = useState(initialTitle);
   const inputRef = useRef<TextInput>(null);
 
+  // F2 — keep `draft` in sync with `initialTitle` whenever the prop changes
+  // and we're NOT mid-edit. Covers the race where the parent loads
+  // session.title AFTER this component first mounted with title=''. The
+  // decision is delegated to `nextDraftOnPropSync` for unit testability.
+  useEffect(() => {
+    const next = nextDraftOnPropSync({ initialTitle, draft, editing });
+    if (next !== null) setDraft(next);
+  }, [initialTitle, draft, editing]);
+
   const commit = async () => {
-    // Trim trailing whitespace but allow empty string (= freestyle / placeholder).
-    const next = draft.trim();
+    // Delegate the persist-vs-noop decision to `decideCommit` (pure,
+    // unit-tested). Empty strings are valid (= freestyle / placeholder).
+    const decision = decideCommit({ draft, initialTitle });
     setEditing(false);
-    if (next === initialTitle) return; // no-op
-    setDraft(next);
+    if (!decision.shouldPersist) return;
+    setDraft(decision.next);
     try {
-      await updateSessionTitle(db, sessionId, next);
-      onUpdated?.(next);
+      await updateSessionTitle(db, sessionId, decision.next);
+      onUpdated?.(decision.next);
     } catch {
       // Best-effort: if the write fails the parent's initialTitle stays
       // stale and a future refresh will reconcile. Avoid an alert here —
@@ -74,6 +98,9 @@ export function SessionTitleEditor({
   };
 
   if (editing) {
+    // F2 — cursor-at-end seeding via `selection` lets the user immediately
+    // append to an existing title without retyping or manually positioning.
+    const cursorAtEnd = draft.length;
     return (
       <TextInput
         ref={inputRef}
@@ -82,6 +109,7 @@ export function SessionTitleEditor({
         onBlur={commit}
         onSubmitEditing={commit}
         autoFocus
+        selection={{ start: cursorAtEnd, end: cursorAtEnd }}
         returnKeyType="done"
         placeholder={placeholder}
         placeholderTextColor={tokens.text.tertiary}
@@ -96,6 +124,10 @@ export function SessionTitleEditor({
       accessibilityRole="button"
       accessibilityLabel={t('button', 'a11yTapEditTitle')}
       onPress={() => {
+        // Defensive: sync draft to the latest initialTitle here too, since
+        // the useEffect sync above runs after render. This guarantees the
+        // very first edit-mode render has the correct value even if a prop
+        // update is in flight.
         setDraft(initialTitle);
         setEditing(true);
       }}
