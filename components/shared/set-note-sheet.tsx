@@ -15,10 +15,11 @@
  * of scope for this slice.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type SetNoteSheetProps = {
   visible: boolean;
@@ -39,6 +40,8 @@ export function SetNoteSheet({
   onConfirm,
   onCancel,
 }: SetNoteSheetProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const resolvedTitle = title ?? t('domain', 'note');
   const resolvedPlaceholder = placeholder ?? t('page', 'setNotePlaceholder');
   const [draft, setDraft] = useState(initialValue ?? '');
@@ -79,7 +82,7 @@ export function SetNoteSheet({
             value={draft}
             onChangeText={setDraft}
             placeholder={resolvedPlaceholder}
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={tokens.text.tertiary}
             autoFocus
             textAlignVertical="top"
           />
@@ -89,48 +92,51 @@ export function SetNoteSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-  },
-  topBarConfirm: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  input: {
-    margin: 16,
-    minHeight: 120,
-    maxHeight: 240,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f9fafb',
-    fontSize: 15,
-    color: '#111827',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+    },
+    topBarConfirm: {
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    input: {
+      margin: 16,
+      minHeight: 120,
+      maxHeight: 240,
+      padding: 12,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.elevated,
+      fontSize: 15,
+      color: tokens.text.primary,
+    },
+  });
+}
