@@ -45,7 +45,7 @@ import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
-import { getLocale, t, tAssistedEffective, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 
 /**
  * Inline dynamic helpers — kept local rather than added to `src/i18n/dynamic.ts`
@@ -1078,7 +1078,7 @@ function HeaderCard({
         <View style={styles.headerNameRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={leftDisabled ? t('status', 'alreadyASide') : tSwitchToPartner(partnerName ?? '')}
+            accessibilityLabel={leftDisabled ? t('status', 'alreadyASide') : tSwitchToPartner(tExercise(partnerName ?? ''))}
             accessibilityState={{ disabled: leftDisabled }}
             onPress={leftDisabled ? undefined : onRequestSwap}
             disabled={leftDisabled || !onRequestSwap}
@@ -1094,11 +1094,11 @@ function HeaderCard({
           <Text
             style={[styles.headerName, styles.headerNameInRow]}
             numberOfLines={2}>
-            {header.exercise_name}
+            {tExercise(header.exercise_name)}
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={rightDisabled ? t('status', 'alreadyBSide') : tSwitchToPartner(partnerName ?? '')}
+            accessibilityLabel={rightDisabled ? t('status', 'alreadyBSide') : tSwitchToPartner(tExercise(partnerName ?? ''))}
             accessibilityState={{ disabled: rightDisabled }}
             onPress={rightDisabled ? undefined : onRequestSwap}
             disabled={rightDisabled || !onRequestSwap}
@@ -1113,7 +1113,7 @@ function HeaderCard({
           </Pressable>
         </View>
       ) : (
-        <Text style={styles.headerName}>{header.exercise_name}</Text>
+        <Text style={styles.headerName}>{tExercise(header.exercise_name)}</Text>
       )}
       <Text style={styles.headerSubline}>
         {tTotalSessionsLast7d(header.total_sessions, header.sessions_last_7_days)}

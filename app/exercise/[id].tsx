@@ -27,6 +27,7 @@ import {
   t,
   tDeleteExerciseFromLibrary,
   tEquipment,
+  tExercise,
   tLoadType,
   tMuscleGroup,
 } from '@/src/i18n';
@@ -115,7 +116,7 @@ export default function ExerciseDetailScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.heading}>{data.exercise.name}</Text>
+        <Text style={styles.heading}>{tExercise(data.exercise.name)}</Text>
         <Text style={styles.subheading}>
           {mg ? `${tMuscleGroup(mg.name)} · ` : ''}
           {loadTypeKey ? tLoadType(loadTypeKey) : data.exercise.load_type}
@@ -161,7 +162,7 @@ export default function ExerciseDetailScreen() {
             }
             Alert.alert(
               t('button', 'deleteExercise'),
-              tDeleteExerciseFromLibrary(data.exercise.name),
+              tDeleteExerciseFromLibrary(tExercise(data.exercise.name)),
               [
                 { text: t('common', 'cancel'), style: 'cancel' },
                 {

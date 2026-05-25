@@ -63,7 +63,7 @@ import {
   switcherArrowDisabled,
   type ClusterSide,
 } from '@/src/domain/exercise/clusterSwitcher';
-import { t, tSwitchToPartner } from '@/src/i18n';
+import { t, tExercise, tSwitchToPartner } from '@/src/i18n';
 
 type ChartMetric = 'weight' | 'volume' | 'e1rm';
 type ChartToggle = ChartMetric | 'parallel';
@@ -520,13 +520,13 @@ function ChartPageContent({
                 switcherArrowDisabled() in clusterSwitcher.ts. */}
             {showSwitcher ? (
               <SwitcherTitle
-                name={header.exercise_name}
+                name={tExercise(header.exercise_name)}
                 currentSide={currentSide}
                 onRequestSwap={onRequestSwap}
-                partnerName={partnerName}
+                partnerName={partnerName ? tExercise(partnerName) : null}
               />
             ) : (
-              <Text style={styles.headerName}>{header.exercise_name}</Text>
+              <Text style={styles.headerName}>{tExercise(header.exercise_name)}</Text>
             )}
 
             <View style={styles.filterRow}>
