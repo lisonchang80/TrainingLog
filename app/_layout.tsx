@@ -1,16 +1,20 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider as NavigationThemeProvider,
+} from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { DatabaseProvider } from '@/components/database-provider';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
+import { ThemeProvider, useTheme } from '@/src/theme';
 
 // Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
 // `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
@@ -44,13 +48,33 @@ export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+/**
+ * ADR-0025 § "Boot order" — bridge the app-level ThemeProvider's resolved
+ * mode into React Navigation's ThemeProvider so navigator chrome (header
+ * bars, default backgrounds) follows the user's pick, not just the system
+ * scheme. Without this, picking "Light" in Settings while system is dark
+ * would leave navigation chrome dark — visible inconsistency.
+ *
+ * StatusBar lives here too so its tint follows the resolved theme.
+ */
+function NavThemeBridge({ children }: { children: ReactNode }) {
+  const { resolved } = useTheme();
+  return (
+    <NavigationThemeProvider value={resolved === 'dark' ? DarkTheme : DefaultTheme}>
+      {children}
+      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
+    </NavigationThemeProvider>
+  );
+}
 
+export default function RootLayout() {
   // Phase 5 — hydrate locale from AsyncStorage on boot. A brief flash with
   // the default ('zh') is acceptable; once resolved, every `t()` call in
   // subsequent renders returns the user's chosen language. The Settings
   // toggle updates module state directly so re-renders pick up the change.
+  //
+  // ADR-0025 — theme preference is hydrated inside <ThemeProvider> on its
+  // own (no useEffect needed here); see src/theme/ThemeContext.tsx.
   useEffect(() => {
     (async () => {
       const stored = await loadStoredLocale();
@@ -62,8 +86,9 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <DatabaseProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
+      <ThemeProvider>
+        <NavThemeBridge>
+          <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen
             name="program-wizard/new"
@@ -150,8 +175,8 @@ export default function RootLayout() {
             name="body"
             options={{ title: t('page', 'bodyMetrics') }}
           />
-        </Stack>
-        <StatusBar style="auto" />
+          </Stack>
+        </NavThemeBridge>
       </ThemeProvider>
     </DatabaseProvider>
     </GestureHandlerRootView>

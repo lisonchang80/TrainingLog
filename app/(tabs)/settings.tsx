@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -32,14 +32,21 @@ import {
   type StoredLocaleValue,
 } from '@/src/i18n/locale-persist';
 import { setLocale } from '@/src/i18n/strings';
+import { useTheme, type ThemeTokens, type StoredThemeValue } from '@/src/theme';
 
 /**
  * Settings tab — slice 7 ships the unit preference toggle.
  * Slice 15 (Backup) brings backup mode + export / restore.
+ *
+ * ADR-0025 — every color comes from `useTheme().tokens`. No `#hex` literals
+ * here; if you need a new color, add a token to `constants/theme.ts` first.
  */
 export default function SettingsScreen() {
   const db = useDatabase();
   const router = useRouter();
+  const { tokens, stored: themePref, setStored: setThemePref } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
+
   const [unit, setUnit] = useState<UnitPreference>('kg');
   /**
    * Rest timer auto-popup toggle (ADR-0019 § slice 10d S1).
@@ -111,6 +118,16 @@ export default function SettingsScreen() {
     setLocale(resolveLocale(next));
   };
 
+  /**
+   * ADR-0025 — apply theme change. `setStored` already persists to
+   * AsyncStorage and re-resolves tokens via Context; this screen re-renders
+   * automatically via the Context subscription.
+   */
+  const onPickTheme = async (next: StoredThemeValue) => {
+    if (next === themePref) return;
+    await setThemePref(next);
+  };
+
   // ADR-0024 § 5 — 體重 mini sheet handlers.
   const onOpenBwSheet = () => {
     setBwInput('');
@@ -155,11 +172,15 @@ export default function SettingsScreen() {
             label="kg"
             active={unit === 'kg'}
             onPress={() => onSet('kg')}
+            styles={styles}
+            tokens={tokens}
           />
           <UnitOption
             label="lb"
             active={unit === 'lb'}
             onPress={() => onSet('lb')}
+            styles={styles}
+            tokens={tokens}
           />
         </View>
         <Text style={styles.hint}>{t('page', 'unitPreferenceHint')}</Text>
@@ -193,25 +214,53 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* ADR-0025 — Color theme section. Placed above 語言 because visual
+            preference is more impactful than text language. Same 3-radio
+            pattern as 語言 for consistency. */}
+        <Text style={styles.section}>{t('page', 'colorThemeSection')}</Text>
+        <View style={styles.langGroup}>
+          <RadioRow
+            label={t('status', 'themeSystem')}
+            active={themePref === 'system'}
+            onPress={() => onPickTheme('system')}
+            styles={styles}
+          />
+          <RadioRow
+            label={t('status', 'themeLight')}
+            active={themePref === 'light'}
+            onPress={() => onPickTheme('light')}
+            styles={styles}
+          />
+          <RadioRow
+            label={t('status', 'themeDark')}
+            active={themePref === 'dark'}
+            onPress={() => onPickTheme('dark')}
+            styles={styles}
+          />
+        </View>
+
         <Text style={styles.section}>{t('page', 'languageSection')}</Text>
         <View style={styles.langGroup}>
-          <LangOption
+          <RadioRow
             label={t('status', 'languageAuto')}
             active={localePref === 'auto'}
             disabled={localePref === null}
             onPress={() => onPickLocale('auto')}
+            styles={styles}
           />
-          <LangOption
+          <RadioRow
             label={t('status', 'languageZh')}
             active={localePref === 'zh'}
             disabled={localePref === null}
             onPress={() => onPickLocale('zh')}
+            styles={styles}
           />
-          <LangOption
+          <RadioRow
             label={t('status', 'languageEn')}
             active={localePref === 'en'}
             disabled={localePref === null}
             onPress={() => onPickLocale('en')}
+            styles={styles}
           />
         </View>
 
@@ -248,7 +297,7 @@ export default function SettingsScreen() {
               value={bwInput}
               onChangeText={setBwInput}
               placeholder={unit === 'kg' ? '70.0' : '154.0'}
-              placeholderTextColor="#999"
+              placeholderTextColor={tokens.text.tertiary}
               autoFocus
             />
             <View style={styles.modalActions}>
@@ -282,14 +331,20 @@ export default function SettingsScreen() {
   );
 }
 
+type Styles = ReturnType<typeof makeStyles>;
+
 function UnitOption({
   label,
   active,
   onPress,
+  styles,
+  tokens,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  styles: Styles;
+  tokens: ThemeTokens;
 }) {
   return (
     <Pressable
@@ -300,7 +355,11 @@ function UnitOption({
         active && styles.optionActive,
         pressed && styles.btnPressed,
       ]}>
-      <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>
+      <Text
+        style={[
+          styles.optionLabel,
+          { color: active ? tokens.action.onPrimary : tokens.text.primary },
+        ]}>
         {label}
       </Text>
     </Pressable>
@@ -308,20 +367,23 @@ function UnitOption({
 }
 
 /**
- * Phase 5 — single radio-style row for the language toggle. List-style (one
- * per row) rather than side-by-side because labels can be long (e.g.
- * "Traditional Chinese") and would wrap awkwardly in a flex-row.
+ * Phase 5 — single radio-style row, used for both the 語言 (locale) toggle
+ * and the ADR-0025 色彩主題 (theme) toggle. List-style (one per row) rather
+ * than side-by-side because labels can be long (e.g. "Traditional Chinese")
+ * and would wrap awkwardly in a flex-row.
  */
-function LangOption({
+function RadioRow({
   label,
   active,
   disabled,
   onPress,
+  styles,
 }: {
   label: string;
   active: boolean;
   disabled?: boolean;
   onPress: () => void;
+  styles: Styles;
 }) {
   return (
     <Pressable
@@ -342,106 +404,146 @@ function LangOption({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 24, gap: 12 },
-  heading: { fontSize: 28, fontWeight: '700', marginBottom: 4 },
-  section: { fontSize: 16, fontWeight: '600', marginTop: 12 },
-  toggleRow: { flexDirection: 'row', gap: 8 },
-  option: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  optionActive: { backgroundColor: '#0a7ea4' },
-  optionLabel: { fontSize: 18, fontWeight: '600' },
-  optionLabelActive: { color: 'white' },
-  hint: { fontSize: 12, opacity: 0.6 },
-  placeholder: { fontSize: 14, opacity: 0.6 },
-  btnPressed: { opacity: 0.85 },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  linkLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
-  linkChevron: { fontSize: 22, fontWeight: '300', opacity: 0.5 },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    gap: 12,
-  },
-  switchLabelGroup: { flex: 1, gap: 2 },
-  switchLabel: { fontSize: 16, fontWeight: '500' },
-  langGroup: { gap: 8 },
-  langRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  langRowActive: { backgroundColor: '#0a7ea4' },
-  langLabel: { flex: 1, fontSize: 16, fontWeight: '500' },
-  langLabelActive: { color: 'white' },
-  langCheck: { fontSize: 18, color: 'white', fontWeight: '700' },
-  // ADR-0024 § 5 — 體重 row + mini sheet.
-  bwRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    gap: 4,
-  },
-  bwRowLabel: { fontSize: 16, fontWeight: '600' },
-  bwRowHint: { fontSize: 12, opacity: 0.7 },
-  btnDisabled: { opacity: 0.5 },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalSheet: {
-    backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 20,
-    gap: 12,
-  },
-  modalHeading: { fontSize: 18, fontWeight: '700' },
-  modalLabel: { fontSize: 13, opacity: 0.7 },
-  modalInput: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    fontSize: 18,
-  },
-  modalActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  modalPrimaryBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-  },
-  modalPrimaryText: { color: 'white', fontSize: 16, fontWeight: '700' },
-  modalSecondaryBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(127,127,127,0.2)',
-    alignItems: 'center',
-  },
-  modalSecondaryText: { fontSize: 14, fontWeight: '600' },
-});
+/**
+ * ADR-0025 — all colors come from tokens. Layout (flex / padding / radius)
+ * stays in StyleSheet for perf; colors are interpolated per-token.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 24, gap: 12 },
+    heading: {
+      fontSize: 28,
+      fontWeight: '700',
+      marginBottom: 4,
+      color: tokens.text.primary,
+    },
+    section: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginTop: 12,
+      color: tokens.text.primary,
+    },
+    toggleRow: { flexDirection: 'row', gap: 8 },
+    option: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 10,
+      alignItems: 'center',
+      backgroundColor: tokens.bg.elevated,
+    },
+    optionActive: { backgroundColor: tokens.action.primary },
+    optionLabel: { fontSize: 18, fontWeight: '600' },
+    hint: { fontSize: 12, color: tokens.text.secondary },
+    placeholder: { fontSize: 14, color: tokens.text.tertiary },
+    btnPressed: { opacity: 0.85 },
+    linkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+    },
+    linkLabel: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    linkChevron: { fontSize: 22, fontWeight: '300', color: tokens.text.tertiary },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 12,
+    },
+    switchLabelGroup: { flex: 1, gap: 2 },
+    switchLabel: { fontSize: 16, fontWeight: '500', color: tokens.text.primary },
+    langGroup: { gap: 8 },
+    langRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+    },
+    langRowActive: { backgroundColor: tokens.action.primary },
+    langLabel: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '500',
+      color: tokens.text.primary,
+    },
+    langLabelActive: { color: tokens.action.onPrimary },
+    langCheck: {
+      fontSize: 18,
+      color: tokens.action.onPrimary,
+      fontWeight: '700',
+    },
+    // ADR-0024 § 5 — 體重 row + mini sheet.
+    bwRow: {
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 4,
+    },
+    bwRowLabel: { fontSize: 16, fontWeight: '600', color: tokens.text.primary },
+    bwRowHint: { fontSize: 12, color: tokens.text.secondary },
+    btnDisabled: { opacity: 0.5 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    modalSheet: {
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 14,
+      padding: 20,
+      gap: 12,
+    },
+    modalHeading: { fontSize: 18, fontWeight: '700', color: tokens.text.primary },
+    modalLabel: { fontSize: 13, color: tokens.text.secondary },
+    modalInput: {
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.subtle,
+      fontSize: 18,
+      color: tokens.text.primary,
+    },
+    modalActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+    modalPrimaryBtn: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 12,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+    },
+    modalPrimaryText: {
+      color: tokens.action.onPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    modalSecondaryBtn: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    modalSecondaryText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+  });
+}
