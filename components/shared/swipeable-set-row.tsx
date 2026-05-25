@@ -12,12 +12,26 @@
  *   - long-press → caller-supplied `onLongPress`.
  *
  * Visual polish (ADR-0016 amendment §F): drag ≥ 4px highlights row bg
- * via `rgba(0,0,0,0.12)`; `onTouchStart` bridges to the same colour so
- * the row never blinks between touch-down and gesture-handler kick-in.
+ * via a neutral 12% overlay; `onTouchStart` bridges to the same colour
+ * so the row never blinks between touch-down and gesture-handler kick-in.
+ *
+ * ADR-0025 — touch overlay uses a neutral gray (works in both modes);
+ * action button label uses `action.onPrimary`.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
+
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * Touch-state overlay color — semi-transparent neutral gray that renders
+ * acceptably on both light and dark surfaces. Kept literal (not tokenised)
+ * because RN `Animated.interpolate` outputRange demands raw color strings
+ * known at render time.
+ */
+const TOUCH_OVERLAY = 'rgba(127,127,127,0.18)';
+const TOUCH_OVERLAY_OFF = 'rgba(127,127,127,0)';
 
 export type SwipeAction = {
   key: string;
@@ -43,6 +57,8 @@ export function SwipeableSetRow({
   onLongPress,
   enabled = true,
 }: SwipeableSetRowProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const swipeableRef = useRef<Swipeable>(null);
   const [capturedDragX, setCapturedDragX] = useState<
     Animated.AnimatedInterpolation<number> | null
@@ -120,11 +136,11 @@ export function SwipeableSetRow({
                 backgroundColor: capturedDragX.interpolate({
                   inputRange: [-200, -4, 0, 4, 200],
                   outputRange: [
-                    'rgba(0,0,0,0.12)',
-                    'rgba(0,0,0,0.12)',
-                    'rgba(0,0,0,0)',
-                    'rgba(0,0,0,0.12)',
-                    'rgba(0,0,0,0.12)',
+                    TOUCH_OVERLAY,
+                    TOUCH_OVERLAY,
+                    TOUCH_OVERLAY_OFF,
+                    TOUCH_OVERLAY,
+                    TOUCH_OVERLAY,
                   ],
                   extrapolate: 'clamp',
                 }),
@@ -148,25 +164,27 @@ export function SwipeableSetRow({
   );
 }
 
-const styles = StyleSheet.create({
-  rowSurface: {},
-  rowSurfaceTouch: {
-    backgroundColor: 'rgba(0,0,0,0.12)',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-  },
-  actionsRowReverse: {
-    flexDirection: 'row-reverse',
-  },
-  actionBtn: {
-    width: ACTION_WIDTH,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionLabel: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    rowSurface: {},
+    rowSurfaceTouch: {
+      backgroundColor: TOUCH_OVERLAY,
+    },
+    actionsRow: {
+      flexDirection: 'row',
+    },
+    actionsRowReverse: {
+      flexDirection: 'row-reverse',
+    },
+    actionBtn: {
+      width: ACTION_WIDTH,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    actionLabel: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+  });
+}
