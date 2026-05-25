@@ -249,4 +249,46 @@ If a PRD has already been published (e.g., as issue #1) when this grill round ad
 
 This is project-specific to TrainingLog. For other projects without published PRDs, ADR + CONTEXT.md is sufficient.
 
+### Walk-back cleanup recipe (3-side atomic ship)
+
+When a grill round decides to **formally retract** a previously-shipped (or silently-reverted) feature, the cleanup spans 3 sides — shipping only the ADR amendment without the code cleanup leaves future readers confused why the spec says "retracted" but the wiring is still in place. Validated 2x in TrainingLog 2026-05-25 grill (G3 H1 縱條色 + G4+G5 computeSessionDiff orphan).
+
+**3-side recipe**:
+
+1. **ADR side** (per "Mark revisions explicitly" rule above):
+   - Inline marker on the original sub-decision: `（**YYYY-MM-DD G<N> 翻盤**：見 § 2026-MM-DD Amendment — <topic> walked-back）`
+   - New `### YYYY-MM-DD Amendment — <topic> walked-back` subsection at end of the Q section, containing:
+     - **翻盤** — which sub-decision is retracted (be precise; preserve untouched parts e.g.「banner 部分維持」)
+     - **理由** — why now (technical / UX / spec-debt + cross-reference to prior silent revert if any)
+     - **Code 改動** — explicit file list with paths + what's removed per file
+   - For full-section retract: add `❌` markers on tables/bullets, strikethrough `~~...~~` original wording (don't delete — preserve history); add `> ❌ YYYY-MM-DD G<N> grill 紮定` blockquote on top of the retracted block
+
+2. **Code side** — drop now-orphan wiring atomically (single commit):
+   - Drop dead props from component interfaces (props with no visual effect, e.g. `colorHex` that's computed but never applied)
+   - Drop derived constants that have no caller (`const borderLeftColor = ...` when there's no `borderLeftWidth` in styles)
+   - Drop SQL LEFT JOINs / SELECT fields if no remaining production caller (grep for the interface field, not just the function name)
+   - Drop callers' `prop={value}` passes (chase via grep + tsc errors)
+   - Drop type interface fields
+   - **Do NOT leave a "kept for future use" comment** — if a future design wants it back, `git revert <this-commit>` re-adds the prop + 1-line JOIN atomically. Stale "保留" comments are the seed of the next silent revert.
+
+3. **Test side** — delete tests that exclusively cover removed code:
+   - Pure data-layer tests for SQL fields no longer in the schema interface → `git rm` the test file
+   - Domain logic tests for functions no longer called by production → `git rm` the test file + the domain module
+   - Cost-benefit: 13-25 dead tests carry CI time + cognitive load forever; 1-line revert can regenerate them if needed
+
+**Commit message format**:
+- `chore(<scope>): walk back <topic> + cleanup dead wiring` — for component-level retract
+- `chore(adr-NNNN,<scope>): retract <topic> + drop <orphan-name> orphan` — for ADR-level + orphan-code combined
+- Body must include:
+  - Grill round identifier (e.g. "G3 grill decision (2026-05-25)")
+  - Why this is the final answer (1-2 lines)
+  - Bulleted "Changes" list (ADR side + code side + test side)
+  - Explicit "NOT touched" list (related features that stay — proves intent was surgical)
+
+**Validated savings** (2026-05-25 session):
+- G3 H1 縱條色: 6 files, -134 LOC (21 add, 155 remove), 3 tests removed
+- G4+G5 computeSessionDiff: 4 files, -666 LOC (28 add, 694 remove), 13 tests removed
+
+**Anti-pattern**: keeping orphan props "for future use" + no callers + ADR says retracted = guaranteed future-confusion ticket. If walk-back is uncertain, defer the grill; if walking back, fully cleanup. Either decision is fine — half-walked-back is not.
+
 </supporting-info>
