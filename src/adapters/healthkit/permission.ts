@@ -8,6 +8,14 @@ import type { HKPermissionState } from './types';
 /**
  * HealthKit permission gateway — slice 13b foundation.
  *
+ * Backed by `@kingstinct/react-native-healthkit@14.x` (Nitro / New
+ * Architecture compatible). The original choice in ADR-0019 § Phase B
+ * scope was `react-native-health` but it ships a legacy bridge that fails
+ * to register under New Arch (`NativeModules.AppleHealthKit === undefined`
+ * → `initHealthKit is not a function` runtime error). Since Expo SDK 54
+ * forces New Arch on (via `react-native-reanimated`'s Podspec assertion),
+ * the Kingstinct fork is the only compatible HK package as of 2026-05-25.
+ *
  * iOS HealthKit has a *one-shot* permission dialog: once the OS shows it
  * (regardless of grant/deny outcome), the same app can never re-trigger
  * the dialog from code. The user has to go to Settings.app → Privacy →
@@ -17,19 +25,26 @@ import type { HKPermissionState } from './types';
  * Apple intentionally hides that to prevent fingerprinting. The only way
  * to know is to query and see if you get data (or an empty result). So
  * `'requested'` here means "we asked at least once" — not "user said yes."
- *
- * The 13b UI uses this state to switch button labels: 'never' shows the
- * "Connect Apple Health" CTA; 'requested' shows the "Open System Settings"
- * shortcut + a hint that the answer can only be changed from Settings.app.
  */
 
-const NATIVE_MODULE = 'react-native-health';
-
-/** Lazily imported so jest can mock the native module per-test. */
-function getNativeAppleHealthKit(): typeof import('react-native-health').default {
+/**
+ * Lazily imported so jest can mock the native module per-test.
+ *
+ * Kingstinct exports named bindings (no default surface):
+ *   `requestAuthorization({ toRead, toShare }) → Promise<boolean>`
+ *
+ * The Promise resolves to a boolean whose meaning is misleading — `false`
+ * just means "the user dismissed without granting anything"; it does NOT
+ * tell us per-scope status. We treat any resolve (true OR false) as
+ * "dialog completed" and flip local state to `'requested'`.
+ */
+function getNativeRequestAuthorization(): (toRequest: {
+  toShare?: readonly string[];
+  toRead?: readonly string[];
+}) => Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require(NATIVE_MODULE);
-  return mod.default ?? mod;
+  const mod = require('@kingstinct/react-native-healthkit');
+  return mod.requestAuthorization;
 }
 
 /**
@@ -48,29 +63,17 @@ function getNativeAppleHealthKit(): typeof import('react-native-health').default
  *     The promise still resolves cleanly so the UI can safely call this
  *     idempotently.
  *
- * Errors from RN-Health (e.g. running on a non-iOS host, simulator gaps,
- * entitlement misconfig) reject the promise.
+ * Errors from RN-Healthkit (e.g. running on a non-iOS host, simulator
+ * gaps, entitlement misconfig) reject the promise.
  */
 export async function requestHKAuthorization(db: Database): Promise<void> {
-  const AppleHealthKit = getNativeAppleHealthKit();
-  const permissions = {
-    permissions: {
-      read: ['HeartRate', 'ActiveEnergyBurned'],
-      write: ['Workout'],
-    },
-  };
-  await new Promise<void>((resolve, reject) => {
-    AppleHealthKit.initHealthKit(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      permissions as any,
-      (err: string) => {
-        if (err) {
-          reject(new Error(err));
-          return;
-        }
-        resolve();
-      }
-    );
+  const requestAuthorization = getNativeRequestAuthorization();
+  await requestAuthorization({
+    toRead: [
+      'HKQuantityTypeIdentifierHeartRate',
+      'HKQuantityTypeIdentifierActiveEnergyBurned',
+    ],
+    toShare: ['HKWorkoutTypeIdentifier'],
   });
   await markAuthorizationRequested(db);
 }

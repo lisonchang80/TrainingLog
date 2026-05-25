@@ -1,10 +1,10 @@
 /**
  * Slice 13b — HealthKit permission state machine tests.
  *
- * The native `react-native-health` binding doesn't load under
- * `testEnvironment: node` (it requires the iOS native module), so we
- * mock it via `jest.mock` and assert the wrapper's callback handling
- * + persisted-state transitions.
+ * The native `@kingstinct/react-native-healthkit` binding doesn't load
+ * under `testEnvironment: node` (it requires the iOS Nitro module), so
+ * we mock it via `jest.mock` and assert the wrapper's Promise handling +
+ * persisted-state transitions.
  *
  * What's covered:
  *   - default `getAuthorizationState` returns `'never'`
@@ -19,14 +19,11 @@
  *   - HKWorkout writer (slice 13c-d)
  */
 
-const initHealthKitMock = jest.fn();
+const requestAuthorizationMock = jest.fn();
 
-jest.mock('react-native-health', () => ({
+jest.mock('@kingstinct/react-native-healthkit', () => ({
   __esModule: true,
-  default: {
-    initHealthKit: initHealthKitMock,
-  },
-  initHealthKit: initHealthKitMock,
+  requestAuthorization: requestAuthorizationMock,
 }));
 
 import { BetterSqliteDatabase } from '../../../src/adapters/sqlite/betterSqliteDatabase';
@@ -44,7 +41,7 @@ describe('Slice 13b — HealthKit permission state machine', () => {
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
-    initHealthKitMock.mockReset();
+    requestAuthorizationMock.mockReset();
   });
 
   afterEach(() => {
@@ -69,30 +66,42 @@ describe('Slice 13b — HealthKit permission state machine', () => {
   });
 
   it('requestHKAuthorization (happy path) flips state to "requested"', async () => {
-    // RN-Health's signature: callback(err, result). Happy path = err is
-    // empty / falsy.
-    initHealthKitMock.mockImplementation(
-      (_perm: unknown, cb: (err: string) => void) => cb('')
-    );
+    // Kingstinct API: requestAuthorization({ toShare, toRead }) → Promise<boolean>.
+    // Happy path = resolves true (user granted at least one scope).
+    requestAuthorizationMock.mockResolvedValue(true);
 
     await requestHKAuthorization(db);
 
-    expect(initHealthKitMock).toHaveBeenCalledTimes(1);
+    expect(requestAuthorizationMock).toHaveBeenCalledTimes(1);
     expect(await getAuthorizationState(db)).toBe('requested');
 
     // Verify the requested scopes match Q4 (ratified) + Q8 amendment (WRITE
     // Workout for iPhone 補寫 path).
-    const args = initHealthKitMock.mock.calls[0][0] as {
-      permissions: { read: string[]; write: string[] };
+    const args = requestAuthorizationMock.mock.calls[0][0] as {
+      toShare?: readonly string[];
+      toRead?: readonly string[];
     };
-    expect(args.permissions.read).toEqual(['HeartRate', 'ActiveEnergyBurned']);
-    expect(args.permissions.write).toEqual(['Workout']);
+    expect(args.toRead).toEqual([
+      'HKQuantityTypeIdentifierHeartRate',
+      'HKQuantityTypeIdentifierActiveEnergyBurned',
+    ]);
+    expect(args.toShare).toEqual(['HKWorkoutTypeIdentifier']);
+  });
+
+  it('requestHKAuthorization (false resolve) still flips state to "requested"', async () => {
+    // Kingstinct resolves `false` when user dismissed without granting
+    // anything — but the OS dialog WAS shown, so we still mark as requested
+    // (iOS won't re-show the dialog regardless of grant outcome).
+    requestAuthorizationMock.mockResolvedValue(false);
+
+    await requestHKAuthorization(db);
+
+    expect(await getAuthorizationState(db)).toBe('requested');
   });
 
   it('requestHKAuthorization rejects on native error + state unchanged', async () => {
-    initHealthKitMock.mockImplementation(
-      (_perm: unknown, cb: (err: string) => void) =>
-        cb('entitlement missing or HK unavailable')
+    requestAuthorizationMock.mockRejectedValue(
+      new Error('entitlement missing or HK unavailable')
     );
 
     await expect(requestHKAuthorization(db)).rejects.toThrow(
