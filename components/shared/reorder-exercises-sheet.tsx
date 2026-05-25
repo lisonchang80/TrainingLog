@@ -17,7 +17,7 @@
  * gesture detection.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -30,6 +30,7 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 
 import { t, tExercise } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Localize a row name produced by `buildSessionReorderRows` /
@@ -64,6 +65,8 @@ export function ReorderExercisesSheet({
   onConfirm,
   onCancel,
 }: ReorderExercisesSheetProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [draft, setDraft] = useState<ReorderItem[]>(initialItems);
 
   useEffect(() => {
@@ -121,54 +124,61 @@ export function ReorderExercisesSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: { fontSize: 16, fontWeight: '600', color: '#111827' },
-  topBarBtnText: { fontSize: 15, color: '#6b7280' },
-  topBarConfirm: { color: '#007AFF', fontWeight: '600' },
-  hintBanner: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(10,126,164,0.08)',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  hintBannerText: { fontSize: 13, color: '#0a7ea4' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f3f4f6',
-    backgroundColor: '#fff',
-  },
-  rowActive: {
-    backgroundColor: '#f9fafb',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-  },
-  dragHandle: {
-    fontSize: 20,
-    color: '#9ca3af',
-    width: 24,
-    textAlign: 'center',
-  },
-  rowName: { fontSize: 15, color: '#111827', flex: 1 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    sheet: {
+      flex: 1,
+      backgroundColor: tokens.bg.base,
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: { fontSize: 15, color: tokens.text.secondary },
+    topBarConfirm: { color: tokens.action.primary, fontWeight: '600' },
+    hintBanner: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      backgroundColor: tokens.bg.elevated,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    hintBannerText: { fontSize: 13, color: tokens.action.primary },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+      backgroundColor: tokens.bg.base,
+    },
+    rowActive: {
+      backgroundColor: tokens.bg.elevated,
+      elevation: 4,
+      // Drag-active shadow — kept literal black for cross-mode legibility.
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.15,
+      shadowRadius: 4,
+    },
+    dragHandle: {
+      fontSize: 20,
+      color: tokens.text.tertiary,
+      width: 24,
+      textAlign: 'center',
+    },
+    rowName: { fontSize: 15, color: tokens.text.primary, flex: 1 },
+  });
+}
