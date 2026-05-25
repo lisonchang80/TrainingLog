@@ -22,8 +22,10 @@
  * template editor previously owned identical style entries which have
  * been removed in favour of importing from this module.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Structural minimum a set object must expose for SetRowContent to
@@ -92,6 +94,8 @@ export function SetRowContent<S extends SetRowItem>({
   onAddDropsetRow,
   onCycleLabel,
 }: SetRowContentProps<S>) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const hasNote =
     !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
 
@@ -169,7 +173,7 @@ export function SetRowContent<S extends SetRowItem>({
         </Pressable>
       ) : (
         <TextInput
-          style={[styles.setInput, compact && styles.setInputCompact]}
+          style={[styles.setInput, styles.setInputTextInline, compact && styles.setInputCompact]}
           value={weightText}
           onChangeText={handleWeightChange}
           keyboardType="decimal-pad"
@@ -248,134 +252,149 @@ export function SetRowContent<S extends SetRowItem>({
   );
 }
 
-const styles = StyleSheet.create({
-  // overnight #52 — 統一 set/cycle row sizing 規格 A/B:
-  //   spec A (compact=false / solo)  : gap 12, label 40×32 fs:16, input min 60 padH 12 padV 6 fs:16
-  //   spec B (compact=true  / cluster): gap  6, label 28×22 fs:11, input min 32 padH  5 padV 3 fs:12
-  // 規格 B fine-tune (#52 follow-up): 初版 cluster 數值 (label 32×24 fs:13 / input 44 padH 8 fs:13 /
-  // gap 8) 撐爆 iPhone row 寬度 (4 個 input + 兩個 kg/× + 兩個 label + ✓ + note slot 過寬)，
-  // 導致 cell 互相重疊。縮回較保守值仍比舊版 (28 padH 3 fs:11) 略大 — 字體可讀、cell 易點，
-  // 但 row total 在 iPhone 標準寬度內。
-  setRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  setRowCompact: { gap: 6 },
-  setLabelBtn: {
-    width: 40,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnCompact: {
-    width: 28,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  setLabelBtnDisabled: {
-    backgroundColor: 'transparent',
-    borderTopColor: 'transparent',
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'transparent',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  setLabelBtnPressed: {
-    backgroundColor: '#e5e7eb',
-    borderTopWidth: 2,
-    borderBottomWidth: 1,
-    borderTopColor: '#6b7280',
-    borderLeftColor: '#9ca3af',
-    borderRightColor: '#d1d5db',
-    borderBottomColor: '#f3f4f6',
-    shadowOpacity: 0,
-    elevation: 0,
-    transform: [{ translateY: 1 }],
-  },
-  setLabelText: { fontSize: 16, fontWeight: '600', color: '#374151' },
-  setLabelTextCompact: { fontSize: 11 },
-  setLabelTextDisabled: { color: '#9ca3af' },
-  setInput: {
-    minWidth: 60,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  setInputCompact: {
-    minWidth: 32,
-    paddingHorizontal: 5,
-    paddingVertical: 3,
-    fontSize: 12,
-  },
-  setInputText: {
-    fontSize: 16,
-    color: '#111827',
-    textAlign: 'center',
-  },
-  setInputTextCompact: {
-    fontSize: 12,
-  },
-  // overnight #52 — kg / × separator fontSize 對齊新 cell fontSize 避免視覺錯位
-  setUnit: { fontSize: 16, color: '#6B7280' },
-  setUnitCompact: { fontSize: 12 },
-  setNoteIndicator: { paddingHorizontal: 4, paddingVertical: 2, marginLeft: 4 },
-  setNoteIndicatorText: { fontSize: 14 },
-  // overnight #5 第 4 點: 沒備註留 placeholder 同寬 (4+4 padding + ~16 emoji + 4 marginLeft)
-  setNoteIndicatorPlaceholder: { width: 28, marginLeft: 4 },
-  dropsetInlineBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,149,0,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Reserved width matches dropsetInlineBtn so single-button rows keep the
-  // weight/reps inputs aligned across all follower rows in the chain.
-  dropsetInlineBtnPlaceholder: { width: 22, height: 22 },
-  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: '#FF9500' },
-  dropsetTailBtnDisabled: { opacity: 0.35 },
-  dropsetTailBtnTextDisabled: { color: '#9CA3AF' },
-  // Container for the -/+ pair occupying the label-slot position on the
-  // left of a dropset follower row (2026-05-20 — user request to move
-  // these buttons from the row's right end onto the empty label slot).
-  dropsetLeftGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-});
+/**
+ * ADR-0025 — token-driven styles. The skeuomorphic 3D button shading
+ * (multi-layer border colors, drop shadow) is intentional and kept
+ * literal across modes; in dark mode the button bg shifts to a slightly
+ * elevated surface so the 3D effect still reads.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    // overnight #52 — 統一 set/cycle row sizing 規格 A/B:
+    //   spec A (compact=false / solo)  : gap 12, label 40×32 fs:16, input min 60 padH 12 padV 6 fs:16
+    //   spec B (compact=true  / cluster): gap  6, label 28×22 fs:11, input min 32 padH  5 padV 3 fs:12
+    setRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    setRowCompact: { gap: 6 },
+    setLabelBtn: {
+      width: 40,
+      height: 32,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.surface,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 2,
+      // Skeuomorphic 3D bevel — kept literal across modes (the gradient of
+      // light-to-dark border faces preserves the "physical button" look).
+      borderTopColor: '#f3f4f6',
+      borderLeftColor: '#d1d5db',
+      borderRightColor: '#9ca3af',
+      borderBottomColor: '#6b7280',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.18,
+      shadowRadius: 1.5,
+      elevation: 2,
+    },
+    setLabelBtnCompact: {
+      width: 28,
+      height: 22,
+      borderRadius: 4,
+      backgroundColor: tokens.bg.surface,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 2,
+      borderTopColor: '#f3f4f6',
+      borderLeftColor: '#d1d5db',
+      borderRightColor: '#9ca3af',
+      borderBottomColor: '#6b7280',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.18,
+      shadowRadius: 1.5,
+      elevation: 2,
+    },
+    setLabelBtnDisabled: {
+      backgroundColor: 'transparent',
+      borderTopColor: 'transparent',
+      borderLeftColor: 'transparent',
+      borderRightColor: 'transparent',
+      borderBottomColor: 'transparent',
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    setLabelBtnPressed: {
+      backgroundColor: tokens.bg.elevated,
+      borderTopWidth: 2,
+      borderBottomWidth: 1,
+      borderTopColor: '#6b7280',
+      borderLeftColor: '#9ca3af',
+      borderRightColor: '#d1d5db',
+      borderBottomColor: '#f3f4f6',
+      shadowOpacity: 0,
+      elevation: 0,
+      transform: [{ translateY: 1 }],
+    },
+    setLabelText: { fontSize: 16, fontWeight: '600', color: tokens.text.primary },
+    setLabelTextCompact: { fontSize: 11 },
+    setLabelTextDisabled: { color: tokens.text.tertiary },
+    setInput: {
+      minWidth: 60,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.surface,
+      fontSize: 16,
+      textAlign: 'center',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    setInputCompact: {
+      minWidth: 32,
+      paddingHorizontal: 5,
+      paddingVertical: 3,
+      fontSize: 12,
+    },
+    setInputText: {
+      fontSize: 16,
+      color: tokens.text.primary,
+      textAlign: 'center',
+    },
+    setInputTextCompact: {
+      fontSize: 12,
+    },
+    // Applied to the bare TextInput variant so its text color follows theme.
+    setInputTextInline: {
+      color: tokens.text.primary,
+    },
+    // overnight #52 — kg / × separator fontSize 對齊新 cell fontSize 避免視覺錯位
+    setUnit: { fontSize: 16, color: tokens.text.secondary },
+    setUnitCompact: { fontSize: 12 },
+    setNoteIndicator: {
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+      marginLeft: 4,
+    },
+    setNoteIndicatorText: { fontSize: 14 },
+    setNoteIndicatorPlaceholder: { width: 28, marginLeft: 4 },
+    dropsetInlineBtn: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      // Warning-tinted "dropset" affordance — kept literal because it's a
+      // semantically-meaningful color tint (matches dropset chip styling
+      // upstream) not a generic surface.
+      backgroundColor: 'rgba(255,149,0,0.15)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dropsetInlineBtnPlaceholder: { width: 22, height: 22 },
+    dropsetInlineBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.action.warning,
+    },
+    dropsetTailBtnDisabled: { opacity: 0.35 },
+    dropsetTailBtnTextDisabled: { color: tokens.text.tertiary },
+    dropsetLeftGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+  });
+}
