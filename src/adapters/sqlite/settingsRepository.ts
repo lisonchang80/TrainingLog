@@ -24,6 +24,21 @@ const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 const DEV_SIMULATE_WATCH_TRACKED_KEY = 'dev_simulate_watch_tracked';
 const DEV_SIMULATE_HK_GRANTED_KEY = 'dev_simulate_hk_granted';
 
+/**
+ * Slice 13b — local-only flag tracking whether the HealthKit permission
+ * dialog has been shown to the user at least once. iOS's HK API is
+ * one-shot: once the system dialog has been displayed for an app the
+ * same `initHealthKit()` call no longer triggers it (the user has to go
+ * to Settings.app → Privacy → Health → TrainingLog to change their
+ * answer). We persist this flag so the Settings 「Apple Health 整合」
+ * section can switch between the "Connect" CTA and the "已連結 / Open
+ * System Settings" view across launches.
+ *
+ * Distinct from `DEV_SIMULATE_HK_GRANTED_KEY` (Phase A dev toggle that
+ * gets deleted in B3 along with its repo getters/setters).
+ */
+const HK_AUTHORIZATION_REQUESTED_KEY = 'hk_authorization_requested';
+
 export async function getSetting<T>(
   db: Database,
   key: string
@@ -155,4 +170,28 @@ export async function setDevSimulateHKGranted(
   enabled: boolean
 ): Promise<void> {
   await setSetting<number>(db, DEV_SIMULATE_HK_GRANTED_KEY, enabled ? 1 : 0);
+}
+
+/**
+ * Slice 13b — has the HealthKit OS permission dialog been shown at least once?
+ *
+ * `false` (default) → Settings shows the "Connect Apple Health" CTA, tapping
+ * it triggers `requestHKAuthorization` which shows the OS dialog.
+ * `true` → Settings shows the "已連結 Apple Health / Open System Settings"
+ * view. iOS won't re-show the dialog from `initHealthKit()` so the user has
+ * to go to Settings.app → 隱私 → 健康 to change their answer.
+ *
+ * Note: this flag tracks whether we ASKED, not whether we were GRANTED.
+ * iOS deliberately hides per-scope grant status (privacy / fingerprinting).
+ */
+export async function getHKAuthorizationRequested(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, HK_AUTHORIZATION_REQUESTED_KEY);
+  return v === 1 || v === true;
+}
+
+export async function setHKAuthorizationRequested(
+  db: Database,
+  requested: boolean
+): Promise<void> {
+  await setSetting<number>(db, HK_AUTHORIZATION_REQUESTED_KEY, requested ? 1 : 0);
 }
