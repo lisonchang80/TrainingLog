@@ -592,6 +592,85 @@ export const strings = {
     },
 
     /**
+     * Exercise display name — built-in seed (v006) DB names are EN; this
+     * mapper produces zh display labels for the 66 built-in exercises.
+     * Unknown keys (user-created exercises) pass through unchanged via
+     * `tExercise()`'s fallback.
+     *
+     * Naming convention: equipment-prefixed when ambiguous (槓鈴臥推 /
+     * 啞鈴臥推), bench-angle prefixed when relevant (上斜 / 下斜),
+     * gym-floor 慣用 terms when domain-standard (引體向上 / 硬舉 / 臀推).
+     */
+    exercise: {
+      'Bench Press': '槓鈴臥推',
+      'Push-up': '伏地挺身',
+      'Incline Bench Press': '上斜槓鈴臥推',
+      'Decline Bench Press': '下斜槓鈴臥推',
+      'Dumbbell Bench Press': '啞鈴臥推',
+      'Incline Dumbbell Press': '上斜啞鈴臥推',
+      'Cable Crossover': '繩索夾胸',
+      'Dumbbell Fly': '啞鈴飛鳥',
+      'Chest Dip': '雙槓臂屈伸',
+      'Machine Chest Press': '機械臥推',
+      'Assisted Dip': '輔助雙槓臂屈伸',
+      'Deadlift': '硬舉',
+      'Barbell Row': '槓鈴划船',
+      'Pull-up': '引體向上',
+      'Lat Pulldown': '滑輪下拉',
+      'Seated Cable Row': '坐姿划船',
+      'T-bar Row': 'T 槓划船',
+      'Dumbbell Row': '啞鈴划船',
+      'Chin-up': '反握引體向上',
+      'Rack Pull': '架上拉',
+      'Hyperextension': '山羊挺身',
+      'Assisted Pull-up': '輔助引體向上',
+      'Back Squat': '槓鈴深蹲',
+      'Front Squat': '前蹲',
+      'Bulgarian Split Squat': '保加利亞分腿蹲',
+      'Leg Press': '腿推機',
+      'Leg Extension': '腿伸展',
+      'Leg Curl': '腿彎舉',
+      'Lunge': '弓箭步',
+      'Goblet Squat': '高腳杯深蹲',
+      'Hip Thrust': '臀推',
+      'Glute Bridge': '臀橋',
+      'Cable Kickback': '繩索後踢腿',
+      'Sumo Deadlift': '相撲硬舉',
+      'Romanian Deadlift': '羅馬尼亞硬舉',
+      'Overhead Press': '肩推',
+      'Dumbbell Shoulder Press': '啞鈴肩推',
+      'Lateral Raise': '側平舉',
+      'Front Raise': '前平舉',
+      'Rear Delt Fly': '後束飛鳥',
+      'Arnold Press': '阿諾推舉',
+      'Upright Row': '直立划船',
+      'Barbell Shrug': '槓鈴聳肩',
+      'Dumbbell Shrug': '啞鈴聳肩',
+      'Face Pull': '面拉',
+      'Barbell Curl': '槓鈴彎舉',
+      'Dumbbell Curl': '啞鈴彎舉',
+      'Hammer Curl': '錘式彎舉',
+      'Preacher Curl': '牧師椅彎舉',
+      'Cable Curl': '繩索彎舉',
+      'Tricep Pushdown': '三頭下壓',
+      'Skull Crusher': '仰卧臂屈伸',
+      'Overhead Tricep Extension': '過頭三頭伸展',
+      'Close-grip Bench Press': '窄握臥推',
+      'Bench Dip': '板凳撐體',
+      'Standing Calf Raise': '站姿提踵',
+      'Seated Calf Raise': '坐姿提踵',
+      'Donkey Calf Raise': '驢式提踵',
+      'Wrist Curl': '腕屈',
+      'Reverse Wrist Curl': '反向腕屈',
+      'Plank': '棒式',
+      'Crunch': '捲腹',
+      'Hanging Leg Raise': '懸吊舉腿',
+      'Russian Twist': '俄羅斯轉體',
+      'Cable Wood Chop': '繩索斜砍',
+      'Pallof Press': '帕洛夫推',
+    },
+
+    /**
      * Muscle group + muscle name display label。
      * 32 筆從 v010 schema (post-rename) + v006 seed legacy 名稱合併。
      * Legacy 名稱 (前臂 / 二頭長頭 / 二頭短頭) 也保留 mapping，因為 v006 之前的
@@ -1201,6 +1280,80 @@ export const strings = {
       其他: 'Other',
     },
 
+    /**
+     * Exercise display name — EN locale is identity (DB names ARE EN).
+     * Kept parallel to zh.exercise so the shape-invariant test passes;
+     * `tExercise()` returns the value either way.
+     */
+    exercise: {
+      'Bench Press': 'Bench Press',
+      'Push-up': 'Push-up',
+      'Incline Bench Press': 'Incline Bench Press',
+      'Decline Bench Press': 'Decline Bench Press',
+      'Dumbbell Bench Press': 'Dumbbell Bench Press',
+      'Incline Dumbbell Press': 'Incline Dumbbell Press',
+      'Cable Crossover': 'Cable Crossover',
+      'Dumbbell Fly': 'Dumbbell Fly',
+      'Chest Dip': 'Chest Dip',
+      'Machine Chest Press': 'Machine Chest Press',
+      'Assisted Dip': 'Assisted Dip',
+      'Deadlift': 'Deadlift',
+      'Barbell Row': 'Barbell Row',
+      'Pull-up': 'Pull-up',
+      'Lat Pulldown': 'Lat Pulldown',
+      'Seated Cable Row': 'Seated Cable Row',
+      'T-bar Row': 'T-bar Row',
+      'Dumbbell Row': 'Dumbbell Row',
+      'Chin-up': 'Chin-up',
+      'Rack Pull': 'Rack Pull',
+      'Hyperextension': 'Hyperextension',
+      'Assisted Pull-up': 'Assisted Pull-up',
+      'Back Squat': 'Back Squat',
+      'Front Squat': 'Front Squat',
+      'Bulgarian Split Squat': 'Bulgarian Split Squat',
+      'Leg Press': 'Leg Press',
+      'Leg Extension': 'Leg Extension',
+      'Leg Curl': 'Leg Curl',
+      'Lunge': 'Lunge',
+      'Goblet Squat': 'Goblet Squat',
+      'Hip Thrust': 'Hip Thrust',
+      'Glute Bridge': 'Glute Bridge',
+      'Cable Kickback': 'Cable Kickback',
+      'Sumo Deadlift': 'Sumo Deadlift',
+      'Romanian Deadlift': 'Romanian Deadlift',
+      'Overhead Press': 'Overhead Press',
+      'Dumbbell Shoulder Press': 'Dumbbell Shoulder Press',
+      'Lateral Raise': 'Lateral Raise',
+      'Front Raise': 'Front Raise',
+      'Rear Delt Fly': 'Rear Delt Fly',
+      'Arnold Press': 'Arnold Press',
+      'Upright Row': 'Upright Row',
+      'Barbell Shrug': 'Barbell Shrug',
+      'Dumbbell Shrug': 'Dumbbell Shrug',
+      'Face Pull': 'Face Pull',
+      'Barbell Curl': 'Barbell Curl',
+      'Dumbbell Curl': 'Dumbbell Curl',
+      'Hammer Curl': 'Hammer Curl',
+      'Preacher Curl': 'Preacher Curl',
+      'Cable Curl': 'Cable Curl',
+      'Tricep Pushdown': 'Tricep Pushdown',
+      'Skull Crusher': 'Skull Crusher',
+      'Overhead Tricep Extension': 'Overhead Tricep Extension',
+      'Close-grip Bench Press': 'Close-grip Bench Press',
+      'Bench Dip': 'Bench Dip',
+      'Standing Calf Raise': 'Standing Calf Raise',
+      'Seated Calf Raise': 'Seated Calf Raise',
+      'Donkey Calf Raise': 'Donkey Calf Raise',
+      'Wrist Curl': 'Wrist Curl',
+      'Reverse Wrist Curl': 'Reverse Wrist Curl',
+      'Plank': 'Plank',
+      'Crunch': 'Crunch',
+      'Hanging Leg Raise': 'Hanging Leg Raise',
+      'Russian Twist': 'Russian Twist',
+      'Cable Wood Chop': 'Cable Wood Chop',
+      'Pallof Press': 'Pallof Press',
+    },
+
     muscleGroup: {
       胸: 'Chest',
       背: 'Back',
@@ -1313,6 +1466,17 @@ export function tEquipment(dbValue: string): string {
  */
 export function tMuscleGroup(dbValue: string): string {
   const tree = strings[currentLocale].muscleGroup as Record<string, string>;
+  return tree[dbValue] ?? dbValue;
+}
+
+/**
+ * Exercise name DB value (EN literal for v006 seed) → display label.
+ * User-created exercise names (not in the seed) pass through unchanged
+ * via the fallback, so custom exercises stay verbatim in whatever
+ * language the user typed them in.
+ */
+export function tExercise(dbValue: string): string {
+  const tree = strings[currentLocale].exercise as Record<string, string>;
   return tree[dbValue] ?? dbValue;
 }
 

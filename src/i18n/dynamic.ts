@@ -16,7 +16,7 @@
  * `v008Achievements.ts`) intentionally skipped — see Phase 2 user decision.
  */
 
-import { getLocale } from './strings';
+import { getLocale, tExercise } from './strings';
 
 const isEn = (): boolean => getLocale() === 'en';
 
@@ -303,12 +303,14 @@ export function tIntensityFilterCount(n: number): string {
 
 /** Rest-seconds cluster-action header. `⏱️ 休息秒數 · Bench Press` / `⏱️ Rest Seconds · Bench Press`. */
 export function tRestSecondsHeader(exerciseName: string): string {
-  return isEn() ? `⏱️ Rest Seconds · ${exerciseName}` : `⏱️ 休息秒數 · ${exerciseName}`;
+  const name = tExercise(exerciseName);
+  return isEn() ? `⏱️ Rest Seconds · ${name}` : `⏱️ 休息秒數 · ${name}`;
 }
 
 /** Exercise-note cluster-action header. */
 export function tExerciseNoteHeader(exerciseName: string): string {
-  return isEn() ? `📝 ${exerciseName} Note` : `📝 ${exerciseName} 備註`;
+  const name = tExercise(exerciseName);
+  return isEn() ? `📝 ${name} Note` : `📝 ${name} 備註`;
 }
 
 /** Last-bodyweight reminder line in today-page Alert. */
@@ -318,7 +320,8 @@ export function tLastBodyweightLine(formatted: string): string {
 
 /** View-exercise-details link from superset detail page. */
 export function tViewExerciseDetails(exerciseName: string): string {
-  return isEn() ? `View ${exerciseName} details` : `查看 ${exerciseName} 詳情`;
+  const name = tExercise(exerciseName);
+  return isEn() ? `View ${name} details` : `查看 ${name} 詳情`;
 }
 
 /** Cluster A/B switcher button label. */
