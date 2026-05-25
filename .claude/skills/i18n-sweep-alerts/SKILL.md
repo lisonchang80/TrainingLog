@@ -102,10 +102,49 @@ grep -rnE --include='*.tsx' "(placeholder)=\"[A-Z]" app/ components/ | head -10
 對每一筆：
 
 1. 決定 namespace（一般 alert title → `alert`、screen title → `page`、status → `status`、CTA → `button`）
-2. 加新 key 進 `strings.ts`（**APPEND-ONLY**、勿動既有 key 順序）
-3. zh + en 兩 locale 同步加
-4. call site 換 `t(namespace, key)` 或 dynamic helper
-5. 跑 `npx tsc --noEmit && npm test -- i18n`
+2. **先 grep `strings.ts` 看是否既存 key** — sweep target 常常 zh + en 都已有但 call site 部分 migrate（mixed `t()` + raw literal）。若既存 → 直接重用，不要 dup。本次驗證：2026-05-25 wave 2 audit B 28 處替換中 4 個 alert key 是「reuse 既有」、3 個 alert + 2 個 button.a11y 才是真新增。
+3. 加新 key 進 `strings.ts`（**APPEND-ONLY**、勿動既有 key 順序）
+4. zh + en 兩 locale 同步加
+5. call site 換 `t(namespace, key)` 或 dynamic helper
+6. 跑 `npx tsc --noEmit && npm test -- i18n`
+
+## 編輯技巧
+
+### `replace_all` 批次最快 — 但要先驗證 literal 全域唯一
+
+當同一個 literal（連單引號）在檔案內出現 N 次而 N 都是同樣的替換目標（典型：`Alert.alert('Save failed', e.message)` 模式重複 8 次），用 `Edit` tool 帶 `replace_all: true` 一次替換掉全部。
+
+```typescript
+// Edit tool with replace_all: true
+old_string: 'Save failed'        // 含單引號
+new_string: t('alert', 'saveFailed')
+```
+
+**前提**：該 literal token 在檔案內僅出現於同類 context（例如所有 `'Save failed'` 都在 Alert.alert title 位）。先 `grep -n "'Save failed'" <file>` 看所有出現，目測都是同類再 replace_all。
+
+省時驗證：wave 2 audit B 8 個 `'Save failed'` 出現位 + 6 個 `'Delete failed'` 出現位 — 各一個 replace_all call 完事，省 12× 個別 Edit。
+
+### accessibilityLabel JSX attr → expr 強制轉換
+
+```typescript
+// ❌ 直接替換會壞掉（attr= 形式不接 expr 的 t() return）
+accessibilityLabel="Session menu"
+
+// ✅ 必須轉成 expr={} 形式
+accessibilityLabel={t('button', 'a11ySessionMenu')}
+```
+
+不能用 replace_all（因為兩側形式不同：attr 形式是 `="..."`、expr 形式是 `={...}`），逐個用 targeted Edit。
+
+### 驗證 0 殘留
+
+最後一定要 grep 確認 0 hit：
+
+```bash
+grep -n "'Save failed'\|'Delete failed'\|'Invalid input'\|accessibilityLabel=\"Session menu\"" <files>
+```
+
+exit 1 = no match = 0 殘留 = ship 條件達成。任何殘留代表 replace_all 漏抓 case（通常是格式微差，例如 trailing comma 或 JSX vs JS context 不同）。
 
 ## Anti-pattern
 
@@ -115,6 +154,14 @@ grep -rnE --include='*.tsx' "(placeholder)=\"[A-Z]" app/ components/ | head -10
 
 ## 歷史 baseline
 
-slice 10e i18n agent #4（branch `i18n/tab-bar-catchup` tip `4341576`）一次掃補了 **57 個漏網**：tab labels / Today header / Pre-session copy / **24 個 Alert.alert title**（最大 cluster）/ Stack header titles / session detail muted states + alerts / database init / body-data-sheet。
+| Run | Tip SHA | 漏網數 | 主要 cluster |
+|---|---|---|---|
+| slice 10e i18n agent #4（`i18n/tab-bar-catchup`） | `4341576` | **57** | 24 個 Alert.alert title 為最大 cluster |
+| 2026-05-25 wave 2 audit B #1 sweep（`slice/10c-set-logger-and-menu`） | `fa002ae` | **28** | 18 raw Alert title + 2 寫死 a11y label + 8 mixed-migration call sites（key 已存在但部分 raw） |
 
-下次 sweep 預期會抓到更少（量降）但 pattern 同。
+「量降但 pattern 同」預測在 wave 2 應驗。量級從 57 降到 28 = 約半量，且 cluster 分佈仍以 Alert title 為主。
+
+**下次 sweep 經驗法則**：
+- 預期量級 ~15-25（持續下降但不會歸零；新加的 screen 會帶 1-3 個漏網）
+- 主 cluster：Alert.alert title + accessibilityLabel + Stack/Tabs.Screen title
+- 一次 sweep 應在 1 hour 內完成（含 grep / strings.ts edit / replace_all / verify / commit），靠 `replace_all` 批次。
