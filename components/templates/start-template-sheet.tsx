@@ -46,7 +46,7 @@
  * parent's onStart / onEdit persists sticky.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -67,6 +67,7 @@ import {
 } from '@/src/domain/program/resolveProgramDefaults';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type StartTemplateSheetProps = {
   visible: boolean;
@@ -167,6 +168,8 @@ export function StartTemplateSheet({
   onCancel,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   // Prepend the reserved 「通用」 to the picker list, dedupe if listPrograms
   // somehow returned it (shouldn't — programRepository filters it out, but
   // defending against future regressions).
@@ -459,7 +462,7 @@ export function StartTemplateSheet({
                   value={customProgramName}
                   onChangeText={setCustomProgramName}
                   placeholder={t('page', 'newProgramNamePlaceholder')}
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={tokens.text.tertiary}
                   maxLength={60}
                   editable={!creatingProgram}
                 />
@@ -562,7 +565,7 @@ export function StartTemplateSheet({
                       value={customSubTag}
                       onChangeText={setCustomSubTag}
                       placeholder={t('page', 'newIntensityWithExamplePlaceholder')}
-                      placeholderTextColor="#9ca3af"
+                      placeholderTextColor={tokens.text.tertiary}
                       editable={!cloningSubTag}
                     />
                     <Pressable
@@ -627,170 +630,174 @@ export function StartTemplateSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-    maxHeight: '85%',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    flex: 1,
-    textAlign: 'center',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-    minWidth: 50,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-  },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 6,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e5e7eb',
-    marginBottom: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    gap: 10,
-  },
-  rowPressed: { opacity: 0.6 },
-  radio: {
-    fontSize: 18,
-    color: '#111827',
-    width: 22,
-    textAlign: 'center',
-  },
-  rowName: {
-    fontSize: 15,
-    color: '#111827',
-    flexShrink: 1,
-  },
-  rowHint: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginLeft: 'auto',
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#9ca3af',
-    fontStyle: 'italic',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-  },
-  /**
-   * Primary CTA「新增計畫 / 強度」— always blue-solid white-text so the entry
-   * point visually stands out from the radio rows above. Active state darkens
-   * the fill slightly to signal「inline-add mode is open」. Mirrors
-   * components/session/template-meta-sheet.tsx (round 32).
-   */
-  addCta: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-    marginTop: 6,
-  },
-  addCtaActive: {
-    backgroundColor: '#0050B3',
-  },
-  addCtaText: {
-    fontSize: 13,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  inlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#f9fafb',
-  },
-  inlineInput: {
-    flex: 1,
-  },
-  inlineConfirm: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-  },
-  inlineConfirmDisabled: {
-    opacity: 0.4,
-  },
-  inlineConfirmText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    gap: 12,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnPressed: { opacity: 0.7 },
-  actionBtnSecondary: {
-    backgroundColor: '#f3f4f6',
-  },
-  actionBtnPrimary: {
-    backgroundColor: '#0a7ea4',
-  },
-  actionBtnTextSecondary: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  actionBtnTextPrimary: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      // HIG-standard modal scrim — mode-agnostic.
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+      maxHeight: '85%',
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      flex: 1,
+      textAlign: 'center',
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+      minWidth: 50,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 16,
+    },
+    sectionLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      marginBottom: 6,
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: tokens.border.subtle,
+      marginBottom: 4,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      gap: 10,
+    },
+    rowPressed: { opacity: 0.6 },
+    radio: {
+      fontSize: 18,
+      color: tokens.text.primary,
+      width: 22,
+      textAlign: 'center',
+    },
+    rowName: {
+      fontSize: 15,
+      color: tokens.text.primary,
+      flexShrink: 1,
+    },
+    rowHint: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      marginLeft: 'auto',
+    },
+    emptyText: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+    },
+    /**
+     * Primary CTA「新增計畫 / 強度」— solid blue / white text so the entry
+     * point visually stands out from the radio rows above. Active state
+     * uses bg.surface darken to signal「inline-add mode is open」.
+     */
+    addCta: {
+      alignSelf: 'flex-start',
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: tokens.action.primary,
+      marginTop: 6,
+    },
+    addCtaActive: {
+      // Darker fill for active state — kept literal so the contrast vs the
+      // base action.primary stays consistent across modes.
+      backgroundColor: '#0050B3',
+    },
+    addCtaText: {
+      fontSize: 13,
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+    },
+    inlineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 8,
+    },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      fontSize: 15,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.elevated,
+    },
+    inlineInput: {
+      flex: 1,
+    },
+    inlineConfirm: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: tokens.action.primary,
+    },
+    inlineConfirmDisabled: {
+      opacity: 0.4,
+    },
+    inlineConfirmText: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    actionRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      gap: 12,
+    },
+    actionBtn: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionBtnPressed: { opacity: 0.7 },
+    actionBtnSecondary: {
+      backgroundColor: tokens.bg.elevated,
+    },
+    actionBtnPrimary: {
+      backgroundColor: tokens.action.primary,
+    },
+    actionBtnTextSecondary: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    actionBtnTextPrimary: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.action.onPrimary,
+    },
+  });
+}
