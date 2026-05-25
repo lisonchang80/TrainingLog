@@ -4,7 +4,7 @@ import {
   useNavigation,
   useRouter,
 } from 'expo-router';
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -31,6 +31,17 @@ import {
   tLoadType,
   tMuscleGroup,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook for the 3 components in this file that share the
+ * memoised style sheet. Each sub-component calls `useExerciseStyles()`
+ * instead of repeating the useTheme + useMemo pair.
+ */
+function useExerciseStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * exerciseLibrary load_type DB enum → tLoadType key. DB row uses `loaded` /
@@ -54,6 +65,7 @@ export default function ExerciseDetailScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
+  const styles = useExerciseStyles();
   const [data, setData] = useState<ExerciseWithMuscles | null>(null);
   const [highlight, setHighlight] = useState<Map<string, MuscleRole>>(new Map());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -86,7 +98,7 @@ export default function ExerciseDetailScreen() {
         <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
       </Pressable>
     ),
-    [router]
+    [router, styles.headerBack]
   );
 
   useLayoutEffect(() => {
@@ -200,6 +212,7 @@ function FooterButton({
   disabled?: boolean;
   destructive?: boolean;
 }) {
+  const styles = useExerciseStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -230,6 +243,7 @@ function MuscleSection({
   color: string;
   muscles: Muscle[];
 }) {
+  const styles = useExerciseStyles();
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
@@ -251,52 +265,70 @@ function MuscleSection({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 20, gap: 12 },
-  heading: { fontSize: 26, fontWeight: '700' },
-  subheading: { fontSize: 14, opacity: 0.7, marginBottom: 4 },
-  placeholder: { fontSize: 14, opacity: 0.6, padding: 24 },
-  diagramCard: {
-    borderRadius: 14,
-    padding: 12,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    alignItems: 'center',
-  },
-  section: { gap: 6, marginTop: 8 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionSwatch: { width: 14, height: 14, borderRadius: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: '600' },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  muscleChip: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.0)',
-  },
-  muscleChipText: { fontSize: 13 },
-  empty: { fontSize: 13, opacity: 0.5, fontStyle: 'italic' },
-  headerBack: {
-    color: '#0a7ea4',
-    fontSize: 17,
-    fontWeight: '400',
-    paddingHorizontal: 8,
-  },
-  footer: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.3)',
-    backgroundColor: 'rgba(255,255,255,0.0)',
-  },
-  footerBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  footerBtnPressed: { opacity: 0.4 },
-  footerBtnText: { fontSize: 16, fontWeight: '500', color: '#0a7ea4' },
-  footerBtnTextDisabled: { color: 'rgba(127,127,127,0.5)' },
-  footerBtnTextDestructive: { color: '#DC2626' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 20, gap: 12 },
+    heading: { fontSize: 26, fontWeight: '700', color: tokens.text.primary },
+    subheading: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    placeholder: { fontSize: 14, color: tokens.text.secondary, padding: 24 },
+    diagramCard: {
+      borderRadius: 14,
+      padding: 12,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    section: { gap: 6, marginTop: 8 },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    sectionSwatch: { width: 14, height: 14, borderRadius: 4 },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    muscleChip: {
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      backgroundColor: 'transparent',
+    },
+    muscleChipText: { fontSize: 13, color: tokens.text.primary },
+    empty: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+    },
+    headerBack: {
+      color: tokens.action.primary,
+      fontSize: 17,
+      fontWeight: '400',
+      paddingHorizontal: 8,
+    },
+    footer: {
+      flexDirection: 'row',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.default,
+      backgroundColor: 'transparent',
+    },
+    footerBtn: {
+      flex: 1,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    footerBtnPressed: { opacity: 0.4 },
+    footerBtnText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: tokens.action.primary,
+    },
+    footerBtnTextDisabled: { color: tokens.text.disabled },
+    footerBtnTextDestructive: { color: tokens.action.destructive },
+  });
+}
