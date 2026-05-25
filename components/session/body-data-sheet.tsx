@@ -24,7 +24,7 @@
  * spec: "snapshot badge: 先砍 — snapshot 資訊在 sheet 內看").
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -37,6 +37,7 @@ import {
 import type { UnitPreference } from '@/src/domain/body/types';
 import { formatWeight } from '@/src/domain/body/unitConversion';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface BodyDataSheetProps {
   visible: boolean;
@@ -71,6 +72,8 @@ export function BodyDataSheet({
   onClose,
   busy,
 }: BodyDataSheetProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   // Mirror set-note-sheet's autofocus-on-open pattern by keying off `visible`.
   const [, setMountTick] = useState(0);
   useEffect(() => {
@@ -125,12 +128,22 @@ export function BodyDataSheet({
                 label={`${t('domain', 'bodyweight')} (${unit})`}
                 value={bwInput}
                 onChange={onBwInputChange}
+                styles={styles}
+                tokens={tokens}
               />
-              <Field label="PBF (%)" value={pbfInput} onChange={onPbfInputChange} />
+              <Field
+                label="PBF (%)"
+                value={pbfInput}
+                onChange={onPbfInputChange}
+                styles={styles}
+                tokens={tokens}
+              />
               <Field
                 label={`SMM (${unit})`}
                 value={smmInput}
                 onChange={onSmmInputChange}
+                styles={styles}
+                tokens={tokens}
               />
             </View>
 
@@ -142,14 +155,20 @@ export function BodyDataSheet({
   );
 }
 
+type Styles = ReturnType<typeof makeStyles>;
+
 function Field({
   label,
   value,
   onChange,
+  styles,
+  tokens,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  styles: Styles;
+  tokens: ThemeTokens;
 }) {
   return (
     <View style={styles.field}>
@@ -160,89 +179,98 @@ function Field({
         value={value}
         onChangeText={onChange}
         placeholder="—"
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={tokens.text.tertiary}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-  },
-  topBarBtnDisabled: {
-    opacity: 0.4,
-  },
-  topBarConfirm: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  body: {
-    padding: 16,
-    gap: 12,
-  },
-  snapshotBadge: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,126,164,0.15)',
-  },
-  snapshotBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0a7ea4',
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  field: {
-    flex: 1,
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: 11,
-    opacity: 0.7,
-  },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#f9fafb',
-  },
-  hint: {
-    fontSize: 11,
-    opacity: 0.6,
-  },
-});
+/**
+ * ADR-0025 — token-driven styles. Backdrop kept raw rgba (dim layer).
+ * Snapshot badge previously used 'rgba(10,126,164,0.15)' bg + '#0a7ea4'
+ * text — kept as a low-saturation tint of action.primary by deriving
+ * from the token via opacity. fieldLabel + hint use text.secondary
+ * (replaces opacity-only Text without color — the wave 2 bug).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+    },
+    topBarBtnDisabled: {
+      opacity: 0.4,
+    },
+    topBarConfirm: {
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    body: {
+      padding: 16,
+      gap: 12,
+    },
+    snapshotBadge: {
+      alignSelf: 'flex-start',
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      backgroundColor: tokens.bg.elevated,
+    },
+    snapshotBadgeText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.action.primary,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    field: {
+      flex: 1,
+      gap: 4,
+    },
+    fieldLabel: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+    },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      fontSize: 15,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.surface,
+    },
+    hint: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+    },
+  });
+}
