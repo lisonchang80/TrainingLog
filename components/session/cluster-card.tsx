@@ -37,6 +37,7 @@
  * `src/domain/session/clusterCard.ts`.
  */
 
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   NestableDraggableFlatList,
@@ -63,6 +64,7 @@ import {
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
 import { t, tExercise } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type ClusterCardGroup = ClusterGroup<
   SessionExerciseRowWithName,
@@ -164,6 +166,8 @@ export function ClusterCard({
   onConfirmReorderCycles,
   colorHex,
 }: ClusterCardProps): React.ReactElement {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
   // Working-set ordinal per side (slice 10c overnight #7 第 1 點).
@@ -329,7 +333,7 @@ export function ClusterCard({
                             {
                               key: 'del-cluster-cycle',
                               label: t('button', 'swipeDelete'),
-                              color: '#FF3B30',
+                              color: tokens.action.destructive,
                               onPress: () =>
                                 onDeleteCycle({
                                   a_set_id: c.a_set?.id ?? null,
@@ -345,7 +349,7 @@ export function ClusterCard({
                             {
                               key: 'clone-cluster-cycle',
                               label: '+1',
-                              color: '#28a745',
+                              color: tokens.action.success,
                               onPress: () =>
                                 onCloneCycle({
                                   a_set_id: c.a_set?.id ?? null,
@@ -359,7 +363,7 @@ export function ClusterCard({
                             {
                               key: 'note-cluster-cycle',
                               label: t('domain', 'note'),
-                              color: '#007AFF',
+                              color: tokens.action.primary,
                               onPress: () => onShowCycleNote(noteTarget),
                             },
                           ]
@@ -599,275 +603,296 @@ function toSetRowItem(s: SessionSetWithExercise): SetRowItem {
 // 'warmup' → '熱' / 'dropset' → 'D' 的分支由 `displaySetLabel` 保留 (第 3 點
 // — legacy dropset 顯示驗證).
 
-const styles = StyleSheet.create({
-  clusterCard: {
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    borderRadius: 10,
-    overflow: 'hidden',
-    // Slice 10c overnight #6: 砍掉左側 RS 彩色 border，與 solo card 一致。
-    // colorHex prop 暫保留（無視覺效果，留待未來再用）。
-  },
-  clusterCardExpanded: {
-    backgroundColor: 'rgba(127,127,127,0.14)',
-  },
-  clusterCardHeader: {
-    flexDirection: 'row',
-    // overnight #5 第 5 點: 控制鈕 (chevron + gear) align row 1 (tag row)
-    // 而不是 vertical center, 配合 3-row 標題 layout (tag / title / bar+chip)
-    alignItems: 'flex-start',
-  },
-  clusterCardHeaderMain: {
-    flex: 1,
-    flexDirection: 'row',
-    // 同上: chevron align row 1 (tag), 不要垂直中心
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  clusterText: { flex: 1, gap: 4 },
-  // Row 1: tag only (chevron + gear 在 outer header right column).
-  // overnight #5 第 5 點: 標題分行.
-  clusterTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  // Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
-  clusterProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  clusterProgressBarFill: {
-    flex: 1,
-  },
-  // Title 獨佔 row 2, 不再 ... truncate (overnight #3 第 5 點 + #5 第 5 點).
-  clusterName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
-  clusterChip: { fontSize: 13 },
-  // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
-  // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
-  // (`#5856D6` iOS system indigo/purple, white text, 4px corners). 視覺更穩、
-  // 在動作名旁的閱讀節奏比 [...] 包文字更乾淨。
-  supersetTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    backgroundColor: '#5856D6',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
-  },
-  clusterPlus: { fontSize: 14, opacity: 0.5 },
-  // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
-  // overnight #5 第 1 點 + 第 2 點: 純數字、無 prefix；minWidth 鎖避免 jitter；
-  // 字體 fit `9999/9999` (9 chars). fontSize 12 (原 13) — 在 ~76px 寬內可容.
-  clusterVolumeChip: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.7,
-    minWidth: 76,
-    textAlign: 'right',
-  },
-  clusterChevron: {
-    fontSize: 14,
-    opacity: 0.5,
-    width: 18,
-    textAlign: 'right',
-  },
-  clusterGear: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clusterGearText: { fontSize: 18 },
-  clusterProgressBar: {
-    marginTop: 4,
-    width: '100%',
-  },
-  clusterBody: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 6,
-  },
-  sideLabelRow: {
-    flexDirection: 'row',
-    paddingVertical: 4,
-    gap: 4,
-    alignItems: 'center',
-  },
-  sideLabel: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.6,
-    textAlign: 'center',
-  },
-  // Leading spacer matching shared `#` btn column (point 7 alignment).
-  // overnight #52 follow-up — sharedLabelBtn 32→28 (cluster row 撐爆 fine-tune)
-  sideLabelLead: { width: 28 },
-  // Divider spacer matching cycleDivider column.
-  sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
-  // Trailing spacer matching note slot (20) + completeBtn (28) + row gap.
-  // overnight #5 第 4 點: 加 20 容納 note placeholder column.
-  sideLabelGap: { width: 52 },
-  clusterEmpty: {
-    fontSize: 13,
-    opacity: 0.55,
-    fontStyle: 'italic',
-    paddingVertical: 8,
-  },
-  cycleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    // overnight #52 follow-up — 規格 B (cluster): gap 8→6 (撐爆 fine-tune)、paddingVertical 8
-    gap: 6,
-    paddingVertical: 8,
-  },
-  // Shared note indicator slot — sits between B-side cell and ✓ button
-  // (per overnight #3 第 4 點). Compact width to keep cluster row inside
-  // available space; tap opens A side's note editor (parent priority).
-  cycleNoteBtn: {
-    width: 20,
-    paddingHorizontal: 2,
-    paddingVertical: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cycleNoteBtnText: { fontSize: 14 },
-  // overnight #5 第 4 點: 沒備註留 placeholder 同寬, ✓ column 固定
-  cycleNoteBtnPlaceholder: {
-    width: 20,
-  },
-  // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
-  // (overnight 第 5 點, inline drag reorder).
-  cycleRowDragActive: {
-    backgroundColor: '#f3f4f6',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
-  // Shared `#` button at row start — replaces per-side label buttons.
-  // Visual style matches `setLabelBtnCompact` in set-row-content so the
-  // affordance reads as "cluster row's set_kind toggle".
-  // overnight #52 follow-up — 規格 B: 28×22 fs:11 (cluster row 撐爆 fine-tune)
-  sharedLabelBtn: {
-    width: 28,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  sharedLabelBtnPressed: {
-    backgroundColor: '#e5e7eb',
-    borderTopWidth: 2,
-    borderBottomWidth: 1,
-    borderTopColor: '#6b7280',
-    borderLeftColor: '#9ca3af',
-    borderRightColor: '#d1d5db',
-    borderBottomColor: '#f3f4f6',
-    shadowOpacity: 0,
-    elevation: 0,
-    transform: [{ translateY: 1 }],
-  },
-  sharedLabelBtnDisabled: {
-    opacity: 0.35,
-  },
-  sharedLabelText: { fontSize: 11, fontWeight: '600', color: '#374151' },
-  cycleSide: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Vertical divider between A and B sides (point 4) — light hairline to
-  // mirror solo card's row-internal visual rhythm without adding heaviness.
-  cycleDivider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-    backgroundColor: 'rgba(127,127,127,0.35)',
-    marginHorizontal: 2,
-  },
-  cycleCell: {
-    fontSize: 14,
-  },
-  cycleEmpty: {
-    fontSize: 14,
-    opacity: 0.4,
-    flex: 1,
-    textAlign: 'center',
-  },
-  completeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(127,127,127,0.18)',
-  },
-  completeBtnDone: {
-    backgroundColor: '#28a745',
-  },
-  completeBtnDisabled: {
-    opacity: 0.4,
-  },
-  completeBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#6b7280',
-  },
-  completeBtnTextDone: {
-    color: 'white',
-  },
-  clusterFooter: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  clusterFooterBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  clusterFooterBtnPrimary: {
-    backgroundColor: '#0a7ea4',
-  },
-  clusterFooterBtnSecondary: {
-    backgroundColor: 'rgba(127,127,127,0.18)',
-  },
-  clusterFooterBtnTextPrimary: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  clusterFooterBtnTextSecondary: {
-    color: '#0a7ea4',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  btnPressed: { opacity: 0.85 },
-  btnDisabled: { opacity: 0.45 },
-});
+/**
+ * ADR-0025 — token-driven styles. Most rgba(127,127,127,*) sit-on-anything
+ * neutrals already work in both modes (gray with alpha), but we route them
+ * through tokens to keep the audit clean. The «超» supersetTag purple
+ * (#5856D6) is an iOS-system indigo brand accent kept raw to mirror
+ * template-editor's identical badge palette.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    clusterCard: {
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      overflow: 'hidden',
+      // Slice 10c overnight #6: 砍掉左側 RS 彩色 border，與 solo card 一致。
+      // colorHex prop 暫保留（無視覺效果，留待未來再用）。
+    },
+    clusterCardExpanded: {
+      backgroundColor: tokens.bg.surface,
+    },
+    clusterCardHeader: {
+      flexDirection: 'row',
+      // overnight #5 第 5 點: 控制鈕 (chevron + gear) align row 1 (tag row)
+      // 而不是 vertical center, 配合 3-row 標題 layout (tag / title / bar+chip)
+      alignItems: 'flex-start',
+    },
+    clusterCardHeaderMain: {
+      flex: 1,
+      flexDirection: 'row',
+      // 同上: chevron align row 1 (tag), 不要垂直中心
+      alignItems: 'flex-start',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    clusterText: { flex: 1, gap: 4 },
+    // Row 1: tag only (chevron + gear 在 outer header right column).
+    // overnight #5 第 5 點: 標題分行.
+    clusterTagRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    // Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
+    clusterProgressRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      width: '100%',
+    },
+    clusterProgressBarFill: {
+      flex: 1,
+    },
+    // Title 獨佔 row 2, 不再 ... truncate (overnight #3 第 5 點 + #5 第 5 點).
+    clusterName: {
+      fontSize: 15,
+      fontWeight: '600',
+      lineHeight: 20,
+      color: tokens.text.primary,
+    },
+    clusterChip: { fontSize: 13, color: tokens.text.secondary },
+    // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
+    // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
+    // (`#5856D6` iOS system indigo/purple, white text, 4px corners). 視覺更穩、
+    // 在動作名旁的閱讀節奏比 [...] 包文字更乾淨。
+    // ADR-0025 — purple/white kept raw: brand accent intentionally identical
+    // across light + dark to match template-editor's badge (visual consistency
+    // with the «超» chip on the template page).
+    supersetTag: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#fff',
+      backgroundColor: '#5856D6',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      overflow: 'hidden',
+      alignSelf: 'flex-start',
+    },
+    clusterPlus: { fontSize: 14, color: tokens.text.tertiary },
+    // Cycle fraction chip — mirrors solo card's `exerciseCardVolumeChip`.
+    // overnight #5 第 1 點 + 第 2 點: 純數字、無 prefix；minWidth 鎖避免 jitter；
+    // 字體 fit `9999/9999` (9 chars). fontSize 12 (原 13) — 在 ~76px 寬內可容.
+    clusterVolumeChip: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      minWidth: 76,
+      textAlign: 'right',
+    },
+    clusterChevron: {
+      fontSize: 14,
+      color: tokens.text.tertiary,
+      width: 18,
+      textAlign: 'right',
+    },
+    clusterGear: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    clusterGearText: { fontSize: 18 },
+    clusterProgressBar: {
+      marginTop: 4,
+      width: '100%',
+    },
+    clusterBody: {
+      paddingHorizontal: 12,
+      paddingBottom: 12,
+      gap: 6,
+    },
+    sideLabelRow: {
+      flexDirection: 'row',
+      paddingVertical: 4,
+      gap: 4,
+      alignItems: 'center',
+    },
+    sideLabel: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      textAlign: 'center',
+    },
+    // Leading spacer matching shared `#` btn column (point 7 alignment).
+    // overnight #52 follow-up — sharedLabelBtn 32→28 (cluster row 撐爆 fine-tune)
+    sideLabelLead: { width: 28 },
+    // Divider spacer matching cycleDivider column.
+    sideLabelDivider: { width: StyleSheet.hairlineWidth + 4 },
+    // Trailing spacer matching note slot (20) + completeBtn (28) + row gap.
+    // overnight #5 第 4 點: 加 20 容納 note placeholder column.
+    sideLabelGap: { width: 52 },
+    clusterEmpty: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+      paddingVertical: 8,
+    },
+    cycleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      // overnight #52 follow-up — 規格 B (cluster): gap 8→6 (撐爆 fine-tune)、paddingVertical 8
+      gap: 6,
+      paddingVertical: 8,
+    },
+    // Shared note indicator slot — sits between B-side cell and ✓ button
+    // (per overnight #3 第 4 點). Compact width to keep cluster row inside
+    // available space; tap opens A side's note editor (parent priority).
+    cycleNoteBtn: {
+      width: 20,
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cycleNoteBtnText: { fontSize: 14 },
+    // overnight #5 第 4 點: 沒備註留 placeholder 同寬, ✓ column 固定
+    cycleNoteBtnPlaceholder: {
+      width: 20,
+    },
+    // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
+    // (overnight 第 5 點, inline drag reorder).
+    cycleRowDragActive: {
+      backgroundColor: tokens.bg.surface,
+      elevation: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.18,
+      shadowRadius: 6,
+      borderRadius: 8,
+    },
+    // Shared `#` button at row start — replaces per-side label buttons.
+    // Visual style matches `setLabelBtnCompact` in set-row-content so the
+    // affordance reads as "cluster row's set_kind toggle".
+    // overnight #52 follow-up — 規格 B: 28×22 fs:11 (cluster row 撐爆 fine-tune)
+    sharedLabelBtn: {
+      width: 28,
+      height: 22,
+      borderRadius: 4,
+      backgroundColor: tokens.bg.surface,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 2,
+      borderTopColor: tokens.border.subtle,
+      borderLeftColor: tokens.border.default,
+      borderRightColor: tokens.border.default,
+      borderBottomColor: tokens.text.tertiary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.18,
+      shadowRadius: 1.5,
+      elevation: 2,
+    },
+    sharedLabelBtnPressed: {
+      backgroundColor: tokens.bg.elevated,
+      borderTopWidth: 2,
+      borderBottomWidth: 1,
+      borderTopColor: tokens.text.tertiary,
+      borderLeftColor: tokens.border.default,
+      borderRightColor: tokens.border.default,
+      borderBottomColor: tokens.border.subtle,
+      shadowOpacity: 0,
+      elevation: 0,
+      transform: [{ translateY: 1 }],
+    },
+    sharedLabelBtnDisabled: {
+      opacity: 0.35,
+    },
+    sharedLabelText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    cycleSide: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // Vertical divider between A and B sides (point 4) — light hairline to
+    // mirror solo card's row-internal visual rhythm without adding heaviness.
+    cycleDivider: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: 'stretch',
+      backgroundColor: tokens.border.default,
+      marginHorizontal: 2,
+    },
+    cycleCell: {
+      fontSize: 14,
+    },
+    cycleEmpty: {
+      fontSize: 14,
+      color: tokens.text.tertiary,
+      flex: 1,
+      textAlign: 'center',
+    },
+    completeBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tokens.bg.elevated,
+    },
+    completeBtnDone: {
+      backgroundColor: tokens.action.success,
+    },
+    completeBtnDisabled: {
+      opacity: 0.4,
+    },
+    completeBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    completeBtnTextDone: {
+      color: tokens.action.onPrimary,
+    },
+    clusterFooter: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    clusterFooterBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    clusterFooterBtnPrimary: {
+      backgroundColor: tokens.action.primary,
+    },
+    clusterFooterBtnSecondary: {
+      backgroundColor: tokens.bg.elevated,
+    },
+    clusterFooterBtnTextPrimary: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    clusterFooterBtnTextSecondary: {
+      color: tokens.action.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    btnPressed: { opacity: 0.85 },
+    btnDisabled: { opacity: 0.45 },
+  });
+}
