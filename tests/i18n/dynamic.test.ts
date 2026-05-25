@@ -293,8 +293,9 @@ describe('misc inline templates', () => {
   });
 
   test('tRestSecondsHeader / tExerciseNoteHeader', () => {
-    expect(tRestSecondsHeader('Bench Press')).toBe('⏱️ 休息秒數 · Bench Press');
-    expect(tExerciseNoteHeader('Bench Press')).toBe('📝 Bench Press 備註');
+    // helper internally calls tExercise() so DB-EN names render localized
+    expect(tRestSecondsHeader('Bench Press')).toBe('⏱️ 休息秒數 · 槓鈴臥推');
+    expect(tExerciseNoteHeader('Bench Press')).toBe('📝 槓鈴臥推 備註');
     setLocale('en');
     expect(tRestSecondsHeader('Bench Press')).toBe('⏱️ Rest Seconds · Bench Press');
     expect(tExerciseNoteHeader('Bench Press')).toBe('📝 Bench Press Note');
@@ -307,7 +308,8 @@ describe('misc inline templates', () => {
   });
 
   test('tViewExerciseDetails / tSwitchToPartner', () => {
-    expect(tViewExerciseDetails('Bench Press')).toBe('查看 Bench Press 詳情');
+    // tViewExerciseDetails internally calls tExercise() so DB-EN names render localized
+    expect(tViewExerciseDetails('Bench Press')).toBe('查看 槓鈴臥推 詳情');
     expect(tSwitchToPartner('Chest Dip')).toBe('切換到 Chest Dip');
     setLocale('en');
     expect(tViewExerciseDetails('Bench Press')).toBe('View Bench Press details');
