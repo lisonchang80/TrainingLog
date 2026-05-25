@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -44,6 +44,7 @@ import {
   tHistoryWithCount,
   tSaveOrSaving,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Body tab — slice 7.
@@ -53,9 +54,27 @@ import {
  *   3. Trend chart (3 series, toggleable, dual Y axis).
  *
  * Storage in kg / %; display in current unit_preference.
+ *
+ * ADR-0025 — all colors flow from useTheme().tokens via the shared
+ * useBodyStyles() hook (mirrors library.tsx pattern). The 3 series colors
+ * (bw / PBF / SMM) come from SERIES_COLORS — they're fixed brand-data
+ * colors used as `borderColor` on stat cards and `backgroundColor` on
+ * active legend chips.
  */
+
+/**
+ * DRY helper — body screen + sub-components all need the same memoised
+ * style sheet.
+ */
+function useBodyStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
+
 export default function BodyScreen() {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useBodyStyles();
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [bwInput, setBwInput] = useState('');
@@ -160,12 +179,14 @@ export default function BodyScreen() {
                   ? kgToDisplay(latest.bodyweight_kg, unit).toFixed(1)
                   : '70.0'
               }
+              tokens={tokens}
             />
             <Field
               label="PBF (%)"
               value={pbfInput}
               onChangeText={setPbfInput}
               placeholder={latest.pbf != null ? latest.pbf.toFixed(1) : '20.0'}
+              tokens={tokens}
             />
             <Field
               label={`SMM (${unit})`}
@@ -176,6 +197,7 @@ export default function BodyScreen() {
                   ? kgToDisplay(latest.smm_kg, unit).toFixed(1)
                   : '32.0'
               }
+              tokens={tokens}
             />
           </View>
           {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
@@ -242,6 +264,7 @@ export default function BodyScreen() {
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+  const styles = useBodyStyles();
   return (
     <View style={[styles.stat, { borderColor: color }]}>
       <Text style={[styles.statValue, { color }]}>{value}</Text>
@@ -255,12 +278,15 @@ function Field({
   value,
   onChangeText,
   placeholder,
+  tokens,
 }: {
   label: string;
   value: string;
   onChangeText: (s: string) => void;
   placeholder: string;
+  tokens: ThemeTokens;
 }) {
+  const styles = useBodyStyles();
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -268,7 +294,7 @@ function Field({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#999"
+        placeholderTextColor={tokens.text.tertiary}
         keyboardType="decimal-pad"
         style={styles.input}
       />
@@ -287,6 +313,8 @@ function LegendChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useBodyStyles();
+  const { tokens } = useTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -299,7 +327,10 @@ function LegendChip({
       <View
         style={[
           styles.legendDot,
-          { backgroundColor: active ? '#fff' : color },
+          // When active the chip background is the series color, so the dot
+          // becomes the "on-primary" foreground; when inactive it stays the
+          // series color so the user can still identify the series.
+          { backgroundColor: active ? tokens.action.onPrimary : color },
         ]}
       />
       <Text style={[styles.legendLabel, active && styles.legendLabelActive]}>
@@ -341,68 +372,85 @@ function formatDateTime(ms: number): string {
   return `${m}/${day} ${hh}:${mm}`;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  flex: { flex: 1 },
-  body: { padding: 24, gap: 12, paddingBottom: 48 },
-  heading: { fontSize: 28, fontWeight: '700', marginBottom: 4 },
-  statsRow: { flexDirection: 'row', gap: 8, marginVertical: 8 },
-  stat: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 2,
-    alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.06)',
-  },
-  statValue: { fontSize: 18, fontWeight: '700' },
-  statLabel: { fontSize: 12, opacity: 0.65, marginTop: 4 },
-  section: { fontSize: 16, fontWeight: '600', marginTop: 12 },
-  inputRow: { flexDirection: 'row', gap: 8 },
-  field: { flex: 1, gap: 4 },
-  fieldLabel: { fontSize: 12, opacity: 0.7 },
-  input: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    fontSize: 16,
-  },
-  saveBtn: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#0a7ea4',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  saveBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
-  btnDisabled: { opacity: 0.5 },
-  btnPressed: { opacity: 0.85 },
-  errorText: { color: '#dc3545', fontSize: 13 },
-  legendRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  legendChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: 'rgba(127,127,127,0.3)',
-  },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendLabel: { fontSize: 13, fontWeight: '500' },
-  legendLabelActive: { color: 'white', fontWeight: '600' },
-  muted: { fontSize: 14, opacity: 0.6 },
-  historyList: { gap: 6 },
-  historyRow: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    gap: 2,
-  },
-  historyTime: { fontSize: 12, opacity: 0.6 },
-  historyValues: { fontSize: 14 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    flex: { flex: 1 },
+    body: { padding: 24, gap: 12, paddingBottom: 48 },
+    heading: {
+      fontSize: 28,
+      fontWeight: '700',
+      marginBottom: 4,
+      color: tokens.text.primary,
+    },
+    statsRow: { flexDirection: 'row', gap: 8, marginVertical: 8 },
+    stat: {
+      flex: 1,
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      borderRadius: 10,
+      borderWidth: 2,
+      alignItems: 'center',
+      backgroundColor: tokens.bg.elevated,
+    },
+    statValue: { fontSize: 18, fontWeight: '700' },
+    statLabel: { fontSize: 12, color: tokens.text.secondary, marginTop: 4 },
+    section: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginTop: 12,
+      color: tokens.text.primary,
+    },
+    inputRow: { flexDirection: 'row', gap: 8 },
+    field: { flex: 1, gap: 4 },
+    fieldLabel: { fontSize: 12, color: tokens.text.secondary },
+    input: {
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      fontSize: 16,
+      color: tokens.text.primary,
+    },
+    saveBtn: {
+      paddingVertical: 14,
+      borderRadius: 12,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    saveBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    btnDisabled: { opacity: 0.5 },
+    btnPressed: { opacity: 0.85 },
+    errorText: { color: tokens.action.destructive, fontSize: 13 },
+    legendRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+    legendChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      borderColor: tokens.border.default,
+    },
+    legendDot: { width: 8, height: 8, borderRadius: 4 },
+    legendLabel: { fontSize: 13, fontWeight: '500', color: tokens.text.primary },
+    legendLabelActive: { color: tokens.action.onPrimary, fontWeight: '600' },
+    muted: { fontSize: 14, color: tokens.text.secondary },
+    historyList: { gap: 6 },
+    historyRow: {
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 2,
+    },
+    historyTime: { fontSize: 12, color: tokens.text.secondary },
+    historyValues: { fontSize: 14, color: tokens.text.primary },
+  });
+}
