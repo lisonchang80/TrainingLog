@@ -56,6 +56,17 @@ import {
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
 import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY helper for the 10 components in this file that all need
+ * the same memoised style sheet. Each sub-component calls `useLibStyles()`
+ * instead of repeating the useTheme + useMemo pair.
+ */
+function useLibStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Library screen (slice 9.6 / ADR-0017 Q1, Q6, Q7, Q15).
@@ -72,6 +83,10 @@ import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
 export default function LibraryScreen() {
   const db = useDatabase();
   const router = useRouter();
+  // ADR-0025 — pull tokens here so we can use the raw value for
+  // `placeholderTextColor` (inline prop, not in StyleSheet).
+  const { tokens } = useTheme();
+  const styles = useLibStyles();
   const params = useLocalSearchParams<{ mode?: string; sessionId?: string }>();
   const isPickerMode = params.mode === 'picker';
   // 2026-05-20 edit-parity audit: when picker is opened from session detail
@@ -297,7 +312,7 @@ export default function LibraryScreen() {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             placeholder={t('page', 'searchExercises')}
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholderTextColor={tokens.text.tertiary}
             value={search}
             onChangeText={setSearch}
             style={styles.searchInput}
@@ -403,6 +418,7 @@ interface SidebarProps {
 }
 
 function Sidebar(props: SidebarProps) {
+  const styles = useLibStyles();
   const {
     muscleGroups,
     selectedMgId,
@@ -484,6 +500,7 @@ function EquipmentChipRow({
   value: Equipment | null;
   onChange: (eq: Equipment | null) => void;
 }) {
+  const styles = useLibStyles();
   return (
     <View style={styles.equipRowOuter}>
       <ScrollView
@@ -517,6 +534,7 @@ function EquipmentChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useLibStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -560,6 +578,7 @@ function ExerciseGrid({
    *  navigates to the exercise's detail page without affecting selection. */
   onInfoPress: ((ex: Exercise) => void) | null;
 }) {
+  const styles = useLibStyles();
   if (exercises.length === 0) {
     return (
       <View style={styles.empty}>
@@ -636,6 +655,7 @@ function ExerciseCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  const styles = useLibStyles();
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
   const thumbnail = exercise.media_path;
   return (
@@ -692,6 +712,7 @@ function ExerciseCard({
 }
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
+  const styles = useLibStyles();
   // Hash-color circle with first character — ADR-0017 Q8 v1 placeholder.
   // hash uses raw DB name so the color is stable across locales;
   // displayed initial uses tExercise() so zh seeds show the zh first char.
@@ -729,6 +750,7 @@ function SupersetGrid({
   /** Non-null = picker mode (render ⓘ for detail preview); null = browse mode. */
   onInfoPress: ((s: ReusableSupersetWithExercises) => void) | null;
 }) {
+  const styles = useLibStyles();
   if (supersets.length === 0) {
     return (
       <View style={styles.empty}>
@@ -807,6 +829,7 @@ function SupersetCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  const styles = useLibStyles();
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
   const exA = exercises[0];
@@ -858,6 +881,7 @@ function SupersetCard({
 }
 
 function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
+  const styles = useLibStyles();
   if (!exercise) {
     return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
   }
@@ -884,8 +908,20 @@ const SIDEBAR_WIDTH = 92;
 const CARD_GAP = 10;
 const CONTENT_H_PADDING = 12;
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
+/**
+ * ADR-0025 — library.tsx was originally built dark-only (#fff text + #000 bg
+ * + green #34C759 accent everywhere). Every color now flows from tokens.
+ * The green accent maps to `action.success` (semantic "selected / add" in
+ * the library context — picker-mode selection badge, sidebar active rail,
+ * add-exercise FAB).
+ *
+ * The two `#fff` circle backgrounds (thumb + miniThumb) map to bg.surface
+ * — in dark mode that becomes a slightly elevated dark circle that hosts
+ * either an Image (fits) or a hash-colored letter overlay (overrides).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+  safe: { flex: 1, backgroundColor: tokens.bg.base },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -897,15 +933,19 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(127,127,127,0.20)',
+    backgroundColor: tokens.bg.elevated,
     borderRadius: 999,
     paddingHorizontal: 14,
     height: 40,
   },
-  searchIcon: { fontSize: 14, marginRight: 6, color: 'rgba(255,255,255,0.6)' },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: 6,
+    color: tokens.text.secondary,
+  },
   searchInput: {
     flex: 1,
-    color: '#fff',
+    color: tokens.text.primary,
     fontSize: 15,
     padding: 0,
   },
@@ -913,20 +953,30 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addBtnText: { color: '#fff', fontSize: 24, fontWeight: '600', lineHeight: 26 },
+  addBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 24,
+    fontWeight: '600',
+    lineHeight: 26,
+  },
   cancelBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cancelBtnText: { color: '#fff', fontSize: 20, fontWeight: '600', lineHeight: 22 },
+  cancelBtnText: {
+    color: tokens.text.primary,
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
 
   body: { flex: 1, flexDirection: 'row' },
 
@@ -945,18 +995,22 @@ const styles = StyleSheet.create({
     top: 8,
     bottom: 8,
     width: 3,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     borderRadius: 2,
   },
-  sidebarText: { color: 'rgba(255,255,255,0.55)', fontSize: 17, fontWeight: '500' },
-  sidebarTextActive: { color: '#fff', fontWeight: '700' },
+  sidebarText: {
+    color: tokens.text.tertiary,
+    fontSize: 17,
+    fontWeight: '500',
+  },
+  sidebarTextActive: { color: tokens.text.primary, fontWeight: '700' },
   sidebarSubRow: {
     height: 36,
     paddingLeft: 24,
     justifyContent: 'center',
   },
-  sidebarSubText: { color: 'rgba(255,255,255,0.45)', fontSize: 15 },
-  sidebarSubTextActive: { color: '#34C759', fontWeight: '600' },
+  sidebarSubText: { color: tokens.text.tertiary, fontSize: 15 },
+  sidebarSubTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   content: { flex: 1, flexDirection: 'column', minWidth: 0 },
   equipRowOuter: { height: 56 },
@@ -971,13 +1025,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(127,127,127,0.20)',
+    backgroundColor: tokens.bg.elevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Semitransparent success tint kept as-is (success token at 18% alpha) —
+  // the active-chip overlay needs to read clearly against the page base in
+  // both themes; using bg.elevated here would lose the "this is selected"
+  // signal. Token-friendly variants use rgba of the success hex.
   equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
-  equipText: { color: 'rgba(255,255,255,0.75)', fontSize: 14 },
-  equipTextActive: { color: '#34C759', fontWeight: '600' },
+  equipText: { color: tokens.text.secondary, fontSize: 14 },
+  equipTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
   gridContent: {
@@ -993,7 +1051,7 @@ const styles = StyleSheet.create({
   },
   card: {
     flexShrink: 0,
-    backgroundColor: 'rgba(127,127,127,0.15)',
+    backgroundColor: tokens.bg.elevated,
     borderRadius: 14,
     padding: 10,
     alignItems: 'center',
@@ -1001,8 +1059,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
+  // Same rationale as equipChipActive — semitransparent success accent for
+  // a clear "selected" affordance independent of theme.
   cardSelected: {
-    borderColor: '#34C759',
+    borderColor: tokens.action.success,
     backgroundColor: 'rgba(52,199,89,0.15)',
   },
   /** Slice 10c #20 — exercise/RS already in the in-progress session. Dim
@@ -1020,11 +1080,15 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selectedBadgeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  selectedBadgeText: {
+    color: tokens.action.onPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   infoBtn: {
     position: 'absolute',
     top: 6,
@@ -1034,33 +1098,37 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: tokens.bg.surface,
   },
-  infoBtnText: { color: '#fff', fontSize: 18, lineHeight: 20 },
+  infoBtnText: { color: tokens.text.primary, fontSize: 18, lineHeight: 20 },
   cuesPill: {
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   /** Shift right when ⓘ button occupies top-left (picker mode). */
   cuesPillWithInfo: { left: 40 },
-  cuesPillText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  cuesPillText: {
+    color: tokens.action.onPrimary,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   countBadge: {
     position: 'absolute',
     top: 10,
     right: 12,
-    color: 'rgba(255,255,255,0.85)',
+    color: tokens.text.secondary,
     fontSize: 13,
   },
   thumbWrap: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1073,9 +1141,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Letter inside hash-colored placeholder. Kept white because the
+  // hashColor() palette is dark/saturated so white-on-color reads either
+  // way (the parent View overrides backgroundColor with `bg`).
   thumbInitial: { color: '#fff', fontSize: 36, fontWeight: '700' },
   cardName: {
-    color: '#fff',
+    color: tokens.text.primary,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
@@ -1108,29 +1179,30 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#fff',
+    backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   supersetMiniThumbEmpty: {
-    backgroundColor: 'rgba(127,127,127,0.3)',
+    backgroundColor: tokens.bg.elevated,
   },
+  // See thumbInitial comment — white letter sits on hash-colored bg.
   supersetMiniThumbInitial: {
     color: '#fff',
     fontSize: 20,
     fontWeight: '700',
   },
   cardCueLink: {
-    color: 'rgba(255,255,255,0.55)',
+    color: tokens.text.tertiary,
     fontSize: 12,
     marginTop: 4,
   },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyText: { color: 'rgba(255,255,255,0.55)', fontSize: 15 },
+  emptyText: { color: tokens.text.tertiary, fontSize: 15 },
   emptySubText: {
-    color: 'rgba(255,255,255,0.35)',
+    color: tokens.text.disabled,
     fontSize: 12,
     marginTop: 6,
     textAlign: 'center',
@@ -1142,17 +1214,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.15)',
+    borderTopColor: tokens.border.subtle,
   },
   pickerDoneBtn: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#34C759',
+    backgroundColor: tokens.action.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pickerDoneBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: tokens.bg.elevated,
   },
-  pickerDoneBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-});
+  pickerDoneBtnText: {
+    color: tokens.action.onPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  });
+}
