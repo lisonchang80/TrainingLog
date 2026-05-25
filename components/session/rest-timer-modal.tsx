@@ -153,6 +153,29 @@ export function RestTimerModal({
   // loaded on mount, released automatically on unmount.
   const finishPlayer = useAudioPlayer(REST_TIMER_DONE_SOUND);
 
+  // Bug F7 (slice 13a smoke 2026-05-25): parent (Today / detail page) passes
+  // `onSkip` as an inline closure (`onSkip={() => setRestTimerTarget(null)}`),
+  // so the prop reference changes every parent re-render. If we put `onSkip`
+  // in the finish-edge effect deps, the effect re-runs on every parent render —
+  // and on the SECOND ✓-tap cycle there's a window where `state.status` is
+  // still stale-`'finished'` (setState from the [triggerKey] / [visible]
+  // resets is queued but not yet committed) while `firedFinishHapticRef.current`
+  // has just been reset to `false` by those same effects. shouldFireFinishEdge
+  // then returns `true` and we fire the haptic + sound IMMEDIATELY on the
+  // second cycle, before the countdown even starts.
+  //
+  // Fix: keep `state.status` as the SOLE dep so the effect only re-runs on
+  // genuine running → finished transitions. Read the latest `onSkip` and
+  // `finishPlayer` via refs so dep-list churn can't race the predicate.
+  const onSkipRef = useRef(onSkip);
+  const finishPlayerRef = useRef(finishPlayer);
+  useEffect(() => {
+    onSkipRef.current = onSkip;
+  });
+  useEffect(() => {
+    finishPlayerRef.current = finishPlayer;
+  });
+
   // Fire haptic + beep on the running → finished edge (once per cycle).
   useEffect(() => {
     if (shouldFireFinishEdge(state.status, firedFinishHapticRef.current)) {
@@ -166,19 +189,20 @@ export function RestTimerModal({
       // Seek to 0 first so consecutive triggers (rare; the modal is one-shot
       // per cycle) replay from the start instead of from the previous play's
       // end position.
-      void finishPlayer
+      const player = finishPlayerRef.current;
+      void player
         .seekTo(0)
-        .then(() => finishPlayer.play())
+        .then(() => player.play())
         .catch(() => {
           /* swallow — sound failure must not break the modal */
         });
       // Auto-dismiss after a brief flash so the user sees "00:00" land.
       const id = setTimeout(() => {
-        onSkip();
+        onSkipRef.current();
       }, 400);
       return () => clearTimeout(id);
     }
-  }, [state.status, onSkip, finishPlayer]);
+  }, [state.status]);
 
   return (
     <Modal
