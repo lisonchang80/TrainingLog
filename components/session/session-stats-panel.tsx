@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -8,6 +8,7 @@ import {
   type SessionStatsSetInput,
 } from '@/src/domain/session/sessionStats';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * In-session 3-tile stats panel (ADR-0019 Q6, position P1 — between
@@ -64,6 +65,8 @@ export function SessionStatsPanel({
   // Frozen mode skips the 1-second tick entirely. We still mount the hook
   // (rules of hooks), but bail out of setInterval when ended_at_ms is a
   // concrete number.
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const isFrozen = typeof ended_at_ms === 'number';
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -108,13 +111,23 @@ export function SessionStatsPanel({
           <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
         </View>
       )}
-      <Tile big={formatVolumeShort(stats.volume_kg)} label={t('domain', 'volume')} />
-      <Tile big={String(stats.exercise_count)} label={t('status', 'exerciseCountLabel')} />
+      <Tile
+        big={formatVolumeShort(stats.volume_kg)}
+        label={t('domain', 'volume')}
+        styles={styles}
+      />
+      <Tile
+        big={String(stats.exercise_count)}
+        label={t('status', 'exerciseCountLabel')}
+        styles={styles}
+      />
     </View>
   );
 }
 
-function Tile({ big, label }: { big: string; label: string }) {
+type Styles = ReturnType<typeof makeStyles>;
+
+function Tile({ big, label, styles }: { big: string; label: string; styles: Styles }) {
   return (
     <View style={styles.tile}>
       <Text style={styles.bigText}>{big}</Text>
@@ -123,39 +136,44 @@ function Tile({ big, label }: { big: string; label: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    gap: 8,
-    marginVertical: 12,
-  },
-  tile: {
-    flex: 1,
-    backgroundColor: '#F4F4F7',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 64,
-  },
-  // Subtle visual cue that the tile is tappable — slightly thicker border
-  // mimics the 編輯訓練 affordance language used elsewhere in the app.
-  tileTappable: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,122,255,0.35)',
-  },
-  tilePressed: { opacity: 0.7 },
-  bigText: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    fontVariant: ['tabular-nums'],
-  },
-  labelText: {
-    marginTop: 4,
-    fontSize: 11,
-    color: '#666',
-    letterSpacing: 0.4,
-  },
-});
+/**
+ * ADR-0025 — token-driven styles.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      gap: 8,
+      marginVertical: 12,
+    },
+    tile: {
+      flex: 1,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 64,
+    },
+    // Subtle visual cue that the tile is tappable — slightly thicker border
+    // mimics the 編輯訓練 affordance language used elsewhere in the app.
+    tileTappable: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.action.primary,
+    },
+    tilePressed: { opacity: 0.7 },
+    bigText: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    labelText: {
+      marginTop: 4,
+      fontSize: 11,
+      color: tokens.text.secondary,
+      letterSpacing: 0.4,
+    },
+  });
+}
