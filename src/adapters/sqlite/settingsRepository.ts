@@ -13,16 +13,19 @@ const UNIT_KEY = 'unit_preference';
 const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
 /**
- * Slice 13a Phase A dev toggles — REMOVE in Phase B first commit (per
- * ADR-0019 § Slice 13 Phase A Amendment risks section). These keys back
- * Settings > 開發者 switches that let us preview the Watch-tracked 5-tile
- * variant + HK-granted mock state without an actual Apple Watch / HealthKit
- * binding (those require Expo Dev Build).
+ * Slice 13a Phase A — `dev_simulate_watch_tracked` toggle.
  *
- * Both default OFF — fresh installs see the legacy 3-tile / no-HK state.
+ * Kept past slice 13b as a 5-tile-watch UI regression guard while slice 13d
+ * (Watch app scaffold + WatchConnectivity bridge) is still in flight — without
+ * this dev affordance the 5-tile-watch variant is unreachable on dev builds
+ * (no session has `healthkit_workout_uuid` set yet). Removed in slice 13d's
+ * first commit once real Watch sessions can flip the variant naturally.
+ *
+ * Counterpart `dev_simulate_hk_granted` was removed in slice 13b — the real
+ * `getAuthorizationState` reading from `hk_authorization_requested` replaces
+ * it (see `src/adapters/healthkit/permission.ts`).
  */
 const DEV_SIMULATE_WATCH_TRACKED_KEY = 'dev_simulate_watch_tracked';
-const DEV_SIMULATE_HK_GRANTED_KEY = 'dev_simulate_hk_granted';
 
 /**
  * Slice 13b — local-only flag tracking whether the HealthKit permission
@@ -150,26 +153,6 @@ export async function setDevSimulateWatchTracked(
   enabled: boolean
 ): Promise<void> {
   await setSetting<number>(db, DEV_SIMULATE_WATCH_TRACKED_KEY, enabled ? 1 : 0);
-}
-
-/**
- * Slice 13a Phase A — read 模擬 HealthKit 授權 dev toggle.
- *
- * Phase A has no observable UI effect (preserves the slot for Phase B
- * permission gating). Documented + persisted so the Settings switch state
- * survives reloads; Phase B will branch HK-dependent UI on this flag (then
- * remove it once real HKHealthStore.authorizationStatus replaces the mock).
- */
-export async function getDevSimulateHKGranted(db: Database): Promise<boolean> {
-  const v = await getSetting<number | boolean>(db, DEV_SIMULATE_HK_GRANTED_KEY);
-  return v === 1 || v === true;
-}
-
-export async function setDevSimulateHKGranted(
-  db: Database,
-  enabled: boolean
-): Promise<void> {
-  await setSetting<number>(db, DEV_SIMULATE_HK_GRANTED_KEY, enabled ? 1 : 0);
 }
 
 /**
