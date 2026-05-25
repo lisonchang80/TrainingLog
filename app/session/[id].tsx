@@ -124,6 +124,7 @@ import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import {
   t,
   tDuplicateTemplateTriple,
+  tExercise,
   tExerciseNoteHeader,
   tRemoveExerciseFromSessionPrompt,
   tRemoveSupersetFromSessionPrompt,
@@ -1216,7 +1217,7 @@ export default function SessionDetailScreen() {
       const destructiveButtonIndex = isCluster ? 5 : 3;
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          title: planRow.exercise_name,
+          title: tExercise(planRow.exercise_name),
           options: menuOptions,
           cancelButtonIndex: 0,
           destructiveButtonIndex,
@@ -1261,8 +1262,9 @@ export default function SessionDetailScreen() {
               const partnerPlan = sessionExercises.find(
                 (p) => p.id === partnerSessionExerciseId,
               );
-              const partnerName =
-                partnerPlan?.exercise_name ?? t('common', 'unknownExercise');
+              const partnerName = partnerPlan?.exercise_name
+                ? tExercise(partnerPlan.exercise_name)
+                : t('common', 'unknownExercise');
               const setsForCluster = sets.filter(
                 (s) =>
                   s.session_exercise_id === planRow.id ||
@@ -1281,7 +1283,7 @@ export default function SessionDetailScreen() {
               Alert.alert(
                 t('alert', 'deleteSupersetQ'),
                 tRemoveSupersetFromSessionPrompt(
-                  planRow.exercise_name,
+                  tExercise(planRow.exercise_name),
                   partnerName,
                   warningSuffix,
                 ),
@@ -1335,7 +1337,7 @@ export default function SessionDetailScreen() {
                   : '';
             Alert.alert(
               t('alert', 'deleteExerciseQ'),
-              tRemoveExerciseFromSessionPrompt(planRow.exercise_name, warningSuffix),
+              tRemoveExerciseFromSessionPrompt(tExercise(planRow.exercise_name), warningSuffix),
               [
                 { text: t('common', 'cancel'), style: 'cancel' },
                 {
@@ -2346,7 +2348,7 @@ function SoloExerciseBlock({
   return (
     <View style={styles.exCard}>
       <View style={styles.exHeader}>
-        <Text style={styles.exName}>{exercise.exercise_name}</Text>
+        <Text style={styles.exName}>{tExercise(exercise.exercise_name)}</Text>
       </View>
       {sets.length === 0 ? (
         <Text style={styles.muted}>No sets recorded.</Text>
@@ -2511,9 +2513,9 @@ function ClusterBlock({
           <Text style={styles.supersetTag}>{t('domain', 'supersetChip')}</Text>
         </View>
         <Text style={styles.clusterLabel}>
-          {cluster.parent.exercise_name}
+          {tExercise(cluster.parent.exercise_name)}
           <Text style={styles.clusterPlus}> + </Text>
-          {cluster.child.exercise_name}
+          {tExercise(cluster.child.exercise_name)}
         </Text>
         {/* Column-aligned exercise name sub-headers: cycle slot + A column +
             B column + check slot (mirrors the data row structure so names
@@ -2522,12 +2524,12 @@ function ClusterBlock({
           <View style={styles.clusterCycle} />
           <View style={styles.clusterCell}>
             <Text style={styles.clusterColumnHeader} numberOfLines={1}>
-              {cluster.parent.exercise_name}
+              {tExercise(cluster.parent.exercise_name)}
             </Text>
           </View>
           <View style={styles.clusterCell}>
             <Text style={styles.clusterColumnHeader} numberOfLines={1}>
-              {cluster.child.exercise_name}
+              {tExercise(cluster.child.exercise_name)}
             </Text>
           </View>
           <View style={styles.clusterCheckSlot} />
@@ -2702,7 +2704,7 @@ function EditableExerciseCard({
           <View style={styles.planText}>
             <View style={styles.exerciseCardTitleRow}>
               <Text style={styles.planName} numberOfLines={1}>
-                {planRow.exercise_name}
+                {tExercise(planRow.exercise_name)}
               </Text>
             </View>
             {progress.setsTotal > 0 ? (
