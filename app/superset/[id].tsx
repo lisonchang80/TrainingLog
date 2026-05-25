@@ -28,6 +28,7 @@ import {
 import {
   t,
   tDeleteSupersetPrompt,
+  tExercise,
   tUsedNSessions,
   tViewExerciseDetails,
 } from '@/src/i18n';
@@ -220,7 +221,7 @@ function ExerciseTile({
   }
   const thumbnail = exercise.media_path;
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <Pressable
       accessibilityRole="button"
@@ -238,7 +239,7 @@ function ExerciseTile({
         )}
       </View>
       <Text style={styles.tileName} numberOfLines={2}>
-        {exercise.name}
+        {tExercise(exercise.name)}
       </Text>
     </Pressable>
   );

@@ -40,7 +40,7 @@ import {
   insertReusableSuperset,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
-import { t, tEquipment, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
+import { t, tEquipment, tExercise, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
 
 /**
  * Reusable Superset creation page (ADR-0017 Q10 / slice 9.8a).
@@ -277,11 +277,11 @@ function SelectedChipRow({
           <Pressable
             key={ex.id}
             accessibilityRole="button"
-            accessibilityLabel={tRemoveExercise(ex.name)}
+            accessibilityLabel={tRemoveExercise(tExercise(ex.name))}
             onPress={() => onRemove(ex.id)}
             style={styles.chip}>
             <Text style={styles.chipText} numberOfLines={1}>
-              {ex.name}
+              {tExercise(ex.name)}
             </Text>
             <Text style={styles.chipRemove}>✕</Text>
           </Pressable>
@@ -482,7 +482,7 @@ function ExercisePickerCard({
         )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {exercise.name}
+        {tExercise(exercise.name)}
       </Text>
     </Pressable>
   );
@@ -490,7 +490,7 @@ function ExercisePickerCard({
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.thumbPlaceholder, { backgroundColor: bg }]}>
       <Text style={styles.thumbInitial}>{ch}</Text>

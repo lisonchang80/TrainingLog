@@ -29,7 +29,22 @@ import DraggableFlatList, {
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 
-import { t } from '@/src/i18n';
+import { t, tExercise } from '@/src/i18n';
+
+/**
+ * Localize a row name produced by `buildSessionReorderRows` /
+ * `buildTemplateReorderRows`. Cluster rows arrive as compound
+ * "A + B" strings; split on the literal " + " separator before
+ * mapping each piece through tExercise(), since the compound
+ * isn't a v006 seed key itself.
+ */
+function localizeRowName(name: string): string {
+  if (!name.includes(' + ')) return tExercise(name);
+  return name
+    .split(' + ')
+    .map((part) => tExercise(part))
+    .join(' + ');
+}
 
 type ReorderItem = {
   id: string;
@@ -65,7 +80,7 @@ export function ReorderExercisesSheet({
       ]}
     >
       <Text style={styles.dragHandle}>≡</Text>
-      <Text style={styles.rowName}>{item.name}</Text>
+      <Text style={styles.rowName}>{localizeRowName(item.name)}</Text>
     </Pressable>
   );
 

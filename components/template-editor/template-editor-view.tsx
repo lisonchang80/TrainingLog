@@ -99,7 +99,7 @@ import { PALETTE, hashColor } from './palette';
 import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
-import { getLocale, t as tt } from '@/src/i18n';
+import { getLocale, t as tt, tExercise } from '@/src/i18n';
 
 /**
  * Inline dynamic helpers for template-editor-view. Kept local rather than
@@ -974,10 +974,11 @@ export default function TemplateEditorView() {
       .map((parent) => {
         const childNames = draft.exercises
           .filter((c) => c.parent_id === parent.id)
-          .map((c) => c.name ?? '(動作)');
+          .map((c) => (c.name ? tExercise(c.name) : '(動作)'));
+        const parentName = parent.name ? tExercise(parent.name) : '(動作)';
         const name = childNames.length === 0
-          ? parent.name ?? '(動作)'
-          : [parent.name ?? '(動作)', ...childNames].join(' + ');
+          ? parentName
+          : [parentName, ...childNames].join(' + ');
         return { id: parent.id, name };
       });
   }, [draft]);
@@ -1152,7 +1153,7 @@ export default function TemplateEditorView() {
     // 只是 alert copy 要點明刪超級組以對齊 session UX。
     const isCluster = draft.exercises.some((e) => e.parent_id === ex.id);
     const title = isCluster ? tt('alert', 'deleteSupersetQ') : tt('alert', 'confirmDeleteQ');
-    const exName = ex.name ?? tt('common', 'unknownExercise');
+    const exName = ex.name ? tExercise(ex.name) : tt('common', 'unknownExercise');
     const body = isCluster
       ? tEditorDeleteClusterBody(exName)
       : tEditorDeleteSoloBody(exName);
@@ -1198,7 +1199,7 @@ export default function TemplateEditorView() {
     ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: ex.name ?? undefined,
+        title: ex.name ? tExercise(ex.name) : undefined,
         options,
         destructiveButtonIndex: 4,
         cancelButtonIndex: 5,
@@ -1588,11 +1589,11 @@ export default function TemplateEditorView() {
                   ) : null}
                 </View>
                 <Text style={styles.clusterName}>
-                  {parent.name ?? '(動作)'}
+                  {parent.name ? tExercise(parent.name) : '(動作)'}
                   {children.map((c) => (
                     <Fragment key={c.id}>
                       <Text style={styles.clusterPlus}> + </Text>
-                      {c.name ?? '(動作)'}
+                      {c.name ? tExercise(c.name) : '(動作)'}
                     </Fragment>
                   ))}
                 </Text>
@@ -2093,7 +2094,7 @@ export default function TemplateEditorView() {
                     key={ex.id}
                     onPress={() => onPickExercise(ex, 'general')}
                     style={styles.exercisePickerRow}>
-                    <Text style={styles.exercisePickerName}>{ex.name}</Text>
+                    <Text style={styles.exercisePickerName}>{tExercise(ex.name)}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
@@ -2453,7 +2454,7 @@ function ExerciseBody({
           <Text
             style={[styles.exName, compact && styles.exNameCompact]}
             numberOfLines={1}>
-            {exercise.name ?? '(動作)'}
+            {exercise.name ? tExercise(exercise.name) : '(動作)'}
           </Text>
           {exercise.notes && exercise.notes.trim().length > 0 ? (
             <Pressable
