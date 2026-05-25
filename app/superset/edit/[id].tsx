@@ -3,7 +3,7 @@ import {
   useNavigation,
   useRouter,
 } from 'expo-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -21,6 +21,7 @@ import {
   updateReusableSupersetName,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { t, tSaveOrSaving } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Reusable Superset edit page (ADR-0017 Q10 / slice 9.8a).
@@ -39,6 +40,8 @@ export default function EditSupersetScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [original, setOriginal] = useState<ReusableSuperset | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -58,7 +61,7 @@ export default function EditSupersetScreen() {
         </Pressable>
       ),
     });
-  }, [navigation, router]);
+  }, [navigation, router, styles.headerCancel]);
 
   useEffect(() => {
     if (!id) return;
@@ -113,7 +116,7 @@ export default function EditSupersetScreen() {
             value={name}
             onChangeText={setName}
             placeholder={t('page', 'enterSupersetNameShort')}
-            placeholderTextColor="rgba(127,127,127,0.6)"
+            placeholderTextColor={tokens.text.tertiary}
             style={styles.input}
             maxLength={60}
             autoCorrect={false}
@@ -138,31 +141,47 @@ export default function EditSupersetScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 20, gap: 16 },
-  section: { gap: 8 },
-  label: { fontSize: 14, opacity: 0.7, fontWeight: '500' },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  errorText: { fontSize: 13, color: '#DC2626' },
-  placeholder: { fontSize: 14, opacity: 0.6, padding: 24 },
-  saveBtn: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#34C759',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  saveBtnDisabled: { backgroundColor: 'rgba(127,127,127,0.3)' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  pressed: { opacity: 0.7 },
-  headerCancel: { fontSize: 16, color: '#007AFF', paddingHorizontal: 12 },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 20, gap: 16 },
+    section: { gap: 8 },
+    label: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontWeight: '500',
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: tokens.border.default,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 16,
+      color: tokens.text.primary,
+      backgroundColor: tokens.bg.surface,
+    },
+    errorText: { fontSize: 13, color: tokens.action.destructive },
+    placeholder: { fontSize: 14, color: tokens.text.secondary, padding: 24 },
+    saveBtn: {
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: tokens.action.success,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 12,
+    },
+    saveBtnDisabled: { backgroundColor: tokens.bg.elevated },
+    saveBtnText: {
+      color: tokens.action.onPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    pressed: { opacity: 0.7 },
+    headerCancel: {
+      fontSize: 16,
+      color: tokens.action.primary,
+      paddingHorizontal: 12,
+    },
+  });
+}
