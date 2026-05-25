@@ -10,19 +10,34 @@ import {
 import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  bottomRowCount,
+  formatAvgHr,
+  formatKcal,
+  hrTileBorderColor,
+  type StatsTileVariant,
+} from './session-stats-panel.behavior';
+
 /**
- * In-session 3-tile stats panel (ADR-0019 Q6, position P1 — between
- * SessionHeader and exercise list).
+ * Session stats panel — three variants (ADR-0019 Q6 + Q10, expanded by
+ * Slice 13 Phase A Amendment 2026-05-25):
  *
- * Renders three equal-width tiles:
+ *   - '3tile'        — in-session row (default; backward-compat). Tiles:
+ *                       訓練時間 / 容量 / 動作數
+ *   - '4tile'        — session detail page. Adds 大卡 (kcal) as 4th tile
+ *                       in a 2 × 2 grid. NULL kcal renders '—' until
+ *                       HealthKit lands in Phase B.
+ *   - '5tile-watch'  — Watch-tracked session. 2 rows: row 1 of 3 = same as
+ *                       3tile, row 2 of 2 = 心率 / 大卡. The 心率 tile gets
+ *                       a Z-zone-colored border via `hrTileBorderColor`.
+ *
+ * Tiles per variant:
  *   - 訓練時間 — live wall-clock duration since started_at (1s tick) OR
  *     frozen ended_at - started_at when in detail-page edit-history mode.
  *   - 容量    — Σ weight × reps for is_logged=1, non-warmup
  *   - 動作數  — count of session_exercise rows
- *
- * The 5-tile Watch-tracked variant (HR + kcal) is deferred to slice 13
- * per ADR-0019 Q6 (b). When that lands, this component will accept an
- * optional HR/kcal slot and a `is_watch_tracked` flag.
+ *   - 大卡    — HealthKit activeEnergyBurned (Phase B); NULL Phase A → '—'
+ *   - 心率    — avg BPM from HR samples (Phase B); NULL Phase A → '—'
  *
  * The 1-second tick lives in this component (not the parent) so the
  * Today screen re-render cost is bounded — only this panel paints when
@@ -53,6 +68,26 @@ interface SessionStatsPanelProps {
    * started_at / ended_at.
    */
   onTapDuration?: () => void;
+  /**
+   * Tile layout variant (Slice 13a). Default '3tile' for backward compat
+   * with existing in-session call sites (Today screen).
+   */
+  variant?: StatsTileVariant;
+  /**
+   * HealthKit kcal (Phase B). Phase A passes null → tile shows '—'. Only
+   * rendered in '4tile' / '5tile-watch' variants.
+   */
+  kcal?: number | null;
+  /**
+   * Average BPM across the session (Phase B). Phase A passes null → tile
+   * shows '—'. Only rendered in '5tile-watch'.
+   */
+  avgHr?: number | null;
+  /**
+   * User age for HRmax estimation. Drives the HR tile's Z-zone border
+   * color in '5tile-watch'. Omitted / NULL → default tile border (no zone).
+   */
+  userAge?: number | null;
 }
 
 export function SessionStatsPanel({
@@ -61,6 +96,10 @@ export function SessionStatsPanel({
   started_at_ms,
   ended_at_ms,
   onTapDuration,
+  variant = '3tile',
+  kcal = null,
+  avgHr = null,
+  userAge = null,
 }: SessionStatsPanelProps) {
   // Frozen mode skips the 1-second tick entirely. We still mount the hook
   // (rules of hooks), but bail out of setInterval when ended_at_ms is a
@@ -89,47 +128,138 @@ export function SessionStatsPanel({
     Math.floor(stats.duration_ms / 1000),
   );
 
-  return (
-    <View style={styles.container}>
-      {onTapDuration ? (
-        <Pressable
-          onPress={onTapDuration}
-          accessibilityRole="button"
-          accessibilityLabel={t('status', 'editTrainingTimeA11y')}
-          style={({ pressed }) => [
-            styles.tile,
-            styles.tileTappable,
-            pressed && styles.tilePressed,
-          ]}
-        >
-          <Text style={styles.bigText}>{durationBig}</Text>
-          <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
-        </Pressable>
-      ) : (
-        <View style={styles.tile}>
-          <Text style={styles.bigText}>{durationBig}</Text>
-          <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
+  // Duration tile is special (Pressable + onTapDuration wiring lives here,
+  // not in the generic Tile component) — render once and pass into the row.
+  const durationTile = onTapDuration ? (
+    <Pressable
+      key="duration"
+      onPress={onTapDuration}
+      accessibilityRole="button"
+      accessibilityLabel={t('status', 'editTrainingTimeA11y')}
+      style={({ pressed }) => [
+        styles.tile,
+        styles.tileTappable,
+        pressed && styles.tilePressed,
+      ]}
+    >
+      <Text style={styles.bigText}>{durationBig}</Text>
+      <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
+    </Pressable>
+  ) : (
+    <View key="duration" style={styles.tile}>
+      <Text style={styles.bigText}>{durationBig}</Text>
+      <Text style={styles.labelText}>{t('status', 'sessionDuration')}</Text>
+    </View>
+  );
+
+  const volumeTile = (
+    <Tile
+      key="volume"
+      big={formatVolumeShort(stats.volume_kg)}
+      label={t('domain', 'volume')}
+      styles={styles}
+    />
+  );
+
+  const exerciseCountTile = (
+    <Tile
+      key="exerciseCount"
+      big={String(stats.exercise_count)}
+      label={t('status', 'exerciseCountLabel')}
+      styles={styles}
+    />
+  );
+
+  const kcalTile = (
+    <Tile
+      key="kcal"
+      big={formatKcal(kcal)}
+      label={t('domain', 'kcal')}
+      styles={styles}
+    />
+  );
+
+  const hrBorder = hrTileBorderColor(avgHr, userAge);
+  const avgHrTile = (
+    <Tile
+      key="avgHr"
+      big={formatAvgHr(avgHr)}
+      label={t('domain', 'heartRate')}
+      styles={styles}
+      borderColor={hrBorder}
+    />
+  );
+
+  // 3tile — single row (legacy / in-session).
+  if (variant === '3tile') {
+    return (
+      <View style={styles.container}>
+        {durationTile}
+        {volumeTile}
+        {exerciseCountTile}
+      </View>
+    );
+  }
+
+  // 4tile — 2 × 2 grid (session detail page).
+  if (variant === '4tile') {
+    return (
+      <View style={styles.containerCol}>
+        <View style={styles.row}>
+          {durationTile}
+          {volumeTile}
         </View>
-      )}
-      <Tile
-        big={formatVolumeShort(stats.volume_kg)}
-        label={t('domain', 'volume')}
-        styles={styles}
-      />
-      <Tile
-        big={String(stats.exercise_count)}
-        label={t('status', 'exerciseCountLabel')}
-        styles={styles}
-      />
+        <View style={styles.row}>
+          {exerciseCountTile}
+          {kcalTile}
+        </View>
+      </View>
+    );
+  }
+
+  // 5tile-watch — row 1 of 3 + row 2 of 2 (avg HR + kcal).
+  // bottomRowCount(variant) confirms row 2 has 2 tiles; encoded explicitly
+  // here for readability (the JSX shape itself is the canonical layout).
+  void bottomRowCount;
+  return (
+    <View style={styles.containerCol}>
+      <View style={styles.row}>
+        {durationTile}
+        {volumeTile}
+        {exerciseCountTile}
+      </View>
+      <View style={styles.row}>
+        {avgHrTile}
+        {kcalTile}
+      </View>
     </View>
   );
 }
 
 type Styles = ReturnType<typeof makeStyles>;
 
-function Tile({ big, label, styles }: { big: string; label: string; styles: Styles }) {
+function Tile({
+  big,
+  label,
+  styles,
+  borderColor,
+}: {
+  big: string;
+  label: string;
+  styles: Styles;
+  /** Optional override (used by HR tile in 5-tile-watch for Z-zone color). */
+  borderColor?: string | null;
+}) {
   return (
-    <View style={styles.tile}>
+    <View
+      style={[
+        styles.tile,
+        borderColor != null && {
+          borderWidth: 2,
+          borderColor,
+        },
+      ]}
+    >
       <Text style={styles.bigText}>{big}</Text>
       <Text style={styles.labelText}>{label}</Text>
     </View>
@@ -145,6 +275,15 @@ function makeStyles(tokens: ThemeTokens) {
       flexDirection: 'row',
       gap: 8,
       marginVertical: 12,
+    },
+    containerCol: {
+      flexDirection: 'column',
+      gap: 8,
+      marginVertical: 12,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: 8,
     },
     tile: {
       flex: 1,

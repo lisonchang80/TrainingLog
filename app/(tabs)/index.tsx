@@ -43,6 +43,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import {
   getAutoPopupRestTimer,
+  getDevSimulateWatchTracked,
   getSetting,
   getUnitPreference,
   setSetting,
@@ -275,6 +276,14 @@ export default function TodayScreen() {
    * rest_sec + exercise name to render in the modal.
    */
   const [autoPopupTimer, setAutoPopupTimer] = useState<boolean>(true);
+  /**
+   * Slice 13a Phase A dev toggle — `dev_simulate_watch_tracked`. When ON
+   * the in-session SessionStatsPanel renders the 5-tile Watch variant
+   * (心率 / 大卡 = '—' until Phase B HK ingest). Default false — legacy
+   * 3-tile layout stays for fresh installs.
+   * REMOVE in Phase B first commit (per ADR-0019 § Phase A Amendment).
+   */
+  const [devWatchTracked, setDevWatchTracked] = useState<boolean>(false);
   const [restTimerTarget, setRestTimerTarget] = useState<{
     rest_sec: number;
     exercise_name: string;
@@ -313,7 +322,7 @@ export default function TodayScreen() {
   const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, bms, popup] = await Promise.all([
+    const [exs, active, prog, tpls, u, bms, popup, devWT] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
@@ -323,6 +332,8 @@ export default function TodayScreen() {
       // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
       // key to ON (matches v016 seed intent + the new Settings Switch).
       getAutoPopupRestTimer(db),
+      // Slice 13a Phase A — `dev_simulate_watch_tracked` defaults OFF.
+      getDevSimulateWatchTracked(db),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
@@ -330,6 +341,7 @@ export default function TodayScreen() {
     setUnit(u);
     setBodyMetrics(bms);
     setAutoPopupTimer(popup);
+    setDevWatchTracked(devWT);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
@@ -2153,9 +2165,16 @@ export default function TodayScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {programBanner}
-          {/* ADR-0019 Q6 — in-session 3-tile stats panel (P1 position) */}
+          {/* ADR-0019 Q6 — in-session stats panel (P1 position).
+              Slice 13a Phase A: the `dev_simulate_watch_tracked` toggle
+              upgrades the panel to the 5-tile Watch variant (HR / kcal =
+              '—' until Phase B HealthKit ingest). When OFF (default), the
+              legacy 3-tile layout is preserved. */}
           {sessionState.status === 'in_progress' ? (
             <SessionStatsPanel
+              variant={devWatchTracked ? '5tile-watch' : '3tile'}
+              kcal={null}
+              avgHr={null}
               sets={setsInSession.map((s) => ({
                 set_kind: s.set_kind,
                 is_logged: s.is_logged,

@@ -26,6 +26,7 @@ import { useDatabase } from '@/components/database-provider';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
+import { HRZoneChart } from '@/components/session/hr-zone-chart';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
 import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { ClusterCard } from '@/components/session/cluster-card';
@@ -141,6 +142,13 @@ import {
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
+ * Phase A placeholder HRmax (220 - 30). Used to position HR zone band
+ * boundaries on the chart canvas while no real samples render. Phase B
+ * will source from settings / HealthKit profile and pass per-user.
+ */
+const HRMAX_PLACEHOLDER = 190;
+
+/**
  * ADR-0025 — DRY helper for the 5 components in this file that all need
  * the same memoised styles. Each calls `useSessionStyles()` instead of
  * repeating useTheme + useMemo (mirror app/(tabs)/library.tsx pattern).
@@ -158,9 +166,12 @@ function useSessionStyles() {
  *   - Today screen on End Session (router.push immediately after closing)
  *   - History tab on row tap (already-ended sessions, identical view)
  *
- * Layout (ADR-0019 Q10):
+ * Layout (ADR-0019 Q10, expanded by Slice 13 Phase A Amendment 2026-05-25):
  *   - Header: title (session name or date fallback) + back button
- *   - 3-tile SessionStatsPanel (frozen mode — ended_at - started_at + tap to edit)
+ *   - 4-tile SessionStatsPanel (frozen mode — ended_at - started_at + tap to
+ *     edit; 4th tile = 大卡, NULL in Phase A → '—', Phase B reads session.kcal)
+ *   - HRZoneChart placeholder (Phase A renders chrome + grey empty hint;
+ *     Phase B HealthKit ingest pipes real samples)
  *   - 動作清單: in read mode = SoloExerciseBlock / ClusterBlock simple display
  *     in edit mode = FULL active-session UI parity (ClusterCard + ExerciseCard
  *     mirrors with cluster CRUD + picker + drag + ⚙️ menu + swipe-delete +
@@ -179,10 +190,10 @@ function useSessionStyles() {
  *     trigger RestTimerModal (no rest_timer state at all on this page).
  *   - No BodyDataSheet (already absent — kept removed).
  *
- * Note: the detail page intentionally DROPS the 大卡 tile that the prior
- * 4-tile implementation rendered. SessionStatsPanel is 3-tile, and kcal
- * is HealthKit-only data (deferred to slice 13). If the user complains
- * later, easy to add a 4th tile prop to SessionStatsPanel.
+ * Note: prior to Slice 13a (2026-05-25) the detail page dropped the 大卡
+ * tile and ran a 3-tile panel. Slice 13a wires the 4-tile variant + HR
+ * zone chart placeholder so the structure is ready for Phase B HealthKit
+ * ingest — both tile and chart render NULL/empty state in Phase A.
  */
 export default function SessionDetailScreen() {
   // 2026-05-20 overnight #58 — ADR-0015 § Tap 日格行為: history calendar tap
@@ -1923,6 +1934,8 @@ export default function SessionDetailScreen() {
                 </Text>
 
                 <SessionStatsPanel
+                  variant="4tile"
+                  kcal={session.kcal}
                   sets={sets.map((s) => ({
                     set_kind: s.set_kind,
                     is_logged: s.is_logged,
@@ -1937,6 +1950,17 @@ export default function SessionDetailScreen() {
                       ? () => setTimeEditorOpen(true)
                       : undefined
                   }
+                />
+
+                <Text style={styles.section}>{t('page', 'hrZoneSection')}</Text>
+                <HRZoneChart
+                  samples={null}
+                  hrmax={HRMAX_PLACEHOLDER}
+                  durationSec={Math.max(
+                    0,
+                    ((session.ended_at ?? viewOpenedAtMs) - session.started_at) / 1000,
+                  )}
+                  sessionStartTs={session.started_at}
                 />
 
                 <View style={styles.sectionRow}>
@@ -1982,6 +2006,8 @@ export default function SessionDetailScreen() {
                 </Text>
 
                 <SessionStatsPanel
+                  variant="4tile"
+                  kcal={session.kcal}
                   sets={sets.map((s) => ({
                     set_kind: s.set_kind,
                     is_logged: s.is_logged,
@@ -1996,6 +2022,17 @@ export default function SessionDetailScreen() {
                       ? () => setTimeEditorOpen(true)
                       : undefined
                   }
+                />
+
+                <Text style={styles.section}>{t('page', 'hrZoneSection')}</Text>
+                <HRZoneChart
+                  samples={null}
+                  hrmax={HRMAX_PLACEHOLDER}
+                  durationSec={Math.max(
+                    0,
+                    ((session.ended_at ?? viewOpenedAtMs) - session.started_at) / 1000,
+                  )}
+                  sessionStartTs={session.started_at}
                 />
 
                 <View style={styles.sectionRow}>

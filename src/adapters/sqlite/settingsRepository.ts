@@ -12,6 +12,18 @@ import type { UnitPreference } from '../../domain/body/types';
 const UNIT_KEY = 'unit_preference';
 const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
+/**
+ * Slice 13a Phase A dev toggles — REMOVE in Phase B first commit (per
+ * ADR-0019 § Slice 13 Phase A Amendment risks section). These keys back
+ * Settings > 開發者 switches that let us preview the Watch-tracked 5-tile
+ * variant + HK-granted mock state without an actual Apple Watch / HealthKit
+ * binding (those require Expo Dev Build).
+ *
+ * Both default OFF — fresh installs see the legacy 3-tile / no-HK state.
+ */
+const DEV_SIMULATE_WATCH_TRACKED_KEY = 'dev_simulate_watch_tracked';
+const DEV_SIMULATE_HK_GRANTED_KEY = 'dev_simulate_hk_granted';
+
 export async function getSetting<T>(
   db: Database,
   key: string
@@ -100,4 +112,47 @@ export async function setAutoPopupRestTimer(
   // round-trip stay consistent. JSON.stringify(1) = "1" — same wire form
   // as the seed, so a Settings toggle never produces a divergent shape.
   await setSetting<number>(db, AUTO_POPUP_REST_TIMER_KEY, enabled ? 1 : 0);
+}
+
+/**
+ * Slice 13a Phase A — read 模擬 Watch tracked dev toggle.
+ *
+ * When ON, the Today screen renders SessionStatsPanel `variant='5tile-watch'`
+ * even without an actual Apple Watch / HealthKit data source (HR / kcal
+ * tiles show '—'). When OFF (default), Today keeps the legacy 3-tile
+ * layout.
+ *
+ * Phase B (HealthKit + Watch unlock) REMOVES this toggle — the variant
+ * decision will instead read `session.is_watch_tracked` from the schema.
+ */
+export async function getDevSimulateWatchTracked(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, DEV_SIMULATE_WATCH_TRACKED_KEY);
+  return v === 1 || v === true;
+}
+
+export async function setDevSimulateWatchTracked(
+  db: Database,
+  enabled: boolean
+): Promise<void> {
+  await setSetting<number>(db, DEV_SIMULATE_WATCH_TRACKED_KEY, enabled ? 1 : 0);
+}
+
+/**
+ * Slice 13a Phase A — read 模擬 HealthKit 授權 dev toggle.
+ *
+ * Phase A has no observable UI effect (preserves the slot for Phase B
+ * permission gating). Documented + persisted so the Settings switch state
+ * survives reloads; Phase B will branch HK-dependent UI on this flag (then
+ * remove it once real HKHealthStore.authorizationStatus replaces the mock).
+ */
+export async function getDevSimulateHKGranted(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, DEV_SIMULATE_HK_GRANTED_KEY);
+  return v === 1 || v === true;
+}
+
+export async function setDevSimulateHKGranted(
+  db: Database,
+  enabled: boolean
+): Promise<void> {
+  await setSetting<number>(db, DEV_SIMULATE_HK_GRANTED_KEY, enabled ? 1 : 0);
 }
