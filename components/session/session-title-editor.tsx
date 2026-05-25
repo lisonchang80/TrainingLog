@@ -32,6 +32,14 @@ interface SessionTitleEditorProps {
   initialTitle: string;
   placeholder?: string;
   onUpdated?: (title: string) => void;
+  /**
+   * Typography size. `'hero'` (default) mirrors Today's session header (28pt,
+   * weight 700) — used by `app/(tabs)/index.tsx`. `'nav'` mirrors the
+   * detail-page nav-bar title (17pt, weight 700) — used by
+   * `app/session/[id].tsx` per ADR-0014 § history detail header. Only typography
+   * changes; tap-to-edit semantics + commit-on-blur are identical.
+   */
+  size?: 'hero' | 'nav';
 }
 
 export function SessionTitleEditor({
@@ -39,10 +47,11 @@ export function SessionTitleEditor({
   initialTitle,
   placeholder,
   onUpdated,
+  size = 'hero',
 }: SessionTitleEditorProps) {
   const db = useDatabase();
   const { tokens } = useTheme();
-  const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const styles = useMemo(() => makeStyles(tokens, size), [tokens, size]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initialTitle);
   const inputRef = useRef<TextInput>(null);
@@ -102,7 +111,11 @@ export function SessionTitleEditor({
   );
 }
 
-function makeStyles(tokens: ThemeTokens) {
+function makeStyles(tokens: ThemeTokens, size: 'hero' | 'nav') {
+  // `'hero'` matches Today's session header `styles.heading` (fontSize 28).
+  // `'nav'` matches detail page `styles.headerTitleText` (fontSize 17). Weight
+  // 700 + primary text color are shared across both.
+  const fontSize = size === 'nav' ? 17 : 28;
   return StyleSheet.create({
     touch: {
       // Take the same horizontal slot the old <Text style={styles.heading}>
@@ -112,8 +125,7 @@ function makeStyles(tokens: ThemeTokens) {
       flexShrink: 1,
     },
     heading: {
-      // Mirror app/(tabs)/index.tsx → styles.heading (fontSize 28, weight 700).
-      fontSize: 28,
+      fontSize,
       fontWeight: '700',
       color: tokens.text.primary,
     },
@@ -122,7 +134,7 @@ function makeStyles(tokens: ThemeTokens) {
       opacity: 0.5,
     },
     input: {
-      fontSize: 28,
+      fontSize,
       fontWeight: '700',
       paddingVertical: 0,
       color: tokens.text.primary,
