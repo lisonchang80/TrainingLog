@@ -62,7 +62,7 @@ import {
 } from '@/src/domain/set/workingSetOrdinal';
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
-import { t } from '@/src/i18n';
+import { t, tExercise } from '@/src/i18n';
 
 type ClusterCardGroup = ClusterGroup<
   SessionExerciseRowWithName,
@@ -205,7 +205,7 @@ export function ClusterCard({
       <View style={styles.clusterCardHeader}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${t('domain', 'superset')} ${group.a.exercise.exercise_name} + ${group.b.exercise.exercise_name}`}
+          accessibilityLabel={`${t('domain', 'superset')} ${tExercise(group.a.exercise.exercise_name)} + ${tExercise(group.b.exercise.exercise_name)}`}
           onPress={onToggleExpand}
           style={({ pressed }) => [
             styles.clusterCardHeaderMain,
@@ -222,9 +222,9 @@ export function ClusterCard({
             </View>
             {/* Row 2: title 獨佔全寬, 不再 ... truncate. */}
             <Text style={styles.clusterName}>
-              {group.a.exercise.exercise_name}
+              {tExercise(group.a.exercise.exercise_name)}
               <Text style={styles.clusterPlus}> + </Text>
-              {group.b.exercise.exercise_name}
+              {tExercise(group.b.exercise.exercise_name)}
             </Text>
             {/*
               Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
@@ -275,11 +275,11 @@ export function ClusterCard({
           <View style={styles.sideLabelRow}>
             <View style={styles.sideLabelLead} />
             <Text style={styles.sideLabel} numberOfLines={1}>
-              {group.a.exercise.exercise_name}
+              {tExercise(group.a.exercise.exercise_name)}
             </Text>
             <View style={styles.sideLabelDivider} />
             <Text style={styles.sideLabel} numberOfLines={1}>
-              {group.b.exercise.exercise_name}
+              {tExercise(group.b.exercise.exercise_name)}
             </Text>
             <View style={styles.sideLabelGap} />
           </View>

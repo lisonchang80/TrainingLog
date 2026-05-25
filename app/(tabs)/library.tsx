@@ -55,7 +55,7 @@ import {
   selectionRank,
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
-import { t, tEquipment, tMuscleGroup, tNSessions } from '@/src/i18n';
+import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
 
 /**
  * Library screen (slice 9.6 / ADR-0017 Q1, Q6, Q7, Q15).
@@ -671,7 +671,7 @@ function ExerciseCard({
         )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {exercise.name}
+        {tExercise(exercise.name)}
       </Text>
       {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
       {onInfoPress && (
@@ -693,8 +693,10 @@ function ExerciseCard({
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
   // Hash-color circle with first character — ADR-0017 Q8 v1 placeholder.
+  // hash uses raw DB name so the color is stable across locales;
+  // displayed initial uses tExercise() so zh seeds show the zh first char.
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.thumbPlaceholder, { backgroundColor: bg }]}>
       <Text style={styles.thumbInitial}>{ch}</Text>
@@ -868,7 +870,7 @@ function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
     );
   }
   const bg = hashColor(exercise.name || exercise.id);
-  const ch = exercise.name?.charAt(0) ?? '?';
+  const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
     <View style={[styles.supersetMiniThumb, { backgroundColor: bg }]}>
       <Text style={styles.supersetMiniThumbInitial}>{ch}</Text>
