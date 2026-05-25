@@ -32,7 +32,7 @@
  * primary — Android behaviour is reasonable but not exhaustively tested.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -53,6 +53,7 @@ import {
   validateSessionTimes,
 } from '@/src/domain/session/sessionTimeEditor';
 import { t } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface SessionTimeEditorSheetProps {
   visible: boolean;
@@ -74,6 +75,8 @@ export function SessionTimeEditorSheet({
   onSave,
   onClose,
 }: SessionTimeEditorSheetProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [start, setStart] = useState<Date>(() => new Date(started_at_ms));
   const [end, setEnd] = useState<Date>(() => new Date(ended_at_ms));
   const [busy, setBusy] = useState(false);
@@ -337,99 +340,106 @@ function formatDateTime(d: Date): string {
   return `${y}-${mo}-${day}  ${h}:${m}`;
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-    maxHeight: '85%',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  topBarBtnText: {
-    fontSize: 15,
-    color: '#6b7280',
-  },
-  topBarBtnDisabled: {
-    opacity: 0.4,
-  },
-  topBarConfirm: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  body: {
-    padding: 16,
-    gap: 12,
-  },
-  field: {
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    opacity: 0.7,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  androidFieldButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: '#f9fafb',
-  },
-  androidFieldButtonText: {
-    fontSize: 15,
-    color: '#111827',
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e5e7eb',
-    marginVertical: 4,
-  },
-  durationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  durationLabel: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '600',
-  },
-  durationValue: {
-    fontSize: 16,
-    color: '#111827',
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  durationValueInvalid: {
-    color: '#9ca3af',
-  },
-  warningText: {
-    fontSize: 13,
-    color: '#dc2626',
-    fontWeight: '500',
-  },
-});
+/**
+ * ADR-0025 — token-driven styles. Backdrop dim stays raw rgba. The
+ * DateTimePicker itself is a native widget and ignores these styles — the
+ * native picker auto-themes with the system color scheme (iOS spinner
+ * already adapts to dark/light).
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: tokens.bg.modal,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingBottom: 24,
+      maxHeight: '85%',
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+    },
+    topBarTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    topBarBtnText: {
+      fontSize: 15,
+      color: tokens.text.secondary,
+    },
+    topBarBtnDisabled: {
+      opacity: 0.4,
+    },
+    topBarConfirm: {
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    body: {
+      padding: 16,
+      gap: 12,
+    },
+    field: {
+      gap: 4,
+    },
+    fieldLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    androidFieldButton: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      backgroundColor: tokens.bg.surface,
+    },
+    androidFieldButtonText: {
+      fontSize: 15,
+      color: tokens.text.primary,
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: tokens.border.subtle,
+      marginVertical: 4,
+    },
+    durationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 4,
+    },
+    durationLabel: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      fontWeight: '600',
+    },
+    durationValue: {
+      fontSize: 16,
+      color: tokens.text.primary,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    durationValueInvalid: {
+      color: tokens.text.tertiary,
+    },
+    warningText: {
+      fontSize: 13,
+      color: tokens.action.destructive,
+      fontWeight: '500',
+    },
+  });
+}
 
 export default SessionTimeEditorSheet;
