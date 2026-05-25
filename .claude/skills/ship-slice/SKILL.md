@@ -157,7 +157,9 @@ PR title under 70 chars. Body cites the issue's exact acceptance criteria so rev
 
 **Slices 1–8**: `npx expo start --ios` (background) → boots iPhone simulator with Expo Go.
 
-**Slice 9 onwards**: `npx expo run:ios --device "iPhone 17"` (background) → builds dev build natively, installs to simulator, launches. First run is 5–10 min cold build; budget for it. Pod install needs `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (see gotcha below).
+**Slice 9–13a**: `npx expo run:ios --device "iPhone 17"` (background) → builds dev build natively, installs to simulator, launches. First run is 5–10 min cold build; budget for it. Pod install needs `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (see gotcha below).
+
+**Slice 13b onwards (Phase B HealthKit+)**: Bare workflow — `ios/` is committed, `app.json` declares plugins, real device required (HK API no-ops on Simulator). Build via Xcode locally (open `ios/TrainingLog.xcworkspace`), Run on physical iPhone with ADP-signed dev profile. Metro must be running for JS bundle. See **`expo-bare-build-pipeline` skill** for full pipeline + 5 specific gotchas (RN-Health vs Kingstinct New Arch trap / CocoaPods Ruby 4.0 encoding fix / prebuild --clean wipes Team / Metro JS bundle requirement / nullability warning noise).
 
 Walk the user through the manual flow corresponding to the acceptance criteria. **The smoke test is what catches platform bugs unit tests miss** — slice 1 caught the Hermes-no-crypto bug only on real device because tests injected fake uuid.
 

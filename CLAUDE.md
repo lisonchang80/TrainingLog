@@ -7,14 +7,16 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 - **Framework**: Expo SDK (latest) + React Native + TypeScript
 - **Routing**: expo-router (file-based, tabs template)
 - **Storage**: SQLite via `expo-sqlite` (local-first); pure logic / adapter / UI separated under `src/{db,domain,adapters}` (see ADR-0001 onwards)
-- **Health integration**: HealthKit via `react-native-health` (planned; requires Expo Dev Build, lands in slice 13)
+- **Health integration**: HealthKit via `@kingstinct/react-native-healthkit` (foundation shipped slice 13b 2026-05-26; data read + HKWorkout writer slice 13c-d). Originally planned as `react-native-health` but that package is legacy bridge + incompatible with New Architecture (forced on by `react-native-reanimated`'s Podspec).
 - **Apple Watch**: in scope for v1 — separate native SwiftUI target, lands in slices 11–14 (per ADR-0008)
 - **Backup / sync**: iCloud Drive whole-DB backup (per ADR-0011), lands in slice 15
 
 ## Development environment
 
 - **Primary OS**: macOS (Mac mini M4 Pro) — switched from Windows 11 on 2026-05-06
-- **Preview**: iOS Simulator on Mac (`npx expo start` → press `i`) or Expo Go on iPhone (QR scan)
+- **Preview**: 
+  - Slices 1-13a: iOS Simulator on Mac (`npx expo start` → press `i`) or Expo Go on iPhone (QR scan)
+  - Slice 13b+: Bare workflow, Xcode build to real iPhone (Expo Go path retired). See `expo-bare-build-pipeline` skill.
 - **Build / TestFlight / App Store submission**: Apple Developer Program ($99/yr) purchased on 2026-05-07 (order W1540856250); enrollment **active** since 2026-05-08 (Welcome to ADP + App Store Connect emails received). Required from slice 11 onwards (HealthKit + App Group entitlements); slices 1–10 run on Expo Go without it.
 
 ## Testing
