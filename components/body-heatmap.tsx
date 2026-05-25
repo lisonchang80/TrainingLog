@@ -19,10 +19,11 @@
  *   Q4           → #FB923C  (暖橙)
  *   Q5 highest   → #EF4444  (暖紅)
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
 import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
   M_ABS,
@@ -596,21 +597,25 @@ const LABEL_FONT_SIZE = 10;
 const COLOR_LABEL_TEXT = '#4B5563';
 
 export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
   const backData = React.useMemo(() => buildSlugData(mQuintile, 'back'), [mQuintile]);
   return (
     <View style={styles.row}>
       <View style={styles.column}>
-        <SideHeader side="front" label={t('page', 'bodyFront')} />
-        <SideContainer side="front" mQuintile={mQuintile} data={frontData} />
+        <SideHeader side="front" label={t('page', 'bodyFront')} styles={styles} />
+        <SideContainer side="front" mQuintile={mQuintile} data={frontData} styles={styles} />
       </View>
       <View style={styles.column}>
-        <SideHeader side="back" label={t('page', 'bodyBack')} />
-        <SideContainer side="back" mQuintile={mQuintile} data={backData} />
+        <SideHeader side="back" label={t('page', 'bodyBack')} styles={styles} />
+        <SideContainer side="back" mQuintile={mQuintile} data={backData} styles={styles} />
       </View>
     </View>
   );
 }
+
+type HeatmapStyles = ReturnType<typeof makeStyles>;
 
 /**
  * SideContainer — body + role overlay + fan-layout muscle-name labels for
@@ -621,10 +626,12 @@ function SideContainer({
   side,
   mQuintile,
   data,
+  styles,
 }: {
   side: 'front' | 'back';
   mQuintile: Map<string, Quintile>;
   data: ExtendedBodyPart[];
+  styles: HeatmapStyles;
 }): React.JSX.Element {
   const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
   const items = React.useMemo(
@@ -716,7 +723,15 @@ function SideContainer({
  * Centers the 正面/背面 header over the body lane only (not over the label
  * lane). Spacer-row trick mirrors muscle-body-tagger.tsx.
  */
-function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) {
+function SideHeader({
+  side,
+  label,
+  styles,
+}: {
+  side: 'front' | 'back';
+  label: string;
+  styles: HeatmapStyles;
+}) {
   const labelOnLeft = side === 'front';
   return (
     <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
@@ -731,6 +746,8 @@ function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) 
 
 /** Legend strip showing the 5-quintile colour scale, labelled as rank percentiles. */
 export function BodyHeatmapLegend() {
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   // Each quintile's upper-bound percentile (e.g. Q1 = bottom 20% → label "20%").
   const PERCENTILE_LABELS = ['20%', '40%', '60%', '80%', '100%'] as const;
   return (
@@ -754,49 +771,61 @@ export function BodyHeatmapLegend() {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  column: {
-    alignItems: 'center',
-  },
-  bodyWrap: {
-    position: 'relative',
-  },
-  label: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  muscleLabel: {
-    position: 'absolute',
-    width: LABEL_WIDTH,
-    height: LABEL_HEIGHT,
-    justifyContent: 'center',
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  swatch: {
-    width: 14,
-    height: 14,
-    borderRadius: 3,
-  },
-  legendText: {
-    fontSize: 11,
-    color: '#374151',
-  },
-});
+/**
+ * ADR-0025 — only the chrome text colors (header label, legend label) flow
+ * through tokens. The heatmap palette (QUINTILE_COLORS, COLOR_ZERO,
+ * COLOR_BODY_BASE, COLOR_OUTLINE, COLOR_SKIN, etc.) is intentionally NOT
+ * swept — those colors carry semantic meaning (frequency rank, anatomical
+ * silhouette) that must read identically in both modes.
+ *
+ * TODO(theme-wave3): consider per-mode body silhouette tones if the
+ * #FAFAFA defaultFill turns out to be unreadable in dark mode.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    column: {
+      alignItems: 'center',
+    },
+    bodyWrap: {
+      position: 'relative',
+    },
+    label: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    muscleLabel: {
+      position: 'absolute',
+      width: LABEL_WIDTH,
+      height: LABEL_HEIGHT,
+      justifyContent: 'center',
+    },
+    legendRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 8,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    swatch: {
+      width: 14,
+      height: 14,
+      borderRadius: 3,
+    },
+    legendText: {
+      fontSize: 11,
+      color: tokens.text.primary,
+    },
+  });
+}
