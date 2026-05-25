@@ -25,8 +25,19 @@
  * `deltoids`), primary wins over secondary — the visual emphasises the
  * "hottest" role across the group.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY hook shared by 3 components (MuscleBodyTagger,
+ * SideHeader, LegendItem) that all read from the same StyleSheet.
+ */
+function useBodyTaggerStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 import Body, { type ExtendedBodyPart, type Slug } from 'react-native-body-highlighter';
 import Svg, { ClipPath, Defs, Path, Polyline, Rect } from 'react-native-svg';
 
@@ -616,6 +627,7 @@ function SideContainer({
   data,
   handlePress,
 }: SideContainerProps): React.JSX.Element {
+  const styles = useBodyTaggerStyles();
   const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
   const items = React.useMemo(
     () =>
@@ -725,6 +737,7 @@ export function MuscleBodyTagger({
   mode = 'readonly',
   onTap,
 }: MuscleBodyTaggerProps): React.JSX.Element {
+  const styles = useBodyTaggerStyles();
   const frontData = React.useMemo(() => buildData(highlight, 'front'), [highlight]);
   const backData = React.useMemo(() => buildData(highlight, 'back'), [highlight]);
 
@@ -782,6 +795,7 @@ export function MuscleBodyTagger({
  * label lane and a fixed-width body slot that centers the label text.
  */
 function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) {
+  const styles = useBodyTaggerStyles();
   const labelOnLeft = side === 'front';
   return (
     <View style={{ width: SIDE_WIDTH, flexDirection: 'row' }}>
@@ -795,6 +809,7 @@ function SideHeader({ side, label }: { side: 'front' | 'back'; label: string }) 
 }
 
 function LegendItem({ color, label }: { color: string; label: string }) {
+  const styles = useBodyTaggerStyles();
   return (
     <View style={styles.legendItem}>
       <View style={[styles.swatch, { backgroundColor: color }]} />
@@ -803,47 +818,49 @@ function LegendItem({ color, label }: { color: string; label: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 4,
-  },
-  column: {
-    alignItems: 'center',
-  },
-  sideLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  label: {
-    position: 'absolute',
-    width: LABEL_WIDTH,
-    height: LABEL_HEIGHT,
-    borderWidth: 1,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
-    marginTop: 8,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  swatch: {
-    width: 12,
-    height: 12,
-    borderRadius: 3,
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#374151',
-  },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    column: {
+      alignItems: 'center',
+    },
+    sideLabel: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      marginBottom: 4,
+    },
+    label: {
+      position: 'absolute',
+      width: LABEL_WIDTH,
+      height: LABEL_HEIGHT,
+      borderWidth: 1,
+      borderRadius: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    legendRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+      marginTop: 8,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    swatch: {
+      width: 12,
+      height: 12,
+      borderRadius: 3,
+    },
+    legendText: {
+      fontSize: 12,
+      color: tokens.text.primary,
+    },
+  });
+}
