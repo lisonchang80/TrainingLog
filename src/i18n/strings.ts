@@ -371,6 +371,8 @@ export const strings = {
       sessionTitlePlaceholder: '自由訓練',
       // Slice 13 Phase A (2026-05-25) — detail page HR zone section header.
       hrZoneSection: '心率區間',
+      // Slice 13a Phase A dev-only — REMOVE in Phase B first commit.
+      devSection: '開發者 (Phase A)',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -603,6 +605,12 @@ export const strings = {
       hrChartEmptyHint: '需 Apple Watch 同步心率資料',
       hrZoneSummary: '本次訓練心率區間分佈',
       kcalEmpty: '需 Apple Watch 同步活動數據',
+      // Slice 13a Phase A dev-only — REMOVE in Phase B first commit
+      // (per ADR-0019 § Phase A Amendment risks).
+      devSimulateWatchTracked: '模擬 Apple Watch 追蹤',
+      devSimulateWatchTrackedHint: '開啟後 Today 顯示 5-tile 變體（心率 / 大卡 = —）',
+      devSimulateHKGranted: '模擬 HealthKit 授權',
+      devSimulateHKGrantedHint: 'Phase A 不影響 UI；為 Phase B 預備',
     },
 
     /**
@@ -1101,6 +1109,8 @@ export const strings = {
       sessionTitlePlaceholder: 'Freestyle session',
       // Slice 13 Phase A (2026-05-25) — detail page HR zone section header.
       hrZoneSection: 'Heart rate zones',
+      // Slice 13a Phase A dev-only — REMOVE in Phase B first commit.
+      devSection: 'Developer (Phase A)',
     },
 
     alert: {
@@ -1325,6 +1335,12 @@ export const strings = {
       hrChartEmptyHint: 'Apple Watch HR sync required',
       hrZoneSummary: 'Heart rate zone distribution',
       kcalEmpty: 'Apple Watch activity data required',
+      // Slice 13a Phase A dev-only — REMOVE in Phase B first commit
+      // (per ADR-0019 § Phase A Amendment risks).
+      devSimulateWatchTracked: 'Simulate Watch-tracked session',
+      devSimulateWatchTrackedHint: 'When ON, Today shows 5-tile variant (HR / kcal = —)',
+      devSimulateHKGranted: 'Simulate HealthKit granted',
+      devSimulateHKGrantedHint: 'No UI effect in Phase A; reserved for Phase B',
     },
 
     equipment: {

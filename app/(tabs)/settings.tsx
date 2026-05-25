@@ -18,8 +18,12 @@ import { useDatabase } from '@/components/database-provider';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import {
   getAutoPopupRestTimer,
+  getDevSimulateHKGranted,
+  getDevSimulateWatchTracked,
   getUnitPreference,
   setAutoPopupRestTimer,
+  setDevSimulateHKGranted,
+  setDevSimulateWatchTracked,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -56,6 +60,13 @@ export default function SettingsScreen() {
    */
   const [autoPopup, setAutoPopup] = useState<boolean | null>(null);
   /**
+   * Slice 13a Phase A dev toggles (REMOVE in Phase B first commit).
+   * `null` = loading. Default false — Today keeps legacy 3-tile + no HK
+   * gating until the user opts in.
+   */
+  const [devWatchTracked, setDevWatchTracked] = useState<boolean | null>(null);
+  const [devHKGranted, setDevHKGranted] = useState<boolean | null>(null);
+  /**
    * Phase 5 — locale preference. `'auto'` follows device locale, `'zh'` /
    * `'en'` are explicit overrides. Backed by AsyncStorage via
    * `locale-persist.ts`. `null` while loading (renders a default snapshot).
@@ -72,14 +83,18 @@ export default function SettingsScreen() {
   const [bwBusy, setBwBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc] = await Promise.all([
+    const [u, popup, loc, devWT, devHK] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
+      getDevSimulateWatchTracked(db),
+      getDevSimulateHKGranted(db),
     ]);
     setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
+    setDevWatchTracked(devWT);
+    setDevHKGranted(devHK);
   }, [db]);
 
   useFocusEffect(
@@ -100,6 +115,19 @@ export default function SettingsScreen() {
     // same boolean twice = no-op).
     setAutoPopup(next);
     await setAutoPopupRestTimer(db, next);
+  };
+
+  // Slice 13a Phase A dev toggles — REMOVE in Phase B first commit
+  // (per ADR-0019 § Phase A Amendment risks). Optimistic write same as
+  // autoPopup pattern above.
+  const onToggleDevWatchTracked = async (next: boolean) => {
+    setDevWatchTracked(next);
+    await setDevSimulateWatchTracked(db, next);
+  };
+
+  const onToggleDevHKGranted = async (next: boolean) => {
+    setDevHKGranted(next);
+    await setDevSimulateHKGranted(db, next);
   };
 
   /**
@@ -279,6 +307,34 @@ export default function SettingsScreen() {
 
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
         <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
+
+        {/* Slice 13a Phase A — 開發者 section.
+            REMOVE this entire block in Phase B first commit once
+            HealthKit + Watch unlock real Watch-tracked + HK-granted
+            states (per ADR-0019 § Phase A Amendment risks). */}
+        <Text style={styles.section}>{t('page', 'devSection')}</Text>
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={styles.switchLabel}>{t('status', 'devSimulateWatchTracked')}</Text>
+            <Text style={styles.hint}>{t('status', 'devSimulateWatchTrackedHint')}</Text>
+          </View>
+          <Switch
+            value={devWatchTracked ?? false}
+            onValueChange={onToggleDevWatchTracked}
+            disabled={devWatchTracked === null}
+          />
+        </View>
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={styles.switchLabel}>{t('status', 'devSimulateHKGranted')}</Text>
+            <Text style={styles.hint}>{t('status', 'devSimulateHKGrantedHint')}</Text>
+          </View>
+          <Switch
+            value={devHKGranted ?? false}
+            onValueChange={onToggleDevHKGranted}
+            disabled={devHKGranted === null}
+          />
+        </View>
       </ScrollView>
 
       {/* ADR-0024 § 5 — 體重 mini sheet (modal). 單一 TextInput + 儲存。 */}
