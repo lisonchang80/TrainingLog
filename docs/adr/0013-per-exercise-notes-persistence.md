@@ -108,10 +108,22 @@ Freestyle session flow：
 └─────────────────────────────────┘
 ```
 
-- 圖標：**SF Symbol `text.bubble`**（一致 iconography），非 emoji
+- 圖標：**SF Symbol `text.bubble`**（一致 iconography），非 emoji（**2026-05-25 G2 修訂**：實裝採 `💬` emoji，與全 app affordance icon 路線一致 (`⚙️ 🗑️ 📖 ⏱️`)；無 `expo-symbols` 依賴）
 - 顯示位置：動作圖正下方、Set rows 上方
 - 為空 → 不顯示區塊（不佔垂直空間）
 - 非空 → 直行純文字、secondary 字色、無「備註：」標題前綴
+
+### Cluster card per-side notes preview（2026-05-25 G2 amendment）
+
+Cluster card 代表 2 個 exercises（A + B），各自有獨立 `exercise.notes`。本 ADR 原圖示只畫 solo card；G2 grill 拍板 cluster case 規則：
+
+- **A/B 各佔一行**：`💬 A: <notesA>` + `💬 B: <notesB>`，A 在上 B 在下（cluster pair 排序一致）
+- **空側跳過該行**：若僅 A 有 notes，只顯示 A row（不留空白 B row）
+- **雙空整區塊不顯**：含 divider；clusterBody 內無 notes 區塊也無下緣 gap
+- **位置**：clusterBody 內、sideLabelRow 上方（mirror solo card「動作圖正下方、set rows 上方」相對位置）
+- **樣式**：與 solo card `exerciseCardNotes` 一致（amber sticky-note callout：bg `#FEF3C7` / borderLeft `#F59E0B` / text `#78350F`）；warm-amber 跨 light/dark mode 保留為 ADR-0025 semantic callout 例外
+
+實裝位置：`components/session/cluster-card.tsx` clusterBody 區塊內，`styles.clusterNotes` + `styles.clusterNotesText`。
 
 ### ⚙ menu entry（Q5.3a）
 

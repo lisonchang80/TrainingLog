@@ -2828,7 +2828,7 @@ function EditableExerciseCard({
           {planRow.exercise_notes && planRow.exercise_notes.trim().length > 0 ? (
             <View style={styles.exerciseCardNotes}>
               <Text style={styles.exerciseCardNotesText}>
-                📝 {planRow.exercise_notes.trim()}
+                💬 {planRow.exercise_notes.trim()}
               </Text>
             </View>
           ) : null}

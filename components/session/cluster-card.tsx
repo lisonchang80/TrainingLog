@@ -258,6 +258,35 @@ export function ClusterCard({
 
       {isExpanded ? (
         <View style={styles.clusterBody}>
+          {/*
+            ADR-0013 (G2 2026-05-25 amendment) — per-side `exercise.notes`
+            preview. Cluster represents 2 exercises, each carrying its own
+            global notes; render A and B on independent rows so neither
+            side hides the other's coaching cues. Empty side → row skipped;
+            both empty → entire block (incl. divider) absent so the cluster
+            stays visually tight when no coaching cue exists.
+          */}
+          {(() => {
+            const aNotes =
+              group.a.exercise.exercise_notes?.trim() ?? '';
+            const bNotes =
+              group.b.exercise.exercise_notes?.trim() ?? '';
+            if (!aNotes && !bNotes) return null;
+            return (
+              <View style={styles.clusterNotes}>
+                {aNotes ? (
+                  <Text style={styles.clusterNotesText}>
+                    💬 A: {aNotes}
+                  </Text>
+                ) : null}
+                {bNotes ? (
+                  <Text style={styles.clusterNotesText}>
+                    💬 B: {bNotes}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })()}
           {/* Side labels row — columns align with cycle row:
               [sharedLabelBtn 28] [cycleSide A] [divider 1] [cycleSide B] [completeBtn 28]. */}
           <View style={styles.sideLabelRow}>
@@ -698,6 +727,24 @@ function makeStyles(tokens: ThemeTokens) {
       paddingHorizontal: 12,
       paddingBottom: 12,
       gap: 6,
+    },
+    // ADR-0013 G2 (2026-05-25 amendment) — cluster per-side notes preview.
+    // Mirror solo card's `exerciseCardNotes` amber sticky-note styling for
+    // visual consistency (warm-amber accent intentionally retained across
+    // theme modes per ADR-0025 — semantic callout, not generic surface).
+    clusterNotes: {
+      backgroundColor: '#FEF3C7',
+      borderLeftWidth: 3,
+      borderLeftColor: '#F59E0B',
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      borderRadius: 4,
+      gap: 4,
+    },
+    clusterNotesText: {
+      fontSize: 13,
+      color: '#78350F',
+      lineHeight: 18,
     },
     sideLabelRow: {
       flexDirection: 'row',
