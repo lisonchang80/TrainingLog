@@ -136,6 +136,17 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
+
+/**
+ * ADR-0025 — DRY helper for the 5 components in this file that all need
+ * the same memoised styles. Each calls `useSessionStyles()` instead of
+ * repeating useTheme + useMemo (mirror app/(tabs)/library.tsx pattern).
+ */
+function useSessionStyles() {
+  const { tokens } = useTheme();
+  return useMemo(() => makeStyles(tokens), [tokens]);
+}
 
 /**
  * Session detail page — ADR-0019 Q10 final layout (slice 10c session detail).
@@ -182,6 +193,8 @@ export default function SessionDetailScreen() {
   }>();
   const db = useDatabase();
   const router = useRouter();
+  // ADR-0025 — token-driven styles for this screen.
+  const styles = useSessionStyles();
 
   const navState = useMemo(
     () =>
@@ -2330,6 +2343,7 @@ function SoloExerciseBlock({
   exercise: SessionExerciseRowWithName;
   sets: SessionSetWithExercise[];
 }) {
+  const styles = useSessionStyles();
   // Session 詳情頁 read mode：用 computeSessionSetLayout，dropset chain
   // 只在 head 顯示 `D{N}`、follower 留空（mirror active session / edit mode）。
   // 避免出現 D1..D12 把整條 chain 每個 row 都當獨立 D 算的問題。
@@ -2377,6 +2391,7 @@ function ReadOnlySetRow({
   setRow: SessionSetWithExercise;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
 }) {
+  const styles = useSessionStyles();
   return (
     <View style={styles.setRow}>
       <Text style={styles.setOrdering}>{label}</Text>
@@ -2470,7 +2485,11 @@ function ClusterBlock({
   cluster: ClusterRow;
   rs: ReusableSupersetWithExercises | null;
 }) {
-  const color = rs?.superset.color_hex ?? '#9aa0a6';
+  const styles = useSessionStyles();
+  const { tokens } = useTheme();
+  // Fallback border accent for clusters with no RS color — use border.default
+  // (legacy `#9aa0a6` was a hard-coded mid-gray with bad dark-mode contrast).
+  const color = rs?.superset.color_hex ?? tokens.border.default;
   const rowCount = Math.max(cluster.setsA.length, cluster.setsB.length);
   const rows = Array.from({ length: rowCount }).map((_, i) => ({
     a: cluster.setsA[i] ?? null,
@@ -2649,6 +2668,8 @@ function EditableExerciseCard({
   onLongPressHeader,
   onConfirmReorderSets,
 }: EditableExerciseCardProps) {
+  const styles = useSessionStyles();
+  const { tokens } = useTheme();
   // Slice 10c overnight #61 — labels + groups via computeSessionSetLayout
   // (mirror active session / template editor). Replaces prior
   // computeWorkingSetOrdinals + displaySetLabel path.
@@ -2801,7 +2822,7 @@ function EditableExerciseCard({
                       {
                         key: 'delete',
                         label: t('common', 'delete'),
-                        color: '#dc3545',
+                        color: tokens.action.destructive,
                         onPress: () => onDeleteSet(head.id),
                       },
                     ]}
@@ -2809,13 +2830,13 @@ function EditableExerciseCard({
                       {
                         key: 'add',
                         label: '+1',
-                        color: '#28a745',
+                        color: tokens.action.success,
                         onPress: () => onAddSetAfter(head.id),
                       },
                       {
                         key: 'note',
                         label: t('domain', 'note'),
-                        color: '#007AFF',
+                        color: tokens.action.primary,
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
                     ]}
@@ -2979,371 +3000,458 @@ function EditableExerciseCard({
 // Styles
 // ─────────────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.2)',
-    gap: 8,
-  },
-  headerBackBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  headerBackText: { fontSize: 15, color: '#007AFF' },
-  headerTitle: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
-  headerTitleRow: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  headerTitleText: { fontSize: 17, fontWeight: '700' },
-  editChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    backgroundColor: '#FF375F',
-  },
-  editChipText: { color: 'white', fontSize: 12, fontWeight: '700' },
-  headerSpacer: { width: 60 },
-  headerDoneBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    minWidth: 60,
-    alignItems: 'flex-end',
-  },
-  headerDoneText: { fontSize: 15, color: '#007AFF', fontWeight: '700' },
+/**
+ * ADR-0025 — token-driven styles. The 3349-LOC detail page mirrors the
+ * canonical big-file pattern in `app/(tabs)/index.tsx`: all 5 components
+ * (SessionDetailScreen + 4 sub-cards) call `useSessionStyles()` to derive
+ * matching styles from the same token set.
+ *
+ * Notable kept-raw exceptions (with reason):
+ *   - `#FF375F` editChip — high-saturation "Editing" pink badge, brand
+ *     accent kept identical across modes (visual flag the user is in
+ *     mutation mode; must remain attention-grabbing in both themes).
+ *   - `#FEF3C7` / `#F59E0B` / `#78350F` notes callout — semantic amber
+ *     "post-it" identical to TodayScreen's notes block (matches index.tsx
+ *     wave-1 sweep; explicitly kept raw there for the same reason).
+ *   - `#5856D6` supersetTag — brand indigo matching template-editor +
+ *     ClusterCard (visual consistency with the «超» chip elsewhere).
+ *   - Drag-active card shadow `#000` — shadow color, not a theme surface.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.default,
+      gap: 8,
+    },
+    headerBackBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+    headerBackText: { fontSize: 15, color: tokens.action.primary },
+    headerTitle: {
+      flex: 1,
+      fontSize: 17,
+      fontWeight: '700',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    headerTitleRow: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    headerTitleText: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    // Editing chip — kept raw `#FF375F` brand pink, identical in both
+    // modes so it stays attention-grabbing as a mutation-mode flag.
+    editChip: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+      backgroundColor: '#FF375F',
+    },
+    editChipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+    headerSpacer: { width: 60 },
+    headerDoneBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      minWidth: 60,
+      alignItems: 'flex-end',
+    },
+    headerDoneText: {
+      fontSize: 15,
+      color: tokens.action.primary,
+      fontWeight: '700',
+    },
 
-  // Same-day switcher sub-row.
-  sameDayBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    gap: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(127,127,127,0.15)',
-    backgroundColor: 'rgba(0,122,255,0.04)',
-  },
-  sameDayBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,122,255,0.12)',
-  },
-  sameDayBtnDisabled: { backgroundColor: 'rgba(127,127,127,0.08)' },
-  sameDayBtnText: { fontSize: 17, color: '#007AFF', fontWeight: '600' },
-  sameDayBtnTextDisabled: { color: 'rgba(127,127,127,0.4)' },
-  sameDayIndicator: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1F2937',
-    minWidth: 36,
-    textAlign: 'center',
-  },
-  body: { padding: 16, gap: 12, paddingBottom: 100 },
-  timestamp: { fontSize: 13, opacity: 0.65 },
-  section: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-  },
-  hideUncheckedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  hideUncheckedLabel: { fontSize: 13, color: '#6B7280' },
+    // Same-day switcher sub-row.
+    sameDayBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      gap: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: tokens.border.subtle,
+      backgroundColor: tokens.bg.elevated,
+    },
+    sameDayBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tokens.bg.surface,
+    },
+    sameDayBtnDisabled: { backgroundColor: tokens.bg.elevated },
+    sameDayBtnText: {
+      fontSize: 17,
+      color: tokens.action.primary,
+      fontWeight: '600',
+    },
+    sameDayBtnTextDisabled: { color: tokens.text.tertiary },
+    sameDayIndicator: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      minWidth: 36,
+      textAlign: 'center',
+    },
+    body: { padding: 16, gap: 12, paddingBottom: 100 },
+    timestamp: { fontSize: 13, color: tokens.text.secondary },
+    section: { fontSize: 14, fontWeight: '600', color: tokens.text.secondary },
+    sectionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 12,
+    },
+    hideUncheckedToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    hideUncheckedLabel: { fontSize: 13, color: tokens.text.secondary },
 
-  // Empty-state placeholder (mirror Today's emptyPlanBlock).
-  emptyPlanBlock: {
-    padding: 24,
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(127,127,127,0.06)',
-    borderRadius: 12,
-    marginTop: 8,
-  },
-  emptyPlanTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  emptyPlanBody: { fontSize: 13, color: '#6B7280', textAlign: 'center' },
-  planList: { gap: 8, marginTop: 8 },
+    // Empty-state placeholder (mirror Today's emptyPlanBlock).
+    emptyPlanBlock: {
+      padding: 24,
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 12,
+      marginTop: 8,
+    },
+    emptyPlanTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    emptyPlanBody: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+    },
+    planList: { gap: 8, marginTop: 8 },
 
-  // ── Read-mode solo card ──────────────────────────────────────────────
-  exCard: {
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(127,127,127,0.3)',
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  exHeader: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  exName: { fontSize: 15, fontWeight: '600' },
-  setsBox: {
-    paddingHorizontal: 12,
-    paddingBottom: 10,
-    gap: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.15)',
-    paddingTop: 8,
-  },
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  setOrdering: { fontSize: 13, opacity: 0.6, width: 28 },
-  setText: { flex: 1, fontSize: 14 },
-  setCheck: { fontSize: 16, color: '#34C759', fontWeight: '600' },
+    // ── Read-mode solo card ──────────────────────────────────────────────
+    exCard: {
+      borderRadius: 10,
+      backgroundColor: tokens.bg.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      overflow: 'hidden',
+      marginTop: 8,
+    },
+    exHeader: {
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    exName: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    setsBox: {
+      paddingHorizontal: 12,
+      paddingBottom: 10,
+      gap: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.subtle,
+      paddingTop: 8,
+    },
+    setRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 4,
+    },
+    setOrdering: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      width: 28,
+    },
+    setText: { flex: 1, fontSize: 14, color: tokens.text.primary },
+    setCheck: {
+      fontSize: 16,
+      color: tokens.action.success,
+      fontWeight: '600',
+    },
 
-  // ── Read-mode cluster card ───────────────────────────────────────────
-  clusterCard: {
-    borderWidth: 1.5,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
-  },
-  clusterHeader: {
-    flexDirection: 'column',
-    gap: 4,
-    marginBottom: 0,
-  },
-  clusterTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  supersetTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    backgroundColor: '#5856D6',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
-  },
-  // Main title matches solo exName (fontSize 15 / weight 600).
-  clusterLabel: { fontSize: 15, fontWeight: '600' },
-  clusterPlus: { fontSize: 15, opacity: 0.5 },
-  clusterPairRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  clusterCycle: { fontSize: 12, opacity: 0.6, width: 24 },
-  clusterCell: { flex: 1 },
-  clusterCellText: { fontSize: 13 },
-  clusterCellEmpty: { fontSize: 13, opacity: 0.3 },
-  // Fixed-width slot keeps A/B columns aligned regardless of whether the
-  // ✓ checkmark is shown (else flex:1 cells absorb the extra width and
-  // B drifts right when no logged set in that cycle).
-  clusterCheckSlot: { width: 16, alignItems: 'center' },
-  // Column sub-header — smaller than main title, sits tight above the rows.
-  clusterColumnHeader: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
-  clusterDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    marginTop: 2,
-    marginBottom: 4,
-  },
+    // ── Read-mode cluster card ───────────────────────────────────────────
+    clusterCard: {
+      borderWidth: 1.5,
+      borderRadius: 12,
+      padding: 12,
+      marginTop: 8,
+    },
+    clusterHeader: {
+      flexDirection: 'column',
+      gap: 4,
+      marginBottom: 0,
+    },
+    clusterTagRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    // ADR-0025 — purple/white kept raw: brand accent matches the «超» pill
+    // in components/session/cluster-card.tsx + template-editor.
+    supersetTag: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#fff',
+      backgroundColor: '#5856D6',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      overflow: 'hidden',
+      alignSelf: 'flex-start',
+    },
+    // Main title matches solo exName (fontSize 15 / weight 600).
+    clusterLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    clusterPlus: { fontSize: 15, color: tokens.text.tertiary },
+    clusterPairRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 4,
+    },
+    clusterCycle: {
+      fontSize: 12,
+      color: tokens.text.secondary,
+      width: 24,
+    },
+    clusterCell: { flex: 1 },
+    clusterCellText: { fontSize: 13, color: tokens.text.primary },
+    clusterCellEmpty: { fontSize: 13, color: tokens.text.tertiary },
+    // Fixed-width slot keeps A/B columns aligned regardless of whether the
+    // ✓ checkmark is shown (else flex:1 cells absorb the extra width and
+    // B drifts right when no logged set in that cycle).
+    clusterCheckSlot: { width: 16, alignItems: 'center' },
+    // Column sub-header — smaller than main title, sits tight above the rows.
+    clusterColumnHeader: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    clusterDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: tokens.border.default,
+      marginTop: 2,
+      marginBottom: 4,
+    },
 
-  // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
-  exerciseCard: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(127,127,127,0.3)',
-    overflow: 'hidden',
-  },
-  exerciseCardExpanded: {
-    borderColor: 'rgba(0,122,255,0.45)',
-  },
-  exerciseCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  exerciseCardHeaderMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  planText: { flex: 1, gap: 4 },
-  exerciseCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  planName: { fontSize: 15, fontWeight: '600' },
-  exerciseCardProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  exerciseCardProgressBarFill: { flex: 1 },
-  exerciseCardVolumeChip: {
-    fontSize: 12,
-    fontWeight: '600',
-    opacity: 0.7,
-    minWidth: 76,
-    textAlign: 'right',
-  },
-  exerciseCardChevron: {
-    fontSize: 14,
-    opacity: 0.5,
-    width: 18,
-    textAlign: 'right',
-  },
-  exerciseCardGear: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  exerciseCardGearText: { fontSize: 18 },
-  // Slice 10e bundle 1 — inline notes callout in expanded session card.
-  exerciseCardNotes: {
-    backgroundColor: '#FEF3C7',
-    borderLeftWidth: 3,
-    borderLeftColor: '#F59E0B',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 4,
-  },
-  exerciseCardNotesText: {
-    fontSize: 13,
-    color: '#78350F',
-    lineHeight: 18,
-  },
-  exerciseCardBody: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 6,
-  },
-  exerciseCardEmpty: {
-    fontSize: 13,
-    opacity: 0.55,
-    fontStyle: 'italic',
-    paddingVertical: 8,
-  },
-  exerciseCardSetRowWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    gap: 8,
-  },
-  exerciseCardSetRowContent: {
-    flex: 1,
-  },
-  /**
-   * Slice 10c overnight #61 — dropset chain cluster stack. Head + all
-   * followers render inside ONE SwipeableSetRow (single swipe unit),
-   * stacked vertically via this container. Mirror Today
-   * (`exerciseCardDropsetClusterStack` in app/(tabs)/index.tsx).
-   */
-  exerciseCardDropsetClusterStack: {
-    flexDirection: 'column',
-  },
-  exerciseCardSetRowDragActive: {
-    backgroundColor: '#f3f4f6',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
-  exerciseCardFooter: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  exerciseCardFooterBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  exerciseCardFooterBtnPrimary: {
-    backgroundColor: '#0a7ea4',
-  },
-  exerciseCardFooterBtnSecondary: {
-    backgroundColor: 'rgba(127,127,127,0.18)',
-  },
-  exerciseCardFooterBtnTextPrimary: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  exerciseCardFooterBtnTextSecondary: {
-    color: '#0a7ea4',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  completeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(127,127,127,0.18)',
-  },
-  completeBtnDone: { backgroundColor: '#28a745' },
-  completeBtnText: { fontSize: 14, fontWeight: '700', color: '#6b7280' },
-  completeBtnTextDone: { color: 'white' },
-  /**
-   * Slice 10c overnight #61 — same width as completeBtn so dropset
-   * follower rows keep their SetRowContent column-aligned with the head
-   * row (head has ✓, follower has nothing).
-   */
-  completeBtnSpacer: { width: 28, height: 28 },
+    // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
+    exerciseCard: {
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
+      overflow: 'hidden',
+    },
+    exerciseCardExpanded: {
+      borderColor: tokens.action.primary,
+    },
+    exerciseCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    exerciseCardHeaderMain: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    planText: { flex: 1, gap: 4 },
+    exerciseCardTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    planName: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.text.primary,
+    },
+    exerciseCardProgressRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      width: '100%',
+    },
+    exerciseCardProgressBarFill: { flex: 1 },
+    exerciseCardVolumeChip: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+      minWidth: 76,
+      textAlign: 'right',
+    },
+    exerciseCardChevron: {
+      fontSize: 14,
+      color: tokens.text.tertiary,
+      width: 18,
+      textAlign: 'right',
+    },
+    exerciseCardGear: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    exerciseCardGearText: { fontSize: 18 },
+    // Slice 10e bundle 1 — per-Exercise notes callout. Semantic amber
+    // "post-it" kept raw to mirror the wave-1 TodayScreen sweep — high-
+    // saturation warmth signals user-authored note regardless of mode.
+    exerciseCardNotes: {
+      backgroundColor: '#FEF3C7',
+      borderLeftWidth: 3,
+      borderLeftColor: '#F59E0B',
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      borderRadius: 4,
+    },
+    exerciseCardNotesText: {
+      fontSize: 13,
+      color: '#78350F',
+      lineHeight: 18,
+    },
+    exerciseCardBody: {
+      paddingHorizontal: 12,
+      paddingBottom: 12,
+      gap: 6,
+    },
+    exerciseCardEmpty: {
+      fontSize: 13,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+      paddingVertical: 8,
+    },
+    exerciseCardSetRowWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 4,
+      gap: 8,
+    },
+    exerciseCardSetRowContent: {
+      flex: 1,
+    },
+    /**
+     * Slice 10c overnight #61 — dropset chain cluster stack. Head + all
+     * followers render inside ONE SwipeableSetRow (single swipe unit),
+     * stacked vertically via this container. Mirror Today
+     * (`exerciseCardDropsetClusterStack` in app/(tabs)/index.tsx).
+     */
+    exerciseCardDropsetClusterStack: {
+      flexDirection: 'column',
+    },
+    exerciseCardSetRowDragActive: {
+      backgroundColor: tokens.bg.elevated,
+      elevation: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.18,
+      shadowRadius: 6,
+      borderRadius: 8,
+    },
+    exerciseCardFooter: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    exerciseCardFooterBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    exerciseCardFooterBtnPrimary: {
+      backgroundColor: tokens.action.primary,
+    },
+    exerciseCardFooterBtnSecondary: {
+      backgroundColor: tokens.bg.elevated,
+    },
+    exerciseCardFooterBtnTextPrimary: {
+      color: tokens.action.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    exerciseCardFooterBtnTextSecondary: {
+      color: tokens.action.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    completeBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tokens.bg.elevated,
+    },
+    completeBtnDone: { backgroundColor: tokens.action.success },
+    completeBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+    },
+    completeBtnTextDone: { color: tokens.action.onPrimary },
+    /**
+     * Slice 10c overnight #61 — same width as completeBtn so dropset
+     * follower rows keep their SetRowContent column-aligned with the head
+     * row (head has ✓, follower has nothing).
+     */
+    completeBtnSpacer: { width: 28, height: 28 },
 
-  // ── Bottom 4-button sticky action bar ───────────────────────────────
-  actionBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    gap: 6,
-    backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(127,127,127,0.2)',
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,122,255,0.10)',
-    alignItems: 'center',
-  },
-  actionBtnActive: { backgroundColor: 'rgba(0,122,255,0.25)' },
-  actionBtnDisabled: { opacity: 0.4 },
-  actionBtnPrimary: { backgroundColor: '#0a7ea4' },
-  actionBtnText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
-  actionBtnTextActive: { color: '#0050B3' },
-  actionBtnTextPrimary: { color: 'white', fontWeight: '700' },
-  actionBtnTextDestructive: { color: '#FF3B30' },
+    // ── Bottom 4-button sticky action bar ───────────────────────────────
+    actionBar: {
+      flexDirection: 'row',
+      paddingHorizontal: 8,
+      paddingVertical: 10,
+      gap: 6,
+      backgroundColor: tokens.bg.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: tokens.border.default,
+    },
+    actionBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.elevated,
+      alignItems: 'center',
+    },
+    actionBtnActive: { backgroundColor: tokens.action.primary },
+    actionBtnDisabled: { opacity: 0.4 },
+    actionBtnPrimary: { backgroundColor: tokens.action.primary },
+    actionBtnText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.action.primary,
+    },
+    actionBtnTextActive: { color: tokens.action.onPrimary },
+    actionBtnTextPrimary: { color: tokens.action.onPrimary, fontWeight: '700' },
+    actionBtnTextDestructive: { color: tokens.action.destructive },
 
-  btnPressed: { opacity: 0.85 },
-  btnDisabled: { opacity: 0.45 },
+    btnPressed: { opacity: 0.85 },
+    btnDisabled: { opacity: 0.45 },
 
-  muted: { fontSize: 14, opacity: 0.6 },
-  error: { fontSize: 14, color: '#dc3545' },
-});
+    muted: { fontSize: 14, color: tokens.text.secondary },
+    error: { fontSize: 14, color: tokens.action.destructive },
+  });
+}
