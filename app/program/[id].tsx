@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,14 +8,19 @@ import { getProgram } from '@/src/adapters/sqlite/programRepository';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import type { ProgramWithCells } from '@/src/domain/program/types';
 import { t, tMainTagLine, tWeekdayLabels } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Program detail screen — calendar grid showing the fan-out of cycles ×
  * days, with each cell rendering its template name + sub_tag.
+ *
+ * ADR-0025 — all colors flow from useTheme().tokens via makeStyles below.
  */
 export default function ProgramDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [data, setData] = useState<ProgramWithCells | null>(null);
   const [templatesById, setTemplatesById] = useState<Record<string, TemplateSummary>>({});
 
@@ -103,35 +108,51 @@ export default function ProgramDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 16, gap: 8 },
-  heading: { fontSize: 24, fontWeight: '700' },
-  tag: { fontSize: 13, opacity: 0.8 },
-  meta: { fontSize: 12, opacity: 0.7, marginBottom: 8 },
-  row: { flexDirection: 'row' },
-  cycleLabelHeader: {
-    width: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cellHeader: {
-    flex: 1,
-    paddingVertical: 6,
-    alignItems: 'center',
-  },
-  headerLabel: { fontSize: 12, fontWeight: '700', opacity: 0.7 },
-  cell: {
-    flex: 1,
-    margin: 2,
-    minHeight: 56,
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: 'rgba(127,127,127,0.10)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cellName: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  cellTag: { fontSize: 9, opacity: 0.65, marginTop: 2, textAlign: 'center' },
-  empty: { fontSize: 14, opacity: 0.6, fontStyle: 'italic' },
-});
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: tokens.bg.base },
+    body: { padding: 16, gap: 8 },
+    heading: { fontSize: 24, fontWeight: '700', color: tokens.text.primary },
+    tag: { fontSize: 13, color: tokens.text.secondary },
+    meta: { fontSize: 12, color: tokens.text.secondary, marginBottom: 8 },
+    row: { flexDirection: 'row' },
+    cycleLabelHeader: {
+      width: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cellHeader: {
+      flex: 1,
+      paddingVertical: 6,
+      alignItems: 'center',
+    },
+    headerLabel: { fontSize: 12, fontWeight: '700', color: tokens.text.secondary },
+    cell: {
+      flex: 1,
+      margin: 2,
+      minHeight: 56,
+      padding: 6,
+      borderRadius: 6,
+      backgroundColor: tokens.bg.elevated,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    cellName: {
+      fontSize: 11,
+      fontWeight: '600',
+      textAlign: 'center',
+      color: tokens.text.primary,
+    },
+    cellTag: {
+      fontSize: 9,
+      color: tokens.text.tertiary,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    empty: {
+      fontSize: 14,
+      color: tokens.text.tertiary,
+      fontStyle: 'italic',
+    },
+  });
+}
