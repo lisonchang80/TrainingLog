@@ -155,6 +155,7 @@ import type { BucketKey, PRDelta } from '@/src/domain/pr/types';
 import {
   t,
   tA11yStartPlanned,
+  tExercise,
   tExerciseCount,
   tExerciseNoteHeader,
   tPrDeltaLine,
@@ -1276,7 +1277,7 @@ export default function TodayScreen() {
             : plan.find((p) => p.exercise_id === toggled.exercise_id) ?? null)
         : null;
       const rest_sec = planRow?.rest_sec ?? 60;
-      const exercise_name = planRow?.exercise_name ?? '';
+      const exercise_name = planRow?.exercise_name ? tExercise(planRow.exercise_name) : '';
       setRestTimerTarget({ rest_sec, exercise_name });
       setRestTimerTrigger((n) => n + 1);
     } else if (nextLogged === 0) {
@@ -1342,7 +1343,7 @@ export default function TodayScreen() {
       // either child's. Falls back to 60s when NULL (system default).
       const rest_sec = group.a.exercise.rest_sec ?? 60;
       // Banner-style name: "A名 + B名"
-      const exercise_name = `${group.a.exercise.exercise_name} + ${group.b.exercise.exercise_name}`;
+      const exercise_name = `${tExercise(group.a.exercise.exercise_name)} + ${tExercise(group.b.exercise.exercise_name)}`;
       setRestTimerTarget({ rest_sec, exercise_name });
       setRestTimerTrigger((n) => n + 1);
     } else if (nextLogged === 0) {
@@ -1589,7 +1590,7 @@ export default function TodayScreen() {
     const destructiveButtonIndex = isCluster ? 5 : 3;
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: planRow.exercise_name,
+        title: tExercise(planRow.exercise_name),
         options: menuOptions,
         cancelButtonIndex: 0,
         destructiveButtonIndex,
@@ -1663,8 +1664,9 @@ export default function TodayScreen() {
             const partnerPlan = plan.find(
               (p) => p.id === partnerSessionExerciseId,
             );
-            const partnerName =
-              partnerPlan?.exercise_name ?? t('common', 'unknownExercise');
+            const partnerName = partnerPlan?.exercise_name
+              ? tExercise(partnerPlan.exercise_name)
+              : t('common', 'unknownExercise');
             const setsForCluster = setsInSession.filter(
               (s) =>
                 s.session_exercise_id === planRow.id ||
@@ -1683,7 +1685,7 @@ export default function TodayScreen() {
             Alert.alert(
               t('alert', 'deleteSupersetQ'),
               tRemoveSupersetFromSessionPrompt(
-                planRow.exercise_name,
+                tExercise(planRow.exercise_name),
                 partnerName,
                 warningSuffix,
               ),
@@ -1749,7 +1751,7 @@ export default function TodayScreen() {
                 : '';
           Alert.alert(
             t('alert', 'deleteExerciseQ'),
-            tRemoveExerciseFromSessionPrompt(planRow.exercise_name, warningSuffix),
+            tRemoveExerciseFromSessionPrompt(tExercise(planRow.exercise_name), warningSuffix),
             [
               { text: t('common', 'cancel'), style: 'cancel' },
               {
@@ -2821,7 +2823,7 @@ function ExerciseCard({
           <View style={styles.planText}>
             <View style={styles.exerciseCardTitleRow}>
               <Text style={styles.planName} numberOfLines={1}>
-                {planRow.exercise_name}
+                {tExercise(planRow.exercise_name)}
               </Text>
             </View>
             {(() => {
