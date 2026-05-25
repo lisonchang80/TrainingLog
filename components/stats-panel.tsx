@@ -37,6 +37,7 @@ import type {
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
 import { t, tMuscleGroup } from '@/src/i18n';
+import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
  * Period selector labels. Backed by `domain.year/month/week` keys in
@@ -97,6 +98,8 @@ function formatAnchorLabel(d: Date): string {
 
 export function StatsPanel() {
   const db = useDatabase();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
   // Anchor date drives the histogram X-axis. Default = today at 00:00 local.
@@ -364,79 +367,101 @@ export function StatsPanel() {
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { padding: 16, gap: 12 },
-  periodRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    padding: 4,
-    gap: 4,
-  },
-  periodBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  periodBtnActive: { backgroundColor: '#fff' },
-  periodBtnText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
-  periodBtnTextActive: { color: '#111827', fontWeight: '700' },
-  anchorRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  anchorBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  anchorBtnLabel: { fontSize: 13, color: '#6B7280' },
-  anchorBtnDate: { flex: 1, fontSize: 14, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
-  anchorBtnCaret: { fontSize: 14, color: '#6B7280' },
-  anchorTodayBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: '#111827',
-    borderRadius: 10,
-  },
-  anchorTodayText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  pickerWrap: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 4,
-  },
-  card: {
-    backgroundColor: 'rgba(127,127,127,0.08)',
-    borderRadius: 12,
-    padding: 14,
-    gap: 8,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700' },
-  cardSubtitle: { fontSize: 12, color: '#6B7280' },
-  emptyText: { fontSize: 13, color: '#6B7280', textAlign: 'center', paddingVertical: 16 },
-  mgGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  mgCell: {
-    width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 8,
-    gap: 4,
-  },
-  mgCellHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  mgCellName: { fontSize: 13, fontWeight: '700' },
-  mgCellTotal: { fontSize: 11, color: '#6B7280', fontVariant: ['tabular-nums'] },
-  durationFootnote: {
-    fontSize: 11,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-});
+/**
+ * ADR-0025 — all chrome colors flow from tokens. Histogram bar colors
+ * (#6366F1 indigo for capacity, #10B981 emerald for duration) stay
+ * literal because they're data-viz palette per-MG / per-metric.
+ */
+function makeStyles(tokens: ThemeTokens) {
+  return StyleSheet.create({
+    scroll: { padding: 16, gap: 12 },
+    periodRow: {
+      flexDirection: 'row',
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      padding: 4,
+      gap: 4,
+    },
+    periodBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    periodBtnActive: { backgroundColor: tokens.bg.surface },
+    periodBtnText: { fontSize: 14, fontWeight: '500', color: tokens.text.secondary },
+    periodBtnTextActive: { color: tokens.text.primary, fontWeight: '700' },
+    anchorRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    anchorBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+    },
+    anchorBtnLabel: { fontSize: 13, color: tokens.text.secondary },
+    anchorBtnDate: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '700',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    anchorBtnCaret: { fontSize: 14, color: tokens.text.secondary },
+    anchorTodayBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      backgroundColor: tokens.action.primary,
+      borderRadius: 10,
+    },
+    anchorTodayText: { color: tokens.action.onPrimary, fontSize: 13, fontWeight: '700' },
+    pickerWrap: {
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 12,
+      paddingVertical: 4,
+    },
+    card: {
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 12,
+      padding: 14,
+      gap: 8,
+    },
+    cardTitle: { fontSize: 15, fontWeight: '700', color: tokens.text.primary },
+    cardSubtitle: { fontSize: 12, color: tokens.text.secondary },
+    emptyText: {
+      fontSize: 13,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      paddingVertical: 16,
+    },
+    mgGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    mgCell: {
+      width: '48%',
+      backgroundColor: tokens.bg.surface,
+      borderRadius: 8,
+      padding: 8,
+      gap: 4,
+    },
+    mgCellHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+    mgCellName: { fontSize: 13, fontWeight: '700', color: tokens.text.primary },
+    mgCellTotal: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      fontVariant: ['tabular-nums'],
+    },
+    durationFootnote: {
+      fontSize: 11,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      marginTop: 4,
+    },
+  });
+}
