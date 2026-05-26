@@ -35,18 +35,13 @@ import {
   discardSession,
   endSession,
   getActiveSession,
-  getSession,
   listSessionExercisesWithName,
   appendReusableSupersetToSession,
   reorderSessionExercises,
-  setSessionHealthKitData,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
-import {
-  aggregateActiveEnergyBurned,
-  saveTrainingLogWorkout,
-} from '@/src/adapters/healthkit';
+import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import {
   getAutoPopupRestTimer,
   getDevSimulateWatchTracked,
@@ -1909,40 +1904,14 @@ export default function TodayScreen() {
     } catch (e) {
       console.warn('[achievements] evaluate failed:', e);
     }
-    // Slice 13c C3 — HealthKit sync (Q5 persist kcal + Q6 saveWorkout).
-    // Best-effort (Q8): any failure → session DB row still saved, UI silent
-    // skip, detail page shows '—' kcal + grey HR overlay. Per Q11, only
-    // sessions finished from 13c onwards get this; older sessions stay NULL.
-    try {
-      const session = await getSession(db, session_id);
-      if (session && session.ended_at != null) {
-        const kcal = await aggregateActiveEnergyBurned(
-          session.started_at,
-          session.ended_at,
-        );
-        // 2026-05-26 B1 follow-up: session.title is empty string ('') for
-        // freestyle sessions (DB convention — UI renders the i18n placeholder
-        // at display time). Passing '' as HKWorkoutBrandName makes Apple
-        // Fitness silently fall back to the activityType localized name
-        // (「傳統肌力訓練」) instead of our intended「空白訓練」. Resolve
-        // to the placeholder here so HK metadata carries the user-facing name.
-        const displayTitle = session.title || t('page', 'sessionTitlePlaceholder');
-        const uuid = await saveTrainingLogWorkout({
-          startMs: session.started_at,
-          endMs: session.ended_at,
-          kcal,
-          title: displayTitle,
-          sessionId: session.id,
-        });
-        await setSessionHealthKitData(db, {
-          id: session_id,
-          kcal,
-          healthkit_workout_uuid: uuid,
-        });
-      }
-    } catch (e) {
-      console.warn('[healthkit] finish sync failed:', e);
-    }
+    // Slice 13c C3 — HealthKit sync. Extracted to `syncSessionWithHealthKit`
+    // service module (slice 13c "tests" pass) so the best-effort contract is
+    // jest-tested instead of relying only on iPhone smoke. Caller resolves the
+    // i18n placeholder up-front because `t` is a React hook and can't be used
+    // inside the pure service module.
+    await syncSessionWithHealthKit(db, session_id, {
+      fallbackTitle: t('page', 'sessionTitlePlaceholder'),
+    });
     setLastPRDelta(null);
     setLastPRExerciseName('');
     endState(sessionState, ended_at);
