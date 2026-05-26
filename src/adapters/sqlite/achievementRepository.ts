@@ -164,7 +164,7 @@ async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]> {
 
 // ---- Pipeline ----
 
-export interface EvaluationOutcome {
+interface EvaluationOutcome {
   newUnlocks: NewUnlock[];
   /** The full definition rows for the new unlocks, for UI display. */
   newDefinitions: AchievementDefinitionRow[];
@@ -230,7 +230,7 @@ export async function evaluateAndPersistAchievements(
 
 const BACKFILL_SETTING_KEY = 'achievements_backfilled_at';
 
-export interface BackfillOutcome {
+interface BackfillOutcome {
   ranBackfill: boolean;
   sessionsReplayed: number;
   newUnlocks: number;

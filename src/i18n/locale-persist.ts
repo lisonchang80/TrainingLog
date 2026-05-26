@@ -21,7 +21,7 @@ import * as Localization from 'expo-localization';
 export type StoredLocaleValue = 'zh' | 'en' | 'auto';
 
 /** Concrete locale used by `setLocale()`. `'auto'` is never one of these. */
-export type ResolvedLocale = 'zh' | 'en';
+type ResolvedLocale = 'zh' | 'en';
 
 const STORAGE_KEY = 'app.locale.preference';
 
