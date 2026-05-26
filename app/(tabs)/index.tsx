@@ -39,7 +39,6 @@ import {
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import {
   getAutoPopupRestTimer,
-  getDevSimulateWatchTracked,
   getSetting,
   getUnitPreference,
   setSetting,
@@ -270,14 +269,6 @@ export default function TodayScreen() {
    * rest_sec + exercise name to render in the modal.
    */
   const [autoPopupTimer, setAutoPopupTimer] = useState<boolean>(true);
-  /**
-   * Slice 13a Phase A dev toggle — `dev_simulate_watch_tracked`. When ON
-   * the in-session SessionStatsPanel renders the 5-tile Watch variant
-   * (心率 / 大卡 = '—' until Phase B HK ingest). Default false — legacy
-   * 3-tile layout stays for fresh installs.
-   * REMOVE in Phase B first commit (per ADR-0019 § Phase A Amendment).
-   */
-  const [devWatchTracked, setDevWatchTracked] = useState<boolean>(false);
   const [restTimerTarget, setRestTimerTarget] = useState<{
     rest_sec: number;
     exercise_name: string;
@@ -315,7 +306,7 @@ export default function TodayScreen() {
   const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, popup, devWT] = await Promise.all([
+    const [exs, active, prog, tpls, u, popup] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
@@ -324,15 +315,12 @@ export default function TodayScreen() {
       // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
       // key to ON (matches v016 seed intent + the new Settings Switch).
       getAutoPopupRestTimer(db),
-      // Slice 13a Phase A — `dev_simulate_watch_tracked` defaults OFF.
-      getDevSimulateWatchTracked(db),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
     setAutoPopupTimer(popup);
-    setDevWatchTracked(devWT);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
@@ -2163,9 +2151,7 @@ export default function TodayScreen() {
               when the active session's `is_watch_tracked` flag (v024 column,
               surfaced into SessionState by `fromRow`) is true — i.e. the
               session is being driven from the paired Apple Watch. Falls
-              back to the legacy 3-tile layout otherwise. Prior to D5 this
-              predicate was the in-memory `dev_simulate_watch_tracked`
-              setting; the dev toggle is retired in a later D-chain commit.
+              back to the legacy 3-tile layout otherwise.
               HR / kcal still read '—' until Watch HK ingest lands. */}
           {sessionState.status === 'in_progress' ? (
             <SessionStatsPanel
