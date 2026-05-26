@@ -125,7 +125,7 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
   - **效果**：dual-write race 整個消失；`session.is_watch_tracked` flag 純粹是 5-tile UI predicate、不參與 writer dedupe
   - **未驗的 invariant**：watchOS 11+ 對 `discardWorkout()` 的 deprecation status；slice 13d D0 commit 用 5-line Swift snippet 實機 spike 驗（3 invariant: HR > ambient ×5 / Fitness 無 entry / 無 deprecation warning）；失敗則退 Branch A（Watch 寫 HKWorkout + iPhone 加 is_watch_tracked skip 邏輯）
 - ❌ **line 87-88「Watch 寫 HKWorkout metadata」** → 移除；Watch 不寫 metadata、不寫 HKWorkout（per Q28 Branch C）。
-- ❌ **17 條 row 10「暫停 / 結束 Session: pause = HKWorkoutSession.pause()」** pause 部分 deferred to v1.5+；Watch v1 ship 時不顯 pause button（align ADR-0019 § Q6.1 no-pause 紀律）。end 仍走 `.end() + discardWorkout()`、不寫 HKWorkout。
+- ❌ **17 條 row 10「暫停 / 結束 Session: pause = HKWorkoutSession.pause()」** pause 部分 deferred to v1.5+；Watch v1 ship 時不顯 pause button（align ADR-0019 § Q9 (b) line 497 no-pause 紀律）。end 仍走 `.end() + discardWorkout()`、不寫 HKWorkout。
 - ❌ **2026-05-23 amendment line 58-72「FEATURE_WATCH_HANDOFF gate」** → **移除按鈕、flag 退役**。α-model native handoff = WC bidirectional initiator；原按鈕「iPhone 交接 Watch」語意過時、保留只會誤導 user。slice 13d D2 commit 砍 button + features.ts const + tests/config/features.test.ts。
 
 ### 不翻盤、繼續成立
@@ -149,6 +149,6 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 
 - 完整 grill decision + commit chain + smoke matrix + test count delta — ADR-0019 § 2026-05-26 Slice 13d Amendment（28 + 19 NEW Q）
 - HK reader / writer 13c shipped — ADR-0019 § Slice 13c Amendment
-- Pause 紀律 — ADR-0019 § Q6.1（不翻盤）
+- Pause 紀律 — ADR-0019 § Q9 (b) line 497（不翻盤）
 - 5-tile predicate — ADR-0019 § Q6 + Slice 13d Amendment Q24
 - Cluster 視覺一致性 — ADR-0012 dropset / ADR-0017 Reusable Superset / ADR-0018 session-side cluster
