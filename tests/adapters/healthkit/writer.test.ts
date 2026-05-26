@@ -138,4 +138,62 @@ describe('Slice 13c — HealthKit workout writer', () => {
     const warnMsg = (warnSpy.mock.calls[0] as unknown[]).join(' ');
     expect(warnMsg).toMatch(/no uuid/);
   });
+
+  // ---------------------------------------------------------------------
+  // Regression sentinels — these tests guard the two real-device-smoke bug
+  // fixes that 13c shipped. They overlap conceptually with earlier cases
+  // but use the exact bug-report inputs so future failures point straight
+  // at the originating commit.
+  // ---------------------------------------------------------------------
+
+  it('regression (commit 33eaa1f): metadata uses SHORT key names (HKWorkoutBrandName / HKExternalUUID), not HKMetadataKey* prefixed', async () => {
+    // First slice 13c real-device smoke caught Apple Fitness displaying the
+    // default localized activityType name (「傳統肌力訓練」) instead of
+    // session.title. Root cause: writer originally used the full ObjC
+    // constant names (`HKMetadataKeyWorkoutBrandName`,
+    // `HKMetadataKeyExternalUUID`) as JS string keys, but Apple's stored
+    // NSString values strip the `HKMetadataKey` prefix.
+    // See .claude/skills/healthkit-metadata-debug/SKILL.md TL;DR table.
+    saveWorkoutSampleMock.mockResolvedValue({ uuid: 'hk-regress-1' });
+
+    await saveTrainingLogWorkout({
+      ...input,
+      kcal: 497,
+      title: '胸推日',
+      sessionId: 'S1',
+    });
+
+    const metadata = saveWorkoutSampleMock.mock.calls[0][5] as Record<
+      string,
+      unknown
+    >;
+    expect(metadata).toEqual({
+      HKWorkoutBrandName: '胸推日',
+      HKExternalUUID: 'S1',
+    });
+    // Belt-and-suspenders: assert the *wrong* (full ObjC) keys are NOT set.
+    expect(metadata.HKMetadataKeyWorkoutBrandName).toBeUndefined();
+    expect(metadata.HKMetadataKeyExternalUUID).toBeUndefined();
+  });
+
+  it('regression (commit e5732ac): activityType = traditionalStrengthTraining, not functional', async () => {
+    // Originally shipped as `functionalStrengthTraining` (mirroring 訓記's
+    // first-pass screenshot). Real-device smoke + closer review of 訓記's
+    // other entries showed traditional is the right bucket for barbell /
+    // dumbbell hypertrophy. Asserting via the imported enum symbol means
+    // any silent regression to `functionalStrengthTraining` would resolve
+    // to a different mocked value (or undefined) and fail this test.
+    //
+    // The mock maps traditionalStrengthTraining → 20 (see jest.mock above);
+    // functionalStrengthTraining intentionally has no mapping, so a writer
+    // regression would pass `undefined` as activityType and trip this assert.
+    saveWorkoutSampleMock.mockResolvedValue({ uuid: 'hk-regress-2' });
+
+    await saveTrainingLogWorkout(input);
+
+    const activityType = saveWorkoutSampleMock.mock.calls[0][0];
+    expect(activityType).toBe(TST_ENUM);
+    expect(activityType).not.toBeUndefined();
+    expect(activityType).not.toBeNull();
+  });
 });
