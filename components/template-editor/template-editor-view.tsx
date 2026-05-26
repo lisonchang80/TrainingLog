@@ -2748,7 +2748,6 @@ function makeStyles(tokens: ThemeTokens) {
     overflow: 'hidden',
     alignSelf: 'flex-start',
   },
-  supersetNames: { flex: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   // overnight #45 第 1 點 — cluster header mirror session layout (decoupled
   // styles, own copy). Row 1: tag (alignSelf flex-start). Row 2: 標題分行。
   clusterText: { flex: 1, gap: 4 },
@@ -2909,18 +2908,6 @@ function makeStyles(tokens: ThemeTokens) {
     marginRight: 4,
   },
   exNoteIndicatorText: { fontSize: 16 },
-  dropsetInlineBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,149,0,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 2,
-  },
-  dropsetInlineBtnText: { fontSize: 14, fontWeight: '700', color: tokens.action.warning },
-  dropsetTailBtnDisabled: { opacity: 0.35 },
-  dropsetTailBtnTextDisabled: { color: tokens.text.tertiary },
   exFooterBtns: {
     flexDirection: 'row',
     gap: 8,
@@ -3023,7 +3010,6 @@ function makeStyles(tokens: ThemeTokens) {
     minWidth: 90,
     justifyContent: 'center',
   },
-  restValue: { fontSize: 40, fontWeight: '700', color: tokens.text.primary },
   restValueInput: {
     fontSize: 40,
     fontWeight: '700',

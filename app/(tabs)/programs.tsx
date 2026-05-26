@@ -1840,11 +1840,6 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.action.primary,
       fontWeight: '600',
     },
-    modalRowSubtle: {
-      fontSize: 12,
-      color: tokens.text.secondary,
-      fontWeight: '400',
-    },
     modalAddRow: {
       flexDirection: 'row',
       gap: 8,

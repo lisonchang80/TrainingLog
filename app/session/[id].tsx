@@ -3158,13 +3158,6 @@ function makeStyles(tokens: ThemeTokens) {
     },
     headerBackBtn: { paddingHorizontal: 8, paddingVertical: 6 },
     headerBackText: { fontSize: 15, color: tokens.action.primary },
-    headerTitle: {
-      flex: 1,
-      fontSize: 17,
-      fontWeight: '700',
-      textAlign: 'center',
-      color: tokens.text.primary,
-    },
     // ADR-0014 + ADR-0019 Q10 — header title column hosts title row +
     // optional subtitle 「週期 · 強度」. flex:1 owns the middle slot so
     // back / done buttons keep their right slot intact; column 'center'
@@ -3577,7 +3570,6 @@ function makeStyles(tokens: ThemeTokens) {
       backgroundColor: tokens.bg.elevated,
       alignItems: 'center',
     },
-    actionBtnActive: { backgroundColor: tokens.action.primary },
     actionBtnDisabled: { opacity: 0.4 },
     actionBtnPrimary: { backgroundColor: tokens.action.primary },
     actionBtnText: {
@@ -3585,7 +3577,6 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '600',
       color: tokens.action.primary,
     },
-    actionBtnTextActive: { color: tokens.action.onPrimary },
     actionBtnTextPrimary: { color: tokens.action.onPrimary, fontWeight: '700' },
     actionBtnTextDestructive: { color: tokens.action.destructive },
 

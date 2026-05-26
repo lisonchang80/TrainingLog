@@ -1277,7 +1277,6 @@ function makeStyles(tokens: ThemeTokens) {
       fontSize: 16,
       color: tokens.text.primary,
     },
-    subTagInput: { marginTop: 6 },
     // Wave 18g smoke fix — 自訂 free-form input + 確認/取消 buttons in Step 4.
     customRow: {
       flexDirection: 'row',
@@ -1393,14 +1392,6 @@ function makeStyles(tokens: ThemeTokens) {
       marginBottom: 4,
       color: tokens.text.primary,
     },
-    subTagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    subTagDayLabel: {
-      width: 32,
-      fontSize: 12,
-      fontWeight: '600',
-      color: tokens.text.secondary,
-    },
-    subTagOverrideInput: { flex: 1, paddingVertical: 8 },
     previewRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',
