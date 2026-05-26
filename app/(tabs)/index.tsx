@@ -15,10 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
-import {
-  insertBodyMetric,
-  listBodyMetrics,
-} from '@/src/adapters/sqlite/bodyMetricRepository';
+import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import {
   getExerciseNotes,
@@ -116,7 +113,7 @@ import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults'
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
-import type { BodyMetric, UnitPreference } from '@/src/domain/body/types';
+import type { UnitPreference } from '@/src/domain/body/types';
 import {
   formatWeight,
   kgToDisplay,
@@ -205,7 +202,6 @@ export default function TodayScreen() {
   const [templatesById, setTemplatesById] = useState<Record<string, TemplateSummary>>({});
   const [programCellToday, setProgramCellToday] = useState<ProgramCell | null>(null);
   const [unit, setUnit] = useState<UnitPreference>('kg');
-  const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
   const [bwSnapshotKg, setBwSnapshotKg] = useState<number | null>(null);
   /**
    * Card 11 / ADR-0014 — session.title for the in-session header tap-to-edit
@@ -321,13 +317,12 @@ export default function TodayScreen() {
   const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, bms, popup, devWT] = await Promise.all([
+    const [exs, active, prog, tpls, u, popup, devWT] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
       listTemplates(db),
       getUnitPreference(db),
-      listBodyMetrics(db),
       // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
       // key to ON (matches v016 seed intent + the new Settings Switch).
       getAutoPopupRestTimer(db),
@@ -338,7 +333,6 @@ export default function TodayScreen() {
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
-    setBodyMetrics(bms);
     setAutoPopupTimer(popup);
     setDevWatchTracked(devWT);
     const tplMap: Record<string, TemplateSummary> = {};
@@ -822,8 +816,6 @@ export default function TodayScreen() {
       setInlinePbfInput('');
       setInlineSmmInput('');
       setBodySheetVisible(false);
-      const bms = await listBodyMetrics(db);
-      setBodyMetrics(bms);
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
