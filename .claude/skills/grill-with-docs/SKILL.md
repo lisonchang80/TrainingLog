@@ -149,6 +149,49 @@ Stale-default's strongest form: **the Round's premise itself no longer exists** 
 
 **Why this matters**: forcing original Qs through when topic is dead wastes user time + produces ledger noise ("Q3 N/A、Q4 obsolete..." instead of「Round F 重定義」一句話）. The redirect is the value-add — the original Qs being dead is information, not failure.
 
+### When user's custom answer expands grill scope mid-stream
+
+The most disruptive grill event is **scope expansion via free-form custom answer** — user picks `Other` on `AskUserQuestion` and types text that widens the originally-grilled topic by 2-5×. This invalidates a chunk of preceding context AND agent prep, but is easy to miss if you treat the custom string as "just another branch".
+
+**Detection signal**: user's custom string includes either:
+- A reference to a deferred / out-of-scope item from this slice's plan (e.g. "feature X 也加")
+- A capability that crosses sister Qs you've already closed (e.g. now-in-scope thing that turns "Q17 stays 13e" into "Q17 reopens")
+- A new requirement absent from any prep doc (e.g. "左滑音樂頁" when no Q in the 28-Q grill mentioned music)
+
+**Recipe**:
+
+1. **STOP drilling other Qs**. Don't proceed assuming the original scope. The next answer the user gives in expanded scope might contradict an earlier "closed" Q.
+
+2. **Parse the custom text carefully** — separate three categories:
+   - **Added** (new features not in any agent prep) → these need fresh grilling, possibly NEW Qs beyond the original Q1-QN list
+   - **Modified** (existing decision flipped) → e.g. user 接受 Q28 Branch C 但 also expands Q15 / Q17 from "defer 13e" to "進 scope"
+   - **Untouched** (decisions still hold)
+
+3. **Explicit-confirm the scope expansion** with `AskUserQuestion`. Don't assume "C'" means "C + expansion". Offer:
+   - "一次做完（confirm 擴張）"
+   - "拆 N slice ship（narrow first + expand later）"
+   - "退回原 scope（custom 是 over-spec、走 B 或推薦）"
+
+4. **List explicitly which previously-closed Qs are NOW reopened**. Print a table:
+   ```
+   Q4: 原 narrow start trigger only → reopen 為 full bidirectional WC mapping
+   Q15: 原 defer 13e → in scope
+   Q17: 原 defer 13e → in scope
+   ```
+   This protects against silent assumption drift.
+
+5. **Update commit chain + test count + smoke matrix estimates**. A 5× scope expansion typically: commits 7 → 25-30, test count delta +30 → +80, smoke 8 → 16-20.
+
+6. **Only after user confirms expansion** — continue with the new wider grill. Earlier "closed" Qs flagged as reopened in step 4 go back into the queue.
+
+**Example** (TrainingLog Slice 13d 2026-05-26):
+- 3 agent prep reports (Q1-Q10, Q11-Q19, Q20-Q28) all assumed narrow B2/B3 fix
+- User picked "C'" custom answer on Q28 — kept HK trigger-only Branch C, BUT added: Watch picker (Q17 reopen), in-session live HR (Q15 reopen), Watch full set logger UI (Q16 reopen), 左滑音樂頁 (new), iPhone +動作 限制 (new)
+- I detected the expansion 對話 turn 立刻 STOP grill 其他細節，重新 confirm scope expansion via 3-Q AskUserQuestion (scope / +動作 limit / 音樂頁 source) BEFORE drilling next
+- Result: scope locked at α-model full slice; commit chain 7 → 28; previously deferred items (Q15/Q17/Q19) re-grilled with new context; 47 final decisions (28 original + 19 NEW-Q from scope expansion)
+
+**Anti-pattern**: silently treating "C'" as Branch C and moving to next Q, then 5 Q later realizing Q15/Q17 deferrals contradict user's intent. Cost: re-tracing back 5 Q + retracting decisions + writing 翻盤 ledger entries for what should never have been closed.
+
 ### When user pins to existing pattern, scan that pattern's code BEFORE proposing options
 
 If the user says "match X's pattern" / "reference X" / "X 怎麼做的就照辦" / "後續優先參考 X" — that's a meta-rule binding all subsequent answers. Aggressively grep / read X's code BEFORE answering the next question.
