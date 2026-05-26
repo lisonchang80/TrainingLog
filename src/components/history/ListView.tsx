@@ -108,11 +108,8 @@ function deriveTitleParts(
   session: Session,
   triple: SessionLinkedTriple | null
 ): { text: string; isFreestyle: boolean } {
-  // `session.title` (ADR-0014) is not yet in the schema as of this branch —
-  // read defensively (via `unknown` cast) so the view works pre-and-post
-  // migration without requiring a Session type widen.
-  const maybeTitle = (session as unknown as { title?: unknown }).title;
-  const rawTitle = typeof maybeTitle === 'string' ? maybeTitle.trim() : '';
+  // `session.title` is now part of the Session type (post ADR-0014 migration).
+  const rawTitle = session.title.trim();
   const isFreestyle = triple == null;
   if (isFreestyle) {
     return { text: rawTitle.length > 0 ? rawTitle : t('domain', 'freestyle'), isFreestyle: true };
