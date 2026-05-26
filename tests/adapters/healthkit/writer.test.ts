@@ -3,7 +3,7 @@
  *
  * Mocks `saveWorkoutSample` from `@kingstinct/react-native-healthkit` and
  * verifies:
- *   - happy path returns the HK uuid + activityType=functionalStrengthTraining
+ *   - happy path returns the HK uuid + activityType=traditionalStrengthTraining
  *   - metadata wiring (HKWorkoutBrandName / HKExternalUUID)
  *   - kcal=null → totals argument omits energyBurned (not 0, not undefined-property)
  *   - kcal=number → totals.energyBurned matches input
@@ -18,20 +18,20 @@
 
 const saveWorkoutSampleMock = jest.fn();
 
-// The writer reads `WorkoutActivityType.functionalStrengthTraining` at module
+// The writer reads `WorkoutActivityType.traditionalStrengthTraining` at module
 // load. The enum value in Kingstinct's generated module is 20; we mirror that
 // here so the asserted activityType arg has a stable expected value.
 jest.mock('@kingstinct/react-native-healthkit', () => ({
   __esModule: true,
   saveWorkoutSample: saveWorkoutSampleMock,
   WorkoutActivityType: {
-    functionalStrengthTraining: 20,
+    traditionalStrengthTraining: 20,
   },
 }));
 
 import { saveTrainingLogWorkout } from '../../../src/adapters/healthkit/writer';
 
-const FST_ENUM = 20;
+const TST_ENUM = 20;
 
 describe('Slice 13c — HealthKit workout writer', () => {
   let warnSpy: jest.SpyInstance;
@@ -53,7 +53,7 @@ describe('Slice 13c — HealthKit workout writer', () => {
     sessionId: 'sess-uuid-abc-123',
   } as const;
 
-  it('happy path: returns uuid + calls native with activityType=functionalStrengthTraining', async () => {
+  it('happy path: returns uuid + calls native with activityType=traditionalStrengthTraining', async () => {
     saveWorkoutSampleMock.mockResolvedValue({ uuid: 'hk-uuid-xyz' });
 
     const result = await saveTrainingLogWorkout(input);
@@ -63,7 +63,7 @@ describe('Slice 13c — HealthKit workout writer', () => {
 
     const args = saveWorkoutSampleMock.mock.calls[0];
     // saveWorkoutSample(activityType, quantities, startDate, endDate, totals, metadata)
-    expect(args[0]).toBe(FST_ENUM);
+    expect(args[0]).toBe(TST_ENUM);
     expect(args[1]).toEqual([]); // no per-sample quantities — workout container only
     expect(args[2]).toBeInstanceOf(Date);
     expect((args[2] as Date).getTime()).toBe(input.startMs);

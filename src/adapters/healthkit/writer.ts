@@ -2,16 +2,21 @@
  * HealthKit workout writer — slice 13c (C2).
  *
  * Persists each TrainingLog session as an HKWorkout sample so it surfaces in
- * Apple's Fitness app under「體能訓練」(functionalStrengthTraining filter)
- * and contributes to 動態大卡 totals. Mimics 訓記-style entries — the workout
- * appears with TrainingLog's session title (via HKMetadataKeyWorkoutBrandName)
- * and the /||\ icon next to it.
+ * Apple's Fitness app under「傳統肌力訓練」(traditionalStrengthTraining filter)
+ * and contributes to 動態大卡 totals. Workout appears with TrainingLog's
+ * session title (via HKWorkoutBrandName metadata) and the strength-training
+ * dumbbell icon.
  *
  * Per ADR-0019 § Phase B Q6 / Q7 / Q8 grill (ratified 2026-05-26):
- *   - activityType = functionalStrengthTraining (Apple HK enum value; the
- *     Kingstinct generated enum re-numbers it to 20 internally — that's the
- *     value the native bridge ultimately maps back to Apple's identifier so
- *     we just hand the enum member through).
+ *   - activityType = traditionalStrengthTraining (Apple HK enum; Kingstinct
+ *     maps to the Apple-internal HKWorkoutActivityType raw value 50).
+ *     **2026-05-26 fix**: originally functionalStrengthTraining (mirroring
+ *     訓記's choice), changed to traditional after first real-device smoke
+ *     because TrainingLog is a barbell/dumbbell-focused hypertrophy log —
+ *     traditionalStrengthTraining semantically fits "重量訓練" (Apple's
+ *     definition: "free weights or weight machines with a barbell, dumbbell,
+ *     kettlebell"). functional is the broader "free weights or body weight"
+ *     bucket — less precise for our domain.
  *   - We only write the *active* energy (`totalEnergyBurned` field). Apple
  *     HK sums basal samples from the user's HK profile, so writing basal
  *     ourselves would double-count. The field name is misleading — it IS
@@ -107,7 +112,7 @@ export async function saveTrainingLogWorkout(
       input.kcal == null ? undefined : { energyBurned: input.kcal };
 
     const result = await saveWorkoutSample(
-      WorkoutActivityType.functionalStrengthTraining,
+      WorkoutActivityType.traditionalStrengthTraining,
       [], // no per-sample quantity rows — Apple Watch (when present) writes its own HR samples; we only need the workout container
       new Date(input.startMs),
       new Date(input.endMs),
