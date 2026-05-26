@@ -16,9 +16,27 @@ import {
  */
 describe('sessionManager — state machine (slice 2)', () => {
   describe('start', () => {
-    it('transitions IDLE → in_progress', () => {
+    it('transitions IDLE → in_progress (is_watch_tracked defaults false)', () => {
       const next = start({ id: 's1', started_at: 1000 });
-      expect(next).toEqual({ status: 'in_progress', id: 's1', started_at: 1000 });
+      expect(next).toEqual({
+        status: 'in_progress',
+        id: 's1',
+        started_at: 1000,
+        is_watch_tracked: false,
+      });
+    });
+
+    // ADR-0019 § Q19 / slice 13d D5 — start() accepts the Watch-tracked flag so
+    // Watch-initiated sessions (D6) can opt in at creation; iPhone-led
+    // sessions omit it and inherit false.
+    it('honors explicit is_watch_tracked = true (slice 13d D5)', () => {
+      const next = start({ id: 's1', started_at: 1000, is_watch_tracked: true });
+      expect(next).toEqual({
+        status: 'in_progress',
+        id: 's1',
+        started_at: 1000,
+        is_watch_tracked: true,
+      });
     });
 
     it('rejects empty id', () => {
@@ -90,11 +108,32 @@ describe('sessionManager — state machine (slice 2)', () => {
       expect(fromRow(null)).toEqual(IDLE);
     });
 
-    it('row without ended_at → in_progress', () => {
+    it('row without ended_at → in_progress (is_watch_tracked defaults false when row omits it)', () => {
       expect(fromRow({ id: 's1', started_at: 1000, ended_at: null })).toEqual({
         status: 'in_progress',
         id: 's1',
         started_at: 1000,
+        is_watch_tracked: false,
+      });
+    });
+
+    // ADR-0019 § Q19 / slice 13d D5 — the v024 column flows from
+    // sessionRepository row → fromRow → SessionState so the Today 5-tile
+    // predicate (`app/(tabs)/index.tsx`) can read it inline without a
+    // second DB round trip.
+    it('row with is_watch_tracked=true → in_progress carries the flag (slice 13d D5)', () => {
+      expect(
+        fromRow({
+          id: 's1',
+          started_at: 1000,
+          ended_at: null,
+          is_watch_tracked: true,
+        })
+      ).toEqual({
+        status: 'in_progress',
+        id: 's1',
+        started_at: 1000,
+        is_watch_tracked: true,
       });
     });
 

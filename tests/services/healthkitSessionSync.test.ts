@@ -58,6 +58,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     ended_at: ENDED_AT,
     bodyweight_snapshot_kg: 75,
     title: 'Leg day',
+    is_watch_tracked: false,
     ...overrides,
   };
 }

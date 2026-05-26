@@ -2159,13 +2159,17 @@ export default function TodayScreen() {
         >
           {programBanner}
           {/* ADR-0019 Q6 — in-session stats panel (P1 position).
-              Slice 13a Phase A: the `dev_simulate_watch_tracked` toggle
-              upgrades the panel to the 5-tile Watch variant (HR / kcal =
-              '—' until Phase B HealthKit ingest). When OFF (default), the
-              legacy 3-tile layout is preserved. */}
+              Slice 13d D5 (ADR-0019 § Q19): the 5-tile Watch variant fires
+              when the active session's `is_watch_tracked` flag (v024 column,
+              surfaced into SessionState by `fromRow`) is true — i.e. the
+              session is being driven from the paired Apple Watch. Falls
+              back to the legacy 3-tile layout otherwise. Prior to D5 this
+              predicate was the in-memory `dev_simulate_watch_tracked`
+              setting; the dev toggle is retired in a later D-chain commit.
+              HR / kcal still read '—' until Watch HK ingest lands. */}
           {sessionState.status === 'in_progress' ? (
             <SessionStatsPanel
-              variant={devWatchTracked ? '5tile-watch' : '3tile'}
+              variant={sessionState.is_watch_tracked ? '5tile-watch' : '3tile'}
               kcal={null}
               avgHr={null}
               sets={setsInSession.map((s) => ({
