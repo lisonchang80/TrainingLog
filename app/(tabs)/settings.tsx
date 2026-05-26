@@ -24,10 +24,8 @@ import {
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import {
   getAutoPopupRestTimer,
-  getDevSimulateWatchTracked,
   getUnitPreference,
   setAutoPopupRestTimer,
-  setDevSimulateWatchTracked,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -64,11 +62,6 @@ export default function SettingsScreen() {
    */
   const [autoPopup, setAutoPopup] = useState<boolean | null>(null);
   /**
-   * Slice 13a Phase A → 13b — Watch-tracked dev toggle kept to slice 13d as a
-   * 5-tile-watch UI regression guard. `null` = loading.
-   */
-  const [devWatchTracked, setDevWatchTracked] = useState<boolean | null>(null);
-  /**
    * Slice 13b — HealthKit permission state. `null` = loading.
    * `'never'` → show "Connect Apple Health" CTA.
    * `'requested'` → show "已連結 Apple Health" + "Open System Settings"
@@ -94,17 +87,15 @@ export default function SettingsScreen() {
   const [bwBusy, setBwBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc, devWT, hkState] = await Promise.all([
+    const [u, popup, loc, hkState] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
-      getDevSimulateWatchTracked(db),
       getAuthorizationState(db),
     ]);
     setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
-    setDevWatchTracked(devWT);
     setHkAuthState(hkState);
   }, [db]);
 
@@ -126,16 +117,6 @@ export default function SettingsScreen() {
     // same boolean twice = no-op).
     setAutoPopup(next);
     await setAutoPopupRestTimer(db, next);
-  };
-
-  // Slice 13a Phase A → 13b — Watch tracked dev toggle kept to slice 13d
-  // (5-tile-watch UI regression guard).
-  // TODO(slice-13d): remove this affordance once a real Apple Watch session
-  // writes session.healthkit_workout_uuid (the variant logic already branches
-  // on that column, see components/session/session-stats-panel.tsx).
-  const onToggleDevWatchTracked = async (next: boolean) => {
-    setDevWatchTracked(next);
-    await setDevSimulateWatchTracked(db, next);
   };
 
   /**
@@ -391,24 +372,6 @@ export default function SettingsScreen() {
           </Pressable>
         )}
 
-        {/* Slice 13a Phase A → 13b — 開發者 section.
-            Watch tracked toggle kept to slice 13d as a 5-tile-watch UI
-            regression guard (without it, no session has
-            session.healthkit_workout_uuid set on dev builds and the variant
-            is unreachable). HK granted toggle removed in slice 13b (real
-            Apple Health 整合 section above replaces it). */}
-        <Text style={styles.section}>{t('page', 'devSection')}</Text>
-        <View style={styles.switchRow}>
-          <View style={styles.switchLabelGroup}>
-            <Text style={styles.switchLabel}>{t('status', 'devSimulateWatchTracked')}</Text>
-            <Text style={styles.hint}>{t('status', 'devSimulateWatchTrackedHint')}</Text>
-          </View>
-          <Switch
-            value={devWatchTracked ?? false}
-            onValueChange={onToggleDevWatchTracked}
-            disabled={devWatchTracked === null}
-          />
-        </View>
       </ScrollView>
 
       {/* ADR-0024 § 5 — 體重 mini sheet (modal). 單一 TextInput + 儲存。 */}
