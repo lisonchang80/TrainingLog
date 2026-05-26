@@ -1090,4 +1090,205 @@ Grill round D（set-logger implementation plan finalization）resolved 4 decisio
 - **Watch picker UI**（user requirement 2026-05-25：可以從 Watch 開啟「計劃訓練 / 模板訓練」、不必先掏 iPhone）
 - **Phase A `dev_simulate_watch_tracked` setting key + Settings toggle 第一個 commit 移除**（per slice 13b § Phase A → Phase B 轉換點規約、13b 暫留作 regression guard、13d 真 Watch session 自然 trigger 5-tile-watch variant 後即可砍）
 
-ADR-0008 § HealthKit 整合「Watch 寫 HKWorkout」與本 slice 13c「iPhone 補寫 HKWorkout」的覆蓋率分工 amendment 留給 slice 13d ship 時補（屆時 Watch session 真上線、補寫路徑只在 Watch 不可用時 fallback）。
+ADR-0008 § HealthKit 整合「Watch 寫 HKWorkout」與本 slice 13c「iPhone 補寫 HKWorkout」的覆蓋率分工 amendment 留給 slice 13d ship 時補（屆時 Watch session 真上線、補寫路徑只在 Watch 不可用時 fallback）。（**Slice 13d 修訂**：此分工模型推翻 — 改為「Watch HKWorkoutSession trigger-only sampling、iPhone 13c writer 為唯一 HKWorkout 寫入點」，per Slice 13d Amendment Q28 Branch C，見下節）
+
+---
+
+### 2026-05-26 Slice 13d Amendment — α-model 完整實作 (Watch 雙向 initiator + live mirror + Live Activity)
+
+**主軸**：slice 13d 原規劃為 narrow B2/B3 fix（補 Watch 端 `HKWorkoutSession` trigger 解 13c 詳情頁 HR / kcal 空）。grill 過程使用者要求擴張為 **α-model full slice** — 實作 Watch SwiftUI app + WatchConnectivity bidirectional bridge + HKWorkoutSession trigger-only sampling pattern + iPhone Live Activity + 雙向 initiator + bidirectional live mirror set logger + Watch 端 picker (計劃訓練 + 模板訓練)。13c iPhone 補寫 HKWorkout 路徑保留為**唯一** HKWorkout writer；Watch 端 `HKWorkoutSession` 改為純 HR / kcal sampling trigger，end 時用 `HKLiveWorkoutBuilder.discardWorkout()` 不寫 HKWorkout entry，徹底消除 dual-write race（per Q28 Branch C）。
+
+#### 翻盤的既有拍板（既有決定的 13d revision）
+
+- ❌ ADR-0008 line 3「**全程 Watch 主、iPhone 不掏**」→ 改為 **雙向 initiator**：iPhone 訓練 tab + Watch picker root 兩端 UI 都有 [開始訓練] 入口、user 隨手挑、SQLite 寫在 iPhone、另一端 WC push 進 in-session view。原 α-model「iPhone 不掏」是 watch-leadership 假設、現實使用者期待雙向彈性。
+- ❌ ADR-0008 line 79「**HKWorkoutSession 啟動點 = Watch 端 ... iPhone 端不寫**」→ 改為 **trigger-only sampling**：Watch 端 `HKWorkoutSession.startActivity()` 開 HR sampling、end 時 `HKLiveWorkoutBuilder.discardWorkout()` **不寫** HKWorkout entry；iPhone 13c `saveTrainingLogWorkout` 為唯一 HKWorkout 寫入點。Watch HR sample 仍進 HealthKit store（sample 與 builder 分離）、iPhone 13c reader 不在乎 source、照撈得到。
+- ❌ ADR-0008 line 24「**bw_snapshot 鎖定時機 = pre-session 階段**」→ 改為 **session-start moment 鎖定**：雙向 initiator 後 iPhone 在 session start moment 一定 reachable（WC roundtrip 必經 iPhone），不需 pre-session 提前鎖。
+- ❌ ADR-0008 line 87-88「**Watch 寫 HKWorkout metadata = duration / 卡路里 / 平均 HR / max HR**」→ 改為 iPhone 13c writer 為唯一 metadata 寫入點（與 § Slice 13c Amendment Q6 一致）；Watch 不寫 metadata、不寫 HKWorkout。
+- ❌ Slice 13c Amendment line 1089「**In-session live HR / kcal（5-tile Watch variant 真資料、不再是 dev toggle 模擬）**」→ 改為 5-tile variant predicate = `session.is_watch_tracked`（v024 新 column）；live HR / kcal Watch 端從 `HKWorkoutSession.activeWorkoutHeartRate` 觀察、3-5s applicationContext throttled 推 iPhone live mirror。
+- ❌ Slice 13c Amendment line 1090 留尾 user requirement 2026-05-25「**可以從 Watch 開啟計劃訓練 / 模板訓練**」→ ratified 為 Watch picker root 三步 UI（root [計劃訓練] + [模板訓練] dropdown → 選模板 name → 方塊選計劃 → 強度）。
+- ❌ Slice 10e bundle 3 ADR-0008 amendment line 58-72「**FEATURE_WATCH_HANDOFF gate**」→ **移除按鈕、flag 退役**。α-model native handoff = WC bidirectional、原按鈕「iPhone 交接 Watch」語意過時。
+
+不翻盤、繼續成立：
+- ✅ ADR-0019 § Q6.1 line 759「iPhone v1 維持 pre-session ↔ in-session 兩態狀態機、不引入 paused 第三態」；補：Watch 端也不引入 pause button（α-model 擴張後維持 no-pause 紀律）
+- ✅ ADR-0008 路徑 C（prefetch + event queue）核心仍成立；只是 Stage 1 / 2 mapping 擴張為完整 13 message-kind 表
+- ✅ ADR-0008「iPhone SQLite source of truth；Watch in-memory mirror」仍成立；Watch in-memory map session 結束清掉（不需 UserDefaults backup、handshake on launch 即可重 fetch）
+
+#### slice 13d 拍板 grill Q1-Q28 + NEW Q (2026-05-26 ratified by user)
+
+| Q | Topic | Decision |
+|---|-------|----------|
+| Q1 | Xcode Watch target 加入方式 | Branch C — 手動 Xcode scaffold + `ios/` committed + 不再跑 `expo prebuild --clean` |
+| Q2 | Watch app bundleId | Branch A — `com.lisonchang.TrainingLog.watchkitapp` |
+| Q3 | Signing + entitlement | Branch A — 同 ADP team + Xcode automatic signing + Watch target HealthKit boolean entitlement + Background Modes "Workout processing" |
+| Q4 | WC channel mapping | 完整 13 message kind mapping table（見下節）；start trigger / set events / end signal 走 sendMessage + TUI fallback；HR / kcal 走 applicationContext (3-5s 節流) |
+| Q5 | WC bridge lib | Branch B `react-native-watch-connectivity@2.0.0` + 2-hour validation gate (D0 spike C)、失敗 fallback Branch A (Swift Nitro module ~150 LOC) |
+| Q6 | WC payload 型別 | Branch A — JSON-compatible primitives + Date epoch ms + shared `src/adapters/watch/payloadSchema.ts` + Swift mirror `WCPayload.swift` |
+| Q7 | sendMessage 失敗 fallback | sendMessage primary + TUI fallback + message-id dedupe |
+| Q8 | HKWorkoutSession source-of-truth | **雙向 initiator**（推翻 narrow scope Branch A「iPhone primary」決定）；兩端任一可發起 session、彼此 WC push live mirror |
+| Q9 | Pause | 維持 no-pause 紀律；Watch / iPhone 都不顯 pause button |
+| Q10 | End race | Q28 Branch C 後 race 消失；end-session 雙向：either-side initiates → WC msg → 另一端被動同步 |
+| Q11 | iPhone 無 Watch 時 | Branch A silent skip + Settings 開發者區塊「Watch 整合 last sync」debug readout (replace 退役的 dev toggle) |
+| Q12 | per-session checkbox | Branch A — 不加 checkbox；user 自選哪端 initiate |
+| Q13 | FEATURE_WATCH_HANDOFF | **移除按鈕、flag 退役** — α-model native handoff 取代 |
+| Q14 | HR / kcal 資料 path | (c) 並行 — 13d 同時實作 (a) 即時 push (3-5s applicationContext throttle) + (b) HK auto-sync (finish 時 13c reader 仍跑) |
+| Q15 | In-session live HR / kcal | **進 scope** — Watch `activeWorkoutHeartRate` observer + 3-5s applicationContext push iPhone live mirror |
+| Q16 | Watch UI 範圍 | **完整 α-model UI**：picker root 三步 + in-session vertical scroll set logger + 完成頁 + NowPlaying 左滑 (OS) + ⋯ menu + ⚙ menu |
+| Q17 | Watch picker UI | **進 scope** — 三步：root [計劃訓練 (一鍵)] + [模板訓練 (dropdown)] → dropdown 選 template name → 方塊選計劃 (program/週期) → 強度 (兩步分開) |
+| Q18 | Background delivery / iPhone wake | α-model 期間 HR/kcal applicationContext 每 3-5s overwrite、iPhone 不需主動 wake；Live Activity 持續顯狀態 |
+| Q19 | Max session 時長警告 | Defer to v1.5+（ADR known issue、revisit 條件：≥ 3 reported incidents or any single >12hr session）|
+| Q20 | Testing 策略 | 全 3 path：unit + Watch simulator + 實機 smoke matrix（~28 unit case + 16 smoke case）|
+| Q21 | Migration | v024_session_is_watch_tracked.ts — `session.is_watch_tracked INTEGER NOT NULL DEFAULT 0`；舊 row 自然 0、無 backfill |
+| Q22 | Watch HK permission | Paired-share 為主、Watch 端不主動 request；spike B 驗 (D0)；fail 則 fallback Watch 端獨立 requestAuthorization |
+| Q23 | Failure modes | Q28 Branch C 後 dual-write race 消失；`is_watch_tracked` flag 純 5-tile UI predicate；finalize 後 5 sec timeout reconcile（Watch ack 失敗 → flag flip false） |
+| Q24 | 5-tile predicate | `session.is_watch_tracked === true` — 不用 `healthkit_workout_uuid !== null`（13c iPhone-only path 也寫 uuid、不是 Watch-tracked predicate）|
+| Q25 | dev_simulate_watch_tracked 退役 | Branch A fail-stop — 13d D2 commit 一次性砍 5 處 hit + tests |
+| Q26 | CocoaPods + Watch target | Branch A — Watch target 純 Apple framework、無 npm dep；Podfile Watch target section stub or skip |
+| Q27 | TestFlight + Watch 上架 | Branch A 自動 embed；新增 5 must-fix（Watch App ID 註冊、watchOS icon set 13-size、Watch entitlements signing、CFBundleVersion sync via agvtool、watchOS screenshots）|
+| Q28 | ADR-0008 HK 分工 | **Branch C trigger-only**：Watch sampling + `HKLiveWorkoutBuilder.discardWorkout()`、iPhone 13c writer 為唯一 HKWorkout entry。D0 spike A 驗 watchOS 11+ 行為 |
+| NEW-Q29 | Watch picker root UI 詳 | [↻刷新] + [計劃訓練] big primary（副標 today's program 排程）+ [模板訓練] dropdown |
+| NEW-Q30 | Watch in-session list 導航 | Vertical scroll 全 exercise list + active card 自動 expand + Digital Crown 滾動 |
+| NEW-Q31 | Set row UX | Inherit planned weight/reps 預填 + tap 數字 → Digital Crown 滾 2.5kg/1rep step + tap ✓ 自動跳下組 |
+| NEW-Q32 | Top bar 兩列 sticky | Row 1: elapsed timer + clock；Row 2: ♥HR + 🔥kcal + ⚙；兩列凍結頂部 |
+| NEW-Q33 | 進度條 | 每 exercise segmented bar (組數 N 格、完成格亮)、無 (n/N) 文字計數 |
+| NEW-Q34 | Set type 共存 | 熱身組「熱」/ 一般組「1./2./...」 / D# (Dropset)/ Superset (A/B) 同 exercise 內混存；長按 row → popover 切換 type |
+| NEW-Q35 | Active row 修改限制 | 僅 Active row（外框高亮）可改 weight/reps；✓ 任何時候可按（不需先選中）；tap 其他/空白/✓ → 解除 Active |
+| NEW-Q36 | Gesture 分層 | Active row: 左滑刪除/右滑 +1組；non-active row 或空白: 左滑 → NowPlaying (OS auto)/右滑 → 完成頁 |
+| NEW-Q37 | Cluster 視覺 | Inline nested cluster — Dropset 紫帶 + 副組 inline `⊖[數值]⊕`；Superset 綠帶 + A/B 子標籤；不分子頁、不抹平 |
+| NEW-Q38 | 動作 ⋯ menu | 4 項：🗑刪除動作 (警示) / ↺重置此動作 / ⏭跳過此動作 / 📊查看歷史 |
+| NEW-Q39 | ⚙ 設定 | 5 項：輸入方式 (鍵盤/滾輪) / ✓ 後自動跳下組 / Rest timer 模式 (popup/chip/off) / HR alert zone5 / 觸覺回饋 (弱/中/強) |
+| NEW-Q40 | iPhone state during Watch-led | Live mirror bidirectional + ActivityKit Live Activity (鎖屏 + Dynamic Island) |
+| NEW-Q41 | State SoT | iPhone SQLite SoT、Watch 純 in-memory mirror；Watch app kill → 重啟跑 handshake re-fetch |
+| NEW-Q42 | Session initiator | 雙向 — 兩端 UI 都有 [開始訓練] 入口；initiator 寫 session row 在 iPhone、另一端 WC push auto-jump in-session view |
+| NEW-Q43 | set-modified conflict 模式 | Option A diff + per-field LWW ts (in-memory map, session 結束清掉) |
+| NEW-Q44 | Watch launch handshake | Two-stage — Stage 1 handshake reply = session 狀態 + template list 名單；Stage 2 lazy fetch template detail on pick |
+| NEW-Q45 | End session 雙向協定 | Watch-led: Watch.end() + discardWorkout → WC → iPhone finalize. iPhone-led: iPhone finalize → WC → Watch.end() + discardWorkout. WC unreachable: 仍 complete 自己流程、queue TUI fallback |
+| NEW-Q46 | iPhone Live Activity | 進 13d scope；ActivityKit native widget extension + `NSSupportsLiveActivities=true` |
+| NEW-Q47 | D0 spike 內容 | Spike A (Q28 trigger-only watchOS 11+) + Spike B (Q22 paired-share HK) + Spike C (Q5 react-native-watch-connectivity New Arch) 一次跑、3-5 hours 實機 |
+
+#### WC channel mapping table (13 message kinds)
+
+| # | Kind | 方向 | Channel | Latency | Payload 摘要 |
+|---|---|---|---|---|---|
+| 0 | `handshake` | Watch→iPhone | sendMessage + ack | <2s | ack: {session?, prefetch:{templates}} |
+| 1 | `start-from-watch` | Watch→iPhone | sendMessage + ack | <2s | {progId, cycleId, intensId}; ack: {sessionId, snapshot} |
+| 2 | `start-from-iphone` | iPhone→Watch | sendMessage + TUI fallback | <2s | {sessionId, snapshot} |
+| 3 | `set-completed` | Watch→iPhone | sendMessage + ack + TUI | <1s | {setId, weight, reps, ts} |
+| 4 | `set-modified` | bidirectional | sendMessage | <1s | {setId, diff:{field}, ts} |
+| 5 | `set-deleted` | bidirectional | sendMessage | <1s | {setId} |
+| 6 | `set-added` (+1組) | bidirectional | sendMessage | <1s | {exerciseId, planned} |
+| 7 | `exercise-added` | iPhone→Watch | sendMessage + TUI | <2s | {full exercise card} |
+| 8 | `exercise-deleted` | bidirectional | sendMessage | <2s | {exerciseId} |
+| 9 | `hr-tick` | Watch→iPhone | applicationContext | ~3-5s | {hrBpm, ts}（latest-wins overwrite）|
+| 10 | `kcal-tick` | Watch→iPhone | applicationContext | ~3-5s | {kcalAccum, ts}（latest-wins）|
+| 11 | `end-session` | bidirectional | sendMessage + TUI | <2s | {sessionId, side, ts} → 觸發 finalize |
+| 12 | `settings-sync` | iPhone→Watch | applicationContext | n/a | {input_mode, rest_mode, ...} |
+
+**Channel 用法 design rules**：
+- 即時互動 (set events / end) → sendMessage + TUI fallback + message-id dedupe
+- Hot stream (HR / kcal) → applicationContext (overwriting, low overhead)
+- 全 payload < 1KB（per Apple WC limit）
+- 每 message 帶 `kind` + `msgId` + `ts`；兩端各維護 `seen msgIds` ring buffer 防重
+- set-modified 採 **diff + per-field LWW ts**：incoming diff 對 (setId, fieldName) compare ts vs in-memory map、newer wins
+
+#### slice 13d 28-commit chain
+
+| # | Commit title | 摘要 |
+|---|---|---|
+| D0 | `chore(slice-13d): spike — trigger-only HK + paired-share + react-native-watch-connectivity` | 3 spike 實機跑、結果寫進 commit message；spike A 失敗 → Q28 退 Branch A、spike B 失敗 → Watch 加 requestAuthorization、spike C 失敗 → 自造 Swift native module |
+| D1 | `feat(slice-13d): v024 schema — session.is_watch_tracked column` | migration + Session type + sessionRepository `setIsWatchTracked` + test |
+| D2 | `feat(slice-13d): retire dev_simulate_watch_tracked (Phase A → Phase B fail-stop)` | 砍 settingsRepository 4 處 + index.tsx 3 處 + tests |
+| D3 | `feat(slice-13d): WC bridge — connectivity.ts + payloadSchema.ts` | src/adapters/watch/* + 6+ unit tests（mock target = react-native-watch-connectivity OR NativeModules.RNWatchBridge）|
+| D4 | `feat(slice-13d): Watch Xcode target scaffold + entitlements` | 手動 Xcode add target + Info.plist + entitlements + Background Modes "Workout processing" + .watchkitapp bundleId |
+| D5 | `feat(slice-13d): Watch HK lifecycle — SessionController + discardWorkout pattern` | Swift SessionController.swift + HealthKitController.swift + discardWorkout trigger-only flow |
+| D6 | `feat(slice-13d): iPhone start-session WC push` | 既有 13c finalizeEndAndRoute 不動；加 start session 時 WC sendMessage to Watch |
+| D7 | `feat(slice-13d): end-session bidirectional protocol` | finalizeEndAndRoute 加 WC send + delegate handler 收 watch-led end + 5-sec reconcile timeout |
+| D8 | `feat(slice-13d): Watch picker root 3-step UI` | SwiftUI Root + Templates dropdown + 計劃方塊 + 強度方塊 |
+| D9 | `feat(slice-13d): start-from-watch WC + handshake-on-launch (two-stage)` | Watch picker [計劃訓練] / [模板訓練] → WC sendMessage; Watch app launch 跑 handshake、iPhone delegate reply 帶 session snapshot or null + prefetch list |
+| D10 | `feat(slice-13d): Watch in-session UI — 2-row top bar + 進度條 + exercise card` | SwiftUI top sticky 2-row + per-exercise card with segmented progress bar |
+| D11 | `feat(slice-13d): Watch set logger — set row + Active state + Crown + ✓` | Set row layout + tap 數字 highlight Active + Digital Crown observer + tap ✓ confirm + auto-advance |
+| D12 | `feat(slice-13d): Watch dropset / superset inline cluster rendering` | 紫帶 Dropset + 副組 `⊖[]⊕` + 綠帶 Superset + A/B subrow |
+| D13 | `feat(slice-13d): Watch gestures — 左滑刪除/右滑+1/長按切 type` | Active row gesture + 警示 confirm；非 Active or 空白 swipe 走 page-level (NowPlaying / 完成頁) |
+| D14 | `feat(slice-13d): Watch 完成頁 + 右滑非 active → 完成頁 transition` | 完成頁 SwiftUI + transition + 雙 button (結束訓練 / 返回繼續) |
+| D15 | `feat(slice-13d): Watch 動作 ⋯ menu — 刪除 / 重置 / 跳過 / 查看歷史` | 4-item context menu + 警示 dialog + sub-page 歷史 (read-only 最近 3 場) |
+| D16 | `feat(slice-13d): Watch ⚙ settings popover + settings-sync applicationContext` | 5-item settings popover + per-session 套用 + WC settings-sync push iPhone |
+| D17 | `feat(slice-13d): Watch in-session live HR display (activeWorkoutHeartRate observer)` | Top bar HR 真值由 Watch 本地 observer 拉、無 WC 依賴 |
+| D18 | `feat(slice-13d): HR/kcal applicationContext push Watch → iPhone (3-5s throttle)` | Watch observer 節流 → applicationContext push；iPhone delegate update React state |
+| D19 | `feat(slice-13d): iPhone live mirror — in-session view 受 WC msg 即時更新` | app/(tabs)/index.tsx in-session view 加 WC listener、set / exercise events → state update |
+| D20 | `feat(slice-13d): set-modified diff + per-field LWW (in-memory ts map)` | merge logic + ring buffer dedupe + edge case test 8 case |
+| D21 | `feat(slice-13d): 5-tile predicate switch to is_watch_tracked` | session-stats-panel 改用 v024 column；ADR-0019 line 325 文字修訂 |
+| D22 | `feat(slice-13d): NowPlaying 左滑 + 完成頁 右滑 transitions` | TabView pageStyle + custom 右滑 detect → 完成頁；NowPlaying 系統內建 |
+| D23 | `feat(slice-13d): iOS Live Activity — ActivityKit native widget extension` | Widget extension target + ActivityKit + NSSupportsLiveActivities + Lock screen / Dynamic Island content |
+| D24 | `feat(slice-13d): Settings 開發者「Watch 整合 last sync」debug readout` | replace 退役 dev toggle、顯 last attempted sync ts + result code |
+| D25 | `chore(slice-13d): smoke matrix run + bug fix sweep` | 16 case smoke matrix log + 任何 fix-as-you-go commits |
+| D26 | `docs(adr): Slice 13d Amendment + CONTEXT.md α-model update` | 本 amendment + ADR-0008 amendment + CONTEXT.md |
+| D27 | `chore(testflight): Watch add-ons — App ID + icon set + version sync` | ADP App ID 註冊 + Watch icon set 13 size sips script + agvtool version sync + signing manual config |
+
+#### Smoke matrix (16 項 — α-model 完整覆蓋)
+
+| # | 描述 | Pass 條件 |
+|---|---|---|
+| S1 | Watch [計劃訓練] one-tap → in-session UI | 1-2 秒進 set logger、HR sampling 啟動、HKWorkoutSession console no error |
+| S2 | Watch [模板訓練] dropdown 選 template → 方塊計劃 → 強度 → 開始訓練 | 三步 nav 流暢、選完進 in-session UI、bw_snapshot 帶入正確 |
+| S3 | iPhone 訓練 tab [開始訓練] → Watch auto-jump in-session view | Watch 在 <2s 內離 picker、進 in-session UI 同步 |
+| S4 | Watch set ✓ 後、iPhone in-session view 內 set row 即時更新 | <1s 內 iPhone view 反映 |
+| S5 | iPhone +動作 → Watch 同步看到新 exercise card | <2s 內 Watch in-memory mirror 加 exercise |
+| S6 | Set 同時改 weight (Watch) + reps (iPhone) — non-overlap | 兩 field 各保留、無丟失 |
+| S7 | 戴 Watch 完成 session → 詳情頁 HR chart 真資料 + kcal tile > 0 | 5-tile variant、HR polyline 真 sample |
+| S8 | 完成 session → Apple Fitness app 只有一筆 workout (iPhone 寫) | Watch 未額外寫 entry |
+| S9 | 不戴 Watch / Watch 沒電 → iPhone-led session | is_watch_tracked=false、3-tile variant、HR chart grey overlay |
+| S10 | Watch app kill mid-session → 重啟 | handshake 帶回 session snapshot、in-memory mirror 重 hydrate、無資料遺失 |
+| S11 | iPhone 鎖屏 in-session | Live Activity 顯 elapsed + HR + kcal；Dynamic Island compact + expanded 各正確 |
+| S12 | Watch 左滑非 active → NowPlaying | OS 內建 NowPlaying page 自然出現 |
+| S13 | Watch 右滑非 active → 完成頁 | 完成頁 顯 elapsed + 組數 + 雙 button、tap 結束觸發 end protocol |
+| S14 | Settings HK 權限拒絕 → Watch session 起不來 | silent log + 5-tile fallback 3-tile + Watch UI 不卡 |
+| S15 | Battery 1hr session 跑完 Watch 耗電 | ≤ 10% drain (Apple Watch S9/SE2 baseline) |
+| S16 | Phase A `dev_simulate_watch_tracked` toggle 已不存在於 Settings | Setting key gone、tsc clean、無對應 test 殘留 |
+
+#### Test count delta (estimate)
+
+1666 → **~1740-1780** delta：
+- WC connectivity adapter: +6 case (send happy / unreachable / dual-send dedupe / payload too large / Watch app uninstalled / paired=false)
+- WC payload schema: +8 case
+- `is_watch_tracked` repository setter: +4 case
+- 5-tile predicate (post-migrate): +4 case
+- syncSessionWithHealthKit Watch path: +3 case
+- finalizeEndAndRoute Watch branch: +3 case
+- set-modified diff + per-field LWW merge: +8 case
+- Live Activity ActivityKit hook: +5 case
+- handshake reply shape + two-stage lazy fetch: +6 case
+- Watch picker SwiftUI (snapshot test if applicable): +N case
+- 總 estimate: ~+47-114 case；±5% tolerance allowed before considered drift
+
+#### TestFlight Watch add-ons（02-testflight 6 must-fix 之外的 5 新增）
+
+per Slice 13d Q27：
+
+| 新增 must | 細節 | 工時 |
+|---|---|---|
+| Watch App ID 註冊 | ADP portal → Identifiers → App ID `com.lisonchang.TrainingLog.watchkitapp` + HealthKit capability | 10 min |
+| watchOS Watch App AppIcon multi-size | 24/27.5/29/40/44/50/55/86/98/108pt 共 9 size + 1024 marketing；sips script 從 source 生 | 20 min |
+| Watch entitlements signing | Xcode → Watch target → Signing & Capabilities → automatic + Team XQTU89U2J2 + HealthKit + Background Modes | 5 min |
+| CFBundleVersion sync | `VERSIONING_SYSTEM = apple-generic` 已具備、`agvtool next-version -all` 兩 target 同步 bump | 0 |
+| watchOS screenshots | App Store Connect 需 Watch screenshot；用 simulator 截 3-5 張 picker / in-session / 完成頁 | 15 min |
+
+#### Slice 13e+ preview / known issues
+
+Items 留 13e 或之後（intentional defer）：
+- **Pause button** — 永不（per Q9 紀律、α-model 擴張後仍維持）
+- **Watch face complication**（ADR-0008 #14）— 13e+
+- **PR 達成觸覺通知**（#12）— 13e+
+- **結束 summary 卡片**（#15）— 13e+ Watch end UI
+- **Max session 時長警告**（Q19）— v1.5+ revisit triggered by report ≥ 3 incidents
+- **iCloud backup integration**（ADR-0011）— slice 15
+- **Watch 上 +動作**（user 主動限制）— 永不（Watch 畫面小、選 exercise 麻煩）；user 要 +動作 → 掏 iPhone +動作、Watch via WC sync 自然看到
+- **Watch on-device exercise library picker UI** — 不做（同上原因）
+- **react-native-watch-connectivity New Arch 確認** — 若 D0 spike C 通過則 hold；fail 則 Branch A fallback (Swift Nitro module ~150 LOC) 紀錄為 13d 跨 slice rewrite 候選
+
+#### 涉及 ADR cross-references
+
+- ADR-0008 — § 2026-05-26 Slice 13d Amendment（同步寫、α-model 路徑 + 雙向 initiator + HK 分工 trigger-only）
+- ADR-0019 § Slice 13c Amendment line 1089-1090（本 amendment 推翻範圍）
+- ADR-0019 § Q6.1 line 759（pause 紀律維持、不推翻）
+- ADR-0019 § Q6 line 145（5-tile predicate 由 dev toggle → `is_watch_tracked`）
+- ADR-0014 — Session.title schema、與 Live mirror 雙向 sync 對齊
+- ADR-0012 — Cluster card + set row、Watch UI inline nested cluster 視覺對齊
