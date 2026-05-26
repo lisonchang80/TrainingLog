@@ -13,7 +13,6 @@ import { useDatabase } from '@/components/database-provider';
 import { muscleHighlightMap } from '@/src/domain/exercise/exerciseLibrary';
 import type {
   ExerciseWithMuscles,
-  Muscle,
   MuscleGroup,
   MuscleRole,
 } from '@/src/domain/exercise/types';
@@ -234,37 +233,6 @@ function FooterButton({
   );
 }
 
-function MuscleSection({
-  title,
-  color,
-  muscles,
-}: {
-  title: string;
-  color: string;
-  muscles: Muscle[];
-}) {
-  const styles = useExerciseStyles();
-  return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionSwatch, { backgroundColor: color }]} />
-        <Text style={styles.sectionTitle}>{title}</Text>
-      </View>
-      {muscles.length === 0 ? (
-        <Text style={styles.empty}>{t('common', 'none')}</Text>
-      ) : (
-        <View style={styles.chipRow}>
-          {muscles.map((m) => (
-            <View key={m.id} style={[styles.muscleChip, { borderColor: color }]}>
-              <Text style={styles.muscleChipText}>{tMuscleGroup(m.name)}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
 function makeStyles(tokens: ThemeTokens) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: tokens.bg.base },
@@ -281,28 +249,6 @@ function makeStyles(tokens: ThemeTokens) {
       padding: 12,
       backgroundColor: tokens.bg.elevated,
       alignItems: 'center',
-    },
-    section: { gap: 6, marginTop: 8 },
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    sectionSwatch: { width: 14, height: 14, borderRadius: 4 },
-    sectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: tokens.text.primary,
-    },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    muscleChip: {
-      paddingVertical: 5,
-      paddingHorizontal: 10,
-      borderRadius: 999,
-      borderWidth: 1.5,
-      backgroundColor: 'transparent',
-    },
-    muscleChipText: { fontSize: 13, color: tokens.text.primary },
-    empty: {
-      fontSize: 13,
-      color: tokens.text.tertiary,
-      fontStyle: 'italic',
     },
     headerBack: {
       color: tokens.action.primary,
