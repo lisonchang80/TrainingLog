@@ -99,7 +99,6 @@ import {
   cloneTemplateWithSubTag,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
-  listDistinctSubTags,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -310,7 +309,6 @@ export default function TodayScreen() {
     null,
   );
   const [sheetPrograms, setSheetPrograms] = useState<ProgramOption[]>([]);
-  const [sheetSubTags, setSheetSubTags] = useState<string[]>([]);
   const [sheetLastProgramId, setSheetLastProgramId] = useState<string | null>(
     null,
   );
@@ -572,17 +570,14 @@ export default function TodayScreen() {
   const onPickTemplate = async (item: TemplateSummary) => {
     setBusy(true);
     try {
-      const [programSummaries, distinctSubTags, lastProgram, lastTag] =
-        await Promise.all([
-          listPrograms(db),
-          listDistinctSubTags(db),
-          getSetting<string>(db, LAST_PROGRAM_KEY),
-          getSetting<string>(db, LAST_SUB_TAG_KEY),
-        ]);
+      const [programSummaries, lastProgram, lastTag] = await Promise.all([
+        listPrograms(db),
+        getSetting<string>(db, LAST_PROGRAM_KEY),
+        getSetting<string>(db, LAST_SUB_TAG_KEY),
+      ]);
       setSheetPrograms(
         programSummaries.map((p) => ({ id: p.id, name: p.name })),
       );
-      setSheetSubTags(distinctSubTags);
       setSheetLastProgramId(lastProgram);
       setSheetLastSubTag(lastTag);
       setSheetTemplate(item);
@@ -2090,7 +2085,6 @@ export default function TodayScreen() {
           visible={sheetTemplate != null}
           templateName={sheetTemplate?.name ?? ''}
           programs={sheetPrograms}
-          subTags={sheetSubTags}
           lastUsedProgramId={sheetLastProgramId}
           lastUsedSubTag={sheetLastSubTag}
           onEdit={onSheetEdit}

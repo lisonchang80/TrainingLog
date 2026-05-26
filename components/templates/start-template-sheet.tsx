@@ -75,14 +75,6 @@ type StartTemplateSheetProps = {
   templateName: string;
   /** Programs from `listPrograms(db)` — caller filters; we prepend 「通用」 here. */
   programs: ProgramOption[];
-  /**
-   * @deprecated Round 35 polish — intensity radios now fetch per-program via
-   * `listDistinctSubTagsByProgram(db, programId)` on each period selection.
-   * The prop is kept (and still accepted) only as an initial-render fallback
-   * before the first useEffect fires + for the `resolveProgramDefaults`
-   * sticky-resolution input. Parent should keep passing it for now.
-   */
-  subTags: string[];
   /** Sticky last-used program_id (from app_settings). */
   lastUsedProgramId: string | null;
   /** Sticky last-used sub_tag (from app_settings). */
@@ -158,7 +150,6 @@ export function StartTemplateSheet({
   visible,
   templateName,
   programs,
-  subTags,
   lastUsedProgramId,
   lastUsedSubTag,
   onEdit,
@@ -207,9 +198,9 @@ export function StartTemplateSheet({
    * sub_tag is a free-form string column, the new value will reach db when
    * the parent persists sticky in `onStart` / `onEdit`).
    *
-   * Dedupe: if user types a name that already exists in `subTags` (from db)
-   * or `localSubTags` (in-session), we don't append a duplicate radio row —
-   * just activate the existing one.
+   * Dedupe: if user types a name that already exists in `programSubTags`
+   * (the per-program union fetched on open) or `localSubTags` (in-session),
+   * we don't append a duplicate radio row — just activate the existing one.
    */
   const [customSubTagMode, setCustomSubTagMode] = useState(false);
   const [customSubTag, setCustomSubTag] = useState('');
@@ -219,24 +210,33 @@ export function StartTemplateSheet({
    * Per-program distinct sub_tags (round 35 polish — mirror of
    * template-meta-sheet round 30). Re-fetched whenever the period selection
    * changes. Empty list when periodId === RESERVED_NONE_PROGRAM_ID since the
-   * intensity section is hidden in that case. Initial render before the
-   * first useEffect fires falls back to the legacy cross-program `subTags`
-   * prop to avoid a flash of empty list on open.
+   * intensity section is hidden in that case. On initial open the list is
+   * empty until the per-program-union effect fires (cross-program fallback
+   * was removed in round 38+ — the union effect now owns sticky resolution
+   * too).
    */
   const [programSubTags, setProgramSubTags] = useState<string[]>([]);
 
   // Re-resolve defaults each time the sheet opens — sticky state may have
   // changed since last open (e.g. another tab confirmed a session).
+  //
+  // Round 38+ refactor: we only resolve `period_id` here (against the
+  // currently-available `programs`). The intensity sticky is resolved later
+  // in the per-program-union useEffect below, against the merged
+  // (templates × dictionary) sub_tag list for the resolved period — so the
+  // cross-program `subTags` fallback is no longer needed. Pass an empty
+  // array to keep the pure-logic contract; the returned `intensity_id` is
+  // immediately overwritten by the union effect.
   useEffect(() => {
     if (!visible) return;
     const defaults = resolveProgramDefaults({
       programs: periodOptions,
-      subTags,
+      subTags: [],
       lastUsedProgramId,
       lastUsedSubTag,
     });
     setPeriodId(defaults.period_id);
-    setIntensityId(defaults.intensity_id);
+    setIntensityId(null);
     // Reset inline-add state so they don't persist across opens.
     setCustomProgramMode(false);
     setCustomProgramName('');
@@ -248,9 +248,9 @@ export function StartTemplateSheet({
     setCloningSubTag(false);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
-    // + the underlying sticky values + raw inputs.
+    // + the underlying sticky values + the programs identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, lastUsedProgramId, lastUsedSubTag, subTags.join('|'), programs.length]);
+  }, [visible, lastUsedProgramId, lastUsedSubTag, programs.length]);
 
   /**
    * Re-fetch per-program sub_tags whenever the user changes period selection
@@ -285,13 +285,20 @@ export function StartTemplateSheet({
         );
         merged.sort((a, b) => a.localeCompare(b));
         setProgramSubTags(merged);
-        // If the previously-resolved intensityId is no longer present in this
-        // program's sub_tags (e.g. user switched programs and the prior tag
-        // doesn't apply), collapse to null = 通用 so the radio doesn't show
-        // a phantom selection.
-        setIntensityId((prev) =>
-          prev != null && !merged.includes(prev) ? null : prev
-        );
+        // Round 38+ — restore sticky intensity from the per-program union.
+        // Previously this only collapsed a stale intensityId; now it also
+        // owns the initial sticky-resolution (the open-effect no longer
+        // pre-fills intensity from the cross-program `subTags` prop). When
+        // the user has switched periods mid-sheet the `prev` value already
+        // reflects their explicit choice — keep it if it's still valid,
+        // otherwise fall back to the sticky last-used tag if that one is
+        // in this program's union, otherwise null.
+        setIntensityId((prev) => {
+          if (prev != null) return merged.includes(prev) ? prev : null;
+          return lastUsedSubTag != null && merged.includes(lastUsedSubTag)
+            ? lastUsedSubTag
+            : null;
+        });
       })
       .catch(() => {
         if (!cancelled) setProgramSubTags([]);
@@ -299,7 +306,7 @@ export function StartTemplateSheet({
     return () => {
       cancelled = true;
     };
-  }, [visible, periodId, db]);
+  }, [visible, periodId, db, lastUsedSubTag]);
 
   const isNoneSelected = periodId === RESERVED_NONE_PROGRAM_ID;
   // When 無 is selected, force intensity to null on confirm (hidden picker).
