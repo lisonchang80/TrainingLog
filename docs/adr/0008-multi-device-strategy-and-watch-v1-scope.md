@@ -55,21 +55,27 @@ Watch → iPhone events 走 `WCSession.transferUserInfo`（OS-managed reliable d
 | 16 | Pre-session 兩態 | 選定 Template → ▶ 開始訓練按鈕，不啟 HKWorkoutSession |
 | 17 | In-session 啟動點 | 按鈕觸發 HKWorkoutSession + Session row 創建 |
 
-### 2026-05-23 amendment — iPhone `[傳至手錶 ⌚]` button feature-gate
+### 2026-05-23 amendment — iPhone `[傳至手錶 ⌚]` button feature-gate（**Retired in slice 13d D2，commit `6aa2bd8`**）
+
+> **Status: retired**. The `FEATURE_WATCH_HANDOFF` build-time flag and its gating block have been removed. `src/config/features.ts` no longer exists, and `tests/config/features.test.ts` has been deleted. Watch tracking is now driven directly by the v024 `session.is_watch_tracked` column (per slice 13d D1 + D5; see ADR-0019 § Slice 13d amendments). This section is preserved for historical traceability — readers investigating why slice 10c/10e ever shipped a gated `[傳至手錶 ⌚]` Pressable should still find that story here.
+
+**Historical context（slice 10c → 10e）**:
 
 iPhone 端 Today bottom sticky bar 在 slice 10c Phase 5 期間（2026-05-XX）有 forward-port placeholder Pressable `[傳至手錶 ⌚]`，tap → 顯示「將在 slice 13 上線」informational Alert。slice 10e bundle 3 拍板：**按鈕預設**不渲染**，由 build-time flag `FEATURE_WATCH_HANDOFF` 控制**（`src/config/features.ts`、default `false`）。
 
-理由：
+當時的理由：
 - App Store user 不知道「slice 13」是什麼，看到「敬請期待」Alert 會解讀為功能壞掉
 - 真正的 WatchConnectivity handoff 要等 slice 11+（watch scaffold + WCSession 真實對接）才有意義
 - Build-time flag 是最輕量的 gate，flip true 後 button 出現、無需動 UI 邏輯
 
-當 slice 11+ 真正 ship WatchConnectivity 對接時：
-1. `src/config/features.ts` 把 `FEATURE_WATCH_HANDOFF` 改 `true`
-2. `app/(tabs)/index.tsx` 的 `onPress` 從目前 informational Alert 換成真正觸發 `WatchConnectivity.send(...)` 呼叫
-3. `tests/config/features.test.ts` 的 invariant 更新或刪除（看 watch handoff 是否視為「永遠開」）
+原本規劃 slice 11+ ship WC 對接時的 flip 步驟（已 obsolete，留作歷史記錄）：
+1. ~~`src/config/features.ts` 把 `FEATURE_WATCH_HANDOFF` 改 `true`~~
+2. ~~`app/(tabs)/index.tsx` 的 `onPress` 從 informational Alert 換成 `WatchConnectivity.send(...)` 呼叫~~
+3. ~~`tests/config/features.test.ts` 的 invariant 更新或刪除~~
 
-`session/[id].tsx` history detail edit mode 目前**沒有**此按鈕（編輯 post-hoc session 不需要 handoff，per ADR-0019 § slice 10d E2 區分）。
+**Retirement rationale（slice 13d D2，2026-05-27）**：slice 13d 開始真正實作 WatchConnectivity payload schema (D3) + native bridge，dev gate 失去存在價值。D2 commit `6aa2bd8` 一次刪除 `src/config/features.ts`、Today tab 內的 gated `<Pressable>` block、以及 `tests/config/features.test.ts`（單檔單 flag 測試）。Watch handoff 的 ship 路徑改為由 v024 `session.is_watch_tracked` column 直接驅動 — column = true 即代表該 session 由 Watch 端開啟並 stream 資料進 iPhone，UI（包含 5-tile stats panel variant）依此 branch，不再需要 build-time flag。
+
+`session/[id].tsx` history detail edit mode 從未渲染此按鈕（編輯 post-hoc session 不需要 handoff，per ADR-0019 § slice 10d E2 區分）；retirement 後該行為不變。
 
 ## HealthKit 整合（v1 提前實作）
 
