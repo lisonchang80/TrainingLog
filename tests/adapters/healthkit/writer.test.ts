@@ -4,7 +4,7 @@
  * Mocks `saveWorkoutSample` from `@kingstinct/react-native-healthkit` and
  * verifies:
  *   - happy path returns the HK uuid + activityType=functionalStrengthTraining
- *   - metadata wiring (HKMetadataKeyWorkoutBrandName / HKMetadataKeyExternalUUID)
+ *   - metadata wiring (HKWorkoutBrandName / HKExternalUUID)
  *   - kcal=null → totals argument omits energyBurned (not 0, not undefined-property)
  *   - kcal=number → totals.energyBurned matches input
  *   - native rejection → returns null without throwing (best-effort contract)
@@ -71,7 +71,7 @@ describe('Slice 13c — HealthKit workout writer', () => {
     expect((args[3] as Date).getTime()).toBe(input.endMs);
   });
 
-  it('metadata: HKMetadataKeyWorkoutBrandName === input.title', async () => {
+  it('metadata: HKWorkoutBrandName === input.title', async () => {
     saveWorkoutSampleMock.mockResolvedValue({ uuid: 'hk-1' });
 
     await saveTrainingLogWorkout(input);
@@ -80,10 +80,10 @@ describe('Slice 13c — HealthKit workout writer', () => {
       string,
       unknown
     >;
-    expect(metadata.HKMetadataKeyWorkoutBrandName).toBe('腿 (蹲)');
+    expect(metadata.HKWorkoutBrandName).toBe('腿 (蹲)');
   });
 
-  it('metadata: HKMetadataKeyExternalUUID === input.sessionId', async () => {
+  it('metadata: HKExternalUUID === input.sessionId', async () => {
     saveWorkoutSampleMock.mockResolvedValue({ uuid: 'hk-1' });
 
     await saveTrainingLogWorkout(input);
@@ -92,7 +92,7 @@ describe('Slice 13c — HealthKit workout writer', () => {
       string,
       unknown
     >;
-    expect(metadata.HKMetadataKeyExternalUUID).toBe('sess-uuid-abc-123');
+    expect(metadata.HKExternalUUID).toBe('sess-uuid-abc-123');
   });
 
   it('kcal passed: totals.energyBurned matches input', async () => {

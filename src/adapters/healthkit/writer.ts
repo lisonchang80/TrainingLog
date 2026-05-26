@@ -79,12 +79,23 @@ export async function saveTrainingLogWorkout(
   try {
     const saveWorkoutSample = getNativeSaveWorkoutSample();
 
-    // Build metadata. HKMetadataKey* string constants are hardcoded because
-    // Kingstinct doesn't re-export them as JS constants (they're typed in
-    // generated.d.ts as TypedMetadata keys but not exported as values).
+    // Build metadata. Apple's ObjC HKMetadataKey* constants are symbols that
+    // resolve to SHORTER NSString values at link time — the actual key Apple
+    // stores in HKWorkout.metadata is e.g. `"HKWorkoutBrandName"` (NOT
+    // `"HKMetadataKeyWorkoutBrandName"`). Kingstinct's AnyMap bridge passes
+    // JS keys through verbatim, so we must use the *serialized* values.
+    //
+    // First slice 13c real-device smoke (2026-05-26) caught this — workout
+    // saved fine but Apple Fitness app showed the default "功能性肌力訓練"
+    // (activityType localized name) instead of session.title because the
+    // (wrong-keyed) metadata was silently ignored by Apple's reader.
+    //
+    // Mapping (per Apple HKMetadata.m / react-native-health convention):
+    //   HKMetadataKeyWorkoutBrandName → "HKWorkoutBrandName"
+    //   HKMetadataKeyExternalUUID     → "HKExternalUUID"
     const metadata: Record<string, unknown> = {
-      HKMetadataKeyWorkoutBrandName: input.title,
-      HKMetadataKeyExternalUUID: input.sessionId,
+      HKWorkoutBrandName: input.title,
+      HKExternalUUID: input.sessionId,
     };
 
     // OMIT energyBurned entirely when kcal is null — passing 0 would lie

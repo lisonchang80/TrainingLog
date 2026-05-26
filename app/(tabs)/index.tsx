@@ -300,7 +300,7 @@ export default function TodayScreen() {
    * mirrors the session's linked template (name + program · sub_tag) instead
    * of the user's active Program. `null` while loading or for freestyle
    * sessions (no row carries a non-null template_id) — caller renders
-   * 「自由訓練」. Refreshed by a useEffect keyed on session status + id below.
+   * 「空白訓練」. Refreshed by a useEffect keyed on session status + id below.
    */
   const [sessionTemplateInfo, setSessionTemplateInfo] = useState<{
     template_name: string;
@@ -1965,7 +1965,7 @@ export default function TodayScreen() {
     ? templatesById[programCellToday.template_id] ?? null
     : null;
   // 5/19 polish #43 — banner branches on session status. In-progress sessions
-  // mirror the session's linked template (or「自由訓練」for freestyle);
+  // mirror the session's linked template (or「空白訓練」for freestyle);
   // idle / ended fall through to the existing active-program banner.
   let programBanner: ReactNode = null;
   if (sessionState.status === 'in_progress') {

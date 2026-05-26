@@ -20,7 +20,7 @@ import {
  * program_name, sub_tag) triple of the session's "linked template" — the most
  * common non-null `session_exercise.template_id` across the session's rows.
  * Tie-break: earliest `ordering`. Returns null for a freestyle session (no
- * non-null template_id) so the caller can render 「自由訓練」.
+ * non-null template_id) so the caller can render 「空白訓練」.
  */
 describe('getSessionLinkedTemplateTriple (5/19 polish #43)', () => {
   let db: BetterSqliteDatabase;

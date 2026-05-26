@@ -81,7 +81,7 @@ function displaySessionTitle(s: EnrichedSession): string {
   return t('domain', 'freestyle');
 }
 
-// ADR-0025 — 「自由訓練」(no-template) semantic gray indicator. Kept as
+// ADR-0025 — 「空白訓練」(no-template) semantic gray indicator. Kept as
 // raw hex because the visual intent is specifically a neutral mid-gray
 // chip (not a primary surface), and we want it to read the same in both
 // themes — the contrast with FREESTYLE_TEXT below carries the meaning.
@@ -125,7 +125,7 @@ export default function MonthGridView() {
         // session.title is a planned column (ADR-0014) but not yet
         // shipped in any v001-v020 migration on this branch. Until the
         // column lands we always treat title as empty — title fallback
-        // resolves to template_name or 「自由訓練」per ADR-0015 spec.
+        // resolves to template_name or 「空白訓練」per ADR-0015 spec.
         const title = '';
 
         return {
