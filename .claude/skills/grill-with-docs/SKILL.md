@@ -292,6 +292,18 @@ If a PRD has already been published (e.g., as issue #1) when this grill round ad
 
 This is project-specific to TrainingLog. For other projects without published PRDs, ADR + CONTEXT.md is sufficient.
 
+### Post-amendment doc QC pass (before merging long ADR amendments)
+
+When a grill round produces an ADR amendment of 100+ lines (large slice grills routinely do — slice 13d's ADR-0019 amendment was 203 lines, 47 decisions, embedded line-refs / 翻盤 ledger / commit chain / smoke matrix), **doc drift is essentially invisible to human review** — but auto-detectable. Spawn a single read-only QC agent against the amendment-PR tip:
+
+- **Phantom line / section refs** — every `見 § Q__ line NNN` / `see § X` in the amendment must grep-verify; line numbers rot the moment ADR is re-flowed. (Slice 13d: 3 phantom `§ Q6.1 line 759` cites — actual no-pause section was Q9(b) line 497; line 759 was the References list. Caught by Agent A.)
+- **Cross-doc terminology drift** — amendment landed `functionalStrengthTraining` in CONTEXT.md but ADR's body still said `traditionalStrengthTraining`. Both can't be right; pick one + retrofit. Grep the term across all amended files.
+- **翻盤 ledger row completeness** — if the amendment翻盤s N decisions, the `翻盤 ledger (greppable)` table must add N rows on the same day. Walk the ❌ markers in the amendment body, then count ledger rows added that date; mismatch = silent drift seed.
+- **Forward-pointer marker on every reverted bullet** — old decisions must carry inline `（**Slice X 修訂**：見 § X Amendment）`; without inline marker, the old bullet looks ratified to a cold reader.
+- **Decision-count internal arithmetic** — if amendment claims "47 decisions = 28 Q + 19 NEW-Q" but the table has 28+20 rows, fix one.
+
+The audit is **read-only, single agent, ~10-20 min, ~3000 word report** — high signal/noise. Run it before the doc-only PR merges (after the merge, drift is harder to untangle from real code-side updates). Project-specific to repos with long-lived ADRs; for short PRs / single-paragraph amendments, skip.
+
 ### Walk-back cleanup recipe (3-side atomic ship)
 
 When a grill round decides to **formally retract** a previously-shipped (or silently-reverted) feature, the cleanup spans 3 sides — shipping only the ADR amendment without the code cleanup leaves future readers confused why the spec says "retracted" but the wiring is still in place. Validated 2x in TrainingLog 2026-05-25 grill (G3 H1 縱條色 + G4+G5 computeSessionDiff orphan).
