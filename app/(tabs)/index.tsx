@@ -3278,24 +3278,6 @@ function makeStyles(tokens: ThemeTokens) {
     marginTop: 12,
     color: tokens.text.secondary,
   },
-  pillsRow: { gap: 8, paddingVertical: 4 },
-  pill: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    backgroundColor: tokens.bg.elevated,
-  },
-  pillActive: { backgroundColor: tokens.action.primary },
-  pillText: { fontSize: 14, fontWeight: '500', color: tokens.text.primary },
-  pillTextActive: { color: tokens.action.onPrimary },
-  input: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: tokens.bg.elevated,
-    fontSize: 18,
-    color: tokens.text.primary,
-  },
   startBtn: {
     paddingVertical: 18,
     borderRadius: 12,
@@ -3305,18 +3287,6 @@ function makeStyles(tokens: ThemeTokens) {
   startBtnText: {
     color: tokens.action.onPrimary,
     fontSize: 18,
-    fontWeight: '700',
-  },
-  endBtn: {
-    marginTop: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: tokens.action.destructive,
-    alignItems: 'center',
-  },
-  endBtnText: {
-    color: tokens.action.onPrimary,
-    fontSize: 16,
     fontWeight: '700',
   },
   sessionHeader: {
@@ -3404,15 +3374,8 @@ function makeStyles(tokens: ThemeTokens) {
     color: tokens.text.tertiary,
     textAlign: 'center',
   },
-  planMark: {
-    fontSize: 18,
-    width: 22,
-    textAlign: 'center',
-    color: tokens.text.primary,
-  },
   planText: { flex: 1 },
   planName: { fontSize: 15, fontWeight: '600', color: tokens.text.primary },
-  planDetails: { fontSize: 12, color: tokens.text.secondary },
   // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
   exerciseCard: {
     backgroundColor: tokens.bg.elevated,
@@ -3449,10 +3412,6 @@ function makeStyles(tokens: ThemeTokens) {
     justifyContent: 'center',
   },
   exerciseCardGearText: { fontSize: 18, color: tokens.text.primary },
-  exerciseCardProgressBar: {
-    marginTop: 4,
-    width: '100%',
-  },
   // Progress bar + 容量 chip 同一 row (overnight #5 第 1 點)
   // chip 在 bar 右側、與齒輪 column 對齊
   exerciseCardProgressRow: {
@@ -3464,11 +3423,6 @@ function makeStyles(tokens: ThemeTokens) {
   },
   exerciseCardProgressBarFill: {
     flex: 1,
-  },
-  exerciseCardVolume: {
-    fontSize: 11,
-    color: tokens.text.tertiary,
-    marginTop: 2,
   },
   exerciseCardTitleRow: {
     flexDirection: 'row',
@@ -3644,11 +3598,6 @@ function makeStyles(tokens: ThemeTokens) {
     fontSize: 13,
     color: tokens.action.primary,
     fontWeight: '600',
-  },
-  exerciseHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
   // Semantic warm-amber PR banner intentionally retained (alert-on-record feel);
   // ADR-0025 keeps warm-tone callouts as their own design intent.
