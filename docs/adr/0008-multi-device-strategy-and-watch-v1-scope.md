@@ -138,7 +138,7 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 - ✅ **UUID 主鍵範圍**（Session / Set / body_metric 三表）— 不變
 - ✅ **Schema 影響最小**（新增僅 `set.is_skipped` + `session.healthkit_workout_uuid`）— 13d 再加 v024 `session.is_watch_tracked INTEGER DEFAULT 0`、總計 3 個 13d-affected column
 - ✅ **Watch v1 17 條** 大部分仍適用（picker / 即時心率 / 增刪組 / 完成勾 / 休息倒數 / 超級組 / 跳過 Exercise / Pre-session 兩態 / In-session 啟動點 / NowPlaying 系統內建）；deferred items：#12 PR 觸覺通知、#14 complication、#15 結束 summary 卡片
-- ✅ **Watch 端輸入限制**（不做 body data 輸入 / 不編 Template / 不編 Program）— 13d 進一步**user 主動限制 Watch 不可 +動作**；要 +動作 → iPhone +動作、Watch via WC sync 自然看到（per ADR-0019 § Slice 13d Amendment NEW-Q「Watch 上不能 +動作」）
+- ✅ **Watch 端輸入限制**（不做 body data 輸入 / 不編 Template / 不編 Program）— 13d 進一步**user 主動限制 Watch 不可 +動作**；要 +動作 → iPhone +動作、Watch via WC sync 自然看到（per ADR-0019 § Slice 13d Amendment § Slice 13e+ preview / known issues 「Watch 上 +動作（user 主動限制）— 永不」line 1283）
 
 ### 13d 新增 (α-model 補完)
 
@@ -151,7 +151,7 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 
 ### Cross-references
 
-- 完整 grill decision + commit chain + smoke matrix + test count delta — ADR-0019 § 2026-05-26 Slice 13d Amendment（28 + 19 NEW Q）
+- 完整 grill decision + commit chain + smoke matrix + test count delta — ADR-0019 § 2026-05-26 Slice 13d Amendment（Q1-Q28 + NEW-Q29-Q47 = 47 decisions total）
 - HK reader / writer 13c shipped — ADR-0019 § Slice 13c Amendment
 - Pause 紀律 — ADR-0019 § Q9 (b) line 497（不翻盤）
 - 5-tile predicate — ADR-0019 § Q6 + Slice 13d Amendment Q24
