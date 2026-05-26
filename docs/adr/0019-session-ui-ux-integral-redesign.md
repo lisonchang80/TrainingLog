@@ -1086,10 +1086,10 @@ Grill round D（set-logger implementation plan finalization）resolved 4 decisio
 
 - **SwiftUI Watch app 新 Xcode target**（bundleId `com.lisonchang.TrainingLog.watchkitapp`、native target、不走 RN-for-watchOS per ADR-0008）
 - **WatchConnectivity bridge**（iPhone ↔ Watch state sync、protocol 選型 grill 13d 拍）
-- **`HKWorkoutSession` lifecycle on Watch**（start / pause / end）→ Watch 寫 active energy + HR 進 HK、iPhone 自動拿到（per ADR-0008 § HealthKit「HKWorkoutSession 啟動點 = Watch 端」）
-- **In-session live HR / kcal**（5-tile Watch variant 真資料、不再是 Phase A `dev_simulate_watch_tracked` toggle 模擬）
+- **`HKWorkoutSession` lifecycle on Watch**（start / pause / end）→ Watch 寫 active energy + HR 進 HK、iPhone 自動拿到（per ADR-0008 § HealthKit「HKWorkoutSession 啟動點 = Watch 端」）（**Slice 13d 修訂**：HKWorkoutSession 改為 trigger-only sampling、`discardWorkout()` 不寫 HKWorkout entry；iPhone 13c writer 為唯一 HKWorkout 寫入點。HR / activeEnergyBurned sample 仍進 HK store、iPhone reader 照撈。見 § 2026-05-26 Slice 13d Amendment Q28 Branch C）
+- **In-session live HR / kcal**（5-tile Watch variant 真資料、不再是 Phase A `dev_simulate_watch_tracked` toggle 模擬）（**Slice 13d 修訂**：5-tile predicate 改為 `session.is_watch_tracked` v024 column；live HR / kcal Watch 端從 `HKWorkoutSession.activeWorkoutHeartRate` 觀察、3-5s applicationContext throttled 推 iPhone live mirror。見 § 2026-05-26 Slice 13d Amendment Q14 + Q24）
 - **Watch picker UI**（user requirement 2026-05-25：可以從 Watch 開啟「計劃訓練 / 模板訓練」、不必先掏 iPhone）
-- **Phase A `dev_simulate_watch_tracked` setting key + Settings toggle 第一個 commit 移除**（per slice 13b § Phase A → Phase B 轉換點規約、13b 暫留作 regression guard、13d 真 Watch session 自然 trigger 5-tile-watch variant 後即可砍）
+- **Phase A `dev_simulate_watch_tracked` setting key + Settings toggle 第一個 commit 移除**（per slice 13b § Phase A → Phase B 轉換點規約、13b 暫留作 regression guard、13d 真 Watch session 自然 trigger 5-tile-watch variant 後即可砍）（**Slice 13d 修訂**：predicate switch 改由 `is_watch_tracked` v024 column 承擔、非「session 自然 trigger」；D2 commit fail-stop 砍 dev toggle 5 處 hit + tests）
 
 ADR-0008 § HealthKit 整合「Watch 寫 HKWorkout」與本 slice 13c「iPhone 補寫 HKWorkout」的覆蓋率分工 amendment 留給 slice 13d ship 時補（屆時 Watch session 真上線、補寫路徑只在 Watch 不可用時 fallback）。（**Slice 13d 修訂**：此分工模型推翻 — 改為「Watch HKWorkoutSession trigger-only sampling、iPhone 13c writer 為唯一 HKWorkout 寫入點」，per Slice 13d Amendment Q28 Branch C，見下節）
 
