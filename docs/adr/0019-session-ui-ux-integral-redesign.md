@@ -1043,7 +1043,7 @@ Grill round D（set-logger implementation plan finalization）resolved 4 decisio
 | Q3 | Time range | `session.start_at → session.end_at`（active session 不適用本 slice、active live HR 留 13d）|
 | Q4 | In-session live HR/kcal | **Deferred to slice 13d**（需配 SwiftUI Watch app + WatchConnectivity + `HKWorkoutSession` 才有意義）|
 | Q5 | kcal storage | Persist to `session.kcal` column on finish（finish 時一次性 query active energy aggregate + 寫 column、之後詳情頁不再重 query）|
-| Q6 | HKWorkout 寫入欄位 | `activityType=functionalStrengthTraining`（Fitness app「體能訓練」/ /\|\| icon）+ `totalEnergyBurned={quantity: session.kcal, unit: 'kcal'}` + `metadata={ HKMetadataKeyWorkoutBrandName: session.title, HKMetadataKeyExternalUUID: session.id }` |
+| Q6 | HKWorkout 寫入欄位 | `activityType=traditionalStrengthTraining`（Fitness app「傳統肌力訓練」filter；**2026-05-26 fix commit `e5732ac`**：原本拍 `functionalStrengthTraining`，後改 traditional 因「重量訓練」語意更貼近 — `traditional` = barbell / dumbbell weight lifting，`functional` = HIIT / circuit training）+ `totalEnergyBurned={quantity: session.kcal, unit: 'kcal'}` + `metadata={ HKMetadataKeyWorkoutBrandName: session.title, HKMetadataKeyExternalUUID: session.id }` |
 | Q6.5 | 「總大卡 ≠ 動態大卡」差異化 | 依 Apple HK 個人資料（生日 / 性別 / 身高 / 體重）自動算 basal samples；TrainingLog **不額外寫 `basalEnergyBurned`**。User 未填 HK 個人資料時兩值相等（如使用者本人 = 訓記場景）|
 | Q7 | Writer 時機 | finish button 內 synchronous `await`——寫完 HKWorkout 才 `router.push` 詳情頁（fail-stop UX、避免 user 進詳情頁時 uuid 還沒落）|
 | Q8 | 寫失敗 / 無權限處理 | **Best-effort 三層**：(1) `session` DB row 一定先存；(2) HK write 失敗 → silent skip（`uuid=NULL` / `kcal=NULL`）；(3) UI 不彈 alert。Recovery 路徑 = user 重 finish 別場 session 或去 Settings 翻 HK toggle、不在 13c 處理 retry |
