@@ -116,6 +116,24 @@ describe('Slice 13c — HealthKit reader adapter', () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0][0]).toMatch(/queryHeartRateSamples/);
     });
+
+    it("passes unit 'count/min' to the native binding", async () => {
+      // Explicit contract: HR samples MUST be requested in count/min so the
+      // mapped bpm values land in the chart's [Y_BPM_MIN, Y_BPM_MAX] window.
+      // If a future refactor accidentally drops the unit param, HK falls back
+      // to its raw storage unit (also count/min in practice, but undocumented
+      // — we want the call site to be explicit). Regression guard for the
+      // call-shape, complementary to the broader assertion in the "empty
+      // window" case.
+      queryQuantitySamplesMock.mockResolvedValue([]);
+
+      await queryHeartRateSamples(1000, 2000);
+
+      expect(queryQuantitySamplesMock).toHaveBeenCalledTimes(1);
+      const [identifier, options] = queryQuantitySamplesMock.mock.calls[0];
+      expect(identifier).toBe('HKQuantityTypeIdentifierHeartRate');
+      expect(options.unit).toBe('count/min');
+    });
   });
 
   describe('aggregateActiveEnergyBurned', () => {
@@ -177,6 +195,24 @@ describe('Slice 13c — HealthKit reader adapter', () => {
       const result = await aggregateActiveEnergyBurned(1000, 2000);
 
       expect(result).toBe(15);
+    });
+
+    it("passes unit 'kcal' to the native binding", async () => {
+      // Explicit contract: active-energy samples MUST be requested in kcal so
+      // the session.kcal column + detail-page tile both read in the same unit
+      // as the writer's HKWorkoutBuilder totals payload. If a future refactor
+      // accidentally drops the unit (or sets it to 'J'), the kcal tile would
+      // display ~4184× the expected value. Regression guard for the
+      // call-shape, complementary to the broader assertion in the "sums 3
+      // samples" case.
+      queryQuantitySamplesMock.mockResolvedValue([]);
+
+      await aggregateActiveEnergyBurned(1000, 2000);
+
+      expect(queryQuantitySamplesMock).toHaveBeenCalledTimes(1);
+      const [identifier, options] = queryQuantitySamplesMock.mock.calls[0];
+      expect(identifier).toBe('HKQuantityTypeIdentifierActiveEnergyBurned');
+      expect(options.unit).toBe('kcal');
     });
   });
 });
