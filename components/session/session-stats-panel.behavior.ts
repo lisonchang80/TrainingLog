@@ -21,7 +21,7 @@ import { ZONE_COLORS } from './hr-zone-chart.behavior';
 
 export type StatsTileVariant = '3tile' | '4tile' | '5tile-watch';
 
-export type StatsTileKey =
+type StatsTileKey =
   | 'duration'
   | 'volume'
   | 'exerciseCount'

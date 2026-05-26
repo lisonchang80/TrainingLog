@@ -28,7 +28,7 @@ export interface ChartDims {
 export const Y_BPM_MIN = 60;
 export const Y_BPM_MAX = 200;
 
-export interface ZoneBand {
+interface ZoneBand {
   zone: 1 | 2 | 3 | 4 | 5;
   /** Inclusive lower BPM bound at the given HRmax. */
   bpmFrom: number;

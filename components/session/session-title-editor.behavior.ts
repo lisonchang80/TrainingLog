@@ -20,7 +20,7 @@
  *     initialTitle, mirroring the component's `commit` body.
  */
 
-export interface DraftSyncInput {
+interface DraftSyncInput {
   /** Latest `initialTitle` from parent. */
   initialTitle: string;
   /** Current local `draft` state. */
@@ -47,14 +47,14 @@ export function nextDraftOnPropSync(input: DraftSyncInput): string | null {
   return input.initialTitle;
 }
 
-export interface CommitDecisionInput {
+interface CommitDecisionInput {
   /** Current `draft` (raw — will be trimmed before comparison). */
   draft: string;
   /** Latest `initialTitle` (the value currently persisted in DB). */
   initialTitle: string;
 }
 
-export interface CommitDecision {
+interface CommitDecision {
   /** Trimmed draft, ready to write through to DB / `onUpdated`. */
   next: string;
   /**
