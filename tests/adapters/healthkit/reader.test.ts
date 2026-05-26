@@ -196,5 +196,23 @@ describe('Slice 13c — HealthKit reader adapter', () => {
 
       expect(result).toBe(15);
     });
+
+    it("passes unit 'kcal' to the native binding", async () => {
+      // Explicit contract: active-energy samples MUST be requested in kcal so
+      // the session.kcal column + detail-page tile both read in the same unit
+      // as the writer's HKWorkoutBuilder totals payload. If a future refactor
+      // accidentally drops the unit (or sets it to 'J'), the kcal tile would
+      // display ~4184× the expected value. Regression guard for the
+      // call-shape, complementary to the broader assertion in the "sums 3
+      // samples" case.
+      queryQuantitySamplesMock.mockResolvedValue([]);
+
+      await aggregateActiveEnergyBurned(1000, 2000);
+
+      expect(queryQuantitySamplesMock).toHaveBeenCalledTimes(1);
+      const [identifier, options] = queryQuantitySamplesMock.mock.calls[0];
+      expect(identifier).toBe('HKQuantityTypeIdentifierActiveEnergyBurned');
+      expect(options.unit).toBe('kcal');
+    });
   });
 });
