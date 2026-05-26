@@ -22,14 +22,14 @@
 export const MG_CHEST = 'mg-chest';
 export const MG_BACK = 'mg-back';
 export const MG_LEG = 'mg-leg';
-export const MG_GLUTE = 'mg-glute';
-export const MG_SHOULDER = 'mg-shoulder';
-export const MG_TRAP = 'mg-trap';
-export const MG_BICEP = 'mg-bicep';
-export const MG_TRICEP = 'mg-tricep';
-export const MG_CALF = 'mg-calf';
-export const MG_FOREARM = 'mg-forearm';
-export const MG_CORE = 'mg-core';
+const MG_GLUTE = 'mg-glute';
+const MG_SHOULDER = 'mg-shoulder';
+const MG_TRAP = 'mg-trap';
+const MG_BICEP = 'mg-bicep';
+const MG_TRICEP = 'mg-tricep';
+const MG_CALF = 'mg-calf';
+const MG_FOREARM = 'mg-forearm';
+const MG_CORE = 'mg-core';
 
 // ---------- Muscle IDs (19 anatomical muscles per ADR-0010) ----------
 export const M_UPPER_CHEST = 'm-upper-chest';      // 上胸
@@ -52,22 +52,22 @@ export const M_FOREARM = 'm-forearm';              // 前臂
 export const M_OBLIQUE = 'm-oblique';              // 側腹
 export const M_ABS = 'm-abs';                      // 腹肌
 
-export interface MuscleGroupSeed {
+interface MuscleGroupSeed {
   id: string;
   name: string;
   display_order: number;
 }
 
-export interface MuscleSeed {
+interface MuscleSeed {
   id: string;
   name: string;
   mg_id: string;
   display_order: number;
 }
 
-export type LoadType = 'loaded' | 'bodyweight' | 'assisted';
+type LoadType = 'loaded' | 'bodyweight' | 'assisted';
 
-export interface ExerciseLibrarySeed {
+interface ExerciseLibrarySeed {
   id: string;
   name: string;
   load_type: LoadType;

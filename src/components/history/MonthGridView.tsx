@@ -177,7 +177,7 @@ export default function MonthGridView() {
   const onTapDay = useCallback(
     (bucket: DayBucket) => {
       const allIds = bucket.sessions.map((s) => s.id).join(',');
-      router.push(`/session/${bucket.main.id}?sameDayIds=${allIds}` as any);
+      router.push(`/session/${bucket.main.id}?sameDayIds=${allIds}`);
     },
     [router]
   );

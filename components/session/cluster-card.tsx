@@ -675,7 +675,6 @@ function makeStyles(tokens: ThemeTokens) {
       lineHeight: 20,
       color: tokens.text.primary,
     },
-    clusterChip: { fontSize: 13, color: tokens.text.secondary },
     // 「超」 marker — solid purple badge (per overnight #3 第 1 點, 2026-05-17).
     // 砍中括號 + 改純底色紫色 pill — mirror template-editor's `supersetTag` palette
     // (`#5856D6` iOS system indigo/purple, white text, 4px corners). 視覺更穩、
@@ -720,10 +719,6 @@ function makeStyles(tokens: ThemeTokens) {
       justifyContent: 'center',
     },
     clusterGearText: { fontSize: 18 },
-    clusterProgressBar: {
-      marginTop: 4,
-      width: '100%',
-    },
     clusterBody: {
       paddingHorizontal: 12,
       paddingBottom: 12,
@@ -865,9 +860,6 @@ function makeStyles(tokens: ThemeTokens) {
       alignSelf: 'stretch',
       backgroundColor: tokens.border.default,
       marginHorizontal: 2,
-    },
-    cycleCell: {
-      fontSize: 14,
     },
     cycleEmpty: {
       fontSize: 14,
