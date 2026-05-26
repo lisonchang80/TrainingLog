@@ -90,7 +90,7 @@ export const strings = {
       bodyweight: '體重',
       warmupChip: '熱',
       supersetChip: '超',
-      freestyle: '自由訓練',
+      freestyle: '空白訓練',
       restDay: '休息日',
       rest: '休息',
       programSchedule: '計劃表',
@@ -370,8 +370,9 @@ export const strings = {
       // Phase 4.5 final sweep — set-note sheet placeholder.
       setNotePlaceholder: '這組想留下什麼？（例：RPE 8、左肘有點緊）',
       // Card 11 / ADR-0014 — in-session header tap-to-edit title placeholder
-      // (freestyle / un-named session).
-      sessionTitlePlaceholder: '自由訓練',
+      // (freestyle / un-named session). 2026-05-26: 「自由訓練」→「空白訓練」
+      // to avoid collision with「自由重量」(free weights) terminology.
+      sessionTitlePlaceholder: '空白訓練',
       // Slice 13 Phase A (2026-05-25) — detail page HR zone section header.
       hrZoneSection: '心率區間',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
@@ -511,7 +512,7 @@ export const strings = {
       noExercisesMatch: '沒有符合條件的動作',
       noRecordsUnderFilter: '篩選條件下沒有紀錄。',
       noIntensity: '無強度',
-      freestyle: '自由訓練',
+      freestyle: '空白訓練',
       restDay: '休息日',
       inProgress: '· 進行中',
       todayOutsideProgram: '今天不在 Program 範圍內',

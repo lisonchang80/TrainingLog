@@ -219,7 +219,7 @@ export async function findTemplateByTriple(
  * (mirrors `convertSessionToTemplate`'s `linkedTemplateId` resolution, with
  * the tie-break tightened so the order of identically-counted templates is
  * stable). Returns `null` for a freestyle session (no row carries a non-null
- * template_id) — caller renders 「自由訓練」.
+ * template_id) — caller renders 「空白訓練」.
  *
  * The second SELECT joins `program` to resolve `program.name` (may be NULL
  * when the template lives under the「通用」program or none); `template.sub_tag`
