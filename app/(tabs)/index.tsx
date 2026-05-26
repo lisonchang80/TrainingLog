@@ -16,7 +16,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
-import { FEATURE_WATCH_HANDOFF } from '@/src/config/features';
 import {
   insertBodyMetric,
   listBodyMetrics,
@@ -2571,32 +2570,6 @@ export default function TodayScreen() {
               {t('button', 'manualTimer')}
             </Text>
           </Pressable>
-          {/*
-            Slice 10e bundle 3 — Watch handoff button gated by
-            FEATURE_WATCH_HANDOFF (default false). Real WatchConnectivity
-            handoff lands in slice 11+ (per ADR-0008). Until then the
-            placeholder Alert UX is confusing for App Store users, so the
-            button is hidden by default. See `src/config/features.ts`.
-          */}
-          {FEATURE_WATCH_HANDOFF ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                Alert.alert(
-                  t('button', 'sendToWatch'),
-                  t('alert', 'watchComingSlice13'),
-                )
-              }
-              style={({ pressed }) => [
-                styles.bottomStickyBtn,
-                styles.bottomStickyBtnSecondary,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.bottomStickyBtnTextSecondary}>
-                {t('button', 'sendToWatch')}
-              </Text>
-            </Pressable>
-          ) : null}
         </View>
       </KeyboardAvoidingView>
       <SetNoteSheet
