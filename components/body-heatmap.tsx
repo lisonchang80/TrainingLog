@@ -791,9 +791,6 @@ function makeStyles(tokens: ThemeTokens) {
     column: {
       alignItems: 'center',
     },
-    bodyWrap: {
-      position: 'relative',
-    },
     label: {
       fontSize: 12,
       color: tokens.text.secondary,

@@ -706,13 +706,6 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.text.secondary,
       marginLeft: 'auto',
     },
-    emptyText: {
-      fontSize: 13,
-      color: tokens.text.tertiary,
-      fontStyle: 'italic',
-      paddingVertical: 8,
-      paddingHorizontal: 4,
-    },
     /**
      * Primary CTA「新增計畫 / 強度」— solid blue / white text so the entry
      * point visually stands out from the radio rows above. Active state
