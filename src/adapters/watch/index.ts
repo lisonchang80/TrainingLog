@@ -13,6 +13,7 @@ export {
   isWCEnvelope,
   makeEnvelope,
   normaliseForWire,
+  __resetEnvelopeCounterForTests,
 } from './payloadSchema';
 
 export type {
