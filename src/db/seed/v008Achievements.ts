@@ -23,7 +23,7 @@ export type AchievementCategory =
 
 export type AchievementPRType = 'weight' | 'volume';
 
-export interface AchievementDefinitionSeed {
+interface AchievementDefinitionSeed {
   code: string;
   category: AchievementCategory;
   display_name: string;
