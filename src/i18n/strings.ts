@@ -377,10 +377,6 @@ export const strings = {
       hrZoneSection: '心率區間',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health 整合',
-      // Slice 13a Phase A dev-only — Watch tracked toggle kept to slice 13d
-      // as a regression guard (5-tile-watch UI variant)；HK granted toggle
-      // removed in slice 13b per ADR-0019 § Phase B 開工 Amendment.
-      devSection: '開發者 (Phase A)',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -617,11 +613,6 @@ export const strings = {
       appleHealthIntro: 'TrainingLog 會讀取 Apple Watch 訓練期間的心率與消耗熱量；無 Apple Watch 紀錄時、會寫入訓練紀錄讓 Fitness App 顯示。',
       appleHealthConnected: '已連結 Apple Health',
       managePermissionHint: '權限管理請至「設定 → 隱私 → 健康 → TrainingLog」。',
-      // Slice 13a Phase A dev-only — Watch tracked toggle kept to slice 13d
-      // as 5-tile-watch UI regression guard. HK granted toggle removed in
-      // slice 13b (real HK permission UI replaces it).
-      devSimulateWatchTracked: '模擬 Apple Watch 追蹤 [dev]',
-      devSimulateWatchTrackedHint: '開啟後 Today 顯示 5-tile 變體（心率 / 大卡 = —）。13d Watch app ship 後此 toggle 移除。',
     },
 
     /**
@@ -1125,9 +1116,6 @@ export const strings = {
       hrZoneSection: 'Heart rate zones',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health Integration',
-      // Slice 13a Phase A dev-only — Watch tracked toggle kept to slice 13d
-      // as a regression guard. HK granted toggle removed in slice 13b.
-      devSection: 'Developer (Phase A)',
     },
 
     alert: {
@@ -1356,11 +1344,6 @@ export const strings = {
       appleHealthIntro: 'TrainingLog reads heart rate and active energy from Apple Watch workouts; it writes a workout entry to the Fitness app for sessions without Apple Watch tracking.',
       appleHealthConnected: 'Connected to Apple Health',
       managePermissionHint: 'Manage permissions at Settings → Privacy → Health → TrainingLog.',
-      // Slice 13a Phase A dev-only — Watch tracked toggle kept to slice 13d
-      // as 5-tile-watch UI regression guard. HK granted toggle removed in
-      // slice 13b (real HK permission UI replaces it).
-      devSimulateWatchTracked: 'Simulate Watch-tracked session [dev]',
-      devSimulateWatchTrackedHint: 'When ON, Today shows 5-tile variant (HR / kcal = —). Removed once slice 13d Watch app ships.',
     },
 
     equipment: {
