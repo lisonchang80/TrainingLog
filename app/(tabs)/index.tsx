@@ -1920,11 +1920,18 @@ export default function TodayScreen() {
           session.started_at,
           session.ended_at,
         );
+        // 2026-05-26 B1 follow-up: session.title is empty string ('') for
+        // freestyle sessions (DB convention — UI renders the i18n placeholder
+        // at display time). Passing '' as HKWorkoutBrandName makes Apple
+        // Fitness silently fall back to the activityType localized name
+        // (「傳統肌力訓練」) instead of our intended「空白訓練」. Resolve
+        // to the placeholder here so HK metadata carries the user-facing name.
+        const displayTitle = session.title || t('page', 'sessionTitlePlaceholder');
         const uuid = await saveTrainingLogWorkout({
           startMs: session.started_at,
           endMs: session.ended_at,
           kcal,
-          title: session.title,
+          title: displayTitle,
           sessionId: session.id,
         });
         await setSessionHealthKitData(db, {
