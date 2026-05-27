@@ -39,6 +39,10 @@ import {
 } from '@/src/i18n/locale-persist';
 import { setLocale } from '@/src/i18n/strings';
 import { useTheme, type ThemeTokens, type StoredThemeValue } from '@/src/theme';
+import {
+  runConnectivitySpike,
+  type SpikeReport,
+} from '@/src/adapters/watch/spike/connectivitySpike';
 
 /**
  * Settings tab — slice 7 ships the unit preference toggle.
@@ -85,6 +89,13 @@ export default function SettingsScreen() {
   const [bwSheetOpen, setBwSheetOpen] = useState(false);
   const [bwInput, setBwInput] = useState('');
   const [bwBusy, setBwBusy] = useState(false);
+  /**
+   * Slice 13d / D0 spike C — react-native-watch-connectivity validation
+   * harness state. Throwaway dev tool, will be removed when D0 commit
+   * lands on main. See `src/adapters/watch/spike/connectivitySpike.ts`.
+   */
+  const [spikeRunning, setSpikeRunning] = useState(false);
+  const [spikeReport, setSpikeReport] = useState<SpikeReport | null>(null);
 
   const refresh = useCallback(async () => {
     const [u, popup, loc, hkState] = await Promise.all([
@@ -210,6 +221,31 @@ export default function SettingsScreen() {
       Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
     } finally {
       setBwBusy(false);
+    }
+  };
+
+  // Slice 13d / D0 spike C handler. We wrap with our own try/catch even
+  // though runConnectivitySpike() doesn't throw — defensive in case the
+  // TurboModule registration crashes at the spike entry (which is exactly
+  // one of the failure modes we want to surface, not silently swallow).
+  const onRunSpike = async () => {
+    setSpikeRunning(true);
+    setSpikeReport(null);
+    try {
+      const report = await runConnectivitySpike();
+      setSpikeReport(report);
+      // Full JSON to native console for D0 commit-body capture.
+      console.log(
+        '[D0 spike C] full report:\n' + JSON.stringify(report, null, 2),
+      );
+    } catch (e) {
+      Alert.alert(
+        'Spike crashed at entry',
+        e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+      );
+      console.log('[D0 spike C] hard crash:', e);
+    } finally {
+      setSpikeRunning(false);
     }
   };
 
@@ -370,6 +406,52 @@ export default function SettingsScreen() {
             </Text>
             <Text style={styles.linkChevron}>›</Text>
           </Pressable>
+        )}
+
+        {/* Slice 13d / D0 spike C — react-native-watch-connectivity@2.0.0
+            New Arch validation. Throwaway dev section, will be removed
+            when D0 commit lands. See
+            `src/adapters/watch/spike/connectivitySpike.ts` + ADR-0019
+            NEW-Q47. */}
+        <Text style={styles.section}>🔬 開發者 — D0 spike C</Text>
+        <Text style={styles.hint}>
+          react-native-watch-connectivity@2.0.0 New Arch validation. 結果寫進
+          D0 commit body 後本 section 會移除。
+        </Text>
+        <Pressable
+          onPress={onRunSpike}
+          disabled={spikeRunning}
+          style={({ pressed }) => [
+            styles.linkRow,
+            spikeRunning && styles.btnDisabled,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.linkLabel}>
+            {spikeRunning ? '執行中…' : '執行 WC spike'}
+          </Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </Pressable>
+        {spikeReport && (
+          <View style={styles.spikePanel}>
+            <Text style={styles.spikeVerdict}>
+              判定：{spikeReport.verdict.toUpperCase()} · 共 {spikeReport.totalMs}
+              ms
+            </Text>
+            <Text style={styles.hint}>{spikeReport.summary}</Text>
+            {spikeReport.steps.map((step, i) => (
+              <Text key={i} style={styles.spikeStep}>
+                {step.ok ? '✓' : '✗'} {step.step} ({step.durationMs}ms)
+                {step.value !== undefined
+                  ? ` → ${JSON.stringify(step.value)}`
+                  : ''}
+                {step.error ? ` · err=${step.error}` : ''}
+                {step.errorCode ? ` · code=${step.errorCode}` : ''}
+              </Text>
+            ))}
+            <Text style={styles.hint}>
+              完整 JSON 已 console.log，從 Xcode console 複製進 D0 commit body。
+            </Text>
+          </View>
         )}
 
       </ScrollView>
@@ -637,6 +719,26 @@ function makeStyles(tokens: ThemeTokens) {
       fontSize: 14,
       fontWeight: '600',
       color: tokens.text.primary,
+    },
+    // Slice 13d / D0 spike C — throwaway dev panel styles. Removed when
+    // the D0 commit lands and the spike section gets deleted from the UI.
+    spikePanel: {
+      gap: 6,
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.subtle,
+    },
+    spikeVerdict: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: tokens.text.primary,
+    },
+    spikeStep: {
+      fontSize: 12,
+      fontFamily: 'Menlo',
+      color: tokens.text.secondary,
     },
   });
 }
