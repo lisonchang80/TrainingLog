@@ -54,3 +54,14 @@ export type {
   SessionSnapshotExercise,
   SessionSnapshotSet,
 } from './handshake';
+
+export {
+  sendMessage,
+  isPaired,
+  isReachable,
+  updateApplicationContext,
+  addMessageListener,
+  seenMsgId,
+  __resetBridgeForTests,
+} from './connectivity';
+export type { SendResult, SendOptions } from './connectivity';

@@ -135,6 +135,7 @@ import {
   type SessionTitleEditorHandle,
 } from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
+import { pushStartToWatch } from '@/src/services/watchSessionStart';
 import {
   IDLE,
   canRecordSet,
@@ -531,13 +532,17 @@ export default function TodayScreen() {
   ) => {
     setBusy(true);
     try {
-      await startSessionFromTemplate(db, {
+      const { session_id } = await startSessionFromTemplate(db, {
         template_id,
         uuid: randomUUID,
         program_id: program_id ?? undefined,
         sub_tag: sub_tag ?? null,
       });
       await refresh();
+      // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
+      // Ack flips session.is_watch_tracked = true so detail page renders 5-tile.
+      // Watch unreachable / unpaired → no-op, session stays iPhone-led.
+      void pushStartToWatch(db, session_id, {});
     } catch (e) {
       Alert.alert(
         t('alert', 'cannotStartSession'),
@@ -756,7 +761,7 @@ export default function TodayScreen() {
       }
       await persistSticky(selection.period_id, selection.intensity_id);
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
-      await startSessionFromTemplate(db, {
+      const { session_id } = await startSessionFromTemplate(db, {
         template_id: resolved.template_id,
         uuid: randomUUID,
         program_id: selection.period_id,
@@ -764,6 +769,9 @@ export default function TodayScreen() {
       });
       closeSheet();
       await refresh();
+      // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
+      // See sibling call site in `onStartPlanned` for rationale.
+      void pushStartToWatch(db, session_id, {});
     } catch (e) {
       Alert.alert(
         t('alert', 'cannotStartSession'),

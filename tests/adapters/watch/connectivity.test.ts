@@ -1,178 +1,235 @@
 /**
- * Slice 13d / D3 (后半) — WatchConnectivity bridge wrapper test scaffold.
+ * Slice 13d D6 — connectivity.ts bridge wrapper tests.
  *
- * Scaffold built by Agent Z 2026-05-27, following V's coverage-audit
- * report `24-overnight-V-coverage-audit.md` item #1 (high priority).
+ * Replaces the D3 scaffold (Agent Z 2026-05-27) with real tests now
+ * that connectivity.ts lands.
  *
- * The actual `connectivity.ts` module is NOT yet land in main as of
- * `8ca6671`. It will be a thin lazy-`require()` wrapper around
- * `react-native-watch-connectivity` mirroring the pattern from
- * `src/adapters/healthkit/permission.ts` (jest's `testEnvironment: node`
- * can't load the native bridge at module-load time).
+ * Coverage: 6 outbound behaviours from the micro-PRD (happy reply /
+ * errCb / timeout / unpaired / unreachable / bridge throw), plus the
+ * inbound msgId dedupe + silent-failing state queries.
  *
- * Per V's report, the wrapper SHOULD expose:
- *   - `sendMessage<K extends WCMessageKind>(env: WCEnvelope<K, ...>)` —
- *     fire-and-forget send (uses `transferUserInfo` for reliable queue
- *     or `sendMessage` for live reachability — TBD by D0 spike).
- *   - reachability state (`isReachable()` / `onReachabilityChange(cb)`).
- *   - inbound handler registration (`onMessage(kind, handler)`).
- *   - a dedupe ring buffer (≥256 slots keyed by `msgId`) per ADR-0019 § Q7.
- *
- * This file is **scaffold-only**. Every test is `it.todo` or `it.skip`
- * — implementers should:
- *   1. Replace the `// TODO: import once connectivity.ts ships` line with the
- *      real import.
- *   2. Flip `describe.skip` → `describe`.
- *   3. Fill in the bodies one by one.
- *
- * Reference for typed payloads:
- *   - `WC_MESSAGE_KINDS` / `makeEnvelope` from `src/adapters/watch`
- *     (D3 protocol layer, already landed in commit `c29f1fd`).
+ * Implementation note: we use real timers (not fake) because the
+ * sendMessage flow chains `await isPaired() → await isReachable() →
+ * setTimeout(...) → bridge().sendMessage(...)` and faking timers makes
+ * microtask interleaving brittle. Tests that need timeout use a small
+ * real timeoutMs (~50ms) and wait actual wall time — total suite cost
+ * is < 0.5s.
  */
 
-import { makeEnvelope, WC_MESSAGE_KINDS } from '../../../src/adapters/watch';
-import type { WCMessage } from '../../../src/adapters/watch';
+import { makeEnvelope } from '../../../src/adapters/watch/payloadSchema';
 
-// TODO: import once connectivity.ts ships:
-//   import {
-//     sendMessage,
-//     isReachable,
-//     onReachabilityChange,
-//     onMessage,
-//     __resetDedupeRingForTests,
-//   } from '../../../src/adapters/watch/connectivity';
+function loadModule() {
+  jest.resetModules();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('../../../src/adapters/watch/connectivity') as typeof import('../../../src/adapters/watch/connectivity');
+}
 
-describe.skip('WatchConnectivity bridge (connectivity.ts) — not yet landed', () => {
-  beforeEach(() => {
-    // TODO: reset the dedupe ring buffer between tests so msgId state
-    //       doesn't leak across cases.
-    // TODO: jest.resetModules() so a fresh lazy-require runs per test,
-    //       allowing per-test mocks of `react-native-watch-connectivity`.
-    // TODO: install a default jest.mock for 'react-native-watch-connectivity'
-    //       exposing `sendMessage`, `transferUserInfo`,
-    //       `useReachability`, and event subscribers.
-  });
+interface MockBridge {
+  getIsPaired: jest.Mock;
+  getIsWatchAppInstalled: jest.Mock;
+  getReachability: jest.Mock;
+  sendMessage: jest.Mock;
+  updateApplicationContext: jest.Mock;
+  watchEvents: {
+    addListener: jest.Mock;
+  };
+}
 
+function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
+  return {
+    getIsPaired: jest.fn().mockResolvedValue(true),
+    getIsWatchAppInstalled: jest.fn().mockResolvedValue(true),
+    getReachability: jest.fn().mockResolvedValue(true),
+    sendMessage: jest.fn(),
+    updateApplicationContext: jest.fn(),
+    watchEvents: {
+      addListener: jest.fn().mockReturnValue(() => {}),
+    },
+    ...overrides,
+  };
+}
+
+function installBridge(bridge: MockBridge): void {
+  jest.doMock('react-native-watch-connectivity', () => bridge);
+}
+
+describe('Slice 13d D6 — connectivity.ts', () => {
   afterEach(() => {
-    // TODO: tear down event listeners; clear all jest mock state.
+    jest.dontMock('react-native-watch-connectivity');
   });
 
-  // -----------------------------------------------------------------
-  // (a) sendMessage happy path
-  // -----------------------------------------------------------------
-  describe('sendMessage — happy path', () => {
-    it.todo(
-      'fires native sendMessage with JSON-stringified envelope when watch is reachable',
-    );
-    it.todo(
-      'preserves msgId / ts / kind / payload structurally via JSON round-trip',
-    );
-    it.todo('resolves once the native bridge ack callback fires');
-  });
+  // ─── Outbound sendMessage ──────────────────────────────────────────
 
-  // -----------------------------------------------------------------
-  // (b) transferUserInfo fallback when watch unreachable
-  // -----------------------------------------------------------------
-  describe('sendMessage — TUI (transferUserInfo) fallback', () => {
-    it.todo(
-      'falls back to transferUserInfo when isReachable() === false (Q4 reliable channel)',
-    );
-    it.todo(
-      'still uses transferUserInfo for non-realtime kinds (hr-tick / kcal-tick use applicationContext per ADR-0019 NEW)',
-    );
-    it.todo(
-      'preserves envelope.msgId across the TUI queue (no re-wrapping)',
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // (c) paired=false guard
-  // -----------------------------------------------------------------
-  describe('sendMessage — paired=false guard', () => {
-    it.todo(
-      'no-ops and resolves silently when the user has no paired Apple Watch',
-    );
-    it.todo(
-      'does not throw / does not log error when paired === false (production users without a Watch)',
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // (d) Dedupe ring buffer (≥256 slots, ADR-0019 § Q7)
-  // -----------------------------------------------------------------
-  describe('inbound dedupe ring buffer (msgId-keyed)', () => {
-    it.todo(
-      'invokes onMessage handler exactly once for a repeated msgId within 256 receives',
-    );
-    it.todo(
-      're-admits a msgId after 256 distinct messages have rolled it out of the ring',
-    );
-    it.todo('rejects envelope with missing / non-string msgId silently');
-  });
-
-  // -----------------------------------------------------------------
-  // (e) Payload size guard (>64KB per WC docs)
-  // -----------------------------------------------------------------
-  describe('payload size guard', () => {
-    it.todo(
-      'throws / rejects when JSON.stringify(envelope).length > 64_000 (WC realtime limit)',
-    );
-    it.todo(
-      'falls back to transferUserInfo (file-backed) when 16KB < size ≤ 64KB (TBD by D0 spike)',
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // (f) Reachability state observer
-  // -----------------------------------------------------------------
-  describe('isReachable / onReachabilityChange', () => {
-    it.todo(
-      'isReachable() reflects the native `session.isReachable` at call time',
-    );
-    it.todo(
-      'onReachabilityChange callback fires when paired Watch transitions reachable→unreachable',
-    );
-    it.todo(
-      'unsubscribe function returned by onReachabilityChange detaches the listener',
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // (g) Type safety — envelope must be typed via makeEnvelope
-  // -----------------------------------------------------------------
-  it.todo(
-    'sendMessage rejects raw object that did not come through makeEnvelope (no msgId / no kind)',
-  );
-
-  // -----------------------------------------------------------------
-  // (h) Inbound dispatch — typed envelope round-trip via the protocol layer
-  // -----------------------------------------------------------------
-  describe('onMessage dispatch — typed receive path', () => {
-    it.todo(
-      'invokes the registered handler with payload narrowed by kind (set-completed)',
-    );
-    it.todo(
-      'ignores inbound envelope whose kind is not in WC_MESSAGE_KINDS (drops without throw)',
-    );
-    it.todo(
-      'ignores inbound shape that fails isWCEnvelope (malformed bridge payload)',
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // Sanity — wired correctly to the D3 protocol layer
-  // -----------------------------------------------------------------
-  it('protocol layer is importable as typed dependency (sanity)', () => {
-    // This test is NOT skipped — it's a sanity check that the
-    // protocol layer is reachable and makeEnvelope is callable from
-    // this scaffold's import path. If a future commit breaks the
-    // `src/adapters/watch` barrel re-export, this test will fail.
-    const env: WCMessage = makeEnvelope('handshake', {
-      requestId: 'req-scaffold',
-      clientVersion: '13d.0',
+  it('happy path — Watch replyHandler fires synchronously → {ok:true, reply}', async () => {
+    const bridge = makeBridge({
+      sendMessage: jest.fn((_msg, replyCb) => {
+        replyCb?.({ ok: true, ackMsgId: 'echo-1' });
+      }),
     });
-    expect(env.kind).toBe('handshake');
-    expect(typeof env.msgId).toBe('string');
-    expect(WC_MESSAGE_KINDS).toContain('handshake');
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-1',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env, { timeoutMs: 2000 });
+
+    expect(result).toEqual({
+      ok: true,
+      reply: { ok: true, ackMsgId: 'echo-1' },
+    });
+    expect(bridge.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('errCb fires → {ok:false, code:"BRIDGE_ERROR", error}', async () => {
+    const bridge = makeBridge({
+      sendMessage: jest.fn((_msg, _replyCb, errCb) => {
+        const e = new Error('mock bridge error') as Error & { code?: string };
+        e.code = 'WC_7008';
+        errCb?.(e);
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-2',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env);
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'BRIDGE_ERROR',
+      error: 'mock bridge error',
+    });
+  });
+
+  it('neither callback fires before timeout → {ok:false, code:"TIMEOUT"}', async () => {
+    const bridge = makeBridge({
+      sendMessage: jest.fn(() => {
+        // Never call replyCb nor errCb — simulate dropped channel.
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-3',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env, { timeoutMs: 50 });
+
+    expect(result).toEqual({ ok: false, code: 'TIMEOUT' });
+  });
+
+  it('unpaired precheck → {ok:false, code:"UNPAIRED"}, no sendMessage call', async () => {
+    const bridge = makeBridge({
+      getIsPaired: jest.fn().mockResolvedValue(false),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-4',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env);
+
+    expect(result).toEqual({ ok: false, code: 'UNPAIRED' });
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('unreachable precheck → {ok:false, code:"NOT_REACHABLE"}, no sendMessage call', async () => {
+    const bridge = makeBridge({
+      getIsPaired: jest.fn().mockResolvedValue(true),
+      getReachability: jest.fn().mockResolvedValue(false),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-5',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env);
+
+    expect(result).toEqual({ ok: false, code: 'NOT_REACHABLE' });
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('bridge.sendMessage itself throws synchronously → {ok:false, code:"BRIDGE_ERROR"}', async () => {
+    const bridge = makeBridge({
+      sendMessage: jest.fn(() => {
+        throw new Error('TurboModule call failed');
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-6',
+      snapshot: {},
+    });
+    const result = await mod.sendMessage(env);
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'BRIDGE_ERROR',
+      error: 'TurboModule call failed',
+    });
+  });
+
+  // ─── Inbound msgId dedupe ──────────────────────────────────────────
+
+  it('seenMsgId rings the buffer + dedupes duplicate ids', () => {
+    installBridge(makeBridge());
+    const mod = loadModule();
+
+    expect(mod.seenMsgId('id-a')).toBe(false);
+    expect(mod.seenMsgId('id-a')).toBe(true); // second time = dedupe
+    expect(mod.seenMsgId('id-b')).toBe(false);
+  });
+
+  // ─── State queries silent-fail ──────────────────────────────────────
+
+  it('isPaired() returns false when bridge throws', async () => {
+    const bridge = makeBridge({
+      getIsPaired: jest.fn().mockRejectedValue(new Error('bridge down')),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    await expect(mod.isPaired()).resolves.toBe(false);
+  });
+
+  it('isReachable() returns false when bridge throws', async () => {
+    const bridge = makeBridge({
+      getReachability: jest.fn().mockRejectedValue(new Error('bridge down')),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    await expect(mod.isReachable()).resolves.toBe(false);
+  });
+
+  // ─── updateApplicationContext fire-and-forget ───────────────────────
+
+  it('updateApplicationContext swallows bridge throw', () => {
+    const bridge = makeBridge({
+      updateApplicationContext: jest.fn(() => {
+        throw new Error('bridge crash');
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('hr-tick', {
+      sessionId: 'sess-x',
+      bpm: 142,
+      sampleTs: Date.now(),
+    });
+    expect(() => mod.updateApplicationContext(env)).not.toThrow();
   });
 });

@@ -100,6 +100,30 @@ export async function endSession(
 }
 
 /**
+ * Flip the `session.is_watch_tracked` column.
+ *
+ * Slice 13d D6 (ADR-0019 § Q19 + NEW-Q42). v024 schema only added the
+ * column with DEFAULT 0; this setter is the write boundary. Used by:
+ *   - `pushStartToWatch` (D6): set true on Watch ack ≤2s
+ *   - `reconcileWatchAck` (D7): set false on ack timeout 5s
+ *
+ * Boolean is normalised to 0/1 at the SQL layer — the column type is
+ * `INTEGER NOT NULL` per v024 migration. No row-existence check —
+ * UPDATE on missing id is a silent no-op, which matches the rest of
+ * this repository's setters.
+ */
+export async function setIsWatchTracked(
+  db: Database,
+  args: { id: string; value: boolean }
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE session SET is_watch_tracked = ? WHERE id = ?`,
+    args.value ? 1 : 0,
+    args.id
+  );
+}
+
+/**
  * Persist HealthKit-side data after session finish (slice 13c C3).
  *
  * `kcal` = sum of activeEnergyBurned in [started_at, ended_at] (from
