@@ -1,54 +1,59 @@
 /**
- * Slice 13d / D19 — Live Activity mirror reducer test scaffold.
+ * Slice 13d / D19 — Live Mirror reducer tests.
  *
- * Scaffold built by Agent Z 2026-05-27, following V's coverage-audit
- * report `24-overnight-V-coverage-audit.md` item #4 (medium priority).
+ * Activated 2026-05-27. Scaffold from Agent Z (item #4 of V coverage
+ * audit) now points at the real `liveMirrorReducer` shipped under
+ * `src/services/liveMirrorReducer.ts`.
  *
- * The actual `liveMirrorReducer` module is NOT yet land in main as of
- * `8ca6671`. Per V's report + ADR-0019 § Q19, the reducer feeds the
- * iPhone-side Live Activity (Dynamic Island / lock-screen widget)
- * driven by inbound WC messages from the Watch. Expected location:
- *   - `src/services/liveMirrorReducer.ts` (the reducer)
- *   - mirrored state shape lives somewhere like `src/services/liveMirrorState.ts`
+ * Reducer surface (per ADR-0019 § Q19, NEW-Q40/Q41/Q43):
+ *   - 6 mirror-affecting kinds (`set-completed/-modified/-deleted/-added`
+ *     and `exercise-added/-deleted`) mutate state via immutable transforms.
+ *   - 7 out-of-scope kinds are no-ops (referential equality preserved).
+ *   - Coarse stale-ts rule: drop any envelope with `ts <= lastAppliedTs`.
+ *   - Defensive: null / unknown-kind envelopes return state unchanged.
  *
- * Per V's spec the reducer SHOULD handle 6 message kinds (out of the
- * 13 in `WC_MESSAGE_KINDS`):
- *   - `set-completed`  → flip `is_logged` + update weight / reps
- *   - `set-modified`   → per-field diff merge (LWW — see lww.test.ts)
- *   - `set-deleted`    → drop from in-memory set list
- *   - `set-added`      → insert at the supplied ordinal
- *   - `exercise-added` → append exercise card
- *   - `exercise-deleted` → drop the card
- *   - everything else (`hr-tick`, `kcal-tick`, `handshake`, ...) → no-op
- *
- * Stale-timestamp rule: any envelope with `ts <= mirror.lastAppliedTs`
- * for the same `(sessionId, setId|exerciseId)` target is dropped on
- * arrival — LWW reconciliation lives one layer deeper but the reducer
- * surface is responsible for the coarse drop.
- *
- * This file is **scaffold-only**. Implementers should:
- *   1. Replace the commented import block once `liveMirrorReducer.ts` lands.
- *   2. Flip `describe.skip` → `describe`.
- *   3. Fill the test bodies — sample envelopes built via `makeEnvelope`
- *      already type-check via the D3 protocol layer.
+ * Per-field LWW reconciliation under `set-modified` crosses to
+ * `lww.test.ts` (D20); this file only validates the reducer-surface
+ * drop + accepted-field application.
  */
 
 import { makeEnvelope } from '../../../src/adapters/watch';
 import type { WCMessage } from '../../../src/adapters/watch';
+import {
+  liveMirrorReducer,
+  initialLiveMirrorState,
+} from '../../../src/services/liveMirrorReducer';
+import type {
+  LiveMirrorState,
+  MirrorExercise,
+} from '../../../src/services/liveMirrorReducer';
 
-// TODO: import once liveMirrorReducer.ts ships:
-//   import {
-//     liveMirrorReducer,
-//     initialLiveMirrorState,
-//   } from '../../../src/services/liveMirrorReducer';
-//   import type { LiveMirrorState } from '../../../src/services/liveMirrorReducer';
+/** Seed state helper — exercise se-1 with one set set-1 (working, weight=70, reps=8, not logged). */
+function seedStateWithOneSet(baseState: LiveMirrorState): LiveMirrorState {
+  const exercise: MirrorExercise = {
+    sessionExerciseId: 'se-1',
+    exerciseId: 'ex-1',
+    exerciseName: '臥推',
+    ordering: 0,
+    plannedSets: 3,
+    sets: [
+      {
+        setId: 'set-1',
+        ordinal: 0,
+        weight: 70,
+        reps: 8,
+        rpe: null,
+        rest_sec: null,
+        notes: null,
+        set_kind: 'working',
+        is_logged: false,
+      },
+    ],
+  };
+  return { ...baseState, exercises: [exercise] };
+}
 
-describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaffold)', () => {
-  // -----------------------------------------------------------------
-  // Test fixture helpers — these are scaffold-ready and will compile.
-  // The reducer call (`liveMirrorReducer(state, env)`) is what's missing.
-  // -----------------------------------------------------------------
-
+describe('liveMirrorReducer — Live Activity inbound message reducer', () => {
   /** Pre-built sample envelopes used across all reducer tests. */
   const sampleEnvelopes = {
     setCompleted: makeEnvelope('set-completed', {
@@ -87,7 +92,7 @@ describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaf
     }),
     exerciseDeleted: makeEnvelope('exercise-deleted', {
       sessionId: 'sess-1',
-      sessionExerciseId: 'se-2',
+      sessionExerciseId: 'se-1',
     }),
     hrTick: makeEnvelope('hr-tick', {
       sessionId: 'sess-1',
@@ -96,30 +101,35 @@ describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaf
     }),
   } as const satisfies Record<string, WCMessage>;
 
+  let state: LiveMirrorState;
+
   beforeEach(() => {
-    // TODO: build a fresh `initialLiveMirrorState` per test so no
-    //       cross-test state leakage in the reducer-under-test.
+    state = initialLiveMirrorState();
   });
 
   // -----------------------------------------------------------------
   // (a) set-completed
   // -----------------------------------------------------------------
   describe('set-completed', () => {
-    it.skip(
-      'flips is_logged false → true on the targeted set and updates weight + reps',
-      () => {
-        // TODO: assert state.sets[setId].is_logged === true
-        //       and matches envelope.payload.weight / reps.
-        void sampleEnvelopes.setCompleted;
-      },
-    );
-    it.skip(
-      'is a no-op when the targeted set is not in the mirror (out-of-order arrive)',
-      () => {
-        // TODO: feed envelope first, then exercise-added/set-added — the
-        // reducer should drop the set-completed silently.
-      },
-    );
+    it('flips is_logged false → true on the targeted set and updates weight + reps', () => {
+      state = seedStateWithOneSet(state);
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.setCompleted);
+
+      expect(next.exercises[0].sets[0].is_logged).toBe(true);
+      expect(next.exercises[0].sets[0].weight).toBe(80);
+      expect(next.exercises[0].sets[0].reps).toBe(8);
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.setCompleted.ts);
+    });
+
+    it('is a no-op when the targeted set is not in the mirror (out-of-order arrive)', () => {
+      // empty state — set-1 not present
+      const next = liveMirrorReducer(state, sampleEnvelopes.setCompleted);
+
+      expect(next).toBe(state);
+      expect(next.lastAppliedTs).toBe(0);
+    });
+
     it.todo(
       'TBD — should set-completed for unknown sessionId fan into a "pending session" buffer?',
     );
@@ -129,19 +139,44 @@ describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaf
   // (b) set-modified
   // -----------------------------------------------------------------
   describe('set-modified', () => {
-    it.skip(
-      'applies sparse diff (only listed fields change; others retain prior values)',
-      () => {
-        // TODO: ensure unmodified fields (reps, notes) stay at prior state.
-        void sampleEnvelopes.setModified;
-      },
-    );
-    it.skip(
-      'drops a set-modified envelope whose ts is older than the last applied ts for the same set (stale rule)',
-      () => {
-        // TODO: apply env A (ts=2000), then env B (ts=1000) — B should be ignored.
-      },
-    );
+    it('applies sparse diff (only listed fields change; others retain prior values)', () => {
+      state = seedStateWithOneSet(state);
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.setModified);
+
+      expect(next.exercises[0].sets[0].weight).toBe(82.5);
+      expect(next.exercises[0].sets[0].reps).toBe(8); // unchanged
+      expect(next.exercises[0].sets[0].notes).toBeNull(); // unchanged
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.setModified.ts);
+    });
+
+    it('drops a set-modified envelope whose ts is older than the last applied ts for the same set (stale rule)', () => {
+      state = seedStateWithOneSet(state);
+
+      // Apply newer first
+      const newer = makeEnvelope('set-modified', {
+        sessionId: 'sess-1',
+        setId: 'set-1',
+        diff: { weight: 90 },
+        fieldTs: { weight: 5_000 },
+      });
+      const afterNewer = liveMirrorReducer(state, newer);
+      expect(afterNewer.exercises[0].sets[0].weight).toBe(90);
+      const tsAfterNewer = afterNewer.lastAppliedTs;
+
+      // Now an older one — should be dropped at the reducer surface
+      const older: typeof newer = {
+        ...newer,
+        msgId: `${newer.msgId}-older`,
+        ts: tsAfterNewer - 1,
+        payload: { ...newer.payload, diff: { weight: 75 }, fieldTs: { weight: 100 } },
+      };
+
+      const afterOlder = liveMirrorReducer(afterNewer, older);
+      expect(afterOlder).toBe(afterNewer);
+      expect(afterOlder.exercises[0].sets[0].weight).toBe(90);
+    });
+
     it.todo(
       'per-field LWW reconciliation crosses-over to lww.test.ts — only test the reducer-surface drop here',
     );
@@ -151,12 +186,20 @@ describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaf
   // (c) set-deleted
   // -----------------------------------------------------------------
   describe('set-deleted', () => {
-    it.skip('removes the set from state.sets', () => {
-      // TODO
-      void sampleEnvelopes.setDeleted;
+    it('removes the set from state.exercises[i].sets', () => {
+      state = seedStateWithOneSet(state);
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.setDeleted);
+
+      expect(next.exercises[0].sets).toHaveLength(0);
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.setDeleted.ts);
     });
-    it.skip('does not throw / no-ops when setId is unknown', () => {
-      // TODO
+
+    it('does not throw / no-ops when setId is unknown', () => {
+      // empty state — set-1 not present
+      const next = liveMirrorReducer(state, sampleEnvelopes.setDeleted);
+
+      expect(next).toBe(state);
     });
   });
 
@@ -164,73 +207,156 @@ describe.skip('liveMirrorReducer — Live Activity inbound message reducer (scaf
   // (d) set-added
   // -----------------------------------------------------------------
   describe('set-added', () => {
-    it.skip('inserts the new set at the supplied ordinal under the exercise', () => {
-      // TODO
-      void sampleEnvelopes.setAdded;
+    it('inserts the new set at the supplied ordinal under the exercise (sorted)', () => {
+      state = seedStateWithOneSet(state); // se-1 has set-1 at ordinal 0
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.setAdded);
+
+      expect(next.exercises[0].sets).toHaveLength(2);
+      expect(next.exercises[0].sets[0].setId).toBe('set-1'); // ordinal 0
+      expect(next.exercises[0].sets[1].setId).toBe('set-99'); // ordinal 3
+      expect(next.exercises[0].sets[1].is_logged).toBe(false); // fresh set
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.setAdded.ts);
     });
-    it.skip(
-      'is a no-op when the parent sessionExerciseId is not in the mirror (out-of-order arrive)',
-      () => {
-        // TODO
+
+    it('is a no-op when the parent sessionExerciseId is not in the mirror (out-of-order arrive)', () => {
+      // empty state — se-1 not present
+      const next = liveMirrorReducer(state, sampleEnvelopes.setAdded);
+
+      expect(next).toBe(state);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // (e) exercise-added
+  // -----------------------------------------------------------------
+  describe('exercise-added', () => {
+    it('appends the exercise card with the supplied ordering', () => {
+      state = seedStateWithOneSet(state); // se-1 at ordering 0
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.exerciseAdded);
+
+      expect(next.exercises).toHaveLength(2);
+      expect(next.exercises[0].sessionExerciseId).toBe('se-1'); // ordering 0
+      expect(next.exercises[1].sessionExerciseId).toBe('se-2'); // ordering 1
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.exerciseAdded.ts);
+    });
+
+    it('initialises an empty sets list for the new exercise', () => {
+      const next = liveMirrorReducer(state, sampleEnvelopes.exerciseAdded);
+
+      expect(next.exercises[0].sets).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // (f) exercise-deleted
+  // -----------------------------------------------------------------
+  describe('exercise-deleted', () => {
+    it('removes the exercise + cascades cleanup of its sets', () => {
+      state = seedStateWithOneSet(state); // se-1 has 1 set
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.exerciseDeleted);
+
+      expect(next.exercises).toHaveLength(0);
+      expect(next.lastAppliedTs).toBe(sampleEnvelopes.exerciseDeleted.ts);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // (g) Non-reducer-relevant kinds are no-ops
+  // -----------------------------------------------------------------
+  describe('out-of-scope kinds', () => {
+    it('hr-tick does not mutate Live Activity state (referential equality)', () => {
+      state = seedStateWithOneSet(state);
+
+      const next = liveMirrorReducer(state, sampleEnvelopes.hrTick);
+
+      expect(next).toBe(state);
+    });
+
+    it('kcal-tick does not mutate Live Activity state', () => {
+      const kcal = makeEnvelope('kcal-tick', {
+        sessionId: 'sess-1',
+        kcal: 250,
+        sampleTs: 1_700_000_000_000,
+      });
+
+      const next = liveMirrorReducer(state, kcal);
+
+      expect(next).toBe(state);
+    });
+
+    it('handshake / start-from-* / settings-sync / end-session are no-ops here', () => {
+      const offTopic: WCMessage[] = [
+        makeEnvelope('handshake', { requestId: 'r1', clientVersion: '13d.0' }),
+        makeEnvelope('start-from-watch', {
+          templateId: null,
+          programCycleId: null,
+          intensityId: null,
+        }),
+        makeEnvelope('start-from-iphone', {
+          sessionId: 'sess-1',
+          snapshot: {},
+        }),
+        makeEnvelope('end-session', { sessionId: 'sess-1', side: 'iphone' }),
+        makeEnvelope('settings-sync', {
+          sessionId: 'sess-1',
+          settings: { unit: 'kg' },
+        }),
+      ];
+
+      for (const env of offTopic) {
+        expect(liveMirrorReducer(state, env)).toBe(state);
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // (h) Unknown kind / malformed envelope
+  // -----------------------------------------------------------------
+  describe('defensive — bad input', () => {
+    it('returns state unchanged for an envelope whose kind is not in WC_MESSAGE_KINDS', () => {
+      const bogus = {
+        msgId: 'bogus-1',
+        ts: 5_000,
+        kind: 'not-a-kind',
+        payload: {},
+      } as unknown as WCMessage;
+
+      expect(liveMirrorReducer(state, bogus)).toBe(state);
+    });
+
+    it('returns state unchanged for null / undefined envelope', () => {
+      expect(liveMirrorReducer(state, null)).toBe(state);
+      expect(liveMirrorReducer(state, undefined)).toBe(state);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // (i) Stale-ts rule on the reducer surface — parameterised
+  // -----------------------------------------------------------------
+  describe('stale-ts coarse drop', () => {
+    it.each([
+      ['set-completed', sampleEnvelopes.setCompleted],
+      ['set-modified', sampleEnvelopes.setModified],
+      ['set-deleted', sampleEnvelopes.setDeleted],
+      ['set-added', sampleEnvelopes.setAdded],
+      ['exercise-added', sampleEnvelopes.exerciseAdded],
+      ['exercise-deleted', sampleEnvelopes.exerciseDeleted],
+    ])(
+      '%s with ts <= lastAppliedTs is dropped without throw',
+      (_label, env) => {
+        // Bump lastAppliedTs above the envelope's ts
+        const aheadState: LiveMirrorState = {
+          ...seedStateWithOneSet(state),
+          lastAppliedTs: env.ts + 1_000,
+        };
+
+        const next = liveMirrorReducer(aheadState, env);
+
+        expect(next).toBe(aheadState);
       },
     );
   });
-
-  // -----------------------------------------------------------------
-  // (e) exercise-added / exercise-deleted
-  // -----------------------------------------------------------------
-  describe('exercise-added', () => {
-    it.skip('appends the exercise card with the supplied ordering', () => {
-      // TODO
-      void sampleEnvelopes.exerciseAdded;
-    });
-    it.skip('initialises an empty sets list for the new exercise', () => {
-      // TODO
-    });
-  });
-
-  describe('exercise-deleted', () => {
-    it.skip('removes the exercise + cascades cleanup of its sets', () => {
-      // TODO
-      void sampleEnvelopes.exerciseDeleted;
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // (f) Non-reducer-relevant kinds are no-ops
-  // -----------------------------------------------------------------
-  describe('out-of-scope kinds', () => {
-    it.skip('hr-tick does not mutate Live Activity state', () => {
-      // TODO: assert deep-equal state pre/post.
-      void sampleEnvelopes.hrTick;
-    });
-    it.skip('kcal-tick does not mutate Live Activity state', () => {
-      // TODO
-    });
-    it.skip('handshake / start-from-* / settings-sync / end-session are no-ops here', () => {
-      // TODO: handshake + lifecycle are owned by handshake.test.ts.
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // (g) Unknown kind / malformed envelope
-  // -----------------------------------------------------------------
-  describe('defensive — bad input', () => {
-    it.skip('returns state unchanged for an envelope whose kind is not in WC_MESSAGE_KINDS', () => {
-      // TODO: cast a fake kind through `as unknown as WCMessage`.
-    });
-    it.skip('returns state unchanged for null / undefined envelope', () => {
-      // TODO
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // (h) Stale-ts rule on the reducer surface
-  // -----------------------------------------------------------------
-  it.skip(
-    'all set-* / exercise-* envelopes with ts <= mirror.lastAppliedTs are dropped without throw',
-    () => {
-      // TODO: parameterise over the 6 set-/exercise- kinds.
-    },
-  );
 });
