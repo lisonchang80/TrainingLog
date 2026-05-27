@@ -66,7 +66,7 @@ If the pure subset shares files with the future commit's other code, **don't spl
 
 ## Validated cases (2026-05-27 evening)
 
-Six landings under this pattern in one session, zero conflicts on cherry-pick, pre-existing flakes never even surfaced on hook retry (174 suites consistently clean):
+Eight landings under this pattern in one session, zero conflicts on cherry-pick, pre-existing flakes never even surfaced on hook retry (174 suites consistently clean). At end of session, slice 13d's entire pure-TS backlog was exhausted — remaining D-commits all gate on D0 spike or Xcode operations:
 
 | Commit | What shipped | LOC / cases |
 |---|---|---|
@@ -76,6 +76,10 @@ Six landings under this pattern in one session, zero conflicts on cherry-pick, p
 | D7 partial `9a29ef6` | `endSessionReconciler.ts` 5-sec state machine + fresh test | ~125 / 12 |
 | D9 partial `c350b5c` | `handshake.ts` pure builders (`buildStage1Reply` discriminated union + `matchesPendingRequest` + `buildStartFromIphone`) + activate Z's `handshake.test.ts` pure subset, keeping wire-in `describe.skip` intact | ~205 / 17 + 3 todo preserved + 9 wire-in skip preserved |
 | D26 partial 二次補刀 `02f8625` | ADR-0019 add D7/D9-partial + skill rows, narrow remaining-未-land, refresh 翻盤 ledger top row with full 6-commit list | doc-only |
+| D24 partial `355bf00` | `watchSyncReadout.ts` enum-driven formatter — 6-variant `WatchSyncResult` + relative-time 4-bucket display ("剛剛" / "N 分鐘前" / "N 小時前" / MM-DD HH:mm) + fresh test using `it.each` for label mapping | ~80 / 19 |
+| D26 partial 三次補刀 `c5da856` | ADR-0019 add D24-partial + skill v2 + 二次補刀 rows, mark 純 TS backlog exhausted | doc-only |
+
+**Doc-sweep cadence** — 3 ADR sweeps + 2 skill self-updates landed alongside 5 code commits in one session. The pattern: every 2-3 ship-partial code commits → one `docs(slice-13d): D26 partial 補刀` to refresh the shipped table + remaining-未-land list + 翻盤 ledger. Don't let doc drift accumulate across an evening — three small sweeps cost less attention than one big end-of-session reconciliation, and future-you reading the ADR mid-session sees current state without guessing what's "really" landed.
 
 **Naming variant for already-partial-named D-commits**: D7/D9 originally specified as full commits in the chain. When only the pure subset ships, branch as `slice/13d-d{N}-partial-{kebab}` (note the `-partial-` infix, not `-subset-`). Commit title: `feat(slice-13d): D{N} partial — <summary>`. The partial naming makes "this isn't D{N} full" visible at three levels: branch, commit title, ADR progress row.
 
