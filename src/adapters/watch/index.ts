@@ -40,3 +40,17 @@ export type {
 
 export { createLwwMap, clearLwwMap, admitDiff } from './setModifiedReducer';
 export type { LwwMap, AdmitDiffResult, DiffField } from './setModifiedReducer';
+
+export {
+  buildStage1Reply,
+  buildStartFromIphone,
+  matchesPendingRequest,
+} from './handshake';
+export type {
+  Stage1ReplyPayload,
+  Stage1SessionSummary,
+  Stage1TemplateSummary,
+  SessionSnapshot,
+  SessionSnapshotExercise,
+  SessionSnapshotSet,
+} from './handshake';

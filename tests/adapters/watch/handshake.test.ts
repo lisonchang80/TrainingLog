@@ -1,42 +1,15 @@
 /**
- * Slice 13d / D9 — two-stage WC handshake protocol scaffold.
+ * Slice 13d / D9 partial — pure builder + race-predicate tests.
  *
- * Scaffold built by Agent Z 2026-05-27, following V's coverage-audit
- * report `24-overnight-V-coverage-audit.md` item #6 (medium priority).
+ * Z's original scaffold (2026-05-27) covered the full handshake
+ * module — including impure paths (onHandshakeRequest, onStartFromWatch,
+ * fetchSessionSnapshot) that depend on SQLite + the WC sendMessage
+ * bridge. This file activates only the **pure** subset that ships
+ * with D9 partial; the wire-in describe block at the bottom stays
+ * `describe.skip` for the future D9 commit that wires the bridge.
  *
- * Context — ADR-0019 NEW-Q44 specifies a **two-stage** handshake:
- *
- *   Stage 1 — Watch → iPhone: `handshake` envelope carrying
- *             { requestId, clientVersion }. iPhone replies with a
- *             small payload: { hasActiveSession: bool, sessionId?,
- *             startedAt?, title?, exerciseCount? } — enough for the
- *             Watch picker to decide between Adopt / Discard / Plan.
- *             Reply payload MUST be < ~1KB (Q6/Q7 wire budget).
- *
- *   Stage 2 — Watch → iPhone (lazy, only if user picks Adopt):
- *             `start-from-iphone`-style follow-up that fetches the
- *             full SessionSnapshot. Race-resistant via `requestId`
- *             echo — Watch ignores any Stage 1 reply whose requestId
- *             doesn't match its current pending request.
- *
- * The handshake module is NOT yet land in main as of `8ca6671`.
- * Expected location:
- *   - `src/adapters/watch/handshake.ts` — wraps the protocol layer +
- *     `sessionRepository.getActiveSession` + the (future) snapshot
- *     fetch.
- *
- * Also covered here per V's report:
- *   - **start-from-watch**: Watch picker fires it → iPhone creates
- *     session row + replies with the canonical sessionId + flips
- *     `is_watch_tracked` via `setIsWatchTracked(_, _, true)`
- *     (cross-references setIsWatchTracked.test.ts).
- *   - **start-from-iphone**: iPhone-side session create asks Watch to
- *     adopt; Watch hydrates its mirror from the snapshot.
- *
- * This file is **scaffold-only**. Implementers should:
- *   1. Replace the commented import block once handshake.ts lands.
- *   2. Flip `describe.skip` → `describe`.
- *   3. Fill the test bodies. Sample envelopes use `makeEnvelope`.
+ * Run cold under `testEnvironment: node` — no fake timers, no in-memory
+ * DB, no native mocks.
  */
 
 import { makeEnvelope } from '../../../src/adapters/watch';
@@ -45,16 +18,393 @@ import type {
   StartFromIphonePayload,
   StartFromWatchPayload,
 } from '../../../src/adapters/watch';
+import {
+  buildStage1Reply,
+  buildStartFromIphone,
+  matchesPendingRequest,
+  type SessionSnapshot,
+  type Stage1ReplyPayload,
+  type Stage1SessionSummary,
+  type Stage1TemplateSummary,
+} from '../../../src/adapters/watch/handshake';
 
-// TODO: import once handshake.ts ships:
-//   import {
-//     onHandshakeRequest,
-//     onStartFromWatch,
-//     buildStartFromIphone,
-//     fetchSessionSnapshot, // Stage 2 lazy fetch
-//   } from '../../../src/adapters/watch/handshake';
+// =====================================================================
+// Stage 1 reply (pure builder)
+// =====================================================================
 
-describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
+describe('WC handshake — Stage 1 reply (pure builder, D9 partial)', () => {
+  const sampleRequest: HandshakePayload = {
+    requestId: 'req-abc',
+    clientVersion: '13d.0',
+  };
+
+  // -------------------------------------------------------------------
+  // (a) absent-session variant
+  // -------------------------------------------------------------------
+  it('replies with hasActiveSession=false when activeSession is null', () => {
+    const reply = buildStage1Reply(sampleRequest, null, []);
+
+    expect(reply.hasActiveSession).toBe(false);
+    expect(reply.requestId).toBe('req-abc');
+    expect(reply.prefetch.templates).toEqual([]);
+    // Discriminated union — no `session` field on the false variant.
+    expect((reply as { session?: unknown }).session).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------
+  // (b) present-session variant
+  // -------------------------------------------------------------------
+  it('replies with hasActiveSession=true and minimal summary when activeSession present', () => {
+    const active: Stage1SessionSummary = {
+      sessionId: 'sess-1',
+      startedAt: 1_700_000_000_000,
+      title: 'Push Day',
+      exerciseCount: 4,
+    };
+    const reply = buildStage1Reply(sampleRequest, active, []);
+
+    expect(reply.hasActiveSession).toBe(true);
+    if (reply.hasActiveSession) {
+      expect(reply.session.sessionId).toBe('sess-1');
+      expect(reply.session.startedAt).toBe(1_700_000_000_000);
+      expect(reply.session.title).toBe('Push Day');
+      expect(reply.session.exerciseCount).toBe(4);
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // (c) requestId echo
+  // -------------------------------------------------------------------
+  it('echoes the original requestId so the Watch can match the reply to its pending request', () => {
+    const reply = buildStage1Reply(sampleRequest, null, []);
+    expect(reply.requestId).toBe(sampleRequest.requestId);
+  });
+
+  // -------------------------------------------------------------------
+  // (d) prefetch list carry-through
+  // -------------------------------------------------------------------
+  it('carries the provided templates list into the reply prefetch field', () => {
+    const templates: Stage1TemplateSummary[] = [
+      { templateId: 'tpl-1', name: 'Push' },
+      { templateId: 'tpl-2', name: 'Pull' },
+      { templateId: 'tpl-3', name: 'Legs' },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, templates);
+
+    expect(reply.prefetch.templates).toHaveLength(3);
+    expect(reply.prefetch.templates[0]).toEqual({
+      templateId: 'tpl-1',
+      name: 'Push',
+    });
+    expect(reply.prefetch.templates[2]).toEqual({
+      templateId: 'tpl-3',
+      name: 'Legs',
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // (e) size budget — Stage 1 lives on the realtime channel
+  //     (WC sendMessage cap is 64KB; we target <2KB with a fat
+  //     prefetch list of 20 templates to leave headroom for the
+  //     envelope wrap + Watch UI naming).
+  // -------------------------------------------------------------------
+  it('reply payload JSON-stringified size is < 2KB with 20 templates and an active session', () => {
+    const active: Stage1SessionSummary = {
+      sessionId: 'sess-1',
+      startedAt: 1_700_000_000_000,
+      title: 'Push Day',
+      exerciseCount: 10,
+    };
+    const templates: Stage1TemplateSummary[] = Array.from(
+      { length: 20 },
+      (_, i) => ({
+        templateId: `tpl-${i}`,
+        name: `Template ${i}`,
+      }),
+    );
+    const reply = buildStage1Reply(sampleRequest, active, templates);
+    const size = JSON.stringify(reply).length;
+
+    expect(size).toBeLessThan(2048);
+  });
+
+  // -------------------------------------------------------------------
+  // (e') size budget — typical case (5 templates) stays well under 1KB
+  // -------------------------------------------------------------------
+  it('reply payload JSON-stringified size is < 1KB with 5 templates and an active session (typical case)', () => {
+    const active: Stage1SessionSummary = {
+      sessionId: 'sess-1',
+      startedAt: 1_700_000_000_000,
+      title: 'Push Day',
+      exerciseCount: 10,
+    };
+    const templates: Stage1TemplateSummary[] = Array.from(
+      { length: 5 },
+      (_, i) => ({
+        templateId: `tpl-${i}`,
+        name: `Template ${i}`,
+      }),
+    );
+    const reply = buildStage1Reply(sampleRequest, active, templates);
+
+    expect(JSON.stringify(reply).length).toBeLessThan(1024);
+  });
+
+  // -------------------------------------------------------------------
+  // (f) referential purity — same inputs → equal outputs
+  // -------------------------------------------------------------------
+  it('is pure — calling twice with the same args produces deep-equal results', () => {
+    const a = buildStage1Reply(sampleRequest, null, []);
+    const b = buildStage1Reply(sampleRequest, null, []);
+    expect(a).toEqual(b);
+  });
+
+  // -------------------------------------------------------------------
+  // (g) freestyle title round-trips as empty string
+  // -------------------------------------------------------------------
+  it('preserves an empty-string title (freestyle path) verbatim', () => {
+    const freestyle: Stage1SessionSummary = {
+      sessionId: 'sess-1',
+      startedAt: 1_700_000_000_000,
+      title: '',
+      exerciseCount: 0,
+    };
+    const reply = buildStage1Reply(sampleRequest, freestyle, []);
+
+    if (reply.hasActiveSession) {
+      expect(reply.session.title).toBe('');
+      expect(reply.session.exerciseCount).toBe(0);
+    } else {
+      throw new Error('expected hasActiveSession=true variant');
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // TBDs — open design questions deferred to the D9 wire-in commit.
+  // -------------------------------------------------------------------
+  it.todo(
+    'TBD — does reply payload carry the iPhone now() ts or the original request ts? (decided at wire-in via makeEnvelope wrap)',
+  );
+});
+
+// =====================================================================
+// matchesPendingRequest (race predicate)
+// =====================================================================
+
+describe('WC handshake — matchesPendingRequest (pure predicate)', () => {
+  const baseReply: Stage1ReplyPayload = {
+    requestId: 'req-abc',
+    hasActiveSession: false,
+    prefetch: { templates: [] },
+  };
+
+  it('returns true when the reply requestId matches the pending nonce', () => {
+    expect(matchesPendingRequest(baseReply, 'req-abc')).toBe(true);
+  });
+
+  it('returns false when the reply requestId is stale (mismatched)', () => {
+    expect(matchesPendingRequest(baseReply, 'req-OLD')).toBe(false);
+  });
+
+  it('returns false on empty pending nonce (Watch has no outstanding handshake)', () => {
+    expect(matchesPendingRequest(baseReply, '')).toBe(false);
+  });
+});
+
+// =====================================================================
+// Stage 2 buildStartFromIphone (pure transform)
+// =====================================================================
+
+describe('WC handshake — buildStartFromIphone (Stage 2 pure transform, D9 partial)', () => {
+  const minimalSnapshot: SessionSnapshot = {
+    sessionId: 'sess-1',
+    title: 'Pull Day',
+    startedAt: 1_700_000_000_000,
+    exercises: [],
+  };
+
+  // -------------------------------------------------------------------
+  // (a) sessionId surfaced at payload top-level
+  // -------------------------------------------------------------------
+  it('packages the snapshot into a StartFromIphonePayload with matching sessionId', () => {
+    const payload: StartFromIphonePayload = buildStartFromIphone(minimalSnapshot);
+
+    expect(payload.sessionId).toBe('sess-1');
+    expect(typeof payload.snapshot).toBe('object');
+    expect(payload.snapshot).not.toBeNull();
+  });
+
+  // -------------------------------------------------------------------
+  // (b) JSON-primitive-clean (round-trips through stringify)
+  // -------------------------------------------------------------------
+  it('produces a JSON-primitive-clean payload (round-trips through JSON.stringify)', () => {
+    const payload = buildStartFromIphone(minimalSnapshot);
+    const roundTripped = JSON.parse(JSON.stringify(payload));
+
+    expect(roundTripped).toEqual(payload);
+  });
+
+  // -------------------------------------------------------------------
+  // (c) snapshot fields preserved verbatim
+  // -------------------------------------------------------------------
+  it('preserves snapshot fields verbatim (title, startedAt)', () => {
+    const payload = buildStartFromIphone(minimalSnapshot);
+
+    expect(payload.snapshot.title).toBe('Pull Day');
+    expect(payload.snapshot.startedAt).toBe(1_700_000_000_000);
+  });
+
+  // -------------------------------------------------------------------
+  // (d) full session tree projection — exercises + sets
+  // -------------------------------------------------------------------
+  it('serialises a full session tree (exercises + sets) without dropping fields', () => {
+    const full: SessionSnapshot = {
+      sessionId: 'sess-2',
+      title: 'Leg Day',
+      startedAt: 1_700_000_000_000,
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: 'ex-squat',
+          exerciseName: 'Back Squat',
+          ordering: 0,
+          plannedSets: 3,
+          sets: [
+            {
+              setId: 'set-1',
+              ordinal: 0,
+              weight: 100,
+              reps: 5,
+              rpe: 8,
+              rest_sec: 180,
+              notes: null,
+              set_kind: 'working',
+              is_logged: true,
+            },
+            {
+              setId: 'set-2',
+              ordinal: 1,
+              weight: 105,
+              reps: 5,
+              rpe: 8.5,
+              rest_sec: 180,
+              notes: 'felt heavy',
+              set_kind: 'working',
+              is_logged: false,
+            },
+          ],
+        },
+      ],
+    };
+    const payload = buildStartFromIphone(full);
+
+    expect(payload.snapshot.exercises).toEqual([
+      {
+        sessionExerciseId: 'se-1',
+        exerciseId: 'ex-squat',
+        exerciseName: 'Back Squat',
+        ordering: 0,
+        plannedSets: 3,
+        sets: [
+          {
+            setId: 'set-1',
+            ordinal: 0,
+            weight: 100,
+            reps: 5,
+            rpe: 8,
+            rest_sec: 180,
+            notes: null,
+            set_kind: 'working',
+            is_logged: true,
+          },
+          {
+            setId: 'set-2',
+            ordinal: 1,
+            weight: 105,
+            reps: 5,
+            rpe: 8.5,
+            rest_sec: 180,
+            notes: 'felt heavy',
+            set_kind: 'working',
+            is_logged: false,
+          },
+        ],
+      },
+    ]);
+  });
+
+  // -------------------------------------------------------------------
+  // (e) survives makeEnvelope normaliseForWire — wire-format invariant
+  // -------------------------------------------------------------------
+  it('produces a payload that survives makeEnvelope normaliseForWire', () => {
+    const payload = buildStartFromIphone(minimalSnapshot);
+    const env = makeEnvelope('start-from-iphone', payload);
+
+    expect(env.kind).toBe('start-from-iphone');
+    expect(env.payload.sessionId).toBe('sess-1');
+    expect(env.payload.snapshot).toEqual(payload.snapshot);
+  });
+
+  // -------------------------------------------------------------------
+  // (f) null-valued fields survive (warmup with no weight/reps yet)
+  // -------------------------------------------------------------------
+  it('preserves null-valued set fields (placeholder rows pre-logging)', () => {
+    const withPlaceholders: SessionSnapshot = {
+      sessionId: 'sess-3',
+      title: '',
+      startedAt: 1_700_000_000_000,
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: 'ex-bench',
+          exerciseName: 'Bench',
+          ordering: 0,
+          plannedSets: 3,
+          sets: [
+            {
+              setId: 'set-1',
+              ordinal: 0,
+              weight: null,
+              reps: null,
+              rpe: null,
+              rest_sec: null,
+              notes: null,
+              set_kind: 'warmup',
+              is_logged: false,
+            },
+          ],
+        },
+      ],
+    };
+    const payload = buildStartFromIphone(withPlaceholders);
+    const exercises = payload.snapshot.exercises as unknown as ReadonlyArray<{
+      sets: ReadonlyArray<Record<string, unknown>>;
+    }>;
+    const set0 = exercises[0].sets[0];
+
+    expect(set0.weight).toBeNull();
+    expect(set0.reps).toBeNull();
+    expect(set0.rpe).toBeNull();
+    expect(set0.notes).toBeNull();
+    expect(set0.set_kind).toBe('warmup');
+  });
+
+  // -------------------------------------------------------------------
+  // TBDs — wire-in concerns
+  // -------------------------------------------------------------------
+  it.todo(
+    'fetchSessionSnapshot returns the session tree for a given sessionId (impure — D9 wire-in)',
+  );
+  it.todo(
+    'fetchSessionSnapshot returns null/typed empty when sessionId no longer exists (impure — D9 wire-in)',
+  );
+});
+
+// =====================================================================
+// Wire-in scaffold — preserved for the future D9 commit
+// =====================================================================
+
+describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — D9 wire-in', () => {
   // Typed sample envelopes — exercise the D3 protocol layer surface.
   const stage1Request = makeEnvelope('handshake', {
     requestId: 'req-abc',
@@ -72,60 +422,34 @@ describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
     // TODO: db.close() + jest.restoreAllMocks()
   });
 
-  // -----------------------------------------------------------------
-  // Stage 1 — handshake reply shape
-  // -----------------------------------------------------------------
-  describe('Stage 1 reply shape', () => {
+  describe('Stage 1 onHandshakeRequest (impure)', () => {
     it.skip(
-      'replies with hasActiveSession=false when no active session exists',
+      'onHandshakeRequest queries active session + templates, then calls sendMessage with the built reply',
       () => {
-        // TODO: db is empty → reply payload.hasActiveSession === false
-        //       and no sessionId / title / startedAt fields present.
         void stage1Request;
       },
     );
 
     it.skip(
-      'replies with hasActiveSession=true + minimal session summary when an in-progress session exists',
+      'onHandshakeRequest replies with hasActiveSession=false when no in-progress row exists',
       () => {
-        // TODO: createSession in db → reply payload.hasActiveSession === true,
-        //       contains sessionId / startedAt / title /
-        //       exerciseCount. No full set list — full snapshot is
-        //       Stage 2.
+        // TODO: empty db → assert sendMessage payload.hasActiveSession === false
       },
     );
 
     it.skip(
-      'reply payload JSON-stringified size is < 1KB even with a 10-exercise session',
+      'onHandshakeRequest counts session_exercise rows for the active session',
       () => {
-        // TODO: seed 10 exercises × 5 sets, build reply, assert
-        //       JSON.stringify(reply.payload).length < 1024.
-        //       Critical because WC sendMessage has a hard 64KB cap
-        //       but Stage 1 lives on the realtime channel.
+        // TODO: seed session + 4 session_exercise rows → assert exerciseCount === 4
       },
-    );
-
-    it.skip(
-      'reply echoes the original requestId so the Watch can match it to its pending request',
-      () => {
-        // TODO: reply payload.requestId === stage1Request.payload.requestId.
-      },
-    );
-
-    it.todo(
-      'TBD — reply ts is the iPhone-side now() or the original request ts?',
     );
   });
 
-  // -----------------------------------------------------------------
-  // Stage 2 — lazy snapshot fetch race
-  // -----------------------------------------------------------------
-  describe('Stage 2 lazy snapshot fetch', () => {
+  describe('Stage 2 fetchSessionSnapshot (impure)', () => {
     it.skip(
-      'fetchSessionSnapshot returns the full session tree (exercises + sets + clusters) for the Stage-1-reported sessionId',
+      'fetchSessionSnapshot returns the full session tree for the Stage-1-reported sessionId',
       () => {
-        // TODO: assert the shape matches what liveMirror.test.ts (e)
-        //       feeds into its reducer (exercise list + set list).
+        // TODO: assert shape matches the SessionSnapshot type exactly
       },
     );
 
@@ -133,7 +457,8 @@ describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
       'ignores a Stage 2 fetch whose requestId does not match the currently-pending handshake (race-resistant)',
       () => {
         // TODO: simulate two interleaved handshakes — only the latest
-        //       requestId's snapshot is applied. Older reply is dropped.
+        //       requestId's snapshot is applied. Older reply is dropped
+        //       via matchesPendingRequest at the bridge boundary.
       },
     );
 
@@ -146,10 +471,7 @@ describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
     );
   });
 
-  // -----------------------------------------------------------------
-  // start-from-watch path
-  // -----------------------------------------------------------------
-  describe('start-from-watch (Watch initiator)', () => {
+  describe('start-from-watch (Watch initiator, impure)', () => {
     const startFromWatchSample: StartFromWatchPayload = {
       templateId: 'tpl-1',
       programCycleId: 'cyc-1',
@@ -169,8 +491,7 @@ describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
       'flips is_watch_tracked=true on the created session (cross-reference setIsWatchTracked.test.ts)',
       () => {
         // TODO: assert sessionRepository.setIsWatchTracked called
-        //       with (db, sessionId, true) — or assert via getSession
-        //       once the setter lands.
+        //       with (db, sessionId, true)
       },
     );
 
@@ -180,36 +501,6 @@ describe.skip('WC handshake (two-stage, ADR-0019 NEW-Q44) — scaffold', () => {
         // TODO: payload { templateId: null, programCycleId: null,
         //       intensityId: null } — assert createSession used with
         //       no template, title defaults to ''.
-      },
-    );
-  });
-
-  // -----------------------------------------------------------------
-  // start-from-iphone path
-  // -----------------------------------------------------------------
-  describe('start-from-iphone (iPhone initiator)', () => {
-    it.skip(
-      'buildStartFromIphone serialises the active session into a JSON-primitive snapshot',
-      () => {
-        // TODO: assert the produced envelope's payload.snapshot is
-        //       deep-stringify-safe (no Date, no Map). The D3
-        //       normaliseForWire layer enforces this at the envelope
-        //       factory boundary — assert the snapshot fields too.
-      },
-    );
-
-    it.skip(
-      'buildStartFromIphone includes a non-empty sessionId and a snapshot record',
-      () => {
-        // TODO: shape check — payload.sessionId.length > 0, payload.snapshot
-        //       is a plain object.
-        const sample: StartFromIphonePayload = {
-          sessionId: 'sess-1',
-          snapshot: { title: 'foo', exerciseCount: 4 },
-        };
-        // The type alias is referenced here so a future API rename
-        // surfaces this scaffold's import in compile errors.
-        void sample;
       },
     );
   });
