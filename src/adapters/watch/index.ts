@@ -37,3 +37,6 @@ export type {
   EndSessionPayload,
   SettingsSyncPayload,
 } from './payloadSchema';
+
+export { createLwwMap, clearLwwMap, admitDiff } from './setModifiedReducer';
+export type { LwwMap, AdmitDiffResult, DiffField } from './setModifiedReducer';
