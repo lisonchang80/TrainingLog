@@ -30,6 +30,7 @@ import {
   discardSession,
   endSession,
   getActiveSession,
+  getSession,
   listSessionExercisesWithName,
   appendReusableSupersetToSession,
   reorderSessionExercises,
@@ -37,6 +38,8 @@ import {
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
+import { pushEndToWatch } from '@/src/services/watchSessionEnd';
+import { addMessageListener } from '@/src/adapters/watch';
 import {
   getAutoPopupRestTimer,
   getSetting,
@@ -388,6 +391,53 @@ export default function TodayScreen() {
       cancelled = true;
     };
   }, [db, sessionIdForBanner]);
+
+  // Slice 13d D7-TS — Watch-led end-session inbound listener.
+  //
+  // Per Q23 / NEW-Q45 / channel #11 (`end-session`): when Watch initiates
+  // session end (user taps end on Watch → SessionController.end() +
+  // discardWorkout → Watch sends end-session msg with side='watch'),
+  // iPhone mirrors by calling finalizeEndAndRoute. The idempotent gate
+  // baked into finalizeEndAndRoute (DB read of session.ended_at) prevents
+  // double-execution if iPhone-led path also fires simultaneously.
+  //
+  // Ref pattern: finalizeEndAndRoute is declared later in this component
+  // body (~line 1900) and captures sessionState (which changes every set
+  // log). Putting it in useEffect deps would re-mount the listener every
+  // render — wasteful. The ref pattern lets us mount once and always
+  // invoke the freshest closure.
+  //
+  // Mount lifecycle: (tabs)/index.tsx stays mounted under expo-router
+  // even when user is on Settings/History/Programs tabs, so the listener
+  // is always alive while the app is foregrounded. App kill / cold start
+  // remounts via component init. SQLite SoT remains correct across
+  // restarts via the idempotent gate above.
+  const finalizeEndAndRouteRef = useRef<
+    ((sessionId: string) => Promise<void>) | null
+  >(null);
+
+  useEffect(() => {
+    const unsubscribe = addMessageListener('end-session', async (env) => {
+      // Defensive: ignore own outbound. iPhone-led envelopes carry
+      // side='iphone' and Apple's WC framework doesn't echo sent
+      // messages to the same device's addMessageListener (reply path
+      // is sendMessage's replyCb). But this guard is cheap insurance
+      // against bridge weirdness or future loopback testing.
+      if (env.payload.side !== 'watch') return;
+      const fn = finalizeEndAndRouteRef.current;
+      if (!fn) return;
+      try {
+        await fn(env.payload.sessionId);
+      } catch (e) {
+        console.warn('[watch] end-session handler failed:', e);
+      }
+    });
+    return unsubscribe;
+    // Intentional empty deps — handler reads latest finalize closure
+    // via ref. Listener mounts once on component mount, unsubscribes
+    // on unmount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Re-fetch on every focus so returning from the detail screen resets us.
   // Also drain the picker mailbox here (per template editor convention) for
@@ -1875,6 +1925,37 @@ export default function TodayScreen() {
    * side effects (PR delta cleanup / sessionState end) 全部維持。
    */
   const finalizeEndAndRoute = async (session_id: string) => {
+    // Slice 13d D7 — idempotent gate (ADR-0019 § Q23 + NEW-Q45).
+    //
+    // Two paths can call this:
+    //   1. iPhone-led: user taps 結束訓練 on iPhone → onEndSession → here
+    //   2. Watch-led: Watch sends `end-session` WC msg → useEffect listener
+    //      (below, mounted via `addMessageListener`) → here
+    //
+    // If both fire (theoretical race — user taps iPhone End the same instant
+    // Watch sends end-session), the second invocation must NOT re-run
+    // achievement eval (duplicate unlock toasts) / HK sync (duplicate HKWorkout
+    // entry) / router.push (double navigation). Gate is DB read: if session
+    // already has ended_at, just route to detail and skip everything else.
+    //
+    // The endSession SQLite call itself is unconditional UPDATE — not gated.
+    // Gating at this finalize layer means BOTH start paths (iPhone-led button
+    // tap + Watch-led inbound) share one idempotent contract.
+    const existing = await getSession(db, session_id);
+    if (!existing) {
+      // Defensive: Watch-led inbound for a session iPhone has no row
+      // for (e.g. future D8+ Watch-led start path before iPhone's
+      // handshake has imported the session row). Silent no-op —
+      // don't router.push to a non-existent detail page.
+      return;
+    }
+    if (existing.ended_at != null) {
+      // Already finalized (iPhone-led path beat us, or duplicate
+      // Watch msg). Just route — skip side effects.
+      router.push(`/session/${session_id}`);
+      return;
+    }
+
     const ended_at = Date.now();
     await endSession(db, { id: session_id, ended_at });
     try {
@@ -1897,7 +1978,26 @@ export default function TodayScreen() {
     setLastPRExerciseName('');
     endState(sessionState, ended_at);
     router.push(`/session/${session_id}`);
+
+    // Slice 13d D7-TS — fire-and-forget WC push to Watch + 5s reconcile.
+    //
+    // Per Q23 / NEW-Q45 / channel #11: iPhone-led finalize → push
+    // `end-session` envelope so paired Watch can teardown its in-memory
+    // mirror + run SessionController.end() (which calls discardWorkout per
+    // Q28 Branch C trigger-only sampling — no HKWorkout entry from Watch).
+    //
+    // `pushEndToWatch` awaits sendMessage with 5000ms timeout and reconciles
+    // `is_watch_tracked` to false if Watch never acks; flag stays true on ack.
+    // Never throws — fire-and-forget at the call site. UI has already routed.
+    void pushEndToWatch(db, session_id);
   };
+
+  // Slice 13d D7-TS — keep ref pointed at the latest finalize closure
+  // so the Watch-led end-session listener (mounted with empty deps,
+  // see useEffect at ~line 419) always invokes the freshest sessionState
+  // capture. Assigning to ref.current during render is the official
+  // React pattern (https://react.dev/learn/referencing-values-with-refs).
+  finalizeEndAndRouteRef.current = finalizeEndAndRoute;
 
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
