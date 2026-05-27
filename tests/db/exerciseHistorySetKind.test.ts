@@ -6,6 +6,7 @@ import { insertSessionSet } from '../../src/adapters/sqlite/setRepository';
 import {
   listExerciseHistorySets,
   listExerciseHistoryBySession,
+  listPriorSetsForExercise,
 } from '../../src/adapters/sqlite/exerciseHistoryRepository';
 import type { Database } from '../../src/db/types';
 
@@ -202,5 +203,150 @@ describe('exerciseHistoryRepository — set_kind + parent_set_id (slice 10c #22)
     expect(sets).toHaveLength(1);
     expect(sets[0].set_kind).toBe('working');
     expect(sets[0].parent_set_id).toBeNull();
+  });
+});
+
+describe('listPriorSetsForExercise — set_kind filter (ADR-0012 line 100/173)', () => {
+  let db: BetterSqliteDatabase;
+  let benchId: string;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const all = await listExercises(db);
+    benchId = all.find((e) => e.name === 'Bench Press')!.id;
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('excludes warmup rows from PR engine input', async () => {
+    await createSession(db, { id: 'sess-A', started_at: 1_000 });
+    // 1 heavy warmup at 100kg + 1 lighter working at 80kg
+    await insertLoggedSet(db, {
+      id: 's-warm',
+      session_id: 'sess-A',
+      exercise_id: benchId,
+      weight_kg: 100,
+      reps: 5,
+      ordering: 1,
+      created_at: 1_001,
+      set_kind: 'warmup',
+    });
+    await insertLoggedSet(db, {
+      id: 's-work',
+      session_id: 'sess-A',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 8,
+      ordering: 2,
+      created_at: 1_002,
+      set_kind: 'working',
+    });
+
+    // Cutoff after both rows
+    const priors = await listPriorSetsForExercise(db, benchId, 1_003);
+
+    expect(priors).toHaveLength(1);
+    expect(priors[0].set_id).toBe('s-work');
+    expect(priors[0].weight_kg).toBe(80);
+    expect(priors[0].set_kind).toBe('working');
+  });
+
+  it('excludes the dropset cluster (parent root + followers) from PR engine input', async () => {
+    await createSession(db, { id: 'sess-B', started_at: 2_000 });
+    // 1 working baseline + dropset cluster (root + 1 follower)
+    await insertLoggedSet(db, {
+      id: 's-baseline',
+      session_id: 'sess-B',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 8,
+      ordering: 1,
+      created_at: 2_001,
+      set_kind: 'working',
+    });
+    // Cluster parent root — set_kind='dropset' AND parent_set_id=NULL
+    // (this is the heaviest of the cluster, the user dropped from this)
+    await insertLoggedSet(db, {
+      id: 's-cluster-root',
+      session_id: 'sess-B',
+      exercise_id: benchId,
+      weight_kg: 100,
+      reps: 5,
+      ordering: 2,
+      created_at: 2_002,
+      set_kind: 'dropset',
+      parent_set_id: null,
+    });
+    // Cluster follower — references root
+    await insertLoggedSet(db, {
+      id: 's-cluster-follow',
+      session_id: 'sess-B',
+      exercise_id: benchId,
+      weight_kg: 70,
+      reps: 6,
+      ordering: 3,
+      created_at: 2_003,
+      set_kind: 'dropset',
+      parent_set_id: 's-cluster-root',
+    });
+
+    const priors = await listPriorSetsForExercise(db, benchId, 2_004);
+
+    // ONLY the working baseline survives; both cluster root (100kg) and
+    // follower (70kg) are excluded per ADR-0012 line 100/173.
+    expect(priors).toHaveLength(1);
+    expect(priors[0].set_id).toBe('s-baseline');
+  });
+
+  it('returns set_kind + parent_set_id + cluster_partner_exercise_id (SELECT no longer drops them)', async () => {
+    await createSession(db, { id: 'sess-C', started_at: 3_000 });
+    await insertLoggedSet(db, {
+      id: 's-1',
+      session_id: 'sess-C',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 8,
+      ordering: 1,
+      created_at: 3_001,
+      set_kind: 'working',
+    });
+    const priors = await listPriorSetsForExercise(db, benchId, 3_002);
+    expect(priors).toHaveLength(1);
+    // These three fields were previously declared in the return type but the
+    // SQL didn't SELECT them — runtime was undefined. Guard against regression.
+    expect(priors[0].set_kind).toBe('working');
+    expect(priors[0].parent_set_id).toBeNull();
+    expect(priors[0].cluster_partner_exercise_id).toBeNull();
+  });
+
+  it('cutoff (before_created_at) is still applied alongside the kind filter', async () => {
+    await createSession(db, { id: 'sess-D', started_at: 4_000 });
+    await insertLoggedSet(db, {
+      id: 's-old',
+      session_id: 'sess-D',
+      exercise_id: benchId,
+      weight_kg: 70,
+      reps: 8,
+      ordering: 1,
+      created_at: 4_001,
+      set_kind: 'working',
+    });
+    await insertLoggedSet(db, {
+      id: 's-new',
+      session_id: 'sess-D',
+      exercise_id: benchId,
+      weight_kg: 90,
+      reps: 5,
+      ordering: 2,
+      created_at: 4_010,
+      set_kind: 'working',
+    });
+    // Cutoff between the two — only the older row is "prior"
+    const priors = await listPriorSetsForExercise(db, benchId, 4_005);
+    expect(priors).toHaveLength(1);
+    expect(priors[0].set_id).toBe('s-old');
   });
 });

@@ -15,6 +15,7 @@ function mkSession(id: string, isoLocal: string): Session {
     ended_at: null,
     bodyweight_snapshot_kg: null,
     title: '',
+    is_watch_tracked: false,
   };
 }
 

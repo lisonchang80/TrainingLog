@@ -334,20 +334,17 @@ export async function getExerciseHistoryHeader(
 // Function A: queryExerciseHistory(db, exerciseId, options?)
 // Function B: queryReusableSupersetHistory(db, rsId, options?)
 //
-// SCHEMA CONTEXT (load-bearing — see overnight report for full breakdown):
-//   - Session-side tables (`set`, `session_exercise`) DO NOT carry
-//     `reusable_superset_id`, `set_kind`, or `parent_set_id`. Only the
-//     planning-side template tables do.
-//   - Therefore, Function B associates session sets with a reusable superset
-//     INDIRECTLY: `set` → `session_exercise` → `template_exercise` (joined on
-//     `template_id + exercise_id`) and selects rows whose template_exercise has
-//     `reusable_superset_id = ?`. This covers all templated sessions that came
-//     from a template containing the exploded cluster. Freestyle sessions and
-//     blank/no-template sessions can never be scoped to a reusable superset.
-//   - `set_kind` is unavailable on session side; the warmup/working/dropset
-//     distinction in spec L23 does not apply at the data layer in v1. The
-//     return rows expose `set_kind: null` to leave room for a future v014
-//     migration to add it. Bucket filtering does NOT exclude any sets by kind.
+// SCHEMA CONTEXT (load-bearing):
+//   - `set.set_kind` (warmup / working / dropset) + `set.parent_set_id` landed
+//     via v015 (2026-05-16). Both are available on the session-side `set`
+//     table. queryExerciseHistory exposes the real `set_kind` value;
+//     listPriorSetsForExercise additionally filters `s.set_kind = 'working'`
+//     per ADR-0012 line 100/173 (整 cluster 跳過 PR、含 parent root step)
+//     so warmup + dropset cluster rows never reach the PR engine.
+//   - `reusable_superset_id` is still template-side only. Function B joins
+//     `set` → `session_exercise` → `template_exercise` to scope to a reusable
+//     superset. Freestyle sessions and blank/no-template sessions can never
+//     be scoped to a reusable superset.
 // ---------------------------------------------------------------------------
 
 /** Filter chip values matching `RepBucketChip`. `'all'` widens to every set. */
@@ -365,8 +362,9 @@ interface QueryExerciseHistoryOptions {
 /**
  * One row in the per-exercise history view. Newest first.
  *
- * `set_kind` is always `null` in v1 (the session-side `set` table has no
- * set_kind column; only template_set does). Reserved for a future migration.
+ * `set_kind` is the v015 column ('warmup' | 'working' | 'dropset'); UI can use
+ * it to colour-code or fold cluster steps per ADR-0012 line 175 (history modal
+ * GROUP BY parent_set_id + e1RM trend skips dropset cluster).
  *
  * `rep_bucket` is derived from `reps` via the same provider used by PR
  * engine (`classifyBucket`). May be `null` for invalid / null reps.
@@ -378,8 +376,8 @@ interface ExerciseHistoryRow {
   set_id: string;
   reps: number | null;
   weight_kg: number | null;
-  /** Always null in v1 — placeholder for warmup/working/dropset on session side. */
-  set_kind: null;
+  /** v015 column: 'warmup' | 'working' | 'dropset'. */
+  set_kind: SetKind;
   /** Domain-bucket key — `'max_strength' | 'strength' | 'hypertrophy' | 'muscle_endurance' | 'endurance' | null`. */
   rep_bucket: BucketKey | null;
   /** ordering within the session (1-based for ASC display, but caller is free to ignore). */
@@ -453,6 +451,7 @@ export async function queryExerciseHistory(
     session_started_at: number;
     reps: number | null;
     weight_kg: number | null;
+    set_kind: SetKind;
     ordering: number;
     load_type: LoadType;
     bw_snapshot_kg: number | null;
@@ -470,6 +469,7 @@ export async function queryExerciseHistory(
             ss.started_at  AS session_started_at,
             s.reps         AS reps,
             s.weight_kg    AS weight_kg,
+            s.set_kind     AS set_kind,
             s.ordering     AS ordering,
             e.load_type    AS load_type,
             ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
@@ -506,7 +506,7 @@ export async function queryExerciseHistory(
     set_id: r.set_id,
     reps: r.reps,
     weight_kg: r.weight_kg,
-    set_kind: null,
+    set_kind: r.set_kind,
     rep_bucket: classifyBucket(r.reps),
     ordering: r.ordering,
     load_type: r.load_type,
@@ -685,6 +685,7 @@ export async function queryReusableSupersetHistory(
     bw_snapshot_kg: number | null;
     reps: number | null;
     weight_kg: number | null;
+    set_kind: SetKind;
     ordering: number;
     exercise_id: string;
     load_type: LoadType;
@@ -692,7 +693,7 @@ export async function queryReusableSupersetHistory(
 
   const rawRows = await db.getAllAsync<RawRow>(
     `SELECT set_id, session_id, session_started_at, bw_snapshot_kg,
-            reps, weight_kg, ordering, exercise_id, load_type
+            reps, weight_kg, set_kind, ordering, exercise_id, load_type
        FROM (
          -- Primary path: session_exercise.reusable_superset_id direct query
          SELECT DISTINCT
@@ -702,6 +703,7 @@ export async function queryReusableSupersetHistory(
                 ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
                 s.reps         AS reps,
                 s.weight_kg    AS weight_kg,
+                s.set_kind     AS set_kind,
                 s.ordering     AS ordering,
                 s.exercise_id  AS exercise_id,
                 e.load_type    AS load_type
@@ -727,6 +729,7 @@ export async function queryReusableSupersetHistory(
                 ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
                 s.reps         AS reps,
                 s.weight_kg    AS weight_kg,
+                s.set_kind     AS set_kind,
                 s.ordering     AS ordering,
                 s.exercise_id  AS exercise_id,
                 e.load_type    AS load_type
@@ -784,7 +787,7 @@ export async function queryReusableSupersetHistory(
       set_id: r.set_id,
       reps: r.reps,
       weight_kg: r.weight_kg,
-      set_kind: null,
+      set_kind: r.set_kind,
       rep_bucket: classifyBucket(r.reps),
       ordering: r.ordering,
       load_type: r.load_type,
@@ -842,9 +845,11 @@ export async function queryReusableSupersetHistory(
 
 /**
  * Helper: list prior-set rows for the SAME (exercise_id) BEFORE a cutoff
- * timestamp. Used by the PR-chip-on-save flow to ask "given this set was
- * just inserted, what PR did it break?". Caller passes new set's created_at
- * as cutoff (exclusive).
+ * timestamp, restricted to `set_kind = 'working'` (per ADR-0012 line 100/173:
+ * warmup sets + entire dropset cluster including parent root step are
+ * excluded from PR engine input). Used by the PR-chip-on-save flow to ask
+ * "given this set was just inserted, what PR did it break?". Caller passes
+ * new set's created_at as cutoff (exclusive).
  */
 export async function listPriorSetsForExercise(
   db: Database,
@@ -865,6 +870,8 @@ export async function listPriorSetsForExercise(
             s.ordering     AS ordering,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
+            s.set_kind     AS set_kind,
+            s.parent_set_id AS parent_set_id,
             CASE
               WHEN se.parent_id IS NOT NULL THEN 1
               WHEN EXISTS (
@@ -872,7 +879,18 @@ export async function listPriorSetsForExercise(
                  WHERE se2.parent_id = se.id
               ) THEN 1
               ELSE 0
-            END AS is_in_cluster
+            END AS is_in_cluster,
+            CASE
+              WHEN se.parent_id IS NOT NULL THEN (
+                SELECT seP.exercise_id FROM session_exercise seP
+                 WHERE seP.id = se.parent_id
+              )
+              ELSE (
+                SELECT seC.exercise_id FROM session_exercise seC
+                 WHERE seC.parent_id = se.id
+                 LIMIT 1
+              )
+            END AS cluster_partner_exercise_id
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
@@ -884,6 +902,7 @@ export async function listPriorSetsForExercise(
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.is_logged = 1
+        AND s.set_kind = 'working'
         AND s.created_at < ?
       ORDER BY s.created_at DESC, s.id DESC`,
     exercise_id,

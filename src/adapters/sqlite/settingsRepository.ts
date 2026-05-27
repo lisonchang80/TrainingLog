@@ -13,21 +13,6 @@ const UNIT_KEY = 'unit_preference';
 const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
 /**
- * Slice 13a Phase A — `dev_simulate_watch_tracked` toggle.
- *
- * Kept past slice 13b as a 5-tile-watch UI regression guard while slice 13d
- * (Watch app scaffold + WatchConnectivity bridge) is still in flight — without
- * this dev affordance the 5-tile-watch variant is unreachable on dev builds
- * (no session has `healthkit_workout_uuid` set yet). Removed in slice 13d's
- * first commit once real Watch sessions can flip the variant naturally.
- *
- * Counterpart `dev_simulate_hk_granted` was removed in slice 13b — the real
- * `getAuthorizationState` reading from `hk_authorization_requested` replaces
- * it (see `src/adapters/healthkit/permission.ts`).
- */
-const DEV_SIMULATE_WATCH_TRACKED_KEY = 'dev_simulate_watch_tracked';
-
-/**
  * Slice 13b — local-only flag tracking whether the HealthKit permission
  * dialog has been shown to the user at least once. iOS's HK API is
  * one-shot: once the system dialog has been displayed for an app the
@@ -130,29 +115,6 @@ export async function setAutoPopupRestTimer(
   // round-trip stay consistent. JSON.stringify(1) = "1" — same wire form
   // as the seed, so a Settings toggle never produces a divergent shape.
   await setSetting<number>(db, AUTO_POPUP_REST_TIMER_KEY, enabled ? 1 : 0);
-}
-
-/**
- * Slice 13a Phase A — read 模擬 Watch tracked dev toggle.
- *
- * When ON, the Today screen renders SessionStatsPanel `variant='5tile-watch'`
- * even without an actual Apple Watch / HealthKit data source (HR / kcal
- * tiles show '—'). When OFF (default), Today keeps the legacy 3-tile
- * layout.
- *
- * Phase B (HealthKit + Watch unlock) REMOVES this toggle — the variant
- * decision will instead read `session.is_watch_tracked` from the schema.
- */
-export async function getDevSimulateWatchTracked(db: Database): Promise<boolean> {
-  const v = await getSetting<number | boolean>(db, DEV_SIMULATE_WATCH_TRACKED_KEY);
-  return v === 1 || v === true;
-}
-
-export async function setDevSimulateWatchTracked(
-  db: Database,
-  enabled: boolean
-): Promise<void> {
-  await setSetting<number>(db, DEV_SIMULATE_WATCH_TRACKED_KEY, enabled ? 1 : 0);
 }
 
 /**

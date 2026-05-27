@@ -149,6 +149,49 @@ Stale-default's strongest form: **the Round's premise itself no longer exists** 
 
 **Why this matters**: forcing original Qs through when topic is dead wastes user time + produces ledger noise ("Q3 N/A、Q4 obsolete..." instead of「Round F 重定義」一句話）. The redirect is the value-add — the original Qs being dead is information, not failure.
 
+### When user's custom answer expands grill scope mid-stream
+
+The most disruptive grill event is **scope expansion via free-form custom answer** — user picks `Other` on `AskUserQuestion` and types text that widens the originally-grilled topic by 2-5×. This invalidates a chunk of preceding context AND agent prep, but is easy to miss if you treat the custom string as "just another branch".
+
+**Detection signal**: user's custom string includes either:
+- A reference to a deferred / out-of-scope item from this slice's plan (e.g. "feature X 也加")
+- A capability that crosses sister Qs you've already closed (e.g. now-in-scope thing that turns "Q17 stays 13e" into "Q17 reopens")
+- A new requirement absent from any prep doc (e.g. "左滑音樂頁" when no Q in the 28-Q grill mentioned music)
+
+**Recipe**:
+
+1. **STOP drilling other Qs**. Don't proceed assuming the original scope. The next answer the user gives in expanded scope might contradict an earlier "closed" Q.
+
+2. **Parse the custom text carefully** — separate three categories:
+   - **Added** (new features not in any agent prep) → these need fresh grilling, possibly NEW Qs beyond the original Q1-QN list
+   - **Modified** (existing decision flipped) → e.g. user 接受 Q28 Branch C 但 also expands Q15 / Q17 from "defer 13e" to "進 scope"
+   - **Untouched** (decisions still hold)
+
+3. **Explicit-confirm the scope expansion** with `AskUserQuestion`. Don't assume "C'" means "C + expansion". Offer:
+   - "一次做完（confirm 擴張）"
+   - "拆 N slice ship（narrow first + expand later）"
+   - "退回原 scope（custom 是 over-spec、走 B 或推薦）"
+
+4. **List explicitly which previously-closed Qs are NOW reopened**. Print a table:
+   ```
+   Q4: 原 narrow start trigger only → reopen 為 full bidirectional WC mapping
+   Q15: 原 defer 13e → in scope
+   Q17: 原 defer 13e → in scope
+   ```
+   This protects against silent assumption drift.
+
+5. **Update commit chain + test count + smoke matrix estimates**. A 5× scope expansion typically: commits 7 → 25-30, test count delta +30 → +80, smoke 8 → 16-20.
+
+6. **Only after user confirms expansion** — continue with the new wider grill. Earlier "closed" Qs flagged as reopened in step 4 go back into the queue.
+
+**Example** (TrainingLog Slice 13d 2026-05-26):
+- 3 agent prep reports (Q1-Q10, Q11-Q19, Q20-Q28) all assumed narrow B2/B3 fix
+- User picked "C'" custom answer on Q28 — kept HK trigger-only Branch C, BUT added: Watch picker (Q17 reopen), in-session live HR (Q15 reopen), Watch full set logger UI (Q16 reopen), 左滑音樂頁 (new), iPhone +動作 限制 (new)
+- I detected the expansion 對話 turn 立刻 STOP grill 其他細節，重新 confirm scope expansion via 3-Q AskUserQuestion (scope / +動作 limit / 音樂頁 source) BEFORE drilling next
+- Result: scope locked at α-model full slice; commit chain 7 → 28; previously deferred items (Q15/Q17/Q19) re-grilled with new context; 47 final decisions (28 original + 19 NEW-Q from scope expansion)
+
+**Anti-pattern**: silently treating "C'" as Branch C and moving to next Q, then 5 Q later realizing Q15/Q17 deferrals contradict user's intent. Cost: re-tracing back 5 Q + retracting decisions + writing 翻盤 ledger entries for what should never have been closed.
+
 ### When user pins to existing pattern, scan that pattern's code BEFORE proposing options
 
 If the user says "match X's pattern" / "reference X" / "X 怎麼做的就照辦" / "後續優先參考 X" — that's a meta-rule binding all subsequent answers. Aggressively grep / read X's code BEFORE answering the next question.
@@ -248,6 +291,19 @@ Rules for ledger entries:
 If a PRD has already been published (e.g., as issue #1) when this grill round adds a new ADR, the grill round is **not complete** when ADR + CONTEXT.md are updated — PRD body and user-level memory will drift. Use the `feature-decision-sweep` skill to handle the full 4-location update (ADR → CONTEXT.md → PRD body → memory).
 
 This is project-specific to TrainingLog. For other projects without published PRDs, ADR + CONTEXT.md is sufficient.
+
+### Post-amendment doc QC pass (before merging long ADR amendments)
+
+When a grill round produces an ADR amendment of 100+ lines (large slice grills routinely do — slice 13d's ADR-0019 amendment was 203 lines, 47 decisions, embedded line-refs / 翻盤 ledger / commit chain / smoke matrix), **doc drift is essentially invisible to human review** — but auto-detectable. Spawn a single read-only QC agent against the amendment-PR tip:
+
+- **Phantom line / section refs** — every `見 § Q__ line NNN` / `see § X` in the amendment must grep-verify; line numbers rot the moment ADR is re-flowed. (Slice 13d: 3 phantom `§ Q6.1 line 759` cites — actual no-pause section was Q9(b) line 497; line 759 was the References list. Caught by Agent A.)
+- **Cross-doc terminology drift** — amendment landed `functionalStrengthTraining` in CONTEXT.md but ADR's body still said `traditionalStrengthTraining`. Both can't be right; pick one + retrofit. Grep the term across all amended files.
+- **QC recommendations are themselves stale-by-default** — when wave-2 applies the audit's findings, the patching agent MUST grep HEAD for the source-of-truth before blindly applying QC recs. The QC agent ran at audit-time `T`; code may have moved at `T+1` (silent commit between audit and patch). Example: Slice 13d QC Agent A flagged `traditionalStrengthTraining` as wrong + recommended flip to `functional`, but commit `e5732ac` between audit + patch had already flipped writer.ts the **opposite** direction. Patching agent X correctly grepped HEAD, found writer.ts = `traditional`, and aligned docs to code (inverse of audit rec). Lesson: tell the wave-2 patching-agent prompt explicitly: "for each QC finding involving a name / value / API, grep HEAD for current truth before applying the audit's suggested fix; if HEAD disagrees with the audit, follow HEAD and document the deviation in your report."
+- **翻盤 ledger row completeness** — if the amendment翻盤s N decisions, the `翻盤 ledger (greppable)` table must add N rows on the same day. Walk the ❌ markers in the amendment body, then count ledger rows added that date; mismatch = silent drift seed.
+- **Forward-pointer marker on every reverted bullet** — old decisions must carry inline `（**Slice X 修訂**：見 § X Amendment）`; without inline marker, the old bullet looks ratified to a cold reader.
+- **Decision-count internal arithmetic** — if amendment claims "47 decisions = 28 Q + 19 NEW-Q" but the table has 28+20 rows, fix one.
+
+The audit is **read-only, single agent, ~10-20 min, ~3000 word report** — high signal/noise. Run it before the doc-only PR merges (after the merge, drift is harder to untangle from real code-side updates). Project-specific to repos with long-lived ADRs; for short PRs / single-paragraph amendments, skip.
 
 ### Walk-back cleanup recipe (3-side atomic ship)
 

@@ -126,12 +126,43 @@ export async function setSessionHealthKitData(
   );
 }
 
+/**
+ * SQLite row shape for the `session` table SELECTs in this repository —
+ * mirrors the column types exactly (`is_watch_tracked INTEGER NOT NULL`
+ * arrives as 0/1, not a JS boolean). Mapped to the domain `Session` type
+ * at the read boundary by `mapSessionRow` so callers see `boolean` while
+ * the SQL layer keeps the integer contract.
+ *
+ * Slice 13d D5 (ADR-0019 § Q19) — added `is_watch_tracked` for the Today
+ * 5-tile predicate switch off `dev_simulate_watch_tracked`.
+ */
+interface SessionRow {
+  id: string;
+  started_at: number;
+  ended_at: number | null;
+  bodyweight_snapshot_kg: number | null;
+  title: string;
+  is_watch_tracked: number;
+}
+
+function mapSessionRow(row: SessionRow): Session {
+  return {
+    id: row.id,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    bodyweight_snapshot_kg: row.bodyweight_snapshot_kg,
+    title: row.title,
+    is_watch_tracked: row.is_watch_tracked === 1,
+  };
+}
+
 export async function getSession(db: Database, id: string): Promise<Session | null> {
-  return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
+  const row = await db.getFirstAsync<SessionRow>(
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title, is_watch_tracked
        FROM session WHERE id = ?`,
     id
   );
+  return row ? mapSessionRow(row) : null;
 }
 
 /**
@@ -142,22 +173,24 @@ export async function getSession(db: Database, id: string): Promise<Session | nu
  * keeps one open at a time), returns the most recently started.
  */
 export async function getActiveSession(db: Database): Promise<Session | null> {
-  return db.getFirstAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
+  const row = await db.getFirstAsync<SessionRow>(
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title, is_watch_tracked
        FROM session
       WHERE ended_at IS NULL
       ORDER BY started_at DESC
       LIMIT 1`
   );
+  return row ? mapSessionRow(row) : null;
 }
 
 /** All sessions, newest first. Used by the History tab list. */
 export async function listSessions(db: Database): Promise<Session[]> {
-  return db.getAllAsync<Session>(
-    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title
+  const rows = await db.getAllAsync<SessionRow>(
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title, is_watch_tracked
        FROM session
       ORDER BY started_at DESC`
   );
+  return rows.map(mapSessionRow);
 }
 
 /**

@@ -10,17 +10,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
-import { FEATURE_WATCH_HANDOFF } from '@/src/config/features';
-import {
-  insertBodyMetric,
-  listBodyMetrics,
-} from '@/src/adapters/sqlite/bodyMetricRepository';
+import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import {
   getExerciseNotes,
@@ -44,7 +39,6 @@ import {
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import {
   getAutoPopupRestTimer,
-  getDevSimulateWatchTracked,
   getSetting,
   getUnitPreference,
   setSetting,
@@ -104,7 +98,6 @@ import {
   cloneTemplateWithSubTag,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
-  listDistinctSubTags,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -118,7 +111,7 @@ import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults'
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
-import type { BodyMetric, UnitPreference } from '@/src/domain/body/types';
+import type { UnitPreference } from '@/src/domain/body/types';
 import {
   formatWeight,
   kgToDisplay,
@@ -207,7 +200,6 @@ export default function TodayScreen() {
   const [templatesById, setTemplatesById] = useState<Record<string, TemplateSummary>>({});
   const [programCellToday, setProgramCellToday] = useState<ProgramCell | null>(null);
   const [unit, setUnit] = useState<UnitPreference>('kg');
-  const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
   const [bwSnapshotKg, setBwSnapshotKg] = useState<number | null>(null);
   /**
    * Card 11 / ADR-0014 — session.title for the in-session header tap-to-edit
@@ -277,14 +269,6 @@ export default function TodayScreen() {
    * rest_sec + exercise name to render in the modal.
    */
   const [autoPopupTimer, setAutoPopupTimer] = useState<boolean>(true);
-  /**
-   * Slice 13a Phase A dev toggle — `dev_simulate_watch_tracked`. When ON
-   * the in-session SessionStatsPanel renders the 5-tile Watch variant
-   * (心率 / 大卡 = '—' until Phase B HK ingest). Default false — legacy
-   * 3-tile layout stays for fresh installs.
-   * REMOVE in Phase B first commit (per ADR-0019 § Phase A Amendment).
-   */
-  const [devWatchTracked, setDevWatchTracked] = useState<boolean>(false);
   const [restTimerTarget, setRestTimerTarget] = useState<{
     rest_sec: number;
     exercise_name: string;
@@ -316,33 +300,27 @@ export default function TodayScreen() {
     null,
   );
   const [sheetPrograms, setSheetPrograms] = useState<ProgramOption[]>([]);
-  const [sheetSubTags, setSheetSubTags] = useState<string[]>([]);
   const [sheetLastProgramId, setSheetLastProgramId] = useState<string | null>(
     null,
   );
   const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, bms, popup, devWT] = await Promise.all([
+    const [exs, active, prog, tpls, u, popup] = await Promise.all([
       listExercises(db),
       getActiveSession(db),
       getActiveProgram(db),
       listTemplates(db),
       getUnitPreference(db),
-      listBodyMetrics(db),
       // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
       // key to ON (matches v016 seed intent + the new Settings Switch).
       getAutoPopupRestTimer(db),
-      // Slice 13a Phase A — `dev_simulate_watch_tracked` defaults OFF.
-      getDevSimulateWatchTracked(db),
     ]);
     setExercises(exs);
     setSessionState(fromRow(active));
     setActiveProgram(prog);
     setUnit(u);
-    setBodyMetrics(bms);
     setAutoPopupTimer(popup);
-    setDevWatchTracked(devWT);
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
@@ -580,17 +558,14 @@ export default function TodayScreen() {
   const onPickTemplate = async (item: TemplateSummary) => {
     setBusy(true);
     try {
-      const [programSummaries, distinctSubTags, lastProgram, lastTag] =
-        await Promise.all([
-          listPrograms(db),
-          listDistinctSubTags(db),
-          getSetting<string>(db, LAST_PROGRAM_KEY),
-          getSetting<string>(db, LAST_SUB_TAG_KEY),
-        ]);
+      const [programSummaries, lastProgram, lastTag] = await Promise.all([
+        listPrograms(db),
+        getSetting<string>(db, LAST_PROGRAM_KEY),
+        getSetting<string>(db, LAST_SUB_TAG_KEY),
+      ]);
       setSheetPrograms(
         programSummaries.map((p) => ({ id: p.id, name: p.name })),
       );
-      setSheetSubTags(distinctSubTags);
       setSheetLastProgramId(lastProgram);
       setSheetLastSubTag(lastTag);
       setSheetTemplate(item);
@@ -824,8 +799,6 @@ export default function TodayScreen() {
       setInlinePbfInput('');
       setInlineSmmInput('');
       setBodySheetVisible(false);
-      const bms = await listBodyMetrics(db);
-      setBodyMetrics(bms);
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
@@ -2100,7 +2073,6 @@ export default function TodayScreen() {
           visible={sheetTemplate != null}
           templateName={sheetTemplate?.name ?? ''}
           programs={sheetPrograms}
-          subTags={sheetSubTags}
           lastUsedProgramId={sheetLastProgramId}
           lastUsedSubTag={sheetLastSubTag}
           onEdit={onSheetEdit}
@@ -2175,13 +2147,15 @@ export default function TodayScreen() {
         >
           {programBanner}
           {/* ADR-0019 Q6 — in-session stats panel (P1 position).
-              Slice 13a Phase A: the `dev_simulate_watch_tracked` toggle
-              upgrades the panel to the 5-tile Watch variant (HR / kcal =
-              '—' until Phase B HealthKit ingest). When OFF (default), the
-              legacy 3-tile layout is preserved. */}
+              Slice 13d D5 (ADR-0019 § Q19): the 5-tile Watch variant fires
+              when the active session's `is_watch_tracked` flag (v024 column,
+              surfaced into SessionState by `fromRow`) is true — i.e. the
+              session is being driven from the paired Apple Watch. Falls
+              back to the legacy 3-tile layout otherwise.
+              HR / kcal still read '—' until Watch HK ingest lands. */}
           {sessionState.status === 'in_progress' ? (
             <SessionStatsPanel
-              variant={devWatchTracked ? '5tile-watch' : '3tile'}
+              variant={sessionState.is_watch_tracked ? '5tile-watch' : '3tile'}
               kcal={null}
               avgHr={null}
               sets={setsInSession.map((s) => ({
@@ -2571,32 +2545,6 @@ export default function TodayScreen() {
               {t('button', 'manualTimer')}
             </Text>
           </Pressable>
-          {/*
-            Slice 10e bundle 3 — Watch handoff button gated by
-            FEATURE_WATCH_HANDOFF (default false). Real WatchConnectivity
-            handoff lands in slice 11+ (per ADR-0008). Until then the
-            placeholder Alert UX is confusing for App Store users, so the
-            button is hidden by default. See `src/config/features.ts`.
-          */}
-          {FEATURE_WATCH_HANDOFF ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                Alert.alert(
-                  t('button', 'sendToWatch'),
-                  t('alert', 'watchComingSlice13'),
-                )
-              }
-              style={({ pressed }) => [
-                styles.bottomStickyBtn,
-                styles.bottomStickyBtnSecondary,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.bottomStickyBtnTextSecondary}>
-                {t('button', 'sendToWatch')}
-              </Text>
-            </Pressable>
-          ) : null}
         </View>
       </KeyboardAvoidingView>
       <SetNoteSheet

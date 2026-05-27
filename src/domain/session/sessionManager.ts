@@ -16,18 +16,38 @@
 
 export type SessionState =
   | { status: 'idle' }
-  | { status: 'in_progress'; id: string; started_at: number }
+  | {
+      status: 'in_progress';
+      id: string;
+      started_at: number;
+      /**
+       * True when the active session is being driven from the paired Apple
+       * Watch. Surfaces `session.is_watch_tracked` (v024 column) into the UI
+       * state so the Today 5-tile predicate (ADR-0019 § Q19, slice 13d D5)
+       * can read it without re-querying the DB row each render.
+       */
+      is_watch_tracked: boolean;
+    }
   | { status: 'ended'; id: string; started_at: number; ended_at: number };
 
 export const IDLE: SessionState = { status: 'idle' };
 
 /** Transition idle → in_progress. */
-export function start(args: { id: string; started_at: number }): SessionState {
+export function start(args: {
+  id: string;
+  started_at: number;
+  is_watch_tracked?: boolean;
+}): SessionState {
   if (!args.id) throw new Error('Session id is required');
   if (!Number.isFinite(args.started_at)) {
     throw new Error('started_at must be a finite number');
   }
-  return { status: 'in_progress', id: args.id, started_at: args.started_at };
+  return {
+    status: 'in_progress',
+    id: args.id,
+    started_at: args.started_at,
+    is_watch_tracked: args.is_watch_tracked ?? false,
+  };
 }
 
 /** Transition in_progress → ended. Throws if state is not in_progress. */
@@ -59,13 +79,28 @@ export function getSessionId(state: SessionState): string | null {
   return state.status === 'idle' ? null : state.id;
 }
 
-/** Lift a session row from the DB into a SessionState. */
+/**
+ * Lift a session row from the DB into a SessionState. `is_watch_tracked` is
+ * carried through into the `in_progress` variant; `ended` sessions don't
+ * need it (the Today 5-tile predicate only fires while in-progress) — but
+ * the DB row may still carry the flag.
+ */
 export function fromRow(
-  row: { id: string; started_at: number; ended_at: number | null } | null
+  row: {
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+    is_watch_tracked?: boolean;
+  } | null
 ): SessionState {
   if (row == null) return IDLE;
   return row.ended_at == null
-    ? { status: 'in_progress', id: row.id, started_at: row.started_at }
+    ? {
+        status: 'in_progress',
+        id: row.id,
+        started_at: row.started_at,
+        is_watch_tracked: row.is_watch_tracked ?? false,
+      }
     : {
         status: 'ended',
         id: row.id,

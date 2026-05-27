@@ -1,7 +1,7 @@
 /**
  * Numeric keypad modal — custom in-app number pad for editing set
- * weight / reps in the session set logger (ADR-0019 Q6, slice 10c
- * Phase 2 commit 4).
+ * weight / reps in the session set logger (ADR-0019 § Silent deviations
+ * ledger; slice 10c Phase 2 commit 4 落地).
  *
  * Why custom: tapping a number on a session set row opens this modal
  * instead of revealing an inline `<TextInput>` so the system keyboard

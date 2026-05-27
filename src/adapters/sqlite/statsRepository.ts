@@ -37,6 +37,10 @@ export async function loadStatsSetRecords(
   db: Database,
   range: { start_ms: number; end_ms: number }
 ): Promise<StatsSetRecord[]> {
+  // ADR-0012 line 174: volumeEngine 排 `set_kind = 'warmup'`（working + dropset
+  // 都算容量）。stats 顯示用同樣語意，warmup 不算進 stats 容量。
+  // 在 SQL 邊界過濾，跟 listPriorSetsForExercise / loadReplayRecords pattern 一致
+  // (2026-05-27).
   const rows = await db.getAllAsync<RawRow>(
     `SELECT s.id                  AS set_id,
             s.session_id           AS session_id,
@@ -53,6 +57,7 @@ export async function loadStatsSetRecords(
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
       WHERE ss.started_at >= ? AND ss.started_at < ?
+        AND s.set_kind != 'warmup'
       ORDER BY ss.started_at ASC, s.created_at ASC`,
     range.start_ms,
     range.end_ms
