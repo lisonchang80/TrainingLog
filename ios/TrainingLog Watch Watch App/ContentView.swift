@@ -2,25 +2,134 @@
 //  ContentView.swift
 //  TrainingLog Watch
 //
-//  Slice 13d D4 placeholder. D8 replaces this with the picker root
-//  3-step UI per ADR-0019 NEW-Q29 + NEW-Q17.
+//  Slice 13d D5 — temporary dev hook for SessionController smoke.
+//  D8 replaces this with the picker root 3-step UI per ADR-0019
+//  NEW-Q29 + NEW-Q17. Everything inside the `dev_smoke` section
+//  below disappears when D8 lands.
 //
 
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var healthKit = HealthKitController()
+    @StateObject private var session: SessionController
+
+    init() {
+        let hk = HealthKitController()
+        _healthKit = StateObject(wrappedValue: hk)
+        _session = StateObject(wrappedValue: SessionController(healthKit: hk))
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            Text("TrainingLog")
-                .font(.headline)
-            Text("D4 scaffold")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("Picker UI ships in D8")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("TrainingLog")
+                    .font(.headline)
+                Text("D5 dev smoke")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("Picker UI ships in D8")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Divider().padding(.vertical, 4)
+
+                // ── dev_smoke (D5): SessionController lifecycle —
+                // remove when D8 picker UI lands.
+                Text("D5 / SessionController")
+                    .font(.caption)
+                    .bold()
+
+                Text("HK auth: \(authText(healthKit.authorizationStatus))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text("State: \(stateText(session.state))")
+                    .font(.caption2)
+                    .foregroundStyle(stateColor(session.state))
+
+                if let startedAt = session.sessionStartedAt {
+                    Text("Started: \(timeText(startedAt))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let endedAt = session.sessionEndedAt {
+                    Text("Ended: \(timeText(endedAt))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 4) {
+                    Button("Start") {
+                        Task { await session.start() }
+                    }
+                    .disabled(!canStart(session.state))
+
+                    Button("End") {
+                        Task { await session.end() }
+                    }
+                    .disabled(!canEnd(session.state))
+                }
+
+                Button("Cancel") {
+                    Task { await session.cancel() }
+                }
+                .disabled(!canEnd(session.state))
+                .tint(.red)
+            }
+            .padding()
         }
-        .padding()
+    }
+
+    private func authText(_ s: HealthKitController.AuthorizationStatus) -> String {
+        switch s {
+        case .unknown: return "unknown"
+        case .requesting: return "requesting…"
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .unavailable: return "unavailable"
+        }
+    }
+
+    private func stateText(_ s: SessionController.State) -> String {
+        switch s {
+        case .idle: return "idle"
+        case .starting: return "starting…"
+        case .active: return "active"
+        case .ending: return "ending…"
+        case .ended: return "ended"
+        case .failed(let msg): return "failed: \(msg)"
+        }
+    }
+
+    private func stateColor(_ s: SessionController.State) -> Color {
+        switch s {
+        case .active: return .green
+        case .failed: return .red
+        case .ending, .starting: return .orange
+        default: return .secondary
+        }
+    }
+
+    private func timeText(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: d)
+    }
+
+    private func canStart(_ s: SessionController.State) -> Bool {
+        switch s {
+        case .idle, .ended, .failed: return true
+        default: return false
+        }
+    }
+
+    private func canEnd(_ s: SessionController.State) -> Bool {
+        switch s {
+        case .active, .starting: return true
+        default: return false
+        }
     }
 }
 
