@@ -352,8 +352,9 @@ describe('queryExerciseHistory (Function A)', () => {
     const rows = await queryExerciseHistory(db, ex.bench);
     expect(rows[0].bw_snapshot_kg).toBe(75);
     expect(rows[0].load_type).toBe('loaded');
-    // set_kind always null in v1 — placeholder for future migration
-    expect(rows[0].set_kind).toBeNull();
+    // v015 (2026-05-16) added set_kind to runtime set table; seedSet defaults
+    // to 'working' so a plain set surfaces as 'working' (not null).
+    expect(rows[0].set_kind).toBe('working');
   });
 });
 
