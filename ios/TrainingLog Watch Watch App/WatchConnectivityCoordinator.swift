@@ -115,9 +115,8 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         }
         guard session.isReachable else {
             // Note: WC has a separate transferUserInfo path for queued
-            // delivery, but D7 spec is bidirectional ack-based — we
-            // only attempt sendMessage. Caller can retry when iPhone
-            // becomes reachable.
+            // delivery, but D7 spec uses sendMessage — caller can retry
+            // when iPhone becomes reachable.
             lastOutbound = "skip: iPhone unreachable"
             return
         }
@@ -128,7 +127,10 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 
         let envelope: [String: Any] = [
             "msgId": UUID().uuidString,
-            "ts": Int(Date().timeIntervalSince1970 * 1000),
+            // watchOS uses arm64_32 — Swift `Int` is 32-bit on Watch
+            // (Int.max ≈ 2.1e9), but epoch ms (~1.78e12 in 2026) overflows.
+            // Use `Int64` (always 64-bit) so the cast doesn't crash.
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
             "kind": "end-session",
             "payload": [
                 "sessionId": sessionId,
@@ -136,28 +138,52 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             ],
         ]
 
-        lastOutbound = "sending sess=\(prefix8(sessionId))…"
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            session.sendMessage(
-                envelope,
-                replyHandler: { reply in
-                    Task { @MainActor [weak self] in
-                        let ok = (reply["ok"] as? Bool) ?? false
-                        self?.lastOutbound = ok
-                            ? "ack ok sess=\(self?.prefix8(sessionId) ?? "?")"
-                            : "ack non-ok: \(reply)"
-                    }
-                    continuation.resume()
-                },
-                errorHandler: { error in
-                    Task { @MainActor [weak self] in
-                        self?.lastOutbound = "err: \(error.localizedDescription)"
-                    }
-                    continuation.resume()
+        // Fire-and-forget (replyHandler: nil) — but with WCError 7016 swallowed.
+        //
+        // Why not 3-arg sendMessage with replyHandler?
+        // `react-native-watch-connectivity` (iPhone JS side) defines BOTH
+        // `session:didReceiveMessage:` AND `session:didReceiveMessage:replyHandler:`
+        // delegate methods on the iPhone side. Apple's WC framework always
+        // dispatches to the reply-variant when both exist, regardless of
+        // what the sender (Watch) specified for replyHandler. The library
+        // stores the framework-supplied replyHandler in an NSCache + dispatches
+        // the message to JS with an injected `id` field, and requires JS to
+        // call its `replyToMessageWithId` API to invoke the stored block.
+        // Our D7-TS handler (`addMessageListener('end-session', …)` in
+        // app/(tabs)/index.tsx) does NOT call that — so iOS times out the
+        // reply after ~5s and fires our errorHandler with
+        // `WCErrorCodeMessageReplyTimedOut` (code 7016) even though the
+        // message was successfully delivered + processed by iPhone JS.
+        //
+        // Treatment: detect 7016 specifically and display "sent (no-ack)"
+        // instead of "err: …" so the UI reflects what actually happened.
+        // Real transport errors (other WCError codes / NSURLError) still
+        // surface as "err: …". (Validated 2026-05-27 night real-device smoke.)
+        //
+        // ADR-0019 § Q23 / NEW-Q45: Watch→iPhone direction is
+        // notification-shaped — iPhone reconciles its own state via
+        // `finalizeEndAndRoute`'s idempotent gate (DB read of ended_at),
+        // so Watch doesn't strictly need an ack to complete the flow.
+        // The iPhone→Watch direction (D7-TS `pushEndToWatch`) keeps the
+        // ack pattern because the Watch Coordinator DOES call replyHandler
+        // synchronously and iPhone uses the ack to flip is_watch_tracked.
+        session.sendMessage(
+            envelope,
+            replyHandler: nil,
+            errorHandler: { [weak self] error in
+                Task { @MainActor [weak self] in
+                    let nsError = error as NSError
+                    let isReplyTimeout =
+                        nsError.domain == WCErrorDomain
+                        && nsError.code == WCError.Code.messageReplyTimedOut.rawValue
+                    self?.lastOutbound =
+                        isReplyTimeout
+                        ? "sent sess=\(self?.prefix8(sessionId) ?? "?") (no-ack)"
+                        : "err: \(error.localizedDescription)"
                 }
-            )
-        }
+            }
+        )
+        lastOutbound = "sent sess=\(prefix8(sessionId))"
     }
 
     private nonisolated func prefix8(_ s: String) -> String {
