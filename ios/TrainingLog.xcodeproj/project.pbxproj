@@ -60,7 +60,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		5F294AB72FC6CC2E00E7C5CD /* Exceptions for "TrainingLog Watch Watch App" folder in "TrainingLog Watch Watch App" target */ = {
+		5F294AB72FC6CC2E00E7C5CD /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"TrainingLog-Watch-Watch-App-Info.plist",
@@ -70,18 +70,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		5F294AA72FC6CA0000E7C5CD /* TrainingLog Watch Watch App */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				5F294AB72FC6CC2E00E7C5CD /* Exceptions for "TrainingLog Watch Watch App" folder in "TrainingLog Watch Watch App" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = "TrainingLog Watch Watch App";
-			sourceTree = "<group>";
-		};
+		5F294AA72FC6CA0000E7C5CD /* TrainingLog Watch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5F294AB72FC6CC2E00E7C5CD /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "TrainingLog Watch Watch App"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */

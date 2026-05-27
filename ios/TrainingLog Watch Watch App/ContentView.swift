@@ -13,11 +13,16 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var healthKit = HealthKitController()
     @StateObject private var session: SessionController
+    @StateObject private var watchConn: WatchConnectivityCoordinator
+    @State private var sessionIdText: String = ""
 
     init() {
         let hk = HealthKitController()
+        let sc = SessionController(healthKit: hk)
+        let wc = WatchConnectivityCoordinator(sessionController: sc)
         _healthKit = StateObject(wrappedValue: hk)
-        _session = StateObject(wrappedValue: SessionController(healthKit: hk))
+        _session = StateObject(wrappedValue: sc)
+        _watchConn = StateObject(wrappedValue: wc)
     }
 
     var body: some View {
@@ -77,8 +82,66 @@ struct ContentView: View {
                 }
                 .disabled(!canEnd(session.state))
                 .tint(.red)
+
+                Divider().padding(.vertical, 4)
+
+                // ── dev_smoke (D7-Swift): WC end-session bidirectional —
+                // remove when D8 picker UI lands.
+                Text("D7 / WatchConnectivity")
+                    .font(.caption)
+                    .bold()
+
+                Text("WC: \(wcStatusText(watchConn.status))")
+                    .font(.caption2)
+                    .foregroundStyle(wcStatusColor(watchConn.status))
+
+                Text("Inbound: \(watchConn.lastInbound)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text("Outbound: \(watchConn.lastOutbound)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                TextField("sessionId", text: $sessionIdText)
+                    .font(.caption2)
+                    .textFieldStyle(.plain)
+
+                Button("End + send → iPhone") {
+                    Task {
+                        // Watch-led: stop local HK first for UI
+                        // responsiveness, then notify iPhone. iPhone's
+                        // handler in app/(tabs)/index.tsx will finalize
+                        // SQLite + bounce end-session(side:iphone) back
+                        // — that bounce is a no-op locally because
+                        // SessionController.end() is idempotent.
+                        await session.end()
+                        await watchConn.sendEndToiPhone(sessionId: sessionIdText)
+                    }
+                }
+                .disabled(sessionIdText.isEmpty || watchConn.status != .activated)
+                .tint(.orange)
             }
             .padding()
+        }
+    }
+
+    private func wcStatusText(_ s: WatchConnectivityCoordinator.Status) -> String {
+        switch s {
+        case .unsupported: return "unsupported"
+        case .inactive: return "inactive"
+        case .activating: return "activating…"
+        case .activated: return "activated"
+        case .failed(let msg): return "failed: \(msg)"
+        }
+    }
+
+    private func wcStatusColor(_ s: WatchConnectivityCoordinator.Status) -> Color {
+        switch s {
+        case .activated: return .green
+        case .failed, .unsupported: return .red
+        case .activating: return .orange
+        default: return .secondary
         }
     }
 
