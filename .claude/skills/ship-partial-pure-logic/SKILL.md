@@ -66,7 +66,7 @@ If the pure subset shares files with the future commit's other code, **don't spl
 
 ## Validated cases (2026-05-27 evening)
 
-Four landings under this pattern in one session, zero conflicts on cherry-pick, pre-existing flakes self-resolved on hook retry:
+Six landings under this pattern in one session, zero conflicts on cherry-pick, pre-existing flakes never even surfaced on hook retry (174 suites consistently clean):
 
 | Commit | What shipped | LOC / cases |
 |---|---|---|
@@ -74,6 +74,12 @@ Four landings under this pattern in one session, zero conflicts on cherry-pick, 
 | D19 `791a0ed` | `liveMirrorReducer.ts` immutable reducer + activate Z's `liveMirror.test.ts` | ~225 / 22 + 2 todo preserved |
 | D26 partial `54b8f9d` | ADR-0019 shipped progress + schema row backfill + chain-order amendment | doc-only |
 | D7 partial `9a29ef6` | `endSessionReconciler.ts` 5-sec state machine + fresh test | ~125 / 12 |
+| D9 partial `c350b5c` | `handshake.ts` pure builders (`buildStage1Reply` discriminated union + `matchesPendingRequest` + `buildStartFromIphone`) + activate Z's `handshake.test.ts` pure subset, keeping wire-in `describe.skip` intact | ~205 / 17 + 3 todo preserved + 9 wire-in skip preserved |
+| D26 partial 二次補刀 `02f8625` | ADR-0019 add D7/D9-partial + skill rows, narrow remaining-未-land, refresh 翻盤 ledger top row with full 6-commit list | doc-only |
+
+**Naming variant for already-partial-named D-commits**: D7/D9 originally specified as full commits in the chain. When only the pure subset ships, branch as `slice/13d-d{N}-partial-{kebab}` (note the `-partial-` infix, not `-subset-`). Commit title: `feat(slice-13d): D{N} partial — <summary>`. The partial naming makes "this isn't D{N} full" visible at three levels: branch, commit title, ADR progress row.
+
+**For scaffold activation that contains MIXED pure + impure tests**: the cleanest split is to refactor the scaffold's describe structure so pure tests live in their own top-level `describe('… pure builder …')` blocks while impure tests stay inside a `describe.skip('… wire-in …')` block. Don't try to keep Z's nested structure intact — readers (and you next month) need a one-glance view of "what's tested now vs deferred to wire-in." See `handshake.test.ts` for the pattern: 3 top-level active describes + 1 top-level skip describe = visually obvious.
 
 ## What NOT to ship as partial
 
