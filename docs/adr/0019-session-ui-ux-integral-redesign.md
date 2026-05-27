@@ -920,6 +920,15 @@ ADR-0014 sibling rename propagation 隨 🔀 一起 moot — 不再需要 in-ses
 
 **測試**：main baseline 663/663 → branch 10c 累積 765/765（+102 tests）。
 
+## Silent deviations ledger（後驗拍板）
+
+Code 已 ship、行為已穩定、但在落地當時未經顯式 Q-row grill 的設計選擇。本 section 後驗 sanction 並 grep-friendly 記錄 — 每條的 rationale 是「碼/comment 已寫、ADR 補錄」、不是「現在才決定」。Add newest first. Greppable 為 `silent deviation`、`後驗`、`後驗拍板`。
+
+| 項目 | 現行行為 | rationale | 範圍 / 邊界 | 觸發 commit | 後驗 sanction |
+|---|---|---|---|---|---|
+| **NumericKeypad**（自製 4×3 modal 取代 system keyboard 編 set 數字） | Tap session set row 的 reps / weight → 開 slide-up modal、4×3 grid (1-9 + optional `.` + 0 + ⌫)；mode = `integer` 隱藏 `.`、`decimal` 顯示；Confirm 透過 `parseKeypadBuffer` 寫回；UI 亦 reuse 在 ⚙️ menu「⏱️ 休息秒數」入口 | iOS system keyboard 會頂卡上去、user 看不到正在編輯的 row / 不到剛輸入的值；4×3 大按鈕 grid 適合運動中粗指尖；inline TextInput 嘗試失敗（slice 10c Phase 2 commit 4 留 comment）。NumericKeypad 是「set logger 可實作的最快編輯路徑」 | Session 端所有數字 input（reps / weight / rest_sec）；Template editor 暫**不**採用（slice 10c Phase 2 commit 4 故意 scope out — 未來可推但無 schema 障礙） | Slice 10c Phase 2 commit 4 落地 + Phase 2 commit 5+「swap into SetRowContent」；後續 wave 14 reuse 進 cluster card 編 rest_sec | **Sanction as-is**（2026-05-27）— code comment ([components/shared/numeric-keypad.tsx:1-19](components/shared/numeric-keypad.tsx)) 把 rationale 寫齊備、行為 31 tests 穩定；ADR-0019 line 877 / 884 / 898 散見 implementation log 但無顯式 Q row，由本 ledger 補錄。Code 內錯誤 reference 「ADR-0019 Q6」（Q6 實為 stats panel）改 link 本 ledger 條為 SoT。 |
+| **手動計時 button**（Today bottom-sticky bar 的「⏱ 手動計時」） | Today 訓練 tab 底部 sticky bar 放 button、tap → open `RestTimerModal` default 60s、**無 set anchor** (`exercise_name = t('button', 'manualRest')`)；user 可隨時 cancel；走跟 Q2.3 auto-popup 完全同一個 modal 與 state machine | Q2.3 rest timer auto-popup 只在 set ✓ 後 fire；user 場景含「exercise 間休息（同一動作 set 之間 ✓ 漏 tap 也算）」、「動態熱身 / 暖身組外」、「cluster 外短暫休息」等 — 全部超出 auto-popup 範圍；reuse 既有 modal/state machine、沒有獨立 timer 邏輯複雜化 | **僅 Today** (`app/(tabs)/index.tsx:2530`)；session detail edit mode (`session/[id].tsx`) **不**加（已結束 session 加 timer 無意義）；history-detail edit 不接（per slice 10d Q2.3 E2「`session/[id].tsx` edit mode 不接 timer」） | 2026-05-12 grill recommendation（mid-slice-10c）+ 2026-05-16 ultra-late pull-forward from slice 10d；commit hash 在 slice 10c 中段、未追記具體 sha | **Sanction as-is**（2026-05-27）— Today-only 範圍清晰、code comment ([app/(tabs)/index.tsx:2529-2545](app/(tabs)/index.tsx)) 註明 rationale + pull-forward 出處；ADR-0019 Q2 整套 rest timer 章節未包含此入口、由本 ledger 補錄。未來若要在 `session/[id].tsx` edit mode 加 manual timer 需先翻盤本條的「範圍 / 邊界」部分。 |
+
 ## 翻盤 ledger（greppable）
 
 Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's primary grep target. Add at top, newest first. Each row machine-greppable for `修訂 / 翻盤 / 砍除 / 廢案`.
