@@ -3,7 +3,7 @@ name: expo-bare-build-pipeline
 description: >
   TrainingLog leaving Expo Go for Bare workflow (since slice 13b 2026-05-25):
   expo prebuild → CocoaPods → Xcode signing → Metro → real-device install
-  pipeline + 8 specific gotchas. Use when adding any native module
+  pipeline + 10 specific gotchas. Use when adding any native module
   (HealthKit, WatchConnectivity, file system, etc.), regenerating ios/
   via prebuild, adding a watchOS target via Xcode, or debugging a dev
   build that won't launch / crashes on HK / Native module call. Trigger
@@ -14,9 +14,13 @@ description: >
   "newArchEnabled false / true", "objectVersion 70", "Unable to find
   compatibility version", "Apple Watch disconnected in Xcode",
   "Copying shared cache symbols from Apple Watch", "Developer Mode
-  Watch", "Could not install at this time" Watch app. Validated 1×
-  slice 13b (2026-05-25 → 26) + 1× slice 13d D0 spike C + D4 Watch
-  target add (2026-05-27).
+  Watch", "Could not install at this time" Watch app, "Timed out
+  while attempting to establish tunnel using negotiated network
+  parameters", "Type X does not conform to protocol ObservableObject",
+  "init(wrappedValue:) is not available due to missing import",
+  "HK auth dialog 出現在 Watch 不是 iPhone". Validated 1× slice 13b
+  (2026-05-25 → 26) + 1× slice 13d D0 spike C + D4 Watch target add
+  + 1× slice 13d D0 spike A native Swift harness (2026-05-27).
 ---
 
 # Expo Bare Build Pipeline — TrainingLog
@@ -184,19 +188,30 @@ LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
 
 **Per-Mac fix**：不入 git。新 Mac / `brew reinstall cocoapods` 後要再 patch 一次。CocoaPods upstream 1.17+ 會 fix。
 
-### Gotcha #7 — Wireless Mac↔Apple Watch dev 需要 USB-tethered iPhone
+### Gotcha #7 — Wireless Mac↔Apple Watch dev 需要 USB-tethered iPhone（**且 Mac 不能走 iPhone 熱點當網路**）
 
-**症狀**: Xcode → Window → Devices and Simulators 顯示 Apple Watch 在 **Disconnected** section；iPhone 端「Apple Watch」app 點安裝 Watch app 跳「Could not install at this time」。
+**症狀**:
+- Xcode → Window → Devices and Simulators 顯示 Apple Watch 在 **Disconnected** section；iPhone 端「Apple Watch」app 點安裝 Watch app 跳「Could not install at this time」。
+- **OR**: Xcode → Devices and Simulators → Watch row 上方黃色 banner 寫「Previous preparation error: A connection to this device could not be established.; **Timed out while attempting to establish tunnel using negotiated network parameters**」+ ERRORS AND WARNINGS section 紅 X 同樣訊息。
 
-**根因**: personal hotspot 設定下 Mac 透過 iPhone 上網、Mac 跟 Watch 沒有直通路徑；Mac ↔ Watch 走的是 iPhone 中繼、且 iPhone 必須走 USB 不能走 hotspot。
+**根因**:
+- Mac ↔ Watch 走的是 iPhone 中繼、iPhone 必須走 USB 不能走 BT 替代
+- iPhone Personal Hotspot 模式下 Mac 透過 iPhone 4G 上網、看起來 Mac 跟 iPhone 在「同網路」、但**熱點是 NAT 後面的 4G IP、不是同一個本地 segment**、dev pairing 走不出 tunnel
+- 拓撲：`Watch ←BT→ iPhone ←?→ Mac`、`?` 必須是 USB-C 直連 OR 雙方都連到家用 WiFi router（不能是熱點 routing）
 
-**修法**：
-1. iPhone 用 USB-C 線插 Mac
-2. iPhone 跳「信任這台電腦？」→ 信任、允許 USB Accessory
-3. 等 10-30 秒、Devices and Simulators 視窗刷新、Watch 從 Disconnected 移到 Connected
-4. 重新 ⌘R build 或從 iPhone Watch app 點安裝
+**修法**（兩條路二選一）：
+1. **USB-C 直連（推薦）**：iPhone 用 USB-C 線插 Mac、信任、允許 USB Accessory；iPhone 關掉個人熱點；Mac WiFi 連回家用 router 自己上網
+2. **同 WiFi 備援**：iPhone 個人熱點關掉、iPhone + Mac 都連到同一個家用 WiFi SSID、Xcode 等 30s 重新發現 Watch（圖示旁會有 🌐 wireless 標記）
+
+確認順序：
+1. 看 Mac 螢幕右上角 WiFi 圖示連到哪個 SSID。如果是 iPhone 熱點名稱（鏈條 icon）→ ❌ 模式不對
+2. iPhone → 設定 → 個人熱點 → 允許其他人加入 = OFF
+3. iPhone USB-C 線真的插著 Mac
+4. Xcode → Devices and Simulators 等 Watch 從 Disconnected 移到 Connected
 
 **Bonus — Watch Developer Mode 觸發順序**: Watch 上 Settings → 隱私權與安全性 → 開發人員模式 **option 預設隱藏**、要 Xcode 先 ping 過 Watch（透過 USB iPhone）才會出現。順序：先插 USB → Xcode 嘗試 build/connect Watch（會 fail 但觸發）→ 回 Watch Settings → option 應該出現 → toggle ON → Watch 重開機。
+
+**驗證 2 次**（2026-05-27）：D4 Watch target install 時第一次踩、spike A real-device run 第二次踩（spike C 後沒拔 USB / 沒關熱點 → spike A 重建環境）— 每次切實機 workflow 都要重檢一次拓撲。
 
 ### Gotcha #8 — Xcode 第一次連 Watch 跑 "Copying shared cache symbols" 10-30 min
 
@@ -213,6 +228,50 @@ LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
 驗證方法：`ps aux | grep AppleMobileDeviceHelper` 看 elapsed time + RSS、+ `xcrun devicectl list devices` 看 Watch 是否 connected。
 
 **也適用**: 換新 Watch、Watch 升級 watchOS major version、Xcode 升級後。
+
+### Gotcha #9 — Swift `@MainActor ObservableObject` + `@Published` 在 Watch target 漏 `import Combine` 會出 4 個錯一起
+
+**症狀** (Build Failed, 4 errors in same file):
+```
+Type 'X' does not conform to protocol 'ObservableObject'
+Initializer 'init(wrappedValue:)' is not available due to missing import of defining module  (×N for the N @Published properties)
+```
+
+**根因**: `ObservableObject` 協定 + `@Published` property wrapper 都來自 **Combine**、不是 Foundation 也不是 SwiftUI。SwiftUI 在 main app target 會透過 import 鏈條把 Combine 帶進來、但純 model class（沒 import SwiftUI）就會漏。
+
+**修法**: 加 `import Combine` 到 model 檔最上面：
+
+```swift
+import Foundation
+import HealthKit
+import Combine  // ← 漏這行
+
+@MainActor
+final class SpikeAHarness: ObservableObject {
+    @Published var isRunning: Bool = false
+    // ...
+}
+```
+
+**判別技巧**: 4 個錯**全在同一檔**、ObservableObject + init(wrappedValue:) 同時出現 → 99% 是漏 Combine。如果是不同檔錯一個 init(wrappedValue:)、可能是其他 property wrapper（`@State` / `@Binding` 漏 SwiftUI）— 但這個情境較少在 model layer 發生。
+
+**Validated**: D0 spike A 第一次 ⌘B 踩、加 import 後一次過。
+
+### Gotcha #10 — Watch process 呼叫 `HKHealthStore.requestAuthorization()`、HK auth dialog 出現在 **Watch 不是 iPhone**
+
+**症狀**: Watch 上 app 跑到呼叫 `store.requestAuthorization(toShare:read:)` 那行、本來預期 iPhone 跳 dialog（因為 13b/13c 都是 iPhone 跳）— 結果 iPhone 沒動、Watch 上跳 dialog。
+
+**根因**: HK auth dialog 出現在**發起 request 的 process** 上、不是「永遠 iPhone」。Watch app 自己呼叫 `requestAuthorization` 時、HK 把 dialog 排到 Watch process 的 UI scene。
+
+**含意（不是「bug」、是設計）**：
+- **Q22 paired-share path** = iPhone 先 grant → Watch query 不需要再 request、自動繼承（這是 ADR-0019 Q22 假設）
+- **Watch-side request path** = Watch app 自己 `requestAuthorization` → Watch 上跳 dialog（這是 Q22 失敗時的 fallback）
+- Spike A 跑「Watch-side request」、所以走的是 fallback 路徑、**不能 piggyback 當作 paired-share 的驗證**
+- Spike B 要單獨驗：iPhone 先 grant → launch Watch app → Watch query HR **不**呼叫 `requestAuthorization` 看能不能拿到資料
+
+**Validated**: D0 spike A 2026-05-27 19:51 真機跑、Watch 跳 dialog（user 報「iphone沒跳 watch有跳」）— 直接推翻「spike A 順便驗 spike B」的隱含假設。
+
+**設計參考**: D5 SessionController.swift 在 `requestAuthorization()` 呼叫前要有條件判斷（如果 paired-share fail / Q22 spike B fail、才走 Watch-side fallback）— 否則無條件呼叫等於放棄 paired-share UX 優勢、每次 Watch app launch 都跳 dialog。
 
 ## Phase A → B 轉換速查
 
@@ -238,11 +297,15 @@ LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
 1. **真機 smoke 必須在 PR 之前跑**：slice 13b 是離開 Expo Go 第一個 slice、code-level test green ≠ 能 build。真機 build 才發現 react-native-health New Arch 不相容、要 hotfix swap 套件。**Rule**：foundation/native-pipeline 改動的 slice 一律 manual real-device smoke 之後才 PR。
 2. **`hk_authorization_requested` flag 只代表 "asked"、不代表 "granted"**：iOS HK API 為 privacy 不暴露 per-scope grant 狀態。Settings UI 顯「已連結」也只是「彈過 dialog」、不代表能讀資料。slice 13c 真讀 HK 資料時要靠 empty result 推斷 grant 狀態。
 
-## Slice 13d D0 spike C + D4 lessons (2026-05-27)
+## Slice 13d D0 spike C + D4 + spike A lessons (2026-05-27)
 
-3. **Spike harness 應該 build-into-the-app 而不是 standalone script**：spike C 把驗證邏輯寫進 `src/adapters/watch/spike/connectivitySpike.ts` + Settings tab 加一個「執行 WC spike」row → 用戶在實機點按鈕 + 結果 console.log 出 JSON、貼進 D0 commit body。對比「寫個 CLI 跑驗證」要簡單得多 — 反正都需要 build 到實機才能驗 native bridge、不如借力 app 本身的部署流程。spike A/B 可以套同 pattern。
-4. **Spike code 不 cherry-pick 到 main**：spike harness 留在獨立 branch `slice/13d-d0-spike-c`、D0 partial doc commit 把結果寫進 ADR、spike code 等到 D3 connectivity.ts ship 時或刪或吸收。避免 throwaway code 污染 main history。
+3. **Spike harness 應該 build-into-the-app 而不是 standalone script**：spike C 把驗證邏輯寫進 `src/adapters/watch/spike/connectivitySpike.ts` + Settings tab 加一個「執行 WC spike」row → 用戶在實機點按鈕 + 結果 console.log 出 JSON、貼進 D0 commit body。spike A 同模式但 Watch native 層：`ios/<Watch App>/SpikeAHarness.swift` + ContentView 加 Run button + result panel + Console JSON dump。對比「寫個 CLI 跑驗證」要簡單得多 — 反正都需要 build 到實機才能驗 native bridge、不如借力 app 本身的部署流程。已 extract 成 `spike-d0-partial-pattern` project skill、spike B 直接套用。
+4. **Spike code 不 cherry-pick 到 main**：spike harness 留在獨立 branch `slice/13d-d0-spike-X`、D0 partial doc commit 把結果寫進 ADR、spike code 等到 D-commit ship 時或刪或吸收（spike C → D3 connectivity.ts；spike A → D5 SessionController.swift）。避免 throwaway code 污染 main history。
 5. **dev-env volatility 別誤判成 lib 問題**：spike C 過程中切 iPhone 鏡像→熱點時、出現 `TurboModuleManager: Timed out waiting for modules to be invalidated` 紅屏 — 看起來像 WatchConnectivity 2.0.0 + New Arch 衝突、實際是 Metro 連線斷的副作用。第一反應應該是「Metro 在嗎？同網路嗎？」再去懷疑 lib。
 6. **Watch target via Xcode 不要試圖手刻 pbxproj**：D4 走 Xcode File → New → Target → watchOS App 的 GUI 流程。Xcode 改動 pbxproj 太複雜（UUID-keyed binary-ish）、手刻必崩。Branch C per ADR-0019 Q1 就是這個意思。
 7. **`Watch App for Existing iOS App` radio 仍生 `.watchkitapp` BI**：Xcode 26 對話框 BI 預覽顯示 `com.lisonchang.TrainingLog-Watch`（看起來是 dash-suffix modern convention）、但實際選 "Watch App for Existing iOS App" + 選 iOS app 之後存的 BI 是 `com.lisonchang.TrainingLog.watchkitapp`（ADR Q2 拍板的 dot-suffix 舊慣例）。對話框是 placeholder、不是 final value。**驗證方法**：建好 target 後 General → Identity → Bundle Identifier 看實際值。
-3. **"開啟系統設定" deep link 不可靠**：`App-Prefs:Privacy&path=HEALTH` iOS 16+ 被 Apple 鎖、`canOpenURL` 回 false、走 fallback `app-settings:` 開 app 自己設定頁（不是隱私→健康）。Apple 沒給 reliable 直跳 path。
+8. **Spike 結果一定要 cross-check 第二條獨立路徑**：spike A 自己的 `HKSampleQuery(workoutType)` 回 0 entries — 但這可能是 query predicate 寫錯。直到開 iPhone Health app **體能訓練** tab 親眼看「今天無新條目」、+ **心率** tab 19:51-19:53 有 sample 點、才算 verdict ground truth。spike harness 是「自己證自己」、容易 confirmation bias；第二條路徑（user-visible app / system UI）才是 oracle。
+9. **每個 spike 都會冒出 unexpected finding 影響下個 spike**：spike A 跑完才發現 HK auth dialog 出現在 Watch、不是 iPhone（gotcha #10）— 這推翻了「spike A 順便 cover spike B 的 paired-share assumption」。直接寫進 ADR 翻盤 ledger top row + 「剩下未 land」段補上 spike B 不能 piggyback。Lesson：spike 跑完不只記 verdict、也要主動掃「跑這個 spike 時假設了什麼？我看到了那些假設是真是假？」
+10. **Native Swift @ObservableObject 4-error cluster = import Combine（gotcha #9）**：spike A 第一次 ⌘B 失敗 4 個 errors 都在 SpikeAHarness.swift；初看像 protocol conformance 問題、實際是漏 `import Combine` 一個 fix 解掉全部。Type / init(wrappedValue:) 訊息**全聚在同一檔**是判別線索。
+11. **Watch dev tunnel 「Timed out」error = 熱點 routing**（gotcha #7 升級）：spike A 跑前 Watch 一直 disconnect、Xcode banner 顯示「Timed out while attempting to establish tunnel using negotiated network parameters」— 根因是 iPhone 個人熱點開著 Mac 透過熱點上網。修法：iPhone 熱點關掉 + USB-C 線接 Mac + Mac WiFi 連回家用 router。**每次切換 dev 工作 session 都檢查一次**（spike C → spike A 換 session 就踩、別以為「上次 OK 這次也 OK」）。
+12. **"開啟系統設定" deep link 不可靠**：`App-Prefs:Privacy&path=HEALTH` iOS 16+ 被 Apple 鎖、`canOpenURL` 回 false、走 fallback `app-settings:` 開 app 自己設定頁（不是隱私→健康）。Apple 沒給 reliable 直跳 path。
