@@ -170,9 +170,9 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 
 | 模組 | 變動 |
 |---|---|
-| **slice 8 PR engine** | 過濾條件 `is_warmup=T` → `set_kind != 'working'`（同時排 warmup + dropset 整 cluster 含 parent root；參見 line 100 的「Code 對齊」備註） |
-| **slice 8 volumeEngine** | 過濾條件 `is_warmup=T` 排除 → `set_kind = 'warmup'` 排除（working + dropset 算容量） |
-| **slice 8 動作歷史 modal** | cluster 渲染要 `GROUP BY parent_set_id`，UI 把 cluster step folded under root；e1RM 趨勢圖跳過 dropset cluster |
+| **slice 8 PR engine** | 過濾條件 `is_warmup=T` → `set_kind != 'working'`（同時排 warmup + dropset 整 cluster 含 parent root；參見 line 100 的「Code 對齊」備註）。Code 對齊：`listPriorSetsForExercise` + `loadReplayRecords` + exercise-history PR snapshot 三處於 2026-05-27 同步補 `set_kind = 'working'` 過濾。 |
+| **slice 8 volumeEngine** | 過濾條件 `is_warmup=T` 排除 → `set_kind = 'warmup'` 排除（working + dropset 算容量）。Code 對齊：`loadStatsSetRecords` SQL WHERE + exercise-chart `buildTrendPoints` (volume) + exercise-history `totalVolume` 三處於 2026-05-27 同步補 `set_kind != 'warmup'` 過濾。 |
+| **slice 8 動作歷史 modal** | cluster 渲染要 `GROUP BY parent_set_id`，UI 把 cluster step folded under root；e1RM 趨勢圖跳過 dropset cluster。Code 對齊：exercise-chart `buildTrendPoints` (weight + e1rm) 於 2026-05-27 補 `set_kind != 'dropset'` 過濾。 |
 | **slice 4 saveBackDiff** | cluster aggregate 計算改成 **cluster 級**（不是 step 級）；diff 偵測對 cluster root 比對 |
 | **slice 3 templateManager** | `TemplateExerciseSpec` 更新 `planned_sets → working_set_count + warmup_set_count + updated_at` |
 
