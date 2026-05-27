@@ -3,18 +3,44 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		2A59EBF825F227F74071B537 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C3333E5808A5846E9A7AE013 /* PrivacyInfo.xcprivacy */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		5F294AB02FC6CA0100E7C5CD /* TrainingLog Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 5F294AA62FC6CA0000E7C5CD /* TrainingLog Watch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		D1F6BE4CCF0401CB3032ABF3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C3333E5808A5846E9A7AE013 /* PrivacyInfo.xcprivacy */; };
 		DE10E9273ACBE948F3086379 /* libPods-TrainingLog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C91B423762C6B26FB36D6B4 /* libPods-TrainingLog.a */; };
 		EEB5088BDAE99D2F316A278D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE28518EB3748235708A6B7 /* ExpoModulesProvider.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5F294AAE2FC6CA0100E7C5CD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5F294AA52FC6CA0000E7C5CD;
+			remoteInfo = "TrainingLog Watch Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5F294AB12FC6CA0100E7C5CD /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				5F294AB02FC6CA0100E7C5CD /* TrainingLog Watch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* TrainingLog.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrainingLog.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -23,6 +49,7 @@
 		1B88F9F7AAA48A275D371337 /* Pods-TrainingLog.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TrainingLog.release.xcconfig"; path = "Target Support Files/Pods-TrainingLog/Pods-TrainingLog.release.xcconfig"; sourceTree = "<group>"; };
 		2E661E9E48C4651D0A18F5C8 /* Pods-TrainingLog.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TrainingLog.debug.xcconfig"; path = "Target Support Files/Pods-TrainingLog/Pods-TrainingLog.debug.xcconfig"; sourceTree = "<group>"; };
 		3C91B423762C6B26FB36D6B4 /* libPods-TrainingLog.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TrainingLog.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F294AA62FC6CA0000E7C5CD /* TrainingLog Watch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "TrainingLog Watch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = TrainingLog/SplashScreen.storyboard; sourceTree = "<group>"; };
 		ADE28518EB3748235708A6B7 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-TrainingLog/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -32,12 +59,44 @@
 		F11748442D0722820044C1D9 /* TrainingLog-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "TrainingLog-Bridging-Header.h"; path = "TrainingLog/TrainingLog-Bridging-Header.h"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5F294AB72FC6CC2E00E7C5CD /* Exceptions for "TrainingLog Watch Watch App" folder in "TrainingLog Watch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"TrainingLog-Watch-Watch-App-Info.plist",
+			);
+			target = 5F294AA52FC6CA0000E7C5CD /* TrainingLog Watch Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		5F294AA72FC6CA0000E7C5CD /* TrainingLog Watch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5F294AB72FC6CC2E00E7C5CD /* Exceptions for "TrainingLog Watch Watch App" folder in "TrainingLog Watch Watch App" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = "TrainingLog Watch Watch App";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
 /* Begin PBXFrameworksBuildPhase section */
 		13B07F8C1A680F5B00A75B9A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				DE10E9273ACBE948F3086379 /* libPods-TrainingLog.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5F294AA32FC6CA0000E7C5CD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -104,6 +163,7 @@
 			children = (
 				13B07FAE1A68108700A75B9A /* TrainingLog */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
+				5F294AA72FC6CA0000E7C5CD /* TrainingLog Watch Watch App */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				5FB6EC60885637F2F894AB5B /* Pods */,
@@ -118,6 +178,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* TrainingLog.app */,
+				5F294AA62FC6CA0000E7C5CD /* TrainingLog Watch Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -146,14 +207,36 @@
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				9A4DD396F7E5DCF52278D83E /* [CP] Embed Pods Frameworks */,
+				5F294AB12FC6CA0100E7C5CD /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5F294AAF2FC6CA0100E7C5CD /* PBXTargetDependency */,
+			);
+			name = TrainingLog;
+			productName = TrainingLog;
+			productReference = 13B07F961A680F5B00A75B9A /* TrainingLog.app */;
+			productType = "com.apple.product-type.application";
+		};
+		5F294AA52FC6CA0000E7C5CD /* TrainingLog Watch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5F294AB42FC6CA0100E7C5CD /* Build configuration list for PBXNativeTarget "TrainingLog Watch Watch App" */;
+			buildPhases = (
+				5F294AA22FC6CA0000E7C5CD /* Sources */,
+				5F294AA32FC6CA0000E7C5CD /* Frameworks */,
+				5F294AA42FC6CA0000E7C5CD /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = TrainingLog;
-			productName = TrainingLog;
-			productReference = 13B07F961A680F5B00A75B9A /* TrainingLog.app */;
+			fileSystemSynchronizedGroups = (
+				5F294AA72FC6CA0000E7C5CD /* TrainingLog Watch Watch App */,
+			);
+			name = "TrainingLog Watch Watch App";
+			productName = "TrainingLog Watch Watch App";
+			productReference = 5F294AA62FC6CA0000E7C5CD /* TrainingLog Watch Watch App.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -162,10 +245,14 @@
 		83CBB9F71A601CBA00E9B192 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 1130;
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1250;
+					};
+					5F294AA52FC6CA0000E7C5CD = {
+						CreatedOnToolsVersion = 26.4.1;
 					};
 				};
 			};
@@ -183,6 +270,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* TrainingLog */,
+				5F294AA52FC6CA0000E7C5CD /* TrainingLog Watch Watch App */,
 			);
 		};
 /* End PBXProject section */
@@ -196,6 +284,14 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				2A59EBF825F227F74071B537 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5F294AA42FC6CA0000E7C5CD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D1F6BE4CCF0401CB3032ABF3 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -335,7 +431,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5F294AA22FC6CA0000E7C5CD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5F294AAF2FC6CA0100E7C5CD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5F294AA52FC6CA0000E7C5CD /* TrainingLog Watch Watch App */;
+			targetProxy = 5F294AAE2FC6CA0100E7C5CD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
@@ -403,6 +514,115 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		5F294AB22FC6CA0100E7C5CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = "TrainingLog Watch Watch App/TrainingLog Watch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = XQTU89U2J2;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "TrainingLog-Watch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "TrainingLog Watch";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "TrainingLog Watch 讀取訓練心率與消耗熱量、用於本機顯示。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "TrainingLog Watch 不直接寫入健康資料，本鍵預留以符合 watchOS HKHealthStore API 要求。";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lisonchang.TrainingLog;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lisonchang.TrainingLog.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		5F294AB32FC6CA0100E7C5CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = "TrainingLog Watch Watch App/TrainingLog Watch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = XQTU89U2J2;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "TrainingLog-Watch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "TrainingLog Watch";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "TrainingLog Watch 讀取訓練心率與消耗熱量、用於本機顯示。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "TrainingLog Watch 不直接寫入健康資料，本鍵預留以符合 watchOS HKHealthStore API 要求。";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lisonchang.TrainingLog;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lisonchang.TrainingLog.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
 			};
 			name = Release;
 		};
@@ -530,6 +750,15 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5F294AB42FC6CA0100E7C5CD /* Build configuration list for PBXNativeTarget "TrainingLog Watch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F294AB22FC6CA0100E7C5CD /* Debug */,
+				5F294AB32FC6CA0100E7C5CD /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
