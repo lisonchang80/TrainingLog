@@ -45,6 +45,7 @@ import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
+import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -1433,6 +1434,29 @@ function SessionRow({
     [session.sets]
   );
 
+  // ADR-0012 line 175: dropset cluster steps fold under the root row.
+  // Mirror the active session layout — `computeSessionSetLayout` returns
+  // `groups: { head, followers }[]` so the cluster's head + follower rows
+  // can be wrapped in one container (tinted bg + indent for followers)
+  // while labels keep the D1/D2/D3-per-row scheme (ADR line 106).
+  const setsById = useMemo(() => {
+    const m = new Map<string, (typeof session.sets)[number]>();
+    for (const s of session.sets) m.set(s.set_id, s);
+    return m;
+  }, [session.sets]);
+  const setGroups = useMemo(
+    () =>
+      computeSessionSetLayout(
+        session.sets.map((s) => ({
+          id: s.set_id,
+          set_kind: s.set_kind,
+          parent_set_id: s.parent_set_id,
+          ordering: s.ordering,
+        }))
+      ).groups,
+    [session.sets]
+  );
+
   return (
     <Pressable onPress={onToggle} style={styles.sessionCard}>
       <View style={styles.sessionRowHeader}>
@@ -1463,23 +1487,47 @@ function SessionRow({
               {t('status', 'bodyweightLabel')}{formatPRWeight(session.bw_snapshot_kg, unit)}
             </Text>
           ) : null}
-          {session.sets.map((set) => {
-            const bucket = classifyBucket(set.reps);
-            const eff =
-              set.weight_kg != null
-                ? effectiveLoad(set.weight_kg, loadType, set.bw_snapshot_kg)
-                : null;
+          {setGroups.map((g) => {
+            const headSet = setsById.get(g.head.id);
+            if (!headSet) return null;
+            const isCluster =
+              g.head.set_kind === 'dropset' && g.followers.length > 0;
+            const renderRow = (
+              set: (typeof session.sets)[number],
+              indent: boolean,
+            ) => {
+              const bucket = classifyBucket(set.reps);
+              const eff =
+                set.weight_kg != null
+                  ? effectiveLoad(set.weight_kg, loadType, set.bw_snapshot_kg)
+                  : null;
+              return (
+                <View
+                  key={set.set_id}
+                  style={[styles.setLine, indent && styles.setLineFollower]}>
+                  <Text style={styles.setLabel}>
+                    {labelMap.get(set.set_id) ?? '—'}
+                  </Text>
+                  <Text style={styles.setText}>
+                    {formatHistoryWeight(eff, set.weight_kg, loadType, unit)} × {set.reps ?? '—'}
+                  </Text>
+                  <Text style={styles.setBucket}>
+                    {bucket ? tPrBucketLabel(bucketLabel(bucket)) : '—'}
+                  </Text>
+                </View>
+              );
+            };
+            if (!isCluster) {
+              return renderRow(headSet, false);
+            }
             return (
-              <View key={set.set_id} style={styles.setLine}>
-                <Text style={styles.setLabel}>
-                  {labelMap.get(set.set_id) ?? '—'}
-                </Text>
-                <Text style={styles.setText}>
-                  {formatHistoryWeight(eff, set.weight_kg, loadType, unit)} × {set.reps ?? '—'}
-                </Text>
-                <Text style={styles.setBucket}>
-                  {bucket ? tPrBucketLabel(bucketLabel(bucket)) : '—'}
-                </Text>
+              <View key={g.head.id} style={styles.dropsetClusterStack}>
+                {renderRow(headSet, false)}
+                {g.followers.map((f) => {
+                  const fSet = setsById.get(f.id);
+                  if (!fSet) return null;
+                  return renderRow(fSet, true);
+                })}
               </View>
             );
           })}
@@ -1782,6 +1830,18 @@ function makeStyles(tokens: ThemeTokens) {
     },
     setText: { fontSize: 13, flex: 1, color: tokens.text.primary },
     setBucket: { fontSize: 11, color: tokens.text.secondary },
+    // ADR-0012 line 175 — dropset cluster fold under root. Subtle bg tint
+    // groups head + followers visually; follower rows indent so the cluster
+    // reads as one logical unit.
+    dropsetClusterStack: {
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 6,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
+      marginVertical: 2,
+      gap: 2,
+    },
+    setLineFollower: { paddingLeft: 16 },
     replayBtn: {
       marginTop: 8,
       paddingVertical: 12,
