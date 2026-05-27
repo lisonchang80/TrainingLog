@@ -1122,6 +1122,11 @@ function buildTrendPoints(
   for (const sess of ordered) {
     let top: number | null = null;
     for (const set of sess.sets) {
+      // ADR-0012 line 173/175: weight + e1RM trend skip warmup + dropset
+      //   cluster (含 parent root)。Line 174: volume trend skip warmup only
+      //   (working + dropset 算容量)。
+      if (set.set_kind === 'warmup') continue;
+      if (metric !== 'volume' && set.set_kind === 'dropset') continue;
       let v: number | null = null;
       if (metric === 'weight') {
         if (set.weight_kg == null || set.reps == null) continue;

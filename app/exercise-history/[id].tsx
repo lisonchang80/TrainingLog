@@ -1217,6 +1217,9 @@ function computePRs(
 
   for (const sess of sessions) {
     for (const s of sess.sets) {
+      // ADR-0012 line 173 / line 100: PR snapshot 只看 working set；
+      // warmup + dropset cluster (含 parent root) 一律不算 PR。
+      if (s.set_kind !== 'working') continue;
       if (s.weight_kg == null || s.reps == null) continue;
       if (loadType === 'bodyweight' && s.weight_kg === 0) continue;
       if (loadType === 'assisted' && s.bw_snapshot_kg == null) continue;
@@ -1398,7 +1401,9 @@ function SessionRow({
     .filter((x) => x.eff != null)
     .sort((a, b) => (b.eff ?? 0) - (a.eff ?? 0))[0];
 
+  // ADR-0012 line 174: volumeEngine 排 warmup（working + dropset 算容量）。
   const totalVolume = session.sets.reduce((sum, s) => {
+    if (s.set_kind === 'warmup') return sum;
     const v = setVolume({
       weight_kg: s.weight_kg,
       reps: s.reps,

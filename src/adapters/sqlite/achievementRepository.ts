@@ -126,7 +126,11 @@ interface ReplayRowDB {
   created_at: number;
 }
 
-async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]> {
+export async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]> {
+  // ADR-0012 line 173 / line 100: PR engine只看 working sets。
+  // warmup + dropset cluster (含 parent root) 必須在 SQL 邊界排除，
+  // 才不會把 backoff set 或熱身誤判為 PR 突破。Sibling to
+  // listPriorSetsForExercise's set_kind filter (2026-05-27).
   const rows = await db.getAllAsync<ReplayRowDB>(
     `SELECT s.id                  AS set_id,
             s.session_id           AS session_id,
@@ -141,6 +145,7 @@ async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]> {
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
+      WHERE s.set_kind = 'working'
       ORDER BY s.created_at ASC, s.id ASC`
   );
   return rows.map((r) => ({
