@@ -189,6 +189,86 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     private nonisolated func prefix8(_ s: String) -> String {
         return String(s.prefix(8))
     }
+
+    // MARK: - Outbound: handshake (Stage 1, D8 Phase 2)
+    //
+    // Sends the WC channel #0 `handshake` envelope (per ADR-0019
+    // NEW-Q44 two-stage handshake) and awaits iPhone's reply via
+    // `sendMessage(_:replyHandler:errorHandler:)`. The reply payload
+    // matches `Stage1ReplyPayload` from `src/adapters/watch/handshake.ts`.
+    //
+    // Race-resistance: a new requestId is minted per call and the
+    // returned reply's `requestId` is checked before resolving — late
+    // replies for a previous request are dropped.
+    //
+    // Returns nil on:
+    //   - WC not activated / not reachable / not supported
+    //   - 5s framework timeout (errorHandler path)
+    //   - Reply shape doesn't decode into `Stage1Reply`
+    //   - Reply's requestId doesn't match the one we sent
+
+    /// Send the `handshake` envelope to iPhone and await the Stage 1
+    /// reply. Updates `lastOutbound` / `lastInbound` for debug
+    /// readout. Idempotent: safe to call from multiple sites (e.g.
+    /// cold-launch bootstrap + 🔄 refresh button).
+    func requestHandshake(clientVersion: String = "13d.0") async -> Stage1Reply? {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "handshake skip: not activated"
+            return nil
+        }
+        guard session.isReachable else {
+            lastOutbound = "handshake skip: iPhone unreachable"
+            return nil
+        }
+
+        let requestId = UUID().uuidString
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "handshake",
+            "payload": [
+                "requestId": requestId,
+                "clientVersion": clientVersion,
+            ],
+        ]
+
+        lastOutbound = "handshake req=\(prefix8(requestId))…"
+
+        // withCheckedContinuation: the WC framework calls EITHER
+        // replyHandler OR errorHandler, never both — Apple's contract.
+        // Resuming twice would crash via the runtime's resumed-once
+        // check; we rely on framework correctness here rather than
+        // adding a redundant guard.
+        return await withCheckedContinuation { (cont: CheckedContinuation<Stage1Reply?, Never>) in
+            session.sendMessage(
+                envelope,
+                replyHandler: { [weak self] reply in
+                    Task { @MainActor [weak self] in
+                        let stage1 = Stage1Reply.parse(from: reply)
+                        // Race check: drop replies that don't echo our
+                        // current requestId (e.g. stale reply for a
+                        // previous launch's nonce).
+                        guard let stage1, stage1.requestId == requestId else {
+                            self?.lastInbound = "handshake reply: malformed or stale"
+                            cont.resume(returning: nil)
+                            return
+                        }
+                        self?.lastInbound =
+                            "stage1 reply templates=\(stage1.prefetch.templates.count)"
+                        + (stage1.hasActiveSession ? " (active)" : "")
+                        cont.resume(returning: stage1)
+                    }
+                },
+                errorHandler: { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        self?.lastOutbound =
+                            "handshake err: \(error.localizedDescription)"
+                        cont.resume(returning: nil)
+                    }
+                }
+            )
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate

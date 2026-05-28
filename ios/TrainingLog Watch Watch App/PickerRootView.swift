@@ -80,6 +80,12 @@ struct PickerRootView: View {
                 // Reset stale drill-down state on cold root present.
                 vm.resetSelection()
             }
+            .task {
+                // Fire the cold-launch handshake once per VM lifetime.
+                // `.task` cancels on view disappear; bootstrap is
+                // idempotent so re-mount is safe.
+                await vm.bootstrap()
+            }
         }
     }
 

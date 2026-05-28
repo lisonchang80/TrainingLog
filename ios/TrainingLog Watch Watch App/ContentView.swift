@@ -2,22 +2,19 @@
 //  ContentView.swift
 //  TrainingLog Watch
 //
-//  Slice 13d D8 Phase 1 — Watch app root view.
+//  Slice 13d D8 — Watch app root view.
 //
-//  Retired in this commit:
-//    The D5/D7 dev_smoke (lifecycle smoke buttons + WC end-session
-//    test bench) that originally lived here. Lifecycle is now
-//    triggered by the picker → set logger flow (Phase 3+);
-//    end-session inbound from iPhone still works because
-//    WatchConnectivityCoordinator is instantiated below and its
-//    delegate stays mounted while the app is running.
+//  Phase 1 (73b2dfc): replaced D5/D7 dev_smoke with PickerRootView,
+//  hardcoded mock data.
+//  Phase 2 (this commit, Path A minimal): inject the
+//  WatchConnectivityCoordinator into a fresh PickerViewModel so the
+//  picker can fire the Stage 1 handshake on cold launch + on 🔄.
 //
-//  Why @StateObject still owned at ContentView level:
-//    HealthKitController + SessionController + WatchConnectivityCoordinator
-//    are app-lifetime objects. PickerRootView creates its own
-//    PickerViewModel (UI-state only) but does NOT own the lifecycle
-//    objects — those will be injected via EnvironmentObject in
-//    Phase 3 when the Set logger actually starts/ends sessions.
+//  Why pre-build the VM here rather than inside PickerRootView's
+//  default-arg init: the VM needs a reference to the
+//  WatchConnectivityCoordinator @StateObject, which only ContentView
+//  owns. PickerRootView wraps the passed-in VM as its own @StateObject
+//  for SwiftUI lifecycle management.
 //
 
 import SwiftUI
@@ -26,25 +23,28 @@ struct ContentView: View {
     @StateObject private var healthKit = HealthKitController()
     @StateObject private var session: SessionController
     @StateObject private var watchConn: WatchConnectivityCoordinator
+    @StateObject private var pickerVM: PickerViewModel
 
     init() {
         let hk = HealthKitController()
         let sc = SessionController(healthKit: hk)
         let wc = WatchConnectivityCoordinator(sessionController: sc)
+        let vm = PickerViewModel(coordinator: wc)
         _healthKit = StateObject(wrappedValue: hk)
         _session = StateObject(wrappedValue: sc)
         _watchConn = StateObject(wrappedValue: wc)
+        _pickerVM = StateObject(wrappedValue: vm)
     }
 
     var body: some View {
-        PickerRootView()
-            // Phase 3 will inject the lifecycle objects here:
+        PickerRootView(viewModel: pickerVM)
+            // Phase 3 will inject the lifecycle objects so the Set
+            // logger view can call `session.start()` / `.end()` and
+            // `watchConn.sendStartFromWatch(...)` once a 3-tuple
+            // selection lands:
             //   .environmentObject(healthKit)
             //   .environmentObject(session)
             //   .environmentObject(watchConn)
-            // so the Set logger view can call session.start() / .end()
-            // and watchConn.sendStartFromWatch(...) when a 3-tuple
-            // selection is made.
     }
 }
 

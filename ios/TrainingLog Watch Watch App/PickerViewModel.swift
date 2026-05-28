@@ -2,22 +2,22 @@
 //  PickerViewModel.swift
 //  TrainingLog Watch
 //
-//  Slice 13d D8 Phase 1 — picker view-state owner with hardcoded mock
-//  data factories. Phase 2 will populate `todayPlanned` / `templates` /
-//  `programs` from the iPhone-side `Stage1ReplyPayload` returned via
-//  WC handshake (see src/adapters/watch/handshake.ts, iPhone helpers
-//  `loadActiveSessionSummary` + `loadTemplatePrefetchList`).
+//  Slice 13d D8 — picker view-state owner.
+//
+//  Phase 1 (skeleton 73b2dfc): hardcoded mock data factories only.
+//  Phase 2 (this commit, Path A minimal): coordinator integration +
+//  Stage 1 handshake wire. Templates now come from real iPhone data
+//  via `WatchConnectivityCoordinator.requestHandshake()`. Programs +
+//  intensities + today's planned-day remain Phase-1-shaped (hardcoded
+//  or empty) until Phase 2.5 extends `Stage1ReplyPayload` to carry
+//  them — see ADR-0019 NEW-Q44 for the staged-extension rationale.
 //
 //  Why @MainActor: SwiftUI views observe @Published mutations on the
-//  main thread; the WC inbound dispatch (Phase 2) hops to MainActor
-//  before mutating, same pattern as WatchConnectivityCoordinator.
+//  main thread; the WC reply handler hops to MainActor before
+//  mutating, same pattern as WatchConnectivityCoordinator.
 //
-//  Mock factories cover all 5 empty-state variants per D8 spec:
-//    - .mockDefault       — both sections populated
-//    - .mockRestDay       — 計劃: 休息日 / 模板: populated
-//    - .mockNoProgram     — 計劃: 無 active program / 模板: populated
-//    - .mockNoTemplates   — 計劃: planned / 模板: empty
-//    - .mockAllEmpty      — 雙區皆空
+//  Mock factories survive intact for `#Preview` invocations — they
+//  bypass the coordinator and inject canned data directly.
 //
 
 import Foundation
@@ -26,82 +26,144 @@ import Combine
 @MainActor
 final class PickerViewModel: ObservableObject {
 
-    /// Today's planned-row state. See `TodayPlanned` for variants.
+    /// Today's planned-row state.
     @Published var todayPlanned: TodayPlanned
 
-    /// Templates list. Empty array → render "請在手機創建模板" empty
-    /// state in 模板訓練 section.
+    /// Templates list — populated from Stage 1 reply after handshake.
+    /// Empty array → "請在手機創建模板" empty state.
     @Published var templates: [TemplateOption]
 
-    /// All active programs the user can pick from in the 計劃 sheet.
-    /// Empty → the sheet still shows "通用" fallback only; tap
-    /// "通用" still bypasses the 強度 sheet.
+    /// Active programs the user can pick from in the 計劃 sheet.
+    /// Phase 2: stays as init value (caller-provided mock OR empty).
+    /// Phase 2.5 will populate from a Stage 1 extension carrying
+    /// `programs` + per-program intensities.
     @Published var programs: [ProgramOption]
 
-    /// True while a 🔄 refresh is in flight. Drives the icon's 0.5s
-    /// spin animation. Phase 1 fakes a 0.5s delay; Phase 2 hooks this
-    /// to the actual WC handshake round-trip.
+    /// True while a handshake round-trip is in flight (cold bootstrap
+    /// OR 🔄 refresh tap). Drives the toolbar icon's spin animation.
     @Published var isRefreshing: Bool = false
 
     // MARK: - 3-tuple navigation state
-    //
-    // Captured progressively as user drills into 計劃 sheet → 強度
-    // sheet. When all three slots are populated (or the user picked
-    // "通用" in a sheet, leaving the corresponding slot nil), the
-    // view layer triggers the start-from-watch outbound (Phase 3).
 
     @Published var selectedTemplate: TemplateOption?
     @Published var selectedProgram: ProgramOption?
     @Published var selectedIntensity: IntensityOption?
 
+    // MARK: - Coordinator dependency
+
+    /// WC coordinator used to send `handshake` outbound. Weak to break
+    /// the retain cycle (ContentView holds the coordinator strongly
+    /// via @StateObject; VM is owned by PickerRootView's @StateObject
+    /// which is held by the picker NavigationStack — without weak the
+    /// coordinator would never deinit even if the picker tree is
+    /// unmounted).
+    ///
+    /// Nil ⇔ Preview / unit-test mode → `refresh()` falls back to a
+    /// 0.5s fake spin without touching WC.
+    private weak var coordinator: WatchConnectivityCoordinator?
+
+    /// True after the first cold-launch handshake has run (regardless
+    /// of success). Used by `bootstrap()` to make it idempotent so
+    /// `.task` doesn't re-fire on every onAppear.
+    private var hasBootstrapped: Bool = false
+
+    // MARK: - Inits
+
+    /// Production init: takes a coordinator. Starts in an empty state
+    /// — caller invokes `bootstrap()` after mount to populate via
+    /// handshake.
+    init(coordinator: WatchConnectivityCoordinator) {
+        self.coordinator = coordinator
+        self.todayPlanned = .noActiveProgram
+        self.templates = []
+        self.programs = []
+    }
+
+    /// Mock init: bypasses coordinator. Used by `#Preview` factories.
     init(
         todayPlanned: TodayPlanned,
         templates: [TemplateOption],
         programs: [ProgramOption]
     ) {
+        self.coordinator = nil
         self.todayPlanned = todayPlanned
         self.templates = templates
         self.programs = programs
     }
 
-    // MARK: - Refresh (Phase 1 stub)
+    // MARK: - Lifecycle
 
-    /// Phase 1: fake a 0.5s spin so the toolbar 🔄 button visibly
-    /// reacts. Phase 2 replaces the body with an actual
-    /// `WatchConnectivityCoordinator.requestHandshake()` round-trip.
+    /// Idempotent cold-launch entry point. Called from
+    /// `PickerRootView.task { … }` so the first handshake fires on
+    /// initial appear; subsequent appears are no-ops.
+    ///
+    /// `.task` cancels on view disappear, so the in-flight handshake
+    /// will be cancelled if the user dismisses the picker mid-trip.
+    /// The coordinator's `withCheckedContinuation` doesn't observe
+    /// cancellation by itself; we rely on the 5s framework timeout
+    /// to resume + the deinit guard on coordinator weak ref.
+    func bootstrap() async {
+        guard !hasBootstrapped else { return }
+        hasBootstrapped = true
+        await refresh()
+    }
+
+    /// Force a fresh handshake regardless of `hasBootstrapped` state.
+    /// Wired to the 🔄 toolbar button. Failures (no coordinator, no
+    /// reply, decode fail) silently leave existing data in place —
+    /// the spinning animation provides the only user-visible signal.
     func refresh() async {
         isRefreshing = true
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        isRefreshing = false
+        defer { isRefreshing = false }
+
+        // Preview / no-coordinator path: cosmetic 0.5s spin only.
+        guard let coordinator else {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            return
+        }
+
+        if let reply = await coordinator.requestHandshake() {
+            applyStage1Reply(reply)
+        }
+    }
+
+    // MARK: - Stage 1 reply application
+
+    /// Map Stage 1 reply onto view state. Phase 2 minimal scope:
+    /// only `templates` field is touched. Phase 2.5 will extend to
+    /// programs + today's planned-day once the wire schema carries
+    /// them.
+    func applyStage1Reply(_ reply: Stage1Reply) {
+        templates = reply.prefetch.templates.map { summary in
+            TemplateOption(id: summary.templateId, name: summary.name)
+        }
+        // NB: reply.hasActiveSession is intentionally ignored in
+        // Phase 2. Phase 3 will branch here to auto-adopt the
+        // iPhone-initiated session (skip picker → jump to set logger).
+        // Until D11 is built, there's no set logger to jump to.
     }
 
     // MARK: - Selection helpers
 
-    /// Reset 3-tuple slots when user leaves the picker drill-down
-    /// (e.g. dismissed a sheet via swipe-back). Called by view layer
-    /// on root reappear.
+    /// Reset 3-tuple slots when user leaves the drill-down.
     func resetSelection() {
         selectedTemplate = nil
         selectedProgram = nil
         selectedIntensity = nil
     }
 
-    /// Convenience for "user picked today's planned row" — no
-    /// drill-down, the program/day spec already carries the 3-tuple
-    /// from iPhone-side (Phase 2+ wires this up).
+    /// Convenience for "user picked today's planned row".
     func selectTodayPlanned() {
-        // Phase 1: just clear any drill-down state. Phase 3 will
-        // emit start-from-watch with `programDayId` payload.
         resetSelection()
     }
 }
 
-// MARK: - Mock factories (Phase 1 only — retired in Phase 2)
+// MARK: - Mock factories (Preview only)
 
 extension PickerViewModel {
 
-    /// Both sections populated. 1 active program with 3 intensities,
-    /// 4 templates. Default for normal usage.
+    /// Both sections populated. Same shape as Phase 1; used by every
+    /// `#Preview` macro that needs non-empty data.
     static func mockDefault() -> PickerViewModel {
         PickerViewModel(
             todayPlanned: .planned(label: "推日 W3D1（今日）", programDayId: "pd-1"),
@@ -141,15 +203,14 @@ extension PickerViewModel {
         )
     }
 
-    /// Rest day variant: 計劃 section shows "今日休息（無訓練）".
+    /// Rest day variant.
     static func mockRestDay() -> PickerViewModel {
         let vm = mockDefault()
         vm.todayPlanned = .restDay
         return vm
     }
 
-    /// No-active-program variant: 計劃 section shows
-    /// "（無計劃進行中）/ 請至 iPhone 設定計劃".
+    /// No-active-program variant.
     static func mockNoProgram() -> PickerViewModel {
         let vm = mockDefault()
         vm.todayPlanned = .noActiveProgram
@@ -157,15 +218,14 @@ extension PickerViewModel {
         return vm
     }
 
-    /// No templates: 模板 section shows "請在手機創建模板".
+    /// No templates variant.
     static func mockNoTemplates() -> PickerViewModel {
         let vm = mockDefault()
         vm.templates = []
         return vm
     }
 
-    /// Both sections empty: combines mockNoProgram + mockNoTemplates.
-    /// Picker has no actionable row in this state.
+    /// Both sections empty.
     static func mockAllEmpty() -> PickerViewModel {
         PickerViewModel(
             todayPlanned: .noActiveProgram,
