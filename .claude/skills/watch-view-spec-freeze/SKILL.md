@@ -198,7 +198,8 @@ main HEAD: {sha}。
 - 2026-05-28 D14 Watch 完成頁 spec frozen @ `9d522e7` (+154 lines、3-round)
 - 2026-05-28 D15 ⋯ menu spec frozen @ `9360638` (+281 lines、3-round) + D11 visual sweep (solo card [⋯] / superset header 3-line) + NEW-Q48 i18n cross-cutting 新增 — 首次套用 Step 3.5 sweep
 - 2026-05-28 D16 ⚙ settings spec frozen @ `5f6c5c8` (+278 lines、2-round) + NEW-Q39 chip retract + D11 line 1597 cross-ref + D16 commit table sweep — 第 2 次套用 Step 3.5 sweep
-- **Quintet 全 frozen**：D8 + D11 + D14 + D15 + D16、合計 21 mock rounds / +1152 lines / 5 commits、Watch session lifecycle 完整 spec'd
+- 2026-05-28 night D10 in-session shell spec frozen @ `0f4a6e0` (+209 lines、3-round) + NEW-Q49 iPhone freestyle 不 push 直到首動作 + D6 commit table sweep + D10 commit table sweep — 第 3 次套用 Step 3.5 sweep；首次出現「user 中途 trigger grep ADR 確認既有拍板（Q4/Q5）」、找到 D11 line 1573-1574 swipe-to-page rules + D8 line 1633 picker entry list 為 anchor、省 2-3 輪 grill
+- **Sextet 全 frozen**：D8 + D11 + D14 + D15 + D16 + D10、合計 24 mock rounds / +1361 lines / 6 commits、Watch session UI in-session shell + lifecycle 完整 spec'd、SwiftUI 可全面動工
 
 ## Anti-patterns
 
