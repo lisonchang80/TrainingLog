@@ -53,7 +53,7 @@ struct CellBox: View {
             : Color.secondary.opacity(0.5)
         let strokeWidth: CGFloat = isActive ? 1.6 : 0.8
 
-        return ZStack(alignment: .topTrailing) {
+        let baseView = ZStack(alignment: .topTrailing) {
             // Center: value digits
             Text(value)
                 .font(.body)
@@ -76,9 +76,20 @@ struct CellBox: View {
                 .stroke(strokeColor, lineWidth: strokeWidth)
         )
         .fixedSize(horizontal: false, vertical: true)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap?()
+
+        // CRITICAL — only attach the tap gesture when `onTap` is non-nil.
+        // Otherwise the empty .onTapGesture would still consume the tap
+        // (eating it silently) and the OUTER row tap-gesture would
+        // never get a chance to re-activate `{}` Active. That's the
+        // «掉了就沒辦法再 Active» bug from 2026-05-29.
+        if let onTap {
+            baseView
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onTap()
+                }
+        } else {
+            baseView
         }
     }
 }
