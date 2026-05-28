@@ -1785,3 +1785,157 @@ Root (D8-1)
 | v4 | 「無計劃」→「通用」（計劃 = Program 主標籤、強度 = 副標籤）、強度依 program 動態 |
 | v5 | tap 通用 = bypass 強度 sheet、強度 sheet 也有「通用」option、休息日 / 無 program 顯示 |
 | 收尾 | 無 templates 時模板訓練區顯示「請在手機創建模板」、雙區皆空狀態定義 |
+
+---
+
+## Slice 13d D14 Watch 完成頁 Spec（凍結 2026-05-28）
+
+**Status**: Spec frozen — ASCII mock 3 輪迭代收斂、待 SwiftUI 動工
+**Depends on**: D11 (set logger ✅ spec) / D7 (end-session WC handshake ✅)
+**Blocks**: 無下游 view、本身為 session 結束點
+**Iteration log**: chat session 2026-05-28、3 輪 mock v1→v3（同會 D8/D11 後續）
+
+### Overview
+
+Watch 上 session 結束頁。從 D11 set logger 右滑（非 {} Active 區）進入、顯示 session 摘要 5 tiles + [取消] / [完成] 兩 button。Tap [完成] 觸發 finalize + sync to iPhone、過程用右上 icon 顯示狀態（⟳ → ✓ → dismiss / ⟳ → ⚠ retry）。**單一 view、無確認 sheet、無 post-finish 摘要、無 PR celebration**。
+
+### View anatomy
+
+#### D14-1 idle（右滑進入後預設狀態）
+
+```
+┌──────────────────────────────────┐
+│ Session 完成？                   │
+│ ─────────────────────────────    │
+│ 推日（A）· Linear W3 · 中度日    │
+│                                  │
+│  ✓  12/15 組                     │
+│  ⏱  32:14                        │
+│  ❤  142 bpm（平均）              │
+│  🔥 285 kcal                     │
+│  💪 5 動作                       │
+│                                  │
+│ ┌──────────┐  ┌──────────┐       │
+│ │  取消    │  │  完成    │       │
+│ └──────────┘  └──────────┘       │
+│                                  │
+│ (← 左滑回 session 繼續)          │
+└──────────────────────────────────┘
+```
+
+- Header: `Session 完成？`
+- Subtitle: 3 元組（模板 · 計劃 · 強度）
+- 5 tiles（fixed order）:
+  - ✓ 組數（完成 / 總計、不含熱身）
+  - ⏱ 時長（HH:MM 或 MM:SS）
+  - ❤ 平均 HR（bpm）
+  - 🔥 kcal 總熱量
+  - 💪 動作數
+- 兩 button: [取消] / [完成]
+- 底部 hint: `(← 左滑回 session 繼續)`
+
+#### D14-1' sync-in-progress（tap [完成] 後）
+
+```
+┌──────────────────────────────────┐
+│ Session 完成？               ⟳   │  ← 右上 spinner
+│ ─────────────────────────────    │
+│ ...（5 tiles 維持）              │
+│                                  │
+│ ┌(灰)取消 ┐  ┌(灰)完成 ┐         │  ← buttons disabled
+│ └──────────┘  └──────────┘       │
+└──────────────────────────────────┘
+```
+
+#### D14-1' sync-success（短暫 transition）
+
+```
+│ Session 完成？               ✓   │
+```
+
+顯示 ✓ 約 0.5s 後 → auto dismiss 回 D8 picker。
+
+#### D14-1'' sync-fail
+
+```
+┌──────────────────────────────────┐
+│ Session 完成？               ⚠   │  ← 紅色 ⚠
+│ ─────────────────────────────    │
+│ ...（5 tiles 維持）              │
+│                                  │
+│ ┌──────────┐  ┌──────────┐       │
+│ │  取消    │  │  完成    │       │  ← buttons re-enabled
+│ └──────────┘  └──────────┘       │
+└──────────────────────────────────┘
+```
+
+- ⚠ 紅色取代 ⟳
+- buttons 重新可按
+- user 可 tap [完成] 重試 sync、或 tap [取消] 走 abort path
+- 無提示文字（icon 即足夠）
+
+### Interaction rules
+
+#### State machine
+
+```
+[D11 set logger] ─── right swipe (non-Active 區) ───→ [D14-1 idle]
+                                                          │
+                                          tap [取消] ─────┼─→ abort session ─→ [D8 picker]
+                                          tap [完成] ─────┘
+                                                          ↓
+                                                    [D14-1' ⟳ sync]
+                                                          │
+                                       ┌──── success ─────┼──── fail ────┐
+                                       ↓                                  ↓
+                                  [D14-1' ✓ 0.5s]                  [D14-1'' ⚠ retry]
+                                       │                                  │
+                                       ↓                       tap [完成] / [取消]
+                                  [D8 picker]                            │
+                                                                          ↓
+                                                                  retry sync / abort
+```
+
+#### Entry / Exit
+
+| Trigger | Action |
+|---|---|
+| D11 right swipe（non-{} Active 區）| 進 D14-1 idle |
+| D14-1 left swipe | 回 D11 set logger（不結束 session）|
+| D14-1 tap [取消] | **直接 abort session、無確認**、立刻 dismiss 回 D8 picker |
+| D14-1 tap [完成] | 進 D14-1' sync flow |
+
+#### Sync flow
+
+| Phase | Visual | Buttons |
+|---|---|---|
+| Sync in progress | 右上 ⟳ spinner | Disabled (灰)|
+| Sync success | 右上 ✓ 0.5s | Disabled |
+| Sync success dismiss | — | dismiss 回 D8 picker |
+| Sync fail | 右上 ⚠ 紅 | **Re-enabled**、user 重試 |
+
+#### 5 tiles 內容（fixed）
+
+| Tile | Icon | Source |
+|---|---|---|
+| 組數 | ✓ | 已完成組數 / 計畫總組數（不含熱身）|
+| 時長 | ⏱ | session 開始至按 [完成] 的 elapsed time |
+| 平均 HR | ❤ | session 期間 HR samples 平均 |
+| kcal | 🔥 | HK kcal samples 總和 |
+| 動作數 | 💪 | 該 session 動作 count（不含已刪除）|
+
+### Excluded（不做）
+
+- ❌ [取消] 確認 sheet（信任 user、誤觸風險低、收斂簡潔）
+- ❌ Post-finish 摘要 view（iPhone 詳情頁有完整摘要、Watch 不重複）
+- ❌ PR / 達標 toast on Watch（PR 提示只在 iPhone）
+- ❌ Sync 中強制攔截 view（過程 inline 在原 view、不切頁）
+- ❌ Sync fail 提示文字（icon 即足夠、不增文字）
+
+### Decisions captured（3 輪 ASCII mock iteration log）
+
+| 輪次 | 主要決策 |
+|---|---|
+| v1 | 從 D11 State 5a 擴展、5 tiles + [取消]/[完成] buttons |
+| v2 | 砍 [取消] 確認 sheet（信任 user）、砍 post-finish 摘要 view、新增右上 ⟳ sync icon |
+| v3 | Sync 4 階段 state machine（idle → ⟳ → ✓ 0.5s → dismiss / ⟳ → ⚠ retry）、buttons disable 規則 |
