@@ -42,33 +42,40 @@ struct SetLoggerView: View {
     @StateObject private var interactionState = SessionInteractionState()
 
     var body: some View {
-        // Page order per user 2026-05-28 polish + spec line 1483
-        // 「完成頁（右滑進入）」:
-        //   - "右滑" (finger slides right) reveals the page on the
-        //     LEFT (lower tag) → 完成頁 must be the lowest tag.
-        //   - Music is reached by the opposite swipe direction
-        //     (finger slides left) → music is the highest tag.
-        //   - Session card sits in the middle as the default landing.
-        // Earlier ordering (music=0, finish=2) was backwards; this
-        // commit swaps them.
-        TabView(selection: $selectedPage) {
-            // Page 0 — 完成頁 (left). Reached via finger right-swipe.
-            FinishPagePlaceholder(snapshot: snapshotForRender)
-                .tag(0)
+        ZStack(alignment: .bottom) {
+            // Page order per user 2026-05-28 polish + spec line 1483
+            // 「完成頁（右滑進入）」:
+            //   - "右滑" (finger slides right) reveals the page on the
+            //     LEFT (lower tag) → 完成頁 must be the lowest tag.
+            //   - Music is reached by the opposite swipe direction
+            //     (finger slides left) → music is the highest tag.
+            //   - Session card sits in the middle as the default landing.
+            TabView(selection: $selectedPage) {
+                // Page 0 — 完成頁 (left). Reached via finger right-swipe.
+                FinishPagePlaceholder(snapshot: snapshotForRender)
+                    .tag(0)
 
-            // Page 1 — Session card list (D11 main, default landing).
-            SessionCardListPage(
-                snapshot: snapshotForRender,
-                state: interactionState
-            )
-            .tag(1)
+                // Page 1 — Session card list (D11 main, default landing).
+                SessionCardListPage(
+                    snapshot: snapshotForRender,
+                    state: interactionState
+                )
+                .tag(1)
 
-            // Page 2 — 音樂 (right). Reached via finger left-swipe.
-            NowPlayingPlaceholderPage()
-                .tag(2)
+                // Page 2 — 音樂 (right). Reached via finger left-swipe.
+                NowPlayingPlaceholderPage()
+                    .tag(2)
+            }
+            .tabViewStyle(.page)
+            .navigationBarHidden(true)
+
+            // Phase C `[]` Active cell-edit overlay. Sits on top of
+            // the TabView; only renders when `state.activeCell != nil`.
+            // Keypad slides up from bottom; crown shows a centered modal
+            // with dim backdrop (per spec line 1422-1446).
+            CellEditOverlay(state: interactionState)
         }
-        .tabViewStyle(.page)
-        .navigationBarHidden(true)
+        .animation(.easeInOut(duration: 0.18), value: interactionState.activeCell)
     }
 
     // Phase A renders the mock when the passed-in snapshot is empty

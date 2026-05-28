@@ -120,11 +120,12 @@ struct ExerciseCard: View {
         case .warmup(let set):
             // Phase B: warmup gets `{}` Active + ✓ toggle just like
             // working rows. (Per spec lines 1531/1582 — any row.)
+            // Phase C: warmup cells are non-editable (no onTap wired).
             InteractiveSetRow(
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
-                content: { SetRowWarmupContent(set: set) }
+                content: { SetRowWarmupContent(set: set, state: state) }
             )
 
         case .working(let set, let index):
@@ -132,7 +133,7 @@ struct ExerciseCard: View {
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
-                content: { SetRowWorkingContent(set: set, displayIndex: index) }
+                content: { SetRowWorkingContent(set: set, displayIndex: index, state: state) }
             )
 
         case .cluster(let header, let subs, let clusterIndex):
@@ -189,7 +190,12 @@ private struct InteractiveSetRow<Content: View>: View {
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    state.activate(setId: setId)
+                    // Only activate the row on tap-anywhere when not
+                    // already Active. Once Active, cells own the taps
+                    // (so they can route to `[]` Active per Phase C).
+                    if !state.isActive(setId: setId) {
+                        state.activate(setId: setId)
+                    }
                 }
 
             if hasCheckmark {
@@ -232,9 +238,18 @@ private struct ClusterSetGroup: View {
     var body: some View {
         HStack(spacing: 4) {
             VStack(alignment: .leading, spacing: 2) {
-                SetRowClusterHeaderContent(set: header, clusterIndex: clusterIndex)
+                SetRowClusterHeaderContent(
+                    set: header,
+                    clusterIndex: clusterIndex,
+                    clusterId: groupId,
+                    state: state
+                )
                 ForEach(subs, id: \.setId) { sub in
-                    SetRowClusterSubContent(set: sub)
+                    SetRowClusterSubContent(
+                        set: sub,
+                        clusterId: groupId,
+                        state: state
+                    )
                 }
             }
             .padding(.horizontal, 4)
@@ -250,7 +265,11 @@ private struct ClusterSetGroup: View {
             )
             .contentShape(Rectangle())
             .onTapGesture {
-                state.activate(setId: groupId)
+                // Don't auto-activate on tap-anywhere when cluster
+                // is already Active — that would steal cell taps.
+                if !state.isActive(setId: groupId) {
+                    state.activate(setId: groupId)
+                }
             }
 
             // Header ✓ controls the whole cluster.
@@ -357,10 +376,12 @@ enum SetRowGroup: Identifiable {
 // MARK: - Row content views (pure visual, no interaction)
 
 /// Warmup row content — gray dim, parens around weight/reps, no
-/// number, no progress contribution. Per user 2026-05-28 polish:
-/// warmup keeps the parens (not boxed) to read as planned-but-light.
+/// number, no progress contribution. Warmup is non-editable in Phase
+/// C (no `onTap` wired); Phase D will allow type-cycle warmup→working
+/// which makes its cells editable.
 private struct SetRowWarmupContent: View {
     let set: SessionSnapshotSet
+    @ObservedObject var state: SessionInteractionState
 
     var body: some View {
         HStack(spacing: 4) {
@@ -371,26 +392,36 @@ private struct SetRowWarmupContent: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             WarmupCellBox(
-                value: formatWeight(set.weight),
+                value: formatWeight(displayWeight),
                 unit: "kg",
                 minWidth: CellMetrics.weightWidth
             )
             WarmupCellBox(
-                value: "\(set.reps ?? 0)",
+                value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
                 minWidth: CellMetrics.repsWidth
             )
             Spacer(minLength: 0)
         }
     }
+
+    private var displayWeight: Double? {
+        state.displayValue(setId: set.setId, field: .weight, fallback: set.weight)
+    }
+    private var displayReps: Double? {
+        state.displayValue(setId: set.setId,
+                           field: .reps,
+                           fallback: set.reps.map { Double($0) })
+    }
 }
 
-/// Working set row content — numbered, boxed cells. Per user
-/// 2026-05-28 polish: render as rounded boxes (the `[]` in the
-/// ASCII spec was just illustrative).
+/// Working set row content — numbered, boxed cells. Cells are
+/// tappable when the row is `{}` Active (Phase C); tap → enters
+/// `[]` Active and opens the cell-edit overlay.
 private struct SetRowWorkingContent: View {
     let set: SessionSnapshotSet
     let displayIndex: Int
+    @ObservedObject var state: SessionInteractionState
 
     var body: some View {
         HStack(spacing: 4) {
@@ -401,24 +432,45 @@ private struct SetRowWorkingContent: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             CellBox(
-                value: formatWeight(set.weight),
+                value: formatWeight(displayWeight),
                 unit: "kg",
-                minWidth: CellMetrics.weightWidth
+                minWidth: CellMetrics.weightWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .weight),
+                onTap: rowIsActive ? {
+                    state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
+                } : nil
             )
             CellBox(
-                value: "\(set.reps ?? 0)",
+                value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
-                minWidth: CellMetrics.repsWidth
+                minWidth: CellMetrics.repsWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .reps),
+                onTap: rowIsActive ? {
+                    state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
+                } : nil
             )
             Spacer(minLength: 0)
         }
     }
+
+    private var rowIsActive: Bool { state.isActive(setId: set.setId) }
+    private var displayWeight: Double? {
+        state.displayValue(setId: set.setId, field: .weight, fallback: set.weight)
+    }
+    private var displayReps: Double? {
+        state.displayValue(setId: set.setId,
+                           field: .reps,
+                           fallback: set.reps.map { Double($0) })
+    }
 }
 
 /// Cluster header row content — labelled `D{n}`, boxed cells.
+/// Cells tappable when the cluster is `{}` Active.
 private struct SetRowClusterHeaderContent: View {
     let set: SessionSnapshotSet
     let clusterIndex: Int
+    let clusterId: String
+    @ObservedObject var state: SessionInteractionState
 
     var body: some View {
         HStack(spacing: 4) {
@@ -429,43 +481,79 @@ private struct SetRowClusterHeaderContent: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             CellBox(
-                value: formatWeight(set.weight),
+                value: formatWeight(displayWeight),
                 unit: "kg",
-                minWidth: CellMetrics.weightWidth
+                minWidth: CellMetrics.weightWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .weight),
+                onTap: clusterActive ? {
+                    state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
+                } : nil
             )
             CellBox(
-                value: "\(set.reps ?? 0)",
+                value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
-                minWidth: CellMetrics.repsWidth
+                minWidth: CellMetrics.repsWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .reps),
+                onTap: clusterActive ? {
+                    state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
+                } : nil
             )
             Spacer(minLength: 0)
         }
     }
+
+    private var clusterActive: Bool { state.isActive(setId: clusterId) }
+    private var displayWeight: Double? {
+        state.displayValue(setId: set.setId, field: .weight, fallback: set.weight)
+    }
+    private var displayReps: Double? {
+        state.displayValue(setId: set.setId,
+                           field: .reps,
+                           fallback: set.reps.map { Double($0) })
+    }
 }
 
-/// Cluster sub-set row content — indented, boxed cells. Same 20pt
-/// leading column as the header's `D{n}` for vertical alignment.
-/// Per user 2026-05-28 polish: cluster sub rows column-align with
-/// the header by sharing `CellMetrics.weightWidth` / `repsWidth`.
+/// Cluster sub-set row content — indented, boxed cells. Cells
+/// tappable when the cluster is `{}` Active.
 private struct SetRowClusterSubContent: View {
     let set: SessionSnapshotSet
+    let clusterId: String
+    @ObservedObject var state: SessionInteractionState
 
     var body: some View {
         HStack(spacing: 4) {
             // Spacer to align with cluster header's number column
             Text("").frame(width: 20, alignment: .center)
             CellBox(
-                value: formatWeight(set.weight),
+                value: formatWeight(displayWeight),
                 unit: "kg",
-                minWidth: CellMetrics.weightWidth
+                minWidth: CellMetrics.weightWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .weight),
+                onTap: clusterActive ? {
+                    state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
+                } : nil
             )
             CellBox(
-                value: "\(set.reps ?? 0)",
+                value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
-                minWidth: CellMetrics.repsWidth
+                minWidth: CellMetrics.repsWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .reps),
+                onTap: clusterActive ? {
+                    state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
+                } : nil
             )
             Spacer(minLength: 0)
         }
+    }
+
+    private var clusterActive: Bool { state.isActive(setId: clusterId) }
+    private var displayWeight: Double? {
+        state.displayValue(setId: set.setId, field: .weight, fallback: set.weight)
+    }
+    private var displayReps: Double? {
+        state.displayValue(setId: set.setId,
+                           field: .reps,
+                           fallback: set.reps.map { Double($0) })
     }
 }
 

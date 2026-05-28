@@ -19,7 +19,13 @@ import SwiftUI
 
 /// Standard editable cell box: number centered, unit small top-right.
 /// Stroked rounded rectangle implies this is a tappable target that
-/// will enter `[]` Active (cell edit) in Phase C.
+/// enters `[]` Active (cell edit) in Phase C when the parent row is
+/// `{}` Active.
+///
+/// Phase C wiring: when `onTap` is non-nil, the box is tappable; when
+/// `isActive` is true, the border thickens + tints to indicate this
+/// cell is currently being edited (the `▌▐` highlight in spec line
+/// 1429).
 struct CellBox: View {
     let value: String
     let unit: String
@@ -30,8 +36,24 @@ struct CellBox: View {
     /// cluster rows align vertically without per-row width pinning.
     var minWidth: CGFloat = 0
 
+    /// When true the box renders an `[]` Active highlight (thicker
+    /// accent-color border). Phase C: set by parent when this cell
+    /// is `state.activeCell`.
+    var isActive: Bool = false
+
+    /// Optional tap handler. When `nil`, the box is non-interactive
+    /// (idle row / `{}` Active but cell mode not yet enabled). When
+    /// non-nil, the box accepts taps and the parent routes to
+    /// `state.activateCell(...)`.
+    var onTap: (() -> Void)? = nil
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        let strokeColor: Color = isActive
+            ? Color.accentColor
+            : Color.secondary.opacity(0.5)
+        let strokeWidth: CGFloat = isActive ? 1.6 : 0.8
+
+        return ZStack(alignment: .topTrailing) {
             // Center: value digits
             Text(value)
                 .font(.body)
@@ -51,9 +73,13 @@ struct CellBox: View {
         .frame(minWidth: minWidth)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.secondary.opacity(0.5), lineWidth: 0.8)
+                .stroke(strokeColor, lineWidth: strokeWidth)
         )
         .fixedSize(horizontal: false, vertical: true)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap?()
+        }
     }
 }
 
