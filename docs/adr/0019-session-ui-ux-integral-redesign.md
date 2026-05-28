@@ -1346,3 +1346,259 @@ Items 留 13e 或之後（intentional defer）：
 - ADR-0019 § Q6 line 145（5-tile predicate 由 dev toggle → `is_watch_tracked`）
 - ADR-0014 — Session.title schema、與 Live mirror 雙向 sync 對齊
 - ADR-0012 — Cluster card + set row、Watch UI inline nested cluster 視覺對齊
+
+---
+
+## Slice 13d D11 Set Logger Spec（凍結 2026-05-28）
+
+**Status**: Spec frozen — ASCII mock 8 輪迭代收斂、待 D8 picker land 後動工 SwiftUI 實作
+**Depends on**: D4 (Watch target ✅) / D5 (lifecycle ✅) / D8 (picker, pending)
+**Blocks**: D14 (完成頁) / D15 (⋯ menu) / D16 (⚙ settings) impl
+**Iteration log**: chat session 2026-05-28、8 輪 mock v1→v8
+
+### Overview
+
+In-session SwiftUI view on Apple Watch（~36 char wide @ 49mm Ultra）。User 在這 view log set / 切 set type / 管理 cluster / 標完成 / 切頁到完成頁或音樂。
+
+### View anatomy
+
+每張動作卡：
+- **Header**: 動作名稱（`深蹲 (Squat)`）、不顯示組數
+- **Progress bar**: continuous（無 gap）、單行、寬度滿、segments = 工作組 + cluster 數（熱身不計）
+- **Set rows**: 細線分隔、結構 `編號 [重量] [次數] ◯`
+
+### Visual: idle（無 highlight、無 focus marker）
+
+```
+┌──────────────────────────────────┐
+│ 深蹲 (Squat)                     │
+│ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱     │
+│                                  │
+│ 熱 ( 40 kg ) ( 12 次 )   ◯     │
+│ ─────────────────────────────    │
+│  1 [ 80 kg ] [  8 次 ]   ◯     │
+│ ─────────────────────────────    │
+│  2 [ 80 kg ] [  8 次 ]   ◯     │
+│ ─────────────────────────────    │
+│  3 [ 80 kg ] [  8 次 ]   ◯     │
+│ ─────────────────────────────    │
+│  4 [ 80 kg ] [  8 次 ]   ◯     │
+│ ─────────────────────────────    │
+│ D1 [ 80 kg ] [  8 次 ]   ◯     │
+│    [ 40 kg ] [  8 次 ]         │
+│    [ 20 kg ] [  8 次 ]         │
+└──────────────────────────────────┘
+```
+
+熱身用圓括號 `( )` 示意灰調 dim、不計進度條。Cluster sub-set 縮排無編號、cluster 算 1 段進度條。
+
+### Visual: {} Active（row mode）
+
+Tap row 中段（編號 / cells / 空白）→ 4 邊框、row 可編輯：
+
+```
+╔══════════════════════════╗
+║ 2 [ 80 kg ] [  8 次 ]    ║ ◯  ← ◯ 在框外
+╚══════════════════════════╝
+```
+
+Cluster {} Active 額外顯示 `-`/`+` CRUD：
+
+```
+╔════════════════════════════╗
+║ D1 [ 80 kg ] [ 8 次 ]      ║◯
+║    -[ 40 kg ] [ 8 次 ] +   ║   ← `-` 刪 sub / `+` 新增 sub
+║    -[ 20 kg ] [ 8 次 ] +   ║
+╚════════════════════════════╝
+```
+
+### Visual: [] Active（cell mode、inline）
+
+從 {} Active tap cell → cell highlight + 輸入 overlay（不跳新 view）。
+
+⚙ keypad mode（必 Done 退出）：
+```
+╔══════════════════════════╗
+║ 2 ┃▌80 kg▐┃ [  8 次 ]    ║ ◯
+╚══════════════════════════╝
+╓──────────────────────────╖
+║   1    2    3            ║
+║   4    5    6            ║
+║   7    8    9     Done   ║
+║   ⌫    0    .            ║
+╙──────────────────────────╜
+```
+
+⚙ crown mode（tap 外即退、值即時生效）：
+```
+╔══════════════════════════╗
+║ 2 ┃▌80 kg▐┃ [  8 次 ]    ║ ◯
+╚══════════════════════════╝
+       ↻ Crown 旋轉調整
+       (tap 框外退出)
+```
+
+### Visual: 超級組（獨立卡片）
+
+idle：
+```
+┌──────────────────────────────────┐
+│ 超級組 (Squat + Bench)           │
+│ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱     │
+│                                  │
+│  1  A [ 80 kg ] [  8 次 ]  ◯    │
+│     B [ 60 kg ] [ 10 次 ]       │
+│ ─────────────────────────────    │
+│  2  A [ 80 kg ] [  8 次 ]  ◯    │
+│     B [ 60 kg ] [ 10 次 ]       │
+└──────────────────────────────────┘
+```
+
+{} Active 整 superset set 一個框、A/B cells 都可 tap 進 [] Active：
+```
+╔═══════════════════════════╗
+║ 1  A [ 80 kg ] [  8 次 ]  ║ ◯
+║    B [ 60 kg ] [ 10 次 ]  ║
+╚═══════════════════════════╝
+```
+
+Superset type 只支援「熱 / 工作」、**不支援 D**。
+
+### Visual: 完成頁（右滑進入、非 {} Active 區域）
+
+```
+┌──────────────────────────────────┐
+│  Session 完成？                  │
+│                                  │
+│  ✓ 已完成 12/15 組               │
+│  ⏱ 32:14                         │
+│  ❤ 平均 142 bpm                  │
+│                                  │
+│  ┌──────────┐  ┌──────────┐      │
+│  │  取消    │  │  完成    │      │
+│  └──────────┘  └──────────┘      │
+│                                  │
+│  (← 左滑回 session 繼續)         │
+└──────────────────────────────────┘
+```
+- [取消] = abort session、不儲存任何資料
+- [完成] = 結束 session、儲存
+- 左滑回 = 繼續 session（swipe-to-page 連續性）
+
+### Visual: 音樂頁（左滑進入、非 {} Active 區域）
+
+走原生 NowPlaying / system music control（不自己 design）。
+
+### Interaction rules — full table
+
+#### Row gestures（{} Active 時）
+
+| Gesture | Action |
+|---|---|
+| tap 編號 (`2` / `熱` / `D1`) | Cycle type（見下方 type cycling）|
+| tap `[重量]` / `[次數]` | 進 [] Active inline edit |
+| tap ◯/✓ | Toggle done state（**跟 Active state 無關、隨時可打**）|
+| ⬅ swipe left | Delete row（row 內手勢優先、不切頁）|
+| ➡ swipe right | +1 set 插入後 |
+| Long press | Move mode（drag to reorder）|
+| tap 框外 | 退回 idle |
+
+#### Cell gestures（[] Active 時）
+
+| Mode | 退出方式 | 值保存時機 |
+|---|---|---|
+| keypad | Done button 必按 | on Done |
+| crown | tap 框外 | live（即時生效）|
+
+#### ◯/✓ semantics
+
+- 任何 state（IDLE / {} Active / [] Active）皆可 tap ◯/✓ 切換
+- tap ◯ → ✓: single tap、無確認、自動退所有 Active state、保存當前 cell 值
+- tap ✓ → ◯: undo、無確認
+- **Cluster: header 一個 ✓ 標完整 cluster、sub-set 無個別 ✓**
+
+### Advance focus
+
+| Trigger | Behavior |
+|---|---|
+| 中間 row ✓ | 不動、保 idle、user 自己 tap 下一 row |
+| 該動作最後 row ✓ | auto-scroll 到下一動作卡、自動展開、無 highlight |
+| 最後動作的最後 row ✓ | 停在原卡、**不自動跳完成頁**、user 右滑進完成頁 |
+| 初次進 card | 全 idle、無 highlight、user tap 才出 |
+
+### Type cycling rules
+
+Tap 編號 → 三態循環：`工作` → `熱` → `D` → `工作`
+
+切換副作用（**即時生效**）：
+- 整列重編號：熱身穿插原物理位置、工作組 1-N 連續重編
+- 例：`1 / 2 / 3 / 4 / D1` tap row 3 切熱 → `1 / 2 / 熱 / 3 / D1`（原 row 4 → 重編 3）
+- 多熱身: 都顯示「熱」（無 `熱1 / 熱2`）
+- 多 cluster: `D1 / D2 / D3` 自動編號
+- 切到 D 預設: 1 sub-set、數值同 header
+- 解構 D: tap header `D1` 切 → 工作組、sub-set 全砍
+
+### Cluster rules
+
+- Min 2 rows（header + ≥1 sub-set）
+- 剩 2 rows 時、唯一 sub 的 `-` 虛化 disabled
+- Cluster header **無** `-`/`+`
+- Cluster ✓ = 整 cluster 一次標完
+
+### Progress bar rules
+
+- Continuous `▰▰▰▱▱`（無 gap）
+- 段數 = 工作組數 + cluster 數（熱身不計、cluster 算 1 段）
+- 動態：+1 set / 刪 set / 切 type 都即時 recalc
+- 寬度: 滿 row 寬、視覺上分隔標題區跟 row 區
+
+### Swipe-to-page rules
+
+- 觸發範圍：**非 {} Active 區域**（標題、進度條、divider、空白邊緣、idle row 整列）
+- {} Active row 上滑動 → row 內手勢優先（delete / +1 / move）、**不切頁**
+- Pages: 音樂 ← session card → 完成頁
+- 連續可滑回（iOS workout-style）
+
+### State transition table
+
+| From | Trigger | To | Side effect |
+|---|---|---|---|
+| Idle | tap row 中段 | {} Active | 4 邊框、◯ 留外 |
+| Idle | tap ◯ | Idle (✓) | mark done、無 advance |
+| Idle | tap ✓ | Idle (◯) | undo |
+| Idle | swipe right (edge) | 完成頁 | swipe-to-page |
+| Idle | swipe left (edge) | 音樂 | swipe-to-page |
+| {} Active | tap cell | [] Active | input overlay |
+| {} Active | tap 編號 | {} Active | cycle type + renumber + recalc bar |
+| {} Active | swipe left row | row deleted | row 內手勢 |
+| {} Active | swipe right row | +1 row inserted | row 內手勢 |
+| {} Active | long press | move mode | drag |
+| {} Active | tap 框外 | Idle | exit |
+| {} Active | tap ◯/✓ | Idle (✓ toggled) | exit Active + save |
+| [] Active (keypad) | tap Done | {} Active | save |
+| [] Active (crown) | tap 框外 | {} Active | save (live) |
+| [] Active | tap ◯ | Idle (✓) | exit both + save |
+
+### Settings dependency（⚙ pane 必含）
+
+- Input mode toggle: `keypad` / `crown`（global、[] Active 中不能切、必須回 ⚙）
+
+### Out of scope（deferred to other D sub-slices）
+
+- Rest timer trigger / popup — 另 view、待 grill
+- Pause / resume session — lifecycle 另 view
+- Animation choreography（cross-fade vs slide for 動作切換）— 留 impl 階段
+- 音樂頁 inner control — 走原生、不自己 design
+
+### Decisions captured（8 輪 ASCII mock iteration log）
+
+| 輪次 | 主要決策 |
+|---|---|
+| v1-v2 | row 結構 `編號 [重量] [次數]` + `{}` 框 + `[]` 兩階 Active |
+| v3 | 進度條改 continuous + 拉長當 divider、`▸` focus marker、◯/✓ 獨立 tap target |
+| v4 | 移除 `▸`、純 box highlight |
+| v5 | [] Active inline（不跳新 view）+ keypad/crown 兩模式 ⚙ 全局 |
+| v6 | 熱身灰調 + 不計進度條、cluster 算 1 段、左右滑切頁 |
+| v7 | type chip `[#]/[熱]/[D]` |
+| v8 | type chip 砍掉、編號本身=button、cluster sub-set `-`/`+` CRUD |
+| 收尾 | 切 D 預設 1 sub-set、熱身無編號、編號重排即時 |
