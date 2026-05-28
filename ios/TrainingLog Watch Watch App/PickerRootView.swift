@@ -267,99 +267,104 @@ private struct EmptyStateRow: View {
     }
 }
 
-// MARK: - Terminal placeholder (D11 stub)
+// MARK: - Terminal destination (Picker → Set logger transition)
 
-/// Phase 3 stub destination — fires `start-from-watch` to iPhone on
-/// mount and renders the WC reply state (creating / created /
-/// failed). Replaces D11 set logger view until that ships.
+/// Drives the start-from-watch handshake AND swaps in the real
+/// `SetLoggerView` (D11) once the iPhone reply lands. Before that
+/// — during in-flight or after a failure — renders a transitional
+/// view (spinner / retry button).
 ///
-/// State machine:
-///   - On appear:        kick off vm.startFromWatch(selection)
-///   - isStartingSession: spinner + "與 iPhone 同步中…"
-///   - startResult = nil after attempt: shouldn't happen (set before
-///                                       returning)
-///   - startResult = .some(nil): WC transport failure
-///   - startResult = .some(reply) isOK=true: render sessionId + exercises
-///   - startResult = .some(reply) isOK=false: iPhone-reported failure
+/// State branches (mounted in order during a typical flow):
+///   1. isStartingSession=true ⇒ spinner page
+///   2. startResult success    ⇒ SetLoggerView(snapshot:)  ← D11
+///   3. startResult failure    ⇒ retry page
 ///
-/// Phase 4+ replaces this view with the actual D11 set logger.
+/// `.task` fires `vm.startFromWatch(selection)` on appear; the VM
+/// resets its result + flag in `resetSelection()` so re-entering
+/// the placeholder retries from scratch.
 struct PickerSetLoggerPlaceholderView: View {
     let selection: PickerSelection
     @ObservedObject var vm: PickerViewModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Set logger 進入點")
-                    .font(.headline)
-                Text("(D11 未實作、stub)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Divider().padding(.vertical, 2)
-
-                Text("3 元組").font(.caption).bold()
-                Text("模板：\(selection.template?.name ?? "（無 — 計劃路徑）")")
-                    .font(.caption2)
-                Text("計劃：\(selection.program?.name ?? "通用")")
-                    .font(.caption2)
-                Text("強度：\(selection.intensity?.name ?? "通用")")
-                    .font(.caption2)
-
-                Divider().padding(.vertical, 2)
-
-                Text("WC 狀態").font(.caption).bold()
-                wcStatusBlock
+        contentView
+            .task {
+                await vm.startFromWatch(selection: selection)
             }
-            .padding()
-        }
-        .navigationTitle("Set logger")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await vm.startFromWatch(selection: selection)
-        }
     }
 
     @ViewBuilder
-    private var wcStatusBlock: some View {
+    private var contentView: some View {
         if vm.isStartingSession {
-            HStack(spacing: 4) {
-                ProgressView().controlSize(.mini)
-                Text("與 iPhone 同步中…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            syncingView
         } else if let attempted = vm.startResult {
-            // attempted is `StartFromWatchReply?` (outer optional unwrapped).
-            // nil ⇒ WC transport failure (no reply / framework err).
-            // .some(reply) ⇒ iPhone responded; check reply.isOK for outcome.
-            if let reply = attempted {
-                if reply.isOK, let snapshot = reply.snapshot {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Session 建立成功", systemImage: "checkmark.circle")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                        Text("sess=\(String(reply.sessionId.prefix(8)))…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("動作數：\(snapshot.exercises.count)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Label("iPhone 回報失敗", systemImage: "exclamationmark.triangle")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
+            if let reply = attempted, reply.isOK, let snapshot = reply.snapshot {
+                // SUCCESS → real D11 set logger view (Phase A
+                // skeleton; Phase B+ adds interactions).
+                SetLoggerView(snapshot: snapshot)
+            } else if let reply = attempted, !reply.isOK {
+                retryView(error: "iPhone 回報失敗", icon: "exclamationmark.triangle")
             } else {
-                Label("傳輸失敗（iPhone 未配對或無回應）", systemImage: "wifi.slash")
-                    .font(.caption2)
-                    .foregroundStyle(.red)
+                retryView(error: "傳輸失敗（iPhone 未配對或無回應）", icon: "wifi.slash")
             }
         } else {
-            Text("尚未發送")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            // Pre-task tick. Render an empty spacer; the `.task`
+            // modifier will flip vm.isStartingSession on the next
+            // render pass.
+            Color.clear
         }
+    }
+
+    // MARK: - Sub-views
+
+    private var syncingView: some View {
+        VStack(alignment: .center, spacing: 8) {
+            Spacer()
+            ProgressView().controlSize(.regular)
+            Text("與 iPhone 同步中…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(selectionSubtitle)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("啟動訓練")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func retryView(error: String, icon: String) -> some View {
+        VStack(alignment: .center, spacing: 8) {
+            Spacer()
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.red)
+            Text(error)
+                .font(.caption2)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            Button("重試") {
+                Task { await vm.startFromWatch(selection: selection) }
+            }
+            .font(.caption2)
+            .controlSize(.small)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("啟動訓練")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var selectionSubtitle: String {
+        var parts: [String] = []
+        if let t = selection.template?.name { parts.append(t) }
+        parts.append(selection.program?.name ?? "通用")
+        parts.append(selection.intensity?.name ?? "通用")
+        return parts.joined(separator: " · ")
     }
 }
 
