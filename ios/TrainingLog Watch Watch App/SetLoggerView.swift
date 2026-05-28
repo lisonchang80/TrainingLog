@@ -97,6 +97,28 @@ private struct SessionCardListPage: View {
     let snapshot: SessionSnapshot
     @ObservedObject var state: SessionInteractionState
 
+    @AppStorage(InputMode.storageKey) private var inputModeRaw: String = InputMode.keypad.rawValue
+
+    /// Crown rotation value mirrored back into `state.activeCell.buffer`
+    /// when crown mode + a cell is `[]` Active. The `.digitalCrownRotation`
+    /// modifier requires a non-optional Binding<Double>; we wire it
+    /// to this @State, then propagate via `.onChange`.
+    @State private var crownValue: Double = 0
+    @FocusState private var crownFocused: Bool
+
+    private var isInlineCrownActive: Bool {
+        state.activeCell != nil && inputModeRaw == InputMode.crown.rawValue
+    }
+
+    private var crownStep: Double {
+        guard let cell = state.activeCell else { return 1 }
+        return cell.field == .weight ? 0.5 : 1
+    }
+    private var crownUpper: Double {
+        guard let cell = state.activeCell else { return 100 }
+        return cell.field == .weight ? 500 : 100
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
@@ -115,16 +137,60 @@ private struct SessionCardListPage: View {
                 }
 
                 // Trailing space — also catches "tap 框外" to dismiss
-                // `{}` Active. Per spec line 1592: tap 框外 → Idle.
+                // `{}` Active OR commit `[]` Active (inline crown).
+                // Per spec line 1592: tap 框外 → Idle.
                 Color.clear
                     .frame(height: 60)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        state.deactivate()
+                        if state.activeCell != nil {
+                            // Commit the in-flight cell edit (live for
+                            // crown, latest buffer for keypad if user
+                            // tapped outside instead of Done).
+                            state.commitActiveCell()
+                        } else {
+                            state.deactivate()
+                        }
                     }
             }
             .padding(.horizontal, 4)
             .padding(.bottom, 12)
+        }
+        // Inline crown input — only active when cell is `[]` Active AND
+        // input mode is crown. Per user 2026-05-29 polish 4: «轉動表冠
+        // 模式：重量或組的框變綠（Active）、表冠旋轉即轉換數字、不要
+        // 跳出東西». No popup; the active cell's green border + live
+        // displayValue do all the work.
+        .focusable(isInlineCrownActive)
+        .focused($crownFocused)
+        .digitalCrownRotation(
+            $crownValue,
+            from: 0,
+            through: crownUpper,
+            by: crownStep,
+            sensitivity: .medium,
+            isContinuous: false,
+            isHapticFeedbackEnabled: true
+        )
+        .onChange(of: state.activeCell) { _, newCell in
+            // When a cell freshly enters `[]` Active in crown mode,
+            // seed the crown value from the cell's buffer and grab focus.
+            guard let cell = newCell, inputModeRaw == InputMode.crown.rawValue else {
+                crownFocused = false
+                return
+            }
+            crownValue = Double(cell.buffer) ?? 0
+            // Defer focus to next runloop tick so SwiftUI has applied
+            // the .focusable(...) change before we set @FocusState.
+            DispatchQueue.main.async {
+                crownFocused = true
+            }
+        }
+        .onChange(of: crownValue) { _, newValue in
+            // Mirror rotation back into the state buffer; displayValue
+            // surfaces this live on the active cell.
+            guard isInlineCrownActive else { return }
+            state.updateActiveCellBuffer(formatCrownValue(newValue, field: state.activeCell?.field ?? .weight))
         }
     }
 }

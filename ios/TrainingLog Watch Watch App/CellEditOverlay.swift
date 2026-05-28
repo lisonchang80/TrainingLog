@@ -55,14 +55,18 @@ struct CellEditOverlay: View {
             case .keypad:
                 // Per user 2026-05-29 polish: entire screen blacks out
                 // during keypad mode — only buffer + keypad visible.
-                // (Earlier impl let the session list bleed through the
-                // strip above the keypad, which was visually noisy.)
                 ZStack(alignment: .bottom) {
                     Color.black.ignoresSafeArea()
                     KeypadOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
                 }
             case .crown:
-                CrownOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
+                // Per user 2026-05-29 polish 4: crown mode is INLINE —
+                // no popup. The cell's green `[]` Active border + live
+                // value display (via displayValue → activeCell.buffer)
+                // provide all the feedback the user needs. Crown is
+                // captured at SessionCardListPage level via
+                // `.digitalCrownRotation`. Tap-outside commits.
+                EmptyView()
             }
         }
     }
@@ -181,103 +185,22 @@ private struct KeypadOverlay: View {
     }
 }
 
-// MARK: - Crown overlay
-
-private struct CrownOverlay: View {
-    let cell: ActiveCell
-    @ObservedObject var state: SessionInteractionState
-    @Binding var inputModeRaw: String
-
-    /// Live crown value. Initialized to the cell's buffered value on
-    /// appear; `.onChange` mirrors back to the state buffer so a
-    /// tap-outside commit captures the latest crown rotation.
-    @State private var crownValue: Double = 0
-
-    private var step: Double {
-        cell.field == .weight ? 0.5 : 1
-    }
-
-    private var upperBound: Double {
-        cell.field == .weight ? 500 : 100
-    }
-
-    var body: some View {
-        ZStack {
-            // Backdrop — tap-outside to commit (per spec line 1525
-            // 「crown | tap 框外 | live (即時生效)」).
-            Color.black.opacity(0.55)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    state.commitActiveCell()
-                }
-
-            // Crown body
-            VStack(spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(formatCrown(crownValue))
-                        .font(.title3)
-                        .monospacedDigit()
-                    Text(cell.field.unit)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("↻ Crown 旋轉")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text("(tap 框外退出)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-
-                Button {
-                    inputModeRaw = InputMode.keypad.rawValue
-                } label: {
-                    Text("切回鍵盤")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.black.opacity(0.95))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.secondary.opacity(0.4), lineWidth: 0.8)
-                    )
-            )
-            .focusable()
-            .digitalCrownRotation(
-                $crownValue,
-                from: 0,
-                through: upperBound,
-                by: step,
-                sensitivity: .medium,
-                isContinuous: false,
-                isHapticFeedbackEnabled: true
-            )
+// Crown mode is now handled INLINE at the page level (see
+// SetLoggerView → SessionCardListPage). No overlay view needed —
+// the active cell's green `[]` Active border + live displayValue
+// is the only visual the user sees. Removed `CrownOverlay` struct
+// 2026-05-29 per user «不要跳出東西».
+//
+// Shared crown formatting helper, used by the inline crown handler.
+func formatCrownValue(_ v: Double, field: CellField) -> String {
+    switch field {
+    case .reps:
+        return String(Int(v.rounded()))
+    case .weight:
+        if v == v.rounded() {
+            return String(format: "%.0f", v)
         }
-        .onAppear {
-            crownValue = Double(cell.buffer) ?? 0
-        }
-        .onChange(of: crownValue) { _, newValue in
-            state.updateActiveCellBuffer(formatCrown(newValue))
-        }
-        .transition(.opacity)
-    }
-
-    private func formatCrown(_ v: Double) -> String {
-        switch cell.field {
-        case .reps:
-            return String(Int(v.rounded()))
-        case .weight:
-            if v == v.rounded() {
-                return String(format: "%.0f", v)
-            }
-            return String(format: "%.1f", v)
-        }
+        return String(format: "%.1f", v)
     }
 }
 

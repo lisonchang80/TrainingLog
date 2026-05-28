@@ -48,10 +48,16 @@ enum CellField: String, Equatable {
 /// The cell currently in `[]` Active state. Carries a string buffer
 /// for keypad input (digits + optional decimal). Crown mode reads /
 /// writes the same buffer, formatting via `formatCrown(...)`.
+///
+/// `hasUserInput` tracks whether the user has actually typed since
+/// the cell was opened. When false, the first digit press REPLACES
+/// the pre-loaded value (instead of appending) per user 2026-05-29
+/// «鍵盤輸入改為取代原有數字». Backspace / dot also flip it true.
 struct ActiveCell: Equatable {
     let setId: String
     let field: CellField
     var buffer: String
+    var hasUserInput: Bool = false
 }
 
 /// Composite key for `editedValues`.
@@ -144,42 +150,59 @@ final class SessionInteractionState: ObservableObject {
     // MARK: - Keypad mutators
 
     /// Append a single digit to the buffer.
+    /// **First-digit-replace semantics**: when `hasUserInput == false`
+    /// (cell freshly opened with pre-loaded value), the first digit
+    /// REPLACES the buffer rather than appending. Subsequent digits
+    /// append normally. Per user 2026-05-29 polish.
     func appendDigit(_ d: String) {
         guard var cell = activeCell else { return }
-        // Cap at 5 chars to keep watch UI readable (e.g. "999.5").
-        guard cell.buffer.count < 5 else { return }
-        // Treat a leading "0" as placeholder — replace on first digit.
-        if cell.buffer == "0" {
+        if !cell.hasUserInput {
             cell.buffer = d
+            cell.hasUserInput = true
         } else {
-            cell.buffer += d
+            // Cap at 5 chars to keep watch UI readable (e.g. "999.5").
+            guard cell.buffer.count < 5 else { return }
+            // Treat a leading "0" as placeholder — replace on first digit.
+            if cell.buffer == "0" {
+                cell.buffer = d
+            } else {
+                cell.buffer += d
+            }
         }
         activeCell = cell
     }
 
     /// Append a decimal point. Only for weight (reps is integer).
-    /// No-op if buffer already contains a dot.
+    /// No-op if buffer already contains a dot. Sets `hasUserInput`
+    /// so subsequent digits append rather than replace.
     func appendDot() {
         guard var cell = activeCell, cell.field == .weight else { return }
         guard !cell.buffer.contains(".") else { return }
         cell.buffer = cell.buffer.isEmpty ? "0." : cell.buffer + "."
+        cell.hasUserInput = true
         activeCell = cell
     }
 
-    /// Delete the last char in the buffer.
+    /// Delete the last char in the buffer. Sets `hasUserInput` so
+    /// the user can erase the pre-loaded value char-by-char then
+    /// have new digits append from empty.
     func backspace() {
         guard var cell = activeCell else { return }
         if !cell.buffer.isEmpty {
             cell.buffer.removeLast()
         }
+        cell.hasUserInput = true
         activeCell = cell
     }
 
     /// Replace the buffer wholesale — used by crown mode to write
-    /// the current crown value back into the buffer.
+    /// the current crown value back into the buffer. Sets
+    /// `hasUserInput` so subsequent keypad presses (if user switches
+    /// modes mid-edit) append properly.
     func updateActiveCellBuffer(_ newBuffer: String) {
         guard var cell = activeCell else { return }
         cell.buffer = newBuffer
+        cell.hasUserInput = true
         activeCell = cell
     }
 
@@ -206,8 +229,17 @@ final class SessionInteractionState: ObservableObject {
 
     // MARK: - Display value
 
-    /// The value to render in a cell. Edited value wins over snapshot.
+    /// The value to render in a cell.
+    /// Priority: **active-cell buffer** (live preview during edit)
+    /// → committed `editedValues` → snapshot `fallback`. The live-buffer
+    /// branch is what makes inline-crown work — as the crown rotates,
+    /// `updateActiveCellBuffer` writes back to `activeCell.buffer`,
+    /// and this getter surfaces the new value on every render tick.
     func displayValue(setId: String, field: CellField, fallback: Double?) -> Double? {
+        if let cell = activeCell, cell.setId == setId, cell.field == field,
+           let live = parseBuffer(cell.buffer, field: field) {
+            return live
+        }
         let key = EditedValueKey(setId: setId, field: field)
         return editedValues[key] ?? fallback
     }

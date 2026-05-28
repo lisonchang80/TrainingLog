@@ -185,7 +185,7 @@ private struct InteractiveSetRow<Content: View>: View {
                             state.isActive(setId: setId)
                                 ? Color.green
                                 : Color.clear,
-                            lineWidth: 1.2
+                            lineWidth: 2.0
                         )
                 )
                 .contentShape(Rectangle())
@@ -375,10 +375,10 @@ enum SetRowGroup: Identifiable {
 
 // MARK: - Row content views (pure visual, no interaction)
 
-/// Warmup row content — gray dim, parens around weight/reps, no
-/// number, no progress contribution. Warmup is non-editable in Phase
-/// C (no `onTap` wired); Phase D will allow type-cycle warmup→working
-/// which makes its cells editable.
+/// Warmup row content — uses the SAME boxed CellBox layout as
+/// working rows (per user 2026-05-29 polish 4: «[熱] 也麻煩跟一般組
+/// 一樣»). Number column shows `熱` instead of `1` / `2` / `D1`.
+/// Cells tappable when row `{}` Active.
 private struct SetRowWarmupContent: View {
     let set: SessionSnapshotSet
     @ObservedObject var state: SessionInteractionState
@@ -386,25 +386,34 @@ private struct SetRowWarmupContent: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("熱")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.caption)
+                .foregroundStyle(.primary)
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            WarmupCellBox(
+            CellBox(
                 value: formatWeight(displayWeight),
                 unit: "kg",
-                minWidth: CellMetrics.weightWidth
+                minWidth: CellMetrics.weightWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .weight),
+                onTap: rowIsActive ? {
+                    state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
+                } : nil
             )
-            WarmupCellBox(
+            CellBox(
                 value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
-                minWidth: CellMetrics.repsWidth
+                minWidth: CellMetrics.repsWidth,
+                isActive: state.isCellActive(setId: set.setId, field: .reps),
+                onTap: rowIsActive ? {
+                    state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
+                } : nil
             )
             Spacer(minLength: 0)
         }
     }
 
+    private var rowIsActive: Bool { state.isActive(setId: set.setId) }
     private var displayWeight: Double? {
         state.displayValue(setId: set.setId, field: .weight, fallback: set.weight)
     }
