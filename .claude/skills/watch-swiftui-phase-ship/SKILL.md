@@ -178,6 +178,48 @@ git push origin --delete slice/13d-d{N}-{view-kebab}-phase-{x}
 - 2026-05-28 D8 Phase 3 (start-from-watch wire) `cdc6897` (+346 / -9、1 new .swift)
 - 2026-05-28 D11 Phase A (visual skeleton) `01ccb50` (+700 / -74、3 new .swift)
 - 2026-05-28 D11 Phase B (`{}` Active + ✓ toggle + progress recalc) `71a34ba` (+304 / -68、1 new .swift)
+- 2026-05-28 D11 Phase B polish (CellBox + page swap + green progress) `dd0e01c` (+195 / -31、1 new .swift)
+- 2026-05-28 D11 Phase C (`[]` Active cell edit + keypad + crown) `2c9d197` (+654 / -78、1 new .swift)
+- 2026-05-29 D11 Phase C polish 1+2 (opaque + fullscreen backdrop) `6ee7500` + `34e9b8e`
+- 2026-05-29 D11 unify Active borders → green `e43e850`
+- 2026-05-29 D11 re-Active bug fix + cell-clear-on-row-switch `5059dda` + `394a62f` + `48cdf5e`
+- 2026-05-29 D11 Phase C polish 4 (inline crown + warmup CellBox + first-digit-replace) `a7c8f85`
+- 2026-05-29 Watch Sim dev mock convenience `fbcc73d`
+
+## Step 9 — Sim dev convenience pattern（多 phase 反覆驗證時用）
+
+當 picker → set logger 整鏈要在 Sim 跑、但 Sim 沒 paired iPhone 走不通 handshake / start-from-watch、原本 timeout 後落 noActiveProgram empty state，每次 phase impl 後又要靠 TEMP ContentView swap 才看得到 SetLoggerView。重複 4-5 次後值得加 sim 永久 dev mock。
+
+### Recipe
+
+兩處 `#if targetEnvironment(simulator)` gate：
+
+1. **`ContentView.init()`** — sim 用 `PickerViewModel.mockDefault()`（pre-load templates / programs / intensities）。實機走 `PickerViewModel(coordinator: wc)` production path。
+
+```swift
+#if targetEnvironment(simulator)
+let vm = PickerViewModel.mockDefault()
+#else
+let vm = PickerViewModel(coordinator: wc)
+#endif
+```
+
+2. **`PickerViewModel.startFromWatch(...)`** — coordinator == nil branch 改 mock SUCCESS reply（之前是 `.some(nil)` 失敗形狀、會卡 retry view）：
+
+```swift
+guard let coordinator else {
+    isStartingSession = true
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    isStartingSession = false
+    startResult = .some(StartFromWatchReply(
+        sessionId: "mock-session-1",
+        snapshot: SetLoggerMockData.mockSnapshot()
+    ))
+    return
+}
+```
+
+實機 build 走 `#else` / 走 coordinator 真路徑、不受 dev mock 影響。Validated `fbcc73d` 2026-05-29。
 
 ## Anti-patterns
 
@@ -187,6 +229,11 @@ git push origin --delete slice/13d-d{N}-{view-kebab}-phase-{x}
 - ❌ 沒 uninstall 直接 install → Sim cache 看不到改動、誤以為 build 沒 link 上
 - ❌ Phase 拆太細 (e.g. 一個 commit 只動 1 行) → 反而 review 看不清；Phase 拆太粗 (>1000 行) → review 不動。Sweet spot: 300-800 行 / 3-5 個 file
 - ❌ 動 Watch UI 沒 ADR frozen spec → 走 mock iterate (per `feedback_watch_ui_reference.md`) freeze 後再動
+- ❌ **空 `.onTapGesture { closure }` 不是 no-op、會吞 tap**（D11 PC re-Active fix `5059dda`）— 即使 closure body 是 `onTap?()` (onTap=nil) 也會 consume tap、外層 row tap gesture 永遠收不到。CellBox 等可選 tappable view 要用 `if let onTap { ... .onTapGesture { onTap() } } else { baseView }` 條件式 attach、不要無條件加。
+- ❌ **跨 row state 不一致**（D11 PC fix `48cdf5e`）— `activeSetId` 跟 `activeCell.setId` 是兩個 @Published、可能不同步。切 row 時要在 `activate(setId:)` 裡 commit + clear `activeCell` 避免「舊 row 的 [] Active 綠框 + 新 row 的 {} Active 綠框」同時顯示。
+- ❌ **Keypad 預載 buffer 但 first-digit append 而非 replace**（D11 PC polish 4 `a7c8f85`）— tap cell 進 keypad 顯示「80 kg」是 nice、但用戶按 `5` 想換成 5、不是想得 805。要 `hasUserInput: Bool` 旗標、首次 digit press 直接 replace。
+- ❌ **Crown overlay 用 popup view 抓不到 focus**（D11 PC polish 4 `a7c8f85`）— `.focusable() + .digitalCrownRotation()` 放在 popup 內常拿不到 focus（被 ScrollView/TabView 搶）、用戶轉表冠完全沒反應。改 inline 把 modifier chain 接到 SessionCardListPage 層級 + `@FocusState` + `.onChange(of: state.activeCell)` 主動 grab focus 才穩。
+- ❌ **同顏色 state semantics 三處不一致** — ✓ checkmark / progress bar filled / row Active border / cell Active border 全部表「engaged / done」概念、要全用同 `Color.green`。混 `.accentColor` / `.primary` / `.green` 視覺讀不出 system。
 
 ## Cross-references
 
