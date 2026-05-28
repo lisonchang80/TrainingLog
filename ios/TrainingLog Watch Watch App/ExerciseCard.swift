@@ -89,7 +89,7 @@ struct ExerciseCard: View {
             ForEach(progressBarItems) { item in
                 Rectangle()
                     .fill(item.filled
-                        ? Color.accentColor.opacity(0.9)
+                        ? Color.green   // 對齊 ✓ 打勾色（per user 2026-05-28 polish）
                         : Color.secondary.opacity(0.3))
                     .frame(height: 3)
             }
@@ -357,7 +357,8 @@ enum SetRowGroup: Identifiable {
 // MARK: - Row content views (pure visual, no interaction)
 
 /// Warmup row content — gray dim, parens around weight/reps, no
-/// number, no progress contribution.
+/// number, no progress contribution. Per user 2026-05-28 polish:
+/// warmup keeps the parens (not boxed) to read as planned-but-light.
 private struct SetRowWarmupContent: View {
     let set: SessionSnapshotSet
 
@@ -369,18 +370,24 @@ private struct SetRowWarmupContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text("( \(formatWeight(set.weight)) kg )")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("( \(set.reps ?? 0) 次 )")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            WarmupCellBox(
+                value: formatWeight(set.weight),
+                unit: "kg",
+                minWidth: CellMetrics.weightWidth
+            )
+            WarmupCellBox(
+                value: "\(set.reps ?? 0)",
+                unit: "次",
+                minWidth: CellMetrics.repsWidth
+            )
             Spacer(minLength: 0)
         }
     }
 }
 
-/// Working set row content — numbered, plain visual.
+/// Working set row content — numbered, boxed cells. Per user
+/// 2026-05-28 polish: render as rounded boxes (the `[]` in the
+/// ASCII spec was just illustrative).
 private struct SetRowWorkingContent: View {
     let set: SessionSnapshotSet
     let displayIndex: Int
@@ -393,17 +400,22 @@ private struct SetRowWorkingContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text("[ \(formatWeight(set.weight)) kg ]")
-                .font(.caption2)
-            Text("[ \(set.reps ?? 0) 次 ]")
-                .font(.caption2)
+            CellBox(
+                value: formatWeight(set.weight),
+                unit: "kg",
+                minWidth: CellMetrics.weightWidth
+            )
+            CellBox(
+                value: "\(set.reps ?? 0)",
+                unit: "次",
+                minWidth: CellMetrics.repsWidth
+            )
             Spacer(minLength: 0)
         }
     }
 }
 
-/// Cluster header row content — labelled `D{n}`, same column layout
-/// as working set.
+/// Cluster header row content — labelled `D{n}`, boxed cells.
 private struct SetRowClusterHeaderContent: View {
     let set: SessionSnapshotSet
     let clusterIndex: Int
@@ -416,17 +428,25 @@ private struct SetRowClusterHeaderContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text("[ \(formatWeight(set.weight)) kg ]")
-                .font(.caption2)
-            Text("[ \(set.reps ?? 0) 次 ]")
-                .font(.caption2)
+            CellBox(
+                value: formatWeight(set.weight),
+                unit: "kg",
+                minWidth: CellMetrics.weightWidth
+            )
+            CellBox(
+                value: "\(set.reps ?? 0)",
+                unit: "次",
+                minWidth: CellMetrics.repsWidth
+            )
             Spacer(minLength: 0)
         }
     }
 }
 
-/// Cluster sub-set row content — indented, no number column, weight/reps
-/// only. Per D11 spec line 1394: `[ 40 kg ] [  8 次 ]`.
+/// Cluster sub-set row content — indented, boxed cells. Same 20pt
+/// leading column as the header's `D{n}` for vertical alignment.
+/// Per user 2026-05-28 polish: cluster sub rows column-align with
+/// the header by sharing `CellMetrics.weightWidth` / `repsWidth`.
 private struct SetRowClusterSubContent: View {
     let set: SessionSnapshotSet
 
@@ -434,10 +454,16 @@ private struct SetRowClusterSubContent: View {
         HStack(spacing: 4) {
             // Spacer to align with cluster header's number column
             Text("").frame(width: 20, alignment: .center)
-            Text("[ \(formatWeight(set.weight)) kg ]")
-                .font(.caption2)
-            Text("[ \(set.reps ?? 0) 次 ]")
-                .font(.caption2)
+            CellBox(
+                value: formatWeight(set.weight),
+                unit: "kg",
+                minWidth: CellMetrics.weightWidth
+            )
+            CellBox(
+                value: "\(set.reps ?? 0)",
+                unit: "次",
+                minWidth: CellMetrics.repsWidth
+            )
             Spacer(minLength: 0)
         }
     }

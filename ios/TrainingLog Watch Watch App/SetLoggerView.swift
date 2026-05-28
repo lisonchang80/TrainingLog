@@ -42,21 +42,29 @@ struct SetLoggerView: View {
     @StateObject private var interactionState = SessionInteractionState()
 
     var body: some View {
+        // Page order per user 2026-05-28 polish + spec line 1483
+        // 「完成頁（右滑進入）」:
+        //   - "右滑" (finger slides right) reveals the page on the
+        //     LEFT (lower tag) → 完成頁 must be the lowest tag.
+        //   - Music is reached by the opposite swipe direction
+        //     (finger slides left) → music is the highest tag.
+        //   - Session card sits in the middle as the default landing.
+        // Earlier ordering (music=0, finish=2) was backwards; this
+        // commit swaps them.
         TabView(selection: $selectedPage) {
-            // Page 0 — 音樂 (left). Phase A: native-style placeholder.
-            NowPlayingPlaceholderPage()
+            // Page 0 — 完成頁 (left). Reached via finger right-swipe.
+            FinishPagePlaceholder(snapshot: snapshotForRender)
                 .tag(0)
 
-            // Page 1 — Session card list (D11 main).
+            // Page 1 — Session card list (D11 main, default landing).
             SessionCardListPage(
                 snapshot: snapshotForRender,
                 state: interactionState
             )
             .tag(1)
 
-            // Page 2 — 完成頁 (right). Phase A: placeholder until
-            // D14 SwiftUI impl ships.
-            FinishPagePlaceholder(snapshot: snapshotForRender)
+            // Page 2 — 音樂 (right). Reached via finger left-swipe.
+            NowPlayingPlaceholderPage()
                 .tag(2)
         }
         .tabViewStyle(.page)
