@@ -94,6 +94,21 @@ final class SessionInteractionState: ObservableObject {
     // MARK: - Active row (Phase B)
 
     func activate(setId: String) {
+        // Switching to a DIFFERENT row mid-edit — implicit-commit the
+        // in-flight cell on the old row, then move row Active.
+        //
+        // Without this, the OLD cell's `[]` Active green border would
+        // linger after the user tapped a new row (because activeCell
+        // still pointed at the old setId+field), leading to multiple
+        // green borders showing simultaneously per user 2026-05-29
+        // «更換 row active 時、要取消原本重量/次數 active».
+        //
+        // Implicit commit (vs discard) preserves any value the user
+        // already entered — they were obviously interacting with that
+        // cell, so save the work before bailing.
+        if let oldSetId = activeSetId, oldSetId != setId, activeCell != nil {
+            commitActiveCell()
+        }
         activeSetId = setId
     }
 
