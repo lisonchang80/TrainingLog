@@ -171,11 +171,17 @@ final class PickerViewModel: ObservableObject {
     /// pure WC-mechanics validation.
     func startFromWatch(selection: PickerSelection) async {
         guard let coordinator else {
-            // Preview / no-coordinator: pretend success after 0.5s.
+            // Preview / sim / no-coordinator: mock SUCCESS with the
+            // canonical mock snapshot. This lets the picker → set
+            // logger flow be exercised end-to-end without a paired
+            // iPhone (e.g. for Sim smoke testing the D11 UI).
             isStartingSession = true
             try? await Task.sleep(nanoseconds: 500_000_000)
             isStartingSession = false
-            startResult = .some(nil)  // Simulate transport failure shape
+            startResult = .some(StartFromWatchReply(
+                sessionId: "mock-session-1",
+                snapshot: SetLoggerMockData.mockSnapshot()
+            ))
             return
         }
 
