@@ -53,6 +53,7 @@ import {
   appendReusableSupersetToSession,
   appendSessionExercise,
   captureSessionSnapshot,
+  countSessionExercises,
   deleteSessionExerciseAndSets,
   discardSession,
   getSession,
@@ -63,6 +64,8 @@ import {
   type SessionExerciseRowWithName,
   type SessionSnapshot,
 } from '@/src/adapters/sqlite/sessionRepository';
+import { pushStartToWatch } from '@/src/services/watchSessionStart';
+import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
 import { sessionSnapshotDirty } from '@/src/domain/session/sessionSnapshotDirty';
 import {
   addClusterCycleAtEnd,
@@ -623,6 +626,20 @@ export default function SessionDetailScreen() {
       if (!id) return;
       void (async () => {
         try {
+          // ADR-0019 NEW-Q49 (slice 13d D9) — capture first-add gate state
+          // BEFORE any append. Same predicate as the Today screen consumePick
+          // path; see app/(tabs)/index.tsx for rationale. Read session via
+          // getSession (vs the Today screen's getActiveSession) since the
+          // detail screen is keyed by `id` and may surface an in-progress
+          // session that isn't the active one in edge cases.
+          const sessionForGate = await getSession(db, id);
+          const exerciseCountBefore = await countSessionExercises(db, id);
+          const willFireFirstAddPush = sessionForGate
+            ? shouldFireFirstAddPush({
+                is_watch_tracked: sessionForGate.is_watch_tracked,
+                currentExerciseCount: exerciseCountBefore,
+              })
+            : false;
           // ADR-0019 Round D Amendment Q4 — track lastAppendedId so we can
           // auto-expand the LAST appended exercise card after the loop.
           // Mirrors the Today screen consumePick (see app/(tabs)/index.tsx).
@@ -669,6 +686,13 @@ export default function SessionDetailScreen() {
           // (Q3 c-2 "only-one-expanded" invariant).
           if (lastAppendedId) {
             setExpandedExerciseId(lastAppendedId);
+          }
+          // ADR-0019 NEW-Q49 (slice 13d D9) — fire one-shot pushStartToWatch
+          // when this batch added the first exercise(s) to a freestyle
+          // session. See sibling call site in app/(tabs)/index.tsx for full
+          // rationale.
+          if (willFireFirstAddPush) {
+            void pushStartToWatch(db, id, {});
           }
         } catch (e) {
           Alert.alert(

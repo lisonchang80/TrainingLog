@@ -671,6 +671,27 @@ export interface SessionExerciseRowWithName extends SessionExerciseRow {
   exercise_notes: string | null;
 }
 
+/**
+ * Count rows in `session_exercise` for a given session. Used by the
+ * NEW-Q49 first-add gate (ADR-0019) — iPhone freestyle session 不立即
+ * push 到 Watch、首動作 append 前若 count === 0、append 後觸發
+ * `pushStartToWatch`. Template-based sessions snapshot template rows
+ * at start so count > 0 by the time +動作 path runs, so the same
+ * predicate naturally short-circuits the push for them.
+ *
+ * Slice 13d D9 — NEW-Q49 patch.
+ */
+export async function countSessionExercises(
+  db: Database,
+  session_id: string
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM session_exercise WHERE session_id = ?`,
+    session_id
+  );
+  return row?.n ?? 0;
+}
+
 /** Same as `listSessionExercises` but joins exercise.name + load_type for UI display. */
 export async function listSessionExercisesWithName(
   db: Database,

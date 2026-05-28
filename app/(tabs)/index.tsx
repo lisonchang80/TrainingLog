@@ -25,6 +25,7 @@ import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
+  countSessionExercises,
   createSession,
   deleteSessionExerciseAndSets,
   discardSession,
@@ -143,6 +144,7 @@ import {
 } from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
+import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
 import {
   IDLE,
   canRecordSet,
@@ -508,6 +510,17 @@ export default function TodayScreen() {
         void (async () => {
           const active = await getActiveSession(db);
           if (!active) return;
+          // ADR-0019 NEW-Q49 (slice 13d D9) — capture first-add gate state
+          // BEFORE any append: freestyle sessions (0 rows at this point) get
+          // a one-shot pushStartToWatch after the append loop succeeds, so
+          // the Watch in-session UI hydrates with the new exercise. Template-
+          // based sessions already snapshot ≥1 row at start so the count
+          // gate naturally short-circuits here.
+          const exerciseCountBefore = await countSessionExercises(db, active.id);
+          const willFireFirstAddPush = shouldFireFirstAddPush({
+            is_watch_tracked: active.is_watch_tracked,
+            currentExerciseCount: exerciseCountBefore,
+          });
           // TODO(ADR-0024 § 4 assisted modal block, slice 10g 落地): before
           // calling `appendSessionExercise` for any `load_type === 'assisted'`
           // exercise, gate via `needsBwSnapshotForAppend({ load_type,
@@ -577,6 +590,14 @@ export default function TodayScreen() {
             // any previously-expanded card automatically).
             if (lastAppendedId) {
               setExpandedExerciseId(lastAppendedId);
+            }
+            // ADR-0019 NEW-Q49 (slice 13d D9) — fire one-shot
+            // pushStartToWatch when this batch added the first exercise(s)
+            // to a freestyle session. Mirrors `onStartPlanned` / `onSheetStart`
+            // — fire-and-forget; ack flips is_watch_tracked, Watch unreachable
+            // = silent no-op + retry on next +動作.
+            if (willFireFirstAddPush) {
+              void pushStartToWatch(db, active.id, {});
             }
           } catch (e) {
             Alert.alert(
