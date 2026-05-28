@@ -67,6 +67,7 @@ cd ios && xcodebuild -target "TrainingLog Watch Watch App" \
 2. **ForEach Identifiable**：`ForEach(items) { ... }` 要求 `Identifiable`、否則 `ForEach(items, id: \.someKey)`。
 3. **Switch double-Optional pattern**：`@Published var x: T??` 在 `if let outer = vm.x` 已 unwrap 一層、`outer` 是 `T?`、不能再 `.some(.some(...))`。
 4. **NSNull bridging**：`[String: Any]` 字典中傳 `nil` 會丟 key；要 round-trip null 必須 `NSNull()`。
+5. **`@Published` 需要 import Combine**（D11 PB 踩）：純 `import Foundation` 的 ObservableObject 檔、`@Published var x: T = ...` 會噴 `type does not conform to protocol 'ObservableObject'` + `initializer 'init(wrappedValue:)' is not available due to missing import of defining module 'Combine'`。Fix：`import Combine` 或改 `import SwiftUI`（已 re-export Combine）。
 
 ### Step 4 — Sim 視覺驗證
 
@@ -102,6 +103,17 @@ xcrun simctl launch <UDID> com.lisonchang.TrainingLog.watchkitapp
 ```
 
 **截 cluster 卡（在 scroll 下方）**：simctl 沒 scroll API。改 mock 順序 / 或 SetLoggerView 接受 `snapshot.exercises` 過濾、把 cluster 卡放第一。
+
+**watchOS Sim 互動驗證的兩個天花板**（D11 PB 踩）：
+
+1. **AX tree 在 watchOS Sim 是空的** — `mcp__ios-simulator__ui_describe_point` / `ui_find_element` 對 Watch Sim 一律回 `{AXFrame: {0,0,0,0}, AXLabel: null, ...}` / `[]`。意味 element-aware 互動驗證**做不到**——你不知道某個 (x, y) 是 Button、Text、還是空白。
+2. **Tap event 本身 work**（`ui_tap` / `simctl io tap` 都會送出 synthetic touch）但 hit detection 對 tiny Button 不穩。Caption2-size SF Symbol Button（~14pt label）即便 tap 落在視覺中心、SwiftUI 也可能 miss。
+
+**Recipe**：
+- Phase B+ 互動驗證**只跑視覺 idle screenshot 確認 layout**（border / dim / 排版）+ build green = ship-ready
+- ✓ toggle / cell edit / type cycling 這些 tap 互動的真互動驗證**延後到實機 picker → D11 整鏈 smoke**（Phase H 後）
+- 不要因為「sim 看不到 toggle」就改 logic — code 對就 ship
+- Watch Button hit area 一律 **`.frame(width: 28, height: 28)` + `.contentShape(Rectangle())` + `.font(.body)`**（Apple HIG ≥44pt 推薦、Watch 螢幕小用 28 折衷）；caption2 size 只用在 Text，不用在 Button label。
 
 ### Step 5 — Visual fix-pass
 
@@ -165,6 +177,7 @@ git push origin --delete slice/13d-d{N}-{view-kebab}-phase-{x}
 - 2026-05-28 D8 Phase 2 (Stage 1 handshake wire) `fc844ec` (+295 / -69、1 new .swift)
 - 2026-05-28 D8 Phase 3 (start-from-watch wire) `cdc6897` (+346 / -9、1 new .swift)
 - 2026-05-28 D11 Phase A (visual skeleton) `01ccb50` (+700 / -74、3 new .swift)
+- 2026-05-28 D11 Phase B (`{}` Active + ✓ toggle + progress recalc) `71a34ba` (+304 / -68、1 new .swift)
 
 ## Anti-patterns
 
