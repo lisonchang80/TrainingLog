@@ -39,7 +39,17 @@ import {
 } from '../sqlite/sessionRepository';
 import { startSessionFromTemplate } from '../sqlite/sessionFromTemplate';
 import { listSetsBySession } from '../sqlite/setRepository';
-import { listTemplates } from '../sqlite/templateRepository';
+import {
+  listDistinctSubTagsByProgram,
+  listTemplates,
+} from '../sqlite/templateRepository';
+import {
+  getActiveProgram,
+  listProgramSubTags,
+  listPrograms,
+} from '../sqlite/programRepository';
+import { cellForDate } from '../../domain/program/programManager';
+import { utcMsToIsoDate } from '../../domain/program/programManager';
 import type {
   HandshakePayload,
   JsonValue,
@@ -80,6 +90,70 @@ export interface Stage1TemplateSummary {
 }
 
 /**
+ * Phase 2.5 — one intensity 副標籤 inside a Program's prefetch entry.
+ * Maps 1:1 to the Watch picker's `IntensityOption` value type. The id
+ * IS the sub_tag string (sub_tag is the natural key per ADR-0003 §
+ * Template triple) — keeping it stable lets the Watch send back the
+ * same string on `start-from-watch.intensityId` without an extra map.
+ */
+export interface Stage1IntensitySummary {
+  /** sub_tag value used by `template.sub_tag` (also the natural key). */
+  id: string;
+  /** Display label — currently identical to `id`; reserved for future i18n. */
+  name: string;
+}
+
+/**
+ * Phase 2.5 — one program in the prefetch list. Intensities are inlined
+ * (not a separate top-level field) because the Watch picker's
+ * `ProgramOption` value type already embeds them — keeps the wire shape
+ * 1:1 with the consumer's data model.
+ *
+ * `id` is the program row's primary key (used verbatim by the Watch as
+ * `start-from-watch.programCycleId` — the legacy WC field name is a
+ * misnomer; per ADR-0004 there's no separate program_cycle entity, the
+ * cycles are implicit cycle_index 0..N within a single program row).
+ *
+ * Sourcing of `intensities`: UNION of two existing helpers per the
+ * `program-sub-tag-union-source` skill —
+ *   (a) `listDistinctSubTagsByProgram` — sub_tags currently in use by
+ *       templates classified under this program.
+ *   (b) `listProgramSubTags` — the persistent label dictionary (v022)
+ *       that survives template renames / re-attaches.
+ * Querying only one source silently drops labels; the union dedupes
+ * via a `Set<string>` before projection.
+ */
+export interface Stage1ProgramSummary {
+  /** program.id (NOT program_cycle.id — see field doc above). */
+  id: string;
+  /** Program display name. */
+  name: string;
+  intensities: ReadonlyArray<Stage1IntensitySummary>;
+}
+
+/**
+ * Phase 2.5 — today's planned-day state, computed iPhone-side from the
+ * active program's start_date + today's date + the cell grid.
+ *
+ * Discriminated union; mirrors the Watch picker's `TodayPlanned` enum
+ * (Swift `PickerModels.swift`). The Watch picker:
+ *   - 'planned' → renders a tappable row with `label` (top of the
+ *     計劃訓練 section) leading into `programDayId`-scoped logger.
+ *   - 'restDay' → renders grey「今天休息 💤」row, non-tappable.
+ *   - 'noActiveProgram' → renders empty-state「沒有啟用的計劃」.
+ *
+ * `programDayId` is the program_cell.id of today's cell — Watch uses
+ * this as the natural key for start-from-watch in a future Phase 3+
+ * extension. For Phase 2.5 ship it carries no behaviour on the Watch
+ * yet (set logger D11 doesn't dispatch on it), but wire-shape carries
+ * it forward so we don't need a second handshake-schema bump later.
+ */
+export type Stage1TodayPlanned =
+  | { kind: 'planned'; label: string; programDayId: string }
+  | { kind: 'restDay' }
+  | { kind: 'noActiveProgram' };
+
+/**
  * Stage 1 reply payload. Discriminated by `hasActiveSession` so the
  * Watch picker can `if (reply.hasActiveSession)` and TS narrows away
  * the `session` field on the false variant — eliminates a garbage
@@ -95,17 +169,35 @@ export interface Stage1TemplateSummary {
  * wire-in. Keeping the payload pure means the builder is clock-free
  * and unit-testable.
  */
+/**
+ * Phase 2.5 — extended prefetch envelope. `templates` is the legacy
+ * (Phase 2) field; `programs` and `todayPlanned` were added by Phase 2.5.
+ *
+ * Both new fields are optional at the type level so the same shape
+ * still type-checks for callers that pre-date Phase 2.5 (e.g. mock
+ * builders in unit tests). The orchestrator (`onHandshakeRequest`)
+ * always populates both — `programs: []` when no user programs exist,
+ * `todayPlanned: { kind: 'noActiveProgram' }` when there's no active
+ * program. Watch-side Codable decode is tolerant of missing keys via
+ * `JSONDecoder`'s default-value-on-absent behaviour.
+ */
+export interface Stage1ReplyPrefetch {
+  templates: ReadonlyArray<Stage1TemplateSummary>;
+  programs?: ReadonlyArray<Stage1ProgramSummary>;
+  todayPlanned?: Stage1TodayPlanned;
+}
+
 export type Stage1ReplyPayload =
   | {
       requestId: string;
       hasActiveSession: false;
-      prefetch: { templates: ReadonlyArray<Stage1TemplateSummary> };
+      prefetch: Stage1ReplyPrefetch;
     }
   | {
       requestId: string;
       hasActiveSession: true;
       session: Stage1SessionSummary;
-      prefetch: { templates: ReadonlyArray<Stage1TemplateSummary> };
+      prefetch: Stage1ReplyPrefetch;
     };
 
 // ---------------------------------------------------------------------
@@ -165,24 +257,35 @@ export interface SessionSnapshotSet {
  *   - `activeSession` — `null` if no in-progress session, otherwise
  *     the queried summary
  *   - `templates` — prefetch list (may be empty)
+ *   - `programs` (Phase 2.5, optional) — program list with inline
+ *     intensities. Omitted = absent on the wire (forward-compat with
+ *     pre-2.5 callers); use `[]` to explicitly send an empty list.
+ *   - `todayPlanned` (Phase 2.5, optional) — today's planned-day state.
+ *     Omitted = absent on the wire; Watch defaults to `noActiveProgram`
+ *     when missing.
  */
 export function buildStage1Reply(
   request: HandshakePayload,
   activeSession: Stage1SessionSummary | null,
   templates: ReadonlyArray<Stage1TemplateSummary>,
+  programs?: ReadonlyArray<Stage1ProgramSummary>,
+  todayPlanned?: Stage1TodayPlanned,
 ): Stage1ReplyPayload {
+  const prefetch: Stage1ReplyPrefetch = { templates };
+  if (programs !== undefined) prefetch.programs = programs;
+  if (todayPlanned !== undefined) prefetch.todayPlanned = todayPlanned;
   if (activeSession === null) {
     return {
       requestId: request.requestId,
       hasActiveSession: false,
-      prefetch: { templates },
+      prefetch,
     };
   }
   return {
     requestId: request.requestId,
     hasActiveSession: true,
     session: activeSession,
-    prefetch: { templates },
+    prefetch,
   };
 }
 
@@ -274,6 +377,113 @@ export async function loadActiveSessionSummary(
     startedAt: session.started_at,
     title: session.title ?? '',
     exerciseCount: exercises.length,
+  };
+}
+
+/**
+ * Phase 2.5 — load the program prefetch list for Stage 1. Each entry
+ * carries its inline intensities (sub_tag union from both the legacy
+ * template-derived source and the v022 persistent label dictionary).
+ *
+ * The 10-cap matches the size-budget headroom test in
+ * `handshake.test.ts` — with 10 programs × 5 intensities + 20 templates +
+ * active session summary the reply stays under 2 KB. Users with
+ * >10 programs get the 10 most-recently-edited (`listPrograms` orders
+ * by `is_active DESC, updated_at DESC`).
+ *
+ * Per the `program-sub-tag-union-source` skill: querying only one of
+ * (templates ∪ dictionary) silently drops labels. The UNION dedupes
+ * via a `Set<string>` before projection.
+ *
+ * `listPrograms` already filters the reserved「無」program (v017 seed),
+ * so we don't surface it as a user-pickable option. Watch-side renders
+ * a synthetic「通用」 row on top of this list — not modelled here.
+ */
+export async function loadProgramsPrefetchList(
+  db: Database,
+  limit = 10,
+): Promise<Stage1ProgramSummary[]> {
+  const programs = await listPrograms(db);
+  const capped = programs.slice(0, limit);
+  const out: Stage1ProgramSummary[] = [];
+  for (const p of capped) {
+    // Union: (a) sub_tags actually used by templates under this program +
+    // (b) the persistent label dictionary (v022). Set dedupes ordered-by-
+    // first-seen → stable across calls.
+    const [tplTags, dictTags] = await Promise.all([
+      listDistinctSubTagsByProgram(db, p.id),
+      listProgramSubTags(db, p.id),
+    ]);
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const t of [...tplTags, ...dictTags]) {
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      merged.push(t);
+    }
+    merged.sort((a, b) => a.localeCompare(b));
+    out.push({
+      id: p.id,
+      name: p.name,
+      intensities: merged.map((tag) => ({ id: tag, name: tag })),
+    });
+  }
+  return out;
+}
+
+/**
+ * Phase 2.5 — compute today's planned-day state for the Stage 1 reply.
+ *
+ * Mirrors the iPhone 訓練 tab's `resolveTodayPlan` logic, projected onto
+ * the Watch picker's 3-case enum. Templates that the cell points at but
+ * have been deleted fall back to `restDay` (matches the iPhone-side
+ * behaviour — never start a session against a phantom template).
+ *
+ * `today` parameter is injectable for unit tests; production callers
+ * pass `Date.now()` and we convert to ISO via `utcMsToIsoDate`.
+ *
+ * The label string is human-readable e.g. "推日 W3D1（今日）" — wired
+ * to the same naming convention as the iPhone Today banner.
+ */
+export async function loadTodayPlanned(
+  db: Database,
+  nowMs: number = Date.now(),
+): Promise<Stage1TodayPlanned> {
+  const active = await getActiveProgram(db);
+  if (!active) return { kind: 'noActiveProgram' };
+  const today = utcMsToIsoDate(nowMs);
+  const cell = cellForDate({
+    program: active.program,
+    cells: active.cells,
+    date: today,
+  });
+  if (!cell || !cell.template_id) {
+    return { kind: 'restDay' };
+  }
+  // Look up the template name for the label. `listTemplates` is cheap
+  // — the prefetch list query reuses the same call in
+  // onHandshakeRequest, but we re-query here to keep the helper
+  // self-contained for unit testing.
+  const tplRow = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM template WHERE id = ?`,
+    cell.template_id,
+  );
+  if (!tplRow) {
+    // Cell points at a deleted template — same fallback as
+    // resolveTodayPlan (kind: 'rest').
+    return { kind: 'restDay' };
+  }
+  // Label format: "<template name> W<cycle>D<day>（今日）" — cycle and
+  // day are 1-based in the user-facing label per the iPhone Today
+  // banner convention.
+  const w = cell.cycle_index + 1;
+  const d = cell.day_index + 1;
+  const subTagSuffix = cell.sub_tag ? ` · ${cell.sub_tag}` : '';
+  const label = `${tplRow.name} W${w}D${d}（今日）${subTagSuffix}`;
+  return {
+    kind: 'planned',
+    label,
+    programDayId: cell.id,
   };
 }
 
@@ -423,17 +633,34 @@ export async function onHandshakeRequest(
 ): Promise<void> {
   if (!replyHandler) return;
   try {
-    const [activeSession, templates] = await Promise.all([
+    // Phase 2.5 — fan out programs + todayPlanned in parallel with the
+    // pre-existing active-session + templates reads. All four are cheap
+    // independent queries; Promise.all keeps the round-trip latency at
+    // the slowest individual query (still well under 100ms even with
+    // 20 templates × 10 programs on better-sqlite3).
+    const [activeSession, templates, programs, todayPlanned] = await Promise.all([
       loadActiveSessionSummary(db),
       loadTemplatePrefetchList(db),
+      loadProgramsPrefetchList(db),
+      loadTodayPlanned(db),
     ]);
-    const reply = buildStage1Reply(env.payload, activeSession, templates);
+    const reply = buildStage1Reply(
+      env.payload,
+      activeSession,
+      templates,
+      programs,
+      todayPlanned,
+    );
     replyHandler(reply as unknown as Record<string, unknown>);
   } catch (e) {
     // Best-effort: degrade to empty reply so Watch picker can render
     // "no active session, no templates" rather than hang on timeout.
     // Error swallowed at the boundary; surface via console.warn so
     // crash reporting (post-TestFlight) picks it up.
+    //
+    // Phase 2.5: also include empty programs + noActiveProgram in the
+    // fallback so the Watch picker doesn't fall through to its
+    // pre-2.5 hardcoded mock state.
     // eslint-disable-next-line no-console
     console.warn(
       '[handshake] onHandshakeRequest failed, falling back to empty reply:',
@@ -442,7 +669,11 @@ export async function onHandshakeRequest(
     replyHandler({
       requestId: env.payload.requestId,
       hasActiveSession: false,
-      prefetch: { templates: [] },
+      prefetch: {
+        templates: [],
+        programs: [],
+        todayPlanned: { kind: 'noActiveProgram' },
+      },
     });
   }
 }

@@ -44,11 +44,14 @@ import {
   buildStartFromIphone,
   fetchSessionSnapshot,
   loadActiveSessionSummary,
+  loadProgramsPrefetchList,
   loadTemplatePrefetchList,
+  loadTodayPlanned,
   matchesPendingRequest,
   onHandshakeRequest,
   onStartFromWatch,
   type SessionSnapshot,
+  type Stage1ProgramSummary,
   type Stage1ReplyPayload,
   type Stage1SessionSummary,
   type Stage1TemplateSummary,
@@ -825,7 +828,13 @@ describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () =>
     expect(replies[0]).toEqual({
       requestId: 'req-err',
       hasActiveSession: false,
-      prefetch: { templates: [] },
+      // Phase 2.5: fallback reply now carries empty programs + noActiveProgram
+      // so the Watch picker doesn't fall back to its pre-2.5 mock state.
+      prefetch: {
+        templates: [],
+        programs: [],
+        todayPlanned: { kind: 'noActiveProgram' },
+      },
     });
     // Re-open before afterEach.close() runs (harmless re-close otherwise).
     db = new BetterSqliteDatabase(':memory:');
@@ -949,5 +958,482 @@ describe('WC handshake — onStartFromWatch (orchestrator, D9 wire-in)', () => {
     const env = makeEnvelope('start-from-watch', sample);
     expect(env.kind).toBe('start-from-watch');
     expect(env.payload).toEqual(sample);
+  });
+});
+
+// =====================================================================
+// Phase 2.5 — Stage 1 reply extension (programs + intensities + todayPlanned)
+// =====================================================================
+
+describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', () => {
+  const sampleRequest: HandshakePayload = {
+    requestId: 'req-25',
+    clientVersion: '13d.0',
+  };
+
+  it('omits programs / todayPlanned from prefetch when not provided (forward-compat with pre-2.5 callers)', () => {
+    const reply = buildStage1Reply(sampleRequest, null, []);
+    expect(reply.prefetch.templates).toEqual([]);
+    expect(reply.prefetch.programs).toBeUndefined();
+    expect(reply.prefetch.todayPlanned).toBeUndefined();
+  });
+
+  it('carries programs with inline intensities verbatim into the prefetch', () => {
+    const programs: Stage1ProgramSummary[] = [
+      {
+        id: 'p1',
+        name: 'Linear progression',
+        intensities: [
+          { id: '12RM', name: '12RM' },
+          { id: '10RM', name: '10RM' },
+        ],
+      },
+      {
+        id: 'p2',
+        name: 'PPL',
+        intensities: [],
+      },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, [], programs);
+    expect(reply.prefetch.programs).toHaveLength(2);
+    expect(reply.prefetch.programs?.[0]).toEqual({
+      id: 'p1',
+      name: 'Linear progression',
+      intensities: [
+        { id: '12RM', name: '12RM' },
+        { id: '10RM', name: '10RM' },
+      ],
+    });
+    expect(reply.prefetch.programs?.[1].intensities).toEqual([]);
+  });
+
+  it('carries todayPlanned discriminated-union variants verbatim', () => {
+    const planned = buildStage1Reply(sampleRequest, null, [], [], {
+      kind: 'planned',
+      label: '推日 W3D1（今日）',
+      programDayId: 'cell-1',
+    });
+    expect(planned.prefetch.todayPlanned).toEqual({
+      kind: 'planned',
+      label: '推日 W3D1（今日）',
+      programDayId: 'cell-1',
+    });
+
+    const restDay = buildStage1Reply(sampleRequest, null, [], [], {
+      kind: 'restDay',
+    });
+    expect(restDay.prefetch.todayPlanned).toEqual({ kind: 'restDay' });
+
+    const noProgram = buildStage1Reply(sampleRequest, null, [], [], {
+      kind: 'noActiveProgram',
+    });
+    expect(noProgram.prefetch.todayPlanned).toEqual({
+      kind: 'noActiveProgram',
+    });
+  });
+
+  it('Phase 2.5 reply with 10 programs × 5 intensities + 20 templates + active session stays under 4KB', () => {
+    const active: Stage1SessionSummary = {
+      sessionId: 'sess-1',
+      startedAt: 1_700_000_000_000,
+      title: 'Push Day',
+      exerciseCount: 10,
+    };
+    const templates: Stage1TemplateSummary[] = Array.from(
+      { length: 20 },
+      (_, i) => ({ templateId: `tpl-${i}`, name: `Template ${i}` }),
+    );
+    const programs: Stage1ProgramSummary[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `p${i}`,
+      name: `Program ${i}`,
+      intensities: Array.from({ length: 5 }, (_, j) => ({
+        id: `i${i}-${j}`,
+        name: `Intensity ${j}`,
+      })),
+    }));
+    const reply = buildStage1Reply(
+      sampleRequest,
+      active,
+      templates,
+      programs,
+      { kind: 'planned', label: '推日 W3D1（今日）', programDayId: 'cell-1' },
+    );
+    const size = JSON.stringify(reply).length;
+    expect(size).toBeLessThan(4096);
+  });
+});
+
+describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('returns empty array when only the reserved「無」 program exists (v017 seed)', async () => {
+    // migrate() seeds the reserved program automatically; no user programs.
+    const list = await loadProgramsPrefetchList(db);
+    expect(list).toEqual([]);
+  });
+
+  it('projects programs with sub_tags UNIONed from templates + dictionary', async () => {
+    const now = 1_700_000_000_000;
+    // User program
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-user',
+      'My Program',
+      null,
+      7,
+      4,
+      '2025-01-01',
+      1,
+      now,
+      now,
+    );
+    // Two templates under this program with different sub_tags.
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-1',
+      'Push',
+      now,
+      now,
+      'p-user',
+      '12RM',
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-2',
+      'Pull',
+      now,
+      now,
+      'p-user',
+      '10RM',
+    );
+    // A historical sub_tag in the dictionary only (no current template).
+    await db.runAsync(
+      `INSERT INTO program_sub_tag (program_id, sub_tag, created_at) VALUES (?, ?, ?)`,
+      'p-user',
+      '8RM',
+      now,
+    );
+
+    const list = await loadProgramsPrefetchList(db);
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe('p-user');
+    expect(list[0].name).toBe('My Program');
+    // Order is alphabetical after the union dedupe; localeCompare sorts
+    // numeric prefixes "10RM" / "12RM" / "8RM" in lexicographic order.
+    expect(list[0].intensities.map((i) => i.id)).toEqual(['10RM', '12RM', '8RM']);
+  });
+
+  it('dedupes sub_tags that appear in BOTH the template scan and the dictionary', async () => {
+    const now = 1_700_000_000_000;
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-x',
+      'X',
+      null,
+      7,
+      1,
+      '2025-01-01',
+      0,
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-dup',
+      'Dup',
+      now,
+      now,
+      'p-x',
+      'DupTag',
+    );
+    await db.runAsync(
+      `INSERT INTO program_sub_tag (program_id, sub_tag, created_at) VALUES (?, ?, ?)`,
+      'p-x',
+      'DupTag',
+      now,
+    );
+    const list = await loadProgramsPrefetchList(db);
+    expect(list[0].intensities).toEqual([{ id: 'DupTag', name: 'DupTag' }]);
+  });
+
+  it('respects the limit parameter (caps to N most-recent)', async () => {
+    const now = 1_700_000_000_000;
+    for (let i = 0; i < 15; i++) {
+      await db.runAsync(
+        `INSERT INTO program
+           (id, name, main_tag, cycle_length, cycle_count, start_date,
+            is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `p-${i}`,
+        `Program ${i}`,
+        null,
+        7,
+        1,
+        '2025-01-01',
+        0,
+        now + i,
+        now + i,
+      );
+    }
+    const list = await loadProgramsPrefetchList(db, 10);
+    expect(list).toHaveLength(10);
+  });
+});
+
+describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('returns noActiveProgram when no user program is active', async () => {
+    const today = await loadTodayPlanned(db);
+    expect(today).toEqual({ kind: 'noActiveProgram' });
+  });
+
+  it('returns restDay when the active program has no cell for today', async () => {
+    const now = 1_700_000_000_000;
+    // 7-day program, only cell at (cycle 0, day 0). start_date is today.
+    const todayIso = '2025-06-15';
+    const todayMs = Date.UTC(2025, 5, 15);
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-active',
+      'Active',
+      null,
+      7,
+      1,
+      todayIso,
+      1,
+      now,
+      now,
+    );
+    // Cell at day 2 — today (day 0) has no cell row, so renders as rest.
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, NULL, NULL)`,
+      'c-1',
+      'p-active',
+      0,
+      2,
+    );
+    const today = await loadTodayPlanned(db, todayMs);
+    expect(today).toEqual({ kind: 'restDay' });
+  });
+
+  it('returns planned with label + programDayId when today is a planned training day', async () => {
+    const now = 1_700_000_000_000;
+    const todayIso = '2025-06-15';
+    const todayMs = Date.UTC(2025, 5, 15);
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-act',
+      'Act',
+      null,
+      7,
+      1,
+      todayIso,
+      1,
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-push',
+      '推日',
+      now,
+      now,
+      'p-act',
+      '12RM',
+    );
+    // Cell at cycle 0 / day 0 (today) — pointing at tpl-push.
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'cell-today',
+      'p-act',
+      0,
+      0,
+      'tpl-push',
+      '12RM',
+    );
+    const today = await loadTodayPlanned(db, todayMs);
+    expect(today.kind).toBe('planned');
+    if (today.kind === 'planned') {
+      expect(today.programDayId).toBe('cell-today');
+      expect(today.label).toContain('推日');
+      expect(today.label).toContain('（今日）');
+      // W1D1 = cycle_index 0 + 1 / day_index 0 + 1
+      expect(today.label).toContain('W1D1');
+      // sub_tag suffix
+      expect(today.label).toContain('12RM');
+    }
+  });
+
+  it('falls back to restDay when the today cell points at a deleted template', async () => {
+    const now = 1_700_000_000_000;
+    const todayIso = '2025-06-15';
+    const todayMs = Date.UTC(2025, 5, 15);
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-ghost',
+      'Ghost',
+      null,
+      7,
+      1,
+      todayIso,
+      1,
+      now,
+      now,
+    );
+    // Insert a template, attach a cell to it, then drop FK enforcement
+    // temporarily so we can DELETE the template without cascading the
+    // cell — simulates a stale cell pointing at a row that no longer
+    // exists (post-import / migration glitch).
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-will-die',
+      'Doomed',
+      now,
+      now,
+      'p-ghost',
+      null,
+    );
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'cell-ghost',
+      'p-ghost',
+      0,
+      0,
+      'tpl-will-die',
+      null,
+    );
+    // Toggle FK off, delete the template row, restore FK.
+    await db.runAsync(`PRAGMA foreign_keys = OFF`);
+    await db.runAsync(`DELETE FROM template WHERE id = ?`, 'tpl-will-die');
+    await db.runAsync(`PRAGMA foreign_keys = ON`);
+    const today = await loadTodayPlanned(db, todayMs);
+    expect(today).toEqual({ kind: 'restDay' });
+  });
+});
+
+describe('Phase 2.5 — onHandshakeRequest wires programs + todayPlanned (orchestrator)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const buildEnv = (requestId = 'req-1'): WCMessage & {
+    kind: 'handshake';
+    payload: HandshakePayload;
+  } =>
+    makeEnvelope('handshake', {
+      requestId,
+      clientVersion: '13d.0',
+    } satisfies HandshakePayload);
+
+  it('reply prefetch carries programs: [] + todayPlanned: noActiveProgram on an empty DB', async () => {
+    const replies: Record<string, unknown>[] = [];
+    await onHandshakeRequest(db, buildEnv(), (r) => replies.push(r));
+    const reply = replies[0] as unknown as Stage1ReplyPayload;
+    expect(reply.prefetch.programs).toEqual([]);
+    expect(reply.prefetch.todayPlanned).toEqual({ kind: 'noActiveProgram' });
+  });
+
+  it('reply prefetch carries real programs (from DB) — todayPlanned shape always present', async () => {
+    const now = 1_700_000_000_000;
+    // Active program with no cell for today → todayPlanned resolves to
+    // restDay. We don't try to fabricate a "today is W1D1" cell here
+    // because the orchestrator uses Date.now() internally — the
+    // load-time-injectable variant is exercised by the loadTodayPlanned
+    // suite above; this test just confirms the orchestrator wires both
+    // fields through to the prefetch.
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'p-real',
+      'Real Program',
+      null,
+      7,
+      1,
+      '2025-01-01',
+      1,
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'tpl-r',
+      'PushDay',
+      now,
+      now,
+      'p-real',
+      'A',
+    );
+
+    const replies: Record<string, unknown>[] = [];
+    await onHandshakeRequest(db, buildEnv(), (r) => replies.push(r));
+    const reply = replies[0] as unknown as Stage1ReplyPayload;
+    expect(reply.prefetch.programs).toHaveLength(1);
+    expect(reply.prefetch.programs?.[0]).toEqual({
+      id: 'p-real',
+      name: 'Real Program',
+      intensities: [{ id: 'A', name: 'A' }],
+    });
+    // Active program is set but no cells → either restDay (cell row
+    // missing) or noActiveProgram is impossible since active program
+    // exists. Assert: shape carries through, kind is a known variant.
+    expect(reply.prefetch.todayPlanned).toBeDefined();
+    expect(['planned', 'restDay', 'noActiveProgram']).toContain(
+      reply.prefetch.todayPlanned?.kind,
+    );
   });
 });

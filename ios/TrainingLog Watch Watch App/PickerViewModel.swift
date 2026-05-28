@@ -5,12 +5,15 @@
 //  Slice 13d D8 — picker view-state owner.
 //
 //  Phase 1 (skeleton 73b2dfc): hardcoded mock data factories only.
-//  Phase 2 (this commit, Path A minimal): coordinator integration +
-//  Stage 1 handshake wire. Templates now come from real iPhone data
-//  via `WatchConnectivityCoordinator.requestHandshake()`. Programs +
-//  intensities + today's planned-day remain Phase-1-shaped (hardcoded
-//  or empty) until Phase 2.5 extends `Stage1ReplyPayload` to carry
-//  them — see ADR-0019 NEW-Q44 for the staged-extension rationale.
+//  Phase 2 (Path A minimal): coordinator integration + Stage 1
+//  handshake wire — templates only.
+//  Phase 2.5 (this commit): Stage 1 reply extension landed —
+//  programs + per-program intensities + today's planned-day now
+//  flow from the iPhone-side `loadProgramsPrefetchList` /
+//  `loadTodayPlanned` builders. The hardcoded mock paths
+//  (mockDefault / mockRestDay / mockNoProgram / mockNoTemplates /
+//  mockAllEmpty) survive intact for `#Preview` invocations only.
+//  See ADR-0019 NEW-Q44 for the staged-extension rationale.
 //
 //  Why @MainActor: SwiftUI views observe @Published mutations on the
 //  main thread; the WC reply handler hops to MainActor before
@@ -34,9 +37,10 @@ final class PickerViewModel: ObservableObject {
     @Published var templates: [TemplateOption]
 
     /// Active programs the user can pick from in the 計劃 sheet.
-    /// Phase 2: stays as init value (caller-provided mock OR empty).
-    /// Phase 2.5 will populate from a Stage 1 extension carrying
-    /// `programs` + per-program intensities.
+    /// Phase 2.5 (this commit): populated from the Stage 1 reply's
+    /// `prefetch.programs` field (which carries inline intensities per
+    /// program). Older iPhone builds that don't send the field → init
+    /// value (caller-provided mock OR empty `[]`) survives.
     @Published var programs: [ProgramOption]
 
     /// True while a handshake round-trip is in flight (cold bootstrap
@@ -145,13 +149,47 @@ final class PickerViewModel: ObservableObject {
 
     // MARK: - Stage 1 reply application
 
-    /// Map Stage 1 reply onto view state. Phase 2 minimal scope:
-    /// only `templates` field is touched. Phase 2.5 will extend to
-    /// programs + today's planned-day once the wire schema carries
-    /// them.
+    /// Map Stage 1 reply onto view state. Phase 2 wired only
+    /// `templates`; Phase 2.5 (this commit) extends to `programs` +
+    /// `todayPlanned` from the iPhone-side `loadProgramsPrefetchList`
+    /// + `loadTodayPlanned` builders (`src/adapters/watch/handshake.ts`).
+    ///
+    /// Optional-field semantics:
+    ///   - `reply.prefetch.programs == nil` (older iPhone build) →
+    ///     leave existing `self.programs` in place (init value = `[]`,
+    ///     or whatever the caller's mock factory seeded).
+    ///   - `reply.prefetch.todayPlanned == nil` (older iPhone build) →
+    ///     leave existing `self.todayPlanned` in place.
+    ///   - Both fields populated → overwrite verbatim.
     func applyStage1Reply(_ reply: Stage1Reply) {
         templates = reply.prefetch.templates.map { summary in
             TemplateOption(id: summary.templateId, name: summary.name)
+        }
+        // Phase 2.5 — programs with inline intensities.
+        if let programDTOs = reply.prefetch.programs {
+            programs = programDTOs.map { p in
+                ProgramOption(
+                    id: p.id,
+                    name: p.name,
+                    intensities: p.intensities.map { i in
+                        IntensityOption(id: i.id, name: i.name)
+                    }
+                )
+            }
+        }
+        // Phase 2.5 — today's planned-day.
+        if let plannedDTO = reply.prefetch.todayPlanned {
+            switch plannedDTO {
+            case .planned(let label, let programDayId):
+                todayPlanned = .planned(
+                    label: label,
+                    programDayId: programDayId
+                )
+            case .restDay:
+                todayPlanned = .restDay
+            case .noActiveProgram:
+                todayPlanned = .noActiveProgram
+            }
         }
         // NB: reply.hasActiveSession is intentionally ignored in
         // Phase 2. Phase 3 will branch here to auto-adopt the
