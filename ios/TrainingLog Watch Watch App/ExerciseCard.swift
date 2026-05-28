@@ -27,6 +27,33 @@ struct ExerciseCard: View {
 
     @ObservedObject var state: SessionInteractionState
 
+    // MARK: - D15 ⋯ menu state
+    //
+    // `dotsMenuOpen` drives the sheet that mounts DotsMenuView.
+    // `isSkipped` is an in-card flag — caller's responsibility to
+    // persist if/when D9 lands the real DB column. For now we flip
+    // it in-memory so the user can see the menu label swap ⏭ ↔ ↩.
+    //
+    // `pendingConfirm` is set when the user picks 🗑 from the menu;
+    // it opens DotsMenuConfirmView via a second sheet. We chain
+    // sheets rather than nesting so swiping the inner one returns
+    // to the menu (per spec line 2176 框外 tap / 左滑 = [取消]).
+    //
+    // `pendingHistorySide` is non-nil when the user picked 📊;
+    // drives the history sub-page push.
+    //
+    // TODO: D9 wire `skipped` flag to repo (currently in-memory only).
+    // TODO: D9 wire DELETE session_exercise CASCADE on delete confirm.
+    // TODO: D9 wire ExerciseHistory real DB query (replace mock).
+    // TODO: D15 wire superset card variant (3-row header [超] + A ＋ B)
+    //       when D11 frozen spec sweep lands the cluster card type.
+    //       Currently every ExerciseCard renders as a solo card; the
+    //       menu defaults `isCluster: false`.
+    @State private var dotsMenuOpen: Bool = false
+    @State private var isSkipped: Bool = false
+    @State private var pendingConfirm: Bool = false
+    @State private var pendingHistorySide: Int? = nil
+
     /// Grouped rows for rendering. Consecutive `dropset` rows are
     /// folded into a `cluster` group with the first dropset as the
     /// cluster header and the remaining ones as sub-sets.
@@ -62,6 +89,62 @@ struct ExerciseCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.secondary.opacity(0.15))
         )
+        .opacity(isSkipped ? 0.4 : 1.0)  // Spec line 2096: dim 30%-ish.
+        // D15 menu sheet (per ADR-0019 § Slice 13d D15).
+        .sheet(isPresented: $dotsMenuOpen) {
+            // NavigationStack lets 📊 history push as a sub-page with
+            // `‹` back chevron returning to the menu (per spec line 2148).
+            NavigationStack {
+                DotsMenuView(
+                    exerciseName: exercise.exerciseName,
+                    isCluster: false,
+                    isSkipped: isSkipped,
+                    clusterChildren: nil,
+                    onReset: {
+                        resetExerciseInMemory()
+                    },
+                    onSkip: {
+                        // Toggle in-memory; D9 will wire to repo.
+                        isSkipped.toggle()
+                    },
+                    onDelete: {
+                        // Show confirm dialog — gate the destructive
+                        // action behind View 4 per spec line 2166.
+                        pendingConfirm = true
+                    },
+                    onShowHistory: { side in
+                        pendingHistorySide = side
+                    }
+                )
+                // Push history sub-page when user taps 📊.
+                .navigationDestination(isPresented: Binding(
+                    get: { pendingHistorySide != nil },
+                    set: { if !$0 { pendingHistorySide = nil } }
+                )) {
+                    ExerciseHistoryView(
+                        exerciseName: exercise.exerciseName,
+                        records: ExerciseHistoryMock.fetch(
+                            exerciseName: exercise.exerciseName
+                        )
+                    )
+                }
+                // Confirm dialog stacked as another sheet so dismissing
+                // it returns to the menu (per spec line 2176).
+                .sheet(isPresented: $pendingConfirm) {
+                    DotsMenuConfirmView(
+                        exerciseName: exercise.exerciseName,
+                        isCluster: false,
+                        onConfirm: {
+                            // TODO: D9 wire DELETE session_exercise
+                            // CASCADE — for now just dismiss back to
+                            // D11 (caller would auto-scroll to next
+                            // exercise per spec line 2208).
+                            dotsMenuOpen = false
+                        }
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Header
@@ -72,14 +155,39 @@ struct ExerciseCard: View {
                 .font(.headline)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            Image(systemName: "ellipsis.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                // Phase B: visual only. Tap target inert until
-                // D15 ⋯ menu wires up.
+            // D15: `[⋯]` Button. Min 44×44 hit area per spec line 1980;
+            // SF Symbol `ellipsis.circle` at .body visual size.
+            // Always enabled — `{}` Active does NOT block this tap
+            // per spec line 2159.
+            Button {
+                dotsMenuOpen = true
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 2)
+    }
+
+    // MARK: - D15 in-memory side effects (D9 will replace with real DB)
+
+    /// 重置此動作 — flip every set in this exercise to `is_logged=false`.
+    /// Per spec line 2083 「reps / weight 不動、保留 user 已 log 的值」 —
+    /// we only clear `loggedSetIds` and any active row/cell highlight;
+    /// `editedValues` (committed cell edits) stay intact so the user
+    /// can re-tap ✓ on the same values.
+    private func resetExerciseInMemory() {
+        let myIds = Set(exercise.sets.map { $0.setId })
+        state.loggedSetIds.subtract(myIds)
+        if let active = state.activeSetId, myIds.contains(active) {
+            state.activeSetId = nil
+            state.activeCell = nil
+        }
     }
 
     // MARK: - Progress bar
