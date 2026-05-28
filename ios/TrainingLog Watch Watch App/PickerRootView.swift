@@ -191,7 +191,7 @@ struct PickerRootView: View {
             )
 
         case .setLogger(let selection):
-            PickerSetLoggerPlaceholderView(selection: selection)
+            PickerSetLoggerPlaceholderView(selection: selection, vm: vm)
         }
     }
 
@@ -267,21 +267,32 @@ private struct EmptyStateRow: View {
     }
 }
 
-// MARK: - Terminal placeholder (Phase 1)
+// MARK: - Terminal placeholder (D11 stub)
 
-/// Phase 1 stub destination — replaces D11 set logger view. Renders
-/// the captured 3-tuple so we can visually verify the navigation
-/// flow without depending on D11 impl. Phase 3 swaps this for the
-/// actual D11 view + outbound `start-from-watch` send.
+/// Phase 3 stub destination — fires `start-from-watch` to iPhone on
+/// mount and renders the WC reply state (creating / created /
+/// failed). Replaces D11 set logger view until that ships.
+///
+/// State machine:
+///   - On appear:        kick off vm.startFromWatch(selection)
+///   - isStartingSession: spinner + "與 iPhone 同步中…"
+///   - startResult = nil after attempt: shouldn't happen (set before
+///                                       returning)
+///   - startResult = .some(nil): WC transport failure
+///   - startResult = .some(reply) isOK=true: render sessionId + exercises
+///   - startResult = .some(reply) isOK=false: iPhone-reported failure
+///
+/// Phase 4+ replaces this view with the actual D11 set logger.
 struct PickerSetLoggerPlaceholderView: View {
     let selection: PickerSelection
+    @ObservedObject var vm: PickerViewModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Set logger 進入點")
                     .font(.headline)
-                Text("(D11 未實作、Phase 3 wire)")
+                Text("(D11 未實作、stub)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Divider().padding(.vertical, 2)
@@ -293,11 +304,62 @@ struct PickerSetLoggerPlaceholderView: View {
                     .font(.caption2)
                 Text("強度：\(selection.intensity?.name ?? "通用")")
                     .font(.caption2)
+
+                Divider().padding(.vertical, 2)
+
+                Text("WC 狀態").font(.caption).bold()
+                wcStatusBlock
             }
             .padding()
         }
         .navigationTitle("Set logger")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await vm.startFromWatch(selection: selection)
+        }
+    }
+
+    @ViewBuilder
+    private var wcStatusBlock: some View {
+        if vm.isStartingSession {
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("與 iPhone 同步中…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let attempted = vm.startResult {
+            // attempted is `StartFromWatchReply?` (outer optional unwrapped).
+            // nil ⇒ WC transport failure (no reply / framework err).
+            // .some(reply) ⇒ iPhone responded; check reply.isOK for outcome.
+            if let reply = attempted {
+                if reply.isOK, let snapshot = reply.snapshot {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Session 建立成功", systemImage: "checkmark.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                        Text("sess=\(String(reply.sessionId.prefix(8)))…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("動作數：\(snapshot.exercises.count)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Label("iPhone 回報失敗", systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            } else {
+                Label("傳輸失敗（iPhone 未配對或無回應）", systemImage: "wifi.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        } else {
+            Text("尚未發送")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

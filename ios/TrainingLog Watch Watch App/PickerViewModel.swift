@@ -43,6 +43,22 @@ final class PickerViewModel: ObservableObject {
     /// OR 🔄 refresh tap). Drives the toolbar icon's spin animation.
     @Published var isRefreshing: Bool = false
 
+    // MARK: - Start-from-watch state (Phase 3)
+
+    /// True while a start-from-watch round-trip is in flight. The
+    /// Phase 3 placeholder view uses this to render a "creating
+    /// session…" indicator.
+    @Published var isStartingSession: Bool = false
+
+    /// Result of the most recent `startFromWatch(...)` call. Cleared
+    /// each time the picker root reappears (`resetSelection`).
+    /// Cases:
+    ///   - nil: no attempt yet
+    ///   - .some(nil): WC transport failure (no reply / framework err)
+    ///   - .some(reply) with isOK=true: iPhone created the session
+    ///   - .some(reply) with isOK=false: iPhone replied, couldn't create
+    @Published var startResult: StartFromWatchReply??
+
     // MARK: - 3-tuple navigation state
 
     @Published var selectedTemplate: TemplateOption?
@@ -143,13 +159,47 @@ final class PickerViewModel: ObservableObject {
         // Until D11 is built, there's no set logger to jump to.
     }
 
+    // MARK: - Start-from-watch (Phase 3)
+
+    /// Fire `start-from-watch` outbound for the captured selection
+    /// and store the result. Idempotent at the VM level: re-firing
+    /// with the same selection re-sends (Phase 3 doesn't dedup;
+    /// Phase 4+ may add a hashing guard).
+    ///
+    /// HK lifecycle is NOT touched here — `SessionController.start()`
+    /// belongs to D11 set logger's lifecycle ownership. Phase 3 is
+    /// pure WC-mechanics validation.
+    func startFromWatch(selection: PickerSelection) async {
+        guard let coordinator else {
+            // Preview / no-coordinator: pretend success after 0.5s.
+            isStartingSession = true
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            isStartingSession = false
+            startResult = .some(nil)  // Simulate transport failure shape
+            return
+        }
+
+        isStartingSession = true
+        defer { isStartingSession = false }
+
+        let reply = await coordinator.sendStartFromWatch(
+            templateId: selection.template?.id,
+            programCycleId: selection.program?.id,
+            intensityId: selection.intensity?.id
+        )
+        startResult = .some(reply)
+    }
+
     // MARK: - Selection helpers
 
-    /// Reset 3-tuple slots when user leaves the drill-down.
+    /// Reset 3-tuple slots when user leaves the drill-down. Also
+    /// clears any prior start-from-watch result.
     func resetSelection() {
         selectedTemplate = nil
         selectedProgram = nil
         selectedIntensity = nil
+        startResult = nil
+        isStartingSession = false
     }
 
     /// Convenience for "user picked today's planned row".

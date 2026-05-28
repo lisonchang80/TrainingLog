@@ -207,6 +207,92 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     //   - Reply shape doesn't decode into `Stage1Reply`
     //   - Reply's requestId doesn't match the one we sent
 
+    // MARK: - Outbound: start-from-watch (D8 Phase 3)
+    //
+    // Sends the WC channel #1 `start-from-watch` envelope (per
+    // ADR-0019 § Slice 13d Amendment Q42 / NEW-Q42) carrying the
+    // user's 3-tuple selection. iPhone's `onStartFromWatch`
+    // orchestrator (D9 wire-in, d7edadd) creates the session row,
+    // flips `is_watch_tracked=true`, and replies with the full
+    // SessionSnapshot.
+    //
+    // Phase 3 scope: just wire the WC mechanics + parse the reply.
+    // HK lifecycle (SessionController.start()) is intentionally NOT
+    // triggered here — D11 set logger owns HK timing.
+
+    /// Send `start-from-watch` to iPhone with the user's 3-tuple +
+    /// await reply. Same race-resistance / activation gating as
+    /// `requestHandshake`. Returns nil on transport failure;
+    /// returns a `StartFromWatchReply` with `isOK == false` when
+    /// iPhone replied but couldn't create the session.
+    func sendStartFromWatch(
+        templateId: String?,
+        programCycleId: String?,
+        intensityId: String?
+    ) async -> StartFromWatchReply? {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "start-from-watch skip: not activated"
+            return nil
+        }
+        guard session.isReachable else {
+            lastOutbound = "start-from-watch skip: iPhone unreachable"
+            return nil
+        }
+
+        // Per StartFromWatchPayload (payloadSchema.ts): all 3 fields
+        // present, null for absent. NSNull bridges to JSON null on
+        // the WC wire; plain `nil` in a Swift `[String: Any]` drops
+        // the key entirely which makes TS-side optional-chain checks
+        // pass with `undefined` (then JSON.stringify drops it).
+        // Stick with NSNull to match the protocol shape verbatim.
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "start-from-watch",
+            "payload": [
+                "templateId": (templateId as Any?) ?? NSNull(),
+                "programCycleId": (programCycleId as Any?) ?? NSNull(),
+                "intensityId": (intensityId as Any?) ?? NSNull(),
+            ],
+        ]
+
+        lastOutbound = "start-from-watch sent"
+            + " template=\(templateId.map(prefix8) ?? "—")"
+            + " program=\(programCycleId.map(prefix8) ?? "—")"
+            + " intensity=\(intensityId.map(prefix8) ?? "—")"
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<StartFromWatchReply?, Never>) in
+            session.sendMessage(
+                envelope,
+                replyHandler: { [weak self] reply in
+                    Task { @MainActor [weak self] in
+                        guard let parsed = StartFromWatchReply.parse(from: reply) else {
+                            self?.lastInbound = "start-from-watch reply: unparseable"
+                            cont.resume(returning: nil)
+                            return
+                        }
+                        if parsed.isOK, let snapshot = parsed.snapshot {
+                            self?.lastInbound =
+                                "session sess=\(self?.prefix8(parsed.sessionId) ?? "?") "
+                            + "ex=\(snapshot.exercises.count)"
+                        } else {
+                            self?.lastInbound =
+                                "start-from-watch reply: iPhone failed"
+                        }
+                        cont.resume(returning: parsed)
+                    }
+                },
+                errorHandler: { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        self?.lastOutbound =
+                            "start-from-watch err: \(error.localizedDescription)"
+                        cont.resume(returning: nil)
+                    }
+                }
+            )
+        }
+    }
+
     /// Send the `handshake` envelope to iPhone and await the Stage 1
     /// reply. Updates `lastOutbound` / `lastInbound` for debug
     /// readout. Idempotent: safe to call from multiple sites (e.g.
