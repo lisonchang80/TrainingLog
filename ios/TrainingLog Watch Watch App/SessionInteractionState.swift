@@ -94,8 +94,8 @@ final class SessionInteractionState: ObservableObject {
     // MARK: - Active row (Phase B)
 
     func activate(setId: String) {
-        // Switching to a DIFFERENT row mid-edit — implicit-commit the
-        // in-flight cell on the old row, then move row Active.
+        // Switching to a DIFFERENT row — implicit-commit any in-flight
+        // cell edit, then defensive-clear the cell pointer.
         //
         // Without this, the OLD cell's `[]` Active green border would
         // linger after the user tapped a new row (because activeCell
@@ -106,8 +106,15 @@ final class SessionInteractionState: ObservableObject {
         // Implicit commit (vs discard) preserves any value the user
         // already entered — they were obviously interacting with that
         // cell, so save the work before bailing.
-        if let oldSetId = activeSetId, oldSetId != setId, activeCell != nil {
-            commitActiveCell()
+        //
+        // Defensive double-clear `activeCell = nil` AFTER commit even
+        // though commitActiveCell already sets it. Pure paranoia
+        // against any edge where commit early-returned.
+        if activeSetId != setId {
+            if activeCell != nil {
+                commitActiveCell()
+            }
+            activeCell = nil
         }
         activeSetId = setId
     }
