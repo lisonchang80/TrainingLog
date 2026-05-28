@@ -53,7 +53,14 @@ struct CellEditOverlay: View {
         if let cell = state.activeCell {
             switch inputMode {
             case .keypad:
-                KeypadOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
+                // Per user 2026-05-29 polish: entire screen blacks out
+                // during keypad mode — only buffer + keypad visible.
+                // (Earlier impl let the session list bleed through the
+                // strip above the keypad, which was visually noisy.)
+                ZStack(alignment: .bottom) {
+                    Color.black.ignoresSafeArea()
+                    KeypadOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
+                }
             case .crown:
                 CrownOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
             }
