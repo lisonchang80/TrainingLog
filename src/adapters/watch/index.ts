@@ -45,6 +45,12 @@ export {
   buildStage1Reply,
   buildStartFromIphone,
   matchesPendingRequest,
+  // D9 wire-in — impure DB helpers + orchestrators
+  fetchSessionSnapshot,
+  loadActiveSessionSummary,
+  loadTemplatePrefetchList,
+  onHandshakeRequest,
+  onStartFromWatch,
 } from './handshake';
 export type {
   Stage1ReplyPayload,

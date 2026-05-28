@@ -123,8 +123,28 @@ function __clearMsgIdRingForTests(): void {
 // Section 3 — Inbound message dispatch (D7+ uses, D6 ships base)
 // ---------------------------------------------------------------------
 
+/**
+ * The native `react-native-watch-connectivity` lib delivers each inbound
+ * 'message' as `(payload, replyHandler)` where `replyHandler` is a callback
+ * the iPhone-side handler can invoke synchronously OR asynchronously to
+ * fulfil the Watch's `sendMessage(..., replyCb)` ack contract.
+ *
+ * D9 wire-in (handshake + start-from-watch) needs that channel — both kinds
+ * are "request-reply" envelopes where the Watch awaits a typed payload back.
+ * D7 end-session does NOT use it (Watch's end-session sendMessage call uses
+ * a separate sendMessage+TUI path with no synchronous ack expectation), so
+ * the parameter is `?: optional` to preserve backward-compat for the
+ * existing end-session listener.
+ *
+ * `replyHandler` may be `null` when the inbound message arrived via a code
+ * path that doesn't carry one (transferUserInfo backup, applicationContext
+ * delivery, etc.) — handlers MUST null-check before calling.
+ */
+type ReplyHandler = (resp: Record<string, unknown>) => void;
+
 type InboundHandler<K extends WCMessageKind> = (
   env: WCMessage & { kind: K; payload: WCPayloadMap[K] },
+  replyHandler?: ReplyHandler,
 ) => void | Promise<void>;
 
 const listeners = new Map<WCMessageKind, Set<InboundHandler<WCMessageKind>>>();
@@ -136,6 +156,15 @@ function ensureBridgeListenerMounted(): void {
     'message',
     (...args: unknown[]) => {
       const msg = args[0] as Record<string, unknown> | undefined;
+      // Lib signature: 'message' callback is (payload, replyHandler|null).
+      // We thread args[1] through to handlers as `ReplyHandler | undefined`.
+      // Non-function values get normalised to undefined so handlers can
+      // null-check uniformly via `if (replyHandler)`.
+      const replyHandlerRaw = args[1];
+      const replyHandler =
+        typeof replyHandlerRaw === 'function'
+          ? (replyHandlerRaw as ReplyHandler)
+          : undefined;
       if (!msg || typeof msg !== 'object') return;
       const kind = msg.kind as WCMessageKind | undefined;
       const msgId = msg.msgId as string | undefined;
@@ -152,6 +181,7 @@ function ensureBridgeListenerMounted(): void {
               kind: typeof kind;
               payload: WCPayloadMap[typeof kind];
             },
+            replyHandler,
           );
         } catch {
           // swallow — handler errors are caller's problem
@@ -167,7 +197,12 @@ function ensureBridgeListenerMounted(): void {
  * second time (`Set` semantics).
  *
  * D6 wires the base dispatch infrastructure; D7 calls this for the
- * `end-session` kind, D9 for `handshake`, D19 for set-* kinds.
+ * `end-session` kind, D9 for `handshake` + `start-from-watch` (both
+ * use the `replyHandler` parameter for ack), D19 for set-* kinds.
+ *
+ * Handler signature: `(env, replyHandler?) => void | Promise<void>`.
+ * `replyHandler` is present when the lib delivered a reply callback
+ * (channels #0 + #1 always; channels #11 end-session does not use it).
  */
 export function addMessageListener<K extends WCMessageKind>(
   kind: K,

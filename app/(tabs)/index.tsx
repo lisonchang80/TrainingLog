@@ -39,7 +39,11 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
-import { addMessageListener } from '@/src/adapters/watch';
+import {
+  addMessageListener,
+  onHandshakeRequest,
+  onStartFromWatch,
+} from '@/src/adapters/watch';
 import {
   getAutoPopupRestTimer,
   getSetting,
@@ -436,6 +440,52 @@ export default function TodayScreen() {
     // Intentional empty deps — handler reads latest finalize closure
     // via ref. Listener mounts once on component mount, unsubscribes
     // on unmount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // D9 wire-in (ADR-0019 NEW-Q44) — handshake + start-from-watch listeners.
+  //
+  // `handshake` (channel #0): Watch app launch fires this; iPhone replies
+  // with Stage 1 (active session summary + template prefetch list). Watch
+  // picker uses the reply to decide Adopt vs new-start without a second
+  // round-trip.
+  //
+  // `start-from-watch` (channel #1): Watch picker user picked freestyle /
+  // a template; iPhone creates the session row (or adopts the existing
+  // one on race), flips is_watch_tracked=true, then replies with the
+  // session snapshot. Watch hydrates its in-memory mirror from the reply.
+  //
+  // Both handlers receive a `replyHandler` from the bridge (lib's
+  // 'message' callback signature: `(payload, replyHandler)`). The
+  // orchestrators in `handshake.ts` invoke `replyHandler` with the
+  // Stage1ReplyPayload / StartFromIphonePayload. Errors degrade to
+  // empty replies (best-effort per Q11).
+  //
+  // After the handlers fire, `refresh()` re-reads the active session so
+  // the iPhone UI flips into in-session mode if Watch initiated start.
+  // refresh is called via the same component-scoped closure that other
+  // listeners use, so we capture it via ref.
+  const refreshRef = useRef<(() => void) | null>(null);
+  refreshRef.current = refresh;
+  useEffect(() => {
+    const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
+      await onHandshakeRequest(db, env, reply);
+    });
+    const unsubStartFromWatch = addMessageListener(
+      'start-from-watch',
+      async (env, reply) => {
+        await onStartFromWatch(db, env, randomUUID, reply);
+        // Watch just created a session — refresh iPhone state so the UI
+        // flips into in-session mode. Read latest closure via ref.
+        refreshRef.current?.();
+      },
+    );
+    return () => {
+      unsubHandshake();
+      unsubStartFromWatch();
+    };
+    // Intentional empty deps — db handle + randomUUID are stable; refresh
+    // read via ref. Listeners mount once on component mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
