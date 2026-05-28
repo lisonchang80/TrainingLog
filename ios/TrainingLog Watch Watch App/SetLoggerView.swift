@@ -41,49 +41,78 @@ struct SetLoggerView: View {
     /// unmount. Per spec the state is per-session, not per-card.
     @StateObject private var interactionState = SessionInteractionState()
 
+    /// D16 ⚙ settings sheet visibility.
+    ///
+    /// TODO: D10 in-session shell impl 時、搬到 top bar Row 2 最右
+    /// (NEW-Q32 ⚙ icon)、移除這個 toolbar 暫位。
+    /// Spec: ADR-0019 § D16 View 1 (line 2238-2252).
+    @State private var showSettings: Bool = false
+
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Page order per user 2026-05-28 polish + spec line 1483
-            // 「完成頁（右滑進入）」:
-            //   - "右滑" (finger slides right) reveals the page on the
-            //     LEFT (lower tag) → 完成頁 must be the lowest tag.
-            //   - Music is reached by the opposite swipe direction
-            //     (finger slides left) → music is the highest tag.
-            //   - Session card sits in the middle as the default landing.
-            TabView(selection: $selectedPage) {
-                // Page 0 — 完成頁 (left). Reached via finger right-swipe.
-                // Per ADR-0019 § Slice 13d D14 spec (line 1809-1962).
-                // Real WC end-session push + abort path deferred to
-                // D7/D9 wire-in (channel #11); for now both callbacks
-                // pop back to the session card list (page 1).
-                FinishPageView(
-                    snapshot: snapshotForRender,
-                    onFinishComplete: { selectedPage = 1 },
-                    onAbort: { selectedPage = 1 }
-                )
-                .tag(0)
+        // NavigationStack wraps the TabView so the toolbar ⚙ button
+        // has somewhere to render. D10 in-session shell will replace
+        // this with the proper top bar Row 2 layout — see TODO above.
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                // Page order per user 2026-05-28 polish + spec line 1483
+                // 「完成頁（右滑進入）」:
+                //   - "右滑" (finger slides right) reveals the page on the
+                //     LEFT (lower tag) → 完成頁 must be the lowest tag.
+                //   - Music is reached by the opposite swipe direction
+                //     (finger slides left) → music is the highest tag.
+                //   - Session card sits in the middle as the default landing.
+                TabView(selection: $selectedPage) {
+                    // Page 0 — 完成頁 (left). Reached via finger right-swipe.
+                    // Per ADR-0019 § Slice 13d D14 spec (line 1809-1962).
+                    // Real WC end-session push + abort path deferred to
+                    // D7/D9 wire-in (channel #11); for now both callbacks
+                    // pop back to the session card list (page 1).
+                    FinishPageView(
+                        snapshot: snapshotForRender,
+                        onFinishComplete: { selectedPage = 1 },
+                        onAbort: { selectedPage = 1 }
+                    )
+                    .tag(0)
 
-                // Page 1 — Session card list (D11 main, default landing).
-                SessionCardListPage(
-                    snapshot: snapshotForRender,
-                    state: interactionState
-                )
-                .tag(1)
+                    // Page 1 — Session card list (D11 main, default landing).
+                    SessionCardListPage(
+                        snapshot: snapshotForRender,
+                        state: interactionState
+                    )
+                    .tag(1)
 
-                // Page 2 — 音樂 (right). Reached via finger left-swipe.
-                NowPlayingPlaceholderPage()
-                    .tag(2)
+                    // Page 2 — 音樂 (right). Reached via finger left-swipe.
+                    NowPlayingPlaceholderPage()
+                        .tag(2)
+                }
+                .tabViewStyle(.page)
+
+                // Phase C `[]` Active cell-edit overlay. Sits on top of
+                // the TabView; only renders when `state.activeCell != nil`.
+                // Keypad slides up from bottom; crown shows a centered modal
+                // with dim backdrop (per spec line 1422-1446).
+                CellEditOverlay(state: interactionState)
             }
-            .tabViewStyle(.page)
-            .navigationBarHidden(true)
-
-            // Phase C `[]` Active cell-edit overlay. Sits on top of
-            // the TabView; only renders when `state.activeCell != nil`.
-            // Keypad slides up from bottom; crown shows a centered modal
-            // with dim backdrop (per spec line 1422-1446).
-            CellEditOverlay(state: interactionState)
+            .animation(.easeInOut(duration: 0.18), value: interactionState.activeCell)
+            // TODO: D10 — move this toolbar entry into top bar Row 2 最右
+            // (NEW-Q32). Once D10 in-session shell lands, the ⚙ icon
+            // belongs next to ♥/🔥 on Row 2, not as a nav-bar trailing
+            // toolbar item. Remove this `.toolbar { ... }` block then.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.body)
+                    }
+                    .accessibilityLabel("設定")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                WatchSettingsView()
+            }
         }
-        .animation(.easeInOut(duration: 0.18), value: interactionState.activeCell)
     }
 
     // Phase A renders the mock when the passed-in snapshot is empty
