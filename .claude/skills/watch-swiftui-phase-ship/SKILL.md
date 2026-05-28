@@ -185,6 +185,9 @@ git push origin --delete slice/13d-d{N}-{view-kebab}-phase-{x}
 - 2026-05-29 D11 re-Active bug fix + cell-clear-on-row-switch `5059dda` + `394a62f` + `48cdf5e`
 - 2026-05-29 D11 Phase C polish 4 (inline crown + warmup CellBox + first-digit-replace) `a7c8f85`
 - 2026-05-29 Watch Sim dev mock convenience `fbcc73d`
+- 2026-05-29 **D14 完成頁 SwiftUI impl** (overnight Wave 1 Agent A) `2e326d8` + `5abf7be` — FinishPageView new (+335) + SetLoggerView TabView page 0 wire; 4-state sync mock (idle → ⟳ → ✓ 0.5s → success / ⟳ → ⚠ retry) + 5 tiles fixed order; HR/kcal real values deferred to Phase 2.5 schema
+- 2026-05-29 **D15 ⋯ menu SwiftUI impl** (overnight Wave 1 Agent B) `d53cc3c` + `0d34aae` — DotsMenuView / DotsMenuConfirmView / ExerciseHistoryView (3 new) + ExerciseCard header `[⋯]` wire; solo 4-item / superset 5-item (歷史拆 A/B) variants
+- 2026-05-29 **D16 ⚙ settings SwiftUI impl** (overnight Wave 1 Agent C) `b2a5a4e` + `ab4c0d9` — WatchSettingsKeys + WatchSettingsView (2 new) + SetLoggerView toolbar 暫位 `⚙`; 5 @AppStorage key (inputMode reuses existing CellEditOverlay key) + 3 picker sub-page + WatchSettingsSyncPayload Codable stub for D7/D9
 
 ## Step 9 — Sim dev convenience pattern（多 phase 反覆驗證時用）
 
