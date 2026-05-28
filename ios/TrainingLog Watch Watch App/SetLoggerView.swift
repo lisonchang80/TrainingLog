@@ -52,8 +52,16 @@ struct SetLoggerView: View {
             //   - Session card sits in the middle as the default landing.
             TabView(selection: $selectedPage) {
                 // Page 0 — 完成頁 (left). Reached via finger right-swipe.
-                FinishPagePlaceholder(snapshot: snapshotForRender)
-                    .tag(0)
+                // Per ADR-0019 § Slice 13d D14 spec (line 1809-1962).
+                // Real WC end-session push + abort path deferred to
+                // D7/D9 wire-in (channel #11); for now both callbacks
+                // pop back to the session card list (page 1).
+                FinishPageView(
+                    snapshot: snapshotForRender,
+                    onFinishComplete: { selectedPage = 1 },
+                    onAbort: { selectedPage = 1 }
+                )
+                .tag(0)
 
                 // Page 1 — Session card list (D11 main, default landing).
                 SessionCardListPage(
@@ -213,32 +221,6 @@ private struct NowPlayingPlaceholderPage: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-// MARK: - Page 2: 完成頁 placeholder
-
-private struct FinishPagePlaceholder: View {
-    let snapshot: SessionSnapshot
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Session 完成？")
-                .font(.headline)
-            Text("(D14 完成頁 — 後續實作)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Divider().padding(.vertical, 2)
-            Text("session=\(String(snapshot.sessionId.prefix(8)))…")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("動作數：\(snapshot.exercises.count)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
