@@ -2,27 +2,30 @@
 //  ExerciseCard.swift
 //  TrainingLog Watch
 //
-//  Slice 13d D11 Phase A — one exercise card visual.
-//  Per ADR-0019 § Slice 13d D11 spec, lines 1368-1400.
+//  Slice 13d D11 Phase A (skeleton) → Phase B (interactions).
+//  Per ADR-0019 § Slice 13d D11 spec (frozen 2026-05-28).
 //
-//  Phase A scope (idle visual only; all interactions in B-H):
-//    - Header: exercise name + `[⋯]` SF Symbol `ellipsis.circle` icon
-//    - Continuous progress bar (▰▰▰▱▱ style) — segments = work sets
-//      + cluster count. Warmup excluded; cluster counts as 1 segment.
-//    - Set rows in order: warmup (parens, gray) / working (numbered,
-//      plain) / cluster (header + indented sub-set rows).
-//    - Hairline dividers between top-level set rows; cluster sub-set
-//      rows share the cluster's container without per-sub dividers.
+//  Phase B scope (this revision):
+//    - `{}` Active state: tap row 中段 → 4-edge border, ◯ 留外
+//    - `◯/✓ toggle`: tap on any state, exits Active per spec
+//    - Progress bar recalc on ✓ change (live)
+//    - Cluster acts as a unit: tap any cluster row → whole cluster
+//      Active; tap header ✓ → marks the cluster logged
 //
-//  Phase A renders all sets as idle (no `{}` Active highlight, no
-//  ✓ marker hit-tested). The progress bar shows 0 filled segments
-//  because no rows are logged.
+//  Still out of scope (Phase C onwards):
+//    - `[]` Active cell edit (keypad / crown)
+//    - Type cycling on tap number
+//    - `-/+` cluster CRUD inside `{}` Active
+//    - Swipe gestures (delete / +1)
+//    - Long-press reorder
 //
 
 import SwiftUI
 
 struct ExerciseCard: View {
     let exercise: SessionSnapshotExercise
+
+    @ObservedObject var state: SessionInteractionState
 
     /// Grouped rows for rendering. Consecutive `dropset` rows are
     /// folded into a `cluster` group with the first dropset as the
@@ -31,18 +34,18 @@ struct ExerciseCard: View {
         return SetRowGroup.group(sets: exercise.sets)
     }
 
-    /// Progress bar segment count. Work sets count 1 each; each
-    /// cluster counts as 1; warmup excluded. Phase A: all idle so
-    /// `filled` is always 0.
-    private var progressSegments: Int {
-        rowGroups.reduce(0) { acc, group in
+    /// Progress bar segments. Work sets + clusters each count as 1
+    /// segment; warmup excluded per spec line 1567.
+    private var progressBarItems: [ProgressBarItem] {
+        rowGroups.compactMap { group in
             switch group {
             case .warmup:
-                return acc
-            case .working:
-                return acc + 1
-            case .cluster:
-                return acc + 1
+                return nil
+            case .working(let set, _):
+                return ProgressBarItem(id: set.setId, filled: state.isLogged(setId: set.setId))
+            case .cluster(let header, _, _):
+                // Cluster is filled iff its header is logged.
+                return ProgressBarItem(id: header.setId, filled: state.isLogged(setId: header.setId))
             }
         }
     }
@@ -72,7 +75,7 @@ struct ExerciseCard: View {
             Image(systemName: "ellipsis.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                // Phase A: visual only. Tap target inert until
+                // Phase B: visual only. Tap target inert until
                 // D15 ⋯ menu wires up.
         }
         .padding(.horizontal, 4)
@@ -83,14 +86,17 @@ struct ExerciseCard: View {
 
     private var progressBar: some View {
         HStack(spacing: 1) {
-            ForEach(0..<progressSegments, id: \.self) { _ in
+            ForEach(progressBarItems) { item in
                 Rectangle()
-                    .fill(Color.secondary.opacity(0.3))
+                    .fill(item.filled
+                        ? Color.accentColor.opacity(0.9)
+                        : Color.secondary.opacity(0.3))
                     .frame(height: 3)
             }
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 6)
+        .animation(.easeInOut(duration: 0.15), value: progressBarItems.map { $0.filled })
     }
 
     // MARK: - Set rows
@@ -112,19 +118,161 @@ struct ExerciseCard: View {
     private func groupRow(_ group: SetRowGroup) -> some View {
         switch group {
         case .warmup(let set):
-            SetRowWarmup(set: set)
+            // Phase B: warmup gets `{}` Active + ✓ toggle just like
+            // working rows. (Per spec lines 1531/1582 — any row.)
+            InteractiveSetRow(
+                state: state,
+                setId: set.setId,
+                hasCheckmark: true,
+                content: { SetRowWarmupContent(set: set) }
+            )
 
         case .working(let set, let index):
-            SetRowWorking(set: set, displayIndex: index)
+            InteractiveSetRow(
+                state: state,
+                setId: set.setId,
+                hasCheckmark: true,
+                content: { SetRowWorkingContent(set: set, displayIndex: index) }
+            )
 
         case .cluster(let header, let subs, let clusterIndex):
-            VStack(alignment: .leading, spacing: 2) {
-                SetRowClusterHeader(set: header, clusterIndex: clusterIndex)
-                ForEach(subs, id: \.setId) { sub in
-                    SetRowClusterSub(set: sub)
+            // Cluster is a single Active unit: tap any sub-row
+            // activates the whole cluster, tap header ✓ logs the
+            // whole cluster.
+            ClusterSetGroup(
+                state: state,
+                header: header,
+                subs: subs,
+                clusterIndex: clusterIndex
+            )
+        }
+    }
+}
+
+// MARK: - Progress bar items
+
+private struct ProgressBarItem: Identifiable, Equatable {
+    let id: String
+    let filled: Bool
+}
+
+// MARK: - Interactive row (warmup + working)
+
+/// One interactive set row: `{}` Active overlay on the labelled
+/// area, with ◯ sitting OUTSIDE the border per D11 spec line 1408.
+///
+/// Tap zones:
+///   - row middle (number + cells)       → activate / re-activate
+///   - ◯ button                          → toggle logged + exit Active
+///
+/// Per spec line 1582: tap row 中段 → `{}` Active (4-edge border)
+/// Per spec line 1593: tap ◯/✓ → exit Active + save (we toggle state)
+private struct InteractiveSetRow<Content: View>: View {
+    @ObservedObject var state: SessionInteractionState
+    let setId: String
+    let hasCheckmark: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 4) {
+            content()
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(
+                            state.isActive(setId: setId)
+                                ? Color.primary
+                                : Color.clear,
+                            lineWidth: 1.2
+                        )
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    state.activate(setId: setId)
                 }
+
+            if hasCheckmark {
+                Button {
+                    state.toggleLogged(setId: setId)
+                } label: {
+                    Image(systemName: state.isLogged(setId: setId)
+                        ? "checkmark.circle.fill"
+                        : "circle")
+                        .font(.body)
+                        .foregroundStyle(state.isLogged(setId: setId)
+                            ? Color.green
+                            : Color.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
+        .padding(.vertical, 1)
+    }
+}
+
+// MARK: - Cluster group
+
+/// Cluster acts as a single `{}` Active unit. Border wraps the
+/// header + all sub-rows; the ◯ on the header toggles the whole
+/// cluster's logged state. Sub-sets have no ◯ per spec line 1534.
+///
+/// The cluster's "active id" is the header's set ID — tapping any
+/// row inside the cluster activates the whole group.
+private struct ClusterSetGroup: View {
+    @ObservedObject var state: SessionInteractionState
+    let header: SessionSnapshotSet
+    let subs: [SessionSnapshotSet]
+    let clusterIndex: Int
+
+    private var groupId: String { header.setId }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                SetRowClusterHeaderContent(set: header, clusterIndex: clusterIndex)
+                ForEach(subs, id: \.setId) { sub in
+                    SetRowClusterSubContent(set: sub)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(
+                        state.isActive(setId: groupId)
+                            ? Color.primary
+                            : Color.clear,
+                        lineWidth: 1.2
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                state.activate(setId: groupId)
+            }
+
+            // Header ✓ controls the whole cluster.
+            VStack {
+                Button {
+                    state.toggleLogged(setId: groupId)
+                } label: {
+                    Image(systemName: state.isLogged(setId: groupId)
+                        ? "checkmark.circle.fill"
+                        : "circle")
+                        .font(.body)
+                        .foregroundStyle(state.isLogged(setId: groupId)
+                            ? Color.green
+                            : Color.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.vertical, 1)
     }
 }
 
@@ -206,11 +354,11 @@ enum SetRowGroup: Identifiable {
     }
 }
 
-// MARK: - Row views
+// MARK: - Row content views (pure visual, no interaction)
 
-/// Warmup row — gray dim, parens around weight/reps, no number, no
-/// progress contribution.
-private struct SetRowWarmup: View {
+/// Warmup row content — gray dim, parens around weight/reps, no
+/// number, no progress contribution.
+private struct SetRowWarmupContent: View {
     let set: SessionSnapshotSet
 
     var body: some View {
@@ -219,8 +367,8 @@ private struct SetRowWarmup: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(width: 20, alignment: .center)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Text("( \(formatWeight(set.weight)) kg )")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -228,16 +376,12 @@ private struct SetRowWarmup: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Image(systemName: "circle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
     }
 }
 
-/// Working set row — numbered, plain visual.
-private struct SetRowWorking: View {
+/// Working set row content — numbered, plain visual.
+private struct SetRowWorkingContent: View {
     let set: SessionSnapshotSet
     let displayIndex: Int
 
@@ -247,24 +391,20 @@ private struct SetRowWorking: View {
                 .font(.caption)
                 .foregroundStyle(.primary)
                 .frame(width: 20, alignment: .center)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Text("[ \(formatWeight(set.weight)) kg ]")
                 .font(.caption2)
             Text("[ \(set.reps ?? 0) 次 ]")
                 .font(.caption2)
             Spacer(minLength: 0)
-            Image(systemName: set.isLogged ? "checkmark.circle.fill" : "circle")
-                .font(.caption2)
-                .foregroundStyle(set.isLogged ? .green : .secondary)
         }
-        .padding(.vertical, 2)
     }
 }
 
-/// Cluster header row — labelled `D{n}`, same column layout as
-/// working set.
-private struct SetRowClusterHeader: View {
+/// Cluster header row content — labelled `D{n}`, same column layout
+/// as working set.
+private struct SetRowClusterHeaderContent: View {
     let set: SessionSnapshotSet
     let clusterIndex: Int
 
@@ -274,37 +414,32 @@ private struct SetRowClusterHeader: View {
                 .font(.caption)
                 .foregroundStyle(.primary)
                 .frame(width: 20, alignment: .center)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Text("[ \(formatWeight(set.weight)) kg ]")
                 .font(.caption2)
             Text("[ \(set.reps ?? 0) 次 ]")
                 .font(.caption2)
             Spacer(minLength: 0)
-            Image(systemName: set.isLogged ? "checkmark.circle.fill" : "circle")
-                .font(.caption2)
-                .foregroundStyle(set.isLogged ? .green : .secondary)
         }
-        .padding(.vertical, 2)
     }
 }
 
-/// Cluster sub-set row — indented, no number column, weight/reps
+/// Cluster sub-set row content — indented, no number column, weight/reps
 /// only. Per D11 spec line 1394: `[ 40 kg ] [  8 次 ]`.
-private struct SetRowClusterSub: View {
+private struct SetRowClusterSubContent: View {
     let set: SessionSnapshotSet
 
     var body: some View {
         HStack(spacing: 4) {
             // Spacer to align with cluster header's number column
-            Text("").frame(width: 16, alignment: .center)
+            Text("").frame(width: 20, alignment: .center)
             Text("[ \(formatWeight(set.weight)) kg ]")
                 .font(.caption2)
             Text("[ \(set.reps ?? 0) 次 ]")
                 .font(.caption2)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 1)
     }
 }
 
@@ -322,14 +457,20 @@ private func formatWeight(_ w: Double?) -> String {
 
 #Preview("深蹲 (warmup + working)") {
     ScrollView {
-        ExerciseCard(exercise: SetLoggerMockData.mockSnapshot().exercises[0])
-            .padding()
+        ExerciseCard(
+            exercise: SetLoggerMockData.mockSnapshot().exercises[0],
+            state: SessionInteractionState()
+        )
+        .padding()
     }
 }
 
 #Preview("臥推 (working + cluster)") {
     ScrollView {
-        ExerciseCard(exercise: SetLoggerMockData.mockSnapshot().exercises[1])
-            .padding()
+        ExerciseCard(
+            exercise: SetLoggerMockData.mockSnapshot().exercises[1],
+            state: SessionInteractionState()
+        )
+        .padding()
     }
 }

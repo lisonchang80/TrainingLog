@@ -36,6 +36,11 @@ struct SetLoggerView: View {
     /// rather than on the music or finish page.
     @State private var selectedPage: Int = 1
 
+    /// Phase B interaction state. Survives across page swipes —
+    /// `{}` Active row + ✓ logged set IDs persist until view
+    /// unmount. Per spec the state is per-session, not per-card.
+    @StateObject private var interactionState = SessionInteractionState()
+
     var body: some View {
         TabView(selection: $selectedPage) {
             // Page 0 — 音樂 (left). Phase A: native-style placeholder.
@@ -43,8 +48,11 @@ struct SetLoggerView: View {
                 .tag(0)
 
             // Page 1 — Session card list (D11 main).
-            SessionCardListPage(snapshot: snapshotForRender)
-                .tag(1)
+            SessionCardListPage(
+                snapshot: snapshotForRender,
+                state: interactionState
+            )
+            .tag(1)
 
             // Page 2 — 完成頁 (right). Phase A: placeholder until
             // D14 SwiftUI impl ships.
@@ -72,6 +80,7 @@ struct SetLoggerView: View {
 
 private struct SessionCardListPage: View {
     let snapshot: SessionSnapshot
+    @ObservedObject var state: SessionInteractionState
 
     var body: some View {
         ScrollView {
@@ -87,8 +96,17 @@ private struct SessionCardListPage: View {
 
                 // ExerciseCard list (continuous vertical scroll).
                 ForEach(snapshot.exercises, id: \.sessionExerciseId) { ex in
-                    ExerciseCard(exercise: ex)
+                    ExerciseCard(exercise: ex, state: state)
                 }
+
+                // Trailing space — also catches "tap 框外" to dismiss
+                // `{}` Active. Per spec line 1592: tap 框外 → Idle.
+                Color.clear
+                    .frame(height: 60)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.deactivate()
+                    }
             }
             .padding(.horizontal, 4)
             .padding(.bottom, 12)
