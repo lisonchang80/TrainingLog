@@ -49,7 +49,7 @@ struct CellBox: View {
 
     var body: some View {
         let strokeColor: Color = isActive
-            ? Color.accentColor
+            ? Color.green
             : Color.secondary.opacity(0.5)
         let strokeWidth: CGFloat = isActive ? 1.6 : 0.8
 

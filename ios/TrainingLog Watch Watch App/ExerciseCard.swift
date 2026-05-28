@@ -183,7 +183,7 @@ private struct InteractiveSetRow<Content: View>: View {
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(
                             state.isActive(setId: setId)
-                                ? Color.primary
+                                ? Color.green
                                 : Color.clear,
                             lineWidth: 1.2
                         )
