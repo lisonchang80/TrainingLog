@@ -103,12 +103,17 @@ private struct KeypadOverlay: View {
             }
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity)
+        // Per user 2026-05-29 polish: opaque full-bleed keypad backdrop
+        // — earlier the session list under the keypad area (below the
+        // Done row) showed through 0.92 alpha, looking noisy. Now the
+        // background fills the entire bottom strip including the safe
+        // area so nothing peeks past the Done row.
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.92))
+            Color.black.ignoresSafeArea(edges: .bottom)
         )
-        .padding(.horizontal, 2)
         .transition(.move(edge: .bottom))
     }
 
