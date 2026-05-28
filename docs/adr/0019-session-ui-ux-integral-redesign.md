@@ -1602,3 +1602,158 @@ Tap 編號 → 三態循環：`工作` → `熱` → `D` → `工作`
 | v7 | type chip `[#]/[熱]/[D]` |
 | v8 | type chip 砍掉、編號本身=button、cluster sub-set `-`/`+` CRUD |
 | 收尾 | 切 D 預設 1 sub-set、熱身無編號、編號重排即時 |
+
+---
+
+## Slice 13d D8 Watch Picker Spec（凍結 2026-05-28）
+
+**Status**: Spec frozen — ASCII mock 5 輪迭代收斂、待 SwiftUI 動工
+**Depends on**: D4 (Watch target ✅) / D6 (start sync ✅) / iPhone-side Program + Template schema (已有)
+**Blocks**: D11 (set logger) entry point
+**Iteration log**: chat session 2026-05-28、5 輪 mock v1→v5（同會 D11 後續）
+
+### Overview
+
+Watch app 開啟後 user 選擇要做的訓練的 picker UI。Root = 兩區（計劃訓練 / 模板訓練）+ 🔄 update icon。3 元組（模板 + 計劃 + 強度）集齊才能進 set logger。「通用」作為計劃跟強度的 fallback option（tap 通用 = bypass 該 sheet）。
+
+### View anatomy
+
+#### Root view（picker = root、無 splash）
+
+```
+┌──────────────────────────────────┐
+│ 選擇訓練                    🔄   │
+│ ─────────────────────────────    │
+│ 計劃訓練                         │
+│  ▶ 推日 W3D1（今日）             │
+│ ─────────────────────────────    │
+│ 模板訓練                         │
+│  • 推日（A）                     │
+│  • 拉日（B）                     │
+│  • 腿日（C）                     │
+│  • 全身                          │
+└──────────────────────────────────┘
+```
+
+- 右上 🔄 = 強制 pull iPhone 最新 program/template 資料
+- 「計劃訓練」區 = 當前 active program 的「今日該做的」單行（自動推算）
+- 「模板訓練」區 = 全部 templates、純名稱、按最近執行時間排序
+
+#### Calendar variants
+
+休息日：
+```
+│ 計劃訓練                         │
+│  今日休息（無訓練）              │
+```
+
+無 active program：
+```
+│ 計劃訓練                         │
+│  （無計劃進行中）                │
+│  請至 iPhone 設定計劃            │
+```
+
+#### 計劃 sheet（tap 模板訓練 row 後）
+
+```
+┌──────────────────────────────────┐
+│ ← 計劃                           │
+│ ─────────────────────────────    │
+│  • 通用                          │
+│ ─────────────────────────────    │
+│  • Linear progression W3         │
+│  • PPL W5                        │
+│  • PHUL W2                       │
+└──────────────────────────────────┘
+```
+
+「計劃」= Program 主標籤。
+- 「通用」永遠頂、有 divider 分隔
+- 列當前 active programs（user 在 iPhone 設定）
+- **tap「通用」→ bypass 強度 sheet、直接進 set logger**（跟 iPhone 行為一致）
+- tap 其他 program → 進強度 sheet
+
+#### 強度 sheet（per program 動態）
+
+```
+┌──────────────────────────────────┐
+│ ← 強度（Linear progression）     │
+│ ─────────────────────────────    │
+│  • 通用                          │
+│ ─────────────────────────────    │
+│  • Volume day                    │
+│  • Intensity day                 │
+│  • Deload                        │
+└──────────────────────────────────┘
+```
+
+「強度」= Program 副標籤（user 在 iPhone 預先建立）。
+- 標題帶 program context `← 強度（Linear progression）`
+- 「通用」永遠頂、有 divider 分隔（每個 program 強度都有此 fallback）
+- 列該 program 自帶的強度副標籤
+- 選擇後 → 進 set logger（D11）
+
+### Interaction rules
+
+#### 3 元組（模板 + 計劃 + 強度）
+
+進 set logger 需集齊 3 元組：
+
+| 入口 | 走過的 sheet | 3 元組來源 |
+|---|---|---|
+| 計劃訓練 row tap（推日 W3D1）| bypass 兩 sheet | program day spec 已含 3 元組 |
+| 模板訓練 + tap「通用」計劃 | bypass 強度 sheet | 模板 / 通用 / 通用 |
+| 模板訓練 + 其他 program 計劃 | 計劃 → 強度兩 sheet | 模板 / program / 強度副標籤 |
+
+#### Sheet flow
+
+```
+Root (D8-1)
+  ├─ 計劃訓練 row tap ─────────────────────┐
+  └─ 模板訓練 row tap                       │
+        └─ 計劃 sheet (D8-2)                │
+             ├─ 「通用」tap ─────────────────┤
+             └─ 其他 program tap             │
+                   └─ 強度 sheet (D8-3)     │
+                        └─ 任一 tap ────────┤
+                                            ↓
+                                       Set logger (D11)
+```
+
+#### 「今日」推算
+
+從 active program 的當前 mesocycle 推算今日 W?D?：
+- 是訓練日 → 顯示 `推日 W3D1（今日）`
+- 是休息日 → 顯示 `今日休息（無訓練）`
+- 無 active program → 顯示 `（無計劃進行中、請至 iPhone 設定計劃）`
+
+#### 🔄 update icon 行為
+
+| Trigger | Behavior |
+|---|---|
+| tap 🔄 | 強制 pull iPhone 最新 program/template 資料 |
+| Visual | icon 旋轉 0.5s 結束、無成功/失敗訊號 |
+| Post-pull | 列表自動 refresh、變動 user 自然看到（變動本身是反饋）|
+
+#### Watch session 啟動路徑
+
+- **Watch 獨立啟動**：通過 picker → sheet flow → set logger（α-model Watch-initiator）
+- **iPhone 已啟動 session、Watch 開 app**：直接進 set logger（mirror、無中介 splash、跳過 picker）
+
+### Excluded（不在 Watch 做）
+
+- ❌ 空白訓練（無動作 session）— picker 沒此 option、要空白 session 必須 iPhone 啟動
+- ❌ Watch 上 +動作 / +Program / +Template — 永不（per ADR-0019 既有原則、必須 iPhone 上做）
+- ❌ 中介 splash「TrainingLog」LOGO — 跳過、Watch app 開即 picker
+- ❌ 🔄 同步狀態 spinner / ✓ / ⚠ icon — 只有 0.5s 旋轉、不細分結果
+
+### Decisions captured（5 輪 ASCII mock iteration log）
+
+| 輪次 | 主要決策 |
+|---|---|
+| v1 | root view 初稿（template list + 空白訓練 option）|
+| v2 | 計劃 / 模板兩區分隔、🔄 update icon、移除空白訓練 |
+| v3 | 3 元組概念、tap 模板 → 計劃 sheet → 強度 sheet flow |
+| v4 | 「無計劃」→「通用」（計劃 = Program 主標籤、強度 = 副標籤）、強度依 program 動態 |
+| v5 | tap 通用 = bypass 強度 sheet、強度 sheet 也有「通用」option、休息日 / 無 program 顯示 |
