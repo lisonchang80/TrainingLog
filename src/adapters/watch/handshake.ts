@@ -54,6 +54,7 @@ import {
   setIsWatchTracked,
 } from '../sqlite/sessionRepository';
 import { listSetsBySession } from '../sqlite/setRepository';
+import { startSessionFromTemplate } from '../sqlite/sessionFromTemplate';
 import {
   listDistinctSubTagsByProgram,
   listTemplates,
@@ -868,6 +869,7 @@ export async function onStartFromWatch(
   db: Database,
   env: WCMessage & { kind: 'start-from-watch'; payload: StartFromWatchPayload },
   sendReverseTUI: ReverseTUISender,
+  uuid?: () => string,
 ): Promise<void> {
   const suppliedId = env.payload.sessionId;
   if (!suppliedId) {
@@ -903,11 +905,40 @@ export async function onStartFromWatch(
       // check + insert sequentially under the orchestrator scope; race
       // protection at the SQL level is handled by `createSession`'s
       // INSERT which would throw on dup, caught below as best-effort.
-      await createSession(db, {
-        id: suppliedId,
-        started_at: env.ts,
-        title: '',
-      });
+      //
+      // 2026-05-29 deep-night smoke fix (B2): branch on templateId.
+      // Pre-fix: createSession always with title='' + no template_id +
+      // no session_exercise rows — iPhone in-progress banner ALWAYS
+      // showed「空白訓練」regardless of what template Watch picked,
+      // because the wire dropped templateId on the floor.
+      //
+      // Post-fix: if templateId is supplied AND we have a uuid factory,
+      // delegate to `startSessionFromTemplate` (which handles the full
+      // tree: session.title = template.name + session_exercise rows
+      // copied from template_exercise + session_set rows copied from
+      // template_set, all in one transaction). Caller supplies sessionId
+      // override so first-write-wins keying still holds.
+      const templateId = env.payload.templateId;
+      if (templateId && uuid) {
+        await startSessionFromTemplate(db, {
+          template_id: templateId,
+          session_id: suppliedId,
+          uuid,
+          now: () => env.ts,
+          program_id: env.payload.programCycleId ?? undefined,
+          sub_tag: env.payload.intensityId ?? undefined,
+        });
+      } else {
+        // Freestyle fallback path — either templateId is null (Watch
+        // 空白訓練 path) OR uuid factory not injected (test path /
+        // pre-NEW-Q50 caller). Empty title means iPhone in-progress
+        // banner renders the「空白訓練」/「freestyle」label.
+        await createSession(db, {
+          id: suppliedId,
+          started_at: env.ts,
+          title: '',
+        });
+      }
     }
     // Existing OR fresh insert: flip is_watch_tracked unconditionally
     // — a session matching the supplied id is now Watch-tracked

@@ -60,6 +60,19 @@ export async function startSessionFromTemplate(
      * Pre-#51 gated the historical prefill phase; post-#51 unused.
      */
     sub_tag?: string | null;
+    /**
+     * NEW-Q50 (2026-05-29) — Optional override for the session.id PK.
+     * Pre-NEW-Q50: this function always minted its own UUID via
+     * `args.uuid()`. Now the Watch-initiated path (onStartFromWatch)
+     * needs to use the Watch-supplied sessionId (NEW-Q50 Q5 first-write-
+     * wins keyed on sessionId), so callers can override.
+     *
+     * Defaults to `args.uuid()` when omitted (preserves all existing
+     * call-site behaviour). Session_exercise / session_set IDs are
+     * still generated via `args.uuid()` regardless — only the session
+     * header row's PK changes.
+     */
+    session_id?: string;
   }
 ): Promise<{ session_id: string; planned_count: number }> {
   const active = await getActiveSession(db);
@@ -103,7 +116,10 @@ export async function startSessionFromTemplate(
     ])
   );
 
-  const session_id = args.uuid();
+  // NEW-Q50 — caller-supplied session_id takes precedence over the
+  // auto-minted UUID. The Watch-initiated path uses this to honour
+  // its already-minted sessionId (first-write-wins semantics).
+  const session_id = args.session_id ?? args.uuid();
   const started_at = (args.now ?? Date.now)();
   const nowFn = args.now ?? Date.now;
   const snapshots = snapshotForSession({

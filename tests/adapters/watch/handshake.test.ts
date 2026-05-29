@@ -1051,6 +1051,127 @@ describe('WC handshake — onStartFromWatch (NEW-Q50 D28 reverse-TUI reconcile)'
   });
 
   // -------------------------------------------------------------------
+  // 2026-05-29 deep-night smoke fix (B2) — templateId branch coverage.
+  // Pre-fix: onStartFromWatch ignored env.payload.templateId entirely
+  // and always createSession with title=''. iPhone in-progress banner
+  // displayed 「空白訓練」 even when the Watch picked a real template.
+  // Post-fix: when templateId + uuid factory are both supplied, the
+  // orchestrator delegates to startSessionFromTemplate which:
+  //   - sets session.title = template.name
+  //   - inserts session_exercise rows from template_exercise
+  //   - inserts session_set rows from template_set
+  // All keyed on the Watch-supplied sessionId (first-write-wins).
+  // -------------------------------------------------------------------
+  it('NEW-Q50 B2 fix — templateId + uuid supplied → session.title = template.name + session_exercise rows materialised', async () => {
+    // Seed a template with 2 template_exercise rows so we can assert
+    // the session_exercise tree gets copied verbatim.
+    const now = 1_700_000_000_000;
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, NULL, NULL)`,
+      'tpl-pushday',
+      '推日（A）',
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-1',
+      'tpl-pushday',
+      BENCH,
+      1,
+      3,
+      8,
+      60,
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-2',
+      'tpl-pushday',
+      BENCH,
+      2,
+      4,
+      6,
+      80,
+    );
+
+    const watchUuid = 'W-pushday-001';
+    const reconciles: StartFromWatchReconcile[] = [];
+    // Deterministic uuid sequence for asserting session_exercise IDs.
+    let counter = 0;
+    const fakeUuid = () => `uuid-${++counter}`;
+
+    await onStartFromWatch(
+      db,
+      makeEnvelope('start-from-watch', {
+        templateId: 'tpl-pushday',
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
+      fakeUuid,
+    );
+
+    // Reverse-TUI ack uses the Watch-supplied sessionId.
+    expect(reconciles).toEqual([
+      { status: 'created', sessionId: watchUuid },
+    ]);
+
+    // Session header — title pulled from template.name (NOT '').
+    const active = await getActiveSession(db);
+    expect(active?.id).toBe(watchUuid);
+    expect(active?.title).toBe('推日（A）');
+    expect(active?.is_watch_tracked).toBe(true);
+
+    // session_exercise rows materialised from template_exercise.
+    const seRows = await db.getAllAsync<{
+      id: string;
+      exercise_id: string;
+      ordering: number;
+    }>(
+      `SELECT id, exercise_id, ordering
+         FROM session_exercise
+        WHERE session_id = ?
+        ORDER BY ordering ASC`,
+      watchUuid,
+    );
+    expect(seRows).toHaveLength(2);
+    expect(seRows[0].exercise_id).toBe(BENCH);
+    expect(seRows[0].ordering).toBe(1);
+    expect(seRows[1].ordering).toBe(2);
+  });
+
+  it('NEW-Q50 B2 fix — templateId supplied but uuid factory omitted → falls back to empty freestyle session (no throw)', async () => {
+    // Test the defensive fallback path. If wire-in forgets to pass
+    // uuid, we must NOT throw; just create an empty freestyle row
+    // so the Watch UI flow doesn't hang (degraded UX, but stable).
+    const watchUuid = 'W-degraded-001';
+    const reconciles: StartFromWatchReconcile[] = [];
+    await onStartFromWatch(
+      db,
+      makeEnvelope('start-from-watch', {
+        templateId: 'tpl-anything',
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
+      // uuid intentionally omitted
+    );
+    expect(reconciles).toEqual([
+      { status: 'created', sessionId: watchUuid },
+    ]);
+    const active = await getActiveSession(db);
+    expect(active?.id).toBe(watchUuid);
+    expect(active?.title).toBe('');
+  });
+
+  // -------------------------------------------------------------------
   // Sample envelope kept for typing — exercise the protocol surface.
   // -------------------------------------------------------------------
   it('typed StartFromWatchPayload sample envelope round-trips through makeEnvelope', () => {

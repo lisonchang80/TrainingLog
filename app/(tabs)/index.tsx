@@ -492,9 +492,19 @@ export default function TodayScreen() {
     const unsubStartFromWatch = addUserInfoListener(
       'start-from-watch',
       async (env) => {
-        await onStartFromWatch(db, env, (response) => {
-          sendUserInfo(makeEnvelope('start-reconcile', response));
-        });
+        // 2026-05-29 deep-night smoke fix (B2): pass `randomUUID` so
+        // onStartFromWatch can route to `startSessionFromTemplate` when
+        // the Watch supplies a templateId. Without uuid injection the
+        // orchestrator falls back to the empty-title freestyle path
+        // (banner shows 「空白訓練」 even if Watch picked a template).
+        await onStartFromWatch(
+          db,
+          env,
+          (response) => {
+            sendUserInfo(makeEnvelope('start-reconcile', response));
+          },
+          randomUUID,
+        );
         // Watch just created (or adopted) a session — refresh iPhone
         // state so the UI flips into in-session mode. Read latest
         // closure via ref.
@@ -522,11 +532,19 @@ export default function TodayScreen() {
     const unsubStartFromWatchV1 = addMessageListener(
       'start-from-watch',
       async (env, reply) => {
-        await onStartFromWatch(db, env, (response) => {
-          if (reply) {
-            reply(response as unknown as Record<string, unknown>);
-          }
-        });
+        // 2026-05-29 deep-night smoke fix (B2): same uuid injection as
+        // the TUI path above — Watch templates need to materialise
+        // template_name + exercise tree, not collapse to freestyle.
+        await onStartFromWatch(
+          db,
+          env,
+          (response) => {
+            if (reply) {
+              reply(response as unknown as Record<string, unknown>);
+            }
+          },
+          randomUUID,
+        );
         refreshRef.current?.();
       },
     );
