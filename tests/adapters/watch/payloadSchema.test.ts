@@ -45,6 +45,14 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         sessionId: 'sess-1',
         snapshot: { title: '腿 (蹲)', exerciseCount: 4 },
       } as unknown as WCPayloadMap[K];
+    case 'start-reconcile':
+      // NEW-Q50 reverse-TUI ack. Sample uses 'created' status as the
+      // happy-path canonical shape; the 'conflict' variant is covered
+      // by per-shape narrowing tests elsewhere.
+      return {
+        status: 'created',
+        sessionId: 'W-deadbeef-0001',
+      } as unknown as WCPayloadMap[K];
     case 'set-completed':
       return {
         sessionId: 'sess-1',

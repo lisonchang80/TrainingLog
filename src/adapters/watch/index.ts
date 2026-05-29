@@ -26,6 +26,7 @@ export type {
   HandshakePayload,
   StartFromWatchPayload,
   StartFromIphonePayload,
+  StartReconcilePayload,
   SetCompletedPayload,
   SetModifiedPayload,
   SetDeletedPayload,
