@@ -2206,7 +2206,14 @@ export default function TodayScreen() {
           contentContainerStyle={styles.idleScroll}
           keyboardShouldPersistTaps="handled">
           <Text style={styles.heading}>{t('tabs', 'training')}</Text>
-          {programBanner}
+          {/*
+            2026-05-29 polish: programBanner removed from idle scroll
+            (above 計劃訓練). Rationale per user: visually redundant —
+            計劃訓練 section already implies "today's plan from your
+            active program" so the banner doubles up. programBanner
+            is still mounted in the in-progress branch (line ~2380)
+            where it surfaces the linked template / freestyle marker.
+          */}
 
           {/* (a) 計劃訓練 — ADR-0024 § 2.a */}
           <View style={styles.section}>
@@ -2267,29 +2274,11 @@ export default function TodayScreen() {
             )}
           </View>
 
-          {/* (b) 空白訓練 — ADR-0024 § 2.b */}
-          <View style={styles.section}>
-            <Text style={styles.sectionHeading}>
-              {t('page', 'freestyleTraining')}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('button', 'startFreestyle')}
-              onPress={onStartFreestyle}
-              disabled={busy}
-              style={({ pressed }) => [
-                styles.startBtn,
-                busy && styles.btnDisabled,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.startBtnText}>
-                {busy ? t('button', 'starting') : t('button', 'startFreestyle')}
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* (c) 模板訓練 — ADR-0024 § 2.c */}
-          {/*
+          {/* (b) 模板訓練 — ADR-0024 § 2.c (renumbered)
+              2026-05-29 polish: reordered ABOVE 空白訓練. Rationale:
+              user reqs brightness 計劃>模板>空白 + 空白 should be
+              last (lowest-effort fallback when no plan/template
+              applies today). Section component stays a pure list.
             Tap a row → load picker data + open StartTemplateSheet. The sheet
             owns the (program, sub_tag) pick + lookup-or-spawn before either
             editing or starting a session. Wired here rather than inside
@@ -2300,6 +2289,31 @@ export default function TodayScreen() {
             heading={t('page', 'templateTraining')}
             onPickTemplate={onPickTemplate}
           />
+
+          {/* (c) 空白訓練 — ADR-0024 § 2.b (renumbered, moved to bottom)
+              2026-05-29 polish: lowest prominence per user — use
+              styles.freestyleBtn (ghost / secondary) instead of the
+              old styles.startBtn (filled primary CTA). 計劃 takes
+              the filled-primary spot now. */}
+          <View style={styles.section}>
+            <Text style={styles.sectionHeading}>
+              {t('page', 'freestyleTraining')}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('button', 'startFreestyle')}
+              onPress={onStartFreestyle}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.freestyleBtn,
+                busy && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.freestyleBtnText}>
+                {busy ? t('button', 'starting') : t('button', 'startFreestyle')}
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
         <StartTemplateSheet
           visible={sheetTemplate != null}
@@ -3441,15 +3455,30 @@ function makeStyles(tokens: ThemeTokens) {
     alignItems: 'center',
   },
   restRowText: { fontSize: 14, color: tokens.text.secondary },
+  // 2026-05-29 polish: plannedRow promoted to filled primary CTA
+  // (highest visual prominence). User reqs brightness 計劃>模板>空白;
+  // 計劃 is the "default daily training" so it should sit at the top
+  // of the visual hierarchy when a planned template is available. The
+  // emptyBox + restRow branches (no-program / rest day) keep their
+  // existing low-prominence styling because they're not the active
+  // CTA in those states.
   plannedRow: {
-    paddingVertical: 14,
+    paddingVertical: 18,
     paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: tokens.bg.elevated,
+    borderRadius: 12,
+    backgroundColor: tokens.action.primary,
     gap: 4,
   },
-  plannedRowName: { fontSize: 16, fontWeight: '700', color: tokens.action.primary },
-  plannedRowDetails: { fontSize: 13, color: tokens.text.secondary },
+  plannedRowName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: tokens.action.onPrimary,
+  },
+  plannedRowDetails: {
+    fontSize: 13,
+    color: tokens.action.onPrimary,
+    opacity: 0.85,
+  },
   scrollBody: { padding: 24, gap: 12, paddingBottom: 48 },
   heading: { fontSize: 28, fontWeight: '700', color: tokens.text.primary },
   label: {
@@ -3458,6 +3487,11 @@ function makeStyles(tokens: ThemeTokens) {
     marginTop: 12,
     color: tokens.text.secondary,
   },
+  // startBtn / startBtnText — legacy filled-primary CTA, no longer
+  // referenced in idle scroll after the 2026-05-29 polish (plannedRow
+  // took over filled-primary; 空白訓練 dropped to freestyleBtn ghost).
+  // Kept for now in case other call sites surface; safe to remove
+  // along with a grep sweep in a later cleanup commit.
   startBtn: {
     paddingVertical: 18,
     borderRadius: 12,
@@ -3468,6 +3502,22 @@ function makeStyles(tokens: ThemeTokens) {
     color: tokens.action.onPrimary,
     fontSize: 18,
     fontWeight: '700',
+  },
+  // 2026-05-29 polish: 空白訓練 ghost / secondary button. Lowest
+  // visual prominence in the 3-section idle scroll — sits at the
+  // bottom of the brightness hierarchy 計劃 > 模板 > 空白 per user.
+  // Outlined / muted bg so the tap target is still discoverable
+  // without competing with 計劃 (filled primary) or the 模板 row list.
+  freestyleBtn: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: tokens.bg.elevated,
+    alignItems: 'center',
+  },
+  freestyleBtnText: {
+    color: tokens.text.secondary,
+    fontSize: 15,
+    fontWeight: '600',
   },
   sessionHeader: {
     flexDirection: 'row',
