@@ -48,3 +48,6 @@ ios/.xcode.env.local
 ios/*.xcworkspace/xcuserdata/
 ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# dev scratch — spike results, anatomy refs, overnight agent intermediate artifacts
+tmp/
