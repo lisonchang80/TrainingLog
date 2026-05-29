@@ -50,6 +50,7 @@ export type WCMessageKind =
   | 'start-from-watch'
   | 'start-from-iphone'
   | 'start-reconcile'
+  | 'start-resolve'
   | 'set-completed'
   | 'set-modified'
   | 'set-deleted'
@@ -67,16 +68,21 @@ export type WCMessageKind =
  * sync with `WCMessageKind` literal union above.
  *
  * NEW-Q50 (2026-05-29) — `start-reconcile` added as reverse TUI ack
- * envelope (iPhone → Watch reply to `start-from-watch`). D30 / D31
- * Watch-side Swift will introduce additional reverse-TUI kinds
- * (`start-resolve` Watch→iPhone for conflict 2-choice; `end-reconcile`
- * iPhone→Watch for end-session ack); deferred until those wire-ins.
+ * envelope (iPhone → Watch reply to `start-from-watch`).
+ *
+ * D31 (2026-05-29 late) — `start-resolve` added as Watch → iPhone
+ * forward TUI envelope: user picked "中止 iPhone 保留 Watch" in the
+ * conflict alert sheet. iPhone receiver hard-deletes the
+ * `existingSessionId` via `discardSession` cascade. Fire-and-forget;
+ * no reply. `end-reconcile` (iPhone→Watch for end-session ack) still
+ * deferred to a later wire-in.
  */
 export const WC_MESSAGE_KINDS = [
   'handshake',
   'start-from-watch',
   'start-from-iphone',
   'start-reconcile',
+  'start-resolve',
   'set-completed',
   'set-modified',
   'set-deleted',
@@ -182,6 +188,40 @@ export type StartReconcilePayload =
       existingTitle: string;
       existingStartedAt: number;
     };
+
+/**
+ * `start-resolve` — Watch → iPhone forward-TUI conflict resolution
+ * envelope (D31 / NEW-Q50 Q5 escalation tail). Fires when the user
+ * picked "中止 iPhone 保留 Watch" in the conflict alert that landed
+ * after a `start-reconcile { status: 'conflict' }` reply.
+ *
+ * Semantics: "Watch is the new winner. Discard your session row at
+ * `existingSessionId` and let my local `localSessionId` take over."
+ *
+ * iPhone receiver MUST:
+ *   - Hard-delete `existingSessionId` via `discardSession` (cascades
+ *     set / session_exercise / achievement_unlock / app_settings
+ *     edit-mode snapshot in one transaction — see
+ *     `src/adapters/sqlite/sessionRepository.ts`).
+ *   - Idempotent: if `existingSessionId` already gone, `discardSession`
+ *     is a sequence of `DELETE WHERE` no-ops; safe to redeliver.
+ *   - NOT touch `localSessionId` — that row may not exist yet (the
+ *     original `start-from-watch` envelope can still be in iOS's TUI
+ *     queue), or may already have been INSERT OR IGNORE'd by a
+ *     prior delivery. Watch is the source of truth for that row;
+ *     iPhone's reconcile pipeline (still `start-reconcile`) will
+ *     adopt it as normal.
+ *
+ * Sent via `transferUserInfo` (Q4 — fire-and-forget queued TUI).
+ * No reply envelope — Watch UI dismisses the alert immediately,
+ * does not block on ack. iPhone delivers when reachable.
+ */
+export interface StartResolvePayload {
+  /** Watch's locally-minted sessionId (the one that won). Diagnostic only — iPhone uses existingSessionId to know what to delete. */
+  localSessionId: string;
+  /** iPhone's existing-but-losing sessionId. Hard-delete target. */
+  existingSessionId: string;
+}
 
 /**
  * `set-completed` — either side → other side. User flipped a set's
@@ -365,6 +405,7 @@ export type WCMessage =
   | WCEnvelope<'start-from-watch', StartFromWatchPayload>
   | WCEnvelope<'start-from-iphone', StartFromIphonePayload>
   | WCEnvelope<'start-reconcile', StartReconcilePayload>
+  | WCEnvelope<'start-resolve', StartResolvePayload>
   | WCEnvelope<'set-completed', SetCompletedPayload>
   | WCEnvelope<'set-modified', SetModifiedPayload>
   | WCEnvelope<'set-deleted', SetDeletedPayload>
@@ -389,6 +430,7 @@ export interface WCPayloadMap {
   'start-from-watch': StartFromWatchPayload;
   'start-from-iphone': StartFromIphonePayload;
   'start-reconcile': StartReconcilePayload;
+  'start-resolve': StartResolvePayload;
   'set-completed': SetCompletedPayload;
   'set-modified': SetModifiedPayload;
   'set-deleted': SetDeletedPayload;

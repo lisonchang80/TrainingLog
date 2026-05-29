@@ -89,6 +89,22 @@ struct SetLoggerView: View {
     /// session lifecycle terminates.
     @Environment(\.dismiss) private var dismiss
 
+    /// D31 (2026-05-29 late) — conflict alert state cache.
+    ///
+    /// `coordinator.lastReconcile` is a published *event* (the latest
+    /// reverse-TUI reply from iPhone); we mirror its `.conflict(...)`
+    /// payload into a local @State so the alert presentation is driven
+    /// by a stable identity. SwiftUI's `.alert(...presenting:)` needs
+    /// a Hashable `item?` whose nil↔non-nil transition is the show/hide
+    /// signal; we set it on `.onChange(of: lastReconcile)` and clear it
+    /// when the user picks either button.
+    ///
+    /// Why not bind directly to `coordinator.lastReconcile` — `.created`
+    /// + `.unparseable` cases must NOT show the alert; using a local
+    /// @State lets us filter to `.conflict` only without leaking the
+    /// other cases into the binding.
+    @State private var conflictAlert: ConflictAlertState?
+
     var body: some View {
         // NEW-Q50 D29 smoke fix (2026-05-29): removed inner
         // `NavigationStack { ... }` wrapper. SetLoggerView is mounted as
@@ -238,6 +254,77 @@ struct SetLoggerView: View {
             .task {
                 await sessionController.start()
             }
+            // D31 (2026-05-29 late) — conflict alert wire.
+            //
+            // When iPhone replies start-reconcile with `.conflict(...)`,
+            // mirror the payload into local @State so the alert presents.
+            // `.created` and `.unparseable` cases never set conflictAlert
+            // — the alert stays nil and remains dismissed.
+            .onChange(of: coordinator.lastReconcile) { _, newValue in
+                guard case let .conflict(local, existing, title, startedAt) = newValue else {
+                    return
+                }
+                conflictAlert = ConflictAlertState(
+                    localSessionId: local,
+                    existingSessionId: existing,
+                    existingTitle: title,
+                    existingStartedAt: startedAt
+                )
+            }
+            // D31 conflict resolution sheet — non-dismissible (iOS HIG
+            // .alert auto-includes no "X / swipe-to-close" affordance;
+            // both buttons are explicit choices, no Cancel role). Per
+            // NEW-Q50 Q5 / 2026-05-29 grill:
+            //   - 「中止 Watch 保留 iPhone」 (.destructive) — abandon the
+            //     local Watch session: end HKWorkoutSession + pop the
+            //     nav stack back to picker so user can re-engage with
+            //     the existing iPhone session (or whatever's next).
+            //     No outbound — iPhone already has its row.
+            //   - 「中止 iPhone 保留 Watch」 (.default) — fire start-resolve
+            //     fire-and-forget TUI to iPhone so it discards the
+            //     losing row; Watch continues training in this SetLogger.
+            .alert(
+                "iPhone 已有訓練中",
+                isPresented: Binding(
+                    get: { conflictAlert != nil },
+                    set: { if !$0 { conflictAlert = nil } }
+                ),
+                presenting: conflictAlert
+            ) { payload in
+                Button("中止 iPhone 保留 Watch") {
+                    coordinator.sendStartResolveToiPhone(
+                        localSessionId: payload.localSessionId,
+                        existingSessionId: payload.existingSessionId
+                    )
+                    conflictAlert = nil
+                }
+                Button("中止 Watch 保留 iPhone", role: .destructive) {
+                    Task {
+                        await sessionController.end()
+                        conflictAlert = nil
+                        if let onSessionEnd {
+                            onSessionEnd()
+                        } else {
+                            dismiss()
+                        }
+                    }
+                }
+            } message: { payload in
+                Text("「\(payload.existingTitle)」")
+            }
+    }
+
+    // MARK: - D31 conflict alert state
+
+    /// Hashable mirror of `StartReconcileResult.conflict(...)` so the
+    /// SwiftUI `.alert(...presenting:)` modifier can drive presentation
+    /// off a stable identity. Pulled out as a top-level struct rather
+    /// than nested so the alert closures can reference it cleanly.
+    private struct ConflictAlertState: Hashable {
+        let localSessionId: String
+        let existingSessionId: String
+        let existingTitle: String
+        let existingStartedAt: Int64
     }
 
     // Phase A renders the mock when the passed-in snapshot is empty

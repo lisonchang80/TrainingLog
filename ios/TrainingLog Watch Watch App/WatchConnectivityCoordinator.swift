@@ -381,6 +381,74 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         lastOutbound = "start-from-watch \(sendMsgStatus) sent sess=\(prefix8(sessionId))"
     }
 
+    /// D31 (2026-05-29 late) — Watch → iPhone conflict resolution outbound.
+    ///
+    /// Fires when the user picked "中止 iPhone 保留 Watch" in the conflict
+    /// alert sheet that landed after `start-reconcile { status: 'conflict' }`.
+    /// Tells iPhone to hard-delete its now-losing session row (per
+    /// NEW-Q50 Q5 escalation tail — first-write-wins is being overridden
+    /// by explicit user choice on Watch).
+    ///
+    /// Fire-and-forget per Q5 design (matches sendStartFromWatchTUI):
+    ///   - `transferUserInfo` queues even if iPhone is unreachable.
+    ///   - `sendMessage` ALSO fires when reachable for instant UX —
+    ///     iPhone's onStartResolve is idempotent (discardSession is a
+    ///     sequence of `DELETE WHERE` no-ops on already-deleted rows)
+    ///     so dual-delivery is safe.
+    ///   - No `replyHandler` / no `await` — caller (alert handler in
+    ///     SetLoggerView) dismisses the alert immediately and continues
+    ///     the local Watch session. iPhone delivery is best-effort.
+    ///
+    /// Payload shape matches TS `StartResolvePayload`:
+    ///   {localSessionId, existingSessionId}
+    /// — both required strings. iPhone uses `existingSessionId` as the
+    /// hard-delete target via `discardSession`.
+    func sendStartResolveToiPhone(
+        localSessionId: String,
+        existingSessionId: String
+    ) {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "start-resolve skip: not activated"
+            return
+        }
+        guard !localSessionId.isEmpty, !existingSessionId.isEmpty else {
+            lastOutbound = "start-resolve skip: empty sessionId"
+            return
+        }
+
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "start-resolve",
+            "payload": [
+                "localSessionId": localSessionId,
+                "existingSessionId": existingSessionId,
+            ],
+        ]
+
+        // Dual-fire like sendStartFromWatchTUI — TUI is the always-on
+        // queued path; sendMessage is the instant path when reachable.
+        session.transferUserInfo(envelope)
+        var status = "tui"
+        if session.isReachable {
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { [weak self] err in
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "start-resolve msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
+                }
+            )
+            status = "tui+msg"
+        }
+        lastOutbound =
+            "start-resolve \(status) sent local=\(prefix8(localSessionId)) → "
+            + "discard=\(prefix8(existingSessionId))"
+    }
+
     /// LEGACY (pre-NEW-Q50) — Send `start-from-watch` to iPhone with
     /// the user's 3-tuple + await reply. Uses sendMessage + replyHandler
     /// which requires `isReachable=true` (i.e., iPhone app foregrounded).

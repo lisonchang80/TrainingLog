@@ -53,6 +53,15 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         status: 'created',
         sessionId: 'W-deadbeef-0001',
       } as unknown as WCPayloadMap[K];
+    case 'start-resolve':
+      // D31 Watch→iPhone conflict resolution forward-TUI. Sample
+      // matches the StartResolvePayload shape: Watch supplies the
+      // local (winning) sessionId + the existing (losing) iPhone
+      // sessionId for hard-delete.
+      return {
+        localSessionId: 'W-deadbeef-0001',
+        existingSessionId: 'sess-iphone-old',
+      } as unknown as WCPayloadMap[K];
     case 'set-completed':
       return {
         sessionId: 'sess-1',

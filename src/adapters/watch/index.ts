@@ -27,6 +27,7 @@ export type {
   StartFromWatchPayload,
   StartFromIphonePayload,
   StartReconcilePayload,
+  StartResolvePayload,
   SetCompletedPayload,
   SetModifiedPayload,
   SetDeletedPayload,

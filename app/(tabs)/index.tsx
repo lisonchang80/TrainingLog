@@ -40,6 +40,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
+import { onStartResolve } from '@/src/services/watchSessionResolve';
 import {
   addMessageListener,
   addUserInfoListener,
@@ -548,10 +549,32 @@ export default function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // D31 (2026-05-29 late) — start-resolve forward-TUI inbound.
+    // Watch fires this after the user picked "中止 iPhone 保留 Watch"
+    // in the conflict alert sheet that landed when start-reconcile
+    // returned {status:'conflict'}. iPhone hard-deletes the now-losing
+    // existingSessionId via discardSession (cascades sets +
+    // session_exercise + achievement_unlock + edit-snapshot in one txn).
+    //
+    // No reply envelope — Watch dismissed its alert immediately on
+    // tap. We call refresh() so the iPhone UI flips out of the
+    // now-stale active-session mode (typical: idle banner returns
+    // to "選擇訓練" since both the old session AND the new Watch
+    // session might not yet be visible to iPhone — that's fine,
+    // the standard start-reconcile pipeline adopts the Watch session
+    // separately).
+    const unsubStartResolve = addUserInfoListener(
+      'start-resolve',
+      async (env) => {
+        await onStartResolve(db, env);
+        refreshRef.current?.();
+      },
+    );
     return () => {
       unsubHandshake();
       unsubStartFromWatch();
       unsubStartFromWatchV1();
+      unsubStartResolve();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.
