@@ -99,6 +99,16 @@ Even after iPhone host app contains fresh embedded Watch bundle, the **Apple Wat
 5. Apple Watch app → 我的手錶 → 可用的 APP → TrainingLog Watch → **[安裝]**
 6. Wait 1-3 min, Watch icon reappears, launch — should be fresh build
 
+**Iteration tax (2026-05-29 late-evening validated, 10+ Trap 3 cycles in one session)**:
+
+Trap 3 is required for EACH new Swift change to Watch target unless you also bump `CFBundleVersion` in `ios/TrainingLog Watch Watch App/Info.plist` (or the build setting `CURRENT_PROJECT_VERSION`). With same version, Apple Watch sync treats every iteration as "already installed" and serves cached old code — even though the iPhone host bundle is genuinely updated by `devicectl`.
+
+Cost: each Trap 3 cycle = ~3-5 min user time (delete + delete + wait + install + wait). For a 10-fix-iteration debug session that's 30-50 min of wall clock burned on the dance alone.
+
+**Mitigation (future work)**: pre-build hook to auto-bump `CFBundleVersion` whenever Watch target Swift files change. Then Watch sync sees a new version each build → auto-pushes new bundle → no Trap 3 needed. Estimated 10-min one-time setup; saves the iteration tax thereafter. Not yet implemented; tracked as backlog.
+
+**During active debug**: if you know you'll iterate ≥3 times, consider implementing the auto-bump first as a one-time investment. Otherwise just accept the dance — explain to user up-front so they know what to expect.
+
 ### Trap 4 — Xcode 16+ debug builds split binary into stub + `.debug.dylib`
 
 For watchOS Debug builds (and possibly iphoneos too), Xcode 16+ emits two files instead of one:
