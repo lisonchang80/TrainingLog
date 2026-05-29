@@ -51,7 +51,7 @@ import {
   NestableScrollContainer,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
@@ -205,6 +205,7 @@ export default function TemplateEditorView() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useEditorStyles();
+  const insets = useSafeAreaInsets();
 
   /** Display override resolver — undefined = no override; null = 通用 / no
    *  intensity; string = explicit value. */
@@ -1992,7 +1993,11 @@ export default function TemplateEditorView() {
           {renderSection('evergreen', tt('status', 'noEvergreenExercises'))}
         </NestableScrollContainer>
 
-        <View style={styles.actionBar}>
+        <View
+          style={[
+            styles.actionBar,
+            { paddingBottom: Math.max(insets.bottom, 10) },
+          ]}>
           <Pressable
             style={styles.actionBtn}
             onPress={() => router.push('/exercise-picker?mode=picker')}>

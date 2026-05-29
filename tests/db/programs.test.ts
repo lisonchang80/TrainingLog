@@ -89,6 +89,33 @@ describe('programRepository', () => {
     expect(ap?.program.is_active).toBe(0);
   });
 
+  // Inline「+ 新增計畫」UX contract: the call sites in
+  // components/session/template-meta-sheet.tsx + app/(tabs)/index.tsx
+  // chain createProgram() with setActiveProgram() so the new program
+  // becomes active immediately (matches app/program-wizard/new.tsx).
+  // These cases lock that contract end-to-end at the repo layer.
+  it('createProgram + setActiveProgram activates the new program (no prior active)', async () => {
+    const p = buildProgram({ name: 'New' });
+    await createProgram(db, { program: p });
+    await setActiveProgram(db, { id: p.id });
+    const active = await getActiveProgram(db);
+    expect(active?.program.id).toBe(p.id);
+    expect(active?.program.is_active).toBe(1);
+  });
+
+  it('createProgram + setActiveProgram deactivates the prior active program', async () => {
+    const prior = buildProgram({ name: 'Prior' });
+    const fresh = buildProgram({ name: 'Fresh' });
+    await createProgram(db, { program: prior });
+    await setActiveProgram(db, { id: prior.id });
+    await createProgram(db, { program: fresh });
+    await setActiveProgram(db, { id: fresh.id });
+    expect((await getProgram(db, prior.id))?.program.is_active).toBe(0);
+    expect((await getProgram(db, fresh.id))?.program.is_active).toBe(1);
+    const active = await getActiveProgram(db);
+    expect(active?.program.id).toBe(fresh.id);
+  });
+
   it('clearActiveProgram zeroes every is_active', async () => {
     const p = buildProgram();
     await createProgram(db, { program: p });

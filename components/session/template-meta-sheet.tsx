@@ -38,7 +38,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -55,6 +57,7 @@ import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
   createProgram,
   listPrograms,
+  setActiveProgram,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
@@ -333,6 +336,11 @@ export function TemplateMetaSheet({
           is_active: 0,
         },
       });
+      // Match wizard-path UX (app/program-wizard/new.tsx) — newly-created
+      // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
+      // picker pick it up without an extra user step. Atomic per
+      // setActiveProgram impl (single transaction clears every other row).
+      await setActiveProgram(db, { id: newId });
       // Append to local chip list (parent will re-fetch next open).
       // Match the ProgramSummary shape — cellCount = 0 since we didn't seed cells.
       const newSummary: ProgramSummary = {
@@ -342,10 +350,13 @@ export function TemplateMetaSheet({
         cycle_length: seedLength,
         cycle_count: seedCount,
         start_date: seedStart,
-        is_active: 0,
+        is_active: 1,
         cellCount: 0,
       };
-      setProgramList((prev) => [...prev, newSummary]);
+      setProgramList((prev) => [
+        ...prev.map((p) => (p.is_active ? { ...p, is_active: 0 as const } : p)),
+        newSummary,
+      ]);
       setProgramId(newId);
       setCustomProgramMode(false);
       setCustomProgramName('');
@@ -415,6 +426,10 @@ export function TemplateMetaSheet({
       animationType="slide"
       onRequestClose={onCancel}
     >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.avoider}
+      >
       <Pressable style={styles.backdrop} onPress={onCancel}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.topBar}>
@@ -442,7 +457,10 @@ export function TemplateMetaSheet({
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={styles.body}>
+          <ScrollView
+            contentContainerStyle={styles.body}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* 名稱 — hidden when omitName=true (template editor caller, where
                 name lives in the editor body inline). defaultName still goes
                 to onConfirm.name unchanged via the `name` state. */}
@@ -601,6 +619,7 @@ export function TemplateMetaSheet({
           </ScrollView>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -642,6 +661,9 @@ function makeStyles(tokens: ThemeTokens) {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.4)',
       justifyContent: 'flex-end',
+    },
+    avoider: {
+      flex: 1,
     },
     sheet: {
       backgroundColor: tokens.bg.modal,

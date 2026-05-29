@@ -112,6 +112,9 @@ import {
 import {
   createProgram,
   listPrograms,
+  // Aliased — local useState exposes `setActiveProgram` setter (line ~209)
+  // that shadows this name. The repo fn is the row-flipping DB helper.
+  setActiveProgram as setActiveProgramRow,
 } from '@/src/adapters/sqlite/programRepository';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
@@ -728,6 +731,10 @@ export default function TodayScreen() {
         is_active: 0,
       },
     });
+    // Match wizard-path UX (app/program-wizard/new.tsx) — inline-created
+    // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
+    // picker pick it up immediately. Atomic per setActiveProgram impl.
+    await setActiveProgramRow(db, { id });
     setSheetPrograms((prev) => [...prev, { id, name }]);
     return { id, name };
   };

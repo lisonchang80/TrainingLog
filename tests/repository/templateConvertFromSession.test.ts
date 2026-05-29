@@ -6,6 +6,7 @@ import {
   getTemplateFull,
 } from '../../src/adapters/sqlite/templateRepository';
 import { listExercises } from '../../src/adapters/sqlite/exerciseRepository';
+import { createProgram } from '../../src/adapters/sqlite/programRepository';
 import {
   createSession,
   insertSessionExercise,
@@ -39,6 +40,26 @@ describe('convertSessionToTemplate', () => {
   });
 
   afterEach(() => db.close());
+
+  // v022 `program_sub_tag` FK requires the program row to exist before
+  // `recordProgramSubTag` fires (called from `convertSessionToTemplate`'s
+  // create-path when args.program_id is non-null). Tests pre-this commit
+  // used phantom program_ids since `template.program_id` was added via
+  // ALTER TABLE (SQLite skips FK on added columns). Seed program rows for
+  // any test that passes a real program_id.
+  async function seedProgram(id: string): Promise<void> {
+    await createProgram(db, {
+      program: {
+        id,
+        name: `seed-${id}`,
+        main_tag: null,
+        cycle_length: 3,
+        cycle_count: 1,
+        start_date: '2026-05-29',
+        is_active: 0,
+      },
+    });
+  }
 
   async function setupSession(args: {
     session_id: string;
@@ -287,6 +308,7 @@ describe('convertSessionToTemplate', () => {
   // create mode 帶入 program_id / sub_tag → 寫進 template row。
   it('create mode with program_id + sub_tag: writes them onto the new template row', async () => {
     await setupSession({ session_id: 'sess-meta', template_id: null });
+    await seedProgram('prog-foo');
 
     const newTplId = await convertSessionToTemplate(db, {
       session_id: 'sess-meta',
@@ -628,6 +650,7 @@ describe('convertSessionToTemplate', () => {
   it('update mode falling back to create (freestyle session) ALSO honors program_id / sub_tag', async () => {
     // No linked template_id on session_exercise rows → create-mode fallback.
     await setupSession({ session_id: 'sess-fallback', template_id: null });
+    await seedProgram('prog-bar');
 
     const newTplId = await convertSessionToTemplate(db, {
       session_id: 'sess-fallback',
@@ -658,6 +681,7 @@ describe('convertSessionToTemplate', () => {
   describe('create-mode dup-triple guard (overnight #55)', () => {
     it('throws DUPLICATE_TEMPLATE_TRIPLE when (name, program_id, sub_tag) already exists (all non-null)', async () => {
       await setupSession({ session_id: 'sess-dup1', template_id: null });
+      await seedProgram('prog-x');
 
       // First save succeeds.
       await convertSessionToTemplate(db, {
@@ -708,6 +732,7 @@ describe('convertSessionToTemplate', () => {
 
     it('allows same name under a different (program, sub_tag) — siblings via ADR-0003 三元組 identity', async () => {
       await setupSession({ session_id: 'sess-sib', template_id: null });
+      await seedProgram('prog-a');
 
       await convertSessionToTemplate(db, {
         session_id: 'sess-sib',

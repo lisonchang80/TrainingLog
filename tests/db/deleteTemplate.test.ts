@@ -209,6 +209,35 @@ describe('deleteTemplate — three-layer cascade + dangling cleanup', () => {
     ).toBe(1);
   });
 
+  it('nulls out program_cell.template_id and leaves the program + cell row intact', async () => {
+    await seedTemplateWithExerciseAndSets('tpl-P', 'Push');
+
+    // Program + grid cell scheduling the template at (cycle 0, day 0).
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, cycle_length, cycle_count, start_date, is_active, created_at, updated_at)
+       VALUES ('prog-P', 'T1', 7, 1, '2026-05-29', 1, ${NOW}, ${NOW})`
+    );
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES ('cell-P', 'prog-P', 0, 0, 'tpl-P', NULL)`
+    );
+
+    // Sanity before delete.
+    expect(await countRows('program_cell', "id = 'cell-P' AND template_id = 'tpl-P'")).toBe(1);
+
+    // Must not throw — without the program_cell cleanup this trips SQLite
+    // error 19 (FOREIGN KEY constraint failed) at commit time.
+    await expect(deleteTemplate(db, 'tpl-P')).resolves.toBeUndefined();
+
+    // Template is gone.
+    expect(await countRows('template', 'id = ?', 'tpl-P')).toBe(0);
+    // Program row + cell row both intact; cell's template_id cleared.
+    expect(await countRows('program', "id = 'prog-P'")).toBe(1);
+    expect(await countRows('program_cell', "id = 'cell-P' AND template_id IS NULL")).toBe(1);
+  });
+
   it('rolls back atomically on mid-cascade failure (no orphan rows left behind)', async () => {
     const { te_id, set_ids } = await seedTemplateWithExerciseAndSets('tpl-X', 'Pull');
 
@@ -225,10 +254,11 @@ describe('deleteTemplate — three-layer cascade + dangling cleanup', () => {
       callCount += 1;
       // Order inside deleteTemplate's transaction:
       //   1. UPDATE session_exercise ...
-      //   2. DELETE FROM template_set ...
-      //   3. DELETE FROM template_exercise ...   <-- throw here
-      //   4. DELETE FROM template ...
-      if (callCount === 3 && sql.includes('DELETE FROM template_exercise')) {
+      //   2. UPDATE program_cell ...
+      //   3. DELETE FROM template_set ...
+      //   4. DELETE FROM template_exercise ...   <-- throw here
+      //   5. DELETE FROM template ...
+      if (callCount === 4 && sql.includes('DELETE FROM template_exercise')) {
         throw new Error('simulated mid-cascade failure');
       }
       return realRun(sql, ...params);

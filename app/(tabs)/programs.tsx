@@ -35,6 +35,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import {
   createTemplate,
+  listDistinctSubTagsByProgram,
   listTemplateGroupsByName,
   listTemplates,
   type TemplateSummary,
@@ -203,8 +204,23 @@ export default function ProgramsScreen() {
     // 強度 ever registered, including ones no cell currently uses (so
     // user can swap back to a prior label without re-typing).
     if (resolvedShown) {
-      const tags = await listProgramSubTags(db, resolvedShown.program.id);
-      setTemplateSubTagsForProgram(tags);
+      // Per `program-sub-tag-union-source` skill — the picker source MUST
+      // union (a) `listDistinctSubTagsByProgram` (templates currently
+      // classified under this program) + (b) `listProgramSubTags` (v022
+      // persistent dictionary). Either alone drops labels:
+      //   - dict-only path misses templates whose write helper forgets to
+      //     call `recordProgramSubTag` (defense-in-depth).
+      //   - template-only path misses dict entries with no template (e.g.
+      //     wizard Step 1 typed `[GG-1, GG-2]` but Step 3 only attached
+      //     GG-1; GG-2 lives in dict alone).
+      // distinctSubTagsInProgram(cells) is added separately at render time.
+      const [dictTags, classifiedTags] = await Promise.all([
+        listProgramSubTags(db, resolvedShown.program.id),
+        listDistinctSubTagsByProgram(db, resolvedShown.program.id),
+      ]);
+      setTemplateSubTagsForProgram(
+        Array.from(new Set([...dictTags, ...classifiedTags])),
+      );
     } else {
       setTemplateSubTagsForProgram([]);
     }
@@ -1498,7 +1514,7 @@ function TemplatePicker({
 
 /**
  * Sub_tag picker — list of existing sub_tags in this program, plus
- * 「無」 and 「+ 新增強度」 inline (mirror template-meta-sheet pattern).
+ * 「通用」 and 「+ 新增強度」 inline (mirror template-meta-sheet pattern).
  */
 function SubTagPicker({
   visible,
@@ -1560,7 +1576,7 @@ function SubTagPicker({
                   styles.modalRowText,
                   activeSubTag == null && styles.modalRowTextActive,
                 ]}>
-                {t('common', 'none')}
+                {t('common', 'default')}
               </Text>
             </Pressable>
             {existingSubTags.map((tag) => (

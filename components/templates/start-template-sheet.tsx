@@ -49,7 +49,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -403,6 +405,10 @@ export function StartTemplateSheet({
       animationType="slide"
       onRequestClose={onCancel}
     >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.avoider}
+      >
       <Pressable style={styles.backdrop} onPress={onCancel}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.topBar}>
@@ -415,7 +421,10 @@ export function StartTemplateSheet({
             <View style={{ width: 50 }} />
           </View>
 
-          <ScrollView contentContainerStyle={styles.body}>
+          <ScrollView
+            contentContainerStyle={styles.body}
+            keyboardShouldPersistTaps="handled"
+          >
             <Text style={styles.sectionLabel}>{t('page', 'selectProgramAlt')}</Text>
             <View style={styles.divider} />
             {periodOptions.map((opt) => {
@@ -633,6 +642,7 @@ export function StartTemplateSheet({
           </View>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -644,6 +654,9 @@ function makeStyles(tokens: ThemeTokens) {
       // HIG-standard modal scrim — mode-agnostic.
       backgroundColor: 'rgba(0,0,0,0.4)',
       justifyContent: 'flex-end',
+    },
+    avoider: {
+      flex: 1,
     },
     sheet: {
       backgroundColor: tokens.bg.modal,

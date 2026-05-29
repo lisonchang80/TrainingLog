@@ -10,6 +10,7 @@ import type {
 } from '../../domain/template/types';
 import type { MemoryCandidate } from '../../domain/template/templateMemory';
 import { colorForTemplateName } from '../../domain/template/templateColor';
+import { recordProgramSubTag } from './programRepository';
 
 /**
  * Persistence layer for Templates and their exercise rows.
@@ -300,6 +301,14 @@ export async function attachTemplateToProgram(
     ts,
     args.template_id
   );
+  // Register the (program_id, sub_tag) pair in the v022 persistent label
+  // dictionary so the Programs tab row/cell picker keeps the chip visible
+  // even before any cell references this classification (the user-reported
+  // bug: 「儲存模板」 inline 新增強度 → 計畫 tab row apply picker shows nothing).
+  // No-op when either side is null per `recordProgramSubTag` spec.
+  if (args.program_id != null) {
+    await recordProgramSubTag(db, args.program_id, args.sub_tag, args.now);
+  }
 }
 
 /**
@@ -415,6 +424,16 @@ export async function deleteTemplate(db: Database, id: string): Promise<void> {
           AND session_id NOT IN (
             SELECT id FROM session WHERE ended_at IS NULL
           )`,
+      id
+    );
+    // 1b. Dangling pointer cleanup on program_cell.template_id — clear the
+    //     template binding on any program-grid cell that scheduled this
+    //     template. The program row + cell stay intact (so the schedule is
+    //     preserved) but the cell reverts to a "no template" state.
+    //     Without this, the FK from program_cell.template_id → template(id)
+    //     trips SQLite error 19 at commit time when foreign_keys=ON.
+    await db.runAsync(
+      `UPDATE program_cell SET template_id = NULL WHERE template_id = ?`,
       id
     );
     // 2. template_set is referenced from template_exercise; drop it first so
@@ -1230,6 +1249,14 @@ export async function convertSessionToTemplate(
         createProgramId,
         createSubTag,
       );
+      // v022 dict sync — same rationale as cloneTemplateWithSubTag /
+      // attachTemplateToProgram. Session-detail 「另存模板」 creates a fresh
+      // template under (createProgramId, createSubTag); without this the
+      // Programs tab picker misses the sub_tag chip when the new template
+      // isn't yet referenced by any cell.
+      if (createProgramId != null) {
+        await recordProgramSubTag(db, createProgramId, createSubTag, args.now);
+      }
     }
 
     // INSERT one template_exercise row per session_exercise + its sets.
@@ -1473,6 +1500,17 @@ export async function cloneTemplateWithSubTag(
       ts,
       args.new_program_id,
       args.new_sub_tag
+    );
+
+    // v022 dict sync — mirror attachTemplateToProgram. Without this the
+    // start-template-sheet「+ 新增強度」 inline flow lands the sub_tag onto
+    // the clone but the Programs tab picker can't see it until a cell
+    // references it.
+    await recordProgramSubTag(
+      db,
+      args.new_program_id,
+      args.new_sub_tag,
+      args.now,
     );
 
     // template_exercise rows — remap id + parent_id.
