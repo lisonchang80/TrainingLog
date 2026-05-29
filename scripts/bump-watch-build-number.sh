@@ -59,6 +59,16 @@ if [ ! -x "$PLIST_BUDDY" ]; then
   exit 1
 fi
 
+# Detect the original on-disk format so we can restore it after writing.
+# Built-product Info.plists are BINARY; PlistBuddy always writes XML on save, so
+# without this we'd silently convert the bundle plist to XML. Both formats are
+# valid at runtime, but preserving binary keeps the output identical to what
+# Xcode normally emits.
+ORIG_FMT=binary1
+if file "$PLIST_PATH" | grep -qi "XML"; then
+  ORIG_FMT=xml1
+fi
+
 # Read the existing value (may be absent — GENERATE_INFOPLIST_FILE targets have
 # CFBundleVersion injected from CURRENT_PROJECT_VERSION, so the SOURCE partial
 # plist usually has no such key). Tolerate absence.
@@ -72,4 +82,7 @@ else
   "$PLIST_BUDDY" -c "Set :CFBundleVersion $VALUE" "$PLIST_PATH"
 fi
 
-echo "bump-watch-build-number: CFBundleVersion $OLD_VALUE -> $VALUE  ($PLIST_PATH)"
+# Restore the original binary/xml format (PlistBuddy wrote XML).
+plutil -convert "$ORIG_FMT" "$PLIST_PATH"
+
+echo "bump-watch-build-number: CFBundleVersion $OLD_VALUE -> $VALUE  ($PLIST_PATH, $ORIG_FMT)"
