@@ -331,23 +331,28 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
                 envelope,
                 replyHandler: nil,
                 errorHandler: { [weak self] err in
-                    // 2026-05-29 B1 diag enrichment (TEMPORARY):
-                    // Surface sendMessage error to lastOutbound so the
-                    // Watch-side DBG overlay can show whether iOS WC
-                    // framework rejected the delivery. Pre-enrichment
-                    // this was a no-op (errors swallowed silently) which
-                    // hid the case where Watch thinks it sent but iPhone
-                    // never received.
+                    // 2026-05-29 B1 diag → permanent defensive log:
+                    // Pre-change this was a no-op (`{ _ in }`) which
+                    // silently swallowed errors. The B1 smoke surfaced
+                    // a NSNull payload bug specifically because we
+                    // started writing the error code to lastOutbound:
+                    // 'msg ERR code=7010 Payload contains unsupported
+                    // type' immediately pointed at the root cause.
                     //
-                    // Common codes:
-                    //   7016 (messageReplyTimedOut) — receiver got
-                    //     message but didn't reply within 5s (cosmetic
-                    //     here since we don't expect a reply)
-                    //   7004 (notReachable) — isReachable flipped to
-                    //     false between our check + the actual send
-                    //   7007 (sessionNotActivated) — WC session got
-                    //     deactivated mid-send (very rare)
-                    //   Other NSURLError* — transport-level issues
+                    // Keep this enrichment long-term — silent swallowing
+                    // hides real bugs. WatchSettingsView surfaces
+                    // lastOutbound for ad-hoc diag if a future issue
+                    // recurs.
+                    //
+                    // Common WCError codes (Apple docs):
+                    //   7004 notReachable — isReachable flipped false
+                    //                       between check + actual send
+                    //   7007 sessionNotActivated — WC deactivated mid-send
+                    //   7010 payloadUnsupportedTypes — NSNull / custom
+                    //                                  object in payload
+                    //   7016 messageReplyTimedOut — receiver got it but
+                    //                               didn't reply in 5s
+                    //                               (cosmetic here)
                     Task { @MainActor [weak self] in
                         let ns = err as NSError
                         self?.lastOutbound =
