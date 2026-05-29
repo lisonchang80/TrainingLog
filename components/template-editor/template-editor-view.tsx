@@ -64,9 +64,11 @@ import {
   applyRenameSiblings,
   attachTemplateToProgram,
   commitTemplateDraft,
-  deleteTemplate,
+  executeTemplateDeletion,
   findTemplateByTriple,
   getTemplateFull,
+  previewTemplateDeletion,
+  type AffectedProgramCell,
   queryMemoryCandidates,
   queryReusableSupersetMemory,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -115,10 +117,43 @@ function useEditorStyles() {
  * Inline dynamic helpers for template-editor-view. Kept local rather than
  * added to `src/i18n/dynamic.ts` (editor-only usage).
  */
-function tEditorDeleteTemplateBody(name: string, triple: string): string {
+function tEditorDeleteTemplateBody(
+  name: string,
+  triple: string,
+  affectedCells: AffectedProgramCell[],
+): string {
+  const baseEn = `"${name}" (${triple}) will be permanently deleted. This cannot be undone.\n\nOnly this (program · intensity) variant is deleted; other siblings with the same name are preserved.\nHistorical session records are unaffected.`;
+  const baseZh = `將永久刪除「${name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`;
+  if (affectedCells.length === 0) {
+    return getLocale() === 'en' ? baseEn : baseZh;
+  }
   return getLocale() === 'en'
-    ? `"${name}" (${triple}) will be permanently deleted. This cannot be undone.\n\nOnly this (program · intensity) variant is deleted; other siblings with the same name are preserved.\nHistorical session records are unaffected.`
-    : `將永久刪除「${name}」(${triple})。此操作無法復原。\n\n只刪此 (計畫 · 強度) 變體，其他同名 sibling 保留。\n歷史 session 紀錄不受影響。`;
+    ? `${baseEn}\n\n${tCellsRestDayBlurb(affectedCells)}`
+    : `${baseZh}\n\n${tCellsRestDayBlurb(affectedCells)}`;
+}
+
+/**
+ * "X program-schedule cells will revert to rest day" blurb appended to a
+ * deletion alert body when one or more `program_cell.template_id` rows
+ * reference the template(s) being deleted. Aggregates by program name
+ * so the user gets a compact summary (`T1 (2 cells), T2 (1 cell)`)
+ * instead of a 7-line breakdown.
+ */
+function tCellsRestDayBlurb(cells: AffectedProgramCell[]): string {
+  const byProgram = cells.reduce<Record<string, number>>((acc, c) => {
+    acc[c.program_name] = (acc[c.program_name] ?? 0) + 1;
+    return acc;
+  }, {});
+  const total = cells.length;
+  const lines = Object.entries(byProgram)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, n]) =>
+      getLocale() === 'en' ? `• ${name} (${n} cell${n > 1 ? 's' : ''})` : `• ${name}（${n} 個格子）`,
+    )
+    .join('\n');
+  return getLocale() === 'en'
+    ? `⚠ ${total} program-schedule cell${total > 1 ? 's' : ''} will revert to a rest day:\n${lines}`
+    : `⚠ ${total} 個程式課表格子將變為休息日：\n${lines}`;
 }
 
 function tEditorDeleteClusterBody(name: string): string {
@@ -538,15 +573,25 @@ export default function TemplateEditorView() {
     ],
   );
 
-  const onDeleteTemplate = useCallback(() => {
+  const onDeleteTemplate = useCallback(async () => {
     if (!id || !draft || busy) return;
     const programName = draft.program_id
       ? programs.find((p) => p.id === draft.program_id)?.name ?? tt('common', 'default')
       : null;
     const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
+    setBusy(true);
+    let preview;
+    try {
+      preview = await previewTemplateDeletion(db, id);
+    } catch (e) {
+      setBusy(false);
+      Alert.alert(tt('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setBusy(false);
     Alert.alert(
       tt('alert', 'deleteTemplateQ'),
-      tEditorDeleteTemplateBody(draft.name, triple),
+      tEditorDeleteTemplateBody(draft.name, triple, preview.affectedCells),
       [
         { text: tt('common', 'cancel'), style: 'cancel' },
         {
@@ -555,7 +600,7 @@ export default function TemplateEditorView() {
           onPress: async () => {
             setBusy(true);
             try {
-              await deleteTemplate(db, id);
+              await executeTemplateDeletion(db, id);
               router.back();
             } catch (e) {
               Alert.alert(tt('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
