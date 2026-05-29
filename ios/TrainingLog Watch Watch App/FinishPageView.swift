@@ -258,8 +258,18 @@ struct FinishPageView: View {
 
     private var buttonsRow: some View {
         HStack(spacing: 6) {
+            // 2026-05-29 deep-night smoke polish (Issue 2):
+            // 「取消」→「放棄」 — 使用者反饋更貼切，因為這個按鈕的
+            // 真實語意是「不要保留這次 session」(D31 abort channel
+            // 將在那邊 wire 真的 session delete + WC abort)，不是
+            // 一般 modal 的「取消當前操作回上一頁」。目前的 handler
+            // 還是 cosmetic (TabView → selectedPage = 1)，等 D31
+            // 上路後 wire 真的 abort 流程。
+            // TODO(D31 abort channel): handleCancel 接 sessionDelete
+            //   + coordinator.sendAbortToiPhone(...)，並用 onSessionEnd
+            //   pop 整路回 picker。
             Button(action: handleCancel) {
-                Text("取消")
+                Text("放棄")
                     .font(.caption)
                     .frame(maxWidth: .infinity)
             }

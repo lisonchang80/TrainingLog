@@ -191,7 +191,17 @@ struct PickerRootView: View {
             )
 
         case .setLogger(let selection):
-            PickerSetLoggerPlaceholderView(selection: selection, vm: vm)
+            // 2026-05-29 deep-night smoke polish (Issue 1 fix):
+            // session 終了（Watch [完成] OR iPhone 推 end-session）後要
+            // 整路 pop 回 picker 第一頁，不能只 pop 一層回強度 sheet。
+            // 把 `path.removeAll()` 包成 closure 傳進去；SetLoggerView
+            // / FinishPageView 完成時 call 這個 closure 取代原本的
+            // `dismiss()` (Environment) — `dismiss()` 只 pop 一層。
+            PickerSetLoggerPlaceholderView(
+                selection: selection,
+                vm: vm,
+                onSessionEnd: { path.removeAll() }
+            )
         }
     }
 
@@ -286,6 +296,15 @@ struct PickerSetLoggerPlaceholderView: View {
     let selection: PickerSelection
     @ObservedObject var vm: PickerViewModel
 
+    /// 2026-05-29 deep-night smoke polish (Issue 1 fix):
+    /// Called when the inner SetLoggerView wants to terminate the
+    /// session (Watch [完成] success path OR iPhone-led end-session).
+    /// PickerRootView wires this to `path.removeAll()` so we pop all
+    /// the way back to the picker root, NOT just one level back to
+    /// the intensity sheet (which is what `Environment.dismiss` does).
+    /// Optional for back-compat with the 3-arg init below.
+    var onSessionEnd: (() -> Void)? = nil
+
     var body: some View {
         contentView
             .task {
@@ -301,7 +320,13 @@ struct PickerSetLoggerPlaceholderView: View {
             if let reply = attempted, reply.isOK, let snapshot = reply.snapshot {
                 // SUCCESS → real D11 set logger view (Phase A
                 // skeleton; Phase B+ adds interactions).
-                SetLoggerView(snapshot: snapshot)
+                // Issue 1 fix: forward `onSessionEnd` so SetLoggerView
+                // can terminate the whole nav stack instead of just
+                // pop-one-level.
+                SetLoggerView(
+                    snapshot: snapshot,
+                    onSessionEnd: onSessionEnd
+                )
             } else if let reply = attempted, !reply.isOK {
                 retryView(error: "iPhone 回報失敗", icon: "exclamationmark.triangle")
             } else {

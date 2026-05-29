@@ -30,6 +30,19 @@ struct SetLoggerView: View {
     /// the mock data instead. Phase B reads it directly.
     let snapshot: SessionSnapshot
 
+    /// 2026-05-29 deep-night smoke polish (Issue 1 fix):
+    /// When the session terminates (either Watch [完成] success or
+    /// iPhone-led end-session via coordinator.$lastIncomingEnd),
+    /// we want to pop ALL THE WAY back to PickerRootView root —
+    /// not just one level (which is what `Environment.dismiss` does
+    /// inside a NavigationStack; user observed "回到強度" sheet
+    /// instead of root).
+    ///
+    /// Caller (PickerRootView) wires this to `path.removeAll()`.
+    /// Optional with `nil` default for #Preview back-compat (preview
+    /// instances mount outside a NavigationStack anyway).
+    var onSessionEnd: (() -> Void)? = nil
+
     /// Center-page selection on initial mount. TabView selection
     /// is stored on the view so swipes naturally update it; pre-
     /// setting to 1 means the user lands on the session card list
@@ -113,7 +126,19 @@ struct SetLoggerView: View {
                             Task { await coordinator.sendEndToiPhone(sessionId: sid) }
                         },
                         onFinishComplete: {
-                            dismiss()
+                            // Issue 1 fix (Watch [完成] success path):
+                            // prefer the parent-provided onSessionEnd
+                            // closure (PickerRootView wires this to
+                            // path.removeAll() — pops ALL the way back
+                            // to picker root). Fall back to dismiss()
+                            // only when no closure is provided (e.g.
+                            // #Preview instances mounted outside a
+                            // NavigationStack).
+                            if let onSessionEnd {
+                                onSessionEnd()
+                            } else {
+                                dismiss()
+                            }
                         },
                         onAbort: { selectedPage = 1 }
                     )
@@ -168,7 +193,14 @@ struct SetLoggerView: View {
             .onChange(of: coordinator.lastIncomingEnd) { _, newSid in
                 guard let sid = newSid,
                       sid == snapshotForRender.sessionId else { return }
-                dismiss()
+                // Issue 1 fix (iPhone-led end path): same logic as the
+                // Watch [完成] success path above — pop all the way back
+                // to picker root via the parent's path-reset closure.
+                if let onSessionEnd {
+                    onSessionEnd()
+                } else {
+                    dismiss()
+                }
             }
     }
 
