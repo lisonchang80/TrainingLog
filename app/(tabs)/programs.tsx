@@ -35,6 +35,7 @@ import {
 } from '@/src/adapters/sqlite/programRepository';
 import {
   createTemplate,
+  findNextAvailableTemplateName,
   listDistinctSubTagsByProgram,
   listTemplateGroupsByName,
   listTemplates,
@@ -965,7 +966,11 @@ export default function ProgramsScreen() {
           if (!shownProgramId || !pickerSnap) return;
           try {
             const id = randomUUID();
-            await createTemplate(db, { id, name: 'New Template' });
+            const uniqueName = await findNextAvailableTemplateName(
+              db,
+              'New Template',
+            );
+            await createTemplate(db, { id, name: uniqueName });
             const params = new URLSearchParams();
             params.set('fromProgram', encodeURIComponent(shownProgramId));
             if (pickerSnap.kind === 'template_for_cell') {

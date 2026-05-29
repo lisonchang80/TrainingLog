@@ -28,6 +28,7 @@ import {
 import {
   attachTemplateToProgram,
   createTemplate,
+  findNextAvailableTemplateName,
   listTemplateGroupsByName,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
@@ -129,7 +130,11 @@ export default function ProgramWizardScreen() {
   const onCreateNewTemplate = useCallback(async () => {
     try {
       const id = randomUUID();
-      await createTemplate(db, { id, name: t('domain', 'newTemplate') });
+      const uniqueName = await findNextAvailableTemplateName(
+        db,
+        t('domain', 'newTemplate'),
+      );
+      await createTemplate(db, { id, name: uniqueName });
       router.push(`/template/${id}`);
     } catch (e) {
       Alert.alert(

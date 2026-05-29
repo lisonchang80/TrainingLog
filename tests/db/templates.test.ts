@@ -5,6 +5,7 @@ import {
   addTemplateExercise,
   createTemplate,
   deleteTemplate,
+  findNextAvailableTemplateName,
   getTemplate,
   listTemplates,
   listTemplateExerciseRows,
@@ -409,6 +410,68 @@ describe('Template + snapshot isolation (slice 3)', () => {
         'tpl-explicit'
       );
       expect(row?.color_hex).toBe('#FF00AA');
+    });
+  });
+
+  // 2026-05-29 — findNextAvailableTemplateName guard for the「+ 新增 template」
+  // entry points (Today tab / Programs cell-tap picker / program wizard). The
+  // Watch picker (slice 13d D8) lists templates by name, so accumulating
+  // multiple "New Template" / 同名 rows turns the picker into an ambiguous mess.
+  describe('findNextAvailableTemplateName — application-layer name guard', () => {
+    it('returns the base name verbatim when no row uses it', async () => {
+      const name = await findNextAvailableTemplateName(db, 'New Template');
+      expect(name).toBe('New Template');
+    });
+
+    it('suffixes (2) when the base name is already taken', async () => {
+      await createTemplate(db, {
+        id: 'tpl-1',
+        name: 'New Template',
+        now: () => 100,
+      });
+      const name = await findNextAvailableTemplateName(db, 'New Template');
+      expect(name).toBe('New Template (2)');
+    });
+
+    it('walks 2 → 3 → 4 ... until the first unused slot', async () => {
+      await createTemplate(db, { id: 'tpl-1', name: 'GB', now: () => 100 });
+      await createTemplate(db, { id: 'tpl-2', name: 'GB (2)', now: () => 101 });
+      await createTemplate(db, { id: 'tpl-3', name: 'GB (3)', now: () => 102 });
+      const name = await findNextAvailableTemplateName(db, 'GB');
+      expect(name).toBe('GB (4)');
+    });
+
+    it('fills a hole in the suffix sequence rather than always picking max+1', async () => {
+      // Sequence has GB and GB (3) but a gap at GB (2). Helper should fill (2).
+      await createTemplate(db, { id: 'tpl-1', name: 'GB', now: () => 100 });
+      await createTemplate(db, { id: 'tpl-3', name: 'GB (3)', now: () => 102 });
+      const name = await findNextAvailableTemplateName(db, 'GB');
+      expect(name).toBe('GB (2)');
+    });
+
+    it('is case-insensitive — "gb" collides with existing "GB"', async () => {
+      await createTemplate(db, { id: 'tpl-1', name: 'GB', now: () => 100 });
+      const name = await findNextAvailableTemplateName(db, 'gb');
+      expect(name).toBe('gb (2)');
+    });
+
+    it('ignores prefix-matching rows that are NOT suffixed (e.g. "GBX")', async () => {
+      await createTemplate(db, { id: 'tpl-1', name: 'GBX', now: () => 100 });
+      const name = await findNextAvailableTemplateName(db, 'GB');
+      expect(name).toBe('GB');
+    });
+
+    it('createTemplate itself stays unguarded — siblings via cloneTemplateWithSubTag stay legal', async () => {
+      // Regression: createTemplate must NOT auto-suffix on its own. The
+      // production paths cloneTemplateWithSubTag / convertSessionToTemplate
+      // create legitimate same-name siblings via separate INSERTs; they
+      // would break if createTemplate enforced uniqueness internally.
+      await createTemplate(db, { id: 'tpl-1', name: 'GB', now: () => 100 });
+      await createTemplate(db, { id: 'tpl-2', name: 'GB', now: () => 101 });
+      const rows = await db.getAllAsync<{ name: string }>(
+        `SELECT name FROM template ORDER BY created_at ASC`
+      );
+      expect(rows.map((r) => r.name)).toEqual(['GB', 'GB']);
     });
   });
 });
