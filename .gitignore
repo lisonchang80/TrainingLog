@@ -51,3 +51,6 @@ ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 
 # dev scratch — spike results, anatomy refs, overnight agent intermediate artifacts
 tmp/
+
+# jest --coverage output
+coverage/
