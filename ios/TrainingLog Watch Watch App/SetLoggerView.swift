@@ -49,11 +49,21 @@ struct SetLoggerView: View {
     @State private var showSettings: Bool = false
 
     var body: some View {
-        // NavigationStack wraps the TabView so the toolbar ⚙ button
-        // has somewhere to render. D10 in-session shell will replace
-        // this with the proper top bar Row 2 layout — see TODO above.
-        NavigationStack {
-            ZStack(alignment: .bottom) {
+        // NEW-Q50 D29 smoke fix (2026-05-29): removed inner
+        // `NavigationStack { ... }` wrapper. SetLoggerView is mounted as
+        // a destination inside `PickerRootView`'s outer NavigationStack
+        // (via `.navigationDestination(for: PickerDestination.self)`);
+        // wrapping again with a second NavigationStack creates a
+        // double-nested navigation context which watchOS handles poorly
+        // — the inner stack's mere presence caused the OUTER stack to
+        // immediately pop the destination on first appear (validated
+        // on Apple Watch Ultra during D29 smoke). The `.toolbar` below
+        // still works because it attaches to the ambient nav context
+        // provided by the outer stack.
+        //
+        // D10 in-session shell will replace the toolbar + ⚙ TODO entry
+        // with the proper top bar Row 2 layout — see TODO above.
+        ZStack(alignment: .bottom) {
                 // Page order per user 2026-05-28 polish + spec line 1483
                 // 「完成頁（右滑進入）」:
                 //   - "右滑" (finger slides right) reveals the page on the
@@ -112,7 +122,6 @@ struct SetLoggerView: View {
             .sheet(isPresented: $showSettings) {
                 WatchSettingsView()
             }
-        }
     }
 
     // Phase A renders the mock when the passed-in snapshot is empty
