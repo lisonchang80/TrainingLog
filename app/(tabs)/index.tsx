@@ -492,6 +492,19 @@ export default function TodayScreen() {
     const unsubStartFromWatch = addUserInfoListener(
       'start-from-watch',
       async (env) => {
+        // 2026-05-29 deep-night B1 diagnosis instrumentation (TEMPORARY).
+        // Pops a modal the moment iPhone's TUI listener fires so the user
+        // can confirm envelope receipt. Yesterday's smoke said Watch 計劃
+        // tap → iPhone never switched; with this Alert we can tell
+        // whether the envelope reached iPhone JS at all (Alert fires) vs
+        // got stuck somewhere upstream (no Alert ever, even after long
+        // wait). REMOVE after B1 root cause is identified.
+        // eslint-disable-next-line no-console
+        console.log('[DEBUG TUI] start-from-watch envelope received', env);
+        Alert.alert(
+          '[DEBUG] WC TUI',
+          `start-from-watch (TUI)\nsess: ${(env.payload.sessionId ?? '').slice(0, 12)}\ntpl: ${env.payload.templateId ?? 'null'}`,
+        );
         // 2026-05-29 deep-night smoke fix (B2): pass `randomUUID` so
         // onStartFromWatch can route to `startSessionFromTemplate` when
         // the Watch supplies a templateId. Without uuid injection the
@@ -532,6 +545,17 @@ export default function TodayScreen() {
     const unsubStartFromWatchV1 = addMessageListener(
       'start-from-watch',
       async (env, reply) => {
+        // 2026-05-29 deep-night B1 diagnosis instrumentation (TEMPORARY).
+        // Sibling Alert to the TUI listener above — fires when v1
+        // sendMessage path delivers. With BOTH instrumented we can tell
+        // which delivery channel arrives first (or at all) for the
+        // planned-tap vs template-tap paths. REMOVE after diagnosis.
+        // eslint-disable-next-line no-console
+        console.log('[DEBUG MSG] start-from-watch envelope received', env);
+        Alert.alert(
+          '[DEBUG] WC sendMessage',
+          `start-from-watch (sendMsg)\nsess: ${(env.payload.sessionId ?? '').slice(0, 12)}\ntpl: ${env.payload.templateId ?? 'null'}`,
+        );
         // 2026-05-29 deep-night smoke fix (B2): same uuid injection as
         // the TUI path above — Watch templates need to materialise
         // template_name + exercise tree, not collapse to freestyle.
