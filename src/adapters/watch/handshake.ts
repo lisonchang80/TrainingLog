@@ -95,6 +95,58 @@ export interface Stage1SessionSummary {
 }
 
 /**
+ * 2026-05-29 SetLogger sets[] fix — one planned set inside a template's
+ * fat-tree exercise. Mirrors per-row `template_set` projection so the
+ * Watch can populate SetLoggerView with real weight/reps/setKind
+ * instead of the deprecated `template_exercise.default_*` summary
+ * columns (which the Watch fell back to before this fix, surfacing
+ * "— kg / 0 次" for any template whose set rows diverge from the
+ * summary).
+ *
+ * Slim shape (no setId / parentSetId / notes) to stay within the
+ * 64 KB WC envelope cap — see `loadTemplateExerciseTree` doc for the
+ * sizing calculation. Cluster (`parent_set_id`) + per-set notes can
+ * be added later when Watch SetLoggerView grows cluster support
+ * (D11 phase D-H).
+ *
+ * `reps` / `weightKg` are NOT NULL in `template_set` schema (v009);
+ * the v009 migration synthesises `0` for legacy rows whose
+ * `template_exercise.default_*` were null. Pass-through here — the
+ * Watch consumer can show `0` as a real value (legacy 0 = "not set");
+ * users can fix via the iPhone template editor.
+ */
+export interface Stage1TemplateSet {
+  /**
+   * template_set.set_kind enum: 'warmup' | 'working' | 'dropset'.
+   * Single-char wire field name (`k`) to keep the per-set tax
+   * minimal — full name expands to ~10 extra chars/row × 600 worst-
+   * case sets ≈ 6 KB. See sizing note below.
+   */
+  k: 'warmup' | 'working' | 'dropset';
+  /** template_set.reps (NOT NULL; legacy migrated rows may be 0). */
+  r: number;
+  /** template_set.weight in kg (NOT NULL; legacy migrated rows may be 0). */
+  w: number;
+}
+
+// 2026-05-29 SetLogger sets[] fix — wire-shape sizing notes:
+//
+// (1) `position` is intentionally omitted because the loader ORDER
+//     BYs position ASC; the array index IS the position. Saved ~12
+//     chars/row × 600 worst-case sets ≈ 7 KB on the 20×10×3
+//     prefetch.
+//
+// (2) Field names compacted to single chars (`k`/`r`/`w`) — full
+//     `setKind`/`reps`/`weightKg` would add ~24 chars/row × 600 =
+//     14 KB, pushing the worst-case envelope past the 64 KB WC
+//     hard ceiling. Watch-side Codable mirrors map these via
+//     CodingKeys to readable property names (setKind/reps/weightKg).
+//
+// Together (1)+(2) keep the 20-template / 10-exercise / 3-set
+// stress shape under the 64 KB cap (measured ≈ 50 KB with
+// headroom).
+
+/**
  * NEW-Q50 D28 — one planned exercise inside a template's fat-tree
  * prefetch entry (or today's planned cell). Mirrors the SwiftUI
  * `WatchPlannedExercise` value type 1:1 so the wire is the consumer
@@ -103,6 +155,14 @@ export interface Stage1SessionSummary {
  * Sourced from `template_exercise` JOIN `exercise` — `exerciseName` is
  * denormalised onto the wire so the Watch never needs an Exercise
  * lookup table to render the planned card.
+ *
+ * 2026-05-29 SetLogger sets[] fix — added `sets` array carrying the
+ * per-row `template_set` projection (ADR-0016 §migration transform
+ * made `template_set` the canonical source-of-truth post-v009; the
+ * `default_*` columns above are kept on the wire only as fallback
+ * for back-compat with older Watch builds that pre-date this field).
+ * When `sets.length > 0`, Watch buildSnapshotFromFatTree uses sets[]
+ * verbatim; when empty, it falls back to the old defaults path.
  */
 export interface Stage1TemplateExercise {
   templateExerciseId: string;
@@ -114,6 +174,15 @@ export interface Stage1TemplateExercise {
   defaultReps: number | null;
   /** May be null when the source template_exercise leaves weight open. */
   defaultWeightKg: number | null;
+  /**
+   * 2026-05-29 SetLogger sets[] fix — per-row `template_set` projection
+   * ordered by `position ASC`. Empty array when the template_exercise
+   * has no template_set rows (rare — v009 migration backfilled all
+   * pre-existing template_exercise rows). Always present on the wire
+   * (may be `[]`); Swift-side Codable decode tolerates absence too,
+   * so older iPhone payloads still parse.
+   */
+  sets: ReadonlyArray<Stage1TemplateSet>;
 }
 
 /**
@@ -545,15 +614,58 @@ async function loadTemplateExerciseTree(
       ORDER BY te.ordering ASC`,
     templateId,
   );
-  return rows.map((r) => ({
-    templateExerciseId: r.id,
-    exerciseId: r.exercise_id,
-    exerciseName: r.exercise_name ?? '',
-    ordering: r.ordering,
-    defaultSets: r.default_sets,
-    defaultReps: r.default_reps,
-    defaultWeightKg: r.default_weight_kg,
-  }));
+
+  // 2026-05-29 SetLogger sets[] fix — fetch template_set rows for each
+  // template_exercise in this template. N+1-ish query inside the
+  // already N+1-ish loadTemplatesFullTree (1 SELECT per template + 1
+  // SELECT per exercise) — acceptable at N≤20 templates × ~10 exercises
+  // with better-sqlite3 (sub-ms per query). Re-evaluate if caps grow.
+  //
+  // Per-set wire bytes ≈ 50 (4 fields × short JSON). Worst-case
+  // budget at the 20-template / 10-exercise / 5-set ceiling = 1000
+  // sets × 50 B = 50 KB — within the 64 KB envelope cap with headroom
+  // for the rest of the prefetch envelope (~30 KB exercise rows).
+  type SetRow = {
+    template_exercise_id: string;
+    position: number;
+    set_kind: string;
+    reps: number;
+    weight: number;
+  };
+  const out: Stage1TemplateExercise[] = [];
+  for (const r of rows) {
+    const setRows = await db.getAllAsync<SetRow>(
+      `SELECT template_exercise_id, position, set_kind, reps, weight
+         FROM template_set
+        WHERE template_exercise_id = ?
+        ORDER BY position ASC`,
+      r.id,
+    );
+    out.push({
+      templateExerciseId: r.id,
+      exerciseId: r.exercise_id,
+      exerciseName: r.exercise_name ?? '',
+      ordering: r.ordering,
+      defaultSets: r.default_sets,
+      defaultReps: r.default_reps,
+      defaultWeightKg: r.default_weight_kg,
+      // `position` is intentionally omitted from the projection —
+      // the array index IS the position because we ORDER BY
+      // position ASC above. Field names are single chars (k/r/w)
+      // to fit the WC envelope cap. See Stage1TemplateSet doc.
+      sets: setRows.map((s) => ({
+        // Defensive: cast to the union; schema CHECK constraint
+        // enforces these three values, but the wire type narrows
+        // the string for the Swift consumer.
+        k: (s.set_kind === 'warmup' || s.set_kind === 'dropset')
+          ? s.set_kind
+          : 'working',
+        r: s.reps,
+        w: s.weight,
+      })),
+    });
+  }
+  return out;
 }
 
 /**

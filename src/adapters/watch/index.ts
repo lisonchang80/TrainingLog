@@ -64,6 +64,8 @@ export type {
   // NEW-Q50 D28 — fat-tree types (Stage1TemplateSummary removed by D28-A).
   Stage1TemplateExercise,
   Stage1TemplateFullSummary,
+  // 2026-05-29 SetLogger sets[] fix — per-template_set wire shape.
+  Stage1TemplateSet,
   StartFromWatchReconcile,
   SessionSnapshot,
   SessionSnapshotExercise,

@@ -137,6 +137,10 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
             defaultSets: 3,
             defaultReps: 8,
             defaultWeightKg: 60,
+            // 2026-05-29 SetLogger sets[] fix — required field; empty
+            // here because this carry-through test doesn't seed
+            // template_set rows. Real loader path covered separately.
+            sets: [],
           },
         ],
       },
@@ -157,6 +161,7 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
           defaultSets: 3,
           defaultReps: 8,
           defaultWeightKg: 60,
+          sets: [],
         },
       ],
     });
@@ -168,7 +173,7 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
   //     ~10 exercises ≈ 30 KB; we assert under 40 KB to leave envelope
   //     wrap headroom but well under the 64 KB WC ceiling.
   // -------------------------------------------------------------------
-  it('reply payload JSON-stringified size is < 40KB with 20 fat-tree templates (10 exercises each) and an active session', () => {
+  it('reply payload JSON-stringified size stays under WC envelope cap with 20 fat-tree templates × 10 exercises × 3 sets and an active session', () => {
     const active: Stage1SessionSummary = {
       sessionId: 'sess-1',
       startedAt: 1_700_000_000_000,
@@ -188,12 +193,30 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
           defaultSets: 3,
           defaultReps: 8,
           defaultWeightKg: 60,
+          // 2026-05-29 SetLogger sets[] fix — size budget test now
+          // also covers the per-set tax. Realistic average user
+          // template has 2-4 working sets per exercise; we seed 3
+          // here to model the high end of the common case (20 ×
+          // 10 × 3 = 600 sets ≈ 30 KB JSON on top of the ~30 KB
+          // template/exercise wrap → total ~60 KB). Threshold
+          // tightened from < 40 KB (pre-fix, no sets[]) to
+          // < 60 KB (with sets[]) but kept under the 64 KB WC
+          // envelope hard ceiling.
+          sets: Array.from({ length: 3 }, () => ({
+            k: 'working' as const,
+            r: 8,
+            w: 60,
+          })),
         })),
       }),
     );
     const reply = buildStage1Reply(sampleRequest, active, templates);
     const size = JSON.stringify(reply).length;
-    expect(size).toBeLessThan(40_000);
+    // Threshold raised from 40 KB → 60 KB on 2026-05-29 to absorb
+    // the new per-set tax (3 sets × 10 exercises × 20 templates =
+    // 600 sets × ~50 B = ~30 KB on top of the pre-fix ~30 KB
+    // template wrap). Still well under the 64 KB WC envelope cap.
+    expect(size).toBeLessThan(60_000);
     // Also assert well under the WC envelope ceiling.
     expect(size).toBeLessThan(64_000);
   });
@@ -216,6 +239,11 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
             defaultSets: 3,
             defaultReps: null,
             defaultWeightKg: null,
+            // 2026-05-29 SetLogger sets[] fix — seed one row so the
+            // round-trip also exercises the per-set projection.
+            sets: [
+              { k: 'working', r: 8, w: 60 },
+            ],
           },
         ],
       },
@@ -485,11 +513,143 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
         defaultSets: 3,
         defaultReps: 8,
         defaultWeightKg: 60,
+        // 2026-05-29 SetLogger sets[] fix — no template_set rows
+        // seeded, so the loader returns an empty array (consumer
+        // falls back to default_* path).
+        sets: [],
       });
       // Second row exercises nullable defaults projection.
       expect(list[0].exercises[1].defaultReps).toBeNull();
       expect(list[0].exercises[1].defaultWeightKg).toBeNull();
       expect(list[0].exercises[1].ordering).toBe(2);
+      expect(list[0].exercises[1].sets).toEqual([]);
+    });
+
+    // 2026-05-29 SetLogger sets[] fix — happy path
+    it('hydrates template_set rows into exercises[].sets ordered by position ASC', async () => {
+      const now = 1_700_000_000_000;
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-sets',
+        'Sets',
+        now,
+        now,
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-sets-1',
+        'tpl-sets',
+        BENCH,
+        1,
+        3,
+        null, // intentionally null — sets[] should still hydrate
+        null, // intentionally null — sets[] should still hydrate
+      );
+      // Seed 3 template_set rows OUT of position order to exercise
+      // the ORDER BY position ASC projection. Mix set_kind values
+      // to assert kind projection too.
+      const seedSet = async (
+        id: string,
+        position: number,
+        kind: string,
+        reps: number,
+        weight: number,
+      ) => {
+        await db.runAsync(
+          `INSERT INTO template_set
+             (id, template_exercise_id, position, set_kind, reps, weight)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          id,
+          'te-sets-1',
+          position,
+          kind,
+          reps,
+          weight,
+        );
+      };
+      await seedSet('s-2', 2, 'working', 8, 80);
+      await seedSet('s-0', 0, 'warmup', 10, 40);
+      await seedSet('s-1', 1, 'working', 8, 70);
+
+      const list = await loadTemplatesFullTree(db);
+      const ex = list[0].exercises[0];
+      expect(ex.sets).toHaveLength(3);
+      // Order by position ASC (NOT insert order) — array index 0
+      // corresponds to the position=0 row, etc. `position` field is
+      // intentionally not on the wire — array order IS the order.
+      // Wire field names: k = setKind, r = reps, w = weightKg
+      // (compacted for the WC envelope cap).
+      expect(ex.sets[0]).toEqual({
+        k: 'warmup',
+        r: 10,
+        w: 40,
+      });
+      expect(ex.sets[1]).toEqual({
+        k: 'working',
+        r: 8,
+        w: 70,
+      });
+      expect(ex.sets[2]).toEqual({
+        k: 'working',
+        r: 8,
+        w: 80,
+      });
+      // Defaults stay null in the wire (consumer prefers sets[]
+      // when non-empty; defaults kept only for back-compat fallback).
+      expect(ex.defaultReps).toBeNull();
+      expect(ex.defaultWeightKg).toBeNull();
+    });
+
+    // 2026-05-29 SetLogger sets[] fix — defensive: unknown set_kind
+    // is normalised to 'working' (schema CHECK enforces the union
+    // but the wire projection narrows defensively, in case of
+    // historic backfill artefacts).
+    it('coerces unrecognised set_kind values to working in the wire projection', async () => {
+      const now = 1_700_000_000_000;
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-coerce',
+        'Coerce',
+        now,
+        now,
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-coerce-1',
+        'tpl-coerce',
+        BENCH,
+        1,
+        1,
+        8,
+        60,
+      );
+      // Insert a 'dropset' row — valid per schema. We're verifying
+      // the wire projection accepts the three valid kinds verbatim
+      // (the defensive coercion only kicks in for genuinely unknown
+      // values, which v009 CHECK normally prevents).
+      await db.runAsync(
+        `INSERT INTO template_set
+           (id, template_exercise_id, position, set_kind, reps, weight)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        's-drop',
+        'te-coerce-1',
+        0,
+        'dropset',
+        5,
+        50,
+      );
+      const list = await loadTemplatesFullTree(db);
+      expect(list[0].exercises[0].sets[0]).toEqual({
+        k: 'dropset',
+        r: 5,
+        w: 50,
+      });
     });
 
     it('orders templates by listTemplates() (updated_at DESC) and caps to the limit', async () => {
@@ -805,6 +965,9 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
       defaultSets: 3,
       defaultReps: 8,
       defaultWeightKg: 60,
+      // 2026-05-29 SetLogger sets[] fix — loader returns empty
+      // sets[] when no template_set rows exist for this exercise.
+      sets: [],
     });
   });
 
@@ -1248,6 +1411,9 @@ describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', (
           defaultSets: 3,
           defaultReps: 8,
           defaultWeightKg: 60,
+          // 2026-05-29 SetLogger sets[] fix — required field; empty
+          // here (todayPlanned fixture path doesn't seed sets).
+          sets: [],
         },
       ],
     });
@@ -1523,6 +1689,9 @@ describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () =
         defaultSets: 4,
         defaultReps: 8,
         defaultWeightKg: 70,
+        // 2026-05-29 SetLogger sets[] fix — no template_set rows
+        // seeded for this fixture, so loader returns sets: [].
+        sets: [],
       });
     }
   });

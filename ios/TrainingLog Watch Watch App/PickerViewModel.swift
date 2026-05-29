@@ -333,10 +333,20 @@ final class PickerViewModel: ObservableObject {
     /// Per Stage1TemplateExercise → SessionSnapshotExercise:
     ///   • sessionExerciseId — synthesised as `SE-<index>` for local
     ///     use; iPhone-side reconcile will own the real persisted ID.
-    ///   • plannedSets — defaultSets from the template_exercise row.
-    ///   • sets — pre-populated with `defaultSets` empty rows so the
-    ///     SetLoggerView can render the planned grid; weight/reps/etc
-    ///     come from defaultReps/defaultWeightKg (may be nil = blank).
+    ///   • plannedSets / sets — two paths depending on whether the
+    ///     fat-tree wire carried per-row `template_set` data:
+    ///       - **Preferred (post 2026-05-29 SetLogger sets[] fix):**
+    ///         when `ex.sets.count > 0`, use those rows verbatim
+    ///         (per-set weight/reps/setKind). plannedSets =
+    ///         `ex.sets.count` so the SetLoggerView shows the real
+    ///         planned row count, not the deprecated `default_sets`
+    ///         summary.
+    ///       - **Fallback (back-compat):** when `ex.sets.isEmpty`
+    ///         (older iPhone payload, or template_exercise truly has
+    ///         no template_set rows), use the legacy default_*
+    ///         summary to pre-populate `defaultSets` empty rows —
+    ///         same shape as pre-fix behaviour, which renders
+    ///         "— kg / 0 次" if defaults are null.
     ///
     /// startedAt = current epoch ms.
     private func buildSnapshotFromFatTree(
@@ -346,26 +356,59 @@ final class PickerViewModel: ObservableObject {
     ) -> SessionSnapshot {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let snapshotExercises: [SessionSnapshotExercise] = exercises.enumerated().map { (idx, ex) in
-            let sets: [SessionSnapshotSet] = (0..<max(1, ex.defaultSets)).map { setIdx in
-                SessionSnapshotSet(
-                    setId: "SET-\(idx)-\(setIdx)",
-                    ordinal: setIdx + 1,
-                    weight: ex.defaultWeightKg,
-                    reps: ex.defaultReps,
-                    rpe: nil,
-                    restSec: nil,
-                    notes: nil,
-                    setKind: "working",
-                    isLogged: false
-                )
+            let snapshotSets: [SessionSnapshotSet]
+            let plannedCount: Int
+            if !ex.sets.isEmpty {
+                // Preferred path — fat-tree carried template_set rows.
+                snapshotSets = ex.sets.enumerated().map { (setIdx, s) in
+                    SessionSnapshotSet(
+                        // 2026-05-29 SetLogger sets[] fix —
+                        // `s.position` was dropped from the wire to
+                        // save envelope bytes; setIdx (array index)
+                        // serves the same purpose because the
+                        // loader ORDER BYs position ASC.
+                        setId: "SET-\(idx)-\(setIdx)",
+                        ordinal: setIdx + 1,
+                        // Pass `weightKg` / `reps` through verbatim;
+                        // a literal `0` from the v009 migration is
+                        // surfaced as a real 0 (user can fix in the
+                        // template editor on iPhone).
+                        weight: s.weightKg,
+                        reps: s.reps,
+                        rpe: nil,
+                        restSec: nil,
+                        notes: nil,
+                        setKind: s.setKind,
+                        isLogged: false
+                    )
+                }
+                plannedCount = ex.sets.count
+            } else {
+                // Fallback — legacy default_* path. Same shape as
+                // pre-2026-05-29 behaviour: pre-populate
+                // `defaultSets` empty rows; weight/reps may be nil.
+                snapshotSets = (0..<max(1, ex.defaultSets)).map { setIdx in
+                    SessionSnapshotSet(
+                        setId: "SET-\(idx)-\(setIdx)",
+                        ordinal: setIdx + 1,
+                        weight: ex.defaultWeightKg,
+                        reps: ex.defaultReps,
+                        rpe: nil,
+                        restSec: nil,
+                        notes: nil,
+                        setKind: "working",
+                        isLogged: false
+                    )
+                }
+                plannedCount = ex.defaultSets
             }
             return SessionSnapshotExercise(
                 sessionExerciseId: "SE-\(idx)-\(ex.exerciseId)",
                 exerciseId: ex.exerciseId,
                 exerciseName: ex.exerciseName,
                 ordering: ex.ordering,
-                plannedSets: ex.defaultSets,
-                sets: sets
+                plannedSets: plannedCount,
+                sets: snapshotSets
             )
         }
         return SessionSnapshot(

@@ -40,11 +40,55 @@ struct Stage1SessionSummary: Codable, Equatable {
     let exerciseCount: Int
 }
 
+/// 2026-05-29 SetLogger sets[] fix — one planned set inside a
+/// fat-tree exercise. Mirror of TS `Stage1TemplateSet`
+/// (handshake.ts). Replaces the Watch's reliance on the deprecated
+/// `template_exercise.default_*` summary columns: when this list is
+/// non-empty, `buildSnapshotFromFatTree` uses these per-row values
+/// to populate SetLoggerView so the user sees real weight/reps
+/// instead of "— kg / 0 次".
+///
+/// Slim wire shape (no setId / parentSetId / notes) — see TS-side
+/// comment for envelope-cap rationale. Cluster + notes ride later.
+struct Stage1TemplateSetDTO: Codable, Equatable, Hashable {
+    /// template_set.set_kind — 'warmup' | 'working' | 'dropset'.
+    let setKind: String
+    /// template_set.reps (NOT NULL on iPhone schema; may be `0` for
+    /// legacy rows synthesised by the v009 migration when the source
+    /// `template_exercise.default_reps` was null).
+    let reps: Int
+    /// template_set.weight in kg (NOT NULL; may be `0` for legacy
+    /// migrated rows — same caveat as `reps`).
+    let weightKg: Double
+
+    // 2026-05-29 SetLogger sets[] fix — sizing notes:
+    //   • `position` intentionally omitted; array index IS the
+    //     position because the iPhone loader ORDER BYs position ASC.
+    //   • Wire field names compacted to single chars (`k`/`r`/`w`)
+    //     to stay under the 64 KB WC envelope ceiling. We expose
+    //     readable Swift property names via CodingKeys so the
+    //     consumer code (PickerViewModel etc.) stays legible.
+    enum CodingKeys: String, CodingKey {
+        case setKind = "k"
+        case reps = "r"
+        case weightKg = "w"
+    }
+}
+
 /// NEW-Q50 D29 — one planned exercise inside a fat-tree template.
 /// Mirror of TS `Stage1TemplateExercise` (handshake.ts:106). Sourced
 /// from `template_exercise` JOIN `exercise`; `exerciseName` is
 /// denormalised onto the wire so Watch never needs a separate
 /// exercise lookup table to render the planned card.
+///
+/// 2026-05-29 SetLogger sets[] fix — added `sets` field carrying the
+/// per-row `template_set` projection. When non-empty, the Watch
+/// consumer prefers it over `default*` (which were always the
+/// deprecated summary columns and surfaced wrong values like
+/// "— kg / 0 次" for any template whose set rows diverged from the
+/// summary). Tolerant decode: missing field → empty array, so older
+/// iPhone payloads that pre-date this field still parse cleanly and
+/// the consumer falls back to the legacy defaults path.
 struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
     let templateExerciseId: String
     let exerciseId: String
@@ -55,6 +99,56 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
     let defaultReps: Int?
     /// May be null when the source template_exercise leaves weight open.
     let defaultWeightKg: Double?
+    /// 2026-05-29 SetLogger sets[] fix — per-row `template_set`
+    /// projection ordered by `position ASC`. Decoded as `[]` on
+    /// older iPhone payloads that don't include the field (tolerant
+    /// fallback so picker still renders; consumer then falls back
+    /// to the legacy default_* path).
+    let sets: [Stage1TemplateSetDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case templateExerciseId
+        case exerciseId
+        case exerciseName
+        case ordering
+        case defaultSets
+        case defaultReps
+        case defaultWeightKg
+        case sets
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.templateExerciseId = try c.decode(String.self, forKey: .templateExerciseId)
+        self.exerciseId = try c.decode(String.self, forKey: .exerciseId)
+        self.exerciseName = try c.decode(String.self, forKey: .exerciseName)
+        self.ordering = try c.decode(Int.self, forKey: .ordering)
+        self.defaultSets = try c.decode(Int.self, forKey: .defaultSets)
+        self.defaultReps = try? c.decode(Int.self, forKey: .defaultReps)
+        self.defaultWeightKg = try? c.decode(Double.self, forKey: .defaultWeightKg)
+        // Tolerant: missing key → [] for back-compat with pre-fix wire.
+        self.sets = (try? c.decode([Stage1TemplateSetDTO].self, forKey: .sets)) ?? []
+    }
+
+    init(
+        templateExerciseId: String,
+        exerciseId: String,
+        exerciseName: String,
+        ordering: Int,
+        defaultSets: Int,
+        defaultReps: Int?,
+        defaultWeightKg: Double?,
+        sets: [Stage1TemplateSetDTO] = []
+    ) {
+        self.templateExerciseId = templateExerciseId
+        self.exerciseId = exerciseId
+        self.exerciseName = exerciseName
+        self.ordering = ordering
+        self.defaultSets = defaultSets
+        self.defaultReps = defaultReps
+        self.defaultWeightKg = defaultWeightKg
+        self.sets = sets
+    }
 }
 
 /// NEW-Q50 D28/D29 — fat-tree template summary. Replaces the pre-Q50
