@@ -34,6 +34,7 @@ import type {
   WCEnvelope,
   DiscardSessionPayload,
 } from '../adapters/watch';
+import { badPayload, wrongSide, dbError } from './watchHandlerResult';
 
 export type DiscardSessionResult =
   | { ok: true; sessionId: string }
@@ -52,30 +53,20 @@ export async function onDiscardSession(
 ): Promise<DiscardSessionResult> {
   const { sessionId, side } = env.payload;
   if (!sessionId || typeof sessionId !== 'string') {
-    return {
-      ok: false,
-      code: 'bad-payload',
-      message: 'discard-session missing or non-string sessionId',
-    };
+    return badPayload('discard-session missing or non-string sessionId');
   }
   // Defensive: ignore self-echo. Currently iPhone-initiated discard
   // is not a defined path (no iPhone→Watch discard envelope), but
   // mirror the end-session handler's side guard to future-proof.
   if (side !== 'watch') {
-    return {
-      ok: false,
-      code: 'wrong-side',
-      message: `discard-session expected side='watch', got side='${side}'`,
-    };
+    return wrongSide(
+      `discard-session expected side='watch', got side='${side}'`
+    );
   }
   try {
     await discardSession(db, sessionId);
     return { ok: true, sessionId };
   } catch (err) {
-    return {
-      ok: false,
-      code: 'db-error',
-      message: err instanceof Error ? err.message : String(err),
-    };
+    return dbError(err);
   }
 }

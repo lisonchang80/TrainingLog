@@ -48,6 +48,7 @@ import type {
   WCEnvelope,
   StartResolvePayload,
 } from '../adapters/watch';
+import { badPayload, dbError } from './watchHandlerResult';
 
 /**
  * Aggregate outcome surfaced to the caller. Mostly for tests +
@@ -71,20 +72,12 @@ export async function onStartResolve(
 ): Promise<StartResolveResult> {
   const { existingSessionId } = env.payload;
   if (!existingSessionId || typeof existingSessionId !== 'string') {
-    return {
-      ok: false,
-      code: 'bad-payload',
-      message: 'start-resolve missing or non-string existingSessionId',
-    };
+    return badPayload('start-resolve missing or non-string existingSessionId');
   }
   try {
     await discardSession(db, existingSessionId);
     return { ok: true, existingSessionId };
   } catch (err) {
-    return {
-      ok: false,
-      code: 'db-error',
-      message: err instanceof Error ? err.message : String(err),
-    };
+    return dbError(err);
   }
 }
