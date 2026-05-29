@@ -151,11 +151,46 @@ final class SessionController: NSObject, ObservableObject {
 
         state = .ending
         let endDate = Date()
-        session?.stopActivity(with: endDate)
 
-        // Per Q28 Branch C (spike A confirmed): discardWorkout is
-        // synchronous void on watchOS 11+ and writes NO HKWorkout
-        // entry. HR samples already in HK store persist.
+        // 2026-05-29 late-evening real-device smoke iter 2 —
+        //
+        // First attempt (fix2 earlier this session): added
+        // `try? await builder.endCollection(at:)` between stopActivity
+        // and discardWorkout. Real-device smoke STILL showed the
+        // active-workout indicator (green runner) + TrainingLog
+        // app-logo Live Activity persisting after [完成] tap — user
+        // had to start + end a workout in Apple's own Workout app to
+        // clear them.
+        //
+        // Root cause: `stopActivity(with:)` only transitions the
+        // HKWorkoutSession from `.running` to `.stopped` — an
+        // INTERMEDIATE state. The OS still treats `.stopped` as an
+        // active workout session (which is why the indicators stay).
+        // The proper terminal call is `session.end()` (available
+        // watchOS 10+), which transitions to `.ended` and releases
+        // OS-level resources.
+        //
+        // Apple's recommended pattern for an explicit "end workout"
+        // user action (validated against the WatchOS 11 Workout app
+        // template's End button impl):
+        //   session.end()
+        //   try await builder.endCollection(at: endDate)
+        //   builder.finishWorkout()  OR  builder.discardWorkout()
+        //
+        // We use discardWorkout (no HKWorkout entry per Q28 Branch C).
+        session?.end()
+
+        // endCollection still needed AFTER session.end() so the builder
+        // flushes its pending sample collection state. try? — silent
+        // fail (already-terminal state is harmless; we still want
+        // discardWorkout + state cleanup to proceed unconditionally).
+        if let builder {
+            try? await builder.endCollection(at: endDate)
+        }
+
+        // Discard collected data. Per Q28 Branch C: synchronous void
+        // on watchOS 11+; no HKWorkout entry created. HR samples
+        // already in HK store persist independently of the builder.
         builder?.discardWorkout()
 
         session = nil
