@@ -75,6 +75,13 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     @Published private(set) var lastInbound: String = "—"
     @Published private(set) var lastOutbound: String = "—"
 
+    /// NEW-Q50 D30 — most-recent inbound `start-reconcile` envelope
+    /// payload from iPhone (delivered via reverse TUI / transferUserInfo).
+    /// `nil` until the first reconcile lands. PickerViewModel (D31)
+    /// subscribes to drive conflict UI; for D29/D30 MVP we just expose
+    /// it for diagnostics (lastInbound also gets a one-line summary).
+    @Published private(set) var lastReconcile: StartReconcileResult?
+
     private let sessionController: SessionController
     private let session: WCSession?
 
@@ -220,11 +227,94 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     // HK lifecycle (SessionController.start()) is intentionally NOT
     // triggered here — D11 set logger owns HK timing.
 
-    /// Send `start-from-watch` to iPhone with the user's 3-tuple +
-    /// await reply. Same race-resistance / activation gating as
-    /// `requestHandshake`. Returns nil on transport failure;
-    /// returns a `StartFromWatchReply` with `isOK == false` when
-    /// iPhone replied but couldn't create the session.
+    /// NEW-Q50 D29 — Watch standalone offline-first send. Replaces the
+    /// legacy `sendStartFromWatch` (sendMessage + replyHandler) path.
+    ///
+    /// Differences vs legacy:
+    ///   - Uses `WCSession.transferUserInfo` → queued by iOS, delivers
+    ///     even if iPhone app is backgrounded / killed / out of range.
+    ///     No `isReachable` gate.
+    ///   - Fire-and-forget: no `replyHandler`, no `await`. Watch UI must
+    ///     transition immediately (`PickerViewModel.startFromWatch` does
+    ///     this via a locally-minted sessionId + mock snapshot).
+    ///   - Carries `sessionId` (locally minted by Watch) in payload —
+    ///     iPhone's `onStartFromWatch` orchestrator uses it as INSERT
+    ///     OR IGNORE key (per Q5 first-write-wins).
+    ///
+    /// The reverse reply (iPhone's `start-reconcile` envelope confirming
+    /// `created` vs `conflict`) lands via `didReceiveUserInfo` and
+    /// surfaces in `@Published lastReconcile`. D31 wires conflict UI;
+    /// D29/D30 just log + diagnostic.
+    func sendStartFromWatchTUI(
+        sessionId: String,
+        templateId: String?,
+        programCycleId: String?,
+        intensityId: String?
+    ) {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "start-from-watch TUI skip: not activated"
+            return
+        }
+        guard !sessionId.isEmpty else {
+            lastOutbound = "start-from-watch TUI skip: empty sessionId"
+            return
+        }
+
+        // Payload shape per `StartFromWatchPayload` in
+        // `src/adapters/watch/payloadSchema.ts`. NSNull for absent
+        // optionals (JSON null on the wire) to match TS optional-field
+        // semantics verbatim.
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "start-from-watch",
+            "payload": [
+                "sessionId": sessionId,
+                "templateId": (templateId as Any?) ?? NSNull(),
+                "programCycleId": (programCycleId as Any?) ?? NSNull(),
+                "intensityId": (intensityId as Any?) ?? NSNull(),
+            ],
+        ]
+
+        // NEW-Q50 D29 dual-fire (added 2026-05-29 night smoke fix):
+        // iOS TUI (transferUserInfo) delivery latency is unpredictable
+        // when iPhone is foregrounded — observed empirically that
+        // envelopes can sit in queue for minutes despite reachable
+        // state. To get immediate UX when iPhone is at hand, ALSO fire
+        // `sendMessage` (instant path, replyHandler:nil so no ack
+        // dance). iPhone's `onStartFromWatch` orchestrator is
+        // idempotent (INSERT OR IGNORE keyed on sessionId per Q5
+        // first-write-wins) so dual-delivery is safe — whichever
+        // envelope lands first wins, the second hit becomes a no-op
+        // at the DB layer.
+        //
+        // Background-killable scenario (the NEW-Q50 core promise)
+        // still works because: isReachable=false → sendMessage skip,
+        // TUI keeps queue + iOS delivers on next iPhone wake.
+        session.transferUserInfo(envelope)
+        var sendMsgStatus = "tui"
+        if session.isReachable {
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { _ in
+                    // Swallow errors — TUI is the durable path.
+                    // Failed sendMessage just means iPhone wasn't
+                    // reachable at the exact moment; TUI queue
+                    // catches it.
+                }
+            )
+            sendMsgStatus = "tui+msg"
+        }
+        lastOutbound = "start-from-watch \(sendMsgStatus) sent sess=\(prefix8(sessionId))"
+    }
+
+    /// LEGACY (pre-NEW-Q50) — Send `start-from-watch` to iPhone with
+    /// the user's 3-tuple + await reply. Uses sendMessage + replyHandler
+    /// which requires `isReachable=true` (i.e., iPhone app foregrounded).
+    /// PickerViewModel no longer calls this — kept around as a fallback
+    /// reference until D31 conflict UI ships + Wave 2 cleanup retires it.
+    @available(*, deprecated, message: "Use sendStartFromWatchTUI (NEW-Q50 D29) — TUI path works in background.")
     func sendStartFromWatch(
         templateId: String?,
         programCycleId: String?,
@@ -439,6 +529,115 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             // 5s reconcile sees the ack.
             await self.sessionController.end()
             replyHandler(["ok": true])
+        }
+    }
+
+    // MARK: - NEW-Q50 D30 — Reverse TUI inbound
+    //
+    // iPhone replies to Watch-initiated `start-from-watch` (TUI) via
+    // its own `sendUserInfo(makeEnvelope('start-reconcile', ...))`
+    // (per `app/(tabs)/index.tsx` D9 wave-2 wire-in). The iOS WC
+    // framework delivers it here regardless of foreground state.
+    //
+    // We parse the envelope by `kind` and route:
+    //   - `start-reconcile` → publish to `lastReconcile` (D31 conflict
+    //     UI subscribes; D29/D30 just diagnostic).
+    //   - Other kinds → drop silently (forward-compat for D32 set/etc.
+    //     when those land via appContext instead).
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        // Synchronous envelope shape validation; bail before MainActor hop
+        // if it's noise (e.g. lib housekeeping payload).
+        guard let kind = userInfo["kind"] as? String else { return }
+        guard kind == "start-reconcile" else {
+            // Unknown / not-our-business envelope kind. Logged on main
+            // actor for diagnostic visibility.
+            Task { @MainActor [weak self] in
+                self?.lastInbound = "TUI ignored kind=\(kind)"
+            }
+            return
+        }
+        guard let payload = userInfo["payload"] as? [String: Any] else {
+            Task { @MainActor [weak self] in
+                self?.lastInbound = "start-reconcile: bad payload"
+            }
+            return
+        }
+
+        let parsed = StartReconcileResult.parse(from: payload)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.lastReconcile = parsed
+            switch parsed {
+            case .created(let sessionId):
+                self.lastInbound = "reconcile created sess=\(self.prefix8(sessionId))"
+            case .conflict(let local, let existing, _, _):
+                self.lastInbound =
+                    "reconcile CONFLICT local=\(self.prefix8(local)) "
+                    + "vs existing=\(self.prefix8(existing))"
+            case .unparseable:
+                self.lastInbound = "start-reconcile: unparseable payload"
+            }
+        }
+    }
+}
+
+// MARK: - NEW-Q50 D30 — start-reconcile envelope payload
+
+/// Mirror of TS `StartReconcilePayload` (src/adapters/watch/payloadSchema.ts).
+/// Discriminated union by `status` field; `'created'` is the success
+/// path, `'conflict'` indicates iPhone had a different active session
+/// (first-write-wins per Q5).
+///
+/// `.unparseable` covers wire shape we can't decode — surfaces to UI
+/// as a diagnostic so we don't silently swallow protocol drift.
+enum StartReconcileResult: Equatable {
+    case created(sessionId: String)
+    case conflict(
+        localSessionId: String,
+        existingSessionId: String,
+        existingTitle: String,
+        existingStartedAt: Int64
+    )
+    case unparseable
+
+    static func parse(from payload: [String: Any]) -> StartReconcileResult {
+        guard let status = payload["status"] as? String else { return .unparseable }
+        guard let sessionId = payload["sessionId"] as? String else { return .unparseable }
+        switch status {
+        case "created":
+            return .created(sessionId: sessionId)
+        case "conflict":
+            guard
+                let existingSessionId = payload["existingSessionId"] as? String,
+                let existingTitle = payload["existingTitle"] as? String
+            else {
+                return .unparseable
+            }
+            // existingStartedAt is epoch ms; tolerate both Int64 and Int
+            // wire shapes (JSON delivers a NSNumber the WC framework
+            // unboxes inconsistently across iOS versions).
+            let startedAtRaw = payload["existingStartedAt"]
+            let existingStartedAt: Int64
+            if let i64 = startedAtRaw as? Int64 {
+                existingStartedAt = i64
+            } else if let i = startedAtRaw as? Int {
+                existingStartedAt = Int64(i)
+            } else if let n = startedAtRaw as? NSNumber {
+                existingStartedAt = n.int64Value
+            } else {
+                return .unparseable
+            }
+            return .conflict(
+                localSessionId: sessionId,
+                existingSessionId: existingSessionId,
+                existingTitle: existingTitle,
+                existingStartedAt: existingStartedAt
+            )
+        default:
+            return .unparseable
         }
     }
 }

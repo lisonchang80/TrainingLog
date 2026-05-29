@@ -114,7 +114,7 @@ struct PickerRootView: View {
     private var planSection: some View {
         Section {
             switch vm.todayPlanned {
-            case .planned(let label, _):
+            case .planned(let label, _, _, _):
                 Button {
                     vm.selectTodayPlanned()
                     // Bypass both sheets — program day spec already

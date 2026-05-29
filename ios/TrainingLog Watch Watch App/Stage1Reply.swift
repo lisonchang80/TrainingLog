@@ -40,10 +40,65 @@ struct Stage1SessionSummary: Codable, Equatable {
     let exerciseCount: Int
 }
 
-/// One row in the template prefetch list.
+/// NEW-Q50 D29 — one planned exercise inside a fat-tree template.
+/// Mirror of TS `Stage1TemplateExercise` (handshake.ts:106). Sourced
+/// from `template_exercise` JOIN `exercise`; `exerciseName` is
+/// denormalised onto the wire so Watch never needs a separate
+/// exercise lookup table to render the planned card.
+struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
+    let templateExerciseId: String
+    let exerciseId: String
+    let exerciseName: String
+    let ordering: Int
+    let defaultSets: Int
+    /// May be null when the source template_exercise leaves reps open.
+    let defaultReps: Int?
+    /// May be null when the source template_exercise leaves weight open.
+    let defaultWeightKg: Double?
+}
+
+/// NEW-Q50 D28/D29 — fat-tree template summary. Replaces the pre-Q50
+/// thin `{templateId, name}` shape: each template now carries its full
+/// planned exercise list so Watch can build a SessionSnapshot offline
+/// (without a second round-trip to iPhone).
+///
+/// Caps per Q3=a sizing: default 20 templates × ~10 exercises ≈ 30 KB
+/// JSON, well under the 64 KB WC envelope ceiling.
 struct Stage1TemplateSummary: Codable, Equatable {
     let templateId: String
     let name: String
+    /// NEW-Q50 D29 — Decoded as `[]` on older iPhone payloads that
+    /// don't include the field (tolerant fallback so picker still
+    /// renders; tap path then has no exercises to build from and
+    /// falls back to mockSnapshot in PickerViewModel).
+    let exercises: [Stage1TemplateExerciseDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case templateId
+        case name
+        case exercises
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.templateId = try c.decode(String.self, forKey: .templateId)
+        self.name = try c.decode(String.self, forKey: .name)
+        // Tolerant: missing key → [] (back-compat with pre-Q50 wire).
+        self.exercises = (try? c.decode(
+            [Stage1TemplateExerciseDTO].self,
+            forKey: .exercises
+        )) ?? []
+    }
+
+    init(
+        templateId: String,
+        name: String,
+        exercises: [Stage1TemplateExerciseDTO]
+    ) {
+        self.templateId = templateId
+        self.name = name
+        self.exercises = exercises
+    }
 }
 
 /// Phase 2.5 — one intensity 副標籤 inside a Program prefetch entry.
@@ -74,7 +129,16 @@ struct Stage1ProgramSummary: Codable, Equatable {
 /// label, programDayId}` / `{kind: "restDay"}` / `{kind:
 /// "noActiveProgram"}`.
 enum Stage1TodayPlannedDTO: Codable, Equatable {
-    case planned(label: String, programDayId: String)
+    /// NEW-Q50 D29 — `templateId` + `exercises` added so Watch can
+    /// build a SessionSnapshot offline from today's planned cell
+    /// without a second round-trip. Pre-Q50 wire (no exercises field)
+    /// decodes with empty `[]` for back-compat.
+    case planned(
+        label: String,
+        programDayId: String,
+        templateId: String,
+        exercises: [Stage1TemplateExerciseDTO]
+    )
     case restDay
     case noActiveProgram
 
@@ -82,6 +146,8 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
         case kind
         case label
         case programDayId
+        case templateId
+        case exercises
     }
 
     init(from decoder: Decoder) throws {
@@ -91,7 +157,20 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
         case "planned":
             let label = try c.decode(String.self, forKey: .label)
             let programDayId = try c.decode(String.self, forKey: .programDayId)
-            self = .planned(label: label, programDayId: programDayId)
+            // NEW-Q50 D29: tolerant — older iPhone payload may omit
+            // templateId / exercises; default to empty so picker still
+            // renders the row (tap path falls back to mockSnapshot).
+            let templateId = (try? c.decode(String.self, forKey: .templateId)) ?? ""
+            let exercises = (try? c.decode(
+                [Stage1TemplateExerciseDTO].self,
+                forKey: .exercises
+            )) ?? []
+            self = .planned(
+                label: label,
+                programDayId: programDayId,
+                templateId: templateId,
+                exercises: exercises
+            )
         case "restDay":
             self = .restDay
         case "noActiveProgram":
@@ -107,10 +186,12 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .planned(let label, let programDayId):
+        case .planned(let label, let programDayId, let templateId, let exercises):
             try c.encode("planned", forKey: .kind)
             try c.encode(label, forKey: .label)
             try c.encode(programDayId, forKey: .programDayId)
+            try c.encode(templateId, forKey: .templateId)
+            try c.encode(exercises, forKey: .exercises)
         case .restDay:
             try c.encode("restDay", forKey: .kind)
         case .noActiveProgram:

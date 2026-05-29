@@ -162,8 +162,15 @@ final class PickerViewModel: ObservableObject {
     ///     leave existing `self.todayPlanned` in place.
     ///   - Both fields populated → overwrite verbatim.
     func applyStage1Reply(_ reply: Stage1Reply) {
+        // NEW-Q50 D29 — propagate fat-tree exercises into TemplateOption
+        // so the tap path can build a SessionSnapshot offline (without
+        // a second round-trip).
         templates = reply.prefetch.templates.map { summary in
-            TemplateOption(id: summary.templateId, name: summary.name)
+            TemplateOption(
+                id: summary.templateId,
+                name: summary.name,
+                exercises: summary.exercises
+            )
         }
         // Phase 2.5 — programs with inline intensities.
         if let programDTOs = reply.prefetch.programs {
@@ -177,13 +184,16 @@ final class PickerViewModel: ObservableObject {
                 )
             }
         }
-        // Phase 2.5 — today's planned-day.
+        // Phase 2.5 + NEW-Q50 D29 — today's planned-day, now with
+        // templateId + exercises fat-tree for offline snapshot build.
         if let plannedDTO = reply.prefetch.todayPlanned {
             switch plannedDTO {
-            case .planned(let label, let programDayId):
+            case .planned(let label, let programDayId, let templateId, let exercises):
                 todayPlanned = .planned(
                     label: label,
-                    programDayId: programDayId
+                    programDayId: programDayId,
+                    templateId: templateId,
+                    exercises: exercises
                 )
             case .restDay:
                 todayPlanned = .restDay
@@ -199,39 +209,171 @@ final class PickerViewModel: ObservableObject {
 
     // MARK: - Start-from-watch (Phase 3)
 
-    /// Fire `start-from-watch` outbound for the captured selection
-    /// and store the result. Idempotent at the VM level: re-firing
-    /// with the same selection re-sends (Phase 3 doesn't dedup;
-    /// Phase 4+ may add a hashing guard).
+    /// NEW-Q50 D29 — Watch standalone offline-first start.
     ///
-    /// HK lifecycle is NOT touched here — `SessionController.start()`
-    /// belongs to D11 set logger's lifecycle ownership. Phase 3 is
-    /// pure WC-mechanics validation.
+    /// Pre-Q50 model (D8 P3): await iPhone's reply via sendMessage,
+    /// requires `isReachable=true` (iPhone foregrounded). On failure
+    /// Watch showed 「傳輸失敗 (iPhone 未配對)」 red screen.
+    ///
+    /// New model (this commit): Watch mints its own sessionId locally,
+    /// transitions to SetLogger IMMEDIATELY (no await), then fires
+    /// `start-from-watch` envelope to iPhone via `transferUserInfo`
+    /// (queued by iOS — survives iPhone background / kill / out-of-
+    /// range). iPhone's `onStartFromWatch` orchestrator INSERT OR IGNORE
+    /// keyed on sessionId (per Q5 first-write-wins).
+    ///
+    /// iPhone confirms (or surfaces conflict) via a reverse-TUI
+    /// `start-reconcile` envelope; coordinator.$lastReconcile receives
+    /// it. D31 will subscribe + show conflict UI; D29/D30 just publish
+    /// for diagnostic.
+    ///
+    /// Snapshot population: D29 uses `SetLoggerMockData.mockSnapshot()`
+    /// as a placeholder. Real exercise data (from template fat-tree
+    /// or appContext mirror) lands in D32.
+    ///
+    /// HK lifecycle: NOT touched here per D11 ownership boundary.
     func startFromWatch(selection: PickerSelection) async {
-        guard let coordinator else {
-            // Preview / sim / no-coordinator: mock SUCCESS with the
-            // canonical mock snapshot. This lets the picker → set
-            // logger flow be exercised end-to-end without a paired
-            // iPhone (e.g. for Sim smoke testing the D11 UI).
-            isStartingSession = true
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            isStartingSession = false
-            startResult = .some(StartFromWatchReply(
-                sessionId: "mock-session-1",
-                snapshot: SetLoggerMockData.mockSnapshot()
-            ))
-            return
-        }
-
         isStartingSession = true
         defer { isStartingSession = false }
 
-        let reply = await coordinator.sendStartFromWatch(
-            templateId: selection.template?.id,
+        // Mint local sessionId. Convention per ADR-0019 NEW-Q50: `W-`
+        // prefix marks Watch-originated; 8-char base32-ish suffix from
+        // the leading hex of a UUID for compactness in debug logs.
+        let uuid = UUID().uuidString
+        let suffix = uuid
+            .replacingOccurrences(of: "-", with: "")
+            .prefix(12)
+            .lowercased()
+        let localSessionId = "W-\(suffix)"
+
+        // NEW-Q50 D29 (extended) — build local SessionSnapshot from
+        // the fat-tree exercises carried in Stage1Reply. Two source
+        // paths:
+        //   • Template tap path  → selection.template.exercises
+        //   • Planned-row path   → todayPlanned.planned.exercises
+        //                          (selection is all-nil per
+        //                          PickerRootView.planSection convention)
+        //
+        // Falls back to SetLoggerMockData.mockSnapshot() when neither
+        // source has exercises (pre-Q50 iPhone payload OR genuinely
+        // empty template) so SetLoggerView still mounts.
+        let (resolvedTitle, resolvedExercises, resolvedTemplateId) = resolveSelectionExercises(selection)
+        let snapshot: SessionSnapshot
+        if resolvedExercises.isEmpty {
+            snapshot = SetLoggerMockData.mockSnapshot()
+        } else {
+            snapshot = buildSnapshotFromFatTree(
+                sessionId: localSessionId,
+                title: resolvedTitle,
+                exercises: resolvedExercises
+            )
+        }
+        let localReply = StartFromWatchReply(
+            sessionId: localSessionId,
+            snapshot: snapshot
+        )
+        startResult = .some(localReply)
+
+        // Preview / no-coordinator path: stop here — no WC to send.
+        guard let coordinator else { return }
+
+        // Fire-and-forget to iPhone. transferUserInfo queues even if
+        // iPhone is unreachable; iOS handles persistence + retry.
+        // No `await` — we already transitioned UI above.
+        //
+        // For planned-row path: templateId comes from
+        // todayPlanned.planned.templateId so iPhone-side reconcile can
+        // build a matching session_exercise tree from the same source.
+        coordinator.sendStartFromWatchTUI(
+            sessionId: localSessionId,
+            templateId: selection.template?.id ?? resolvedTemplateId,
             programCycleId: selection.program?.id,
             intensityId: selection.intensity?.id
         )
-        startResult = .some(reply)
+    }
+
+    // MARK: - NEW-Q50 D29 — Fat-tree → SessionSnapshot
+
+    /// Resolve which fat-tree exercises + title + templateId to use
+    /// based on the selection state. Returns empty exercises when no
+    /// source matches (pre-Q50 fallback path).
+    ///
+    /// Tuple shape: (title, exercises, templateIdForWire).
+    private func resolveSelectionExercises(_ selection: PickerSelection)
+        -> (String, [Stage1TemplateExerciseDTO], String?)
+    {
+        // Template-tap path — template was selected via the 模板訓練
+        // section row, possibly drilled through 計劃 + 強度 sheets.
+        if let template = selection.template {
+            return (template.name, template.exercises, template.id)
+        }
+        // Planned-row path — selection is all-nil per PickerRootView's
+        // planSection planned-case (the program-day already carries the
+        // 3-tuple from iPhone). Pull exercises from todayPlanned.
+        if case .planned(_, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
+            // Display title — use the planned label if available, else
+            // a generic fallback.
+            let label = plannedLabel ?? "今日訓練"
+            return (label, exercises, templateId.isEmpty ? nil : templateId)
+        }
+        return ("自由訓練", [], nil)
+    }
+
+    /// Convenience accessor for the planned label string (when
+    /// todayPlanned is .planned). Returns nil for restDay /
+    /// noActiveProgram.
+    private var plannedLabel: String? {
+        if case .planned(let label, _, _, _) = todayPlanned {
+            return label
+        }
+        return nil
+    }
+
+    /// Build a SessionSnapshot from a fat-tree exercise list.
+    /// Per Stage1TemplateExercise → SessionSnapshotExercise:
+    ///   • sessionExerciseId — synthesised as `SE-<index>` for local
+    ///     use; iPhone-side reconcile will own the real persisted ID.
+    ///   • plannedSets — defaultSets from the template_exercise row.
+    ///   • sets — pre-populated with `defaultSets` empty rows so the
+    ///     SetLoggerView can render the planned grid; weight/reps/etc
+    ///     come from defaultReps/defaultWeightKg (may be nil = blank).
+    ///
+    /// startedAt = current epoch ms.
+    private func buildSnapshotFromFatTree(
+        sessionId: String,
+        title: String,
+        exercises: [Stage1TemplateExerciseDTO]
+    ) -> SessionSnapshot {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let snapshotExercises: [SessionSnapshotExercise] = exercises.enumerated().map { (idx, ex) in
+            let sets: [SessionSnapshotSet] = (0..<max(1, ex.defaultSets)).map { setIdx in
+                SessionSnapshotSet(
+                    setId: "SET-\(idx)-\(setIdx)",
+                    ordinal: setIdx + 1,
+                    weight: ex.defaultWeightKg,
+                    reps: ex.defaultReps,
+                    rpe: nil,
+                    restSec: nil,
+                    notes: nil,
+                    setKind: "working",
+                    isLogged: false
+                )
+            }
+            return SessionSnapshotExercise(
+                sessionExerciseId: "SE-\(idx)-\(ex.exerciseId)",
+                exerciseId: ex.exerciseId,
+                exerciseName: ex.exerciseName,
+                ordering: ex.ordering,
+                plannedSets: ex.defaultSets,
+                sets: sets
+            )
+        }
+        return SessionSnapshot(
+            sessionId: sessionId,
+            title: title,
+            startedAt: nowMs,
+            exercises: snapshotExercises
+        )
     }
 
     // MARK: - Selection helpers
@@ -260,7 +402,12 @@ extension PickerViewModel {
     /// `#Preview` macro that needs non-empty data.
     static func mockDefault() -> PickerViewModel {
         PickerViewModel(
-            todayPlanned: .planned(label: "推日 W3D1（今日）", programDayId: "pd-1"),
+            todayPlanned: .planned(
+                label: "推日 W3D1（今日）",
+                programDayId: "pd-1",
+                templateId: "",
+                exercises: []
+            ),
             templates: [
                 TemplateOption(id: "t1", name: "推日（A）"),
                 TemplateOption(id: "t2", name: "拉日（B）"),
