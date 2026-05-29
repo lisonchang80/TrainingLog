@@ -43,18 +43,44 @@ Promise.all([
 - Listing sub_tags **without** a program scope (e.g., global "all sub_tags ever used"). Different query.
 - Reading sub_tags for a specific template (just read `template.sub_tag` directly — it's the source of truth for that template's classification).
 
-## Current call sites (as of 2026-05-22, wave 18g)
+## Current call sites (as of 2026-05-29)
 
+### Read paths (UNION at read time)
 - ✅ `components/templates/start-template-sheet.tsx` — wave 16 round 15 polish baseline
 - ✅ `components/session/template-meta-sheet.tsx` — wave 18g smoke commit `e32a016`
+- ✅ `app/(tabs)/programs.tsx` — calendar row/cell SubTagPicker, refresh() unions `listProgramSubTags` + `listDistinctSubTagsByProgram` and `distinctSubTagsInProgram(cells)` is mixed in at render time (defense-in-depth — 2026-05-29 fix)
 - ✅ `app/program-wizard/new.tsx` Step 4 自訂 confirm path — uses `recordProgramSubTag` for write, reads via `state.draft.sub_tags`
 - ⚠️ Any future picker — apply this union pattern at write time
 
 ## Inverse direction — when WRITING
 
-Any place that introduces a new sub_tag for a program (cell upsert, row-apply, column-apply override, wizard onConfirm) MUST also call `recordProgramSubTag(db, program_id, sub_tag)` so the v022 dict learns about it. The repository helpers (`upsertCell` / `applyTemplateToColumn` w/ `sub_tag_override` / `applyTagToRow`) all do this internally — wizard's onConfirm + onNext (Step 1 → Step 2 transition) do it explicitly via a loop.
+Any place that introduces a new sub_tag for a program (cell upsert, row-apply, column-apply override, wizard onConfirm, template attach/clone/convert) MUST also call `recordProgramSubTag(db, program_id, sub_tag)` so the v022 dict learns about it. The repository helpers handle this internally:
 
-If you find a write path that lands a sub_tag onto `template.sub_tag` or `program_cell.sub_tag` but DOESN'T call `recordProgramSubTag`, that's a bug — the chip will "disappear from the picker" the next time the user views the program (because `listDistinctSubTagsByProgram` only returns it until something replaces it).
+### Verified WRITE call sites (all sync to v022 dict)
+
+**Cell side (`program_cell.sub_tag`)**
+- ✅ `upsertCell` — `programRepository.ts`
+- ✅ `applyTemplateToColumn` w/ `sub_tag_override` — `programRepository.ts`
+- ✅ `applyTagToRow` — `programRepository.ts`
+- ✅ `swapProgramCells` — `programRepository.ts`
+
+**Template side (`template.sub_tag`) — 2026-05-29 round of fixes**
+- ✅ `attachTemplateToProgram` — `templateRepository.ts` (used by template editor 「儲存」 → TemplateMetaSheet onConfirm path). Was previously missing → bug repro: user inline 新增強度 in 儲存模板 sheet, then 計畫 tab row apply picker showed nothing.
+- ✅ `cloneTemplateWithSubTag` — `templateRepository.ts` (used by start-template-sheet「+ 新增強度」inline). Same bug class.
+- ✅ `convertSessionToTemplate` create-branch — `templateRepository.ts` (used by session 「另存模板」 / 「儲存模板」 create + update-fallback-to-create paths). Same bug class.
+
+**Wizard side**
+- ✅ `app/program-wizard/new.tsx` onConfirm + onNext (Step 1 → Step 2) — explicit `recordProgramSubTag` loop
+
+### Smell check
+
+If you find a write path that lands a sub_tag onto `template.sub_tag` or `program_cell.sub_tag` but DOESN'T call `recordProgramSubTag`, that's a bug — the chip will "disappear from the picker" the next time the user views the program (because `listDistinctSubTagsByProgram` only returns it until something replaces it, and the cell-derived source is empty until a cell uses it).
+
+## Test fixture gotcha — v022 FK enforcement
+
+`program_sub_tag` has `FOREIGN KEY (program_id) REFERENCES program(id) ON DELETE CASCADE`. But `template.program_id` was added via `ALTER TABLE` in v005, and SQLite does NOT enforce FK on columns added by ALTER. This means **prior tests sometimes pass phantom `program_id` like `'prog-foo'` without seeding a program row** — that's fine for `template` writes but the moment those writes start cascading into `recordProgramSubTag`, the FK fires.
+
+**If you add `recordProgramSubTag` to an existing write helper, scan its tests** — any test that passes a non-existent `program_id` now needs `await createProgram(db, { program: {...} })` first. See `tests/repository/templateConvertFromSession.test.ts::seedProgram` helper as the canonical pattern (2026-05-29).
 
 ## References
 
