@@ -98,6 +98,16 @@ Push 失敗（remote 領先）→ `git pull --rebase` 再 push。衝突則停下
 - ❌ batch 完才 push 一次 — 中途斷掉沒 push 等於白做、push 應在每筆 verify 後即時
 - ❌ 對應該手解 conflict 的 branch 跑 batch — batch 是 happy-path 工具、conflict 該人介入
 
+## 下游：pre-ship-gate 對抗式驗證（2026-05-30 新增）
+
+picks-batch 的 per-pick `tsc + jest` 只證「各 branch 不互相破壞編譯/測試」，**不查跨-agent 整合邊界**（A 刪的 i18n key 是否 B 的新 Alert 還在用、C 的 migration cascade vs A 的 INSERT site…）。batch 完、push 前，跑 `pre-ship-gate` workflow 補這個結構性破口：
+
+```
+Workflow({ name: "pre-ship-gate" })   # 預設 base=origin/main
+```
+
+它在合併後狀態上跑 tsc + jest + `expo lint` + 5 路對抗式 skeptic（sqlite-migration / pure-logic / i18n / rn-layout / cross-agent）+ 產出 readyToLand 認證。**綠才 push、紅看 `blockers[]`**。詳見 `dynamic-workflows` skill。建議流程：picks-batch（local，不 push）→ pre-ship-gate → 綠 → push。
+
 ## 與 overnight-parallel-agents skill 的關係
 
 `overnight-parallel-agents` 規範**寫 agent prompt 的 file-level allow-list / DO NOT TOUCH 紀律**、避免 agent 同檔對撞。
