@@ -94,3 +94,14 @@ export {
   addAppContextListener,
 } from './connectivity';
 export type { SendResult, SendOptions } from './connectivity';
+
+// NEW-Q50 D33 (2026-05-30 overnight) — pure Watch sync-status logic
+// (SyncState + 30s stuck threshold, ADR-0019 § Slice 13d NEW-Q50 Q7). The
+// ⏳ corner indicator + end-fail hint banner SwiftUI views are device-gated
+// morning work; this is the testable core they read from.
+export {
+  computeSyncState,
+  shouldShowPendingIndicator,
+  DEFAULT_STUCK_THRESHOLD_MS,
+} from './syncStatus';
+export type { SyncState, SyncStatusInput } from './syncStatus';
