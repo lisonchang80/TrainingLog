@@ -21,7 +21,10 @@ description: >
   while attempting to establish tunnel using negotiated network
   parameters", "Type X does not conform to protocol ObservableObject",
   "init(wrappedValue:) is not available due to missing import",
-  "HK auth dialog 出現在 Watch 不是 iPhone". Validated 1× slice 13b
+  "HK auth dialog 出現在 Watch 不是 iPhone",
+  "TurboModuleManager: Timed out waiting for modules to be invalidated",
+  "RCTTurboModuleManager _invalidateModules", "紅屏 TurboModule",
+  "JS bundle 拉不到". Validated 1× slice 13b
   (2026-05-25 → 26) + 1× slice 13d D0 spike C + D4 Watch target add
   + 1× slice 13d D0 spike A native Swift harness (2026-05-27).
 ---
@@ -162,6 +165,8 @@ npx expo start
 ```
 
 LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
+
+**症狀變體 (validated 2026-05-29 night)**: iPhone 跑 4G/行動數據時、Metro 連不上會跳更深的紅屏「**TurboModuleManager: Timed out waiting for modules to be invalidated**」(`RCTTurboModuleManager.mm:1102`、`_invalidateModules` stack)、看起來像 RN bridge 問題其實也是 LAN 不通。修法同上：iPhone 切回家用 WiFi 同 Mac 網段 → 殺 app 重開 → 自動 reload 成功。Mac 端可用 `ifconfig | grep "inet 192"` 確認 LAN IP、`lsof -nP -i :8081` 看 Metro 真實 listen 端口。
 
 從 iPhone 上 reload：搖晃手機 → "Reload" or 殺 app 重開。
 
