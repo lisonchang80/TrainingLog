@@ -279,19 +279,34 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         }
 
         // Payload shape per `StartFromWatchPayload` in
-        // `src/adapters/watch/payloadSchema.ts`. NSNull for absent
-        // optionals (JSON null on the wire) to match TS optional-field
-        // semantics verbatim.
+        // `src/adapters/watch/payloadSchema.ts`.
+        //
+        // 2026-05-29 deep-night B1 root cause FIX:
+        //   Pre-fix used `NSNull()` for absent optionals (e.g.
+        //   programCycleId / intensityId on the planned-row tap path
+        //   where they're always nil). WCSession.sendMessage AND
+        //   transferUserInfo both REJECT envelopes containing NSNull
+        //   with `WCError.payloadUnsupportedTypes (code 7010)`. Bug
+        //   was latent for template-tap path (user always picked
+        //   non-nil program + intensity) but fatal for planned-tap
+        //   (where those fields are nil by-construction). Diag chain:
+        //   D1 smoke → iPhone never received envelope → enriched
+        //   errorHandler surfaced 'msg ERR code=7010 Payload contains
+        //   unsupported type' on Watch DBG overlay.
+        //
+        // Fix: build dict conditionally — omit keys whose value is
+        // nil. iPhone JS side receives `undefined` for missing keys
+        // (TS type `templateId?: string | null` accepts both); the
+        // `truthy` checks in onStartFromWatch handle them identically.
+        var payload: [String: Any] = ["sessionId": sessionId]
+        if let templateId { payload["templateId"] = templateId }
+        if let programCycleId { payload["programCycleId"] = programCycleId }
+        if let intensityId { payload["intensityId"] = intensityId }
         let envelope: [String: Any] = [
             "msgId": UUID().uuidString,
             "ts": Int64(Date().timeIntervalSince1970 * 1000),
             "kind": "start-from-watch",
-            "payload": [
-                "sessionId": sessionId,
-                "templateId": (templateId as Any?) ?? NSNull(),
-                "programCycleId": (programCycleId as Any?) ?? NSNull(),
-                "intensityId": (intensityId as Any?) ?? NSNull(),
-            ],
+            "payload": payload,
         ]
 
         // NEW-Q50 D29 dual-fire (added 2026-05-29 night smoke fix):
