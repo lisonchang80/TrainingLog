@@ -209,3 +209,7 @@ Task {
 - 2026-05-29 late-evening — `discard-session` (D31 wave 2). 8 new files / files touched. Same pattern, also clean. Shipped @ 6e86c11.
 
 Two clean trips through this 8-step dance in one day. Pattern proven; future D32/D33 envelope additions should follow this exact sequence.
+
+## 相關 agent
+
+- `@watch-connectivity-reviewer`（subagent）— 新 kind 寫完後丟給它審：TS↔Swift schema parity（每個 field 對得上）、handler never-throws 不變式、channel 選對（applicationContext / transferUserInfo / sendMessage）、雙向 send+receive 都接齊、payloadSchema 無 WC import、test 覆蓋。涵蓋本 skill 8 步最容易漏的 cross-device 破口。

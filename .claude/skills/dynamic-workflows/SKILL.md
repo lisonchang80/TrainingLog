@@ -29,6 +29,8 @@ Workflow({ name: "pre-ship-gate", args: { base: "<ref>" } })
 ```
 Green → push; red → fix `blockers[]`. It does MORE than manual tsc+jest: runs `expo lint`, 5 adversarial lenses, cross-agent integration check, and emits a reusable attestation. Validated 2026-05-30 on the round-3 stacked branch (9 files) — caught a stale doc-comment as a non-blocking warning, certified green, pushed.
 
+> Two of the gate's lenses now also exist as standalone subagents for ad-hoc (non-gate) review: `@sqlite-migration-reviewer` (sqlite lens) and `@watch-connectivity-reviewer` (cross-device WC). Reach for those when reviewing a single migration / envelope change without running the whole gate; the gate still runs its own inline lenses.
+
 ### assess pattern (Understand→Synthesize)
 For "evaluate X" research: `parallel(surveyors with agentType:'Explore' + schema)` → barrier → `agent(synthesize over JSON.stringify(surveys))`. Used 2026-05-30 to evaluate workflow-fit across 7 facets.
 
