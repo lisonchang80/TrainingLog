@@ -67,10 +67,23 @@ xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
 `clean install` forces every target (incl. Pods) to recompile. Costs 5-10 min vs 30-60s incremental. Verify success by counting Watch SwiftCompile entries:
 ```bash
 grep -cE "SwiftCompile.*Watch Watch App" build.log
-# expect ≥ 20 (Watch target has ~24 .swift files)
+# Debug build (per-file compile): expect ≥ 20 (Watch target has ~24 .swift files)
+# Release build (WMO bundled compile): expect 2-4 (one CompileSwift + one
+#   SwiftCompile line per architecture: arm64_32 + arm64). The SwiftCompile
+#   line lists ALL .swift files in one invocation — DON'T panic at the low
+#   count, scan for your file name inside that one line instead, or check
+#   `<DerivedData>/.../Release-watchos/.../Objects-normal/arm64/*.o` for
+#   per-file .o output. Validated 2026-05-29 evening — first WMO smoke
+#   showed grep=1 and wasted 10 min debugging until checking the .o files.
 ```
 
 Then Trap 1 still applies — must `devicectl install` after `clean install`.
+
+**Gotcha**: also note `xcodebuild` end-of-build marker for clean install is
+`** INSTALL SUCCEEDED **`, NOT `** BUILD SUCCEEDED **`. Monitor alternations
+that grep only `BUILD SUCCEEDED|BUILD FAILED` will miss the success signal
+and look like a hung build. Use `INSTALL SUCCEEDED|BUILD SUCCEEDED|BUILD FAILED|error:`
+in any monitoring grep.
 
 ### Trap 3 — Apple Watch sync uses aggressive cache
 
