@@ -279,6 +279,23 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     // ---------------------------------------------------------------
     @Published private(set) var lastIncomingEnd: String?
 
+    /// D31 wave 2 (2026-05-29 late) — cache of the most recently sent
+    /// `start-from-watch` envelope, for the conflict-resolve resend
+    /// path. When iPhone replies `start-reconcile{status:'conflict'}`
+    /// and the user picks "中止 iPhone 保留 Watch" in the alert, the
+    /// resolve flow needs two FIFO-ordered envelopes:
+    ///   (1) `start-resolve` — iPhone discards the existing losing
+    ///       session row.
+    ///   (2) `start-from-watch` (resent) — iPhone re-processes the
+    ///       Watch's create request, now with no existing-active
+    ///       conflict to reject against → INSERT OR IGNORE proceeds.
+    ///
+    /// We cache the envelope (rather than just the args) so the resend
+    /// is byte-identical except for a fresh msgId + ts (so iPhone's
+    /// dedupe ring buffer doesn't drop it as a re-arrival of the
+    /// already-seen original).
+    private var lastStartFromWatchEnvelope: [String: Any]?
+
     func sendStartFromWatchTUI(
         sessionId: String,
         templateId: String?,
@@ -324,6 +341,10 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             "kind": "start-from-watch",
             "payload": payload,
         ]
+
+        // D31 wave 2 cache — remember the envelope for potential
+        // conflict-resolve resend (see resendStartFromWatch below).
+        lastStartFromWatchEnvelope = envelope
 
         // NEW-Q50 D29 dual-fire (added 2026-05-29 night smoke fix):
         // iOS TUI (transferUserInfo) delivery latency is unpredictable
@@ -447,6 +468,121 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         lastOutbound =
             "start-resolve \(status) sent local=\(prefix8(localSessionId)) → "
             + "discard=\(prefix8(existingSessionId))"
+    }
+
+    /// D31 conflict-resolve resend (2026-05-29 late, real-device smoke).
+    ///
+    /// When the user picks "中止 iPhone 保留 Watch" in the conflict alert,
+    /// we need a TWO-envelope sequence (FIFO TUI-ordered):
+    ///   1. `start-resolve` — iPhone discards the losing session row.
+    ///   2. `start-from-watch` (this method, resent) — iPhone re-processes
+    ///      the Watch's create request. Pre-fix, the first start-from-watch
+    ///      already landed at step 2 of the original flow, got rejected
+    ///      as conflict, and was NEVER re-processed after the discard —
+    ///      so iPhone ended up idle with no session at all (smoke ❹(e)
+    ///      observed: Watch saved data but no row in iPhone history).
+    ///
+    /// Re-uses the cached `lastStartFromWatchEnvelope` (set when the
+    /// original start-from-watch fired) so the resend carries the same
+    /// templateId / programCycleId / intensityId / sessionId without
+    /// re-threading those args. Mints a fresh msgId + ts so iPhone's
+    /// dedupe ring buffer treats it as a new envelope (not a duplicate
+    /// of the already-processed-and-rejected original).
+    ///
+    /// Silent no-op if no envelope was cached (e.g. iPhone-led
+    /// start path, which doesn't go through sendStartFromWatchTUI) or
+    /// if WC isn't activated.
+    func resendStartFromWatch() {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "start-from-watch resend skip: not activated"
+            return
+        }
+        guard var envelope = lastStartFromWatchEnvelope else {
+            lastOutbound = "start-from-watch resend skip: no cached envelope"
+            return
+        }
+        // Re-key msgId + ts so iPhone's dedupe doesn't drop the resend.
+        envelope["msgId"] = UUID().uuidString
+        envelope["ts"] = Int64(Date().timeIntervalSince1970 * 1000)
+        // Update cache to the new envelope (idempotent on repeat resends).
+        lastStartFromWatchEnvelope = envelope
+
+        session.transferUserInfo(envelope)
+        var status = "tui"
+        if session.isReachable {
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { [weak self] err in
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "start-from-watch resend msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
+                }
+            )
+            status = "tui+msg"
+        }
+        lastOutbound = "start-from-watch resend \(status) sent"
+    }
+
+    /// D31 wave 2 (2026-05-29 late) — Watch → iPhone abort outbound.
+    ///
+    /// Fires when the user tapped [放棄] in FinishPageView. Tells iPhone
+    /// to hard-delete the session row (via `discardSession` cascade —
+    /// same helper start-resolve uses). Semantically distinct from
+    /// end-session (which preserves the row in history); discard means
+    /// "this session never happened".
+    ///
+    /// Payload mirrors `EndSessionPayload` shape: `{sessionId, side}`.
+    /// iPhone's `onDiscardSession` filters `side === 'watch'` (defensive;
+    /// iPhone-initiated discard is not a defined path).
+    ///
+    /// Fire-and-forget per D31 design (matches sendStartResolveToiPhone):
+    ///   - `transferUserInfo` queues even if iPhone is unreachable.
+    ///   - `sendMessage` ALSO fires when reachable for instant UX —
+    ///     iPhone's onDiscardSession is idempotent (discardSession is
+    ///     a sequence of `DELETE WHERE` no-ops on already-deleted rows)
+    ///     so dual-delivery is safe.
+    ///   - No `replyHandler` / no `await` — caller (FinishPageView's
+    ///     onAbort handler) dismisses + ends HK immediately.
+    func sendDiscardToiPhone(sessionId: String) {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "discard-session skip: not activated"
+            return
+        }
+        guard !sessionId.isEmpty else {
+            lastOutbound = "discard-session skip: empty sessionId"
+            return
+        }
+
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "discard-session",
+            "payload": [
+                "sessionId": sessionId,
+                "side": "watch",
+            ],
+        ]
+
+        session.transferUserInfo(envelope)
+        var status = "tui"
+        if session.isReachable {
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { [weak self] err in
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "discard-session msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
+                }
+            )
+            status = "tui+msg"
+        }
+        lastOutbound = "discard-session \(status) sent sess=\(prefix8(sessionId))"
     }
 
     /// LEGACY (pre-NEW-Q50) — Send `start-from-watch` to iPhone with

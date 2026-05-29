@@ -90,19 +90,24 @@ struct FinishPageView: View {
     }
 
     var body: some View {
+        // 2026-05-29 late-evening polish (user smoke feedback):
+        //   - Buttons promoted to right under the header (was at the
+        //     bottom). Wrist-glance UX: user sees the action buttons
+        //     immediately on swipe-in, no scroll needed.
+        //   - Removed the "(← 左滑回 session 繼續)" hint row at the
+        //     very bottom — redundant given the page-dot indicator
+        //     and the new top-of-page button placement.
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 headerRow
                 Rectangle()
                     .fill(Color.secondary.opacity(0.3))
                     .frame(height: 0.5)
+                buttonsRow
                 subtitleRow
+                    .padding(.top, 2)
                 tilesBlock
                     .padding(.top, 4)
-                buttonsRow
-                    .padding(.top, 6)
-                hintRow
-                    .padding(.top, 2)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
@@ -175,11 +180,12 @@ struct FinishPageView: View {
     }
 
     private var subtitleText: String {
-        // TODO: D7/D9 + Stage1 payload extension (Phase 2.5) — pull
-        // real program name + intensity tag from snapshot. Until then
-        // we display the template title plus spec mock placeholders.
-        let template = snapshot.title.isEmpty ? "—" : snapshot.title
-        return "\(template) · Linear W3 · 中度日"
+        // 2026-05-29 late-evening polish — snapshot.title now carries
+        // the full "模板 · 計劃 · 強度" 3-tuple at start-from-watch time
+        // (per PickerViewModel.resolveSelectionExercises). Display
+        // verbatim; fall back to "—" only if the title is truly empty
+        // (degenerate freestyle path or mock snapshot edge case).
+        return snapshot.title.isEmpty ? "—" : snapshot.title
     }
 
     // MARK: - 5 Tiles (fixed order, vertical)
@@ -287,18 +293,6 @@ struct FinishPageView: View {
             .tint(.green)
             .disabled(!buttonsEnabled)
             .opacity(buttonsEnabled ? 1.0 : 0.5)
-        }
-    }
-
-    private var hintRow: some View {
-        HStack {
-            Spacer()
-            Text("(← 左滑回 session 繼續)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Spacer()
         }
     }
 

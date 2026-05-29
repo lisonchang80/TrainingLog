@@ -142,10 +142,15 @@ struct SetLoggerView: View {
                     //     spinner UX finishes; dismisses the nav stack so
                     //     user lands back on PickerRootView (parity with
                     //     iPhone-led end which uses the same `dismiss()`).
-                    //   - `onAbort` — currently still cosmetic (pops back
-                    //     to session card list page 1, no WC). Real abort
-                    //     (DELETE session row + WC) ships with D31 abort
-                    //     channel grill.
+                    //   - `onAbort` — D31 wave 2 (2026-05-29 late) wire-in.
+                    //     End local HK lifecycle, then fire discard-session
+                    //     TUI envelope so iPhone hard-deletes the session
+                    //     row (cascades sets / session_exercise /
+                    //     achievement_unlock / edit-snapshot in one txn).
+                    //     Distinct from onCommit's end-session: end-session
+                    //     preserves the row in history, discard-session
+                    //     deletes it. User explicit intent: "this session
+                    //     never happened".
                     FinishPageView(
                         snapshot: snapshotForRender,
                         onCommit: {
@@ -168,7 +173,34 @@ struct SetLoggerView: View {
                                 dismiss()
                             }
                         },
-                        onAbort: { selectedPage = 1 }
+                        onAbort: {
+                            let sid = snapshotForRender.sessionId
+                            Task {
+                                // End local HK first (state machine
+                                // .active → .ended with full
+                                // stopActivity + endCollection + discard
+                                // chain — see SessionController.swift
+                                // 2026-05-29 late-evening fix).
+                                await sessionController.end()
+                                // Tell iPhone to delete the session row
+                                // (silent no-op if iPhone never received
+                                // the original start-from-watch yet —
+                                // FIFO TUI guarantees start arrives first
+                                // so iPhone ends up creating then deleting,
+                                // not orphaning).
+                                if !sid.isEmpty {
+                                    coordinator.sendDiscardToiPhone(sessionId: sid)
+                                }
+                                // Pop the nav stack all the way back to
+                                // PickerRootView (parity with the [完成]
+                                // success path).
+                                if let onSessionEnd {
+                                    onSessionEnd()
+                                } else {
+                                    dismiss()
+                                }
+                            }
+                        }
                     )
                     .tag(0)
 
@@ -196,6 +228,16 @@ struct SetLoggerView: View {
             // (NEW-Q32). Once D10 in-session shell lands, the ⚙ icon
             // belongs next to ♥/🔥 on Row 2, not as a nav-bar trailing
             // toolbar item. Remove this `.toolbar { ... }` block then.
+            // 2026-05-29 late-evening polish — hide the auto-injected
+            // "<" back chevron at top-leading of the nav bar. User
+            // reported accidental taps on the back button during an
+            // active SetLoggerView session (typically when reaching
+            // up to scroll the card list). The session has explicit
+            // termination paths ([完成] / [放棄] / iPhone-led end /
+            // D31 conflict alert) — all of which call onSessionEnd /
+            // dismiss() programmatically — so the back chevron is
+            // pure UX hazard.
+            .navigationBarBackButtonHidden(true)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -292,15 +334,77 @@ struct SetLoggerView: View {
                 presenting: conflictAlert
             ) { payload in
                 Button("中止 iPhone 保留 Watch") {
+                    // D31 wave 2 iter 2 (2026-05-29 late, real-device
+                    // smoke ❹(e) fix v2) — two-envelope sequence
+                    // WITH explicit delay between them:
+                    //   (1) start-resolve → iPhone's
+                    //       `addUserInfoListener('discard-session')`
+                    //       handler runs `discardSession` (SQL DELETE
+                    //       cascade, ~50-200ms transaction).
+                    //   (2) 800ms wait — long enough that iPhone's
+                    //       discard txn definitely commits before
+                    //       resend lands.
+                    //   (3) start-from-watch (resend) → iPhone's
+                    //       `addUserInfoListener('start-from-watch')`
+                    //       handler runs `getActiveSession` → null
+                    //       (A' gone) → INSERT B-W ✓.
+                    //
+                    // iter 1 (without delay) was insufficient — iPhone's
+                    // two handlers ran concurrently; the resend's
+                    // `getActiveSession` race read A' before discard's
+                    // SQL commit landed → conflict reply again →
+                    // INSERT never happened. Smoke ❹(e) still failed
+                    // (Watch saved data but iPhone had no row).
+                    //
+                    // 800ms is generous on real device (iPhone 18.7.8
+                    // SQLite single-row delete benches < 50ms). User
+                    // doesn't perceive lag because alert dismisses
+                    // immediately + Watch UI stays on the active
+                    // SetLoggerView throughout.
+                    let local = payload.localSessionId
+                    let existing = payload.existingSessionId
                     coordinator.sendStartResolveToiPhone(
-                        localSessionId: payload.localSessionId,
-                        existingSessionId: payload.existingSessionId
+                        localSessionId: local,
+                        existingSessionId: existing
                     )
                     conflictAlert = nil
+                    Task {
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        await MainActor.run {
+                            coordinator.resendStartFromWatch()
+                        }
+                    }
                 }
                 Button("中止 Watch 保留 iPhone", role: .destructive) {
+                    // 2026-05-29 late-evening real-device smoke fix —
+                    // initial implementation called `sessionController.end()`
+                    // directly inside the alert button's Task closure; on
+                    // real device the HK active-workout icon stayed on
+                    // after the alert dismissed (smoke path 1 step 1.4
+                    // (3)(4) both ❌). Hypothesis: SwiftUI alert auto-
+                    // dismiss interacts poorly with the Task's await
+                    // suspension point inside the button closure (the
+                    // `await sessionController.end()` resumes after the
+                    // alert has torn down and may end up no-op'ing on
+                    // a state-machine that races with the still-running
+                    // `.task { sessionController.start() }`).
+                    //
+                    // Fix: route through `coordinator.sendEndToiPhone`,
+                    // the SAME code path the [完成] button uses
+                    // (FinishPageView.onCommit above). That path is
+                    // validated by the D11 HK lifecycle smoke (2026-
+                    // 05-29 evening: icon disappears + raise-wrist
+                    // returns to watch face). Internally that helper
+                    // does `await sessionController.end()` itself + an
+                    // additional WC end-session envelope to iPhone with
+                    // the local W- sessionId; iPhone's
+                    // `finalizeEndAndRoute` for an unknown sessionId is
+                    // a defensive no-op (the row was never created
+                    // because of conflict), so the WC tail is a
+                    // best-effort no-op rather than harmful.
+                    let sid = payload.localSessionId
                     Task {
-                        await sessionController.end()
+                        await coordinator.sendEndToiPhone(sessionId: sid)
                         conflictAlert = nil
                         if let onSessionEnd {
                             onSessionEnd()
@@ -328,14 +432,21 @@ struct SetLoggerView: View {
     }
 
     // Phase A renders the mock when the passed-in snapshot is empty
-    // (caller still wires WC plumbing but uses placeholder data);
-    // when the caller passes real data we render that. This lets the
-    // picker → start-from-watch flow drive real iPhone-supplied
-    // exercises without changing the view contract.
+    // 2026-05-29 late-evening real-device smoke fix —
+    // Pre-fix: empty `snapshot.exercises` (e.g. user picked a
+    // template with no 動作 yet) fell back to
+    // `SetLoggerMockData.mockSnapshot()` which contains hardcoded
+    //「推日（A）+ 深蹲」demo data. Same root-cause class as the
+    // PickerViewModel.startFromWatch mock fallback (which is also
+    // removed) — together they masked real empty-template state
+    // behind misleading mock data. See PickerViewModel for the
+    // 3-bug cascade detail.
+    //
+    // Now: render the snapshot verbatim. Empty exercises trigger
+    // the「尚無動作 / 請至手機加動作」empty state in
+    // SessionCardListPage below, matching the iPhone behavior
+    // (which shows the same hint in the idle empty-session card).
     private var snapshotForRender: SessionSnapshot {
-        if snapshot.exercises.isEmpty {
-            return SetLoggerMockData.mockSnapshot()
-        }
         return snapshot
     }
 }
@@ -380,9 +491,31 @@ private struct SessionCardListPage: View {
                         .padding(.top, 2)
                 }
 
-                // ExerciseCard list (continuous vertical scroll).
-                ForEach(snapshot.exercises, id: \.sessionExerciseId) { ex in
-                    ExerciseCard(exercise: ex, state: state)
+                // 2026-05-29 late-evening real-device smoke fix —
+                // Empty state when user picks a template with no 動作.
+                // Pre-fix: empty exercises array silently rendered as
+                // an empty ScrollView (after the mock-fallback removal);
+                // user had no signal what to do.
+                if snapshot.exercises.isEmpty {
+                    VStack(alignment: .center, spacing: 6) {
+                        Image(systemName: "dumbbell")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("尚無動作")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("請至 iPhone 加動作")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                } else {
+                    // ExerciseCard list (continuous vertical scroll).
+                    ForEach(snapshot.exercises, id: \.sessionExerciseId) { ex in
+                        ExerciseCard(exercise: ex, state: state)
+                    }
                 }
 
                 // Trailing space — also catches "tap 框外" to dismiss

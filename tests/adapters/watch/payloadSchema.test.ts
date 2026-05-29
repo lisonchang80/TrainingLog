@@ -120,6 +120,14 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         sessionId: 'sess-1',
         side: 'iphone',
       } as unknown as WCPayloadMap[K];
+    case 'discard-session':
+      // D31 wave 2 — Watch→iPhone abort. Same shape as end-session
+      // (sessionId + side) but semantically iPhone hard-deletes the
+      // row via discardSession instead of finalizing.
+      return {
+        sessionId: 'sess-1',
+        side: 'watch',
+      } as unknown as WCPayloadMap[K];
     case 'settings-sync':
       return {
         sessionId: 'sess-1',

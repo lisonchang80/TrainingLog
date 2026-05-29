@@ -41,6 +41,7 @@ import {
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
 import { onStartResolve } from '@/src/services/watchSessionResolve';
+import { onDiscardSession } from '@/src/services/watchSessionDiscard';
 import {
   addMessageListener,
   addUserInfoListener,
@@ -570,11 +571,27 @@ export default function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // D31 wave 2 (2026-05-29 late) — discard-session forward-TUI inbound.
+    // Watch fires this when the user tapped [放棄] in FinishPageView.
+    // iPhone hard-deletes the row via discardSession (cascades sets /
+    // session_exercise / achievement_unlock / edit-snapshot in one txn).
+    //
+    // Distinct from end-session: end-session preserves the row in history
+    // (sets ended_at); discard-session deletes it entirely. User explicit
+    // intent.
+    const unsubDiscardSession = addUserInfoListener(
+      'discard-session',
+      async (env) => {
+        await onDiscardSession(db, env);
+        refreshRef.current?.();
+      },
+    );
     return () => {
       unsubHandshake();
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();
+      unsubDiscardSession();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.

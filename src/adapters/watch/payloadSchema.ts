@@ -60,6 +60,7 @@ export type WCMessageKind =
   | 'hr-tick'
   | 'kcal-tick'
   | 'end-session'
+  | 'discard-session'
   | 'settings-sync';
 
 /**
@@ -92,6 +93,7 @@ export const WC_MESSAGE_KINDS = [
   'hr-tick',
   'kcal-tick',
   'end-session',
+  'discard-session',
   'settings-sync',
 ] as const satisfies readonly WCMessageKind[];
 
@@ -350,6 +352,37 @@ export interface EndSessionPayload {
 }
 
 /**
+ * `discard-session` — Watch → iPhone forward-TUI abort envelope (D31 wave 2,
+ * 2026-05-29 late). Fired when the user taps [放棄] in FinishPageView,
+ * the explicit "this session never happened" path. iPhone receiver
+ * hard-deletes the row via `discardSession` (cascades through
+ * achievement_unlock + set + session_exercise + app_settings
+ * edit-snapshot in one txn — same code as start-resolve uses).
+ *
+ * Semantic vs `end-session`:
+ *   - `end-session` → iPhone calls `finalizeEndAndRoute` which sets
+ *     `ended_at` and preserves the row in history. Session shows up
+ *     under History tab.
+ *   - `discard-session` → iPhone calls `discardSession` which DELETES
+ *     the row entirely. Nothing in history. User's intent: "scrap it".
+ *
+ * Side discriminator mirrors `EndSessionPayload`. iPhone receiver
+ * filters `side === 'watch'` to ignore its own outbound (defensive;
+ * iPhone-initiated discard is a different path entirely, not yet
+ * wired). Watch only ever sends `side: 'watch'`.
+ *
+ * Sent via `transferUserInfo` (Q4 — fire-and-forget queued TUI).
+ * Same ordering guarantee as start-resolve: iOS FIFO TUI delivery
+ * preserves causality with any prior `start-from-watch` envelope
+ * (Watch creates session → user abandons → iPhone processes start
+ * first, then discard — no zombie row).
+ */
+export interface DiscardSessionPayload {
+  sessionId: string;
+  side: 'iphone' | 'watch';
+}
+
+/**
  * `settings-sync` — iPhone → Watch (Q4 channel #12, NEW-Q39).
  * Transient per-session settings (e.g. unit display, RPE visibility);
  * cleared when the session ends. Schemaless on purpose — each key
@@ -415,6 +448,7 @@ export type WCMessage =
   | WCEnvelope<'hr-tick', HrTickPayload>
   | WCEnvelope<'kcal-tick', KcalTickPayload>
   | WCEnvelope<'end-session', EndSessionPayload>
+  | WCEnvelope<'discard-session', DiscardSessionPayload>
   | WCEnvelope<'settings-sync', SettingsSyncPayload>;
 
 // ---------------------------------------------------------------------
@@ -440,6 +474,7 @@ export interface WCPayloadMap {
   'hr-tick': HrTickPayload;
   'kcal-tick': KcalTickPayload;
   'end-session': EndSessionPayload;
+  'discard-session': DiscardSessionPayload;
   'settings-sync': SettingsSyncPayload;
 }
 

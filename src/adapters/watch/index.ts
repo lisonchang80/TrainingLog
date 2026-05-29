@@ -37,6 +37,7 @@ export type {
   HrTickPayload,
   KcalTickPayload,
   EndSessionPayload,
+  DiscardSessionPayload,
   SettingsSyncPayload,
 } from './payloadSchema';
 

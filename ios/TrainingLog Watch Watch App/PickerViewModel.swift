@@ -258,16 +258,29 @@ final class PickerViewModel: ObservableObject {
         // source has exercises (pre-Q50 iPhone payload OR genuinely
         // empty template) so SetLoggerView still mounts.
         let (resolvedTitle, resolvedExercises, resolvedTemplateId) = resolveSelectionExercises(selection)
-        let snapshot: SessionSnapshot
-        if resolvedExercises.isEmpty {
-            snapshot = SetLoggerMockData.mockSnapshot()
-        } else {
-            snapshot = buildSnapshotFromFatTree(
-                sessionId: localSessionId,
-                title: resolvedTitle,
-                exercises: resolvedExercises
-            )
-        }
+        // 2026-05-29 late-evening real-device smoke fix —
+        // Pre-fix: empty exercises (user picked a template with no
+        // 動作 yet, OR a fat-tree wire that hadn't landed) fell back
+        // to `SetLoggerMockData.mockSnapshot()` which contains the
+        // hardcoded「推日（A）+ 深蹲」demo data. Three bugs cascade:
+        //   (1) Watch title shows「推日（A）」for an empty template C
+        //   (2) sessionId is the mock's hardcoded value, not our
+        //       locally-minted W- id → iPhone end-session handler
+        //       can't match → 同步結束 broken
+        //   (3) iPhone-side template edits don't reflect on Watch
+        //       (cached mock + sessionId mismatch永遠 sync 不上)
+        //
+        // Fix: build the snapshot with REAL title + sessionId + an
+        // empty exercises array. SetLoggerView's empty state renders
+        //「無動作 / 請至手機加動作」(see SessionCardListPage below).
+        // FinishPage still works — sets count is 0/0, [完成] still
+        // ends the iPhone-side session correctly because sessionId
+        // matches the localW- id iPhone INSERT OR IGNORE'd.
+        let snapshot = buildSnapshotFromFatTree(
+            sessionId: localSessionId,
+            title: resolvedTitle,
+            exercises: resolvedExercises
+        )
         let localReply = StartFromWatchReply(
             sessionId: localSessionId,
             snapshot: snapshot
@@ -304,15 +317,25 @@ final class PickerViewModel: ObservableObject {
     {
         // Template-tap path — template was selected via the 模板訓練
         // section row, possibly drilled through 計劃 + 強度 sheets.
+        //
+        // 2026-05-29 late-evening polish — bake the full 3-tuple into
+        // the title ("模板 · 計劃 · 強度") so FinishPageView's subtitle
+        // shows the real selection instead of the D14 hardcoded
+        // placeholder "· Linear W3 · 中度日". Fall back to "通用" when
+        // program / intensity are nil (user picked the 通用 row in the
+        // 計劃 / 強度 sheets — bypass means no specific cycle/intensity).
         if let template = selection.template {
-            return (template.name, template.exercises, template.id)
+            let programName = selection.program?.name ?? "通用"
+            let intensityName = selection.intensity?.name ?? "通用"
+            let title = "\(template.name) · \(programName) · \(intensityName)"
+            return (title, template.exercises, template.id)
         }
         // Planned-row path — selection is all-nil per PickerRootView's
         // planSection planned-case (the program-day already carries the
-        // 3-tuple from iPhone). Pull exercises from todayPlanned.
+        // 3-tuple from iPhone). Pull exercises from todayPlanned. The
+        // planned label is typically already a meaningful display string
+        // (e.g. "推日 W3D1（今日）") so we don't synthesize a 3-tuple.
         if case .planned(_, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
-            // Display title — use the planned label if available, else
-            // a generic fallback.
             let label = plannedLabel ?? "今日訓練"
             return (label, exercises, templateId.isEmpty ? nil : templateId)
         }
