@@ -56,8 +56,18 @@ struct ContentView: View {
             // declare `@EnvironmentObject var coordinator` without
             // threading constructors.
             .environmentObject(watchConn)
-            // Phase 3 will also wire healthKit + session — deferred
-            // until D11 set logger needs HK lifecycle hooks.
+            // 2026-05-29 D11 HK lifecycle wire — inject SessionController
+            // so SetLoggerView can call `sessionController.start()` in its
+            // `.task` modifier when it mounts. Starting the HKWorkoutSession
+            // is what gives the user the 3 behaviours they asked for:
+            //   (1) screen stays on (no 17s sleep)
+            //   (2) raise-wrist returns to TrainingLog (not watch face)
+            //   (3) "active workout" icon at top of watch face
+            // Watch-led end path calls `sessionController.end()` via the
+            // coordinator's `sendEndToiPhone(...)` (added in this commit);
+            // iPhone-led end path already calls it via the coordinator's
+            // `didReceiveMessage(end-session)` handler (shipped @3cf624e).
+            .environmentObject(session)
     }
 }
 

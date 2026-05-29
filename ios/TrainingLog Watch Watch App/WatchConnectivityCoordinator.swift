@@ -116,6 +116,22 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// WC framework times out internally. Updates `lastOutbound` for
     /// UI diagnostics.
     func sendEndToiPhone(sessionId: String) async {
+        // 2026-05-29 D11 HK lifecycle wire — Watch-led end path must
+        // ALSO tear down the local HKWorkoutSession, otherwise the
+        // workout-active state stays on the OS side after the user
+        // taps [完成] → watch face still shows the active-workout
+        // indicator, screen stays awake forever, app never gets
+        // suspended. The symmetric iPhone-led end path already does
+        // this in `session(_:didReceiveMessage:replyHandler:)` for
+        // kind="end-session" (line ~586). We fire HK end FIRST and
+        // independently of the WC guards below: even if iPhone is
+        // unreachable / sessionId is empty, the user pressed [完成]
+        // — local HK lifecycle must terminate regardless. end() is
+        // idempotent (returns early when state is .idle/.ending/
+        // .ended/.failed) so a duplicate call from a subsequent
+        // iPhone-led broadcast is a safe no-op.
+        await sessionController.end()
+
         guard let session, session.activationState == .activated else {
             lastOutbound = "skip: not activated"
             return

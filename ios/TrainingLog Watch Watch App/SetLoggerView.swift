@@ -71,6 +71,18 @@ struct SetLoggerView: View {
     /// Injected by ContentView via `.environmentObject(watchConn)`.
     @EnvironmentObject private var coordinator: WatchConnectivityCoordinator
 
+    /// 2026-05-29 D11 HK lifecycle wire — needed so this view can call
+    /// `sessionController.start()` in `.task` on mount (and the OS keeps
+    /// the screen on / shows the active-workout indicator at the top of
+    /// the watch face / lets the app keep running when wrist is lowered).
+    /// `.end()` is fired from the coordinator's `sendEndToiPhone(...)`
+    /// (Watch-led path) and the coordinator's `didReceiveMessage`
+    /// end-session handler (iPhone-led path), so the body below
+    /// intentionally does NOT call `.end()` directly — both end paths
+    /// converge on the coordinator and the coordinator owns HK teardown.
+    /// Injected by ContentView via `.environmentObject(session)`.
+    @EnvironmentObject private var sessionController: SessionController
+
     /// Pops the NavigationStack back to PickerRootView. Used by both
     /// the iPhone-led end auto-dismiss path AND the Watch-led [完成]
     /// success path so SetLoggerView always unmounts cleanly after the
@@ -201,6 +213,30 @@ struct SetLoggerView: View {
                 } else {
                     dismiss()
                 }
+            }
+            // 2026-05-29 D11 HK lifecycle wire — start the HKWorkoutSession
+            // the moment SetLoggerView mounts. This is what unlocks:
+            //   (1) screen stays on indefinitely (vs ~17s auto-sleep)
+            //   (2) raise-wrist returns to TrainingLog (vs watch face)
+            //   (3) "active workout" icon at the top of the watch face
+            //   (4) app keeps running in background (not OS-suspended)
+            // Idempotent: SessionController.start() guards on its state
+            // machine (.idle/.ended/.failed → start; else no-op), so a
+            // re-mount of the view during the same session is a safe
+            // no-op. HK auth is requested inline on first start; if user
+            // declined the iPhone Watch prompt, state transitions to
+            // .failed and the behaviours above silently degrade — we do
+            // NOT block the picker→set logger flow on auth (per ADR-0019
+            // §Q22 Watch-side fallback).
+            //
+            // End-side wiring (intentionally not here): both end paths —
+            // Watch-led (`coordinator.sendEndToiPhone(...)` invoked by
+            // FinishPageView.onCommit above) and iPhone-led (coordinator
+            // `didReceiveMessage(end-session)`) — route through the
+            // coordinator which calls `sessionController.end()` itself.
+            // See WatchConnectivityCoordinator.swift for both call sites.
+            .task {
+                await sessionController.start()
             }
     }
 
