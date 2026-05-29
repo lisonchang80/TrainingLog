@@ -351,6 +351,48 @@ export async function getTemplate(
 }
 
 /**
+ * Resolve a name that is unique across the `template` table, suffixing
+ * `(2)` / `(3)` / ... until the first unused name is found. Case-insensitive
+ * (mirrors `executeDeleteTemplatesByName` — same collation policy).
+ *
+ * Used by the「+ 新增 template」entry points (Today tab, Programs tab cell-
+ * tap, program wizard) to guarantee that user-initiated template creation
+ * never collides on `name` with an existing row — the motivation is the
+ * Watch picker (slice 13d D8): it lists templates by name, so two rows
+ * sharing a name — even with different `(program_id, sub_tag)` triples —
+ * collapse into an ambiguous「GB / GB / GB ...」UX.
+ *
+ * **Application-layer only** — schema `template.name` keeps no UNIQUE
+ * constraint. ADR-0003 三元組 identity stays the storage truth (same name +
+ * different (program, sub_tag) is a legal sibling row); the production paths
+ * that legitimately create same-name siblings — `cloneTemplateWithSubTag`,
+ * `convertSessionToTemplate` — INSERT their own rows and do NOT go through
+ * `createTemplate`, so they are unaffected by this guard.
+ *
+ * Scope: only the `createTemplate` callers wrap with this helper. Renames
+ * inside the template editor keep using the existing
+ * `DUPLICATE_TEMPLATE_TRIPLE` guard (`template-editor-view.tsx`).
+ */
+export async function findNextAvailableTemplateName(
+  db: Database,
+  baseName: string
+): Promise<string> {
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM template WHERE name = ? COLLATE NOCASE
+       OR name LIKE ? COLLATE NOCASE`,
+    baseName,
+    `${baseName} (%)`
+  );
+  if (rows.length === 0) return baseName;
+  const taken = new Set(rows.map((r) => r.name.toLowerCase()));
+  if (!taken.has(baseName.toLowerCase())) return baseName;
+  for (let i = 2; ; i++) {
+    const candidate = `${baseName} (${i})`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/**
  * Create a new Template row.
  *
  * `color_hex` is optional — when omitted or passed as an empty string we
@@ -362,6 +404,12 @@ export async function getTemplate(
  *
  * Callers that pass an explicit non-empty `color_hex` (e.g. when cloning a
  * sibling and wanting to share its color) keep their value verbatim.
+ *
+ * **Name uniqueness**: this function does NOT enforce name uniqueness — by
+ * design, since `cloneTemplateWithSubTag` / `convertSessionToTemplate`
+ * legitimately create same-name siblings via separate INSERTs. User-facing
+ *「+ 新增 template」entry points should pre-resolve the name via
+ * `findNextAvailableTemplateName` and pass the result here.
  */
 export async function createTemplate(
   db: Database,

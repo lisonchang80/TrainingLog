@@ -41,6 +41,7 @@ import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   createTemplate,
   executeDeleteTemplatesByName,
+  findNextAvailableTemplateName,
   listTemplates,
   previewTemplateDeletionByName,
   type AffectedProgramCell,
@@ -89,7 +90,11 @@ export function TemplateListSection({
     setBusy(true);
     try {
       const id = randomUUID();
-      await createTemplate(db, { id, name: 'New Template' });
+      const uniqueName = await findNextAvailableTemplateName(
+        db,
+        'New Template',
+      );
+      await createTemplate(db, { id, name: uniqueName });
       router.push(`/template/${id}`);
     } catch (e) {
       Alert.alert('Could not create template', e instanceof Error ? e.message : String(e));
