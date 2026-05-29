@@ -43,6 +43,7 @@ import { pushEndToWatch } from '@/src/services/watchSessionEnd';
 import { onStartResolve } from '@/src/services/watchSessionResolve';
 import { onDiscardSession } from '@/src/services/watchSessionDiscard';
 import {
+  addAppContextListener,
   addMessageListener,
   addUserInfoListener,
   makeEnvelope,
@@ -50,6 +51,7 @@ import {
   onStartFromWatch,
   sendUserInfo,
 } from '@/src/adapters/watch';
+import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
 import {
   getAutoPopupRestTimer,
   getSetting,
@@ -586,12 +588,33 @@ export default function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // D32 (2026-05-29) — applicationContext live-mirror inbound.
+    // Per ADR-0019 § Slice 13d NEW-Q50 Q6. During a live session the
+    // Watch is the SoT; it builds a full SessionSnapshot and pushes it
+    // via `WCSession.updateApplicationContext` every ~15s (Watch-side
+    // D29 — not yet shipped, see watchLiveMirrorReceiver TODO). The OS
+    // delivers only the LATEST payload (latest-state-replace semantics,
+    // no FIFO queue), so `onLiveMirror` unconditionally adopts it via
+    // `replaceLiveMirror` snapshot-replace (no diff/reduce/LWW — the
+    // most-recent snapshot IS the resolved state).
+    //
+    // The payload is a raw SessionSnapshot dict (not a {kind,payload}
+    // envelope — applicationContext isn't envelope-shaped), so the
+    // handler receives `ctx: object` directly; `onLiveMirror` runtime-
+    // validates it. Never throws (returns {ok:false,...} on bad payload
+    // / db error) — we just refresh so the iPhone in-session UI reflects
+    // the latest mirrored sets/exercises.
+    const unsubLiveMirror = addAppContextListener(async (ctx) => {
+      await onLiveMirror(db, ctx);
+      refreshRef.current?.();
+    });
     return () => {
       unsubHandshake();
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();
       unsubDiscardSession();
+      unsubLiveMirror();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.

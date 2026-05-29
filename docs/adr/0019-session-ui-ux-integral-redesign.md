@@ -2952,7 +2952,7 @@ States：
 - D29 — Watch local SessionController state machine：`UUID().uuidString` 生 sessionId、build SessionSnapshot from prefetched data、`updateApplicationContext` 15s debounce + dirty flag
 - D30 — Reverse TUI receiver (Watch side)：`setupReverseTUIListener` + route by kind (`start-resolve` / `start-reconcile` / `end-reconcile`)
 - D31 — Conflict resolution UI (Watch side)：alert sheet + 2-choice resolver + `start-resolve` outbound + Watch local session discard helper
-- D32 — applicationContext live mirror listener (iPhone side)：`addApplicationContextListener` + INSERT OR REPLACE on conflict(id) snapshot replace + UI refresh
+- D32 — applicationContext live mirror listener (iPhone side)：`addApplicationContextListener` + INSERT OR REPLACE on conflict(id) snapshot replace + UI refresh **✅ Q6 shipped (2026-05-29 overnight)** — new orchestrator `src/services/watchLiveMirrorReceiver.ts` (`onLiveMirror` + `parseLiveMirrorSnapshot` runtime validator) → existing `replaceLiveMirror` snapshot-replace (NO reducer/LWW — deleted by NEW-Q50; latest-state-wins IS the conflict resolution) → `refreshRef.current?.()`; wired into `app/(tabs)/index.tsx` useEffect via the already-built `addAppContextListener` (connectivity.ts D6-B). Wire contract = raw `SessionSnapshot` dict (flat, `sessionId` key — see orchestrator `TODO(D32)` re: Q6 pseudocode's `{session:{id...}}` vs flat shape; pending Watch Swift D29 confirmation). 20 jest cases. iPhone-side complete; Watch Swift D29 push side still pending.
 - D33 — Sync UI status (Watch side)：`SyncState` enum + 30s pending threshold + ⏳ corner icon + end-fail hint banner
 
 ### Schema 影響
