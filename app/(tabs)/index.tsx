@@ -42,8 +42,11 @@ import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
 import {
   addMessageListener,
+  addUserInfoListener,
+  makeEnvelope,
   onHandshakeRequest,
   onStartFromWatch,
+  sendUserInfo,
 } from '@/src/adapters/watch';
 import {
   getAutoPopupRestTimer,
@@ -476,22 +479,21 @@ export default function TodayScreen() {
     const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
       await onHandshakeRequest(db, env, reply);
     });
-    const unsubStartFromWatch = addMessageListener(
+    // NEW-Q50 D9 Wave 2 wire-in (2026-05-29) — `start-from-watch` swapped
+    // from sendMessage path (v1) to TUI transport (v2). The Watch
+    // initiator side sends via `transferUserInfo` so the envelope queues
+    // even if iPhone is unreachable (background / locked); we receive it
+    // via `addUserInfoListener` once the OS delivers.
+    //
+    // The orchestrator emits `StartFromWatchReconcile` (a domain shape);
+    // we wrap it in the `start-reconcile` envelope kind and ship back
+    // via `sendUserInfo` (queued TUI — Watch picks it up next time it's
+    // reachable). D30 Watch-side Swift handles the reverse-TUI receive.
+    const unsubStartFromWatch = addUserInfoListener(
       'start-from-watch',
       async (env) => {
-        // NEW-Q50 D28 (signature shim) — `onStartFromWatch` is now
-        // `(db, env, sendReverseTUI)`; sessionId comes from
-        // `env.payload.sessionId` (Watch-generated UUID). Full
-        // reverse-TUI wire-in lands with D9 Wave 2 (this listener
-        // still rides on sendMessage / addMessageListener pending the
-        // TUI transport rewrite in Agent B's branch). Until then we
-        // pass a no-op reverse-TUI sender — the orchestrator still
-        // performs the DB INSERT OR IGNORE + flips is_watch_tracked,
-        // which is what the iPhone UI cares about.
-        // TODO(D9-wave2): swap `addMessageListener` → `addUserInfoListener`
-        // and wire the reverse-TUI sender to `session.transferUserInfo`.
-        await onStartFromWatch(db, env, () => {
-          /* no-op: reverse-TUI deferred to D9 Wave 2 wire-in */
+        await onStartFromWatch(db, env, (response) => {
+          sendUserInfo(makeEnvelope('start-reconcile', response));
         });
         // Watch just created (or adopted) a session — refresh iPhone
         // state so the UI flips into in-session mode. Read latest
@@ -503,8 +505,8 @@ export default function TodayScreen() {
       unsubHandshake();
       unsubStartFromWatch();
     };
-    // Intentional empty deps — db handle + randomUUID are stable; refresh
-    // read via ref. Listeners mount once on component mount.
+    // Intentional empty deps — db handle stable; refresh read via ref.
+    // Listeners mount once on component mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

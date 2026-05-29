@@ -49,6 +49,7 @@ export type WCMessageKind =
   | 'handshake'
   | 'start-from-watch'
   | 'start-from-iphone'
+  | 'start-reconcile'
   | 'set-completed'
   | 'set-modified'
   | 'set-deleted'
@@ -61,14 +62,21 @@ export type WCMessageKind =
   | 'settings-sync';
 
 /**
- * All 13 kinds as a frozen tuple — used by the type guard, jest
+ * All 14 kinds as a frozen tuple — used by the type guard, jest
  * `it.each` tables, and the Swift mirror generator (D4/D5). Keep in
  * sync with `WCMessageKind` literal union above.
+ *
+ * NEW-Q50 (2026-05-29) — `start-reconcile` added as reverse TUI ack
+ * envelope (iPhone → Watch reply to `start-from-watch`). D30 / D31
+ * Watch-side Swift will introduce additional reverse-TUI kinds
+ * (`start-resolve` Watch→iPhone for conflict 2-choice; `end-reconcile`
+ * iPhone→Watch for end-session ack); deferred until those wire-ins.
  */
 export const WC_MESSAGE_KINDS = [
   'handshake',
   'start-from-watch',
   'start-from-iphone',
+  'start-reconcile',
   'set-completed',
   'set-modified',
   'set-deleted',
@@ -145,6 +153,35 @@ export interface StartFromIphonePayload {
    */
   snapshot: Record<string, JsonValue>;
 }
+
+/**
+ * `start-reconcile` — iPhone → Watch reverse-TUI reply to
+ * `start-from-watch` (NEW-Q50 Q4 + Q5). Carries the iPhone-side
+ * reconciliation outcome:
+ *
+ *   - `'created'` — Watch-supplied sessionId landed in the iPhone DB
+ *     (either first delivery, or idempotent dedup via `INSERT OR
+ *     IGNORE`). Watch continues with its standalone session.
+ *
+ *   - `'conflict'` — iPhone already has a DIFFERENT active session
+ *     (first-write-wins per Q5). Payload includes existing session
+ *     metadata so the Watch can render the D31 conflict alert sheet
+ *     ("您的 iPhone 已有訓練中 [title]；要中止 Watch 端、或...").
+ *
+ * Sent via `transferUserInfo` (Q4 — fire-and-forget queued TUI).
+ * Same shape as the `StartFromWatchReconcile` type used inside the
+ * `onStartFromWatch` orchestrator — keeping them as one shared shape
+ * (re-exported via `handshake.ts` for test ergonomics).
+ */
+export type StartReconcilePayload =
+  | { status: 'created'; sessionId: string }
+  | {
+      status: 'conflict';
+      sessionId: string;
+      existingSessionId: string;
+      existingTitle: string;
+      existingStartedAt: number;
+    };
 
 /**
  * `set-completed` — either side → other side. User flipped a set's
@@ -327,6 +364,7 @@ export type WCMessage =
   | WCEnvelope<'handshake', HandshakePayload>
   | WCEnvelope<'start-from-watch', StartFromWatchPayload>
   | WCEnvelope<'start-from-iphone', StartFromIphonePayload>
+  | WCEnvelope<'start-reconcile', StartReconcilePayload>
   | WCEnvelope<'set-completed', SetCompletedPayload>
   | WCEnvelope<'set-modified', SetModifiedPayload>
   | WCEnvelope<'set-deleted', SetDeletedPayload>
@@ -350,6 +388,7 @@ export interface WCPayloadMap {
   handshake: HandshakePayload;
   'start-from-watch': StartFromWatchPayload;
   'start-from-iphone': StartFromIphonePayload;
+  'start-reconcile': StartReconcilePayload;
   'set-completed': SetCompletedPayload;
   'set-modified': SetModifiedPayload;
   'set-deleted': SetDeletedPayload;
