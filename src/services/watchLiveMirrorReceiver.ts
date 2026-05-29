@@ -30,17 +30,23 @@
  * snapshot dict, not envelope-shaped (see `connectivity.updateAppContext`
  * doc — `snapshot: object`).
  *
- *   // TODO(D32): the Watch Swift D29 SessionController that PRODUCES this
- *   // applicationContext is not built yet. The Q6 ADR pseudocode sketches
- *   // `{ session: { id, title, startedAt, exercises } }` with an `id`
- *   // field, but `SessionSnapshot` (the type `replaceLiveMirror` consumes
- *   // and that `snapshotToWire` already emits over the wire) uses
- *   // `sessionId`. We adopt the `SessionSnapshot` flat shape as the
- *   // canonical contract because it (a) matches the existing wire
- *   // projection, (b) feeds `replaceLiveMirror` with zero re-shaping, and
- *   // (c) keeps one snapshot shape across both directions. When D29 Swift
- *   // lands, confirm the Watch encodes `sessionId` (not `id`) and a flat
- *   // (not `{ session: ... }`-wrapped) dict — confirm w/ user.
+ *   D29 (2026-05-30) — the Watch Swift producer now PRODUCES this
+ *   applicationContext (`LiveMirrorProducer.swift`). It projects the
+ *   immutable start `SessionSnapshot` over the live `SessionInteractionState`
+ *   overlay (logged ✓ → `is_logged`, edited cells → `weight`/`reps`) and
+ *   pushes the result via `WCSession.updateApplicationContext` on a 15s
+ *   debounce + dirty flag (Q6=a). The dict is FLAT (top-level `sessionId`,
+ *   NOT a `{ session: { id, ... } }` wrapper) — matching the
+ *   `SessionSnapshot` shape `replaceLiveMirror` consumes with zero
+ *   re-shaping, so one snapshot shape spans both directions.
+ *
+ *   Transport caveat the parser below accommodates — WC applicationContext
+ *   is plist-serialised and CANNOT carry JSON `null` (`NSNull` is not a
+ *   plist type). Swift's `JSONEncoder` therefore OMITS nil optionals, so
+ *   the per-set nullable fields (`weight` / `reps` / `rpe` / `rest_sec` /
+ *   `notes`) arrive ABSENT, not null. `parseLiveMirrorSnapshot` normalises
+ *   absent → null for exactly those five fields; required fields stay
+ *   strict (an absent one is still a reject).
  *
  * Contract (mirrors `watchSessionResolve.onStartResolve`):
  *   - NEVER throws. Bad payloads return `{ ok: false, code: 'bad-payload' }`;
@@ -132,17 +138,19 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
     const parsedSets: SessionSnapshotSet[] = [];
     for (const rawSet of sets) {
       if (!isObject(rawSet)) return null;
-      const {
-        setId,
-        ordinal,
-        weight,
-        reps,
-        rpe,
-        rest_sec,
-        notes,
-        set_kind,
-        is_logged,
-      } = rawSet;
+      const { setId, ordinal, set_kind, is_logged } = rawSet;
+      // WC applicationContext is plist-serialised and cannot carry JSON
+      // null, so the D29 Watch producer OMITS nil optionals (Swift
+      // JSONEncoder drops nil → the key arrives ABSENT). Normalise absent
+      // → null for the five nullable set fields. `?? null` collapses ONLY
+      // null/undefined — a real 0 stays 0 — so a malformed non-null value
+      // (e.g. a string weight) still fails its type guard below. Required
+      // fields (setId/ordinal/set_kind/is_logged) stay strict.
+      const weight = rawSet.weight ?? null;
+      const reps = rawSet.reps ?? null;
+      const rpe = rawSet.rpe ?? null;
+      const rest_sec = rawSet.rest_sec ?? null;
+      const notes = rawSet.notes ?? null;
       if (typeof setId !== 'string' || setId.length === 0) return null;
       if (typeof ordinal !== 'number' || !Number.isFinite(ordinal)) return null;
       if (!isNullableFiniteNumber(weight)) return null;

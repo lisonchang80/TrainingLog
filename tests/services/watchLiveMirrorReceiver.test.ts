@@ -341,3 +341,79 @@ describe('Slice 13d D32 — parseLiveMirrorSnapshot validator', () => {
     expect(parsed?.exercises[0]?.sets[0]?.weight).toBeNull();
   });
 });
+
+describe('Slice 13d D29 — parser tolerates WC-omitted nil optionals (absent → null)', () => {
+  // The D29 Watch producer encodes via Swift JSONEncoder, which OMITS nil
+  // optionals (WC applicationContext is plist-based and cannot carry JSON
+  // null). So the five nullable set fields arrive ABSENT — the parser must
+  // normalise absent → null. Required fields stay strict.
+  function snapWithSet(setExtra: Record<string, unknown>) {
+    return {
+      sessionId: 's',
+      title: 't',
+      startedAt: 1,
+      exercises: [
+        {
+          sessionExerciseId: 'se',
+          exerciseId: 'ex',
+          exerciseName: 'X',
+          ordering: 0,
+          plannedSets: 1,
+          sets: [
+            {
+              setId: 'set',
+              ordinal: 0,
+              set_kind: 'working',
+              is_logged: false,
+              ...setExtra,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('accepts a set with all five nullable fields ABSENT → coerced to null', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithSet({}));
+    expect(parsed).not.toBeNull();
+    const s = parsed?.exercises[0]?.sets[0];
+    expect(s?.weight).toBeNull();
+    expect(s?.reps).toBeNull();
+    expect(s?.rpe).toBeNull();
+    expect(s?.rest_sec).toBeNull();
+    expect(s?.notes).toBeNull();
+  });
+
+  it('keeps a present 0 weight/reps as 0 (only null/undefined collapse)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithSet({ weight: 0, reps: 0 }));
+    expect(parsed?.exercises[0]?.sets[0]?.weight).toBe(0);
+    expect(parsed?.exercises[0]?.sets[0]?.reps).toBe(0);
+  });
+
+  it('still rejects a present-but-malformed optional (string weight)', () => {
+    expect(parseLiveMirrorSnapshot(snapWithSet({ weight: '80' }))).toBeNull();
+  });
+
+  it('still rejects when a REQUIRED field is absent (ordinal omitted)', () => {
+    const bad = snapWithSet({});
+    delete (bad.exercises[0].sets[0] as Record<string, unknown>).ordinal;
+    expect(parseLiveMirrorSnapshot(bad)).toBeNull();
+  });
+
+  it('round-trips a Swift-style payload (logged set, rpe/rest_sec/notes omitted)', () => {
+    // Mirrors what LiveMirror.project → JSONEncoder emits for a logged
+    // working set whose rpe/rest_sec/notes are nil: those keys absent,
+    // weight/reps present, is_logged true.
+    const parsed = parseLiveMirrorSnapshot(
+      snapWithSet({ weight: 100, reps: 5, is_logged: true }),
+    );
+    expect(parsed).not.toBeNull();
+    const s = parsed?.exercises[0]?.sets[0];
+    expect(s?.weight).toBe(100);
+    expect(s?.reps).toBe(5);
+    expect(s?.is_logged).toBe(true);
+    expect(s?.rpe).toBeNull();
+    expect(s?.rest_sec).toBeNull();
+    expect(s?.notes).toBeNull();
+  });
+});

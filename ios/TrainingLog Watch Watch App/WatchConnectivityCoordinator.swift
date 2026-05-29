@@ -213,6 +213,48 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         return String(s.prefix(8))
     }
 
+    // MARK: - Outbound: live mirror (D29 — Q6=a)
+
+    /// Push the current session snapshot to iPhone via
+    /// `WCSession.updateApplicationContext` — the Q6=a live-mirror channel.
+    /// Called by `LiveMirrorProducer` on a 15s debounce + dirty flag.
+    ///
+    /// applicationContext has LATEST-STATE-REPLACE semantics: the OS keeps
+    /// only the most recent dict (no FIFO queue), so each call overwrites
+    /// the previous and the iPhone just adopts the latest via
+    /// `replaceLiveMirror` — no merge/LWW needed there. It also does NOT
+    /// require `isReachable`: the OS holds the latest context and delivers
+    /// it when the iPhone next activates. Best-effort + never throws —
+    /// applicationContext is a freshness channel, not a delivery-guaranteed
+    /// one (end-session reconcile is the correctness backstop).
+    ///
+    /// Plist constraint: the dict must be plist-serialisable and `NSNull`
+    /// is not a plist type. `JSONEncoder` OMITS nil optionals, so the
+    /// per-set nullable fields arrive ABSENT (not null); the iPhone
+    /// `parseLiveMirrorSnapshot` normalises absent → null. Encoding uses
+    /// the `SessionSnapshot` CodingKeys (snake_case rest_sec/set_kind/
+    /// is_logged), matching the iPhone wire contract exactly.
+    func updateLiveMirror(_ snapshot: SessionSnapshot) {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "live-mirror skip: not activated"
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            guard
+                let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                lastOutbound = "live-mirror skip: dict cast failed"
+                return
+            }
+            try session.updateApplicationContext(dict)
+            lastOutbound =
+                "live-mirror sent sess=\(prefix8(snapshot.sessionId)) ex=\(snapshot.exercises.count)"
+        } catch {
+            lastOutbound = "live-mirror error: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Outbound: handshake (Stage 1, D8 Phase 2)
     //
     // Sends the WC channel #0 `handshake` envelope (per ADR-0019

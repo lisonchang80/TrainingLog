@@ -54,6 +54,14 @@ struct SetLoggerView: View {
     /// unmount. Per spec the state is per-session, not per-card.
     @StateObject private var interactionState = SessionInteractionState()
 
+    /// D29 — Watch live-mirror producer. Projects `snapshotForRender` over
+    /// `interactionState` (logged ✓ + edited weight/reps) and pushes the
+    /// merged `SessionSnapshot` to iPhone via
+    /// `coordinator.updateLiveMirror` on a 15s debounce + dirty flag
+    /// (Q6=a). Configured + driven in `.task` below; force-flushed on the
+    /// [完成] keep-path (NOT on discard/abort). See LiveMirrorProducer.swift.
+    @StateObject private var liveMirror = LiveMirrorProducer()
+
     /// D16 ⚙ settings sheet visibility.
     ///
     /// TODO: D10 in-session shell impl 時、搬到 top bar Row 2 最右
@@ -156,6 +164,13 @@ struct SetLoggerView: View {
                         onCommit: {
                             let sid = snapshotForRender.sessionId
                             guard !sid.isEmpty else { return }
+                            // D29 — flush the latest logged state to iPhone
+                            // BEFORE the end-session signal, so end-session
+                            // reconcile sees any sub-15s-window edits the
+                            // throttled loop hasn't pushed yet. Keep-path
+                            // ONLY — never on [放棄]/abort (a late mirror
+                            // would re-create a row iPhone is hard-deleting).
+                            liveMirror.emitFinal()
                             Task { await coordinator.sendEndToiPhone(sessionId: sid) }
                         },
                         onFinishComplete: {
@@ -295,6 +310,20 @@ struct SetLoggerView: View {
             // See WatchConnectivityCoordinator.swift for both call sites.
             .task {
                 await sessionController.start()
+            }
+            // D29 — start the live-mirror producer. Separate .task so its
+            // 15s poll loop runs concurrently with (and independently of)
+            // the HK lifecycle .task above; both auto-cancel on unmount.
+            // configure() binds the immutable base snapshot + the live
+            // interaction overlay + the outbound coordinator; run() does
+            // the initial full-tree push then the throttled loop.
+            .task {
+                liveMirror.configure(
+                    base: snapshotForRender,
+                    interaction: interactionState,
+                    coordinator: coordinator
+                )
+                await liveMirror.run()
             }
             // D31 (2026-05-29 late) — conflict alert wire.
             //
