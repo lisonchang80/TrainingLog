@@ -105,9 +105,20 @@ Trap 3 is required for EACH new Swift change to Watch target unless you also bum
 
 Cost: each Trap 3 cycle = ~3-5 min user time (delete + delete + wait + install + wait). For a 10-fix-iteration debug session that's 30-50 min of wall clock burned on the dance alone.
 
-**Mitigation (future work)**: pre-build hook to auto-bump `CFBundleVersion` whenever Watch target Swift files change. Then Watch sync sees a new version each build → auto-pushes new bundle → no Trap 3 needed. Estimated 10-min one-time setup; saves the iteration tax thereafter. Not yet implemented; tracked as backlog.
+**Mitigation (IMPLEMENTED 2026-05-29, slice 13d `slice/13d-cfbundle-autobump`)**: a Run Script Build Phase named **"Bump Watch CFBundleVersion"** now runs on the Watch target every build (`alwaysOutOfDate = 1`), after the Resources phase. It calls `scripts/bump-watch-build-number.sh "$TARGET_BUILD_DIR/$INFOPLIST_PATH"`, which sets `CFBundleVersion` in the **built product** Info.plist to the current Unix timestamp (monotonic). Source `Info.plist` + `CURRENT_PROJECT_VERSION` stay at `1` → **zero git churn**. Each build → higher version → Watch sync auto-pushes the fresh bundle → **Trap 3 nuclear-delete dance no longer needed** for routine Swift iteration.
 
-**During active debug**: if you know you'll iterate ≥3 times, consider implementing the auto-bump first as a one-time investment. Otherwise just accept the dance — explain to user up-front so they know what to expect.
+- Script: `scripts/bump-watch-build-number.sh` (standalone, testable; takes `<plist-path> [value]`, defaults to `date +%s`, preserves binary/xml plist format).
+- pbxproj also flips `ENABLE_USER_SCRIPT_SANDBOXING` `YES→NO` on both Watch configs — sandboxing denied the phase's read/write of the product plist, and declaring the plist as an `outputPath` collides with Xcode's built-in Info.plist processing ("Multiple commands produce Info.plist"). Disabling matches the main TrainingLog target (already unsandboxed for RN scripts).
+- Verified via `xcodebuild` (Xcode 26.4.1 / watchOS 26.4): two consecutive Watch builds → `CFBundleVersion 1 → 178007xxxx → 178007yyyy` (strictly increasing), `BUILD SUCCEEDED`, plist stays binary, `CFBundleShortVersionString` (marketing 1.0) untouched.
+
+**Standalone test recipe** (never mutate the real source plist):
+```bash
+cp "ios/TrainingLog-Watch-Watch-App-Info.plist" /tmp/copy.plist
+scripts/bump-watch-build-number.sh /tmp/copy.plist
+/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/copy.plist
+```
+
+**Caveat**: the bump lands in the *Debug/Release built product*, NOT in an archive's exported IPA upload sequence — for App Store / TestFlight you still manage `CURRENT_PROJECT_VERSION` / `MARKETING_VERSION` the normal way (a timestamp `CFBundleVersion` is fine for dev/wrist-smoke but App Store Connect wants a build number higher than the previous *uploaded* one, which timestamps satisfy too). This mitigation is aimed at the dev iteration loop.
 
 ### Trap 4 — Xcode 16+ debug builds split binary into stub + `.debug.dylib`
 
