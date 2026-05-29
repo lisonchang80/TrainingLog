@@ -315,11 +315,29 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             session.sendMessage(
                 envelope,
                 replyHandler: nil,
-                errorHandler: { _ in
-                    // Swallow errors — TUI is the durable path.
-                    // Failed sendMessage just means iPhone wasn't
-                    // reachable at the exact moment; TUI queue
-                    // catches it.
+                errorHandler: { [weak self] err in
+                    // 2026-05-29 B1 diag enrichment (TEMPORARY):
+                    // Surface sendMessage error to lastOutbound so the
+                    // Watch-side DBG overlay can show whether iOS WC
+                    // framework rejected the delivery. Pre-enrichment
+                    // this was a no-op (errors swallowed silently) which
+                    // hid the case where Watch thinks it sent but iPhone
+                    // never received.
+                    //
+                    // Common codes:
+                    //   7016 (messageReplyTimedOut) — receiver got
+                    //     message but didn't reply within 5s (cosmetic
+                    //     here since we don't expect a reply)
+                    //   7004 (notReachable) — isReachable flipped to
+                    //     false between our check + the actual send
+                    //   7007 (sessionNotActivated) — WC session got
+                    //     deactivated mid-send (very rare)
+                    //   Other NSURLError* — transport-level issues
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
                 }
             )
             sendMsgStatus = "tui+msg"
