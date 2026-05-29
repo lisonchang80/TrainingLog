@@ -22,7 +22,28 @@ description: Directly query iOS Simulator's SQLite file to diagnose UI vs DB sta
 
 ## Step 1 — 找 DB 檔
 
-iOS Simulator app 沙箱路徑（Expo 開發環境）：
+DB 路徑依 workflow 而異 — 先確認用戶在哪：
+
+### Bare workflow（slice 13b+，目前 default）
+
+```bash
+DB=$(find ~/Library/Developer/CoreSimulator/Devices \
+  -path "*Containers/Data/Application/*Documents/SQLite/traininglog.db" 2>/dev/null \
+  | head -1)
+echo "$DB"
+```
+
+更精準（指定 booted sim UDID）：
+
+```bash
+UDID=$(xcrun simctl list devices booted -j | jq -r '.devices[][0].udid')
+xcrun simctl get_app_container "$UDID" com.lisonchang.TrainingLog data
+# → app sandbox 路徑，DB 在 <sandbox>/Documents/SQLite/traininglog.db
+```
+
+App 沙箱 UUID 每次 uninstall+install 會變、不要硬寫死。
+
+### Expo Go（slice 1-13a，舊路徑、現已退役）
 
 ```bash
 find ~/Library/Developer/CoreSimulator/Devices \
@@ -30,12 +51,16 @@ find ~/Library/Developer/CoreSimulator/Devices \
   -name "traininglog.db" 2>/dev/null
 ```
 
-通常有多個（不同 device UUID）。看 `ls -la` 的修改時間挑最新的那個 — 就是用戶當前在用的 simulator。
+通常有多個（不同 device UUID）。看 `ls -la` 的修改時間挑最新的那個。
+
+### 共同
 
 固定 export 成 env var 方便後續：
 ```bash
 DB="/Users/.../SQLite/traininglog.db"
 ```
+
+如果要 **寫入** seed 而不只 query → 改用 `sim-db-seed-smoke` skill（含 terminate-app-first 鎖處理 + UI re-focus 提示）。
 
 ## Step 2 — 對症下藥的查法
 

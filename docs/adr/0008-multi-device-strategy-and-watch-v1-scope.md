@@ -162,3 +162,45 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 - Pause 紀律 — ADR-0019 § Q9 (b) line 497（不翻盤）
 - 5-tile predicate — ADR-0019 § Q6 + Slice 13d Amendment Q24
 - Cluster 視覺一致性 — ADR-0012 dropset / ADR-0017 Reusable Superset / ADR-0018 session-side cluster
+
+## 2026-05-29 NEW-Q50 Amendment — Watch standalone offline-first start
+
+**Trigger**：morning real-device Watch smoke 踩到 iPhone 不在前景時 `sendStartFromWatch` 失敗、user 明示「iPhone 背景/螢幕關也要能啟動」。grill 出 8 拍板、見 ADR-0019 § Slice 13d NEW-Q50 段 full detail。
+
+### 翻盤點（NEW-Q50）
+
+- ❌ **2026-05-26 Slice 13d Amendment line 128「雙向 initiator — SQLite 寫在 iPhone（唯一 SoT）」** → Watch-initiated 路徑改寫在 Watch、`UUID().uuidString` 本地生 sessionId、iPhone 收到 TUI 後 `INSERT OR IGNORE` dedup mirror。iPhone-initiated 路徑不變（iPhone 仍生 sessionId）。雙來源 sessionId 共存、每筆 session.id 由 initiator owns。
+- ❌ **NEW-Q44 Phase 2.5 Stage 1 reply prefetch shape** → 從 thin `templates: [{id, name}]` 翻盤為 fat tree `templates: [Stage1TemplateFullSummary{exercises:[...]}]` 含 exercise list + planned reps/weight + exercise name。envelope ~30KB 仍守 WC 64KB 上限。理由：Watch standalone 啟動需 prefetch 含完整 template 資料才能離線 build SessionSnapshot。
+- ❌ **D6 sendMessage path** → 砍除；`transferUserInfo` + `updateApplicationContext` 為 sole transport infra。
+- ❌ **D7-Swift `sendStartFromWatch` sendMessage + replyHandler** → 砍除；改 `transferUserInfo` fire-and-forget + reverse TUI receiver。
+- ❌ **D8 P3 `PickerSetLoggerPlaceholderView` retry view**（「傳輸失敗（iPhone 未配對或無回應）」+ 重試 button）→ 砍除；replace by 直接 push SetLoggerView（Watch 已 standalone 啟動、無「失敗」狀態）。
+- ❌ **D9 `onStartFromWatch` sync reply with SessionSnapshot** → 改 `(db, env, sendReverseTUI)` 簽名、async handler、reconcile reply 透過 reverse TUI。
+- ❌ **D19 6-kind liveMirrorReducer** → 退化為 `replaceLiveMirror(snapshot)` 單純 SQLite UPDATE；LWW 邏輯（D20）移到 Watch 端 in-memory only。
+
+### 不翻盤、繼續成立
+
+- ✅ **路徑 C 核心模型** — iPhone 仍是 SoT、Watch 為 mirror（雖然 sessionId 來源換邊、但 final source of truth 仍是 iPhone 的 SQLite row）
+- ✅ **Watch HKWorkoutSession trigger-only sampling** — D5 SessionController HK lifecycle Watch-led、本來就獨立於 WC 通訊、startActivity / discardWorkout 不依賴 reachable
+- ✅ **iPhone 13c writer 為唯一 HKWorkout 寫入點** — NEW-Q50 不動 HK 分工、純粹改 session row + live mirror channel
+- ✅ **single active session per device invariant (ADR-0003)** — Q5 first-write-wins 保護此 invariant、Watch alert sheet escalation 讓 user 選保留誰
+- ✅ **NEW-Q49 iPhone freestyle 首動作 push gate** — iPhone→Watch direction 暫不改、count(session_exercise) 0→1 trigger 仍 sendMessage（後續 grill 再決定是否改 TUI 對稱）
+
+### 新增 (offline-first 補完)
+
+- **Watch local SessionController state machine** — `UUID().uuidString` 生 sessionId、build SessionSnapshot from prefetched data、`updateApplicationContext` 15s debounce + dirty flag throttled push
+- **Reverse TUI receiver (Watch side)** — `setupReverseTUIListener` + route by kind (`start-resolve` / `start-reconcile` / `end-reconcile`)
+- **Conflict resolution UI (Watch side)** — alert sheet + 2-choice resolver + `start-resolve` outbound
+- **ApplicationContext live mirror listener (iPhone side)** — `addApplicationContextListener` + INSERT OR REPLACE on conflict(id) snapshot replace + UI refresh
+- **Sync UI status (Watch side)** — happy path 無 indicator、TUI 30s+ pending 才 ⏳ corner、conflict alert sheet (Q5)、end-fail hint banner
+
+### Stretch / 留下次
+
+- iPhone→Watch direction (`pushStartToWatch` / `pushEndToWatch`) 改 TUI 對稱化 — 後續 grill round 統一改
+- Prefetch refresh 機制 — iPhone 加新 template 時 Watch 怎麼知道
+- Watch reboot 時 SessionController state 恢復 — D11 Phase D-H scope
+
+### Cross-references
+
+- Full 8 Q grill log + impl checklist + D-chain 重排 — ADR-0019 § Slice 13d NEW-Q50 段
+- NEW-Q42 / NEW-Q44 inline 翻盤 markers — ADR-0019 § Slice 13d Amendment NEW-Q table
+- D5 HK lifecycle Watch-led（不翻盤、本來就獨立）— ADR-0019 § Slice 13d Amendment Q28 Branch C

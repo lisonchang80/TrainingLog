@@ -143,6 +143,7 @@ export async function insertNewTableRow(
 - ❌ Forget `IF NOT EXISTS` — migration 重跑 crash
 - ❌ FK without `ON DELETE` — 預設行為跨 sqlite 版本不一致、產生孤兒 row
 - ❌ Test 用真 simulator DB（在 `/tmp` 留檔）— 一律 `:memory:` 用 better-sqlite3
+- ❌ **新加 child table 帶 FK → parent 但沒 audit parent 的既有 `delete*` repo 函式** — 本 migration 跑完後，未來刪 parent row 會在 commit 時 trip `SQLite error 19: FOREIGN KEY constraint failed`。Checklist：grep `src/adapters/sqlite/*Repository.ts` 找 `DELETE FROM <parent>`，每個都要在同一 transaction 內補 `UPDATE <child> SET <fk_col> = NULL WHERE <fk_col> = ?`（如要保留 child row）或 `DELETE FROM <child> WHERE <fk_col> = ?`（如 cascade 刪）。實例：v005 加 `program_cell.template_id` 但漏補 `deleteTemplate`，2026-05-29 user 從 program 上套了 template 後刪 template 就炸（see tests/db/deleteTemplate.test.ts 的 program_cell case）。
 
 ## 歷史 baseline
 
