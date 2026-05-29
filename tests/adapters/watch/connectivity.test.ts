@@ -29,6 +29,7 @@ interface MockBridge {
   getIsWatchAppInstalled: jest.Mock;
   getReachability: jest.Mock;
   sendMessage: jest.Mock;
+  transferUserInfo: jest.Mock;
   updateApplicationContext: jest.Mock;
   watchEvents: {
     addListener: jest.Mock;
@@ -41,6 +42,7 @@ function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
     getIsWatchAppInstalled: jest.fn().mockResolvedValue(true),
     getReachability: jest.fn().mockResolvedValue(true),
     sendMessage: jest.fn(),
+    transferUserInfo: jest.fn(),
     updateApplicationContext: jest.fn(),
     watchEvents: {
       addListener: jest.fn().mockReturnValue(() => {}),
@@ -231,5 +233,360 @@ describe('Slice 13d D6 — connectivity.ts', () => {
       sampleTs: Date.now(),
     });
     expect(() => mod.updateApplicationContext(env)).not.toThrow();
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  NEW-Q50 v2 — TUI + applicationContext primary surface
+  //  (frozen 2026-05-29 evening grill, ADR-0019 § Slice 13d NEW-Q50)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ─── sendUserInfo (TUI outbound) ────────────────────────────────────
+
+  it('sendUserInfo — happy path: bridge.transferUserInfo called with envelope', () => {
+    const bridge = makeBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-w1',
+      snapshot: {},
+    });
+    mod.sendUserInfo(env);
+
+    expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
+    expect(bridge.transferUserInfo).toHaveBeenCalledWith(env);
+  });
+
+  it('sendUserInfo — bridge throws → swallowed silently (Q11 best-effort)', () => {
+    const bridge = makeBridge({
+      transferUserInfo: jest.fn(() => {
+        throw new Error('TurboModule call failed');
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-w2',
+      snapshot: {},
+    });
+    expect(() => mod.sendUserInfo(env)).not.toThrow();
+    expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('sendUserInfo — WC bridge entirely unavailable → swallowed silently', () => {
+    // Simulate transferUserInfo undefined (lib not loaded / partial mock).
+    jest.doMock('react-native-watch-connectivity', () => ({
+      getIsPaired: jest.fn().mockResolvedValue(false),
+      getIsWatchAppInstalled: jest.fn().mockResolvedValue(false),
+      getReachability: jest.fn().mockResolvedValue(false),
+      sendMessage: jest.fn(),
+      // transferUserInfo intentionally omitted to simulate broken lib
+      updateApplicationContext: jest.fn(),
+      watchEvents: { addListener: jest.fn().mockReturnValue(() => {}) },
+    }));
+    const mod = loadModule();
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-w3',
+      snapshot: {},
+    });
+    expect(() => mod.sendUserInfo(env)).not.toThrow();
+  });
+
+  // ─── addUserInfoListener (TUI inbound dispatch) ─────────────────────
+
+  it('addUserInfoListener — subscribes via watchEvents.addListener("user-info") + dispatches matching kind', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addUserInfoListener('start-from-iphone', handler);
+
+    expect(bridge.watchEvents.addListener).toHaveBeenCalledWith(
+      'user-info',
+      expect.any(Function),
+    );
+    expect(capturedCallback).not.toBeNull();
+
+    // Simulate lib delivery — lib sends ARRAY of payloads per
+    // WatchEventCallbacks['user-info']: (payload: P[]) => void.
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r1',
+      snapshot: {},
+    });
+    capturedCallback!([env]);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(env);
+  });
+
+  it('addUserInfoListener — dispatches only to matching kind, others skipped', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const startHandler = jest.fn();
+    const endHandler = jest.fn();
+    mod.addUserInfoListener('start-from-iphone', startHandler);
+    mod.addUserInfoListener('end-session', endHandler);
+
+    const startEnv = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r2',
+      snapshot: {},
+    });
+    capturedCallback!([startEnv]);
+
+    expect(startHandler).toHaveBeenCalledTimes(1);
+    expect(endHandler).not.toHaveBeenCalled();
+  });
+
+  it('addUserInfoListener — unsubscribe stops further dispatch', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    const unsubscribe = mod.addUserInfoListener('start-from-iphone', handler);
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r3',
+      snapshot: {},
+    });
+    capturedCallback!([env]);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    capturedCallback!([env]);
+    expect(handler).toHaveBeenCalledTimes(1); // still 1 — no new fire after unsub
+  });
+
+  it('addUserInfoListener — handles batched delivery (multiple envelopes in one fire)', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addUserInfoListener('start-from-iphone', handler);
+
+    const env1 = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r4a',
+      snapshot: {},
+    });
+    const env2 = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r4b',
+      snapshot: {},
+    });
+    // TUI batched delivery — both envelopes in one event.
+    capturedCallback!([env1, env2]);
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenNthCalledWith(1, env1);
+    expect(handler).toHaveBeenNthCalledWith(2, env2);
+  });
+
+  it('addUserInfoListener — handler throw does not block sibling handlers', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const throwingHandler = jest.fn(() => {
+      throw new Error('handler crash');
+    });
+    const surviveHandler = jest.fn();
+    mod.addUserInfoListener('start-from-iphone', throwingHandler);
+    mod.addUserInfoListener('start-from-iphone', surviveHandler);
+
+    const env = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r5',
+      snapshot: {},
+    });
+    expect(() => capturedCallback!([env])).not.toThrow();
+    expect(throwingHandler).toHaveBeenCalledTimes(1);
+    expect(surviveHandler).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── updateAppContext (applicationContext outbound) ─────────────────
+
+  it('updateAppContext — happy path: bridge.updateApplicationContext called with snapshot', () => {
+    const bridge = makeBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const snapshot = {
+      session: {
+        id: 'sess-ac1',
+        title: 'Push day',
+        exercises: [{ id: 'ex-1', sets: [] }],
+      },
+    };
+    mod.updateAppContext(snapshot);
+
+    expect(bridge.updateApplicationContext).toHaveBeenCalledTimes(1);
+    expect(bridge.updateApplicationContext).toHaveBeenCalledWith(snapshot);
+  });
+
+  it('updateAppContext — swallows bridge throw (Q6 best-effort)', () => {
+    const bridge = makeBridge({
+      updateApplicationContext: jest.fn(() => {
+        throw new Error('bridge crash');
+      }),
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const snapshot = { session: { id: 'sess-ac2' } };
+    expect(() => mod.updateAppContext(snapshot)).not.toThrow();
+  });
+
+  // ─── addAppContextListener (applicationContext inbound) ─────────────
+
+  it('addAppContextListener — subscribes via watchEvents.addListener("application-context") + dispatches', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'application-context') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addAppContextListener(handler);
+
+    expect(bridge.watchEvents.addListener).toHaveBeenCalledWith(
+      'application-context',
+      expect.any(Function),
+    );
+
+    const ctx = { session: { id: 'sess-acr1', exercises: [] } };
+    capturedCallback!(ctx);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(ctx);
+  });
+
+  it('addAppContextListener — unsubscribe stops further dispatch', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'application-context') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    const unsubscribe = mod.addAppContextListener(handler);
+
+    const ctx = { session: { id: 'sess-acr2' } };
+    capturedCallback!(ctx);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    capturedCallback!(ctx);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('addAppContextListener — non-object payload ignored', () => {
+    let capturedCallback:
+      | ((...args: unknown[]) => void)
+      | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'application-context') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addAppContextListener(handler);
+
+    capturedCallback!(null);
+    capturedCallback!(undefined);
+    capturedCallback!('string-not-object');
+
+    expect(handler).not.toHaveBeenCalled();
   });
 });

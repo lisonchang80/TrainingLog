@@ -67,6 +67,9 @@ export type {
 } from './handshake';
 
 export {
+  // Legacy v1 surface (slated 砍除 once Wave 2 wire-in completes, per
+  // NEW-Q50 Q8 hard break). Kept for current `watchSessionStart.ts` +
+  // `watchSessionEnd.ts` callers + their tests.
   sendMessage,
   isPaired,
   isReachable,
@@ -74,5 +77,12 @@ export {
   addMessageListener,
   seenMsgId,
   __resetBridgeForTests,
+  // NEW-Q50 v2 surface — TUI + applicationContext primary transport
+  // (added by D6-B 2026-05-29 evening, ADR-0019 § Slice 13d NEW-Q50).
+  // D9 Wave 2 wire-in will adopt these as sole transport.
+  sendUserInfo,
+  addUserInfoListener,
+  updateAppContext,
+  addAppContextListener,
 } from './connectivity';
 export type { SendResult, SendOptions } from './connectivity';
