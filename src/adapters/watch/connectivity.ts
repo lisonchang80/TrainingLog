@@ -2,10 +2,19 @@
  * Watch ↔ iPhone WatchConnectivity (WC) bridge wrapper.
  *
  * Slice 13d D6 (ADR-0019 § Slice 13d Amendment Q5 + Q7 + NEW-Q42 +
- * D-chain table line 1246). D3 shipped `payloadSchema.ts` as the
- * protocol-only slice; D6 lands this file as the actual bridge to
- * `react-native-watch-connectivity@2.0.0` (lib pinned per Q5 spike C
+ * NEW-Q50 — frozen 2026-05-29 evening). D3 shipped `payloadSchema.ts`
+ * as the protocol-only slice; D6 lands this file as the actual bridge
+ * to `react-native-watch-connectivity@2.0.0` (lib pinned per Q5 spike C
  * 2026-05-27 真機 PASS — see ADR-0019 shipped table D0 partial spike-C).
+ *
+ * NEW-Q50 (2026-05-29 evening grill) — transport翻盤 to TUI + applicationContext:
+ *   - Q4 拍板: TUI is sole outbound channel; sendMessage path slated for
+ *     砍除 once Wave 2 swaps consumers (`watchSessionStart.ts` +
+ *     `watchSessionEnd.ts`). D6 lands the new helpers ALONGSIDE the
+ *     legacy sendMessage path so Wave 1 can ship without breaking
+ *     downstream tsc; Wave 2 wire-in will remove the legacy block.
+ *   - Q6 拍板: ApplicationContext throttled + replace semantics for
+ *     in-session live mirror (D24 HR/kcal share this channel).
  *
  * Why lazy-require:
  *   - The lib loads via `TurboModuleRegistry.getEnforcing(...)` which
@@ -18,14 +27,22 @@
  *     tests can run end-to-end without the bridge.
  *   - Same pattern as `src/adapters/healthkit/permission.ts` (L41-48).
  *
- * Public surface (used by `watchSessionStart.ts` + `watchSessionEnd.ts`):
- *   - `sendMessage(env, opts)` — async with timeout + reply ack
+ * Public surface (v2 NEW-Q50 primary — D9 wire-in will adopt):
+ *   - `sendUserInfo(env)` — fire-and-forget TUI outbound (Q4 sole channel)
+ *   - `addUserInfoListener(kind, handler)` — typed inbound TUI dispatch
+ *   - `updateAppContext(snapshot)` — fire-and-forget applicationContext
+ *     replace (Q6 throttled mirror channel)
+ *   - `addAppContextListener(handler)` — inbound applicationContext delivery
  *   - `isPaired()` / `isReachable()` — bridge state queries
- *   - `updateApplicationContext(env)` — fire-and-forget snapshot push
- *   - `addMessageListener(kind, handler)` — inbound delegate (D7)
- *   - Internal msgId ring buffer for inbound dedupe (D7+)
  *
- * Q7 channel timeouts (ADR-0019 § Slice 13d Amendment table):
+ * Legacy v1 surface (kept for Wave 2 wire-in — slated 砍除 per Q8 hard break):
+ *   - `sendMessage(env, opts)` — async with timeout + reply ack
+ *   - `addMessageListener(kind, handler)` — inbound delegate via 'message' event
+ *   - `updateApplicationContext(env)` — legacy alias (envelope-shaped) for
+ *     `updateAppContext` — kept until Wave 2 swap completes
+ *   - `seenMsgId(id)` + msgId ring buffer for inbound dedupe
+ *
+ * Q7 channel timeouts (ADR-0019 § Slice 13d Amendment table — legacy v1 only):
  *   - send timeout = 2s (channel #2 start-from-iphone)
  *   - Per-callsite ack reconcile timeout is separate (e.g. 5s in D7
  *     end-session). This file owns the *send* timeout only.
@@ -56,6 +73,10 @@ type WCBridge = {
     replyCb?: (reply: Record<string, unknown>) => void,
     errCb?: (err: Error & { code?: string }) => void,
   ) => void;
+  // NEW-Q50 Q4 — TUI is primary outbound channel (fire-and-forget queue).
+  transferUserInfo: (info: Record<string, unknown>) => void;
+  // NEW-Q50 Q6 — applicationContext is throttled live-mirror channel
+  // (latest-state-only replace semantics).
   updateApplicationContext: (ctx: Record<string, unknown>) => void;
   watchEvents: {
     addListener: (
@@ -83,6 +104,8 @@ export function __resetBridgeForTests(): void {
   cached = null;
   __clearMsgIdRingForTests();
   __clearListenersForTests();
+  __clearUserInfoListenersForTests();
+  __clearAppContextListenersForTests();
 }
 
 // ---------------------------------------------------------------------
@@ -379,5 +402,229 @@ export function updateApplicationContext(env: WCMessage): void {
     bridge().updateApplicationContext(env as unknown as Record<string, unknown>);
   } catch {
     // swallow — context push is best-effort
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  NEW-Q50 v2 transport — TUI + applicationContext primary surface
+//  (frozen 2026-05-29 evening grill, ADR-0019 § Slice 13d NEW-Q50)
+// ═════════════════════════════════════════════════════════════════════
+
+// ---------------------------------------------------------------------
+// Section 7 — Outbound TUI (NEW-Q50 Q4 sole outbound channel)
+// ---------------------------------------------------------------------
+
+/**
+ * Fire-and-forget TUI (transferUserInfo) push. Wraps Apple's
+ * `WCSession.transferUserInfo()` — OS queues envelope and delivers
+ * when the counterparty wakes, with at-least-once semantics.
+ *
+ * No timeout, no ack — caller MUST NOT await this in a sync-reply
+ * pattern. Reverse-direction TUI (counterparty → us) provides
+ * reconcile reply per NEW-Q50 Q4 reverse TUI design.
+ *
+ * Per Q11 (best-effort): if WC bridge throws (lib unavailable, OS-
+ * level error), we swallow silently — TUI is "fire and forget"
+ * even on failure. Pairs with `isPaired()` precheck at callsite if
+ * the caller wants an explicit "skip when unpaired" branch.
+ *
+ * NEW-Q50 Q11 silent-skip — if `isPaired()` is false, the OS-level
+ * transferUserInfo call is still safe (becomes no-op); we don't
+ * pre-check here because the bridge already handles unpaired state
+ * gracefully and a precheck adds an extra `await` round-trip per
+ * call. Callers wanting the explicit guard can `if (!await isPaired())
+ * return;` before invoking.
+ */
+export function sendUserInfo(env: WCMessage): void {
+  try {
+    bridge().transferUserInfo(env as unknown as Record<string, unknown>);
+  } catch {
+    // swallow — TUI is best-effort fire-and-forget
+  }
+}
+
+// ---------------------------------------------------------------------
+// Section 8 — Inbound TUI dispatch (NEW-Q50 Q4 reverse TUI receiver)
+// ---------------------------------------------------------------------
+
+/**
+ * Per-kind inbound TUI handler. Mirrors the legacy `InboundHandler`
+ * shape but WITHOUT a `replyHandler` parameter — TUI is one-way
+ * fire-and-forget. The counterparty replies via a separate reverse
+ * TUI envelope (per NEW-Q50 Q4 reverse channel design).
+ */
+type UserInfoHandler<K extends WCMessageKind> = (
+  env: WCMessage & { kind: K; payload: WCPayloadMap[K] },
+) => void | Promise<void>;
+
+const userInfoListeners = new Map<
+  WCMessageKind,
+  Set<UserInfoHandler<WCMessageKind>>
+>();
+let userInfoBridgeUnsubscribe: (() => void) | null = null;
+
+function ensureUserInfoBridgeListenerMounted(): void {
+  if (userInfoBridgeUnsubscribe !== null) return;
+  userInfoBridgeUnsubscribe = bridge().watchEvents.addListener(
+    'user-info',
+    (...args: unknown[]) => {
+      // Real lib signature: 'user-info' callback receives a single
+      // arg `payload: P[]` (an ARRAY of envelopes — see
+      // node_modules/react-native-watch-connectivity/src/events/
+      // definitions.ts line 34). Each TUI delivery may bundle
+      // multiple queued envelopes; we iterate and dispatch per kind.
+      const batch = args[0];
+      if (!Array.isArray(batch)) return;
+      for (const raw of batch) {
+        if (!raw || typeof raw !== 'object') continue;
+        const msg = raw as Record<string, unknown>;
+        const kind = msg.kind as WCMessageKind | undefined;
+        if (!kind) continue;
+        const set = userInfoListeners.get(kind);
+        if (!set || set.size === 0) continue;
+        for (const handler of set) {
+          // Best-effort dispatch — one handler throwing must not
+          // stop siblings or sibling-kind dispatch in this batch.
+          try {
+            void handler(
+              msg as unknown as WCMessage & {
+                kind: typeof kind;
+                payload: WCPayloadMap[typeof kind];
+              },
+            );
+          } catch {
+            // swallow
+          }
+        }
+      }
+    },
+  );
+}
+
+/**
+ * Subscribe to inbound TUI envelopes of a specific `kind`. Returns
+ * an unsubscribe fn. Idempotent — registering the same handler twice
+ * is a no-op the second time (`Set` semantics).
+ *
+ * NEW-Q50 wire-in (D9 Wave 2) will call this for `start-from-watch`
+ * + `set-*` + `end-session` kinds. iPhone side also uses for reverse
+ * TUI from Watch (conflict resolution, end reconcile).
+ *
+ * No `replyHandler` parameter — TUI is one-way. Reply path is via a
+ * separate reverse TUI envelope (counterparty `sendUserInfo`).
+ */
+export function addUserInfoListener<K extends WCMessageKind>(
+  kind: K,
+  handler: UserInfoHandler<K>,
+): () => void {
+  ensureUserInfoBridgeListenerMounted();
+  let set = userInfoListeners.get(kind);
+  if (!set) {
+    set = new Set();
+    userInfoListeners.set(kind, set);
+  }
+  set.add(handler as UserInfoHandler<WCMessageKind>);
+  return () => {
+    set?.delete(handler as UserInfoHandler<WCMessageKind>);
+  };
+}
+
+function __clearUserInfoListenersForTests(): void {
+  userInfoListeners.clear();
+  if (userInfoBridgeUnsubscribe) {
+    try {
+      userInfoBridgeUnsubscribe();
+    } catch {
+      // swallow
+    }
+    userInfoBridgeUnsubscribe = null;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Section 9 — Outbound applicationContext (NEW-Q50 Q6 live mirror)
+// ---------------------------------------------------------------------
+
+/**
+ * Fire-and-forget applicationContext snapshot push with "latest-only"
+ * replace semantics. Subsequent calls overwrite earlier ones before
+ * the OS delivers — no queue, no duplicate delivery.
+ *
+ * NEW-Q50 Q6 — replaces the D19 6-kind reducer. Watch SessionController
+ * builds full SessionSnapshot and pushes here every ~15s (debounce +
+ * dirty flag); iPhone `addAppContextListener` receives latest and does
+ * `INSERT OR REPLACE` on session row.
+ *
+ * `snapshot` is `object` (not `WCMessage`) because applicationContext is
+ * not envelope-shaped — it's a raw snapshot dict. Callers provide their
+ * own shape contract (Wave 2 will type as `SessionSnapshot`).
+ */
+export function updateAppContext(snapshot: object): void {
+  try {
+    bridge().updateApplicationContext(snapshot as Record<string, unknown>);
+  } catch {
+    // swallow — applicationContext is best-effort
+  }
+}
+
+// ---------------------------------------------------------------------
+// Section 10 — Inbound applicationContext (NEW-Q50 Q6 mirror receiver)
+// ---------------------------------------------------------------------
+
+type AppContextHandler = (ctx: object) => void | Promise<void>;
+
+const appContextListeners = new Set<AppContextHandler>();
+let appContextBridgeUnsubscribe: (() => void) | null = null;
+
+function ensureAppContextBridgeListenerMounted(): void {
+  if (appContextBridgeUnsubscribe !== null) return;
+  appContextBridgeUnsubscribe = bridge().watchEvents.addListener(
+    'application-context',
+    (...args: unknown[]) => {
+      // Real lib signature: 'application-context' callback receives a
+      // single arg `payload: P` (NOT array — see
+      // node_modules/react-native-watch-connectivity/src/events/
+      // definitions.ts line 23). Just route through.
+      const ctx = args[0];
+      if (!ctx || typeof ctx !== 'object') return;
+      for (const handler of appContextListeners) {
+        try {
+          void handler(ctx as object);
+        } catch {
+          // swallow
+        }
+      }
+    },
+  );
+}
+
+/**
+ * Subscribe to inbound applicationContext deliveries. Returns an
+ * unsubscribe fn. Idempotent — registering the same handler twice
+ * is a no-op the second time.
+ *
+ * NEW-Q50 wire-in (Wave 2): iPhone side receives Watch's live-mirror
+ * snapshot here and routes to `replaceLiveMirror(ctx)` which writes
+ * the session row via `INSERT OR REPLACE` (per Q6 + Q2 idempotency).
+ */
+export function addAppContextListener(
+  handler: AppContextHandler,
+): () => void {
+  ensureAppContextBridgeListenerMounted();
+  appContextListeners.add(handler);
+  return () => {
+    appContextListeners.delete(handler);
+  };
+}
+
+function __clearAppContextListenersForTests(): void {
+  appContextListeners.clear();
+  if (appContextBridgeUnsubscribe) {
+    try {
+      appContextBridgeUnsubscribe();
+    } catch {
+      // swallow
+    }
+    appContextBridgeUnsubscribe = null;
   }
 }
