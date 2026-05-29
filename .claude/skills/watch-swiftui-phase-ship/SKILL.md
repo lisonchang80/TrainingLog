@@ -24,6 +24,7 @@ User 明確說：
 - Phase 還沒 spec frozen → 先 ASCII mock iterate（per `feedback_watch_ui_reference.md`），freeze 後再回來
 - iPhone view 變動 → 跟 RN/Expo 流程，用 `ship-slice`
 - 多 view 同時動 → 一次只動一個 view 一個 phase；多 view 拆 branch
+- **Real-device install 到實機 Watch（cherry-pick 落 main 之後想戴上手腕 smoke）→ 走 `xcodebuild-watchos-realdevice-install` skill**。這個 skill 本身只到 Sim verify + cherry-pick，不負責 real device install（有 3 個會吃 45 min 的 booby trap）。
 
 ## Recipe (8 步)
 

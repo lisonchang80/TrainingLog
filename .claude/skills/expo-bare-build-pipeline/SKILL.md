@@ -3,7 +3,10 @@ name: expo-bare-build-pipeline
 description: >
   TrainingLog leaving Expo Go for Bare workflow (since slice 13b 2026-05-25):
   expo prebuild → CocoaPods → Xcode signing → Metro → real-device install
-  pipeline + 10 specific gotchas. Use when adding any native module
+  pipeline + 10 specific gotchas. **For Watch app real-device install
+  traps (xcodebuild install fake-succeed / incremental skip Watch target /
+  Apple Watch sync cache) see sibling skill `xcodebuild-watchos-realdevice-install`.**
+  Use when adding any native module
   (HealthKit, WatchConnectivity, file system, etc.), regenerating ios/
   via prebuild, adding a watchOS target via Xcode, or debugging a dev
   build that won't launch / crashes on HK / Native module call. Trigger
