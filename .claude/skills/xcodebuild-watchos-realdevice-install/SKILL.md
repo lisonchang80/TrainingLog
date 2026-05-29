@@ -11,7 +11,7 @@ User wants to push the latest `ios/TrainingLog Watch Watch App/*.swift` to their
 
 If only iPhone-side TS changes (no Watch Swift touched), Metro packager + Reload JS is enough — skip this skill.
 
-## The three booby traps (validated 2026-05-29 morning, ~45 min lost)
+## The booby traps (validated 2026-05-29 morning, ~45 min lost; Trap 4 added 2026-05-29 afternoon)
 
 ### Trap 1 — `xcodebuild ... install` does NOT push to device
 
@@ -41,6 +41,8 @@ App installed:
 Confirm via `xcrun devicectl device info apps --device <iphone-udid> | grep -i training`.
 
 ### Trap 2 — incremental build SKIPS Watch target
+
+> If you can't find the symbol in the main binary, see Trap 4 — debug builds split it out.
 
 If the iPhone host target has no new `.ts/.tsx/.m/.swift` touched, `xcodebuild install` decides the cached host app is fine and **never invokes Watch target compile** — even when `ios/TrainingLog Watch Watch App/*.swift` was just cherry-picked.
 
@@ -83,6 +85,32 @@ Even after iPhone host app contains fresh embedded Watch bundle, the **Apple Wat
 4. From CLI: `devicectl install` again (host app gone = sync service sees true new install)
 5. Apple Watch app → 我的手錶 → 可用的 APP → TrainingLog Watch → **[安裝]**
 6. Wait 1-3 min, Watch icon reappears, launch — should be fresh build
+
+### Trap 4 — Xcode 16+ debug builds split binary into stub + `.debug.dylib`
+
+For watchOS Debug builds (and possibly iphoneos too), Xcode 16+ emits two files instead of one:
+
+- A tiny launcher stub at `TrainingLog Watch Watch App.app/TrainingLog Watch Watch App` (~200KB, mostly empty `__cstring` section)
+- The actual Swift code in a sibling `TrainingLog Watch Watch App.app/TrainingLog Watch Watch App.debug.dylib` (~6-7MB)
+
+This breaks the "verify binary contains symbol X" sanity check from Trap 2 — running `nm` or `strings` on the main binary returns ~0 useful matches even when the build was correct. You'll waste time thinking the build is broken when it's actually fine.
+
+**Fix** — grep the `.debug.dylib` instead:
+
+```bash
+strings "$APP/Watch/TrainingLog Watch Watch App.app/TrainingLog Watch Watch App.debug.dylib" \
+  | grep -i 'YourSymbolHere'
+```
+
+Or check both at once:
+
+```bash
+find "$APP" -name "*.debug.dylib" -exec strings {} \; | grep -i 'YourSymbolHere'
+```
+
+Validated 2026-05-29 ~14:00 during D29+D30 NEW-Q50 ship. The `.debug.dylib` is automatically embedded into the iPhone `.app/Watch/` bundle and installs cleanly via `devicectl` — **users don't need to do anything special**. This trap is purely a *verification* gotcha for the developer; don't waste time rebuilding the wrong file.
+
+This is a Release-vs-Debug build difference; Release builds may still produce a single combined binary.
 
 ## End-to-end recipe
 
