@@ -397,23 +397,133 @@ export async function updateTemplateName(
 }
 
 /**
- * Permanently remove a Template along with its full child cascade (per
- * simulator-db-query SKILL Step 4): template_set → template_exercise →
- * template. We also clean up `session_exercise.template_id` dangling
- * pointers so 5/19 morning wave's `lookup-or-spawn` flow (#38/#42) cannot
- * bite a ghost id — ENDED sessions get their pointer set to NULL while
- * ACTIVE sessions (`ended_at IS NULL`) are left untouched (an in-progress
- * session keeps its 'started from this template' link until it finishes).
- *
- * Session history is unaffected: `session_exercise` rows remain with their
- * full snapshot of name/ordering/sets so the session detail page still
- * renders as before; only the back-pointer to the now-deleted template is
- * cleared.
- *
- * Wrapped in a single transaction so a mid-cascade failure rolls back
- * cleanly and the three template tables stay consistent.
+ * One program_cell row that will lose its `template_id` binding when a
+ * deletion is committed. Returned from the preview functions so the UI
+ * layer can ask the user to confirm (which `program × cycle × day` slots
+ * will revert to a "rest day").
  */
-export async function deleteTemplate(db: Database, id: string): Promise<void> {
+export interface AffectedProgramCell {
+  cell_id: string;
+  program_id: string;
+  program_name: string;
+  cycle_index: number;
+  day_index: number;
+}
+
+/**
+ * Read-only snapshot of "what would `deleteTemplate*` change?" — used by
+ * the UI to build a confirmation alert before any DB mutation. `templates`
+ * is the full set of template rows that will be removed (each carries the
+ * joined `program.name` so the alert can label the variant by user-visible
+ * program name rather than a raw uuid); `affectedCells` is the set of
+ * `program_cell` rows whose `template_id` would become NULL (the schedule
+ * stays intact, the cell just becomes empty / rest-day).
+ */
+export interface TemplateDeletionRow extends TemplateRow {
+  /** Joined `program.name` — NULL when this is the default variant. */
+  program_name: string | null;
+}
+
+export interface TemplateDeletionPreview {
+  templates: TemplateDeletionRow[];
+  affectedCells: AffectedProgramCell[];
+}
+
+/**
+ * Inspect what `executeTemplateDeletion(db, id)` would do, without
+ * mutating anything. Returns the target template row plus every
+ * `program_cell` that currently points at it.
+ *
+ * Returns `{ templates: [], affectedCells: [] }` when the id does not
+ * exist (mirrors execute's no-op behaviour).
+ */
+export async function previewTemplateDeletion(
+  db: Database,
+  id: string,
+): Promise<TemplateDeletionPreview> {
+  const template = await db.getFirstAsync<TemplateDeletionRow>(
+    `SELECT t.id, t.name, t.created_at, t.updated_at,
+            t.program_id, t.sub_tag,
+            p.name AS program_name
+       FROM template t
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE t.id = ?`,
+    id,
+  );
+  if (template == null) {
+    return { templates: [], affectedCells: [] };
+  }
+  const cells = await db.getAllAsync<AffectedProgramCell>(
+    `SELECT pc.id          AS cell_id,
+            pc.program_id  AS program_id,
+            p.name         AS program_name,
+            pc.cycle_index AS cycle_index,
+            pc.day_index   AS day_index
+       FROM program_cell pc
+       JOIN program p ON p.id = pc.program_id
+      WHERE pc.template_id = ?
+      ORDER BY p.name, pc.cycle_index, pc.day_index`,
+    id,
+  );
+  return { templates: [template], affectedCells: cells };
+}
+
+/**
+ * Inspect what `executeDeleteTemplatesByName(db, name)` would do,
+ * case-insensitively, without mutating anything. Returns every template
+ * whose `name` matches (regardless of `program_id` / `sub_tag` —
+ * INCLUDING the "default variant" with both NULL) plus every
+ * `program_cell` whose `template_id` points at any of them.
+ *
+ * Returns empty arrays when no match.
+ */
+export async function previewTemplateDeletionByName(
+  db: Database,
+  name: string,
+): Promise<TemplateDeletionPreview> {
+  const templates = await db.getAllAsync<TemplateDeletionRow>(
+    `SELECT t.id, t.name, t.created_at, t.updated_at,
+            t.program_id, t.sub_tag,
+            p.name AS program_name
+       FROM template t
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE t.name = ? COLLATE NOCASE
+      ORDER BY (t.program_id IS NULL) ASC, p.name, t.sub_tag`,
+    name,
+  );
+  if (templates.length === 0) {
+    return { templates: [], affectedCells: [] };
+  }
+  const placeholders = templates.map(() => '?').join(',');
+  const cells = await db.getAllAsync<AffectedProgramCell>(
+    `SELECT pc.id          AS cell_id,
+            pc.program_id  AS program_id,
+            p.name         AS program_name,
+            pc.cycle_index AS cycle_index,
+            pc.day_index   AS day_index
+       FROM program_cell pc
+       JOIN program p ON p.id = pc.program_id
+      WHERE pc.template_id IN (${placeholders})
+      ORDER BY p.name, pc.cycle_index, pc.day_index`,
+    ...templates.map((t) => t.id),
+  );
+  return { templates, affectedCells: cells };
+}
+
+/**
+ * Commit a single-template deletion. Mirrors the historical
+ * `deleteTemplate(db, id)` semantics — three-layer template cascade plus
+ * the two dangling-pointer cleanups (session_exercise + program_cell) —
+ * wrapped in one transaction.
+ *
+ * The UI should call `previewTemplateDeletion` first to show the user
+ * which `program_cell` slots are about to revert to rest-day, then call
+ * this after confirmation.
+ */
+export async function executeTemplateDeletion(
+  db: Database,
+  id: string,
+): Promise<void> {
   await db.withTransactionAsync(async () => {
     // 1. Dangling pointer cleanup on session_exercise.template_id, excluding
     //    active sessions (ended_at IS NULL) per simulator-db-query SOP.
@@ -424,7 +534,7 @@ export async function deleteTemplate(db: Database, id: string): Promise<void> {
           AND session_id NOT IN (
             SELECT id FROM session WHERE ended_at IS NULL
           )`,
-      id
+      id,
     );
     // 1b. Dangling pointer cleanup on program_cell.template_id — clear the
     //     template binding on any program-grid cell that scheduled this
@@ -434,7 +544,7 @@ export async function deleteTemplate(db: Database, id: string): Promise<void> {
     //     trips SQLite error 19 at commit time when foreign_keys=ON.
     await db.runAsync(
       `UPDATE program_cell SET template_id = NULL WHERE template_id = ?`,
-      id
+      id,
     );
     // 2. template_set is referenced from template_exercise; drop it first so
     //    the cascade is explicit and tests don't have to rely on
@@ -444,12 +554,83 @@ export async function deleteTemplate(db: Database, id: string): Promise<void> {
         WHERE template_exercise_id IN (
           SELECT id FROM template_exercise WHERE template_id = ?
         )`,
-      id
+      id,
     );
     // 3. template_exercise.
     await db.runAsync(`DELETE FROM template_exercise WHERE template_id = ?`, id);
     // 4. template row itself.
     await db.runAsync(`DELETE FROM template WHERE id = ?`, id);
+  });
+}
+
+/**
+ * Backwards-compat alias for `executeTemplateDeletion`. Existing callers
+ * (and the legacy `deleteTemplate.test.ts` suite) keep working without
+ * change; the preview/execute split is opt-in for callers that need it.
+ */
+export async function deleteTemplate(db: Database, id: string): Promise<void> {
+  await executeTemplateDeletion(db, id);
+}
+
+/**
+ * Commit the batch-by-name deletion (case-insensitive). All matched
+ * templates — including the "default variant" (program_id NULL AND
+ * sub_tag NULL) — are removed in a single transaction. Every referenced
+ * `program_cell.template_id` is set to NULL before the DELETE so the
+ * cell reverts to rest-day instead of tripping FK error 19.
+ *
+ * No-op when no template matches. UI should call
+ * `previewTemplateDeletionByName` first and prompt the user with the
+ * preview's `templates` and `affectedCells`.
+ */
+export async function executeDeleteTemplatesByName(
+  db: Database,
+  name: string,
+): Promise<void> {
+  const templates = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM template WHERE name = ? COLLATE NOCASE`,
+    name,
+  );
+  if (templates.length === 0) {
+    return;
+  }
+  const ids = templates.map((t) => t.id);
+  const placeholders = ids.map(() => '?').join(',');
+  await db.withTransactionAsync(async () => {
+    // 1. session_exercise dangling cleanup (ENDED sessions only).
+    await db.runAsync(
+      `UPDATE session_exercise
+          SET template_id = NULL
+        WHERE template_id IN (${placeholders})
+          AND session_id NOT IN (
+            SELECT id FROM session WHERE ended_at IS NULL
+          )`,
+      ...ids,
+    );
+    // 1b. program_cell dangling cleanup — revert cells to rest-day.
+    await db.runAsync(
+      `UPDATE program_cell SET template_id = NULL
+        WHERE template_id IN (${placeholders})`,
+      ...ids,
+    );
+    // 2. template_set (children of template_exercise).
+    await db.runAsync(
+      `DELETE FROM template_set
+        WHERE template_exercise_id IN (
+          SELECT id FROM template_exercise WHERE template_id IN (${placeholders})
+        )`,
+      ...ids,
+    );
+    // 3. template_exercise.
+    await db.runAsync(
+      `DELETE FROM template_exercise WHERE template_id IN (${placeholders})`,
+      ...ids,
+    );
+    // 4. template rows themselves.
+    await db.runAsync(
+      `DELETE FROM template WHERE id IN (${placeholders})`,
+      ...ids,
+    );
   });
 }
 

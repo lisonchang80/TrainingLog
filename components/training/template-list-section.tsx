@@ -12,6 +12,11 @@
  *     to the legacy "open editor" behaviour. The start-sheet wiring (which
  *     turns a tap into a `startSessionFromTemplate` call) is the parent's
  *     responsibility — Section just surfaces which template was picked.
+ *   - left-swipe a row → "刪除同名" destructive action: previews every
+ *     template instance sharing this row's name (including the default
+ *     variant), confirms via Alert with the per-program impact summary
+ *     (which schedule cells will revert to rest-day), then commits the
+ *     batch deletion via `executeDeleteTemplatesByName`.
  *   - empty state: "沒有模板，點 [+ 新建] 開始建立" + [+ 新建模板] btn still
  *     visible (parent never needs to hide it)
  *
@@ -32,12 +37,18 @@ import {
 } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
+import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   createTemplate,
+  executeDeleteTemplatesByName,
   listTemplates,
+  previewTemplateDeletionByName,
+  type AffectedProgramCell,
+  type TemplateDeletionRow,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { listTemplateGroupsByName } from '@/src/domain/training/templateListGroups';
+import { getLocale, t as tt } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface Props {
@@ -95,6 +106,55 @@ export function TemplateListSection({
     router.push(`/template/${row.id}`);
   };
 
+  const onDeleteAllSameName = useCallback(
+    async (row: TemplateSummary) => {
+      if (busy) return;
+      setBusy(true);
+      let preview;
+      try {
+        preview = await previewTemplateDeletionByName(db, row.name);
+      } catch (e) {
+        setBusy(false);
+        Alert.alert(
+          tt('alert', 'deleteFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
+        return;
+      }
+      setBusy(false);
+      if (preview.templates.length === 0) {
+        // Shouldn't happen — the row was visible — but guard anyway.
+        return;
+      }
+      Alert.alert(
+        tt('alert', 'deleteAllSameNameTemplatesQ'),
+        tBatchDeleteBody(row.name, preview.templates, preview.affectedCells),
+        [
+          { text: tt('common', 'cancel'), style: 'cancel' },
+          {
+            text: tt('common', 'delete'),
+            style: 'destructive',
+            onPress: async () => {
+              setBusy(true);
+              try {
+                await executeDeleteTemplatesByName(db, row.name);
+                await load();
+              } catch (e) {
+                Alert.alert(
+                  tt('alert', 'deleteFailed'),
+                  e instanceof Error ? e.message : String(e),
+                );
+              } finally {
+                setBusy(false);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [busy, db, load],
+  );
+
   return (
     <View style={styles.section}>
       <View style={styles.header}>
@@ -121,17 +181,29 @@ export function TemplateListSection({
       ) : (
         <View style={styles.list}>
           {rows.map((row) => (
-            <Pressable
-              key={row.id}
-              accessibilityRole="button"
-              accessibilityLabel={`使用模板 ${row.name}`}
-              onPress={() => onRowPress(row)}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-              <Text style={styles.rowName}>{row.name}</Text>
-              <Text style={styles.rowDetails}>
-                {row.exerciseCount} 個動作 · 編輯於 {formatTimestamp(row.updated_at)}
-              </Text>
-            </Pressable>
+            <View key={row.id} style={styles.rowFrame}>
+              <SwipeableSetRow
+                swipeLeftActions={[
+                  {
+                    key: 'delete-all-same-name',
+                    label: tt('button', 'deleteAllSameName'),
+                    color: tokens.action.destructive,
+                    onPress: () => onDeleteAllSameName(row),
+                  },
+                ]}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`使用模板 ${row.name}`}
+                  onPress={() => onRowPress(row)}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+                  <Text style={styles.rowName}>{row.name}</Text>
+                  <Text style={styles.rowDetails}>
+                    {row.exerciseCount} 個動作 · 編輯於 {formatTimestamp(row.updated_at)}
+                  </Text>
+                </Pressable>
+              </SwipeableSetRow>
+            </View>
           ))}
         </View>
       )}
@@ -141,6 +213,55 @@ export function TemplateListSection({
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();
+}
+
+/**
+ * Alert body for the batch "delete all same-name" flow. Lists every
+ * (program · sub_tag) variant about to disappear, then — if any
+ * program_cell currently schedules one of them — adds the rest-day
+ * impact summary aggregated by program name.
+ */
+function tBatchDeleteBody(
+  name: string,
+  templates: TemplateDeletionRow[],
+  affectedCells: AffectedProgramCell[],
+): string {
+  const en = getLocale() === 'en';
+  const tripleLines = templates
+    .map((t) => formatTripleLine(t, en))
+    .join('\n');
+  const header = en
+    ? `${templates.length} template${templates.length > 1 ? 's' : ''} named "${name}" will be permanently deleted. This cannot be undone.\n\nVariants:\n${tripleLines}`
+    : `將永久刪除 ${templates.length} 個名為「${name}」的模板。此操作無法復原。\n\n變體：\n${tripleLines}`;
+  if (affectedCells.length === 0) {
+    return header;
+  }
+  return `${header}\n\n${formatCellsBlurb(affectedCells, en)}`;
+}
+
+function formatTripleLine(t: TemplateDeletionRow, en: boolean): string {
+  const programLabel = t.program_name ?? (en ? 'default' : '通用');
+  const intensityLabel = t.sub_tag ?? (en ? '(no intensity)' : '無強度');
+  return en
+    ? `• ${programLabel} · ${intensityLabel}`
+    : `• ${programLabel}（${intensityLabel}）`;
+}
+
+function formatCellsBlurb(cells: AffectedProgramCell[], en: boolean): string {
+  const byProgram = cells.reduce<Record<string, number>>((acc, c) => {
+    acc[c.program_name] = (acc[c.program_name] ?? 0) + 1;
+    return acc;
+  }, {});
+  const lines = Object.entries(byProgram)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, n]) =>
+      en ? `• ${name} (${n} cell${n > 1 ? 's' : ''})` : `• ${name}（${n} 個格子）`,
+    )
+    .join('\n');
+  const total = cells.length;
+  return en
+    ? `⚠ ${total} program-schedule cell${total > 1 ? 's' : ''} will revert to a rest day:\n${lines}`
+    : `⚠ ${total} 個程式課表格子將變為休息日：\n${lines}`;
 }
 
 function makeStyles(tokens: ThemeTokens) {
@@ -164,6 +285,10 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '600',
     },
     list: { gap: 8 },
+    rowFrame: {
+      borderRadius: 10,
+      overflow: 'hidden',
+    },
     emptyBox: {
       padding: 16,
       borderRadius: 10,
@@ -178,7 +303,6 @@ function makeStyles(tokens: ThemeTokens) {
     row: {
       paddingVertical: 14,
       paddingHorizontal: 16,
-      borderRadius: 10,
       backgroundColor: tokens.bg.elevated,
       gap: 4,
     },
