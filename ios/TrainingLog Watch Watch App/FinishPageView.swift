@@ -45,14 +45,34 @@ enum FinishPhase: Equatable {
 struct FinishPageView: View {
     let snapshot: SessionSnapshot
 
+    /// 2026-05-29 deep-night smoke fix (Bug 4 wire) — invoked
+    /// SYNCHRONOUSLY at the moment user taps [完成] (before the 1.5s
+    /// spinner UX). Caller (`SetLoggerView`) wires this to
+    /// `coordinator.sendEndToiPhone(sessionId:)` so iPhone gets the
+    /// envelope immediately, not after the spinner.
+    ///
+    /// Fire-and-forget — no return value to await. Transport errors
+    /// surface on `coordinator.lastOutbound` for diagnostic only;
+    /// the UI still proceeds to the success state (because iPhone
+    /// reconciles independently via the end-session message which
+    /// queues at WC layer even on transient failure).
+    ///
+    /// Optional with `{}` default for back-compat with the Phase A
+    /// mock-only callers (e.g. #Preview macros). Pre-fix the spec
+    /// only had `onFinishComplete` + `onAbort` and the WC send was
+    /// a TODO inside `handleFinish`.
+    var onCommit: () -> Void = {}
+
     /// Called when sync succeeds (after the 0.5s ✓ display) — caller
-    /// should dismiss the finish page (TabView → selectedPage = 1 for
-    /// now; real dismiss to D8 picker lands in D7/D9 wire-in).
+    /// should dismiss the finish page. 2026-05-29 deep-night smoke fix:
+    /// SetLoggerView now wires this to `\.dismiss` (pops the
+    /// NavigationStack back to PickerRootView), replacing the previous
+    /// cosmetic-only `selectedPage = 1`.
     let onFinishComplete: () -> Void
 
     /// Called when user taps [取消] — caller should abort the session
     /// (currently: TabView → selectedPage = 1; real abort path lands
-    /// in D7/D9 wire-in, channel #11).
+    /// in D31 abort-channel grill).
     let onAbort: () -> Void
 
     @State private var phase: FinishPhase = .idle
@@ -287,24 +307,38 @@ struct FinishPageView: View {
         guard buttonsEnabled else { return }
         phase = .syncing
 
+        // 2026-05-29 deep-night smoke fix (Bug 4 wire): fire WC
+        // synchronously at tap-time. Caller (`SetLoggerView`) wires
+        // `onCommit` to `coordinator.sendEndToiPhone(sessionId:)` —
+        // fire-and-forget, transport errors surface on
+        // `coordinator.lastOutbound` for diagnostic only.
+        //
+        // Why synchronous (vs awaiting): WC `sendMessage` is async at
+        // the framework layer but the JS reply round-trip can take 5s
+        // (replyHandler timeout). Blocking the spinner UX on that
+        // round-trip would feel sluggish. Instead we fire-and-forget
+        // and rely on iPhone-side idempotency (createSession is gated
+        // by `existing == null`) to handle any retry double-trigger.
+        onCommit()
+
         Task {
-            // TODO: D7/D9 wire real end-session push (channel #11) —
-            // currently a 2s mock with 90% success / 10% fail.
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            let succeeded = (Int.random(in: 0..<10) < 9)
+            // 1.5s visual spinner — enough to feel like "syncing" without
+            // dragging on user perception. (Was 2s + 90% random success
+            // pre-fix; with real WC firing we always succeed visually
+            // since iPhone-side reconciliation is independent of the
+            // Watch UI ack.)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             await MainActor.run {
-                if succeeded {
-                    phase = .success
-                    // Hold the ✓ for 0.5s so the user sees confirmation,
-                    // then hand off to the caller for dismissal.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        onFinishComplete()
-                        // Reset to idle in case the view stays mounted
-                        // (caller may swap selectedPage without unmounting).
-                        phase = .idle
-                    }
-                } else {
-                    phase = .fail
+                phase = .success
+                // Hold the ✓ for 0.5s so the user sees confirmation,
+                // then hand off to the caller for dismissal (which now
+                // pops the NavigationStack via `\.dismiss`).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    onFinishComplete()
+                    // Reset to idle in case the view stays mounted
+                    // (defensive — `\.dismiss` should unmount, but the
+                    // SwiftUI dismiss timing isn't guaranteed-synchronous).
+                    phase = .idle
                 }
             }
         }

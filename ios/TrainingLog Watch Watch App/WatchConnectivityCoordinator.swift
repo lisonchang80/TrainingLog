@@ -245,6 +245,24 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// `created` vs `conflict`) lands via `didReceiveUserInfo` and
     /// surfaces in `@Published lastReconcile`. D31 wires conflict UI;
     /// D29/D30 just log + diagnostic.
+
+    // ---------------------------------------------------------------
+    // 2026-05-29 deep-night smoke fix (Bug 3) — iPhone-initiated end
+    // notify channel for SetLoggerView auto-dismiss.
+    //
+    // didReceiveMessage(end-session, side='iphone') already calls
+    // `sessionController.end()` (HK teardown). We additionally publish
+    // the sessionId here so SwiftUI views can subscribe + dismiss UI:
+    //
+    //   SetLoggerView .onChange(of: coordinator.lastIncomingEnd) {
+    //       if $0 == snapshot.sessionId { dismiss() }
+    //   }
+    //
+    // Independent of `lastInbound` (diagnostic string) — type-safe
+    // String? so subscribers can pattern-match.
+    // ---------------------------------------------------------------
+    @Published private(set) var lastIncomingEnd: String?
+
     func sendStartFromWatchTUI(
         sessionId: String,
         templateId: String?,
@@ -528,6 +546,11 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             // this call is a no-op and we just reply ack so iPhone's
             // 5s reconcile sees the ack.
             await self.sessionController.end()
+            // 2026-05-29 deep-night smoke fix (Bug 3): publish the
+            // sessionId so SetLoggerView can subscribe + auto-dismiss.
+            // Set BEFORE replyHandler so iPhone gets ack with UI already
+            // teared down (no double-trigger surface).
+            self.lastIncomingEnd = sessionId
             replyHandler(["ok": true])
         }
     }

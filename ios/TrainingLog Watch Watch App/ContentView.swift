@@ -47,13 +47,17 @@ struct ContentView: View {
 
     var body: some View {
         PickerRootView(viewModel: pickerVM)
-            // Phase 3 will inject the lifecycle objects so the Set
-            // logger view can call `session.start()` / `.end()` and
-            // `watchConn.sendStartFromWatch(...)` once a 3-tuple
-            // selection lands:
-            //   .environmentObject(healthKit)
-            //   .environmentObject(session)
-            //   .environmentObject(watchConn)
+            // 2026-05-29 deep-night smoke fix (Bug 3 + Bug 4 wire):
+            // SetLoggerView + FinishPageView need direct access to the
+            // coordinator so the [完成] button can fire
+            // `sendEndToiPhone(...)` and SetLoggerView can subscribe to
+            // `$lastIncomingEnd` to auto-dismiss when iPhone initiates
+            // end-session. Inject via .environmentObject so descendants
+            // declare `@EnvironmentObject var coordinator` without
+            // threading constructors.
+            .environmentObject(watchConn)
+            // Phase 3 will also wire healthKit + session — deferred
+            // until D11 set logger needs HK lifecycle hooks.
     }
 }
 

@@ -48,6 +48,22 @@ struct SetLoggerView: View {
     /// Spec: ADR-0019 § D16 View 1 (line 2238-2252).
     @State private var showSettings: Bool = false
 
+    /// 2026-05-29 deep-night smoke fix (Bug 3 + Bug 4 wire):
+    ///   - Bug 3 — subscribe `coordinator.$lastIncomingEnd`; when iPhone
+    ///     initiates session end the coordinator publishes the sessionId
+    ///     and we pop the nav stack via `\.dismiss` if it matches ours.
+    ///   - Bug 4 — FinishPageView's [完成] button now fires
+    ///     `coordinator.sendEndToiPhone(sessionId:)` via the `onCommit`
+    ///     closure injected below, then the success branch dismisses.
+    /// Injected by ContentView via `.environmentObject(watchConn)`.
+    @EnvironmentObject private var coordinator: WatchConnectivityCoordinator
+
+    /// Pops the NavigationStack back to PickerRootView. Used by both
+    /// the iPhone-led end auto-dismiss path AND the Watch-led [完成]
+    /// success path so SetLoggerView always unmounts cleanly after the
+    /// session lifecycle terminates.
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         // NEW-Q50 D29 smoke fix (2026-05-29): removed inner
         // `NavigationStack { ... }` wrapper. SetLoggerView is mounted as
@@ -74,12 +90,31 @@ struct SetLoggerView: View {
                 TabView(selection: $selectedPage) {
                     // Page 0 — 完成頁 (left). Reached via finger right-swipe.
                     // Per ADR-0019 § Slice 13d D14 spec (line 1809-1962).
-                    // Real WC end-session push + abort path deferred to
-                    // D7/D9 wire-in (channel #11); for now both callbacks
-                    // pop back to the session card list (page 1).
+                    //
+                    // 2026-05-29 deep-night smoke fix (Bug 4 wire):
+                    //   - `onCommit` — fires the moment user taps [完成],
+                    //     synchronously hands off to coordinator.
+                    //     `sendEndToiPhone(sessionId:)`. Fire-and-forget
+                    //     (no await) — errors surface via
+                    //     coordinator.lastOutbound for diagnostic only.
+                    //   - `onFinishComplete` — invoked AFTER the 1.5s
+                    //     spinner UX finishes; dismisses the nav stack so
+                    //     user lands back on PickerRootView (parity with
+                    //     iPhone-led end which uses the same `dismiss()`).
+                    //   - `onAbort` — currently still cosmetic (pops back
+                    //     to session card list page 1, no WC). Real abort
+                    //     (DELETE session row + WC) ships with D31 abort
+                    //     channel grill.
                     FinishPageView(
                         snapshot: snapshotForRender,
-                        onFinishComplete: { selectedPage = 1 },
+                        onCommit: {
+                            let sid = snapshotForRender.sessionId
+                            guard !sid.isEmpty else { return }
+                            Task { await coordinator.sendEndToiPhone(sessionId: sid) }
+                        },
+                        onFinishComplete: {
+                            dismiss()
+                        },
                         onAbort: { selectedPage = 1 }
                     )
                     .tag(0)
@@ -121,6 +156,19 @@ struct SetLoggerView: View {
             }
             .sheet(isPresented: $showSettings) {
                 WatchSettingsView()
+            }
+            // 2026-05-29 deep-night smoke fix (Bug 3):
+            // iPhone-initiated end-session arrives at the coordinator via
+            // `didReceiveMessage`; coordinator publishes the sessionId on
+            // `$lastIncomingEnd`. When the published id matches OUR
+            // session, dismiss the nav stack so user pops back to
+            // PickerRootView. Other sessions (e.g. stale broadcast for a
+            // previous session) are ignored — guards against accidental
+            // pops if the coordinator outlives the SetLogger mount.
+            .onChange(of: coordinator.lastIncomingEnd) { _, newSid in
+                guard let sid = newSid,
+                      sid == snapshotForRender.sessionId else { return }
+                dismiss()
             }
     }
 
