@@ -9,7 +9,7 @@
  *   2. Impure helpers (loadActiveSessionSummary, loadTemplatesFullTree,
  *      loadProgramsPrefetchList, loadTodayPlanned, fetchSessionSnapshot)
  *      against an in-memory BetterSqliteDatabase with migrate() applied
- *      — same pattern as `tests/database/setIsWatchTracked.test.ts`.
+ *      — same pattern as `tests/db/setIsWatchTracked.test.ts`.
  *
  *   3. Orchestrators (onHandshakeRequest, onStartFromWatch) — exercise
  *      the new NEW-Q50 reconcile contract end-to-end without going
