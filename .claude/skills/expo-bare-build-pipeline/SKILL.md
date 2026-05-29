@@ -165,6 +165,42 @@ LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
 
 從 iPhone 上 reload：搖晃手機 → "Reload" or 殺 app 重開。
 
+**Gotcha #4.5 — Metro 必須在 native build 對應的 repo 路徑跑** (validated 2026-05-29 / PR #51 smoke)
+
+**症狀**: 上面 npx expo start 跑了、Metro return 200、app launch 卻紅屏 `Unable to resolve module ./TrainingLog/node_modules/expo-router/entry from /Users/.../<worktree>/.`、然後 list 一串 .ios.ts .ts .tsx .native.tsx ... 都找不到。
+
+**根因**: Bare workflow 的 native build (xcodebuild 出來那次)、把當時的 project root path 烤進 bundle metadata。當 Metro 換到別的 worktree 跑時、`./TrainingLog/node_modules/expo-router/entry` 這個相對 import 解析失敗（新 worktree root 底下沒有 `TrainingLog/` 子目錄）。
+
+**踩雷情境**: 想在 sim 上 smoke 一個 fix branch、開了新 worktree、`cd worktree && npx expo start --dev-client`、relaunch app → 紅屏。
+
+**修法**: **不要從別 worktree 跑 Metro**。改走「cherry-pick fix 到主 repo 的當前 branch → 從主 repo 跑 Metro」路徑：
+
+```bash
+# 1. 主 repo 處於某個 branch（slice/13d-...）、有 uncommitted 工作
+cd /Users/hao800922/code/TrainingLog
+git stash push -u -m "smoke-stash"        # 暫存當前工作
+git cherry-pick <fix-commit-SHA>          # 把 fix 套上來
+# 解 import conflict (常見)
+git add . && git cherry-pick --continue
+
+# 2. Metro 從主 repo 跑（路徑跟 native build 對齊）
+nohup npx expo start --dev-client > /tmp/metro.log 2>&1 &
+disown
+
+# 3. 等 200 → relaunch app → smoke
+until curl -s http://localhost:8081/status | grep -q "running"; do sleep 2; done
+xcrun simctl terminate <UDID> com.lisonchang.TrainingLog
+xcrun simctl launch <UDID> com.lisonchang.TrainingLog
+
+# 4. Smoke 完還原
+git reset --hard HEAD~1                   # 移除 cherry-pick
+git stash pop                              # 還原原 working state
+```
+
+**Bare workflow `bundleURL()` 的 `.expo/.virtual-metro-entry` virtual root 機制**: AppDelegate.swift 用 `RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry")`、這個 virtual entry 在 build 時就決定了相對路徑前綴、所以 Metro 換 cwd 不會修補它。
+
+**對照**: 如果 build 本來就是從那個 worktree 跑 `npx expo run:ios` 出來、那從同 worktree 跑 Metro 就 OK（Gotcha #4 的原始情境）。Gotcha #4.5 專指「build 跟 Metro worktree 不同」的 mismatch。
+
 ### Gotcha #5 — Build log warning "Pointer is missing a nullability type specifier"
 
 **症狀**: Xcode Issue Navigator 顯示 1000-2000 warnings、看起來像大爆炸
