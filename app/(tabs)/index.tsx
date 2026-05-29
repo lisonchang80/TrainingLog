@@ -501,9 +501,39 @@ export default function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // NEW-Q50 D9 Wave 2 wire-in (2026-05-29 night smoke) — TEMPORARY v1
+    // compat: Watch Swift `WatchConnectivityCoordinator.sendStartFromWatch`
+    // still uses `session.sendMessage(_:replyHandler:)` (D8 P3 path);
+    // until D29-D33 Swift lands the `transferUserInfo` + reverse-TUI
+    // listener, the TUI listener above never fires for real Watch
+    // sends. This adjacent `addMessageListener` bridges the gap by
+    // acking the StartFromWatchReconcile directly via the sendMessage
+    // replyHandler (no `start-reconcile` envelope wrap — Watch picks it
+    // up as the immediate sendMessage reply).
+    //
+    // `onStartFromWatch` is idempotent (INSERT OR IGNORE per Q5
+    // first-write-wins keyed on sessionId), so dual-path coexistence
+    // is safe — if Watch ever fires both (e.g. mid-transition), the
+    // second hit becomes a no-op on the DB side.
+    //
+    // REMOVE THIS BLOCK once Watch Swift `sendStartFromWatch` swaps to
+    // `session.transferUserInfo` + the reverse-TUI listener (D30) is
+    // active. Tracked in MEMORY backlog (D29-D33).
+    const unsubStartFromWatchV1 = addMessageListener(
+      'start-from-watch',
+      async (env, reply) => {
+        await onStartFromWatch(db, env, (response) => {
+          if (reply) {
+            reply(response as unknown as Record<string, unknown>);
+          }
+        });
+        refreshRef.current?.();
+      },
+    );
     return () => {
       unsubHandshake();
       unsubStartFromWatch();
+      unsubStartFromWatchV1();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.
