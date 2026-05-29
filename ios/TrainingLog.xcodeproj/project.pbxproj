@@ -197,6 +197,7 @@
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				9A4DD396F7E5DCF52278D83E /* [CP] Embed Pods Frameworks */,
 				5F294AB12FC6CA0100E7C5CD /* Embed Watch Content */,
+				CBB3274E3C7BF6402C2C5E8B /* Bump Host CFBundleVersion */,
 			);
 			buildRules = (
 			);
@@ -288,6 +289,26 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		CBB3274E3C7BF6402C2C5E8B /* Bump Host CFBundleVersion */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../scripts/bump-cfbundle-version.sh",
+			);
+			name = "Bump Host CFBundleVersion";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Auto-bump the built iPhone HOST app CFBundleVersion so each App Store\n# Connect / TestFlight upload is strictly higher than the previous one\n# (ASC rejects equal-or-lower build numbers with ITMS-90478). Writes the\n# BUILT product plist only — the source Info.plist + CURRENT_PROJECT_VERSION\n# stay at 1, so no git churn. NO outputPath (would collide with Xcode's\n# built-in Info.plist processing: \"Multiple commands produce Info.plist\").\n\"$SRCROOT/../scripts/bump-cfbundle-version.sh\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\" \"\" host\n";
+		};
 		C67FE4E7B68161E6F7F34FCB /* Bump Watch CFBundleVersion */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -469,6 +490,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XQTU89U2J2;
 				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
 					"FB_SONARKIT_ENABLED=1",
@@ -505,6 +527,7 @@
 				CODE_SIGN_ENTITLEMENTS = TrainingLog/TrainingLog.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XQTU89U2J2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = TrainingLog/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (

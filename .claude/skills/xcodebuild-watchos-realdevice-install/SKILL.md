@@ -107,18 +107,47 @@ Cost: each Trap 3 cycle = ~3-5 min user time (delete + delete + wait + install +
 
 **Mitigation (IMPLEMENTED 2026-05-29, slice 13d `slice/13d-cfbundle-autobump`)**: a Run Script Build Phase named **"Bump Watch CFBundleVersion"** now runs on the Watch target every build (`alwaysOutOfDate = 1`), after the Resources phase. It calls `scripts/bump-watch-build-number.sh "$TARGET_BUILD_DIR/$INFOPLIST_PATH"`, which sets `CFBundleVersion` in the **built product** Info.plist to the current Unix timestamp (monotonic). Source `Info.plist` + `CURRENT_PROJECT_VERSION` stay at `1` → **zero git churn**. Each build → higher version → Watch sync auto-pushes the fresh bundle → **Trap 3 nuclear-delete dance no longer needed** for routine Swift iteration.
 
-- Script: `scripts/bump-watch-build-number.sh` (standalone, testable; takes `<plist-path> [value]`, defaults to `date +%s`, preserves binary/xml plist format).
+- Script: `scripts/bump-cfbundle-version.sh` (target-agnostic, standalone, testable; takes `<plist-path> [value] [label]`, defaults to `date +%s`, preserves binary/xml plist format). `scripts/bump-watch-build-number.sh` is now a thin backward-compat shim delegating to it (so the Watch phase wiring is unchanged).
 - pbxproj also flips `ENABLE_USER_SCRIPT_SANDBOXING` `YES→NO` on both Watch configs — sandboxing denied the phase's read/write of the product plist, and declaring the plist as an `outputPath` collides with Xcode's built-in Info.plist processing ("Multiple commands produce Info.plist"). Disabling matches the main TrainingLog target (already unsandboxed for RN scripts).
 - Verified via `xcodebuild` (Xcode 26.4.1 / watchOS 26.4): two consecutive Watch builds → `CFBundleVersion 1 → 178007xxxx → 178007yyyy` (strictly increasing), `BUILD SUCCEEDED`, plist stays binary, `CFBundleShortVersionString` (marketing 1.0) untouched.
 
-**Standalone test recipe** (never mutate the real source plist):
+**HOST bump (IMPLEMENTED 2026-05-30, slice 13d `slice/13d-host-cfbundle-bump`)** — solves the *real TestFlight blocker*, NOT the Watch-sync dev loop:
+
+The iPhone HOST app (`TrainingLog` target) `CFBundleVersion` was frozen at `1`. App Store Connect requires each upload's HOST build number to be strictly higher than the previous → the 2nd TestFlight upload was rejected with `ITMS-90478`. The Watch-only bump above does NOT cover the host, so it never fixed this.
+
+A second Run Script Build Phase named **"Bump Host CFBundleVersion"** now runs on the HOST `TrainingLog` target every build (`alwaysOutOfDate = 1`), appended LAST (after "Embed Watch Content"). It calls `scripts/bump-cfbundle-version.sh "$TARGET_BUILD_DIR/$INFOPLIST_PATH" "" host`, stamping the built HOST product `Info.plist` `CFBundleVersion` with the current Unix timestamp. Mirrors the Watch phase exactly: **NO `outputPath`** (avoids "Multiple commands produce Info.plist"), writes the BUILT product only → source `ios/TrainingLog/Info.plist` + `CURRENT_PROJECT_VERSION` stay at `1`, **zero git churn**. `ENABLE_USER_SCRIPT_SANDBOXING = NO` added explicitly to both HOST configs (Debug + Release) so the phase can write the product plist (was relying on an unspecified inherited default; now explicit, matching Watch).
+
+- One shared script covers BOTH targets (P3 answer: yes — the logic is plist-path-agnostic; only the cosmetic echo `label` differs).
+- Verified standalone + via env-simulated build-phase invocation (real `$SRCROOT`/`$TARGET_BUILD_DIR`/`$INFOPLIST_PATH`, binary product plist): `CFBundleVersion 1 → 1780073277`, binary format + marketing `1.0.0` preserved, monotonic across consecutive runs. `plutil -lint project.pbxproj` → OK.
+- **NOT yet confirmed by a real archive** (full RN/Expo iphoneos build needs `pod install` + Metro/Hermes + ~10 min; skipped overnight in a Pods-less worktree per env constraints). Morning archive-verify steps below.
+
+**Morning HOST archive-verify (do before next TestFlight upload)**:
 ```bash
-cp "ios/TrainingLog-Watch-Watch-App-Info.plist" /tmp/copy.plist
-scripts/bump-watch-build-number.sh /tmp/copy.plist
+cd /Users/hao800922/code/TrainingLog/ios   # or merged worktree
+pod install                                  # Pods are per-checkout
+xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
+  -configuration Release -sdk iphoneos -allowProvisioningUpdates \
+  -archivePath /tmp/TL.xcarchive archive 2>&1 | tee /tmp/host-archive.log
+# 1. Confirm the phase ran:
+grep -i "host: CFBundleVersion" /tmp/host-archive.log     # expect: 1 -> 17800xxxxx
+# 2. Confirm the archived HOST app plist carries the bumped value:
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  "/tmp/TL.xcarchive/Products/Applications/TrainingLog.app/Info.plist"
+# 3. (optional) confirm embedded Watch also bumped:
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  "/tmp/TL.xcarchive/Products/Applications/TrainingLog.app/Watch/TrainingLog Watch Watch App.app/Info.plist"
+# Then export IPA + upload — ASC should accept the strictly-higher host build.
+```
+Run two archives back-to-back to prove host monotonicity (V2 > V1) before trusting the ASC re-upload.
+
+**Standalone test recipe** (never mutate the real source plist — works for either target's plist):
+```bash
+cp "ios/TrainingLog/Info.plist" /tmp/copy.plist            # host (or the Watch plist)
+scripts/bump-cfbundle-version.sh /tmp/copy.plist "" host   # or call bump-watch-build-number.sh
 /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" /tmp/copy.plist
 ```
 
-**Caveat**: the bump lands in the *Debug/Release built product*, NOT in an archive's exported IPA upload sequence — for App Store / TestFlight you still manage `CURRENT_PROJECT_VERSION` / `MARKETING_VERSION` the normal way (a timestamp `CFBundleVersion` is fine for dev/wrist-smoke but App Store Connect wants a build number higher than the previous *uploaded* one, which timestamps satisfy too). This mitigation is aimed at the dev iteration loop.
+**Caveat**: the bump lands in the built product `Info.plist` *during the build/archive* — for the HOST that DOES flow into the exported IPA, which is exactly what satisfies App Store Connect's strictly-increasing build-number rule (`ITMS-90478`). `MARKETING_VERSION` (`CFBundleShortVersionString`) still managed the normal way — only `CFBundleVersion` is auto-stamped. The Watch payoff is the dev-iteration sync loop; the HOST payoff is unblocking repeat TestFlight uploads.
 
 ### Trap 4 — Xcode 16+ debug builds split binary into stub + `.debug.dylib`
 
