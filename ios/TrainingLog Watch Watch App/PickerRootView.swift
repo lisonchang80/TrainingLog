@@ -305,11 +305,40 @@ struct PickerSetLoggerPlaceholderView: View {
     /// Optional for back-compat with the 3-arg init below.
     var onSessionEnd: (() -> Void)? = nil
 
+    /// 2026-05-29 deep-night B1 diag (TEMPORARY):
+    /// Subscribe to coordinator so we can render its `lastOutbound`
+    /// status on the syncing view. User can immediately see whether
+    /// Watch fired sendMessage / TUI / skipped — differentiates
+    /// (A) Watch never called sendStartFromWatchTUI
+    /// (B) Watch called but early-returned (skip: not activated /
+    ///     skip: empty sessionId)
+    /// (C) Watch fired sent OK but iOS WC bridge didn't deliver
+    /// REMOVE after B1 diagnosed.
+    @EnvironmentObject private var coordinator: WatchConnectivityCoordinator
+
     var body: some View {
-        contentView
-            .task {
-                await vm.startFromWatch(selection: selection)
-            }
+        // 2026-05-29 B1 diag (TEMPORARY): wrap contentView with a top
+        // overlay showing coordinator.lastOutbound. Because
+        // startFromWatch is non-suspending (no awaits) the syncingView
+        // never actually renders — flip happens within one call frame.
+        // So we render the diag at the always-visible parent layer.
+        ZStack(alignment: .top) {
+            contentView
+            // Only show DBG overlay until user dismisses to picker
+            // (parent is always mounted while SetLoggerView is up).
+            Text("DBG: \(coordinator.lastOutbound ?? "no outbound yet")")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(4)
+                .padding(.top, 28)
+        }
+        .task {
+            await vm.startFromWatch(selection: selection)
+        }
     }
 
     @ViewBuilder
@@ -354,6 +383,14 @@ struct PickerSetLoggerPlaceholderView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 12)
+            // 2026-05-29 B1 diag (TEMPORARY): show coordinator's
+            // outbound status so user knows whether Watch fired
+            // sendMessage / TUI / skipped. REMOVE after B1 diagnosed.
+            Text("DBG: \(coordinator.lastOutbound ?? "no outbound yet")")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
