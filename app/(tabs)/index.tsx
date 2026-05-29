@@ -478,10 +478,24 @@ export default function TodayScreen() {
     });
     const unsubStartFromWatch = addMessageListener(
       'start-from-watch',
-      async (env, reply) => {
-        await onStartFromWatch(db, env, randomUUID, reply);
-        // Watch just created a session — refresh iPhone state so the UI
-        // flips into in-session mode. Read latest closure via ref.
+      async (env) => {
+        // NEW-Q50 D28 (signature shim) — `onStartFromWatch` is now
+        // `(db, env, sendReverseTUI)`; sessionId comes from
+        // `env.payload.sessionId` (Watch-generated UUID). Full
+        // reverse-TUI wire-in lands with D9 Wave 2 (this listener
+        // still rides on sendMessage / addMessageListener pending the
+        // TUI transport rewrite in Agent B's branch). Until then we
+        // pass a no-op reverse-TUI sender — the orchestrator still
+        // performs the DB INSERT OR IGNORE + flips is_watch_tracked,
+        // which is what the iPhone UI cares about.
+        // TODO(D9-wave2): swap `addMessageListener` → `addUserInfoListener`
+        // and wire the reverse-TUI sender to `session.transferUserInfo`.
+        await onStartFromWatch(db, env, () => {
+          /* no-op: reverse-TUI deferred to D9 Wave 2 wire-in */
+        });
+        // Watch just created (or adopted) a session — refresh iPhone
+        // state so the UI flips into in-session mode. Read latest
+        // closure via ref.
         refreshRef.current?.();
       },
     );

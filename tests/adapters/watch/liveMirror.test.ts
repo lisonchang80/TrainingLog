@@ -294,6 +294,9 @@ describe('liveMirrorReducer — Live Activity inbound message reducer', () => {
           templateId: null,
           programCycleId: null,
           intensityId: null,
+          // NEW-Q50 D28 — sessionId is now required on the payload
+          // (Watch-supplied UUID); irrelevant to this off-topic test.
+          sessionId: '',
         }),
         makeEnvelope('start-from-iphone', {
           sessionId: 'sess-1',
