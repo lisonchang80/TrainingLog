@@ -38,8 +38,11 @@ export type {
   SettingsSyncPayload,
 } from './payloadSchema';
 
-export { createLwwMap, clearLwwMap, admitDiff } from './setModifiedReducer';
-export type { LwwMap, AdmitDiffResult, DiffField } from './setModifiedReducer';
+// NEW-Q50 (2026-05-29) — removed by D19-C: per-field LWW (`admitDiff` /
+// `createLwwMap` / `clearLwwMap` / `LwwMap` / `AdmitDiffResult` /
+// `DiffField`) deleted along with `setModifiedReducer.ts`. iPhone-side
+// reconcile is now snapshot-replace via `replaceLiveMirror`; LWW
+// concept moved to Watch Swift in-memory state (wave D29).
 
 export {
   buildStage1Reply,
