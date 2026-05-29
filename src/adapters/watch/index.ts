@@ -48,14 +48,19 @@ export {
   // D9 wire-in — impure DB helpers + orchestrators
   fetchSessionSnapshot,
   loadActiveSessionSummary,
-  loadTemplatePrefetchList,
+  // NEW-Q50 D28 — fat-tree replacement for the pre-Q50 thin prefetch.
+  loadTemplatesFullTree, // changed by D28-A (was loadTemplatePrefetchList)
   onHandshakeRequest,
   onStartFromWatch,
 } from './handshake';
 export type {
   Stage1ReplyPayload,
+  Stage1ReplyPrefetch,
   Stage1SessionSummary,
-  Stage1TemplateSummary,
+  // NEW-Q50 D28 — fat-tree types (Stage1TemplateSummary removed by D28-A).
+  Stage1TemplateExercise,
+  Stage1TemplateFullSummary,
+  StartFromWatchReconcile,
   SessionSnapshot,
   SessionSnapshotExercise,
   SessionSnapshotSet,

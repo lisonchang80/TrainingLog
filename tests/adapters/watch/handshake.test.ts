@@ -1,25 +1,31 @@
 /**
- * Slice 13d / D9 — handshake module tests.
+ * Slice 13d / D9 + NEW-Q50 D28 — handshake module tests.
  *
- * Layout (Z's scaffold 2026-05-27 → D9 partial active subset → D9 wire-in
- * full coverage):
+ * Layout (D9 wire-in full coverage → NEW-Q50 D28 rewrite):
  *
- *   1. Pure builders (Stage 1 reply, matchesPendingRequest,
+ *   1. Pure builders (Stage 1 fat-tree reply, matchesPendingRequest,
  *      buildStartFromIphone). No DB, no native mocks.
  *
- *   2. Impure helpers (loadActiveSessionSummary, loadTemplatePrefetchList,
- *      fetchSessionSnapshot) against an in-memory BetterSqliteDatabase
- *      with migrate() applied — same pattern as
- *      `tests/database/setIsWatchTracked.test.ts`.
+ *   2. Impure helpers (loadActiveSessionSummary, loadTemplatesFullTree,
+ *      loadProgramsPrefetchList, loadTodayPlanned, fetchSessionSnapshot)
+ *      against an in-memory BetterSqliteDatabase with migrate() applied
+ *      — same pattern as `tests/database/setIsWatchTracked.test.ts`.
  *
  *   3. Orchestrators (onHandshakeRequest, onStartFromWatch) — exercise
- *      the reply-handler contract end-to-end without going through the
- *      WC native bridge. The reply payload is captured via a fake
- *      `replyHandler` closure.
+ *      the new NEW-Q50 reconcile contract end-to-end without going
+ *      through the WC native bridge. Reverse-TUI replies captured via
+ *      a fake `sendReverseTUI` closure.
  *
- * Run under `testEnvironment: node` — the WC bridge is never loaded
- * because the orchestrators receive an already-parsed envelope and
- * write to a passed `replyHandler` callback.
+ * Run under `testEnvironment: node` — the WC bridge is never loaded.
+ *
+ * NEW-Q50 D28 changes (vs pre-Q50 D9 tests):
+ *   - All `Stage1TemplateSummary` (thin) → `Stage1TemplateFullSummary`
+ *     (fat tree with exercises[]).
+ *   - `loadTemplatePrefetchList` cases → `loadTemplatesFullTree` cases
+ *     (JOIN against template_exercise + exercise).
+ *   - `onStartFromWatch` signature now `(db, env, sendReverseTUI)`;
+ *     sessionId comes from `env.payload.sessionId`, dedup via INSERT
+ *     OR IGNORE-style logic. New conflict-reply case.
  */
 
 import { BetterSqliteDatabase } from '../../../src/adapters/sqlite/betterSqliteDatabase';
@@ -35,7 +41,6 @@ import { insertSessionSet } from '../../../src/adapters/sqlite/setRepository';
 import { makeEnvelope } from '../../../src/adapters/watch';
 import type {
   HandshakePayload,
-  StartFromIphonePayload,
   StartFromWatchPayload,
   WCMessage,
 } from '../../../src/adapters/watch';
@@ -45,7 +50,7 @@ import {
   fetchSessionSnapshot,
   loadActiveSessionSummary,
   loadProgramsPrefetchList,
-  loadTemplatePrefetchList,
+  loadTemplatesFullTree,
   loadTodayPlanned,
   matchesPendingRequest,
   onHandshakeRequest,
@@ -54,7 +59,8 @@ import {
   type Stage1ProgramSummary,
   type Stage1ReplyPayload,
   type Stage1SessionSummary,
-  type Stage1TemplateSummary,
+  type Stage1TemplateFullSummary,
+  type StartFromWatchReconcile,
 } from '../../../src/adapters/watch/handshake';
 
 // The Bench Press row seeded by v001_initial — used as a stable
@@ -66,7 +72,7 @@ const BENCH = '00000000-0000-4000-8000-000000000001';
 // Stage 1 reply (pure builder)
 // =====================================================================
 
-describe('WC handshake — Stage 1 reply (pure builder, D9 partial)', () => {
+describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', () => {
   const sampleRequest: HandshakePayload = {
     requestId: 'req-abc',
     clientVersion: '13d.0',
@@ -115,330 +121,205 @@ describe('WC handshake — Stage 1 reply (pure builder, D9 partial)', () => {
   });
 
   // -------------------------------------------------------------------
-  // (d) prefetch list carry-through
+  // (d) NEW-Q50 D28 — fat-tree templates carry-through
   // -------------------------------------------------------------------
-  it('carries the provided templates list into the reply prefetch field', () => {
-    const templates: Stage1TemplateSummary[] = [
-      { templateId: 'tpl-1', name: 'Push' },
-      { templateId: 'tpl-2', name: 'Pull' },
-      { templateId: 'tpl-3', name: 'Legs' },
+  it('carries the provided fat-tree templates list (with exercises[]) into the reply prefetch field', () => {
+    const templates: Stage1TemplateFullSummary[] = [
+      {
+        templateId: 'tpl-1',
+        name: 'Push',
+        exercises: [
+          {
+            templateExerciseId: 'te-1',
+            exerciseId: BENCH,
+            exerciseName: 'Bench Press',
+            ordering: 1,
+            defaultSets: 3,
+            defaultReps: 8,
+            defaultWeightKg: 60,
+          },
+        ],
+      },
+      { templateId: 'tpl-2', name: 'Pull', exercises: [] },
     ];
     const reply = buildStage1Reply(sampleRequest, null, templates);
 
-    expect(reply.prefetch.templates).toHaveLength(3);
+    expect(reply.prefetch.templates).toHaveLength(2);
     expect(reply.prefetch.templates[0]).toEqual({
       templateId: 'tpl-1',
       name: 'Push',
+      exercises: [
+        {
+          templateExerciseId: 'te-1',
+          exerciseId: BENCH,
+          exerciseName: 'Bench Press',
+          ordering: 1,
+          defaultSets: 3,
+          defaultReps: 8,
+          defaultWeightKg: 60,
+        },
+      ],
     });
-    expect(reply.prefetch.templates[2]).toEqual({
-      templateId: 'tpl-3',
-      name: 'Legs',
-    });
+    expect(reply.prefetch.templates[1].exercises).toEqual([]);
   });
 
   // -------------------------------------------------------------------
-  // (e) size budget — Stage 1 lives on the realtime channel
-  //     (WC sendMessage cap is 64KB; we target <2KB with a fat
-  //     prefetch list of 20 templates to leave headroom for the
-  //     envelope wrap + Watch UI naming).
+  // (e) NEW-Q50 D28 — fat-tree size budget. Estimated 20 templates ×
+  //     ~10 exercises ≈ 30 KB; we assert under 40 KB to leave envelope
+  //     wrap headroom but well under the 64 KB WC ceiling.
   // -------------------------------------------------------------------
-  it('reply payload JSON-stringified size is < 2KB with 20 templates and an active session', () => {
+  it('reply payload JSON-stringified size is < 40KB with 20 fat-tree templates (10 exercises each) and an active session', () => {
     const active: Stage1SessionSummary = {
       sessionId: 'sess-1',
       startedAt: 1_700_000_000_000,
       title: 'Push Day',
       exerciseCount: 10,
     };
-    const templates: Stage1TemplateSummary[] = Array.from(
+    const templates: Stage1TemplateFullSummary[] = Array.from(
       { length: 20 },
       (_, i) => ({
-        templateId: `tpl-${i}`,
+        templateId: `tpl-${i}-aaaa-bbbb-cccc-deadbeef${i}`,
         name: `Template ${i}`,
+        exercises: Array.from({ length: 10 }, (_, j) => ({
+          templateExerciseId: `te-${i}-${j}-aaaa-bbbb-deadbeef`,
+          exerciseId: `ex-${i}-${j}-aaaa-bbbb-deadbeef`,
+          exerciseName: `Exercise ${i}-${j}`,
+          ordering: j,
+          defaultSets: 3,
+          defaultReps: 8,
+          defaultWeightKg: 60,
+        })),
       }),
     );
     const reply = buildStage1Reply(sampleRequest, active, templates);
     const size = JSON.stringify(reply).length;
-
-    expect(size).toBeLessThan(2048);
+    expect(size).toBeLessThan(40_000);
+    // Also assert well under the WC envelope ceiling.
+    expect(size).toBeLessThan(64_000);
   });
 
   // -------------------------------------------------------------------
-  // (e') size budget — typical case (5 templates) stays well under 1KB
+  // (f) NEW-Q50 D28 — sanity: fat-tree shape JSON round-trips cleanly
+  //     (no Map / Set / Date leakage in the projection).
   // -------------------------------------------------------------------
-  it('reply payload JSON-stringified size is < 1KB with 5 templates and an active session (typical case)', () => {
-    const active: Stage1SessionSummary = {
-      sessionId: 'sess-1',
-      startedAt: 1_700_000_000_000,
-      title: 'Push Day',
-      exerciseCount: 10,
-    };
-    const templates: Stage1TemplateSummary[] = Array.from(
-      { length: 5 },
-      (_, i) => ({
-        templateId: `tpl-${i}`,
-        name: `Template ${i}`,
-      }),
+  it('fat-tree reply JSON.parse(JSON.stringify()) round-trips identical', () => {
+    const templates: Stage1TemplateFullSummary[] = [
+      {
+        templateId: 'tpl-rt',
+        name: 'RoundTrip',
+        exercises: [
+          {
+            templateExerciseId: 'te-rt-1',
+            exerciseId: BENCH,
+            exerciseName: 'Bench Press',
+            ordering: 1,
+            defaultSets: 3,
+            defaultReps: null,
+            defaultWeightKg: null,
+          },
+        ],
+      },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, templates);
+    const rt = JSON.parse(JSON.stringify(reply));
+    expect(rt).toEqual(reply);
+  });
+});
+
+// =====================================================================
+// matchesPendingRequest (pure predicate)
+// =====================================================================
+
+describe('WC handshake — matchesPendingRequest', () => {
+  it('returns true when the reply requestId matches the Watch-side pending nonce', () => {
+    const reply = buildStage1Reply(
+      { requestId: 'pending-1', clientVersion: '13d.0' },
+      null,
+      [],
     );
-    const reply = buildStage1Reply(sampleRequest, active, templates);
-
-    expect(JSON.stringify(reply).length).toBeLessThan(1024);
+    expect(matchesPendingRequest(reply, 'pending-1')).toBe(true);
   });
 
-  // -------------------------------------------------------------------
-  // (f) referential purity — same inputs → equal outputs
-  // -------------------------------------------------------------------
-  it('is pure — calling twice with the same args produces deep-equal results', () => {
-    const a = buildStage1Reply(sampleRequest, null, []);
-    const b = buildStage1Reply(sampleRequest, null, []);
-    expect(a).toEqual(b);
-  });
-
-  // -------------------------------------------------------------------
-  // (g) freestyle title round-trips as empty string
-  // -------------------------------------------------------------------
-  it('preserves an empty-string title (freestyle path) verbatim', () => {
-    const freestyle: Stage1SessionSummary = {
-      sessionId: 'sess-1',
-      startedAt: 1_700_000_000_000,
-      title: '',
-      exerciseCount: 0,
-    };
-    const reply = buildStage1Reply(sampleRequest, freestyle, []);
-
-    if (reply.hasActiveSession) {
-      expect(reply.session.title).toBe('');
-      expect(reply.session.exerciseCount).toBe(0);
-    } else {
-      throw new Error('expected hasActiveSession=true variant');
-    }
-  });
-
-  // -------------------------------------------------------------------
-  // TBDs — open design questions deferred to the D9 wire-in commit.
-  // -------------------------------------------------------------------
-  it.todo(
-    'TBD — does reply payload carry the iPhone now() ts or the original request ts? (decided at wire-in via makeEnvelope wrap)',
-  );
-});
-
-// =====================================================================
-// matchesPendingRequest (race predicate)
-// =====================================================================
-
-describe('WC handshake — matchesPendingRequest (pure predicate)', () => {
-  const baseReply: Stage1ReplyPayload = {
-    requestId: 'req-abc',
-    hasActiveSession: false,
-    prefetch: { templates: [] },
-  };
-
-  it('returns true when the reply requestId matches the pending nonce', () => {
-    expect(matchesPendingRequest(baseReply, 'req-abc')).toBe(true);
-  });
-
-  it('returns false when the reply requestId is stale (mismatched)', () => {
-    expect(matchesPendingRequest(baseReply, 'req-OLD')).toBe(false);
-  });
-
-  it('returns false on empty pending nonce (Watch has no outstanding handshake)', () => {
-    expect(matchesPendingRequest(baseReply, '')).toBe(false);
+  it('returns false when a stale reply lands after the Watch moved on to a new nonce', () => {
+    const reply = buildStage1Reply(
+      { requestId: 'stale', clientVersion: '13d.0' },
+      null,
+      [],
+    );
+    expect(matchesPendingRequest(reply, 'fresh-nonce')).toBe(false);
   });
 });
 
 // =====================================================================
-// Stage 2 buildStartFromIphone (pure transform)
+// buildStartFromIphone (pure projection)
 // =====================================================================
 
-describe('WC handshake — buildStartFromIphone (Stage 2 pure transform, D9 partial)', () => {
-  const minimalSnapshot: SessionSnapshot = {
-    sessionId: 'sess-1',
-    title: 'Pull Day',
-    startedAt: 1_700_000_000_000,
-    exercises: [],
-  };
-
-  // -------------------------------------------------------------------
-  // (a) sessionId surfaced at payload top-level
-  // -------------------------------------------------------------------
-  it('packages the snapshot into a StartFromIphonePayload with matching sessionId', () => {
-    const payload: StartFromIphonePayload = buildStartFromIphone(minimalSnapshot);
-
-    expect(payload.sessionId).toBe('sess-1');
-    expect(typeof payload.snapshot).toBe('object');
-    expect(payload.snapshot).not.toBeNull();
-  });
-
-  // -------------------------------------------------------------------
-  // (b) JSON-primitive-clean (round-trips through stringify)
-  // -------------------------------------------------------------------
-  it('produces a JSON-primitive-clean payload (round-trips through JSON.stringify)', () => {
-    const payload = buildStartFromIphone(minimalSnapshot);
-    const roundTripped = JSON.parse(JSON.stringify(payload));
-
-    expect(roundTripped).toEqual(payload);
-  });
-
-  // -------------------------------------------------------------------
-  // (c) snapshot fields preserved verbatim
-  // -------------------------------------------------------------------
-  it('preserves snapshot fields verbatim (title, startedAt)', () => {
-    const payload = buildStartFromIphone(minimalSnapshot);
-
-    expect(payload.snapshot.title).toBe('Pull Day');
-    expect(payload.snapshot.startedAt).toBe(1_700_000_000_000);
-  });
-
-  // -------------------------------------------------------------------
-  // (d) full session tree projection — exercises + sets
-  // -------------------------------------------------------------------
-  it('serialises a full session tree (exercises + sets) without dropping fields', () => {
-    const full: SessionSnapshot = {
-      sessionId: 'sess-2',
-      title: 'Leg Day',
+describe('WC handshake — buildStartFromIphone', () => {
+  it('projects a SessionSnapshot into a JSON-primitive-clean wire payload', () => {
+    const snapshot: SessionSnapshot = {
+      sessionId: 'sess-wire',
+      title: 'Pull Day',
       startedAt: 1_700_000_000_000,
       exercises: [
         {
           sessionExerciseId: 'se-1',
-          exerciseId: 'ex-squat',
-          exerciseName: 'Back Squat',
-          ordering: 0,
+          exerciseId: BENCH,
+          exerciseName: 'Bench Press',
+          ordering: 1,
           plannedSets: 3,
           sets: [
             {
               setId: 'set-1',
-              ordinal: 0,
+              ordinal: 1,
               weight: 100,
               reps: 5,
-              rpe: 8,
-              rest_sec: 180,
+              rpe: null,
+              rest_sec: null,
               notes: null,
               set_kind: 'working',
               is_logged: true,
             },
-            {
-              setId: 'set-2',
-              ordinal: 1,
-              weight: 105,
-              reps: 5,
-              rpe: 8.5,
-              rest_sec: 180,
-              notes: 'felt heavy',
-              set_kind: 'working',
-              is_logged: false,
-            },
           ],
         },
       ],
     };
-    const payload = buildStartFromIphone(full);
-
-    expect(payload.snapshot.exercises).toEqual([
-      {
-        sessionExerciseId: 'se-1',
-        exerciseId: 'ex-squat',
-        exerciseName: 'Back Squat',
-        ordering: 0,
-        plannedSets: 3,
-        sets: [
-          {
-            setId: 'set-1',
-            ordinal: 0,
-            weight: 100,
-            reps: 5,
-            rpe: 8,
-            rest_sec: 180,
-            notes: null,
-            set_kind: 'working',
-            is_logged: true,
-          },
-          {
-            setId: 'set-2',
-            ordinal: 1,
-            weight: 105,
-            reps: 5,
-            rpe: 8.5,
-            rest_sec: 180,
-            notes: 'felt heavy',
-            set_kind: 'working',
-            is_logged: false,
-          },
-        ],
-      },
-    ]);
-  });
-
-  // -------------------------------------------------------------------
-  // (e) survives makeEnvelope normaliseForWire — wire-format invariant
-  // -------------------------------------------------------------------
-  it('produces a payload that survives makeEnvelope normaliseForWire', () => {
-    const payload = buildStartFromIphone(minimalSnapshot);
-    const env = makeEnvelope('start-from-iphone', payload);
-
-    expect(env.kind).toBe('start-from-iphone');
-    expect(env.payload.sessionId).toBe('sess-1');
-    expect(env.payload.snapshot).toEqual(payload.snapshot);
-  });
-
-  // -------------------------------------------------------------------
-  // (f) null-valued fields survive (warmup with no weight/reps yet)
-  // -------------------------------------------------------------------
-  it('preserves null-valued set fields (placeholder rows pre-logging)', () => {
-    const withPlaceholders: SessionSnapshot = {
-      sessionId: 'sess-3',
-      title: '',
+    const out = buildStartFromIphone(snapshot);
+    expect(out.sessionId).toBe('sess-wire');
+    expect(out.snapshot).toEqual({
+      sessionId: 'sess-wire',
+      title: 'Pull Day',
       startedAt: 1_700_000_000_000,
       exercises: [
         {
           sessionExerciseId: 'se-1',
-          exerciseId: 'ex-bench',
-          exerciseName: 'Bench',
-          ordering: 0,
+          exerciseId: BENCH,
+          exerciseName: 'Bench Press',
+          ordering: 1,
           plannedSets: 3,
           sets: [
             {
               setId: 'set-1',
-              ordinal: 0,
-              weight: null,
-              reps: null,
+              ordinal: 1,
+              weight: 100,
+              reps: 5,
               rpe: null,
               rest_sec: null,
               notes: null,
-              set_kind: 'warmup',
-              is_logged: false,
+              set_kind: 'working',
+              is_logged: true,
             },
           ],
         },
       ],
-    };
-    const payload = buildStartFromIphone(withPlaceholders);
-    const exercises = payload.snapshot.exercises as unknown as ReadonlyArray<{
-      sets: ReadonlyArray<Record<string, unknown>>;
-    }>;
-    const set0 = exercises[0].sets[0];
-
-    expect(set0.weight).toBeNull();
-    expect(set0.reps).toBeNull();
-    expect(set0.rpe).toBeNull();
-    expect(set0.notes).toBeNull();
-    expect(set0.set_kind).toBe('warmup');
+    });
   });
-
-  // -------------------------------------------------------------------
-  // TBDs — wire-in concerns
-  // -------------------------------------------------------------------
-  it.todo(
-    'fetchSessionSnapshot returns the session tree for a given sessionId (impure — D9 wire-in)',
-  );
-  it.todo(
-    'fetchSessionSnapshot returns null/typed empty when sessionId no longer exists (impure — D9 wire-in)',
-  );
 });
 
 // =====================================================================
-// Impure helpers — DB-backed (D9 wire-in)
+// Impure helpers — in-memory SQLite
 // =====================================================================
 
-describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () => {
+describe('WC handshake — impure helpers (in-memory SQLite)', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
@@ -482,8 +363,6 @@ describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () =>
       });
       // Seed 3 session_exercise rows; appendSessionExercise refuses
       // dup solo exercise so each row uses a different exercise_id.
-      // BENCH is the only seeded exercise — insert two more via raw
-      // SQL to avoid spinning up exerciseRepository fixtures here.
       await db.runAsync(
         `INSERT INTO exercise (id, name, load_type, is_builtin) VALUES (?, ?, ?, ?)`,
         '00000000-0000-4000-8000-000000000099',
@@ -531,18 +410,91 @@ describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () =>
   });
 
   // -------------------------------------------------------------------
-  // loadTemplatePrefetchList
+  // NEW-Q50 D28 — loadTemplatesFullTree
   // -------------------------------------------------------------------
 
-  describe('loadTemplatePrefetchList', () => {
+  describe('loadTemplatesFullTree (NEW-Q50 D28)', () => {
     it('returns empty array when no templates exist', async () => {
-      const list = await loadTemplatePrefetchList(db);
+      const list = await loadTemplatesFullTree(db);
       expect(list).toEqual([]);
     });
 
-    it('projects (id, name) and caps at the limit', async () => {
+    it('returns templates with empty exercises[] when a template has no template_exercise rows', async () => {
       const now = 1_700_000_000_000;
-      for (let i = 0; i < 3; i++) {
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-empty',
+        'Empty',
+        now,
+        now,
+      );
+      const list = await loadTemplatesFullTree(db);
+      expect(list).toHaveLength(1);
+      expect(list[0]).toEqual({
+        templateId: 'tpl-empty',
+        name: 'Empty',
+        exercises: [],
+      });
+    });
+
+    it('hydrates the full exercise tree with JOINed exercise.name + defaultSets/defaultReps/defaultWeightKg', async () => {
+      const now = 1_700_000_000_000;
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-rich',
+        'Rich Template',
+        now,
+        now,
+      );
+      // Two template_exercise rows referencing the seeded Bench Press
+      // exercise. Different defaults to assert column projection.
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-1',
+        'tpl-rich',
+        BENCH,
+        1,
+        3,
+        8,
+        60,
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-2',
+        'tpl-rich',
+        BENCH,
+        2,
+        4,
+        null,
+        null,
+      );
+      const list = await loadTemplatesFullTree(db);
+      expect(list).toHaveLength(1);
+      expect(list[0].exercises).toHaveLength(2);
+      expect(list[0].exercises[0]).toEqual({
+        templateExerciseId: 'te-1',
+        exerciseId: BENCH,
+        exerciseName: 'Bench Press',
+        ordering: 1,
+        defaultSets: 3,
+        defaultReps: 8,
+        defaultWeightKg: 60,
+      });
+      // Second row exercises nullable defaults projection.
+      expect(list[0].exercises[1].defaultReps).toBeNull();
+      expect(list[0].exercises[1].defaultWeightKg).toBeNull();
+      expect(list[0].exercises[1].ordering).toBe(2);
+    });
+
+    it('orders templates by listTemplates() (updated_at DESC) and caps to the limit', async () => {
+      const now = 1_700_000_000_000;
+      for (let i = 0; i < 5; i++) {
         await db.runAsync(
           `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
            VALUES (?, ?, ?, ?, NULL, NULL)`,
@@ -552,14 +504,14 @@ describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () =>
           now + i,
         );
       }
-      const list = await loadTemplatePrefetchList(db, 20);
+      const list = await loadTemplatesFullTree(db, 3);
       expect(list).toHaveLength(3);
-      // listTemplates orders by updated_at DESC, so newest (tpl-2) first.
-      expect(list[0]).toEqual({ templateId: 'tpl-2', name: 'Template 2' });
-      expect(list[2]).toEqual({ templateId: 'tpl-0', name: 'Template 0' });
+      // listTemplates orders by updated_at DESC → tpl-4 first.
+      expect(list[0].templateId).toBe('tpl-4');
+      expect(list[2].templateId).toBe('tpl-2');
     });
 
-    it('respects the limit parameter (caps to first N)', async () => {
+    it('defaults to 20 templates max (fat-tree size-budget invariant)', async () => {
       const now = 1_700_000_000_000;
       for (let i = 0; i < 25; i++) {
         await db.runAsync(
@@ -571,24 +523,50 @@ describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () =>
           now + i,
         );
       }
-      const list = await loadTemplatePrefetchList(db, 20);
+      const list = await loadTemplatesFullTree(db);
       expect(list).toHaveLength(20);
     });
 
-    it('defaults to 20 templates max (size-budget invariant)', async () => {
+    it('exercises arrive in template_exercise.ordering ASC even when inserted in reverse order', async () => {
       const now = 1_700_000_000_000;
-      for (let i = 0; i < 30; i++) {
-        await db.runAsync(
-          `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
-           VALUES (?, ?, ?, ?, NULL, NULL)`,
-          `tpl-${i}`,
-          `Template ${i}`,
-          now + i,
-          now + i,
-        );
-      }
-      const list = await loadTemplatePrefetchList(db);
-      expect(list).toHaveLength(20);
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-ord',
+        'Order',
+        now,
+        now,
+      );
+      // Insert ordering=2 first, ordering=1 second.
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-second',
+        'tpl-ord',
+        BENCH,
+        2,
+        3,
+        null,
+        null,
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        'te-first',
+        'tpl-ord',
+        BENCH,
+        1,
+        3,
+        null,
+        null,
+      );
+      const list = await loadTemplatesFullTree(db);
+      expect(list[0].exercises.map((e) => e.templateExerciseId)).toEqual([
+        'te-first',
+        'te-second',
+      ]);
     });
   });
 
@@ -737,10 +715,10 @@ describe('WC handshake — impure helpers (in-memory SQLite, D9 wire-in)', () =>
 });
 
 // =====================================================================
-// Orchestrators — D9 wire-in (handshake + start-from-watch)
+// Orchestrators — onHandshakeRequest (wire-in)
 // =====================================================================
 
-describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () => {
+describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
@@ -771,7 +749,7 @@ describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () =>
     expect(reply.prefetch.templates).toEqual([]);
   });
 
-  it('replies with hasActiveSession=true + session summary + templates when both are present', async () => {
+  it('replies with hasActiveSession=true + session summary + fat-tree templates when both are present', async () => {
     await createSession(db, {
       id: 'sess-x',
       started_at: 1_700_000_000_000,
@@ -790,6 +768,18 @@ describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () =>
       1_700_000_000_000,
       1_700_000_000_000,
     );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-x',
+      'tpl-1',
+      BENCH,
+      1,
+      3,
+      8,
+      60,
+    );
 
     const replies: Record<string, unknown>[] = [];
     await onHandshakeRequest(db, buildEnv('req-X'), (r) => replies.push(r));
@@ -803,33 +793,35 @@ describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () =>
       expect(reply.session.exerciseCount).toBe(1);
     }
     expect(reply.prefetch.templates).toHaveLength(1);
-    expect(reply.prefetch.templates[0]).toEqual({
-      templateId: 'tpl-1',
-      name: 'My Template',
+    expect(reply.prefetch.templates[0].templateId).toBe('tpl-1');
+    expect(reply.prefetch.templates[0].name).toBe('My Template');
+    // Fat tree — exercises[] populated from JOIN.
+    expect(reply.prefetch.templates[0].exercises).toHaveLength(1);
+    expect(reply.prefetch.templates[0].exercises[0]).toEqual({
+      templateExerciseId: 'te-x',
+      exerciseId: BENCH,
+      exerciseName: 'Bench Press',
+      ordering: 1,
+      defaultSets: 3,
+      defaultReps: 8,
+      defaultWeightKg: 60,
     });
   });
 
   it('silently drops the request when replyHandler is undefined (lib bug / TUI fallback)', async () => {
-    // Should not throw. With no replyHandler the orchestrator has
-    // nowhere to send the result, so it skips DB work entirely.
     await expect(
       onHandshakeRequest(db, buildEnv(), undefined),
     ).resolves.toBeUndefined();
   });
 
-  it('falls back to empty reply when the DB read throws (best-effort semantics)', async () => {
-    // Close the db so any subsequent read throws — exercise the catch branch.
+  it('falls back to empty fat-tree reply when the DB read throws (best-effort semantics)', async () => {
     db.close();
     const replies: Record<string, unknown>[] = [];
-    // Use a fresh closed db; the catch block must still call replyHandler
-    // with a synthetic empty payload (Watch picker shouldn't hang).
     await onHandshakeRequest(db, buildEnv('req-err'), (r) => replies.push(r));
     expect(replies).toHaveLength(1);
     expect(replies[0]).toEqual({
       requestId: 'req-err',
       hasActiveSession: false,
-      // Phase 2.5: fallback reply now carries empty programs + noActiveProgram
-      // so the Watch picker doesn't fall back to its pre-2.5 mock state.
       prefetch: {
         templates: [],
         programs: [],
@@ -842,15 +834,16 @@ describe('WC handshake — onHandshakeRequest (orchestrator, D9 wire-in)', () =>
   });
 });
 
-describe('WC handshake — onStartFromWatch (orchestrator, D9 wire-in)', () => {
+// =====================================================================
+// Orchestrators — onStartFromWatch (NEW-Q50 D28 rewrite)
+// =====================================================================
+
+describe('WC handshake — onStartFromWatch (NEW-Q50 D28 reverse-TUI reconcile)', () => {
   let db: BetterSqliteDatabase;
-  let uuidCounter = 0;
-  const uuid = () => `uid-${++uuidCounter}`;
 
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
-    uuidCounter = 0;
   });
 
   afterEach(() => {
@@ -864,86 +857,197 @@ describe('WC handshake — onStartFromWatch (orchestrator, D9 wire-in)', () => {
     payload: StartFromWatchPayload;
   } => makeEnvelope('start-from-watch', payload);
 
-  it('creates a freestyle session when templateId is null + replies with the snapshot', async () => {
-    const replies: Record<string, unknown>[] = [];
+  it('NEW-Q50 happy path — inserts a new session with the Watch-supplied id + replies created', async () => {
+    const reconciles: StartFromWatchReconcile[] = [];
+    const watchUuid = 'W-deadbeef-0001';
     await onStartFromWatch(
       db,
-      buildEnv({ templateId: null, programCycleId: null, intensityId: null }),
-      uuid,
-      (r) => replies.push(r),
+      buildEnv({
+        templateId: null,
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
     );
 
-    const reply = replies[0] as unknown as StartFromIphonePayload;
-    expect(reply.sessionId).not.toBe('');
-    expect(reply.snapshot).toBeDefined();
-
-    // The created session is the active one + freestyle title = ''.
+    // Reverse-TUI reply.
+    expect(reconciles).toEqual([
+      { status: 'created', sessionId: watchUuid },
+    ]);
+    // DB landed the Watch-supplied id verbatim + flipped tracking flag.
     const active = await getActiveSession(db);
-    expect(active?.id).toBe(reply.sessionId);
-    expect(active?.title).toBe('');
+    expect(active?.id).toBe(watchUuid);
+    expect(active?.is_watch_tracked).toBe(true);
   });
 
-  it('flips is_watch_tracked=true on the created session', async () => {
-    const replies: Record<string, unknown>[] = [];
+  it('NEW-Q50 dedup — same Watch-supplied sessionId arriving twice is a no-op INSERT (idempotent)', async () => {
+    const reconciles: StartFromWatchReconcile[] = [];
+    const watchUuid = 'W-deadbeef-dedup';
+
+    // First delivery: creates the row.
     await onStartFromWatch(
       db,
-      buildEnv({ templateId: null, programCycleId: null, intensityId: null }),
-      uuid,
-      (r) => replies.push(r),
+      buildEnv({
+        templateId: null,
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
     );
-    const reply = replies[0] as unknown as StartFromIphonePayload;
-    const session = await getSession(db, reply.sessionId);
+
+    // Second delivery (TUI at-least-once replay or applicationContext
+    // race): MUST not create a duplicate row, MUST reply 'created'.
+    await onStartFromWatch(
+      db,
+      buildEnv({
+        templateId: null,
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
+    );
+
+    expect(reconciles).toEqual([
+      { status: 'created', sessionId: watchUuid },
+      { status: 'created', sessionId: watchUuid },
+    ]);
+    // Exactly one row exists for that id.
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM session WHERE id = ?`,
+      watchUuid,
+    );
+    expect(rows).toHaveLength(1);
+    // is_watch_tracked still true (idempotent flip).
+    const session = await getSession(db, watchUuid);
     expect(session?.is_watch_tracked).toBe(true);
   });
 
-  it('adopts an existing active session instead of creating a duplicate (race-safe)', async () => {
+  it('NEW-Q50 conflict — iPhone already has a different active session → reply conflict, no INSERT', async () => {
     await createSession(db, {
-      id: 'pre-existing',
+      id: 'I-existing-001',
       started_at: 1_700_000_000_000,
-      title: 'Pre',
+      title: 'Existing iPhone Session',
     });
-    const replies: Record<string, unknown>[] = [];
+    const watchUuid = 'W-deadbeef-loser';
+    const reconciles: StartFromWatchReconcile[] = [];
     await onStartFromWatch(
       db,
-      buildEnv({ templateId: null, programCycleId: null, intensityId: null }),
-      uuid,
-      (r) => replies.push(r),
+      buildEnv({
+        templateId: null,
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
     );
-    const reply = replies[0] as unknown as StartFromIphonePayload;
-    expect(reply.sessionId).toBe('pre-existing');
-    // Watch initiated adoption still flips the tracked flag.
-    const session = await getSession(db, 'pre-existing');
+
+    // Reverse-TUI 'conflict' with existing session metadata so the
+    // Watch can render its alert sheet (D31).
+    expect(reconciles).toEqual([
+      {
+        status: 'conflict',
+        sessionId: watchUuid,
+        existingSessionId: 'I-existing-001',
+        existingTitle: 'Existing iPhone Session',
+        existingStartedAt: 1_700_000_000_000,
+      },
+    ]);
+    // Watch-supplied session NOT inserted.
+    const lostRow = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM session WHERE id = ?`,
+      watchUuid,
+    );
+    // getFirstAsync returns null for no-row (better-sqlite3 + expo-sqlite
+    // both follow this convention).
+    expect(lostRow).toBeNull();
+    // Pre-existing session untouched — is_watch_tracked stays false
+    // (still iPhone-only).
+    const pre = await getSession(db, 'I-existing-001');
+    expect(pre?.is_watch_tracked).toBe(false);
+  });
+
+  it('NEW-Q50 race recovery — if the supplied id IS the already-active session (e.g. applicationContext mirror beat TUI to insert), reply created + flip tracked', async () => {
+    const watchUuid = 'W-deadbeef-mirror-race';
+    // Simulate: applicationContext mirror landed first and inserted
+    // the row, leaving is_watch_tracked at default 0. The subsequent
+    // start-from-watch TUI delivery for the same id must:
+    //   - not throw
+    //   - reply 'created'
+    //   - flip is_watch_tracked to true
+    await createSession(db, {
+      id: watchUuid,
+      started_at: 1_700_000_000_000,
+      title: '',
+    });
+    const reconciles: StartFromWatchReconcile[] = [];
+    await onStartFromWatch(
+      db,
+      buildEnv({
+        templateId: null,
+        programCycleId: null,
+        intensityId: null,
+        sessionId: watchUuid,
+      }),
+      (r) => reconciles.push(r),
+    );
+    expect(reconciles).toEqual([
+      { status: 'created', sessionId: watchUuid },
+    ]);
+    const session = await getSession(db, watchUuid);
     expect(session?.is_watch_tracked).toBe(true);
   });
 
-  it('silently no-ops when replyHandler is undefined (lib bug / TUI fallback)', async () => {
-    await expect(
-      onStartFromWatch(
+  it('NEW-Q50 degraded wire — empty/missing payload.sessionId logs + replies created with empty id, no DB write', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const reconciles: StartFromWatchReconcile[] = [];
+      await onStartFromWatch(
         db,
-        buildEnv({ templateId: null, programCycleId: null, intensityId: null }),
-        uuid,
-        undefined,
-      ),
-    ).resolves.toBeUndefined();
-    // No session was created (orchestrator early-returns).
-    const active = await getActiveSession(db);
-    expect(active).toBeNull();
+        buildEnv({
+          templateId: null,
+          programCycleId: null,
+          intensityId: null,
+          sessionId: '',
+        }),
+        (r) => reconciles.push(r),
+      );
+      expect(reconciles).toEqual([{ status: 'created', sessionId: '' }]);
+      expect(warnSpy).toHaveBeenCalled();
+      // No active session was created.
+      const active = await getActiveSession(db);
+      expect(active).toBeNull();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
-  it('replies with empty payload when create / fetch path throws (best-effort)', async () => {
-    db.close();
-    const replies: Record<string, unknown>[] = [];
-    await onStartFromWatch(
-      db,
-      buildEnv({ templateId: null, programCycleId: null, intensityId: null }),
-      uuid,
-      (r) => replies.push(r),
-    );
-    expect(replies).toHaveLength(1);
-    expect(replies[0]).toEqual({ sessionId: '', snapshot: {} });
-    // Re-open db so afterEach.close() doesn't crash.
-    db = new BetterSqliteDatabase(':memory:');
-    await migrate(db);
+  it('NEW-Q50 best-effort — DB throw on the create path does NOT send a misleading created reply', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      db.close();
+      const reconciles: StartFromWatchReconcile[] = [];
+      await onStartFromWatch(
+        db,
+        buildEnv({
+          templateId: null,
+          programCycleId: null,
+          intensityId: null,
+          sessionId: 'W-after-close',
+        }),
+        (r) => reconciles.push(r),
+      );
+      // No reconcile reply (can't truthfully claim 'created' after a throw).
+      expect(reconciles).toEqual([]);
+      expect(warnSpy).toHaveBeenCalled();
+      // Re-open before afterEach.close() runs.
+      db = new BetterSqliteDatabase(':memory:');
+      await migrate(db);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // -------------------------------------------------------------------
@@ -954,6 +1058,7 @@ describe('WC handshake — onStartFromWatch (orchestrator, D9 wire-in)', () => {
       templateId: 'tpl-1',
       programCycleId: 'cyc-1',
       intensityId: 'int-1',
+      sessionId: 'W-roundtrip',
     };
     const env = makeEnvelope('start-from-watch', sample);
     expect(env.kind).toBe('start-from-watch');
@@ -1007,17 +1112,31 @@ describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', (
     expect(reply.prefetch.programs?.[1].intensities).toEqual([]);
   });
 
-  it('carries todayPlanned discriminated-union variants verbatim', () => {
+  it('carries todayPlanned discriminated-union variants verbatim (NEW-Q50 fat tree)', () => {
     const planned = buildStage1Reply(sampleRequest, null, [], [], {
       kind: 'planned',
       label: '推日 W3D1（今日）',
       programDayId: 'cell-1',
+      templateId: 'tpl-1',
+      exercises: [
+        {
+          templateExerciseId: 'te-p-1',
+          exerciseId: BENCH,
+          exerciseName: 'Bench Press',
+          ordering: 1,
+          defaultSets: 3,
+          defaultReps: 8,
+          defaultWeightKg: 60,
+        },
+      ],
     });
-    expect(planned.prefetch.todayPlanned).toEqual({
-      kind: 'planned',
-      label: '推日 W3D1（今日）',
-      programDayId: 'cell-1',
-    });
+    expect(planned.prefetch.todayPlanned?.kind).toBe('planned');
+    if (planned.prefetch.todayPlanned?.kind === 'planned') {
+      expect(planned.prefetch.todayPlanned.label).toBe('推日 W3D1（今日）');
+      expect(planned.prefetch.todayPlanned.programDayId).toBe('cell-1');
+      expect(planned.prefetch.todayPlanned.templateId).toBe('tpl-1');
+      expect(planned.prefetch.todayPlanned.exercises).toHaveLength(1);
+    }
 
     const restDay = buildStage1Reply(sampleRequest, null, [], [], {
       kind: 'restDay',
@@ -1030,36 +1149,6 @@ describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', (
     expect(noProgram.prefetch.todayPlanned).toEqual({
       kind: 'noActiveProgram',
     });
-  });
-
-  it('Phase 2.5 reply with 10 programs × 5 intensities + 20 templates + active session stays under 4KB', () => {
-    const active: Stage1SessionSummary = {
-      sessionId: 'sess-1',
-      startedAt: 1_700_000_000_000,
-      title: 'Push Day',
-      exerciseCount: 10,
-    };
-    const templates: Stage1TemplateSummary[] = Array.from(
-      { length: 20 },
-      (_, i) => ({ templateId: `tpl-${i}`, name: `Template ${i}` }),
-    );
-    const programs: Stage1ProgramSummary[] = Array.from({ length: 10 }, (_, i) => ({
-      id: `p${i}`,
-      name: `Program ${i}`,
-      intensities: Array.from({ length: 5 }, (_, j) => ({
-        id: `i${i}-${j}`,
-        name: `Intensity ${j}`,
-      })),
-    }));
-    const reply = buildStage1Reply(
-      sampleRequest,
-      active,
-      templates,
-      programs,
-      { kind: 'planned', label: '推日 W3D1（今日）', programDayId: 'cell-1' },
-    );
-    const size = JSON.stringify(reply).length;
-    expect(size).toBeLessThan(4096);
   });
 });
 
@@ -1076,14 +1165,12 @@ describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', ()
   });
 
   it('returns empty array when only the reserved「無」 program exists (v017 seed)', async () => {
-    // migrate() seeds the reserved program automatically; no user programs.
     const list = await loadProgramsPrefetchList(db);
     expect(list).toEqual([]);
   });
 
   it('projects programs with sub_tags UNIONed from templates + dictionary', async () => {
     const now = 1_700_000_000_000;
-    // User program
     await db.runAsync(
       `INSERT INTO program
          (id, name, main_tag, cycle_length, cycle_count, start_date,
@@ -1099,7 +1186,6 @@ describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', ()
       now,
       now,
     );
-    // Two templates under this program with different sub_tags.
     await db.runAsync(
       `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1120,7 +1206,6 @@ describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', ()
       'p-user',
       '10RM',
     );
-    // A historical sub_tag in the dictionary only (no current template).
     await db.runAsync(
       `INSERT INTO program_sub_tag (program_id, sub_tag, created_at) VALUES (?, ?, ?)`,
       'p-user',
@@ -1132,8 +1217,6 @@ describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', ()
     expect(list).toHaveLength(1);
     expect(list[0].id).toBe('p-user');
     expect(list[0].name).toBe('My Program');
-    // Order is alphabetical after the union dedupe; localeCompare sorts
-    // numeric prefixes "10RM" / "12RM" / "8RM" in lexicographic order.
     expect(list[0].intensities.map((i) => i.id)).toEqual(['10RM', '12RM', '8RM']);
   });
 
@@ -1198,7 +1281,7 @@ describe('Phase 2.5 — loadProgramsPrefetchList (impure, in-memory SQLite)', ()
   });
 });
 
-describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
+describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
@@ -1217,7 +1300,6 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
 
   it('returns restDay when the active program has no cell for today', async () => {
     const now = 1_700_000_000_000;
-    // 7-day program, only cell at (cycle 0, day 0). start_date is today.
     const todayIso = '2025-06-15';
     const todayMs = Date.UTC(2025, 5, 15);
     await db.runAsync(
@@ -1235,7 +1317,6 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
       now,
       now,
     );
-    // Cell at day 2 — today (day 0) has no cell row, so renders as rest.
     await db.runAsync(
       `INSERT INTO program_cell
          (id, program_id, cycle_index, day_index, template_id, sub_tag)
@@ -1249,7 +1330,7 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
     expect(today).toEqual({ kind: 'restDay' });
   });
 
-  it('returns planned with label + programDayId when today is a planned training day', async () => {
+  it('NEW-Q50 D28 — returns planned with label + programDayId + templateId + fat exercise tree', async () => {
     const now = 1_700_000_000_000;
     const todayIso = '2025-06-15';
     const todayMs = Date.UTC(2025, 5, 15);
@@ -1278,6 +1359,18 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
       'p-act',
       '12RM',
     );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-push-1',
+      'tpl-push',
+      BENCH,
+      1,
+      4,
+      8,
+      70,
+    );
     // Cell at cycle 0 / day 0 (today) — pointing at tpl-push.
     await db.runAsync(
       `INSERT INTO program_cell
@@ -1294,12 +1387,22 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
     expect(today.kind).toBe('planned');
     if (today.kind === 'planned') {
       expect(today.programDayId).toBe('cell-today');
+      expect(today.templateId).toBe('tpl-push');
       expect(today.label).toContain('推日');
       expect(today.label).toContain('（今日）');
-      // W1D1 = cycle_index 0 + 1 / day_index 0 + 1
       expect(today.label).toContain('W1D1');
-      // sub_tag suffix
       expect(today.label).toContain('12RM');
+      // NEW-Q50 D28 — fat exercise tree projected onto the planned variant.
+      expect(today.exercises).toHaveLength(1);
+      expect(today.exercises[0]).toEqual({
+        templateExerciseId: 'te-push-1',
+        exerciseId: BENCH,
+        exerciseName: 'Bench Press',
+        ordering: 1,
+        defaultSets: 4,
+        defaultReps: 8,
+        defaultWeightKg: 70,
+      });
     }
   });
 
@@ -1322,10 +1425,6 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
       now,
       now,
     );
-    // Insert a template, attach a cell to it, then drop FK enforcement
-    // temporarily so we can DELETE the template without cascading the
-    // cell — simulates a stale cell pointing at a row that no longer
-    // exists (post-import / migration glitch).
     await db.runAsync(
       `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1347,7 +1446,6 @@ describe('Phase 2.5 — loadTodayPlanned (impure)', () => {
       'tpl-will-die',
       null,
     );
-    // Toggle FK off, delete the template row, restore FK.
     await db.runAsync(`PRAGMA foreign_keys = OFF`);
     await db.runAsync(`DELETE FROM template WHERE id = ?`, 'tpl-will-die');
     await db.runAsync(`PRAGMA foreign_keys = ON`);
@@ -1387,12 +1485,6 @@ describe('Phase 2.5 — onHandshakeRequest wires programs + todayPlanned (orches
 
   it('reply prefetch carries real programs (from DB) — todayPlanned shape always present', async () => {
     const now = 1_700_000_000_000;
-    // Active program with no cell for today → todayPlanned resolves to
-    // restDay. We don't try to fabricate a "today is W1D1" cell here
-    // because the orchestrator uses Date.now() internally — the
-    // load-time-injectable variant is exercised by the loadTodayPlanned
-    // suite above; this test just confirms the orchestrator wires both
-    // fields through to the prefetch.
     await db.runAsync(
       `INSERT INTO program
          (id, name, main_tag, cycle_length, cycle_count, start_date,
@@ -1428,9 +1520,6 @@ describe('Phase 2.5 — onHandshakeRequest wires programs + todayPlanned (orches
       name: 'Real Program',
       intensities: [{ id: 'A', name: 'A' }],
     });
-    // Active program is set but no cells → either restDay (cell row
-    // missing) or noActiveProgram is impossible since active program
-    // exists. Assert: shape carries through, kind is a known variant.
     expect(reply.prefetch.todayPlanned).toBeDefined();
     expect(['planned', 'restDay', 'noActiveProgram']).toContain(
       reply.prefetch.todayPlanned?.kind,

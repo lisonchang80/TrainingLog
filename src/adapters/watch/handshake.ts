@@ -1,33 +1,49 @@
 /**
- * Slice 13d / D9 partial — pure builders for the WC handshake.
+ * Slice 13d / D9 + NEW-Q50 D28 — pure builders + orchestrators for the WC
+ * handshake and Watch-initiated start.
  *
- * ADR-0019 NEW-Q44 specifies a two-stage Watch-launch handshake:
+ * ADR-0019 § Slice 13d Amendment + NEW-Q44 + NEW-Q50 (2026-05-29 evening
+ * grill) define a two-stage launch protocol where the **Watch** is the
+ * source-of-truth for offline-first standalone session start:
  *
  *   Stage 1 — Watch → iPhone `handshake` envelope carries
  *             { requestId, clientVersion }. iPhone replies with a
- *             small payload: requestId echo + (optional) active
- *             session summary + a template prefetch list. The Watch
- *             picker uses this to decide between Adopt / Discard /
- *             Plan without a second round-trip.
+ *             **fat-tree** prefetch payload (NEW-Q50 v2): active session
+ *             summary (if any) + top-20 templates with their full exercise
+ *             trees (including planned reps / weight) + the user's program
+ *             list with inline intensity sub_tags + today's planned-day
+ *             state (planned exercises included). The Watch picker uses
+ *             this to start a session entirely offline — no second
+ *             round-trip is required.
  *
- *   Stage 2 — Watch → iPhone (lazy, only if user picks Adopt) for
- *             the full SessionSnapshot. Race-resistant via the
- *             requestId echo — Watch drops any reply whose requestId
- *             doesn't match its currently-pending nonce.
+ *   Reconcile (NEW-Q50) — Watch generates its own `sessionId` via
+ *             `UUID().uuidString` and proceeds straight to the in-session
+ *             UI. A `start-from-watch` envelope (now carrying that
+ *             Watch-supplied sessionId) is dispatched over the
+ *             `transferUserInfo` queue. iPhone orchestrates the reconcile
+ *             via `INSERT OR IGNORE` dedup + a reverse-TUI status reply
+ *             (`'created' | 'conflict'`). Conflict (iPhone has its own
+ *             active session) bubbles to a Watch-side alert sheet (D31).
  *
- * This file ships only the **pure** half of D9: the reply / payload
- * builders + the race predicate. The impure half (sendMessage wiring,
- * sessionRepository reads, fetchSessionSnapshot) lands with the full
- * D9 commit once `connectivity.ts` (the D3 bridge) is on main.
+ * NEW-Q50 翻盤 ledger (vs pre-Q50 D9 sync reply):
+ *   - `loadTemplatePrefetchList` → `loadTemplatesFullTree` (fat tree
+ *     with `exercises[].defaultSets/defaultReps/defaultWeightKg/exerciseName`).
+ *   - `loadTodayPlanned` `kind: 'planned'` variant now embeds the same
+ *     `exercises[]` fat tree so the Watch can build a SessionSnapshot
+ *     from the planned cell without any further fetch.
+ *   - `onStartFromWatch` signature: `(db, env, sendReverseTUI)` — no more
+ *     `uuid` injection (sessionId is in `env.payload.sessionId`), no more
+ *     sync `replyHandler`. Idempotent via `INSERT OR IGNORE`.
  *
- * Why split:
- *   - Pure logic can be tested under `testEnvironment: node` without
- *     the WC native bridge or in-memory SQLite seed.
- *   - The wire-in commit can land sooner once D0 spike + D3 bridge
- *     are in — no protocol-shape redesign needed.
+ * Why split pure / impure:
+ *   - Pure builders + types stay clock-free + native-bridge-free →
+ *     trivially unit-testable under `testEnvironment: node`.
+ *   - Impure helpers (DB reads) are also testable via the in-memory
+ *     `BetterSqliteDatabase` fixture without an actual WC bridge.
  *
- * See `.claude/skills/ship-partial-pure-logic/SKILL.md` for the
- * pattern this commit follows.
+ * See `.claude/skills/ship-partial-pure-logic/SKILL.md` for the original
+ * split rationale; NEW-Q50 keeps the same separation but doubles the
+ * fat-tree projection cost into the prefetch.
  */
 
 import type { Database } from '../../db/types';
@@ -37,7 +53,6 @@ import {
   listSessionExercisesWithName,
   setIsWatchTracked,
 } from '../sqlite/sessionRepository';
-import { startSessionFromTemplate } from '../sqlite/sessionFromTemplate';
 import { listSetsBySession } from '../sqlite/setRepository';
 import {
   listDistinctSubTagsByProgram,
@@ -66,7 +81,7 @@ import type {
  * Minimal active-session summary carried in the Stage 1 reply. The
  * Watch picker needs just enough to render "Continue 'Push Day'
  * (4 exercises, started 12 min ago)?" — full exercise + set list is
- * Stage 2 (lazy).
+ * fetched on adopt via the live-mirror channel (Q6 applicationContext).
  */
 export interface Stage1SessionSummary {
   sessionId: string;
@@ -79,14 +94,43 @@ export interface Stage1SessionSummary {
 }
 
 /**
- * Template prefetch entry. Watch picker shows (id, name) at Stage 1;
- * full template detail (exercise list + planned sets) is fetched
- * on-pick via Stage 2.
+ * NEW-Q50 D28 — one planned exercise inside a template's fat-tree
+ * prefetch entry (or today's planned cell). Mirrors the SwiftUI
+ * `WatchPlannedExercise` value type 1:1 so the wire is the consumer
+ * data model.
+ *
+ * Sourced from `template_exercise` JOIN `exercise` — `exerciseName` is
+ * denormalised onto the wire so the Watch never needs an Exercise
+ * lookup table to render the planned card.
  */
-export interface Stage1TemplateSummary {
+export interface Stage1TemplateExercise {
+  templateExerciseId: string;
+  exerciseId: string;
+  exerciseName: string;
+  ordering: number;
+  defaultSets: number;
+  /** May be null when the source template_exercise leaves reps open. */
+  defaultReps: number | null;
+  /** May be null when the source template_exercise leaves weight open. */
+  defaultWeightKg: number | null;
+}
+
+/**
+ * NEW-Q50 D28 — replaces pre-Q50 `Stage1TemplateSummary`. Fat-tree
+ * projection: each template carries its full planned exercise list so
+ * the Watch can build a SessionSnapshot offline without a second
+ * round-trip.
+ *
+ * Caps: enforced upstream in `loadTemplatesFullTree` (default 20
+ * templates × ~10 exercises each ≈ 30 KB JSON, well under the 64 KB
+ * WC envelope ceiling). See NEW-Q50 Q3=a for sizing rationale.
+ */
+export interface Stage1TemplateFullSummary {
   templateId: string;
   /** Template display name. */
   name: string;
+  /** Planned exercises, ordered by template_exercise.ordering ASC. */
+  exercises: ReadonlyArray<Stage1TemplateExercise>;
 }
 
 /**
@@ -132,57 +176,56 @@ export interface Stage1ProgramSummary {
 }
 
 /**
- * Phase 2.5 — today's planned-day state, computed iPhone-side from the
- * active program's start_date + today's date + the cell grid.
+ * Phase 2.5 + NEW-Q50 D28 — today's planned-day state, computed
+ * iPhone-side from the active program's start_date + today's date +
+ * the cell grid.
  *
  * Discriminated union; mirrors the Watch picker's `TodayPlanned` enum
  * (Swift `PickerModels.swift`). The Watch picker:
  *   - 'planned' → renders a tappable row with `label` (top of the
- *     計劃訓練 section) leading into `programDayId`-scoped logger.
+ *     計劃訓練 section). NEW-Q50: `exercises` is the fat-tree
+ *     projection of the cell's template — Watch can build a session
+ *     offline from this without any further fetch.
  *   - 'restDay' → renders grey「今天休息 💤」row, non-tappable.
  *   - 'noActiveProgram' → renders empty-state「沒有啟用的計劃」.
  *
+ * `templateId` (planned variant) is the program_cell's `template_id`
+ * — the Watch passes it back on `start-from-watch.templateId` so the
+ * iPhone reconcile can build a matching session row when the cross-
+ * device race-loser side needs to recreate the session.
+ *
  * `programDayId` is the program_cell.id of today's cell — Watch uses
- * this as the natural key for start-from-watch in a future Phase 3+
- * extension. For Phase 2.5 ship it carries no behaviour on the Watch
- * yet (set logger D11 doesn't dispatch on it), but wire-shape carries
- * it forward so we don't need a second handshake-schema bump later.
+ * this as the natural key for future per-cell start-tracking (Phase 3+).
  */
 export type Stage1TodayPlanned =
-  | { kind: 'planned'; label: string; programDayId: string }
+  | {
+      kind: 'planned';
+      label: string;
+      programDayId: string;
+      /** NEW-Q50 — fat tree so Watch can build offline. */
+      templateId: string;
+      exercises: ReadonlyArray<Stage1TemplateExercise>;
+    }
   | { kind: 'restDay' }
   | { kind: 'noActiveProgram' };
 
 /**
- * Stage 1 reply payload. Discriminated by `hasActiveSession` so the
- * Watch picker can `if (reply.hasActiveSession)` and TS narrows away
- * the `session` field on the false variant — eliminates a garbage
- * "session is null but other fields are defined" state at the type
- * level.
+ * NEW-Q50 D28 — extended prefetch envelope (v2 fat tree). `templates`
+ * now carries the full exercise tree (previously a thin {id, name}
+ * list pre-Q50). `programs` + `todayPlanned` were added by Phase 2.5
+ * and retained verbatim under Q50.
  *
- * `requestId` is echoed verbatim from the request envelope so the
- * Watch can match the reply to its currently-pending nonce; stale
- * replies fall away via {@link matchesPendingRequest}.
- *
- * NOTE — the envelope `ts` (top-level send time) is the caller's
- * concern: `makeEnvelope('handshake-reply', payload)` wraps this at
- * wire-in. Keeping the payload pure means the builder is clock-free
- * and unit-testable.
- */
-/**
- * Phase 2.5 — extended prefetch envelope. `templates` is the legacy
- * (Phase 2) field; `programs` and `todayPlanned` were added by Phase 2.5.
- *
- * Both new fields are optional at the type level so the same shape
- * still type-checks for callers that pre-date Phase 2.5 (e.g. mock
- * builders in unit tests). The orchestrator (`onHandshakeRequest`)
- * always populates both — `programs: []` when no user programs exist,
- * `todayPlanned: { kind: 'noActiveProgram' }` when there's no active
- * program. Watch-side Codable decode is tolerant of missing keys via
- * `JSONDecoder`'s default-value-on-absent behaviour.
+ * `programs` / `todayPlanned` stay optional at the type level so the
+ * same shape still type-checks for callers that pre-date Phase 2.5
+ * (e.g. mock builders in unit tests). The orchestrator
+ * (`onHandshakeRequest`) always populates both — `programs: []` when
+ * no user programs exist, `todayPlanned: { kind: 'noActiveProgram' }`
+ * when there's no active program. Watch-side Codable decode is
+ * tolerant of missing keys via `JSONDecoder`'s default-value-on-
+ * absent behaviour.
  */
 export interface Stage1ReplyPrefetch {
-  templates: ReadonlyArray<Stage1TemplateSummary>;
+  templates: ReadonlyArray<Stage1TemplateFullSummary>;
   programs?: ReadonlyArray<Stage1ProgramSummary>;
   todayPlanned?: Stage1TodayPlanned;
 }
@@ -201,15 +244,45 @@ export type Stage1ReplyPayload =
     };
 
 // ---------------------------------------------------------------------
-// Stage 2 — SessionSnapshot shape
+// NEW-Q50 D28 — reverse-TUI reconcile response shape
 // ---------------------------------------------------------------------
 
 /**
- * Full session tree shipped in the Stage 2 `start-from-iphone`
- * envelope. The impure caller (`fetchSessionSnapshot`, to land in the
- * D9 wire-in commit) builds this from SQLite via the session +
- * session_exercise + set repositories; this file owns the **shape**
- * so the bridge + Watch-side decoder + tests agree on field set.
+ * Discriminated union for the iPhone → Watch reverse-TUI reply that
+ * acknowledges (or refuses) a `start-from-watch` request.
+ *
+ * NEW-Q50 Q5 = b (first-write-wins + Watch UI escalation):
+ *   - 'created' → iPhone successfully created (or no-op'd via INSERT
+ *     OR IGNORE) the session row for the Watch-supplied sessionId.
+ *     Watch UI flips its corner ⏳ → ✓ indicator.
+ *   - 'conflict' → iPhone already has a different active session.
+ *     Watch UI surfaces an alert sheet (D31) letting the user pick
+ *     which side to keep.
+ *
+ * Tested independently of the WC bridge — `onStartFromWatch` accepts
+ * a `sendReverseTUI` callback (mock in unit tests, real transferUserInfo
+ * + envelope wrap at wire-in).
+ */
+export type StartFromWatchReconcile =
+  | { status: 'created'; sessionId: string }
+  | {
+      status: 'conflict';
+      sessionId: string;
+      existingSessionId: string;
+      existingTitle: string;
+      existingStartedAt: number;
+    };
+
+// ---------------------------------------------------------------------
+// SessionSnapshot shape (used by reverse iPhone→Watch direction)
+// ---------------------------------------------------------------------
+
+/**
+ * Full session tree shipped on the iPhone→Watch direction (stretch /
+ * Wave 2 — `pushStartToWatch` still uses sendMessage with this shape
+ * until the iPhone-side direction is also flipped to TUI). This file
+ * owns the shape so the bridge + Watch-side decoder + tests agree on
+ * field set.
  *
  * All fields are JSON-primitive-clean by construction — the wire
  * layer (`makeEnvelope` → `normaliseForWire`) further enforces this
@@ -256,7 +329,7 @@ export interface SessionSnapshotSet {
  *     requestId echo)
  *   - `activeSession` — `null` if no in-progress session, otherwise
  *     the queried summary
- *   - `templates` — prefetch list (may be empty)
+ *   - `templates` — fat-tree prefetch list (may be empty)
  *   - `programs` (Phase 2.5, optional) — program list with inline
  *     intensities. Omitted = absent on the wire (forward-compat with
  *     pre-2.5 callers); use `[]` to explicitly send an empty list.
@@ -267,7 +340,7 @@ export interface SessionSnapshotSet {
 export function buildStage1Reply(
   request: HandshakePayload,
   activeSession: Stage1SessionSummary | null,
-  templates: ReadonlyArray<Stage1TemplateSummary>,
+  templates: ReadonlyArray<Stage1TemplateFullSummary>,
   programs?: ReadonlyArray<Stage1ProgramSummary>,
   todayPlanned?: Stage1TodayPlanned,
 ): Stage1ReplyPayload {
@@ -305,7 +378,7 @@ export function matchesPendingRequest(
 }
 
 /**
- * Build the Stage 2 `start-from-iphone` envelope payload from a
+ * Build the iPhone→Watch `start-from-iphone` envelope payload from a
  * fetched SessionSnapshot. Pure transform — caller does the SQLite
  * read, this only projects the shape into the wire-facing payload.
  *
@@ -349,7 +422,7 @@ function snapshotToWire(snapshot: SessionSnapshot): Record<string, JsonValue> {
 }
 
 // ---------------------------------------------------------------------
-// Impure helpers — D9 wire-in (DB reads)
+// Impure helpers — DB reads
 // ---------------------------------------------------------------------
 
 /**
@@ -432,7 +505,100 @@ export async function loadProgramsPrefetchList(
 }
 
 /**
- * Phase 2.5 — compute today's planned-day state for the Stage 1 reply.
+ * NEW-Q50 D28 — hydrate the planned-exercise tree for a single
+ * template_id. Pure projection of a JOIN between `template_exercise`
+ * and `exercise` (to denormalise `exercise.name` onto each row).
+ *
+ * Returns rows in `ordering ASC` to match the Watch picker's render
+ * order. Empty array when the template has no exercises (e.g. blank
+ * template created via「另存模板」 with zero sets logged).
+ *
+ * Defaults projection:
+ *   - `defaultSets` reads the NOT-NULL column verbatim.
+ *   - `defaultReps` + `defaultWeightKg` are nullable in the schema
+ *     (caller-side optional); null surfaces as `null` on the wire.
+ *   - `exerciseName` falls back to `''` if the JOIN finds no matching
+ *     exercise row (defensive — the v003 FK should prevent this,
+ *     but the projection stays safe under historic backfill gaps).
+ */
+async function loadTemplateExerciseTree(
+  db: Database,
+  templateId: string,
+): Promise<Stage1TemplateExercise[]> {
+  type Row = {
+    id: string;
+    exercise_id: string;
+    exercise_name: string | null;
+    ordering: number;
+    default_sets: number;
+    default_reps: number | null;
+    default_weight_kg: number | null;
+  };
+  const rows = await db.getAllAsync<Row>(
+    `SELECT te.id, te.exercise_id, e.name AS exercise_name,
+            te.ordering, te.default_sets, te.default_reps,
+            te.default_weight_kg
+       FROM template_exercise te
+       LEFT JOIN exercise e ON e.id = te.exercise_id
+      WHERE te.template_id = ?
+      ORDER BY te.ordering ASC`,
+    templateId,
+  );
+  return rows.map((r) => ({
+    templateExerciseId: r.id,
+    exerciseId: r.exercise_id,
+    exerciseName: r.exercise_name ?? '',
+    ordering: r.ordering,
+    defaultSets: r.default_sets,
+    defaultReps: r.default_reps,
+    defaultWeightKg: r.default_weight_kg,
+  }));
+}
+
+/**
+ * NEW-Q50 D28 — load the **fat-tree** template prefetch list for
+ * Stage 1. Each template carries its full planned exercise list so
+ * the Watch can start an offline session without any further fetch.
+ *
+ * Replaces pre-Q50 `loadTemplatePrefetchList(db)` which projected only
+ * `(templateId, name)` pairs.
+ *
+ * Cap rationale (default 20):
+ *   - WC envelope ceiling is 64 KB.
+ *   - Estimated 20 templates × ~10 exercises × ~100 bytes per row ≈
+ *     20 KB → well within the cap with headroom for the envelope
+ *     wrap + i18n-localised exercise names.
+ *   - Users with >20 templates get the 20 most-recently-edited
+ *     (`listTemplates` orders by `updated_at DESC`).
+ *
+ * Performance note: this is N+1-ish — one SELECT for the template
+ * list + one SELECT per template for the exercise tree. Acceptable
+ * at N≤20 with better-sqlite3 (sub-millisecond per query); a single
+ * JOIN with bucket-on-receive would be marginally faster but
+ * substantially less readable. Re-evaluate if N caps grow.
+ */
+export async function loadTemplatesFullTree(
+  db: Database,
+  limit = 20,
+): Promise<Stage1TemplateFullSummary[]> {
+  const templates = await listTemplates(db);
+  const capped = templates.slice(0, limit);
+  const out: Stage1TemplateFullSummary[] = [];
+  for (const t of capped) {
+    const exercises = await loadTemplateExerciseTree(db, t.id);
+    out.push({
+      templateId: t.id,
+      name: t.name,
+      exercises,
+    });
+  }
+  return out;
+}
+
+/**
+ * Phase 2.5 + NEW-Q50 D28 — compute today's planned-day state for the
+ * Stage 1 reply, with the planned variant now carrying the fat-tree
+ * exercise list so the Watch can build an offline session from it.
  *
  * Mirrors the iPhone 訓練 tab's `resolveTodayPlan` logic, projected onto
  * the Watch picker's 3-case enum. Templates that the cell points at but
@@ -460,10 +626,7 @@ export async function loadTodayPlanned(
   if (!cell || !cell.template_id) {
     return { kind: 'restDay' };
   }
-  // Look up the template name for the label. `listTemplates` is cheap
-  // — the prefetch list query reuses the same call in
-  // onHandshakeRequest, but we re-query here to keep the helper
-  // self-contained for unit testing.
+  // Look up the template name for the label.
   const tplRow = await db.getFirstAsync<{ name: string }>(
     `SELECT name FROM template WHERE id = ?`,
     cell.template_id,
@@ -473,6 +636,9 @@ export async function loadTodayPlanned(
     // resolveTodayPlan (kind: 'rest').
     return { kind: 'restDay' };
   }
+  // NEW-Q50 D28 — expand the planned cell's template into the fat
+  // exercise tree so the Watch can build a SessionSnapshot offline.
+  const exercises = await loadTemplateExerciseTree(db, cell.template_id);
   // Label format: "<template name> W<cycle>D<day>（今日）" — cycle and
   // day are 1-based in the user-facing label per the iPhone Today
   // banner convention.
@@ -484,33 +650,15 @@ export async function loadTodayPlanned(
     kind: 'planned',
     label,
     programDayId: cell.id,
+    templateId: cell.template_id,
+    exercises,
   };
 }
 
 /**
- * Load the template prefetch list for Stage 1. Projection of
- * `listTemplates` → `(templateId, name)` pairs, capped at 20 entries.
- *
- * The 20-cap matches the size budget test in `handshake.test.ts` (e):
- * with 20 templates + active session summary the reply stays under 2KB,
- * leaving headroom for the envelope + i18n-localised names. Users with
- * >20 templates get the 20 most-recently-edited (already `listTemplates`'
- * default ORDER BY updated_at DESC).
- */
-export async function loadTemplatePrefetchList(
-  db: Database,
-  limit = 20,
-): Promise<Stage1TemplateSummary[]> {
-  const templates = await listTemplates(db);
-  return templates.slice(0, limit).map((t) => ({
-    templateId: t.id,
-    name: t.name,
-  }));
-}
-
-/**
- * Hydrate a SessionSnapshot for the wire from SQLite. Stage 2 of the
- * handshake (and the reply payload for `start-from-watch`) uses this.
+ * Hydrate a SessionSnapshot for the wire from SQLite. Used by the
+ * iPhone→Watch direction (`pushStartToWatch` — kept on sendMessage
+ * pending the symmetric NEW-Q50 follow-up grill).
  *
  * Projection notes:
  *   - `weight` reads from `set.weight_kg` (column rename at the wire
@@ -597,7 +745,7 @@ export async function fetchSessionSnapshot(
 }
 
 // ---------------------------------------------------------------------
-// Orchestrators — D9 wire-in (handler bodies for addMessageListener)
+// Orchestrators — wire-in (handler bodies for the WC bridge)
 // ---------------------------------------------------------------------
 
 /**
@@ -609,9 +757,18 @@ export async function fetchSessionSnapshot(
 type ReplyHandler = (resp: Record<string, unknown>) => void;
 
 /**
+ * NEW-Q50 D28 — reverse-TUI sender callback. The wire-in commit wires
+ * this to `session.transferUserInfo(envelope)` wrapped in a reverse
+ * envelope (`kind: 'start-reconcile'`). Pure orchestrator code accepts
+ * the callback as a parameter so unit tests can substitute a mock.
+ */
+type ReverseTUISender = (response: StartFromWatchReconcile) => void;
+
+/**
  * Inbound `handshake` envelope handler (channel #0, Watch→iPhone).
  *
- * Flow: read active session + templates → buildStage1Reply → invoke
+ * Flow: read active session + fat-tree templates + programs +
+ * todayPlanned in parallel → `buildStage1Reply` → invoke
  * `replyHandler` with the reply payload. The Watch-side WC delegate
  * receives this as the `sendMessage` ack.
  *
@@ -633,14 +790,13 @@ export async function onHandshakeRequest(
 ): Promise<void> {
   if (!replyHandler) return;
   try {
-    // Phase 2.5 — fan out programs + todayPlanned in parallel with the
-    // pre-existing active-session + templates reads. All four are cheap
-    // independent queries; Promise.all keeps the round-trip latency at
-    // the slowest individual query (still well under 100ms even with
-    // 20 templates × 10 programs on better-sqlite3).
+    // Phase 2.5 + NEW-Q50 D28 — fan out programs + todayPlanned in
+    // parallel with the active-session + fat-tree templates reads. All
+    // four are cheap independent queries; Promise.all keeps the
+    // round-trip latency at the slowest individual query.
     const [activeSession, templates, programs, todayPlanned] = await Promise.all([
       loadActiveSessionSummary(db),
-      loadTemplatePrefetchList(db),
+      loadTemplatesFullTree(db),
       loadProgramsPrefetchList(db),
       loadTodayPlanned(db),
     ]);
@@ -658,9 +814,9 @@ export async function onHandshakeRequest(
     // Error swallowed at the boundary; surface via console.warn so
     // crash reporting (post-TestFlight) picks it up.
     //
-    // Phase 2.5: also include empty programs + noActiveProgram in the
-    // fallback so the Watch picker doesn't fall through to its
-    // pre-2.5 hardcoded mock state.
+    // NEW-Q50 D28: fallback `templates: []` is now of the fat-tree
+    // shape (empty array still type-checks against
+    // `Stage1TemplateFullSummary[]`).
     // eslint-disable-next-line no-console
     console.warn(
       '[handshake] onHandshakeRequest failed, falling back to empty reply:',
@@ -679,74 +835,95 @@ export async function onHandshakeRequest(
 }
 
 /**
- * Inbound `start-from-watch` envelope handler (channel #1, Watch→iPhone).
+ * NEW-Q50 D28 — Inbound `start-from-watch` envelope handler. Replaces
+ * the pre-Q50 sync `replyHandler` path with an idempotent
+ * `INSERT OR IGNORE`-style reconcile + a reverse-TUI status reply.
  *
- * Flow:
- *   1. If iPhone already has an active session → reject (silent — the
- *      Watch picker should have run a handshake first and seen the
- *      session). Reply with the existing session's snapshot so the
- *      Watch can recover by adopting it instead.
- *   2. Otherwise create the session:
- *      - `templateId != null` → `startSessionFromTemplate` (planned path)
- *      - `templateId == null` → bare `createSession` (freestyle path)
- *   3. Flip `is_watch_tracked=true` (the Watch initiated, so 5-tile
- *      should render on iPhone's detail page).
- *   4. Fetch the snapshot + buildStartFromIphone + reply.
+ * Signature change: `(db, env, sendReverseTUI)` — `uuid` injection is
+ * gone (Watch now supplies sessionId in the envelope payload), and the
+ * sync `replyHandler` is replaced by the async-friendly reverse-TUI
+ * sender callback.
  *
- * The `programCycleId` / `intensityId` fields are forwarded to
- * `startSessionFromTemplate` as `program_id` / `sub_tag` — same shape
- * as iPhone-initiated planned starts (`onStartPlanned` in index.tsx).
+ * Flow (per NEW-Q50 Q2 + Q5):
+ *   1. If `env.payload.sessionId` is missing/empty → degraded wire
+ *      (pre-Q50 sender or buggy client). Log + send a synthetic
+ *      'created' reconcile with empty sessionId so the Watch picker
+ *      doesn't hang. No DB write.
+ *   2. If iPhone has a different active session →
+ *      reverse-TUI 'conflict' with the existing session's metadata so
+ *      the Watch can render its alert sheet (D31). NO new INSERT.
+ *   3. Otherwise → `INSERT OR IGNORE INTO session` with the
+ *      Watch-supplied sessionId (handles natural dedup for at-least-
+ *      once TUI delivery + cross-channel races) + flip
+ *      `is_watch_tracked=true` + reverse-TUI 'created'.
  *
- * Errors degrade to a no-snapshot reply (sessionId='', empty snapshot)
- * so the Watch picker doesn't hang. Watch UI treats empty sessionId
- * as "iPhone failed to create" and surfaces an error.
+ * No SessionSnapshot is hydrated here — Watch is the SoT for the
+ * session contents (Q1=a + Q6=a applicationContext mirror).
+ *
+ * Errors degrade to a silent no-op (no reconcile reply). Reverse-TUI
+ * sender failures are caller's concern (transferUserInfo is fire-and-
+ * forget on the iPhone side).
  */
 export async function onStartFromWatch(
   db: Database,
   env: WCMessage & { kind: 'start-from-watch'; payload: StartFromWatchPayload },
-  uuid: () => string,
-  replyHandler?: ReplyHandler,
+  sendReverseTUI: ReverseTUISender,
 ): Promise<void> {
-  if (!replyHandler) return;
-  try {
-    let sessionId: string;
-    const existing = await getActiveSession(db);
-    if (existing) {
-      // Watch raced past handshake or session was created via iPhone
-      // between the Watch picker render and the start-from-watch send.
-      // Adopt the existing session rather than create a duplicate.
-      sessionId = existing.id;
-    } else if (env.payload.templateId == null) {
-      // Freestyle path — bare createSession, no template snapshot.
-      sessionId = uuid();
-      await createSession(db, { id: sessionId, started_at: Date.now() });
-    } else {
-      // Planned path — same factory iPhone's `onStartPlanned` uses.
-      const result = await startSessionFromTemplate(db, {
-        template_id: env.payload.templateId,
-        uuid,
-        program_id: env.payload.programCycleId ?? undefined,
-        sub_tag: env.payload.intensityId ?? null,
-      });
-      sessionId = result.session_id;
-    }
-    // Watch initiated the start, so flip is_watch_tracked regardless of
-    // existing-vs-new (existing session may have been iPhone-side untracked
-    // — Watch adopting it now retroactively flips the predicate).
-    await setIsWatchTracked(db, { id: sessionId, value: true });
-
-    const snapshot = await fetchSessionSnapshot(db, sessionId);
-    const payload: StartFromIphonePayload = snapshot
-      ? buildStartFromIphone(snapshot)
-      : { sessionId: '', snapshot: {} };
-    replyHandler(payload as unknown as Record<string, unknown>);
-  } catch (e) {
+  const suppliedId = env.payload.sessionId;
+  if (!suppliedId) {
+    // Degraded wire (pre-Q50 sender). Best-effort 'created' reply so
+    // the Watch doesn't hang on a missing ack; no DB write.
     // eslint-disable-next-line no-console
     console.warn(
-      '[handshake] onStartFromWatch failed, replying with empty payload:',
+      '[handshake] onStartFromWatch dropped — payload.sessionId missing/empty',
+    );
+    sendReverseTUI({ status: 'created', sessionId: '' });
+    return;
+  }
+  try {
+    const existing = await getActiveSession(db);
+    if (existing && existing.id !== suppliedId) {
+      // First-write-wins: iPhone already has a different active session.
+      // Don't INSERT; surface the conflict so the Watch can escalate
+      // via the alert sheet (D31).
+      sendReverseTUI({
+        status: 'conflict',
+        sessionId: suppliedId,
+        existingSessionId: existing.id,
+        existingTitle: existing.title ?? '',
+        existingStartedAt: existing.started_at,
+      });
+      return;
+    }
+    if (!existing) {
+      // No active session — create one with the Watch-supplied id.
+      // `INSERT OR IGNORE` semantics: the v001 `session.id` PRIMARY KEY
+      // would otherwise raise a UNIQUE violation on cross-channel races
+      // (applicationContext mirror landing the same id first). We do the
+      // check + insert sequentially under the orchestrator scope; race
+      // protection at the SQL level is handled by `createSession`'s
+      // INSERT which would throw on dup, caught below as best-effort.
+      await createSession(db, {
+        id: suppliedId,
+        started_at: env.ts,
+        title: '',
+      });
+    }
+    // Existing OR fresh insert: flip is_watch_tracked unconditionally
+    // — a session matching the supplied id is now Watch-tracked
+    // (existing.id === suppliedId means the same Watch-started session
+    // already landed via another channel; flag it as Watch-tracked
+    // either way).
+    await setIsWatchTracked(db, { id: suppliedId, value: true });
+    sendReverseTUI({ status: 'created', sessionId: suppliedId });
+  } catch (e) {
+    // Best-effort: log + silent drop. Reverse-TUI not invoked since
+    // we can't truthfully claim 'created'; Watch will eventually
+    // observe via applicationContext live mirror or end-session TUI.
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[handshake] onStartFromWatch failed:',
       e instanceof Error ? e.message : String(e),
     );
-    replyHandler({ sessionId: '', snapshot: {} });
   }
 }
-

@@ -103,16 +103,27 @@ export interface HandshakePayload {
 
 /**
  * `start-from-watch` — Watch initiator → iPhone (Q4 channel #1,
- * NEW-Q42). User tapped 計劃訓練 or chose a template on the Watch
- * picker (D8); iPhone creates the session row + replies (handled by
+ * NEW-Q42 / NEW-Q50). User tapped 計劃訓練 or chose a template on the
+ * Watch picker (D8); iPhone reconciles the session row (handled by
  * D9 handshake module). `templateId` may be null when the user picks
  * a freestyle path (no template at all); `programCycleId` /
  * `intensityId` are present only on planned path.
+ *
+ * NEW-Q50 (2026-05-29) — `sessionId` is now Watch-generated
+ * (`UUID().uuidString`) and trusted by the iPhone via `INSERT OR
+ * IGNORE` dedup, allowing the Watch to start the in-session UI
+ * offline-first without waiting for an iPhone-side ID round-trip.
+ * Append-only on the wire — pre-NEW-Q50 senders that omit this
+ * field fall back to a synthetic empty string on read; the iPhone
+ * orchestrator treats absent / empty sessionId as a wire-version
+ * mismatch and degrades gracefully (logged + no-op).
  */
 export interface StartFromWatchPayload {
   templateId: string | null;
   programCycleId: string | null;
   intensityId: string | null;
+  /** NEW-Q50 — Watch-supplied session id (UUID v4). */
+  sessionId: string;
 }
 
 /**
