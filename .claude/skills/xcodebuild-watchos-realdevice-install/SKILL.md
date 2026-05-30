@@ -119,15 +119,25 @@ A second Run Script Build Phase named **"Bump Host CFBundleVersion"** now runs o
 
 - One shared script covers BOTH targets (P3 answer: yes — the logic is plist-path-agnostic; only the cosmetic echo `label` differs).
 - Verified standalone + via env-simulated build-phase invocation (real `$SRCROOT`/`$TARGET_BUILD_DIR`/`$INFOPLIST_PATH`, binary product plist): `CFBundleVersion 1 → 1780073277`, binary format + marketing `1.0.0` preserved, monotonic across consecutive runs. `plutil -lint project.pbxproj` → OK.
-- **NOT yet confirmed by a real archive** (full RN/Expo iphoneos build needs `pod install` + Metro/Hermes + ~10 min; skipped overnight in a Pods-less worktree per env constraints). Morning archive-verify steps below.
+- **Confirmed by real archive 2026-05-31** ✅ — two back-to-back Release archives gave host `CFBundleVersion` V1 `1780158818` → V2 `1780158955` (strictly increasing); the archived `TrainingLog.app/Info.plist` carried the bumped value, source plist stayed `1`, marketing `1.0.0` untouched, embedded Watch bumped too. **TestFlight `ITMS-90478` unblocked.** Use the verify recipe below — but note the two traps baked into it (the original `-sdk iphoneos` recipe was WRONG, see below).
 
 **Morning HOST archive-verify (do before next TestFlight upload)**:
 ```bash
-cd /Users/hao800922/code/TrainingLog/ios   # or merged worktree
-pod install                                  # Pods are per-checkout
-xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
-  -configuration Release -sdk iphoneos -allowProvisioningUpdates \
-  -archivePath /tmp/TL.xcarchive archive 2>&1 | tee /tmp/host-archive.log
+# pod install ONLY if Pods/ missing OR Podfile.lock != Pods/Manifest.lock (usually already synced — skip it).
+# ⚠️ TRAP A — do NOT pass `-sdk iphoneos`: it forces the WHOLE build graph
+#   (including the embedded Watch target) onto the iOS SDK, so the Watch fails to
+#   compile with `WatchSettingsView.swift: no such module 'WatchKit'` → ARCHIVE FAILED.
+#   Use `-destination 'generic/platform=iOS'` instead → each target keeps its own
+#   SDKROOT (host→iOS, Watch→watchOS). (Validated 2026-05-31: -sdk iphoneos killed the archive.)
+# ⚠️ TRAP B — a backgrounded xcodebuild does NOT inherit your foreground cwd, so pass an
+#   ABSOLUTE `-workspace` path; otherwise it dies instantly with
+#   `xcodebuild: error: 'TrainingLog.xcworkspace' does not exist.` (exit 66).
+xcodebuild -workspace "/Users/hao800922/code/TrainingLog/ios/TrainingLog.xcworkspace" \
+  -scheme TrainingLog -configuration Release \
+  -destination 'generic/platform=iOS' -allowProvisioningUpdates \
+  -archivePath /tmp/TL.xcarchive archive > /tmp/host-archive.log 2>&1; echo "EXIT=$?"
+# (exit code: the trailing `echo` is the wrapper's; grep the log for `** ARCHIVE SUCCEEDED **`
+#  to confirm the build itself passed — a bare run_in_background EXIT can mask an archive failure.)
 # 1. Confirm the phase ran:
 grep -i "host: CFBundleVersion" /tmp/host-archive.log     # expect: 1 -> 17800xxxxx
 # 2. Confirm the archived HOST app plist carries the bumped value:
