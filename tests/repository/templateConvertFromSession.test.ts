@@ -933,4 +933,83 @@ describe('convertSessionToTemplate', () => {
       expect(full?.sub_tag).toBe('A');
     });
   });
+
+  describe('dropset chain conversion', () => {
+    // Seed a single bench session_exercise holding a dropset chain
+    // (head H + 2 followers F1/F2) so the convert function's second-pass
+    // parent_set_id rewrite runs (template_set.parent_set_id must point at
+    // the cloned HEAD, not the source set id).
+    async function setupDropsetSession(session_id: string): Promise<void> {
+      await createSession(db, { id: session_id, started_at: NOW });
+      await insertSessionExercise(db, {
+        id: 'se-bench-drop',
+        session_id,
+        exercise_id: benchId,
+        ordering: 1,
+        planned_sets: 3,
+        planned_reps: 8,
+        planned_weight_kg: 80,
+        template_id: null,
+        is_evergreen: 0,
+        parent_id: null,
+        reusable_superset_id: null,
+        rest_sec: null,
+      });
+      const seed = async (
+        id: string,
+        ordering: number,
+        weight_kg: number,
+        parent_set_id: string | null,
+      ) => {
+        await insertSessionSet(db, {
+          id,
+          session_id,
+          exercise_id: benchId,
+          weight_kg,
+          reps: 8,
+          is_skipped: 0,
+          ordering,
+          created_at: NOW + ordering * 1000,
+          set_kind: 'dropset',
+          parent_set_id,
+          session_exercise_id: 'se-bench-drop',
+        });
+      };
+      await seed('drop-h', 1, 80, null); // chain head
+      await seed('drop-f1', 2, 60, 'drop-h'); // follower → head
+      await seed('drop-f2', 3, 40, 'drop-h'); // follower → head
+    }
+
+    it('preserves the dropset chain linkage (followers re-anchored to the cloned head)', async () => {
+      await setupDropsetSession('sess-drop');
+
+      const newTplId = await convertSessionToTemplate(db, {
+        session_id: 'sess-drop',
+        template_name: 'Dropset Convert',
+        mode: 'create',
+        uuid,
+        now,
+      });
+
+      const tpl = await getTemplateFull(db, newTplId);
+      expect(tpl).not.toBeNull();
+      expect(tpl!.exercises).toHaveLength(1);
+      const sets = tpl!.exercises[0].sets;
+      expect(sets).toHaveLength(3);
+      expect(sets.map((s) => s.kind)).toEqual(['dropset', 'dropset', 'dropset']);
+
+      // Head row has no parent; both followers point at the SAME new head id.
+      const head = sets[0];
+      const f1 = sets[1];
+      const f2 = sets[2];
+      expect(head.parent_set_id).toBeNull();
+      expect(f1.parent_set_id).toBe(head.id);
+      expect(f2.parent_set_id).toBe(head.id);
+      // The rewritten parent id must be a freshly-cloned template_set id, not
+      // the source session set id.
+      expect(f1.parent_set_id).not.toBe('drop-h');
+      // Weight schedule preserved in chain order.
+      expect(sets.map((s) => s.weight)).toEqual([80, 60, 40]);
+    });
+  });
 });
