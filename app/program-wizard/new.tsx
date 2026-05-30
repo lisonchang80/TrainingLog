@@ -241,7 +241,7 @@ export default function ProgramWizardScreen() {
   const onConfirm = async () => {
     const r = complete(state);
     if ('error' in r) {
-      Alert.alert('Cannot save', r.error);
+      Alert.alert(t('alert', 'cannotSave'), r.error);
       return;
     }
     setBusy(true);

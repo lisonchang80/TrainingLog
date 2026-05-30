@@ -536,7 +536,7 @@ export function StartTemplateSheet({
                         {isSelected ? '◉' : '○'}
                       </Text>
                       <Text style={styles.rowName}>{t('common', 'default')}</Text>
-                      <Text style={styles.rowHint}>(固定項)</Text>
+                      <Text style={styles.rowHint}>{t('status', 'defaultVariantHint')}</Text>
                     </Pressable>
                   );
                 })()}
@@ -557,7 +557,7 @@ export function StartTemplateSheet({
                       <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
                       <Text style={styles.rowName}>{tag}</Text>
                       {isLastUsed && (
-                        <Text style={styles.rowHint}>(最後使用)</Text>
+                        <Text style={styles.rowHint}>{t('status', 'lastUsedHint')}</Text>
                       )}
                     </Pressable>
                   );

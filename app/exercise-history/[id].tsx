@@ -1466,7 +1466,7 @@ function SessionRow({
               `supersetTag` palette (#5856D6 bg, white text, 4px corners,
               fontSize 11) so cluster identity reads consistently across
               session card / template editor / history list. */}
-          {rowIsCluster ? <Text style={styles.supersetTag}>超</Text> : null}
+          {rowIsCluster ? <Text style={styles.supersetTag}>{t('domain', 'supersetChip')}</Text> : null}
           <Text style={styles.sessionDate}>{dateLabel}</Text>
         </View>
         <Text style={styles.sessionMeta}>

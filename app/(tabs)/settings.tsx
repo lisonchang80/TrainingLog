@@ -30,7 +30,7 @@ import {
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
 import { parseWeightInput } from '@/src/domain/body/unitConversion';
-import { t } from '@/src/i18n';
+import { t, tBodyweightWithUnit, tSaveOrSaving } from '@/src/i18n';
 import {
   loadStoredLocale,
   resolveLocale,
@@ -207,7 +207,7 @@ export default function SettingsScreen() {
       setBwSheetOpen(false);
       setBwInput('');
     } catch (e) {
-      Alert.alert('儲存失敗', e instanceof Error ? e.message : String(e));
+      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBwBusy(false);
     }
@@ -383,7 +383,7 @@ export default function SettingsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalHeading}>紀錄體重</Text>
-            <Text style={styles.modalLabel}>體重 ({unit})</Text>
+            <Text style={styles.modalLabel}>{tBodyweightWithUnit(unit)}</Text>
             <TextInput
               style={styles.modalInput}
               keyboardType="decimal-pad"
@@ -402,7 +402,7 @@ export default function SettingsScreen() {
                   bwBusy && styles.btnDisabled,
                   pressed && styles.btnPressed,
                 ]}>
-                <Text style={styles.modalSecondaryText}>取消</Text>
+                <Text style={styles.modalSecondaryText}>{t('common', 'cancel')}</Text>
               </Pressable>
               <Pressable
                 onPress={onSaveBw}
@@ -413,7 +413,7 @@ export default function SettingsScreen() {
                   pressed && styles.btnPressed,
                 ]}>
                 <Text style={styles.modalPrimaryText}>
-                  {bwBusy ? '儲存中…' : '儲存'}
+                  {tSaveOrSaving(bwBusy)}
                 </Text>
               </Pressable>
             </View>

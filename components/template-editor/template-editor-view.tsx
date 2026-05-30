@@ -331,7 +331,7 @@ export default function TemplateEditorView() {
         setLoaded(true);
       } catch (e) {
         if (cancelled) return;
-        Alert.alert('Load failed', e instanceof Error ? e.message : String(e));
+        Alert.alert(tt('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
         setLoaded(true);
       }
     })();

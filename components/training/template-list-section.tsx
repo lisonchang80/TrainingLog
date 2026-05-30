@@ -66,7 +66,7 @@ interface Props {
 
 export function TemplateListSection({
   onPickTemplate,
-  heading = '模板訓練',
+  heading = tt('page', 'templateTraining'),
 }: Props): React.ReactElement {
   const db = useDatabase();
   const router = useRouter();
@@ -97,7 +97,7 @@ export function TemplateListSection({
       await createTemplate(db, { id, name: uniqueName });
       router.push(`/template/${id}`);
     } catch (e) {
-      Alert.alert('Could not create template', e instanceof Error ? e.message : String(e));
+      Alert.alert(tt('alert', 'cannotCreateTemplate'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -174,7 +174,7 @@ export function TemplateListSection({
             busy && styles.btnDisabled,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.newBtnText}>+ 新建模板</Text>
+          <Text style={styles.newBtnText}>{tt('button', 'newTemplate')}</Text>
         </Pressable>
       </View>
       {rows.length === 0 ? (
