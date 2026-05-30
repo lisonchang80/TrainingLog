@@ -1406,6 +1406,10 @@ describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', (
     const planned = buildStage1Reply(sampleRequest, null, [], [], {
       kind: 'planned',
       label: '推日 W3D1（今日）',
+      // #7 — structured 2-line fields.
+      templateName: '推日',
+      programName: 'PPL',
+      intensity: '12RM',
       programDayId: 'cell-1',
       templateId: 'tpl-1',
       exercises: [
@@ -1685,6 +1689,10 @@ describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () =
       expect(today.label).toContain('（今日）');
       expect(today.label).toContain('W1D1');
       expect(today.label).toContain('12RM');
+      // #7 — structured 2-line fields (templateName / programName / intensity).
+      expect(today.templateName).toBe('推日');
+      expect(today.programName).toBe('Act');
+      expect(today.intensity).toBe('12RM');
       // NEW-Q50 D28 — fat exercise tree projected onto the planned variant.
       expect(today.exercises).toHaveLength(1);
       expect(today.exercises[0]).toEqual({

@@ -271,7 +271,23 @@ export interface Stage1ProgramSummary {
 export type Stage1TodayPlanned =
   | {
       kind: 'planned';
+      /**
+       * Pre-formatted single-line label (e.g. "腿日 W3D1（今日）· 12RM").
+       * Kept for backward compat + any single-line consumer.
+       */
       label: string;
+      /**
+       * #7 (2026-05-30) — structured fields so the Watch can render the
+       * planned cell on TWO lines: template name on line 1, then
+       * "計劃：<program> · 強度：<intensity>" on line 2. `label` is the
+       * legacy flat form; these break it apart so the Watch picker shows
+       * a clearer hierarchy. `programName` is the user's program name (not
+       * localised — user-authored). `intensity` is the sub_tag (null when
+       * the cell has no intensity tag).
+       */
+      templateName: string;
+      programName: string;
+      intensity: string | null;
       programDayId: string;
       /** NEW-Q50 — fat tree so Watch can build offline. */
       templateId: string;
@@ -775,6 +791,10 @@ export async function loadTodayPlanned(
   return {
     kind: 'planned',
     label,
+    // #7 — structured fields for the Watch's 2-line planned-cell render.
+    templateName: tplRow.name,
+    programName: active.program.name,
+    intensity: cell.sub_tag ?? null,
     programDayId: cell.id,
     templateId: cell.template_id,
     exercises,
