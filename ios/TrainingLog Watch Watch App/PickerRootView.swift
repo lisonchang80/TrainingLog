@@ -61,49 +61,42 @@ struct PickerRootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            // #8 (2026-05-30) — ScrollViewReader so returning to the picker
-            // root after 完成 / 放棄 (which clears `path`) snaps the list back
-            // to the top instead of staying where the user had scrolled.
-            ScrollViewReader { proxy in
-                List {
-                    planSection
-                        .id(Self.topAnchorID)
-                    templateSection
+            // Picker-hang fix (2026-05-30): UI-F #8 wrapped this carousel
+            // List in a `ScrollViewReader` (to snap-to-top on return to
+            // root after 完成/放棄). On watchOS that wrapper + a `.carousel`
+            // List inside a NavigationStack push triggered a SwiftUI
+            // scene-update render loop — drilling 模板 → 計劃 → 強度 burned
+            // the main thread until the 10s watchdog killed the app
+            // (0x8badf00d, crash 2026-05-30 22:03). Reverted to a plain
+            // List; the scroll-to-top cosmetic is dropped until it can be
+            // re-added with a loop-safe mechanism.
+            List {
+                planSection
+                templateSection
+            }
+            .listStyle(.carousel)
+            .navigationTitle("選擇訓練")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    refreshButton
                 }
-                .listStyle(.carousel)
-                .navigationTitle("選擇訓練")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        refreshButton
-                    }
-                }
-                .navigationDestination(for: PickerDestination.self) { dest in
-                    destinationView(for: dest)
-                }
-                .onAppear {
-                    // Reset stale drill-down state on cold root present.
-                    vm.resetSelection()
-                }
-                .task {
-                    // Fire the cold-launch handshake once per VM lifetime.
-                    // `.task` cancels on view disappear; bootstrap is
-                    // idempotent so re-mount is safe.
-                    await vm.bootstrap()
-                }
-                .onChange(of: path) { _, newPath in
-                    // path emptied → back at root (session ended via
-                    // path.removeAll()). Scroll to the top anchor.
-                    if newPath.isEmpty {
-                        withAnimation { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
-                    }
-                }
+            }
+            .navigationDestination(for: PickerDestination.self) { dest in
+                destinationView(for: dest)
+            }
+            .onAppear {
+                // Reset stale drill-down state on cold root present.
+                vm.resetSelection()
+            }
+            .task {
+                // Fire the cold-launch handshake once per VM lifetime.
+                // `.task` cancels on view disappear; bootstrap is
+                // idempotent so re-mount is safe.
+                await vm.bootstrap()
             }
         }
     }
-
-    /// Stable id for the top list row, used by #8 scroll-to-top on return.
-    private static let topAnchorID = "picker-top"
 
     // MARK: - Toolbar 🔄
 
