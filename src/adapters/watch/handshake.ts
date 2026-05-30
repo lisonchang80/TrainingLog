@@ -66,6 +66,7 @@ import {
 } from '../sqlite/programRepository';
 import { cellForDate } from '../../domain/program/programManager';
 import { utcMsToIsoDate } from '../../domain/program/programManager';
+import { tExercise } from '../../i18n/strings';
 import type {
   HandshakePayload,
   JsonValue,
@@ -644,7 +645,19 @@ async function loadTemplateExerciseTree(
     out.push({
       templateExerciseId: r.id,
       exerciseId: r.exercise_id,
-      exerciseName: r.exercise_name ?? '',
+      // Bug Y (task #271) — localise the exercise name at the iPhone wire
+      // boundary. The DB stores the v001 seed literal in English (e.g.
+      // 'Bench Press'); the iPhone app localises via `tExercise()` at
+      // render time, but the Watch has no i18n table for seed names, so
+      // the raw value crossed the wire and the picker showed English.
+      // `tExercise` switches on the iPhone's `currentLocale` → the Watch
+      // gets the name in the user's chosen language. Custom (non-seed)
+      // names pass through unchanged via tExercise's fallback. This is
+      // display-only — `exerciseId` (the FK) stays raw, and the Watch
+      // never round-trips the name back into the DB (onStartFromWatch
+      // rebuilds the tree from template_id; replaceLiveMirror writes
+      // exercise_id), so there is no seed-pollution risk.
+      exerciseName: r.exercise_name ? tExercise(r.exercise_name) : '',
       ordering: r.ordering,
       defaultSets: r.default_sets,
       defaultReps: r.default_reps,
@@ -831,7 +844,14 @@ export async function fetchSessionSnapshot(
     return {
       sessionExerciseId: se.id,
       exerciseId: se.exercise_id,
-      exerciseName: se.exercise_name,
+      // Bug Y (task #271) — localise at the wire boundary, same as the
+      // Stage 1 prefetch (loadTemplateExerciseTree). This iPhone→Watch
+      // snapshot-push path is currently dormant (pushStartToWatch sends
+      // an empty `{}` snapshot; the live data channel is the D29 Watch→
+      // iPhone live mirror), but localise here too so the path is correct
+      // the day it's wired. `snapshotToWire` stays a pure passthrough —
+      // localisation belongs with the DB read where the seed name origins.
+      exerciseName: tExercise(se.exercise_name),
       ordering: se.ordering,
       plannedSets: se.planned_sets,
       sets: bucket.map((s) => ({

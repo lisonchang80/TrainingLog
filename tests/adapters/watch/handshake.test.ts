@@ -62,6 +62,7 @@ import {
   type Stage1TemplateFullSummary,
   type StartFromWatchReconcile,
 } from '../../../src/adapters/watch/handshake';
+import { getLocale, setLocale } from '../../../src/i18n/strings';
 
 // The Bench Press row seeded by v001_initial — used as a stable
 // `exercise_id` foreign key in session_exercise / set seeds. Other
@@ -508,7 +509,10 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       expect(list[0].exercises[0]).toEqual({
         templateExerciseId: 'te-1',
         exerciseId: BENCH,
-        exerciseName: 'Bench Press',
+        // Bug Y (task #271) — localised at the wire boundary. Default
+        // test locale is 'zh' (strings.ts currentLocale), so the seed
+        // 'Bench Press' surfaces as its zh label.
+        exerciseName: '槓鈴臥推',
         ordering: 1,
         defaultSets: 3,
         defaultReps: 8,
@@ -796,7 +800,8 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       expect(snap?.exercises).toHaveLength(1);
       const ex = snap?.exercises[0];
       expect(ex?.exerciseId).toBe(BENCH);
-      expect(ex?.exerciseName).toBe('Bench Press');
+      // Bug Y (task #271) — localised at the wire boundary (zh default).
+      expect(ex?.exerciseName).toBe('槓鈴臥推');
       expect(ex?.sets).toHaveLength(2);
       // Column renames at the wire boundary:
       //   weight_kg → weight
@@ -960,7 +965,8 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
     expect(reply.prefetch.templates[0].exercises[0]).toEqual({
       templateExerciseId: 'te-x',
       exerciseId: BENCH,
-      exerciseName: 'Bench Press',
+      // Bug Y (task #271) — localised at the wire boundary (zh default).
+      exerciseName: '槓鈴臥推',
       ordering: 1,
       defaultSets: 3,
       defaultReps: 8,
@@ -1684,7 +1690,8 @@ describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () =
       expect(today.exercises[0]).toEqual({
         templateExerciseId: 'te-push-1',
         exerciseId: BENCH,
-        exerciseName: 'Bench Press',
+        // Bug Y (task #271) — localised at the wire boundary (zh default).
+        exerciseName: '槓鈴臥推',
         ordering: 1,
         defaultSets: 4,
         defaultReps: 8,
@@ -1814,5 +1821,111 @@ describe('Phase 2.5 — onHandshakeRequest wires programs + todayPlanned (orches
     expect(['planned', 'restDay', 'noActiveProgram']).toContain(
       reply.prefetch.todayPlanned?.kind,
     );
+  });
+});
+
+// =====================================================================
+// Bug Y (task #271) — exercise-name localisation at the wire boundary
+// =====================================================================
+//
+// The DB stores v001 seed exercise names as English literals; the iPhone
+// app localises via `tExercise()` at render time. The Watch has no i18n
+// table for seed names, so before this fix the raw English value crossed
+// the WC handshake wire and the Watch picker showed English names even
+// when the iPhone was in 中文. The fix localises in the iPhone wire
+// builders (`loadTemplateExerciseTree` → Stage 1 prefetch, and
+// `fetchSessionSnapshot` → dormant snapshot push). These tests lock the
+// behaviour for BOTH locales (the other cases above only prove the zh
+// default) + the custom-name passthrough.
+describe('WC handshake — Bug Y exercise-name localisation (task #271)', () => {
+  let db: BetterSqliteDatabase;
+  let savedLocale: ReturnType<typeof getLocale>;
+  // A custom (non-seed) exercise name has no entry in the i18n dict, so
+  // `tExercise` falls back to the verbatim value in EVERY locale.
+  const CUSTOM = '00000000-0000-4000-8000-0000000000ff';
+  const CUSTOM_NAME = 'Zercher Carry (custom)';
+
+  beforeEach(async () => {
+    savedLocale = getLocale();
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const now = 1_700_000_000_000;
+    await db.runAsync(
+      `INSERT INTO exercise (id, name, load_type, is_builtin) VALUES (?, ?, ?, ?)`,
+      CUSTOM,
+      CUSTOM_NAME,
+      'loaded',
+      0,
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, NULL, NULL)`,
+      'tpl-locale',
+      'Locale Template',
+      now,
+      now,
+    );
+    // ex 0 = seeded Bench Press (in the i18n dict), ex 1 = custom.
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-bench',
+      'tpl-locale',
+      BENCH,
+      1,
+      3,
+      8,
+      60,
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'te-custom',
+      'tpl-locale',
+      CUSTOM,
+      2,
+      3,
+      8,
+      60,
+    );
+  });
+
+  afterEach(() => {
+    // Locale is module-global — restore so a flipped 'en' never leaks
+    // into a later test in this file.
+    setLocale(savedLocale);
+  });
+
+  it('zh locale — seed name is localised, custom name passes through', async () => {
+    setLocale('zh');
+    const list = await loadTemplatesFullTree(db);
+    expect(list[0].exercises[0].exerciseName).toBe('槓鈴臥推');
+    expect(list[0].exercises[1].exerciseName).toBe(CUSTOM_NAME);
+  });
+
+  it('en locale — seed name stays English, custom name passes through', async () => {
+    setLocale('en');
+    const list = await loadTemplatesFullTree(db);
+    expect(list[0].exercises[0].exerciseName).toBe('Bench Press');
+    expect(list[0].exercises[1].exerciseName).toBe(CUSTOM_NAME);
+  });
+
+  it('fetchSessionSnapshot localises the same way (dormant push path)', async () => {
+    setLocale('zh');
+    await createSession(db, {
+      id: 'sess-locale',
+      started_at: 1_700_000_000_000,
+      title: 'Push',
+    });
+    await appendSessionExercise(db, {
+      id: 'se-locale',
+      session_id: 'sess-locale',
+      exercise_id: BENCH,
+      planned_sets: 3,
+    });
+    const snap = await fetchSessionSnapshot(db, 'sess-locale');
+    expect(snap?.exercises[0].exerciseName).toBe('槓鈴臥推');
   });
 });
