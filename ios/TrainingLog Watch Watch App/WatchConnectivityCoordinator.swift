@@ -115,7 +115,7 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// Returns when iPhone replies OR errorHandler fires OR the
     /// WC framework times out internally. Updates `lastOutbound` for
     /// UI diagnostics.
-    func sendEndToiPhone(sessionId: String) async {
+    func sendEndToiPhone(sessionId: String, finalSnapshot: SessionSnapshot? = nil) async {
         // 2026-05-29 D11 HK lifecycle wire — Watch-led end path must
         // ALSO tear down the local HKWorkoutSession, otherwise the
         // workout-active state stays on the OS side after the user
@@ -136,29 +136,38 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             lastOutbound = "skip: not activated"
             return
         }
-        guard session.isReachable else {
-            // Note: WC has a separate transferUserInfo path for queued
-            // delivery, but D7 spec uses sendMessage — caller can retry
-            // when iPhone becomes reachable.
-            lastOutbound = "skip: iPhone unreachable"
-            return
-        }
         guard !sessionId.isEmpty else {
             lastOutbound = "skip: empty sessionId"
             return
         }
+        // E1 fix (Q2): the old `guard session.isReachable { return }` early
+        // exit is GONE — that hard gate WAS the zombie-session bug (a
+        // Watch-led end fired while iPhone unreachable was simply dropped).
+        // We now ALWAYS queue via transferUserInfo below + additionally
+        // sendMessage when reachable.
 
+        // E1 (Q4): authoritative finish timestamp from the Watch's clock,
+        // stamped NOW (≈ the [完成] tap). watchOS is arm64_32 so Swift `Int`
+        // is 32-bit; epoch ms (~1.78e12 in 2026) overflows → use Int64.
+        let endedAt = Int64(Date().timeIntervalSince1970 * 1000)
+        var payload: [String: Any] = [
+            "sessionId": sessionId,
+            "side": "watch",
+            "endedAt": endedAt,
+        ]
+        // E2 (Q1/Q2): carry the final authoritative tree so iPhone can
+        // reconcile-by-membership (purge the rows deleted on the Watch).
+        // Omitted on the conflict-abort path (finalSnapshot nil) → iPhone
+        // finalize-only. Encoding omits nil optionals (plist has no NSNull);
+        // iPhone parseLiveMirrorSnapshot normalises absent → null.
+        if let finalSnapshot, let snapDict = snapshotToWireDict(finalSnapshot) {
+            payload["snapshot"] = snapDict
+        }
         let envelope: [String: Any] = [
             "msgId": UUID().uuidString,
-            // watchOS uses arm64_32 — Swift `Int` is 32-bit on Watch
-            // (Int.max ≈ 2.1e9), but epoch ms (~1.78e12 in 2026) overflows.
-            // Use `Int64` (always 64-bit) so the cast doesn't crash.
-            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "ts": endedAt,
             "kind": "end-session",
-            "payload": [
-                "sessionId": sessionId,
-                "side": "watch",
-            ],
+            "payload": payload,
         ]
 
         // Fire-and-forget (replyHandler: nil) — but with WCError 7016 swallowed.
@@ -190,6 +199,22 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         // The iPhone→Watch direction (D7-TS `pushEndToWatch`) keeps the
         // ack pattern because the Watch Coordinator DOES call replyHandler
         // synchronously and iPhone uses the ack to flip is_watch_tracked.
+        // E1 (Q2 dual-fire): ALWAYS queue via transferUserInfo (OS-backed,
+        // delivered when iPhone next activates — the backstop that fixes the
+        // zombie session when iPhone is unreachable at end time). The iPhone
+        // dedupes the dual delivery via finalizeEndAndRoute's ended_at gate
+        // (end is terminal + idempotent — no divergence risk, unlike E4's
+        // start dual-listener).
+        session.transferUserInfo(envelope)
+
+        guard session.isReachable else {
+            lastOutbound = "end queued (tui) sess=\(prefix8(sessionId))"
+            return
+        }
+        // Reachable → ALSO sendMessage for instant delivery. (7016 reply
+        // timeout is expected + swallowed: the iPhone JS handler doesn't
+        // call replyToMessageWithId, so iOS times out the reply ~5s after a
+        // SUCCESSFUL delivery — surface "no-ack", not an error.)
         session.sendMessage(
             envelope,
             replyHandler: nil,
@@ -201,12 +226,24 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
                         && nsError.code == WCError.Code.messageReplyTimedOut.rawValue
                     self?.lastOutbound =
                         isReplyTimeout
-                        ? "sent sess=\(self?.prefix8(sessionId) ?? "?") (no-ack)"
-                        : "err: \(error.localizedDescription)"
+                        ? "end sent sess=\(self?.prefix8(sessionId) ?? "?") (msg+tui, no-ack)"
+                        : "end err: \(error.localizedDescription)"
                 }
             }
         )
-        lastOutbound = "sent sess=\(prefix8(sessionId))"
+        lastOutbound = "end sent (msg+tui) sess=\(prefix8(sessionId))"
+    }
+
+    /// Encode a `SessionSnapshot` to a plist-safe `[String: Any]` for WC
+    /// transport. `JSONEncoder` OMITS nil optionals (NSNull is not a plist
+    /// type), so per-set nullable fields travel ABSENT; the iPhone
+    /// `parseLiveMirrorSnapshot` normalises absent → null. Returns nil on
+    /// encode/cast failure. Shared by the live-mirror push (D29) + the
+    /// end-session envelope (E2).
+    private func snapshotToWireDict(_ snapshot: SessionSnapshot) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
+        let obj = try? JSONSerialization.jsonObject(with: data)
+        return obj as? [String: Any]
     }
 
     private nonisolated func prefix8(_ s: String) -> String {
@@ -239,14 +276,11 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             lastOutbound = "live-mirror skip: not activated"
             return
         }
+        guard let dict = snapshotToWireDict(snapshot) else {
+            lastOutbound = "live-mirror skip: encode failed"
+            return
+        }
         do {
-            let data = try JSONEncoder().encode(snapshot)
-            guard
-                let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                lastOutbound = "live-mirror skip: dict cast failed"
-                return
-            }
             try session.updateApplicationContext(dict)
             lastOutbound =
                 "live-mirror sent sess=\(prefix8(snapshot.sessionId)) ex=\(snapshot.exercises.count)"

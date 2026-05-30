@@ -171,7 +171,17 @@ struct SetLoggerView: View {
                             // ONLY — never on [放棄]/abort (a late mirror
                             // would re-create a row iPhone is hard-deleting).
                             liveMirror.emitFinal()
-                            Task { await coordinator.sendEndToiPhone(sessionId: sid) }
+                            // E2 (Q1/Q2): carry the final authoritative tree
+                            // so iPhone reconciles-by-membership (purges sets/
+                            // exercises deleted on the Watch). Conflict-abort
+                            // path (L~436) passes no snapshot → finalize-only.
+                            let finalSnap = liveMirror.currentSnapshot()
+                            Task {
+                                await coordinator.sendEndToiPhone(
+                                    sessionId: sid,
+                                    finalSnapshot: finalSnap
+                                )
+                            }
                         },
                         onFinishComplete: {
                             // Issue 1 fix (Watch [完成] success path):

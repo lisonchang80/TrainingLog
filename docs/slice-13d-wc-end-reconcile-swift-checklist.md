@@ -1,10 +1,23 @@
 # Slice 13d — WC ship-blocker E1/E2 Swift checklist (device session)
 
-TS layer shipped on `slice/13d-wc-end-reconcile` (`a67260b`). This is the
-Swift half — must be done with Xcode + real device (paired iPhone + Apple
-Watch). See ADR-0019 § "WC Ship-Blocker Fixes E1/E2/E3" for the Q1–Q6
-decisions and the `xcodebuild-watchos-realdevice-install` skill for the
-build/install traps.
+TS layer shipped on `slice/13d-wc-end-reconcile` (`a67260b`). The Swift
+half is now **DRAFTED on the same branch** (committed below) but is **NOT
+yet compiled** — no local xcodebuild (device-gated). The device session
+just needs: build (catches any Swift compile error) → install → run the
+smoke matrix. See ADR-0019 § "WC Ship-Blocker Fixes E1/E2/E3" for the
+Q1–Q6 decisions and the `xcodebuild-watchos-realdevice-install` skill for
+the build/install traps.
+
+The Swift changes below (✅ = drafted) match this checklist:
+- ✅ `LiveMirrorProducer.currentSnapshot()` — read-only projection accessor
+- ✅ `Coordinator.snapshotToWireDict(_:)` — shared plist-safe encoder
+- ✅ `Coordinator.sendEndToiPhone(sessionId:finalSnapshot:)` — endedAt +
+  optional snapshot payload + dual-fire (transferUserInfo always +
+  sendMessage when reachable; isReachable hard-gate removed)
+- ✅ `SetLoggerView` [完成] keep-path passes `liveMirror.currentSnapshot()`;
+  the conflict-abort path (L~436) keeps the default `nil` (finalize-only)
+
+Remaining = build + the smoke matrix below.
 
 The TS side is **back-compat / inert** until this Swift lands: the new
 `EndSessionPayload.endedAt` + `.snapshot` are optional, and

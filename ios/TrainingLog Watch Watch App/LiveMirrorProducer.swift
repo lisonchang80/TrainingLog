@@ -159,6 +159,20 @@ final class LiveMirrorProducer: ObservableObject {
         emit(force: true)
     }
 
+    /// The CURRENT merged snapshot (start tree folded over the live
+    /// overlay), or nil if not yet configured. Used by the end-session
+    /// envelope (E2 — ADR-0019 § "WC Ship-Blocker Fixes") to carry the
+    /// final authoritative tree to iPhone for membership reconcile. Same
+    /// projection `emit` pushes — read-only, no state change.
+    func currentSnapshot() -> SessionSnapshot? {
+        guard let base, let interaction else { return nil }
+        return LiveMirror.project(
+            base: base,
+            logged: interaction.loggedSetIds,
+            edited: interaction.editedValues
+        )
+    }
+
     private func shouldEmitNow() -> Bool {
         guard let last = lastEmit else { return true }
         return Date().timeIntervalSince(last) >= throttle
