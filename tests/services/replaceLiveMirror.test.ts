@@ -343,6 +343,113 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     expect(setIds.map((r) => r.id)).toEqual(['set-1', 'set-2']);
   });
 
+  it('reconcile (Bug X / Approach A) — mirror onto an existing template-built tree UPDATES in place (no duplicate, template_id preserved)', async () => {
+    // Simulate the iPhone's canonical template tree (what
+    // startSessionFromTemplate builds): a session_exercise with an iPhone
+    // UUID + template_id linkage + a planned set with an iPhone UUID, all
+    // unlogged. The Watch live mirror then arrives carrying its OWN ids
+    // ('se-1' / 'set-1') for the SAME logical exercise. Keyed by natural
+    // position (ordering / ordinal) it must UPDATE the canonical rows —
+    // NOT insert a parallel tree (the pre-Approach-A duplicate bug).
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      'sess-1',
+      1_700_000_000_000,
+      'A',
+    );
+    // Canonical exercise ordering = 1 (snapshotForSession re-indexes 1..N);
+    // canonical set ordering = 1 (startSessionFromTemplate uses j+1).
+    await db.runAsync(
+      `INSERT INTO session_exercise
+         (id, session_id, exercise_id, ordering, planned_sets, template_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'ios-se-uuid',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+      1, // re-indexed 1-based
+      3,
+      'tpl-A',
+    );
+    await db.runAsync(
+      `INSERT INTO "set"
+         (id, session_id, exercise_id, session_exercise_id,
+          weight_kg, reps, notes, set_kind, is_logged, ordering, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'ios-set-uuid',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+      'ios-se-uuid',
+      20, // template default — not yet logged
+      8,
+      null,
+      'working',
+      0,
+      1, // 1-based set position
+      1_700_000_000_000,
+    );
+
+    // Watch mirror — different ids, and a DIFFERENT ordering convention:
+    // ex.ordering = 0 (raw template_exercise.ordering) vs canonical's
+    // re-indexed 1. Position-matching must still align them (the dup-bug
+    // root cause: value-matching ordering 0≠1 inserted a parallel row).
+    // Set ordinal = 1 (both sides 1-based → set value-match still holds).
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0, // raw template ordering (≠ canonical's 1)
+            plannedSets: 3,
+            sets: [
+              {
+                setId: 'set-1',
+                ordinal: 1, // 1-based, matches canonical set ordering
+                weight: 100, // logged on the Watch
+                reps: 5,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'working',
+                is_logged: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Exactly ONE session_exercise — the canonical one, updated. No dup.
+    const seRows = await db.getAllAsync<{
+      id: string;
+      template_id: string | null;
+    }>(
+      `SELECT id, template_id FROM session_exercise WHERE session_id = ?`,
+      'sess-1',
+    );
+    expect(seRows).toHaveLength(1);
+    expect(seRows[0].id).toBe('ios-se-uuid'); // canonical id kept
+    expect(seRows[0].template_id).toBe('tpl-A'); // linkage preserved!
+
+    // Exactly ONE set — the canonical one, updated with the logged values.
+    const setRows = await db.getAllAsync<{
+      id: string;
+      weight_kg: number;
+      reps: number;
+      is_logged: number;
+    }>(
+      `SELECT id, weight_kg, reps, is_logged FROM "set" WHERE session_id = ?`,
+      'sess-1',
+    );
+    expect(setRows).toHaveLength(1);
+    expect(setRows[0].id).toBe('ios-set-uuid'); // canonical id kept
+    expect(setRows[0].weight_kg).toBe(100); // logged value mirrored in place
+    expect(setRows[0].reps).toBe(5);
+    expect(setRows[0].is_logged).toBe(1);
+  });
+
   it('preserves session-bound columns not in the snapshot (ended_at, bodyweight_snapshot_kg)', async () => {
     // First apply baseline snapshot, then iPhone-side mutate
     // un-mirrored columns, then re-apply snapshot — those columns
