@@ -74,6 +74,7 @@ import type {
   StartFromWatchPayload,
   WCMessage,
 } from './payloadSchema';
+import { toWireRecord } from './connectivity';
 
 // ---------------------------------------------------------------------
 // Stage 1 — reply shape
@@ -960,7 +961,7 @@ export async function onHandshakeRequest(
       programs,
       todayPlanned,
     );
-    replyHandler(reply as unknown as Record<string, unknown>);
+    replyHandler(toWireRecord(reply));
   } catch (e) {
     // Best-effort: degrade to empty reply so Watch picker can render
     // "no active session, no templates" rather than hang on timeout.

@@ -108,6 +108,18 @@ export function __resetBridgeForTests(): void {
   __clearAppContextListenersForTests();
 }
 
+/**
+ * Coerce a typed envelope (or any plain JSON-shaped object) to the
+ * `Record<string, unknown>` the native WC bridge methods expect. The
+ * bridge API is loosely typed; this centralises the otherwise-repeated
+ * `as unknown as Record<string, unknown>` cast at the single trust
+ * boundary so the call sites read intent, not ceremony. Behaviour is
+ * identical to the inline cast — no runtime transformation.
+ */
+export function toWireRecord(value: object): Record<string, unknown> {
+  return value as unknown as Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------
 // Section 2 — Inbound msgId dedupe (ring buffer, Q7)
 // ---------------------------------------------------------------------
@@ -360,7 +372,7 @@ export async function sendMessage(
 
     try {
       bridge().sendMessage(
-        env as unknown as Record<string, unknown>,
+        toWireRecord(env),
         (reply) => {
           clearTimeout(timer);
           settle({ ok: true, reply });
@@ -399,7 +411,7 @@ export async function sendMessage(
  */
 export function updateApplicationContext(env: WCMessage): void {
   try {
-    bridge().updateApplicationContext(env as unknown as Record<string, unknown>);
+    bridge().updateApplicationContext(toWireRecord(env));
   } catch {
     // swallow — context push is best-effort
   }
@@ -437,7 +449,7 @@ export function updateApplicationContext(env: WCMessage): void {
  */
 export function sendUserInfo(env: WCMessage): void {
   try {
-    bridge().transferUserInfo(env as unknown as Record<string, unknown>);
+    bridge().transferUserInfo(toWireRecord(env));
   } catch {
     // swallow — TUI is best-effort fire-and-forget
   }

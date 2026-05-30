@@ -129,22 +129,7 @@ export async function listTemplateVariantsByName(
 }
 
 /**
- * Distinct non-null `template.sub_tag` values across all templates, sorted
- * ascending. Feeds the 強度 picker in the start-template bottom sheet
- * (ADR-0019 §Q9.1a). Empty list when no template has a sub_tag yet — the
- * caller renders an empty intensity list + 「+ 新增強度」 affordance.
- */
-export async function listDistinctSubTags(db: Database): Promise<string[]> {
-  const rows = await db.getAllAsync<{ sub_tag: string }>(
-    `SELECT DISTINCT sub_tag FROM template
-      WHERE sub_tag IS NOT NULL AND sub_tag != ''
-      ORDER BY sub_tag ASC`
-  );
-  return rows.map((r) => r.sub_tag);
-}
-
-/**
- * Per-program distinct sub_tags. Similar to listDistinctSubTags but scoped
+ * Per-program distinct sub_tags. Scoped
  * to a single program_id. Returns empty array when no template under that
  * program has a sub_tag yet — caller renders the intensity chip row with
  * only the「通用」(null) chip + 「+ 新增強度」 affordance.
