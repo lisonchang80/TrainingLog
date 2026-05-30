@@ -181,6 +181,20 @@ This is a Release-vs-Debug build difference; Release builds may still produce a 
 # 0. Pre-flight — confirm devices connected
 xcrun xctrace list devices 2>&1 | grep -iE "iPhone|Watch" | grep -v Simulator
 
+# ⚠️ Device-ID trap (2026-05-30 validated, cost 1 wasted build + ~5 min):
+#   `-destination 'id=...'` MUST be the iPhone HOST UDID — NEVER the Watch
+#   UDID, NEVER an ID carried over from earlier context/memory. The Watch
+#   target builds as an EMBEDDED bundle inside the host app; you never
+#   target the Watch directly. A wrong/stale ID does NOT fail at compile —
+#   `xcodebuild` exits 70 with a destination-resolution error and compiles
+#   ZERO lines (log shows only the device list, no SwiftCompile entries).
+#   Symptom: "build" finishes in seconds, `grep -c "SwiftCompile.*Watch" = 0`,
+#   no INSTALL/BUILD marker. ALWAYS re-derive the iPhone UDID FRESH from the
+#   line above each session — for THIS repo iPhone = `00008120-...`,
+#   Watch = `00008301-...` (do not confuse). When a build looks instant,
+#   FIRST check exit code + that the log has real compile lines before
+#   trusting it.
+
 # 1. Clean rebuild (forces Watch target compile per Trap 2)
 cd /path/to/repo/ios
 xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
