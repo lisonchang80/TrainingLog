@@ -338,7 +338,13 @@ function makeStyles(tokens: ThemeTokens) {
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 6,
-      backgroundColor: tokens.bg.surface,
+      // #1 (2026-05-30) — weight/reps 值格子要跟頁面背景有對比。
+      // 原本 `bg.surface` 在淺色 == `bg.base`（頁底），格子整個融進背景看不出
+      // 邊界。改用 `bg.elevated`（淺色淡灰 / 深色提亮）+ 細框，淺/深都讀得出
+      // 這是一個可輸入的格子。
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: 1,
+      borderColor: tokens.border.default,
       fontSize: 16,
       textAlign: 'center',
       alignItems: 'center',

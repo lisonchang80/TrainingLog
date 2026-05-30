@@ -205,8 +205,18 @@ export function ClusterCard({
               Row 1: tag only (chevron + gear 在 outer header row 右側).
               overnight #5 第 5 點: 標題分行 — tag 一行、title 獨佔下一行.
             */}
+            {/*
+              #2 (2026-05-30) — Row 1: 超級組 tag + 容量分數同行 (使用者指定
+              chip 放「超級組」那行，而非 A+B 標題行)。Row 3 進度條成為全寬格線。
+            */}
             <View style={styles.clusterTagRow}>
               <Text style={styles.supersetTag}>{t('domain', 'supersetChip')}</Text>
+              {totalCycles > 0 && volume.denominator > 0 ? (
+                <Text style={styles.clusterVolumeChip}>
+                  {Math.round(volume.numerator)}/
+                  {Math.round(volume.denominator)}
+                </Text>
+              ) : null}
             </View>
             {/* Row 2: title 獨佔全寬, 不再 ... truncate. */}
             <Text style={styles.clusterName}>
@@ -214,10 +224,7 @@ export function ClusterCard({
               <Text style={styles.clusterPlus}> + </Text>
               {tExercise(group.b.exercise.exercise_name)}
             </Text>
-            {/*
-              Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
-              chip 在 bar 右側、與齒輪 column 對齊.
-            */}
+            {/* Row 3: 進度條全寬格線 (標題 ↔ cycle 列之間). */}
             {totalCycles > 0 ? (
               <View style={styles.clusterProgressRow}>
                 <View style={styles.clusterProgressBarFill}>
@@ -226,12 +233,6 @@ export function ClusterCard({
                     total={totalCycles}
                   />
                 </View>
-                {volume.denominator > 0 ? (
-                  <Text style={styles.clusterVolumeChip}>
-                    {Math.round(volume.numerator)}/
-                    {Math.round(volume.denominator)}
-                  </Text>
-                ) : null}
               </View>
             ) : null}
           </View>
@@ -657,6 +658,8 @@ function makeStyles(tokens: ThemeTokens) {
     clusterTagRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      // #2 — 超級組 tag 左、容量分數右 (chip 移到此行)。
+      justifyContent: 'space-between',
     },
     // Row 3: progress bar + 容量 chip 同 row (overnight #5 第 1 點).
     clusterProgressRow: {

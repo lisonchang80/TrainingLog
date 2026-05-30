@@ -768,16 +768,19 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '600',
     },
     /**
-     * Primary CTA chip for「新增計畫」/「新增強度」— always blue-solid white-text
-     * regardless of active state (so the entry point stands out from toggle
-     * chips). Active state darkens via opacity (was `#0050B3`).
+     * CTA chip for「新增計畫」/「新增強度」.
+     * #3 (2026-05-30) — 改外框樣式（透明底 + primary 虛線框 + primary 字），
+     * 與「選中標籤」(chipActive = 實心 primary) 拉開色差，使用者反映原本兩者
+     * 同為實心藍、分不出「已選」vs「新增」。外框 = 明確的「建立新項目」動作。
+     * Active state 仍以 opacity 0.85 表達按壓。
      */
     addCta: {
       paddingVertical: 6,
       paddingHorizontal: 12,
       borderRadius: 999,
-      backgroundColor: tokens.action.primary,
-      borderWidth: StyleSheet.hairlineWidth,
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderStyle: 'dashed',
       borderColor: tokens.action.primary,
     },
     addCtaActive: {
@@ -785,7 +788,7 @@ function makeStyles(tokens: ThemeTokens) {
     },
     addCtaText: {
       fontSize: 13,
-      color: tokens.action.onPrimary,
+      color: tokens.action.primary,
       fontWeight: '600',
     },
     hint: {

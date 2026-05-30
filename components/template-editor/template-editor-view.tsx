@@ -1966,6 +1966,10 @@ export default function TemplateEditorView() {
                 ]}
                 hitSlop={6}
               />
+              {/* #5 (2026-05-30) — ✏ 標示模板名可改。 */}
+              <Text style={{ fontSize: 16, color: tokens.text.tertiary, marginRight: 6 }}>
+                ✏
+              </Text>
               <TextInput
                 value={draft.name}
                 onChangeText={updateName}

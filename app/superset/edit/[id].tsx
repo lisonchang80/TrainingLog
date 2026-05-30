@@ -111,7 +111,8 @@ export default function EditSupersetScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.section}>
-          <Text style={styles.label}>{t('domain', 'supersetName')}</Text>
+          {/* #5 (2026-05-30) — ✏ 標示可重用超級組名可改 */}
+          <Text style={styles.label}>{t('domain', 'supersetName')} ✏</Text>
           <TextInput
             value={name}
             onChangeText={setName}

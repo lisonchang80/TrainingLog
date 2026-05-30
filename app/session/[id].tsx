@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
@@ -205,9 +205,13 @@ export default function SessionDetailScreen() {
   // emits ?sameDayIds=<csv> so the detail page can show ← N/M → switcher
   // between sessions sharing the same date. Absent param (e.g. opened from
   // Today end-session flow) → buildSameDayNavState degrades to single view.
-  const { id, sameDayIds } = useLocalSearchParams<{
+  const { id, sameDayIds, dir } = useLocalSearchParams<{
     id: string;
     sameDayIds?: string;
+    // #4 (2026-05-30) — 同日 session 切換方向。prev → 頁面從左滑入；
+    // next / undefined(首次從歷史進入) → 從右滑入。驅動 <Stack.Screen>
+    // 的 animation 讓「按左箭頭從左進、按右箭頭從右進」符合直覺。
+    dir?: 'prev' | 'next';
   }>();
   const db = useDatabase();
   const router = useRouter();
@@ -234,6 +238,9 @@ export default function SessionDetailScreen() {
         params: {
           id: target,
           sameDayIds: navState.ids.join(','),
+          // #4 — carry the nav direction so the incoming screen picks the
+          // matching slide animation (prev=from-left / next=from-right).
+          dir: direction,
         },
       });
     },
@@ -1857,6 +1864,17 @@ export default function SessionDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/*
+        #4 (2026-05-30) — 同日 session 切換的轉場方向。prev → slide_from_left
+        (頁面從左進入)、next/首次 → slide_from_right。Stack.Screen render null，
+        放這裡只為在本路由首次 render 時就設好 animation，讓 router.replace 的
+        轉場依方向播放，符合「按左箭頭從左進」的直覺。
+      */}
+      <Stack.Screen
+        options={{
+          animation: dir === 'prev' ? 'slide_from_left' : 'slide_from_right',
+        }}
+      />
       {/* Header — back btn + title + (edit mode) 完成 btn */}
       <View style={styles.header}>
         <Pressable
@@ -2874,10 +2892,20 @@ function EditableExerciseCard({
           ]}
         >
           <View style={styles.planText}>
+            {/*
+              #2 (2026-05-30) — 容量分數移到標題行右側；進度條成為標題↔set
+              的全寬格線。與 in-session 動作卡 (app/(tabs)/index.tsx) 一致。
+            */}
             <View style={styles.exerciseCardTitleRow}>
               <Text style={styles.planName} numberOfLines={1}>
                 {tExercise(planRow.exercise_name)}
               </Text>
+              {progress.setsTotal > 0 && progress.volumeTotal > 0 ? (
+                <Text style={styles.exerciseCardVolumeChip}>
+                  {Math.round(progress.volumeDone)}/
+                  {Math.round(progress.volumeTotal)}
+                </Text>
+              ) : null}
             </View>
             {progress.setsTotal > 0 ? (
               <View style={styles.exerciseCardProgressRow}>
@@ -2887,12 +2915,6 @@ function EditableExerciseCard({
                     total={progress.setsTotal}
                   />
                 </View>
-                {progress.volumeTotal > 0 ? (
-                  <Text style={styles.exerciseCardVolumeChip}>
-                    {Math.round(progress.volumeDone)}/
-                    {Math.round(progress.volumeTotal)}
-                  </Text>
-                ) : null}
               </View>
             ) : null}
           </View>
@@ -3439,11 +3461,15 @@ function makeStyles(tokens: ThemeTokens) {
     exerciseCardTitleRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      // #2 — name 左、容量分數右 (chip 移上來後共用此行)。
+      justifyContent: 'space-between',
     },
     planName: {
       fontSize: 15,
       fontWeight: '600',
       color: tokens.text.primary,
+      // #2 — 長名 truncate，留空間給同行的容量分數。
+      flexShrink: 1,
     },
     exerciseCardProgressRow: {
       flexDirection: 'row',

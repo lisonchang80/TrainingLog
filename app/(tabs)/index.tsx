@@ -2232,19 +2232,19 @@ export default function TodayScreen() {
   let programBanner: ReactNode = null;
   if (sessionState.status === 'in_progress') {
     if (sessionTemplateInfo) {
-      programBanner = (
-        <View style={styles.programBanner}>
-          <Text style={styles.programBannerName} numberOfLines={1}>
-            {sessionTemplateInfo.template_name}
-          </Text>
-          <Text style={styles.programBannerCell}>
-            {formatTemplateTriple(
-              sessionTemplateInfo.program_name,
-              sessionTemplateInfo.sub_tag,
-            )}
-          </Text>
-        </View>
+      // #6 (2026-05-30) — header 的 SessionTitleEditor 已顯示 session 標題
+      // (template 訓練預設 = 模板名)。banner 原本第一行又印一次
+      // `template_name` → 與標題重複。移除該行，只留「計劃 · 強度」副標；
+      // 若 session 未連 program/intensity (triple 為空) 整個 banner 不渲染。
+      const triple = formatTemplateTriple(
+        sessionTemplateInfo.program_name,
+        sessionTemplateInfo.sub_tag,
       );
+      programBanner = triple ? (
+        <View style={styles.programBanner}>
+          <Text style={styles.programBannerCell}>{triple}</Text>
+        </View>
+      ) : null;
     } else {
       programBanner = (
         <View style={styles.programBanner}>
@@ -3157,34 +3157,36 @@ function ExerciseCard({
             pressed && styles.btnPressed,
           ]}>
           <View style={styles.planText}>
+            {/*
+              #2 (2026-05-30) — 容量分數 (volume chip) 移到標題行右側；進度條
+              獨佔下一行成為「標題 ↔ set 列」之間的全寬格線 (與 Watch 相似)。
+              收合 / 展開都渲染 (progress row 不 gate isExpanded)。
+            */}
             <View style={styles.exerciseCardTitleRow}>
               <Text style={styles.planName} numberOfLines={1}>
                 {tExercise(planRow.exercise_name)}
               </Text>
+              {progress.setsTotal > 0 && progress.volumeTotal > 0 ? (
+                <Text style={styles.exerciseCardVolumeChip}>
+                  {Math.round(progress.volumeDone)}/
+                  {Math.round(progress.volumeTotal)}
+                </Text>
+              ) : null}
             </View>
-            {(() => {
-              // Bar 分段 = setsTotal (working count + dropset chain head count
-              // per `computeExerciseProgress`). Dropset 納入 wave 12 2026-05-20
-              // — pre-fix only counted working, leaving a logged dropset
-              // chain showing 0/3 on a pure-dropset card.
-              if (progress.setsTotal <= 0) return null;
-              return (
-                <View style={styles.exerciseCardProgressRow}>
-                  <View style={styles.exerciseCardProgressBarFill}>
-                    <SegmentedProgressBar
-                      done={progress.setsDone}
-                      total={progress.setsTotal}
-                    />
-                  </View>
-                  {progress.volumeTotal > 0 ? (
-                    <Text style={styles.exerciseCardVolumeChip}>
-                      {Math.round(progress.volumeDone)}/
-                      {Math.round(progress.volumeTotal)}
-                    </Text>
-                  ) : null}
+            {/*
+              Bar 分段 = setsTotal (working count + dropset chain head count
+              per `computeExerciseProgress`). Dropset 納入 wave 12 2026-05-20.
+            */}
+            {progress.setsTotal > 0 ? (
+              <View style={styles.exerciseCardProgressRow}>
+                <View style={styles.exerciseCardProgressBarFill}>
+                  <SegmentedProgressBar
+                    done={progress.setsDone}
+                    total={progress.setsTotal}
+                  />
                 </View>
-              );
-            })()}
+              </View>
+            ) : null}
           </View>
           <Text style={styles.exerciseCardChevron}>{isExpanded ? '▼' : '▶'}</Text>
         </Pressable>
@@ -3686,7 +3688,14 @@ function makeStyles(tokens: ThemeTokens) {
     textAlign: 'center',
   },
   planText: { flex: 1 },
-  planName: { fontSize: 15, fontWeight: '600', color: tokens.text.primary },
+  planName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: tokens.text.primary,
+    // #2 — flexShrink so a long name truncates (numberOfLines={1}) and
+    // leaves room for the volume chip now sharing the title row.
+    flexShrink: 1,
+  },
   // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
   exerciseCard: {
     backgroundColor: tokens.bg.elevated,

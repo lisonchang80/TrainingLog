@@ -172,6 +172,8 @@ export const SessionTitleEditor = forwardRef<
         ellipsizeMode="tail">
         {isEmpty ? placeholder ?? '' : initialTitle}
       </Text>
+      {/* #5 (2026-05-30) — 編輯提示 ✏ icon，讓使用者知道標題可點擊編輯。 */}
+      <Text style={styles.editHint}> ✏</Text>
     </Pressable>
   );
 });
@@ -188,11 +190,22 @@ function makeStyles(tokens: ThemeTokens, size: 'hero' | 'nav') {
       // its slot. flexShrink lets the title truncate (numberOfLines=1) rather
       // than push the actions off-screen.
       flexShrink: 1,
+      // #5 — title text + ✏ icon on one row.
+      flexDirection: 'row',
+      alignItems: 'center',
     },
     heading: {
       fontSize,
       fontWeight: '700',
       color: tokens.text.primary,
+      // #5 — truncate the title (numberOfLines=1) instead of pushing the ✏
+      // icon out of the row.
+      flexShrink: 1,
+    },
+    editHint: {
+      // Dimmed pencil affordance; scales with the title size variant.
+      fontSize: size === 'nav' ? 13 : 18,
+      color: tokens.text.tertiary,
     },
     placeholder: {
       fontStyle: 'italic',

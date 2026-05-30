@@ -193,8 +193,8 @@ export function CustomExerciseForm({
         }}
       />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {/* Row 1: 名稱 */}
-        <Text style={styles.label}>{t('page', 'nameFieldLabel')}</Text>
+        {/* Row 1: 名稱 — #5 (2026-05-30) ✏ 標示動作名可改 (new + edit 共用) */}
+        <Text style={styles.label}>{t('page', 'nameFieldLabel')} ✏</Text>
         <TextInput
           accessibilityLabel={t('page', 'exerciseNameA11y')}
           placeholder={t('page', 'exerciseNameExamplePlaceholder')}

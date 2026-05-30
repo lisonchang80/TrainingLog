@@ -516,7 +516,8 @@ function NameAndTagPanel({
   return (
     <View style={styles.panel}>
       <View style={styles.labelRow}>
-        <Text style={styles.label}>{t('page', 'programNamePlaceholder')}</Text>
+        {/* #5 (2026-05-30) — ✏ 標示計劃名可改 */}
+      <Text style={styles.label}>{t('page', 'programNamePlaceholder')} ✏</Text>
         {programs.length > 0 ? (
           <Pressable
             accessibilityRole="button"
