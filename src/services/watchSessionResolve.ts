@@ -55,7 +55,7 @@ import { badPayload, dbError } from './watchHandlerResult';
  * potential future diagnostics overlay; production caller in
  * index.tsx just `void`s the promise.
  */
-export type StartResolveResult =
+type StartResolveResult =
   | { ok: true; existingSessionId: string }
   | { ok: false; code: 'bad-payload' | 'db-error'; message: string };
 

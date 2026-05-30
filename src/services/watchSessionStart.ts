@@ -62,7 +62,7 @@ export interface PushStartResult {
   startedAt: number;
 }
 
-export interface PushStartOptions {
+interface PushStartOptions {
   /** Cap on how long to wait for Watch's reply. Default 2000ms
    *  (Q7 channel #2 start-from-iphone). */
   timeoutMs?: number;

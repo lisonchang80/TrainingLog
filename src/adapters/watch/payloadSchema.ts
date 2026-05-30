@@ -29,7 +29,7 @@
  *   3. Every envelope carries a unique `msgId` so the receiver can
  *      dedupe via the ring buffer (≥256 slots) specified in Q7.
  *
- * The 13 message kinds come straight from ADR-0019 § Slice 13d
+ * The 16 message kinds come straight from ADR-0019 § Slice 13d
  * Amendment table + Agent F codebase inventory (D3 section + the kinds
  * referenced by D5-D24). See per-kind doc-comments below for the
  * decision that introduced each kind.
@@ -40,7 +40,7 @@
 // ---------------------------------------------------------------------
 
 /**
- * The 13 message kinds. Order here mirrors the table in
+ * The 16 message kinds. Order here mirrors the table in
  * ADR-0019 § Slice 13d Amendment for grep-ability. New kinds are
  * forbidden without an ADR amendment — the kind set is the cross-end
  * API contract.
@@ -64,7 +64,7 @@ export type WCMessageKind =
   | 'settings-sync';
 
 /**
- * All 14 kinds as a frozen tuple — used by the type guard, jest
+ * All 16 kinds as a frozen tuple — used by the type guard, jest
  * `it.each` tables, and the Swift mirror generator (D4/D5). Keep in
  * sync with `WCMessageKind` literal union above.
  *

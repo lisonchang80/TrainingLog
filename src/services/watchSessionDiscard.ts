@@ -36,7 +36,7 @@ import type {
 } from '../adapters/watch';
 import { badPayload, wrongSide, dbError } from './watchHandlerResult';
 
-export type DiscardSessionResult =
+type DiscardSessionResult =
   | { ok: true; sessionId: string }
   | { ok: false; code: 'bad-payload' | 'wrong-side' | 'db-error'; message: string };
 

@@ -62,7 +62,7 @@ import {
  * (fire-and-forget); future Settings debug readout (D24-wire) may use
  * it for last-sync diagnostics.
  */
-export interface PushEndResult {
+interface PushEndResult {
   /** True iff the Watch acked the end-session envelope within 5s. */
   acked: boolean;
   /** Diagnostic code mirroring `SendResult.code`. `null` when acked. */
@@ -73,7 +73,7 @@ export interface PushEndResult {
   startedAt: number;
 }
 
-export interface PushEndOptions {
+interface PushEndOptions {
   /** Cap on how long to wait for Watch's reply. Default 5000ms
    *  (Q23 channel #11 + reconcile window). */
   timeoutMs?: number;

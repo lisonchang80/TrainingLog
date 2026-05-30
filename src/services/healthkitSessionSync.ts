@@ -50,7 +50,7 @@ import { getSession, setSessionHealthKitData } from '../adapters/sqlite/sessionR
 import { aggregateActiveEnergyBurned, saveTrainingLogWorkout } from '../adapters/healthkit';
 import type { Session } from '../domain/session/types';
 
-export interface HealthKitSessionSyncDeps {
+interface HealthKitSessionSyncDeps {
   /** Defaults to {@link getSession}. */
   getSession?: (db: Database, id: string) => Promise<Session | null>;
   /** Defaults to {@link aggregateActiveEnergyBurned}. */

@@ -76,7 +76,7 @@ import { replaceLiveMirror } from './replaceLiveMirror';
  * potential future diagnostics overlay; the production caller in
  * index.tsx just `void`s the promise then refreshes.
  */
-export type LiveMirrorResult =
+type LiveMirrorResult =
   | { ok: true; sessionId: string; exerciseCount: number; setCount: number }
   | { ok: false; code: 'bad-payload' | 'db-error'; message: string };
 
