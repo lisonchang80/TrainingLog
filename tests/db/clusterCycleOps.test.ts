@@ -50,6 +50,7 @@ describe('Atomic cluster cycle ops', () => {
     weight_kg: number,
     reps: number,
     is_logged: 0 | 1 = 0,
+    session_exercise_id: string | null = null,
   ) {
     await insertSessionSet(db, {
       id,
@@ -62,6 +63,7 @@ describe('Atomic cluster cycle ops', () => {
       created_at: now,
       set_kind: 'working',
       parent_set_id: null,
+      session_exercise_id,
     });
     if (is_logged === 1) {
       await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, id);
@@ -195,6 +197,31 @@ describe('Atomic cluster cycle ops', () => {
       // a2 inserted, b2 silently skipped
       expect(rows.map((r) => r.id).sort()).toEqual(['a1', 'a2']);
     });
+
+    it('v019 isolation: ordering scoped to session_exercise_id, not bare (session,exercise)', async () => {
+      // Two cards (cluster card vs solo card) share the SAME exercise_id but
+      // different session_exercise_id. The clone must take MAX(ordering)
+      // scoped to its own session_exercise_id (3), NOT the cross-card bare
+      // (session_id, exercise_id) MAX (which would jump it to 50+1).
+      await insertSet('a1', exA, 1, 80, 5, 0, 'se-cluster');
+      await insertSet('a2', exA, 3, 85, 5, 0, 'se-cluster');
+      // Decoy: same exercise on the OTHER card with a much higher ordering.
+      await insertSet('solo1', exA, 50, 100, 3, 0, 'se-solo');
+
+      await cloneClusterCycle(db, {
+        a_source: { id: 'a2', exercise_id: exA, session_exercise_id: 'se-cluster' },
+        b_source: null,
+        session_id: sessionId,
+        new_a_set_id: 'a3',
+        new_b_set_id: 'b-unused',
+      });
+
+      const rows = await listSetsBySession(db, sessionId);
+      const a3 = rows.find((r) => r.id === 'a3');
+      // MAX(ordering) within se-cluster is 3 → new row = 4 (not 51).
+      expect(a3?.ordering).toBe(4);
+      expect(a3?.session_exercise_id).toBe('se-cluster');
+    });
   });
 
   // ── addClusterCycleAtEnd ────────────────────────────────────────────────────
@@ -244,6 +271,43 @@ describe('Atomic cluster cycle ops', () => {
 
       const rows = await listSetsBySession(db, sessionId);
       expect(rows.every((r) => r.set_kind === 'warmup')).toBe(true);
+    });
+
+    it('v019 isolation: ordering scoped to session_exercise_id when provided', async () => {
+      // Same exercise on two cards; the new pair must append after its OWN
+      // card's MAX(ordering), ignoring the decoy on the other card.
+      await insertSet('a1', exA, 2, 80, 5, 0, 'se-clusterA');
+      await insertSet('b1', exB, 2, 60, 8, 0, 'se-clusterB');
+      // Decoys on a different card sharing the same exercise ids.
+      await insertSet('decoyA', exA, 40, 99, 1, 0, 'se-other');
+      await insertSet('decoyB', exB, 40, 99, 1, 0, 'se-other');
+
+      await addClusterCycleAtEnd(db, {
+        session_id: sessionId,
+        a: {
+          exercise_id: exA,
+          new_set_id: 'a2',
+          weight_kg: 90,
+          reps: 5,
+          session_exercise_id: 'se-clusterA',
+        },
+        b: {
+          exercise_id: exB,
+          new_set_id: 'b2',
+          weight_kg: 65,
+          reps: 8,
+          session_exercise_id: 'se-clusterB',
+        },
+      });
+
+      const rows = await listSetsBySession(db, sessionId);
+      const a2 = rows.find((r) => r.id === 'a2');
+      const b2 = rows.find((r) => r.id === 'b2');
+      // Each side appends after its own card's MAX (2) → 3, not 41.
+      expect(a2?.ordering).toBe(3);
+      expect(b2?.ordering).toBe(3);
+      expect(a2?.session_exercise_id).toBe('se-clusterA');
+      expect(b2?.session_exercise_id).toBe('se-clusterB');
     });
   });
 });

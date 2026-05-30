@@ -268,6 +268,23 @@ describe('session set logger — DB + domain smoke', () => {
     expect(sets[0].notes).toBeNull();
   });
 
+  it('updateSetFields is a no-op when given an empty patch (no columns to set)', async () => {
+    await recordSetInSession(db, {
+      session_id: sessionId,
+      input: { exercise_id: benchId, weight_kg: 60, reps: 10 },
+      uuid,
+    });
+    let sets = await listForExercise(benchId);
+    const id = sets[0].id;
+
+    // Empty patch — the early return guard must fire (no malformed
+    // "UPDATE set SET  WHERE id = ?" SQL), leaving the row untouched.
+    await expect(updateSetFields(db, id, {})).resolves.toBeUndefined();
+    sets = await listForExercise(benchId);
+    expect(sets[0].weight_kg).toBe(60);
+    expect(sets[0].reps).toBe(10);
+  });
+
   it('deleteSet hard-deletes the row', async () => {
     await recordSetInSession(db, {
       session_id: sessionId,

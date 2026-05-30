@@ -193,4 +193,13 @@ describe('addSessionDropsetRow + removeSessionDropsetRow', () => {
       }),
     ).rejects.toThrow(/not a dropset row/);
   });
+
+  it('removeSessionDropsetRow: throws when set is not found in session', async () => {
+    await expect(
+      removeSessionDropsetRow(db, {
+        session_id: sessionId,
+        set_id: 'ghost-set',
+      }),
+    ).rejects.toThrow(/not found/);
+  });
 });
