@@ -227,8 +227,14 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
     /// build a SessionSnapshot offline from today's planned cell
     /// without a second round-trip. Pre-Q50 wire (no exercises field)
     /// decodes with empty `[]` for back-compat.
+    // #7 (2026-05-30) — templateName / programName / intensity added so
+    // the Watch can render the planned cell on TWO lines. decodeIfPresent +
+    // fallback to `label` so an OLDER iPhone build (only `label`) decodes.
     case planned(
         label: String,
+        templateName: String,
+        programName: String,
+        intensity: String?,
         programDayId: String,
         templateId: String,
         exercises: [Stage1TemplateExerciseDTO]
@@ -239,6 +245,9 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case kind
         case label
+        case templateName
+        case programName
+        case intensity
         case programDayId
         case templateId
         case exercises
@@ -261,6 +270,11 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
             )) ?? []
             self = .planned(
                 label: label,
+                // #7 — fall back to `label` when older iPhone omits the
+                // structured field so the row still shows something.
+                templateName: (try? c.decode(String.self, forKey: .templateName)) ?? label,
+                programName: (try? c.decode(String.self, forKey: .programName)) ?? "",
+                intensity: try? c.decode(String.self, forKey: .intensity),
                 programDayId: programDayId,
                 templateId: templateId,
                 exercises: exercises
@@ -280,9 +294,12 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .planned(let label, let programDayId, let templateId, let exercises):
+        case let .planned(label, templateName, programName, intensity, programDayId, templateId, exercises):
             try c.encode("planned", forKey: .kind)
             try c.encode(label, forKey: .label)
+            try c.encode(templateName, forKey: .templateName)
+            try c.encode(programName, forKey: .programName)
+            try c.encodeIfPresent(intensity, forKey: .intensity)
             try c.encode(programDayId, forKey: .programDayId)
             try c.encode(templateId, forKey: .templateId)
             try c.encode(exercises, forKey: .exercises)

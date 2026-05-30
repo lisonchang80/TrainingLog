@@ -64,8 +64,14 @@ struct IntensityOption: Identifiable, Hashable {
 enum TodayPlanned: Equatable {
     /// User has an active program and today is a training day.
     /// `label` is the human-readable string e.g. "推日 W3D1（今日）".
+    /// #7 (2026-05-30) — templateName / programName / intensity carried
+    /// through from the DTO so PickerRootView can render the planned cell
+    /// on two lines (template name / "計劃：x · 強度：y").
     case planned(
         label: String,
+        templateName: String,
+        programName: String,
+        intensity: String?,
         programDayId: String,
         templateId: String,
         exercises: [Stage1TemplateExerciseDTO]

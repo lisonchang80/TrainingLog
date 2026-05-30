@@ -188,9 +188,12 @@ final class PickerViewModel: ObservableObject {
         // templateId + exercises fat-tree for offline snapshot build.
         if let plannedDTO = reply.prefetch.todayPlanned {
             switch plannedDTO {
-            case .planned(let label, let programDayId, let templateId, let exercises):
+            case let .planned(label, templateName, programName, intensity, programDayId, templateId, exercises):
                 todayPlanned = .planned(
                     label: label,
+                    templateName: templateName,
+                    programName: programName,
+                    intensity: intensity,
                     programDayId: programDayId,
                     templateId: templateId,
                     exercises: exercises
@@ -335,7 +338,7 @@ final class PickerViewModel: ObservableObject {
         // 3-tuple from iPhone). Pull exercises from todayPlanned. The
         // planned label is typically already a meaningful display string
         // (e.g. "推日 W3D1（今日）") so we don't synthesize a 3-tuple.
-        if case .planned(_, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
+        if case .planned(_, _, _, _, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
             let label = plannedLabel ?? "今日訓練"
             return (label, exercises, templateId.isEmpty ? nil : templateId)
         }
@@ -346,7 +349,7 @@ final class PickerViewModel: ObservableObject {
     /// todayPlanned is .planned). Returns nil for restDay /
     /// noActiveProgram.
     private var plannedLabel: String? {
-        if case .planned(let label, _, _, _) = todayPlanned {
+        if case .planned(let label, _, _, _, _, _, _) = todayPlanned {
             return label
         }
         return nil
@@ -470,6 +473,9 @@ extension PickerViewModel {
         PickerViewModel(
             todayPlanned: .planned(
                 label: "推日 W3D1（今日）",
+                templateName: "推日",
+                programName: "PPL",
+                intensity: "12RM",
                 programDayId: "pd-1",
                 templateId: "",
                 exercises: []

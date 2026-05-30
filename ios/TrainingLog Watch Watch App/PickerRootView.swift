@@ -61,33 +61,49 @@ struct PickerRootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                planSection
-                templateSection
-            }
-            .listStyle(.carousel)
-            .navigationTitle("選擇訓練")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    refreshButton
+            // #8 (2026-05-30) — ScrollViewReader so returning to the picker
+            // root after 完成 / 放棄 (which clears `path`) snaps the list back
+            // to the top instead of staying where the user had scrolled.
+            ScrollViewReader { proxy in
+                List {
+                    planSection
+                        .id(Self.topAnchorID)
+                    templateSection
                 }
-            }
-            .navigationDestination(for: PickerDestination.self) { dest in
-                destinationView(for: dest)
-            }
-            .onAppear {
-                // Reset stale drill-down state on cold root present.
-                vm.resetSelection()
-            }
-            .task {
-                // Fire the cold-launch handshake once per VM lifetime.
-                // `.task` cancels on view disappear; bootstrap is
-                // idempotent so re-mount is safe.
-                await vm.bootstrap()
+                .listStyle(.carousel)
+                .navigationTitle("選擇訓練")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        refreshButton
+                    }
+                }
+                .navigationDestination(for: PickerDestination.self) { dest in
+                    destinationView(for: dest)
+                }
+                .onAppear {
+                    // Reset stale drill-down state on cold root present.
+                    vm.resetSelection()
+                }
+                .task {
+                    // Fire the cold-launch handshake once per VM lifetime.
+                    // `.task` cancels on view disappear; bootstrap is
+                    // idempotent so re-mount is safe.
+                    await vm.bootstrap()
+                }
+                .onChange(of: path) { _, newPath in
+                    // path emptied → back at root (session ended via
+                    // path.removeAll()). Scroll to the top anchor.
+                    if newPath.isEmpty {
+                        withAnimation { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
+                    }
+                }
             }
         }
     }
+
+    /// Stable id for the top list row, used by #8 scroll-to-top on return.
+    private static let topAnchorID = "picker-top"
 
     // MARK: - Toolbar 🔄
 
@@ -114,7 +130,20 @@ struct PickerRootView: View {
     private var planSection: some View {
         Section {
             switch vm.todayPlanned {
-            case .planned(let label, _, _, _):
+            case let .planned(label, templateName, programName, intensity, _, _, _):
+                // #7 (2026-05-30) — 2-line render: template name on line 1,
+                // "計劃：<program> · 強度：<intensity>" on line 2. Fall back to
+                // the flat `label` when templateName is empty (older iPhone
+                // build that only sent `label`).
+                let line1 = templateName.isEmpty ? label : templateName
+                let subtitle: String = {
+                    var parts: [String] = []
+                    if !programName.isEmpty { parts.append("計劃：\(programName)") }
+                    if let intensity, !intensity.isEmpty {
+                        parts.append("強度：\(intensity)")
+                    }
+                    return parts.joined(separator: " · ")
+                }()
                 Button {
                     vm.selectTodayPlanned()
                     // Bypass both sheets — program day spec already
@@ -125,7 +154,7 @@ struct PickerRootView: View {
                         intensity: nil
                     )))
                 } label: {
-                    PlanRowLabel(marker: "▶", text: label)
+                    PlanRowLabel(marker: "▶", text: line1, subtitle: subtitle)
                 }
                 .buttonStyle(.plain)
 
@@ -248,6 +277,10 @@ struct PickerRootView: View {
 private struct PlanRowLabel: View {
     let marker: String
     let text: String
+    // #7 (2026-05-30) — optional dimmed second line. The planned-cell row
+    // passes "計劃：<program> · 強度：<intensity>" here; template rows omit it
+    // → unchanged single-line render.
+    var subtitle: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -255,9 +288,17 @@ private struct PlanRowLabel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 12, alignment: .center)
-            Text(text)
-                .font(.body)
-                .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text)
+                    .font(.body)
+                    .multilineTextAlignment(.leading)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
