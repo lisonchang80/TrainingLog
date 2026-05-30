@@ -241,6 +241,69 @@ xcrun devicectl device process launch --device <iphone-udid> com.lisonchang.Trai
    ```
    Staged plist has a bumped timestamp + the host got `devicectl install` → the Watch WILL auto-sync (CFBundleVersion auto-bump, no Trap 3 dance). If you still need to confirm on-wrist, let the smoke result be the proof (does the new behaviour show?), not the flaky query.
 
+## Diagnosing a post-install Watch hang / crash
+
+The traps above are about getting the build ONTO the device. Different
+problem: it installed + launched fine, but the Watch app **hangs (freezes)
+or crashes** at runtime. Validated 2026-05-30 (picker hang → SwiftUI
+render-loop watchdog kill; root cause = a `ScrollViewReader` wrapping a
+`.carousel` List — see `watch-swiftui-phase-ship` anti-patterns).
+
+### 1. Get the report (.ips)
+
+watchdog/hang reports don't reliably land in the Mac's
+`~/Library/Logs/CrashReporter/` quickly. Fastest path: on the **iPhone**,
+設定 → 隱私權與安全性 → 分析與改進 → 分析資料 → newest file named
+`TrainingLog Watch-…-<timestamp>.ips` → open → copy the top block. (Have
+the user reproduce, wait ~30s for watchOS to kill a hung app, then grab it.)
+
+### 2. Classify from the .ips header
+
+- **`termination … 0x8badf00d … watchdog transgression: … exhausted real
+  (wall clock) time allowance of 10.00 seconds`** → main thread
+  blocked/looping >10s. `scene-update` watchdog = stuck during a SwiftUI
+  render/update.
+- **`WatchdogCPUStatistics: Elapsed application CPU time (seconds): N`** is
+  the discriminator:
+  - **high CPU (≈ the full window, e.g. 9.5s / 47%+)** → a **render LOOP** /
+    runaway recompute (SwiftUI body re-evaluating forever), NOT a deadlock.
+    `faultingThread` stack sits deep in `SwiftUI` / `SwiftUICore` /
+    `AttributeGraph`.
+  - **~0 CPU** → a **deadlock / blocked await** (lock, a WC reply that never
+    comes, semaphore). Different fix class.
+- A genuine crash (not hang) shows `EXC_BAD_ACCESS` / `Fatal error` + a real
+  app stack frame — symbolicate it (step 3).
+
+### 3. Symbolicate app frames (atos) + UUID match
+
+`.ips` `usedImages` gives each image's `base`; the header gives `slice_uuid`.
+The just-built Debug binary:
+`<DerivedData>/…/InstallationBuildProductsLocation/Applications/TrainingLog.app/Watch/TrainingLog Watch Watch App.app/TrainingLog Watch Watch App`.
+
+```bash
+dwarfdump --uuid "<watch-binary>" | grep arm64_32   # MUST match .ips slice_uuid
+atos -arch arm64_32 -o "<watch-binary>" -l <imageBase> <imageBase + imageOffset>
+```
+
+Caveat: Debug builds often have NO dSYM (DEBUG_INFORMATION_FORMAT=dwarf) +
+the installed binary may be stripped → atos returns the raw address. Then
+fall back to **bisection by the "new build only" delta**: what structural
+change shipped since the last working build? Revert the single strongest
+suspect, `clean install`, retest. A render-loop with NO app frame in the
+hot loop (all SwiftUI/AttributeGraph) means the trigger already returned —
+read the recently-changed views for self-invalidation (state mutation
+during body, `ScrollViewReader`+carousel, `ForEach` duplicate Identifiable
+id, `onChange` that mutates its own observed value).
+
+### 4. Private Swift symbols won't show in `strings` / `nm`
+
+Verifying "did my new code land" via `strings <binary> | grep mySwiftFn`
+FAILS for private/internal Swift methods (not `@objc` → names mangled /
+absent) — don't conclude the code is missing. The reliable signal is the
+**build log**: `grep -oE "MyFile\.swift" build.log` confirms it compiled, +
+`** INSTALL SUCCEEDED **` with `grep -cE "SwiftCompile.*Watch Watch App"`
+≥20 means the Watch target really recompiled (Trap 2).
+
 ## Not every Watch-facing fix needs this skill (JS-only shortcut)
 
 A bug VISIBLE on the Watch is not necessarily a Watch-BINARY bug. The Watch reads its session data from the iPhone over WC, so a fix in **iPhone-side JS/TS** (handshake builders, `replaceLiveMirror`, services, `onStartFromWatch`, i18n) reflects on the Watch with just **Metro Reload JS + a fresh handshake/session** — NO rebuild, NO `devicectl`, NO Watch-sync dance. Validated 2026-05-30: the D29 "duplicate exercise" + "空白訓練" bugs both looked like Watch bugs but were fixed entirely in `src/` TS → Reload JS re-smoke each cycle (~30s vs ~10min rebuild). Only `ios/**/*.swift` changes need the full pipeline below. Before reaching for a clean install, ask: *did I touch any Swift?* If not, just Reload JS.

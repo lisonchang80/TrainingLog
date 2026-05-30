@@ -238,6 +238,7 @@ guard let coordinator else {
 - ❌ **Keypad 預載 buffer 但 first-digit append 而非 replace**（D11 PC polish 4 `a7c8f85`）— tap cell 進 keypad 顯示「80 kg」是 nice、但用戶按 `5` 想換成 5、不是想得 805。要 `hasUserInput: Bool` 旗標、首次 digit press 直接 replace。
 - ❌ **Crown overlay 用 popup view 抓不到 focus**（D11 PC polish 4 `a7c8f85`）— `.focusable() + .digitalCrownRotation()` 放在 popup 內常拿不到 focus（被 ScrollView/TabView 搶）、用戶轉表冠完全沒反應。改 inline 把 modifier chain 接到 SessionCardListPage 層級 + `@FocusState` + `.onChange(of: state.activeCell)` 主動 grab focus 才穩。
 - ❌ **同顏色 state semantics 三處不一致** — ✓ checkmark / progress bar filled / row Active border / cell Active border 全部表「engaged / done」概念、要全用同 `Color.green`。混 `.accentColor` / `.primary` / `.green` 視覺讀不出 system。
+- ❌ **`ScrollViewReader` 包 `List(.listStyle(.carousel))` → watchOS 無窮 re-layout、watchdog kill**（2026-05-30 picker hang、修 `36dbfc4`）。UI-F #8 為了「結束/放棄回 root 捲頂」把 `PickerRootView` 的 carousel List 包進 `ScrollViewReader { proxy in List {...} }`。在 `NavigationStack` push（模板訓練 → 計劃 → 選真實計劃 drill）時，root List（仍 alive）+ ScrollViewReader 進入無窮 scene-update re-layout、main thread 燒 ~9.5s CPU → 10s `scene-update` watchdog `0x8badf00d` 把 app 砍掉（**hang 不是 crash、無 stack trace 那種**）。watchOS 上 **ScrollViewReader 與 `.carousel` List 不相容**——要捲頂改用 loop-safe 機制或乾脆不做（純 `List` 即可）。**注意 unsmoke 的 UI polish（如本 #8）可能潛伏這類 render-loop，cherry-pick 進 main 後第一次實機走到才爆**。診斷流程見 `xcodebuild-watchos-realdevice-install` skill 的「Diagnosing a post-install Watch hang / crash」段。
 
 ## Cross-references
 
