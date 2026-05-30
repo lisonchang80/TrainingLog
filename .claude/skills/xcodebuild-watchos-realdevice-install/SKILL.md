@@ -217,6 +217,20 @@ xcrun devicectl device process launch --device <iphone-udid> com.lisonchang.Trai
 4. **Does Apple Watch sync see new bundle?**
    `xcrun devicectl device info apps --device <watch-id> | grep -i training` — if shows old `Bundle Version`, Trap 3
 
+   ⚠️ **The Watch `devicectl` query is FLAKY** (2026-05-30 validated, D29 smoke). The Watch is paired-via-iPhone, not directly connected, so `devicectl device info apps --device <watch-id>` intermittently returns empty OR fails with `Timed out while attempting to establish tunnel ... RemotePairingError 1001` / `CoreDeviceError 4000`. Don't trust/chase it. Instead verify **what you actually pushed** by reading the STAGED embedded Watch plist (authoritative, no device round-trip):
+   ```bash
+   APP="<DerivedData>/.../InstallationBuildProductsLocation/Applications/TrainingLog.app"
+   /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+     "$APP/Watch/TrainingLog Watch Watch App.app/Info.plist"   # expect a fresh timestamp (auto-bump), >> the old on-device value
+   # symbol sanity (combined binary on install builds — NOT a .debug.dylib here):
+   strings "$APP/Watch/TrainingLog Watch Watch App.app/TrainingLog Watch Watch App" | grep -ci '<YourNewType>'
+   ```
+   Staged plist has a bumped timestamp + the host got `devicectl install` → the Watch WILL auto-sync (CFBundleVersion auto-bump, no Trap 3 dance). If you still need to confirm on-wrist, let the smoke result be the proof (does the new behaviour show?), not the flaky query.
+
+## Not every Watch-facing fix needs this skill (JS-only shortcut)
+
+A bug VISIBLE on the Watch is not necessarily a Watch-BINARY bug. The Watch reads its session data from the iPhone over WC, so a fix in **iPhone-side JS/TS** (handshake builders, `replaceLiveMirror`, services, `onStartFromWatch`, i18n) reflects on the Watch with just **Metro Reload JS + a fresh handshake/session** — NO rebuild, NO `devicectl`, NO Watch-sync dance. Validated 2026-05-30: the D29 "duplicate exercise" + "空白訓練" bugs both looked like Watch bugs but were fixed entirely in `src/` TS → Reload JS re-smoke each cycle (~30s vs ~10min rebuild). Only `ios/**/*.swift` changes need the full pipeline below. Before reaching for a clean install, ask: *did I touch any Swift?* If not, just Reload JS.
+
 ## RN-side caveat (related but not the same trap)
 
 If the user opens the app and sees React Native red error page `No script URL provided`, that's Metro packager missing, NOT this skill's territory. Fix: `npx expo start --dev-client` from repo root (LAN-reachable from iPhone) → iPhone tap **Reload JS**. This is per-launch and unrelated to Watch binary state.
