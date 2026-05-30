@@ -7,7 +7,7 @@
 - Sub-Group 概念升級為 anatomical **muscle** layer，重命名 + 擴充
 - muscle 列表 = **19 個**（每個 MG 拆 0-3 個 muscle，所有 MG 都至少對應 1 個 muscle）
 - 新增 `exercise_muscle` m:n 表，含 `role ∈ {'primary', 'secondary'}` 欄位
-- 二頭 muscle 命名修正：「內側頭 / 外側頭」→「二頭長頭 / 二頭短頭」
+- 二頭 muscle 命名修正：「內側頭 / 外側頭」→「二頭長頭 / 二頭短頭」（**已被 ADR-0017 Q9 取代**：經 migration v010 再更名為「外側二頭」/「內側二頭」，見本 ADR § 2026-05-13 amendment + ADR-0017；本行為歷史紀錄）
 - 體圖 asset = CC0 / Wikimedia Commons 解剖圖 → 自製 SVG，統計頁 heatmap (by 11 MG aggregate) + Exercise 詳情頁 (by 19 muscle individual highlight) **雙用途**
 - ADR-0002 局部 reverse：**僅**背的 SG 切法（水平/垂直 → 背部/下背）
 
@@ -21,10 +21,10 @@
 | 臀 | 2 | 上臀部 / 下臀部 | 改名（上臀 / 下臀 → 上臀部 / 下臀部，微調對齊訓記語感） |
 | 肩 | 3 | 前束 / 中束 / 後束 | 不動 |
 | 斜方肌 | 1 | 斜方肌 | 新增 self-muscle（原 0 SG） |
-| 二頭 | 2 | **二頭長頭 / 二頭短頭** | **改名**（內側頭/外側頭 → 二頭長頭/二頭短頭，解剖學標準） |
+| 二頭 | 2 | **二頭長頭 / 二頭短頭** | **改名**（內側頭/外側頭 → 二頭長頭/二頭短頭，解剖學標準）；**已被 ADR-0017 Q9 取代** → migration v010 更名為「外側二頭 / 內側二頭」（見 § 2026-05-13 amendment） |
 | 三頭 | 1 | 三頭 | 新增 self-muscle |
 | 小腿 | 1 | 小腿 | 新增 self-muscle |
-| 前臂 | 1 | 前臂 | 新增 self-muscle |
+| 前臂 | 1 | 前臂 | 新增 self-muscle；**已被 ADR-0017 Q9 取代** → migration v010 更名為「小臂」（見 § 2026-05-13 amendment） |
 | 核心 | 2 | **側腹 / 腹肌** | 新增（核心拆 2 muscle，但 11 MG 仍維持「核心」單一 — 不違反 ADR-0002「腹部歸入核心」） |
 
 **合計 19 muscle**。對齊訓記-style 19 個分類；命名採解剖學標準（二頭長頭/短頭）+ 訓練圈口語（上下胸、上下臀、股四、膕繩、側腹/腹肌）混搭，**單字優先標準、多字優先口語**。

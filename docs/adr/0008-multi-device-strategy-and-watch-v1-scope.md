@@ -140,7 +140,9 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 
 ### 不翻盤、繼續成立
 
-- ✅ **路徑 C 核心模型**（`iPhone = SQLite SoT；Watch = in-memory mirror`）— 仍成立；但 Stage 1 / 2 mapping 在 13d 擴張為完整 13 message-kind 表（見 ADR-0019 § Slice 13d Amendment WC channel mapping table）
+- ✅ **路徑 C 核心模型**（`iPhone = SQLite SoT；Watch = in-memory mirror`）— 仍成立；但 Stage 1 / 2 mapping 在 13d 擴張為完整 16 message-kind 表（見 ADR-0019 § Slice 13d Amendment WC channel mapping table）
+
+  > **計數修正（overnight audit 2026-05-30）**：凍結 message-kind set 實為 **16** 種，原文誤記 13。完整 16 種：handshake、start-from-watch、start-from-iphone、start-reconcile、start-resolve、set-completed、set-modified、set-deleted、set-added、exercise-added、exercise-deleted、hr-tick、kcal-tick、end-session、discard-session、settings-sync。其中 `start-resolve` 與 `discard-session` 為 D31 衝突解決流程新增（見 ADR-0019 Slice 13d D31），故「凍結 kind set」的正確基準是 16；權威清單以 `src/adapters/watch/payloadSchema.ts` 的 `WC_MESSAGE_KINDS` 為準。
 - ✅ **UUID 主鍵範圍**（Session / Set / body_metric 三表）— 不變
 - ✅ **Schema 影響最小**（新增僅 `set.is_skipped` + `session.healthkit_workout_uuid`）— 13d 再加 v024 `session.is_watch_tracked INTEGER DEFAULT 0`、總計 3 個 13d-affected column
 - ✅ **Watch v1 17 條** 大部分仍適用（picker / 即時心率 / 增刪組 / 完成勾 / 休息倒數 / 超級組 / 跳過 Exercise / Pre-session 兩態 / In-session 啟動點 / NowPlaying 系統內建）；deferred items：#12 PR 觸覺通知、#14 complication、#15 結束 summary 卡片
