@@ -832,4 +832,181 @@ describe('templateOps — reorderTemplateClusterCycles', () => {
     expect(out.exA.sets.map((s) => s.id)).toEqual(['a3', 'a1', 'a2']);
     expect(out.exB.sets.map((s) => s.id)).toEqual(['b3', 'b1', 'b2']);
   });
+
+  it('skips an unknown / duplicate cycle key in the order list', () => {
+    const exA = makeEx({
+      id: 'A',
+      sets: [
+        makeSet({ id: 'a1', position: 0 }),
+        makeSet({ id: 'a2', position: 1 }),
+      ],
+    });
+    const exB = makeEx({
+      id: 'B',
+      sets: [
+        makeSet({ id: 'b1', position: 0 }),
+        makeSet({ id: 'b2', position: 1 }),
+      ],
+    });
+    // 'zzz' is unknown; 'a1' repeated must not duplicate the cycle.
+    const out = reorderTemplateClusterCycles(exA, exB, ['a2', 'zzz', 'a1', 'a1']);
+    expect(out.exA.sets.map((s) => s.id)).toEqual(['a2', 'a1']);
+    expect(out.exB.sets.map((s) => s.id)).toEqual(['b2', 'b1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Defensive-guard coverage: no-op / fault-tolerance branches across the ops.
+// Each case targets an early-return guard that fires on malformed or
+// out-of-range input (mirrors the "never silently drop sets" contract).
+// ---------------------------------------------------------------------------
+
+describe('templateOps — defensive guards', () => {
+  it('cycleSetKind is a no-op when set_id is not found', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [makeSet({ id: 's1', position: 0, kind: 'working' })],
+    });
+    const out = cycleSetKind(ex, 'nope', deterministicIdGen());
+    expect(out).toEqual(ex);
+  });
+
+  it('cycleSetKind is a no-op when targeting a cluster follower', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'H', kind: 'dropset', parent_set_id: null, position: 0 }),
+        makeSet({ id: 'F', kind: 'dropset', parent_set_id: 'H', position: 1 }),
+      ],
+    });
+    const out = cycleSetKind(ex, 'F', deterministicIdGen());
+    expect(out).toEqual(ex);
+  });
+
+  it('cycleSetKindAcrossExercises returns input unchanged for an unknown ex_id', () => {
+    const ex = makeEx({ id: 'ex-1', sets: [makeSet({ id: 's1' })] });
+    const out = cycleSetKindAcrossExercises([ex], 'ghost', 's1', deterministicIdGen());
+    expect(out).toEqual([ex]);
+  });
+
+  it('cycleSetKindAcrossExercises (reusable cluster) returns input when set_id missing', () => {
+    const a = makeEx({
+      id: 'A',
+      reusable_superset_id: 'rs-1',
+      sets: [makeSet({ id: 'a1', kind: 'warmup' })],
+    });
+    const out = cycleSetKindAcrossExercises([a], 'A', 'nope', deterministicIdGen());
+    expect(out).toEqual([a]);
+  });
+
+  it('cycleSetKindAcrossExercises (reusable cluster) skips a sibling shorter than the target row index', () => {
+    // A has 2 rows, sibling B has only 1 → flipping row idx=1 must not crash
+    // and must leave the short sibling untouched.
+    const a = makeEx({
+      id: 'A',
+      reusable_superset_id: 'rs-1',
+      sets: [
+        makeSet({ id: 'a0', kind: 'working', position: 0 }),
+        makeSet({ id: 'a1', kind: 'working', position: 1 }),
+      ],
+    });
+    const b = makeEx({
+      id: 'B',
+      parent_id: 'A',
+      reusable_superset_id: 'rs-1',
+      sets: [makeSet({ id: 'b0', kind: 'working', position: 0 })],
+    });
+    const out = cycleSetKindAcrossExercises([a, b], 'A', 'a1', deterministicIdGen());
+    // Target side: row idx 1 flips working → warmup.
+    expect(out[0].sets.map((s) => s.kind)).toEqual(['working', 'warmup']);
+    // Short sibling: no row at idx 1 → left unchanged.
+    expect(out[1]).toEqual(b);
+  });
+
+  it('deleteSupersetRowAt no-ops on an out-of-range row index and skips untouched exercises', () => {
+    const parent = makeEx({
+      id: 'P',
+      sets: [makeSet({ id: 'p0', position: 0 }), makeSet({ id: 'p1', position: 1 })],
+    });
+    const other = makeEx({ id: 'OTHER', sets: [makeSet({ id: 'o0' })] });
+    // row_index 5 is out of range → parent untouched; OTHER not in id set.
+    const out = deleteSupersetRowAt([parent, other], 'P', [], 5);
+    expect(out[0]).toEqual(parent);
+    expect(out[1]).toEqual(other);
+    // Negative index guard too.
+    const out2 = deleteSupersetRowAt([parent], 'P', [], -1);
+    expect(out2[0]).toEqual(parent);
+  });
+
+  it('cloneSupersetRowAt no-ops on an out-of-range row index and skips untouched exercises', () => {
+    const parent = makeEx({
+      id: 'P',
+      sets: [makeSet({ id: 'p0', position: 0 })],
+    });
+    const other = makeEx({ id: 'OTHER', sets: [makeSet({ id: 'o0' })] });
+    const out = cloneSupersetRowAt([parent, other], 'P', [], 9, deterministicIdGen());
+    expect(out[0]).toEqual(parent);
+    expect(out[1]).toEqual(other);
+  });
+
+  it('reorderTemplateExercises skips a duplicate parent id in the order list', () => {
+    const p1 = makeEx({ id: 'p1', ordering: 0 });
+    const p2 = makeEx({ id: 'p2', ordering: 1 });
+    // 'p1' listed twice — must only appear once, no duplicate row.
+    const out = reorderTemplateExercises([p1, p2], ['p1', 'p1', 'p2']);
+    expect(out.map((e) => e.id)).toEqual(['p1', 'p2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1]);
+  });
+
+  it('reorderTemplateExercises ignores an unknown parent id (no fabricated rows)', () => {
+    const p1 = makeEx({ id: 'p1', ordering: 0 });
+    const out = reorderTemplateExercises([p1], ['ghost', 'p1']);
+    expect(out.map((e) => e.id)).toEqual(['p1']);
+    expect(out[0].ordering).toBe(0);
+  });
+
+  it('reorderTemplateExercises appends a missing parent WITH its children (cluster not dropped)', () => {
+    // orderedParentIds omits cluster parent 'p2' entirely → the safety loop
+    // must append both p2 and its child c2 (children appended, never dropped).
+    const p1 = makeEx({ id: 'p1', ordering: 0 });
+    const p2 = makeEx({ id: 'p2', ordering: 1, reusable_superset_id: 'rs-1' });
+    const c2 = makeEx({
+      id: 'c2',
+      ordering: 2,
+      parent_id: 'p2',
+      reusable_superset_id: 'rs-1',
+    });
+    const out = reorderTemplateExercises([p1, p2, c2], ['p1']);
+    expect(out.map((e) => e.id)).toEqual(['p1', 'p2', 'c2']);
+    expect(out.map((e) => e.ordering)).toEqual([0, 1, 2]);
+    expect(out[2].parent_id).toBe('p2');
+  });
+
+  it('reorderTemplateSetsByGroups treats an orphan follower (missing head) as a standalone group', () => {
+    // Follower F references head 'GONE' that does not exist in sets → it must
+    // become its own group rather than being silently dropped.
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'F', kind: 'dropset', parent_set_id: 'GONE', position: 0 }),
+        makeSet({ id: 's1', kind: 'working', position: 1 }),
+      ],
+    });
+    const out = reorderTemplateSetsByGroups(ex, ['s1', 'F']);
+    expect(out.sets.map((s) => s.id)).toEqual(['s1', 'F']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1]);
+  });
+
+  it('reorderTemplateSetsByGroups skips an unknown / duplicate group id', () => {
+    const ex = makeEx({
+      id: 'ex-1',
+      sets: [
+        makeSet({ id: 'a', position: 0 }),
+        makeSet({ id: 'b', position: 1 }),
+      ],
+    });
+    const out = reorderTemplateSetsByGroups(ex, ['b', 'zzz', 'b', 'a']);
+    expect(out.sets.map((s) => s.id)).toEqual(['b', 'a']);
+    expect(out.sets.map((s) => s.position)).toEqual([0, 1]);
+  });
 });
