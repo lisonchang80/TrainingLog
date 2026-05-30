@@ -231,7 +231,12 @@ struct ExerciseCard: View {
 
     private var setRowsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rowGroups.enumerated()), id: \.offset) { idx, group in
+            // Identify rows by the group's STABLE id (setId / cluster header
+            // setId), NOT the enumeration offset. With `\.offset`, deleting a
+            // set re-indexed every following row's view identity → the
+            // per-row @State (swipe-reveal flag) misattached to the wrong
+            // row, which is what let one swipe-delete take out two sets.
+            ForEach(Array(rowGroups.enumerated()), id: \.element.id) { idx, group in
                 if idx > 0 {
                     Divider()
                         .padding(.vertical, 2)
@@ -297,55 +302,35 @@ private struct ProgressBarItem: Identifiable, Equatable {
 /// Per spec line 1582: tap row 中段 → `{}` Active (4-edge border)
 /// Per spec line 1593: tap ◯/✓ → exit Active + save (we toggle state)
 ///
-/// Phase F (gap 2) — left-swipe on a `{}` Active row deletes it, per D11
-/// spec line 1592 「{} Active | swipe left row | row deleted」. The gesture
-/// is gated on the row being Active so a non-Active row's horizontal swipe
-/// still reaches the TabView for page paging (spec line 1576-1577
-/// 「非 {} Active 區域 → swipe-to-page」). Warmup + working rows only —
-/// cluster sub-sets keep their min-2 invariant and are removed by deleting
-/// the whole exercise via the ⋯ menu.
+/// Phase F (gap 2) — swipe-to-reveal delete, per D11 spec line 1592 +
+/// 2026-05-31 device feedback. Two-step (iOS-Mail style):
+///   1. tap row → `{}` Active (green border)
+///   2. LEFT-swipe the Active row → the trailing ◯ swaps to a red 🗑
+///   3. tap 🗑 → delete the set
+/// Explicit tap-to-delete (NOT swipe-past-threshold) so an over-eager
+/// swipe can't nuke a set, and one swipe can't take out two.
+///
+/// Gated on the row being Active so a non-Active row's horizontal swipe
+/// still pages the TabView (spec line 1576-1577). The reveal gesture uses
+/// a LOW `minimumDistance` + `.highPriorityGesture` so the Active row
+/// claims the horizontal drag BEFORE the ancestor TabView's page-swipe
+/// threshold — that is the "Active set 左滑一直觸發換頁" fix.
+///
+/// Warmup + working rows only — cluster sub-sets keep their min-2
+/// invariant and are removed by deleting the whole exercise via ⋯ menu.
 private struct InteractiveSetRow<Content: View>: View {
     @ObservedObject var state: SessionInteractionState
     let setId: String
     let hasCheckmark: Bool
     @ViewBuilder let content: () -> Content
 
-    /// Live horizontal offset while a left-swipe-to-delete is in progress.
-    /// 0 at rest; tracks the finger left, then animates to a large negative
-    /// value (slide-out) on commit or springs back to 0 on cancel.
-    @State private var dragOffset: CGFloat = 0
+    /// Whether the trailing 🗑 is revealed (set by a left-swipe on the
+    /// Active row, cleared on tap-elsewhere / leaving Active / delete).
+    @State private var revealed = false
 
     private var rowIsActive: Bool { state.isActive(setId: setId) }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            // Red delete affordance revealed in the trailing gap as the
-            // row slides left. Absent at rest (no peek-through).
-            if dragOffset < -6 {
-                Image(systemName: "trash.fill")
-                    .font(.body)
-                    .foregroundStyle(.red)
-                    .padding(.trailing, 10)
-            }
-
-            rowContent
-                .offset(x: dragOffset)
-        }
-        .padding(.vertical, 1)
-        // `.highPriorityGesture` so the Active row's left-swipe wins over
-        // the ancestor TabView page swipe (spec: Active row swipe = delete,
-        // NOT page). `including:` masks the gesture OFF when not Active
-        // (`.subviews` → only the content's tap-to-activate / cell taps run,
-        // and the horizontal swipe falls through to the TabView for paging).
-        // minimumDistance 14 means a tap (≈0 movement) never starts the drag
-        // → cell taps + ◯ taps are unaffected.
-        .highPriorityGesture(
-            deleteDragGesture,
-            including: rowIsActive ? .all : .subviews
-        )
-    }
-
-    private var rowContent: some View {
         HStack(spacing: 4) {
             content()
                 .padding(.horizontal, 4)
@@ -359,61 +344,89 @@ private struct InteractiveSetRow<Content: View>: View {
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    // Only activate the row on tap-anywhere when not
-                    // already Active. Once Active, cells own the taps
-                    // (so they can route to `[]` Active per Phase C).
                     if !rowIsActive {
+                        // Not Active yet → activate (cells own taps once Active).
                         state.activate(setId: setId)
+                    } else if revealed {
+                        // Revealed → a tap on the row (not the 🗑) cancels it.
+                        withAnimation(.easeOut(duration: 0.15)) { revealed = false }
                     }
                 }
 
-            if hasCheckmark {
-                Button {
-                    state.toggleLogged(setId: setId)
-                } label: {
-                    Image(systemName: state.isLogged(setId: setId)
-                        ? "checkmark.circle.fill"
-                        : "circle")
-                        .font(.body)
-                        .foregroundStyle(state.isLogged(setId: setId)
-                            ? Color.green
-                            : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            trailingControl
+        }
+        .padding(.vertical, 1)
+        // Opaque-ish hit area so a horizontal drag anywhere on the row is
+        // captured by the reveal gesture below.
+        .background(Color.black.opacity(0.001))
+        // Reveal gesture — LOW minimumDistance + highPriority so the Active
+        // row claims the horizontal drag before the TabView pages. Masked
+        // OFF when not Active (`.subviews`) so a non-Active swipe pages.
+        .highPriorityGesture(
+            revealGesture,
+            including: rowIsActive ? .all : .subviews
+        )
+        // Leaving Active (tap 框外 / 切到別 row / ✓) closes the reveal so a
+        // stale 🗑 can't linger on an idle row.
+        .onChange(of: rowIsActive) { _, active in
+            if !active && revealed {
+                withAnimation(.easeOut(duration: 0.15)) { revealed = false }
             }
         }
-        // Opaque-ish hit area so a horizontal drag anywhere on the row is
-        // captured (and the red affordance never bleeds through at rest).
-        .background(Color.black.opacity(0.001))
     }
 
-    private var deleteDragGesture: some Gesture {
-        DragGesture(minimumDistance: 14)
-            .onChanged { value in
-                // Track only a horizontal-dominant LEFT drag; ignore
-                // vertical (that's a scroll) and rightward motion.
-                guard value.translation.width < 0,
-                      abs(value.translation.width) > abs(value.translation.height)
-                else { return }
-                dragOffset = max(value.translation.width, -120)
+    /// Trailing slot: ◯ normally; swaps to a red 🗑 once revealed.
+    @ViewBuilder
+    private var trailingControl: some View {
+        if revealed {
+            Button {
+                // Explicit tap = delete (wrap so the row removal animates).
+                withAnimation(.easeOut(duration: 0.2)) {
+                    state.deleteSet(setId: setId)
+                }
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.body)
+                    .foregroundStyle(.red)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+        } else if hasCheckmark {
+            Button {
+                state.toggleLogged(setId: setId)
+            } label: {
+                Image(systemName: state.isLogged(setId: setId)
+                    ? "checkmark.circle.fill"
+                    : "circle")
+                    .font(.body)
+                    .foregroundStyle(state.isLogged(setId: setId)
+                        ? Color.green
+                        : Color.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var revealGesture: some Gesture {
+        // minimumDistance 5: low enough to claim the drag before the TabView
+        // pages, high enough that a tap (≈0 travel) never starts it → cell
+        // taps + ◯ taps unaffected. Reveal/hide decided on release by the
+        // horizontal-dominant translation.
+        DragGesture(minimumDistance: 5)
             .onEnded { value in
-                let committedLeft = value.translation.width < -55
-                    && abs(value.translation.width) > abs(value.translation.height)
-                if committedLeft {
-                    // Slide the row out, then remove from state.
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        dragOffset = -400
+                guard abs(value.translation.width) > abs(value.translation.height)
+                else { return }
+                if value.translation.width < -28 {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        revealed = true
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                        state.deleteSet(setId: setId)
-                    }
-                } else {
-                    // Didn't cross the threshold — spring back.
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        dragOffset = 0
+                } else if value.translation.width > 18 {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        revealed = false
                     }
                 }
             }
