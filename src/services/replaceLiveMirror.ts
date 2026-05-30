@@ -22,17 +22,23 @@
  * therefore INSERTed a PARALLEL tree → duplicate session_exercise rows
  * (one logged via the mirror, one empty from the template copy).
  *
- * Fix: match the canonical rows by their natural position instead of id:
- *   - session_exercise by (session_id, ordering)
- *   - set            by (session_exercise_id, ordering)
- * Both sides derive `ordering` from the same `template_exercise.ordering`
- * / `template_set` position, so they align. FOUND → UPDATE in place (keep
- * the canonical id + exercise_id + template_id linkage; overwrite only the
- * mirror-bound columns). ABSENT → INSERT (a freestyle add the Watch
- * authored — no template counterpart, so the Watch id + null template_id
- * are correct). This makes the live mirror UPDATE the canonical tree for
- * template sessions and AUTHOR the tree for freestyle sessions, with no
- * duplication either way.
+ * Fix: match the canonical rows by a STABLE natural key instead of id:
+ *   - session_exercise by `exercise_id` + occurrence-index (the N-th
+ *     snapshot occurrence of an exercise_id → the N-th canonical row with
+ *     that exercise_id, both walked in `ordering ASC`). NOT by list
+ *     position: position survives tail deletes but a FIRST/MIDDLE Watch
+ *     delete shifts later rows onto the wrong canonical row (the E2
+ *     corruption — see the reconcile body for the worked [A,B,C]→[A,C]
+ *     example).
+ *   - set by (session_exercise_id, ordering) — both sides number sets
+ *     1..N (canonical `set.ordering = j+1`, Watch `ordinal = setIdx+1`),
+ *     so the VALUE aligns once the parent exercise is matched correctly.
+ * FOUND → UPDATE in place (keep the canonical id + exercise_id +
+ * template_id linkage; overwrite only the mirror-bound columns). ABSENT →
+ * INSERT (a freestyle add the Watch authored — no template counterpart, so
+ * the Watch id + null template_id are correct). This makes the live mirror
+ * UPDATE the canonical tree for template sessions and AUTHOR the tree for
+ * freestyle sessions, with no duplication either way.
  *
  * Idempotency: re-applying the same snapshot matches the rows it created/
  * updated last time → UPDATE with identical values = a no-op. No row
@@ -110,24 +116,52 @@ export async function reconcileSessionTree(
       snapshot.title,
     );
 
-    // ----- session_exercise rows (reconcile by POSITION / rank) -----
-    // Match the snapshot's exercises onto the canonical tree by their
-    // ORDER POSITION, NOT by the raw `ordering` value. The two sides use
-    // DIFFERENT ordering conventions: the canonical tree
-    // (startSessionFromTemplate → snapshotForSession) RE-INDEXES ordering
-    // to 1..N, while the Watch snapshot carries the template's raw
-    // `template_exercise.ordering` (often 0-based). Value-matching
-    // therefore mis-fires (canonical 1 vs Watch 0) and inserts a parallel
-    // row → the duplicate-exercise bug (task #270). Both lists ARE in
-    // template order, so the i-th snapshot exercise is the i-th canonical
-    // row — position-matching is convention-independent + handles the
-    // same-exercise-appearing-twice case (distinct positions).
-    const canonicalSes = await db.getAllAsync<{ id: string }>(
-      `SELECT id FROM session_exercise
+    // ----- session_exercise rows (reconcile by exercise_id + occurrence) -----
+    // Match each snapshot exercise onto a canonical (template-built) row by
+    // a STABLE KEY — `exercise_id` plus occurrence-index — NOT by list
+    // POSITION (the previous Bug X "Approach A") and NOT by the raw
+    // `ordering` value.
+    //
+    //   - POSITION matching aligned the i-th snapshot exercise with the
+    //     i-th canonical row. It survives tail deletes + in-place edits,
+    //     but a FIRST/MIDDLE delete shifts every later row up one slot:
+    //     canonical [A,B,C], Watch deletes B, sends [A,C] → C lands on
+    //     canonical B's row (UPDATEd with C's planned_sets, then C's sets
+    //     overwrite B's set rows by ordinal), and the tail purge deletes
+    //     canonical C. Net: exercise B's row now shows C's data and "C"
+    //     vanishes instead of "B" — history corruption + the wrong row
+    //     purged. That was the E2 ship-blocker.
+    //   - `ordering` VALUE matching mis-fires because the two sides use
+    //     DIFFERENT conventions: the canonical tree
+    //     (startSessionFromTemplate → snapshotForSession) RE-INDEXES ordering
+    //     to 1..N, while the Watch snapshot carries the template's raw
+    //     `template_exercise.ordering` (often 0-based).
+    //
+    // The shared, convention-independent key is `exercise_id` — both sides
+    // carry the real FK. To still handle the same-exercise-appearing-twice
+    // case (the reason POSITION was originally chosen over a naive
+    // exercise_id join), the N-th snapshot occurrence of a given exercise_id
+    // maps to the N-th canonical row with that exercise_id, both walked in
+    // `ordering ASC`. FOUND → UPDATE in place. ABSENT (a freestyle add, or
+    // more occurrences than canonical rows) → INSERT with the Watch id. A
+    // canonical row no occurrence claims is left untouched here and removed
+    // by the tail purge (membership = deletion) — which is exactly how a
+    // first/middle delete now drops the RIGHT row.
+    const canonicalSes = await db.getAllAsync<{ id: string; exercise_id: string }>(
+      `SELECT id, exercise_id FROM session_exercise
         WHERE session_id = ?
         ORDER BY ordering ASC`,
       snapshot.sessionId,
     );
+    // exercise_id → FIFO queue of canonical ids in `ordering ASC`. Shifting
+    // one per snapshot occurrence (the snapshot is also walked in ordering
+    // order) realises the N-th ↔ N-th occurrence mapping.
+    const canonicalByExercise = new Map<string, string[]>();
+    for (const row of canonicalSes) {
+      const q = canonicalByExercise.get(row.exercise_id);
+      if (q) q.push(row.id);
+      else canonicalByExercise.set(row.exercise_id, [row.id]);
+    }
     const snapExercises = [...snapshot.exercises].sort(
       (a, b) => a.ordering - b.ordering,
     );
@@ -139,25 +173,25 @@ export async function reconcileSessionTree(
     const keptSeIds: string[] = [];
     const keptSetIds: string[] = [];
 
-    for (let i = 0; i < snapExercises.length; i++) {
-      const ex = snapExercises[i];
-      const canonical = canonicalSes[i];
+    for (const ex of snapExercises) {
+      const queue = canonicalByExercise.get(ex.exerciseId);
+      const canonicalId = queue && queue.length > 0 ? queue.shift() : undefined;
 
       let seId: string;
-      if (canonical) {
-        // Canonical (template-built) row at this position — UPDATE in
-        // place. Do NOT touch id / exercise_id / template_id: keep the
-        // template linkage the iPhone UI derives from.
-        seId = canonical.id;
+      if (canonicalId !== undefined) {
+        // Canonical (template-built) row for this exercise_id occurrence —
+        // UPDATE in place. Do NOT touch id / exercise_id / ordering /
+        // template_id: keep the template linkage the iPhone UI derives from.
+        seId = canonicalId;
         await db.runAsync(
           `UPDATE session_exercise SET planned_sets = ? WHERE id = ?`,
           ex.plannedSets,
           seId,
         );
       } else {
-        // No canonical row at this position — the Watch authored it
-        // (freestyle add). INSERT with the Watch-minted id; template_id
-        // stays NULL (correct: no template counterpart).
+        // No unclaimed canonical row for this exercise_id — the Watch
+        // authored it (freestyle add). INSERT with the Watch-minted id;
+        // template_id stays NULL (correct: no template counterpart).
         seId = ex.sessionExerciseId;
         await db.runAsync(
           `INSERT INTO session_exercise

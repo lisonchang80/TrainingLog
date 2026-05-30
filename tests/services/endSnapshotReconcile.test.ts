@@ -266,3 +266,270 @@ describe('reconcileEndSnapshot — E2 end-session membership purge', () => {
     expect(await countRows(db)).toEqual({ exercises: 1, sets: 1 });
   });
 });
+
+// =====================================================================
+// E2 first/middle delete under DIVERGENT canonical ids.
+//
+// The block above seeds BOTH sides via `replaceLiveMirror`, so the iPhone
+// rows and the Watch snapshot share ids — which masks the real template
+// flow: `startSessionFromTemplate` mints iPhone UUIDs + re-indexes ordering
+// 1..N, while the Watch snapshot mints its OWN ids (`SE-<idx>-<exId>` /
+// `SET-<i>-<j>`) and carries the raw `template_exercise.ordering`. The two
+// sides share ONLY `exercise_id`. These cases seed a canonical tree with
+// iPhone-minted ids and reconcile against Watch-minted snapshots, covering
+// the Bug X regression + first/middle/tail/duplicate deletes.
+// =====================================================================
+
+// Real seeded builtin exercise ids (FK: session_exercise/set.exercise_id
+// REFERENCES exercise(id), enforced — foreign_keys=ON). Distinct + sorted.
+const EX_A = '00000000-0000-4000-8000-000000000001'; // Bench Press
+const EX_B = '00000000-0000-4000-8000-000000000002'; // Back Squat
+const EX_C = '00000000-0000-4000-8000-000000000003'; // Deadlift
+
+interface ExDef {
+  exerciseId: string;
+  /** Raw `template_exercise.ordering` the Watch carries (often 0-based). */
+  rawOrdering: number;
+  plannedSets: number;
+  /** One entry per set, in template order; distinct weights make rows identifiable. */
+  sets: { weight: number; reps: number }[];
+}
+
+/**
+ * Seed a CANONICAL session tree the way `startSessionFromTemplate` would:
+ * iPhone-minted ids (NEVER equal to a Watch `SE-`/`SET-` id) and the 1..N
+ * re-indexed ordering (`snapshotForSession` exercise `i+1`, set `j+1`).
+ * Returns the generated ids so a test can assert which canonical rows
+ * survive a purge.
+ */
+async function seedCanonicalTree(
+  db: BetterSqliteDatabase,
+  sessionId: string,
+  defs: ExDef[],
+): Promise<{ seId: string; exerciseId: string; setIds: string[] }[]> {
+  await db.runAsync(
+    `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+    sessionId,
+    1_700_000_000_000,
+    'Push Day',
+  );
+  const out: { seId: string; exerciseId: string; setIds: string[] }[] = [];
+  for (let i = 0; i < defs.length; i++) {
+    const d = defs[i];
+    const seId = `canon-se-${i}`; // stands in for a startSessionFromTemplate UUID
+    await db.runAsync(
+      `INSERT INTO session_exercise
+         (id, session_id, exercise_id, ordering, planned_sets, template_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      seId,
+      sessionId,
+      d.exerciseId,
+      i + 1, // canonical re-index 1..N (vs the Watch's raw ordering)
+      d.plannedSets,
+      'tmpl-1', // same template for every row, like snapshotForSession
+    );
+    const setIds: string[] = [];
+    for (let j = 0; j < d.sets.length; j++) {
+      const s = d.sets[j];
+      const setId = `canon-set-${i}-${j}`;
+      await db.runAsync(
+        `INSERT INTO "set"
+           (id, session_id, exercise_id, session_exercise_id,
+            weight_kg, reps, notes, set_kind, is_logged, ordering, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        setId,
+        sessionId,
+        d.exerciseId,
+        seId,
+        s.weight,
+        s.reps,
+        null,
+        'working',
+        1,
+        j + 1, // canonical set ordering 1..N
+        1_700_000_000_000,
+      );
+      setIds.push(setId);
+    }
+    out.push({ seId, exerciseId: d.exerciseId, setIds });
+  }
+  return out;
+}
+
+/**
+ * Build a Watch-shaped `SessionSnapshot` from the same defs: `SE-<idx>-<exId>`
+ * / `SET-<idx>-<setIdx>` ids (never equal to the canonical ones), 1-based set
+ * `ordinal` (matches the Swift builder), and the raw `rawOrdering` on each
+ * exercise. `idx` is the array position — re-compacted after a delete, exactly
+ * like the Watch's `.enumerated()` over its post-delete exercise list.
+ */
+function watchSnapshot(sessionId: string, defs: ExDef[]): SessionSnapshot {
+  return {
+    sessionId,
+    title: 'Push Day',
+    startedAt: 1_700_000_000_000,
+    exercises: defs.map((d, idx) => ({
+      sessionExerciseId: `SE-${idx}-${d.exerciseId}`,
+      exerciseId: d.exerciseId,
+      exerciseName: 'Bench Press',
+      ordering: d.rawOrdering,
+      plannedSets: d.plannedSets,
+      sets: d.sets.map((s, setIdx) => ({
+        setId: `SET-${idx}-${setIdx}`,
+        ordinal: setIdx + 1,
+        weight: s.weight,
+        reps: s.reps,
+        rpe: null,
+        rest_sec: null,
+        notes: null,
+        set_kind: 'working' as const,
+        is_logged: true,
+      })),
+    })),
+  };
+}
+
+const A: ExDef = { exerciseId: EX_A, rawOrdering: 0, plannedSets: 1, sets: [{ weight: 50, reps: 5 }] };
+const B: ExDef = { exerciseId: EX_B, rawOrdering: 1, plannedSets: 1, sets: [{ weight: 70, reps: 7 }] };
+const C: ExDef = { exerciseId: EX_C, rawOrdering: 2, plannedSets: 1, sets: [{ weight: 90, reps: 9 }] };
+
+describe('reconcileEndSnapshot — E2 first/middle delete under divergent canonical ids', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  async function exerciseRows(sessionId = 'sess-1') {
+    return db.getAllAsync<{ id: string; exercise_id: string }>(
+      `SELECT id, exercise_id FROM session_exercise
+        WHERE session_id = ? ORDER BY ordering ASC`,
+      sessionId,
+    );
+  }
+
+  /** Weight of the (single) surviving set under a given exercise_id. */
+  async function setWeightFor(exerciseId: string, sessionId = 'sess-1') {
+    const row = await db.getFirstAsync<{ weight_kg: number }>(
+      `SELECT s.weight_kg AS weight_kg
+         FROM "set" s
+         JOIN session_exercise se ON s.session_exercise_id = se.id
+        WHERE se.session_id = ? AND se.exercise_id = ?`,
+      sessionId,
+      exerciseId,
+    );
+    return row?.weight_kg ?? null;
+  }
+
+  it('live-mirror tick with divergent Watch ids UPDATEs in place — no duplicate rows (Bug X)', async () => {
+    const canon = await seedCanonicalTree(db, 'sess-1', [A, B, C]);
+    expect(await countRows(db)).toEqual({ exercises: 3, sets: 3 });
+
+    // A mid-session tick carrying the same 3 exercises but Watch-minted ids
+    // must reconcile onto the canonical rows by exercise_id, NOT INSERT a
+    // parallel tree (the Bug X duplicate-exercise regression).
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A, B, C]));
+
+    expect(await countRows(db)).toEqual({ exercises: 3, sets: 3 });
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.id)).toEqual(canon.map((c) => c.seId)); // canonical UUIDs kept
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_A, EX_B, EX_C]);
+  });
+
+  it('drops the FIRST exercise → purges that row, survivors keep their own id + set data', async () => {
+    const canon = await seedCanonicalTree(db, 'sess-1', [A, B, C]);
+    // Mid-session live ticks happened (non-purging) — tree still 3 rows.
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A, B, C]));
+
+    // Watch deleted A → final snapshot [B, C] (idx re-compacts, ordering raw).
+    const result = await reconcileEndSnapshot(db, 'sess-1', watchSnapshot('sess-1', [B, C]));
+
+    expect(result).toMatchObject({ purged: true, purgedExercises: 1, purgedSets: 1 });
+    // The position-matching bug would shift B onto A's row + C onto B's row
+    // and purge C; assert the RIGHT row (A) is gone and B/C keep their own
+    // identity + set data (no shuffle).
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_B, EX_C]);
+    expect(rows.map((r) => r.id)).toEqual([canon[1].seId, canon[2].seId]);
+    expect(await setWeightFor(EX_B)).toBe(70);
+    expect(await setWeightFor(EX_C)).toBe(90);
+  });
+
+  it('drops a MIDDLE exercise → purges that row, survivors keep their own id + set data', async () => {
+    const canon = await seedCanonicalTree(db, 'sess-1', [A, B, C]);
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A, B, C]));
+
+    const result = await reconcileEndSnapshot(db, 'sess-1', watchSnapshot('sess-1', [A, C]));
+
+    expect(result).toMatchObject({ purged: true, purgedExercises: 1, purgedSets: 1 });
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_A, EX_C]);
+    expect(rows.map((r) => r.id)).toEqual([canon[0].seId, canon[2].seId]);
+    expect(await setWeightFor(EX_A)).toBe(50);
+    expect(await setWeightFor(EX_C)).toBe(90);
+  });
+
+  it('drops the TAIL exercise → still correct (previously-working case preserved)', async () => {
+    const canon = await seedCanonicalTree(db, 'sess-1', [A, B, C]);
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A, B, C]));
+
+    const result = await reconcileEndSnapshot(db, 'sess-1', watchSnapshot('sess-1', [A, B]));
+
+    expect(result).toMatchObject({ purged: true, purgedExercises: 1, purgedSets: 1 });
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_A, EX_B]);
+    expect(rows.map((r) => r.id)).toEqual([canon[0].seId, canon[1].seId]);
+    expect(await setWeightFor(EX_A)).toBe(50);
+    expect(await setWeightFor(EX_B)).toBe(70);
+  });
+
+  it('same exercise twice → deleting the first occurrence keeps one row carrying the survivor data', async () => {
+    // Two session_exercise rows share exercise_id EX_A (e.g. programmed twice);
+    // distinct set weights make the two occurrences identifiable.
+    const A0: ExDef = { exerciseId: EX_A, rawOrdering: 0, plannedSets: 1, sets: [{ weight: 50, reps: 5 }] };
+    const A1: ExDef = { exerciseId: EX_A, rawOrdering: 1, plannedSets: 1, sets: [{ weight: 60, reps: 6 }] };
+    const Bx: ExDef = { exerciseId: EX_B, rawOrdering: 2, plannedSets: 1, sets: [{ weight: 70, reps: 7 }] };
+    await seedCanonicalTree(db, 'sess-1', [A0, A1, Bx]);
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A0, A1, Bx]));
+    expect(await countRows(db)).toEqual({ exercises: 3, sets: 3 });
+
+    // Watch deletes the FIRST Bench Press → final [A1, B].
+    const result = await reconcileEndSnapshot(db, 'sess-1', watchSnapshot('sess-1', [A1, Bx]));
+
+    expect(result).toMatchObject({ purged: true, purgedExercises: 1, purgedSets: 1 });
+    expect(await countRows(db)).toEqual({ exercises: 2, sets: 2 });
+    // Exactly one EX_A row remains carrying the SURVIVING occurrence's data
+    // (weight 60). The occurrence-index maps the lone snapshot EX_A onto the
+    // first canonical EX_A row, so the kept row-id is A0's while the data is
+    // A1's — invisible to the UI because both rows share exercise_id +
+    // template_id. The invariant that matters: one EX_A gone, survivor data
+    // kept, and B untouched (the bug would shift B's data onto an EX_A row).
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_A, EX_B]);
+    expect(await setWeightFor(EX_A)).toBe(60);
+    expect(await setWeightFor(EX_B)).toBe(70);
+  });
+
+  it('same exercise twice → deleting the last occurrence purges that exact row', async () => {
+    const A0: ExDef = { exerciseId: EX_A, rawOrdering: 0, plannedSets: 1, sets: [{ weight: 50, reps: 5 }] };
+    const A1: ExDef = { exerciseId: EX_A, rawOrdering: 1, plannedSets: 1, sets: [{ weight: 60, reps: 6 }] };
+    const Bx: ExDef = { exerciseId: EX_B, rawOrdering: 2, plannedSets: 1, sets: [{ weight: 70, reps: 7 }] };
+    const canon = await seedCanonicalTree(db, 'sess-1', [A0, A1, Bx]);
+    await replaceLiveMirror(db, watchSnapshot('sess-1', [A0, A1, Bx]));
+
+    // Watch deletes the SECOND Bench Press → final [A0, B]. Here the kept id
+    // IS clean: occurrence 0 maps to canonical A0, A1's row (canon[1]) purged.
+    const result = await reconcileEndSnapshot(db, 'sess-1', watchSnapshot('sess-1', [A0, Bx]));
+
+    expect(result).toMatchObject({ purged: true, purgedExercises: 1, purgedSets: 1 });
+    const rows = await exerciseRows();
+    expect(rows.map((r) => r.id)).toEqual([canon[0].seId, canon[2].seId]); // A1 (canon[1]) purged
+    expect(rows.map((r) => r.exercise_id)).toEqual([EX_A, EX_B]);
+    expect(await setWeightFor(EX_A)).toBe(50); // A0's own data preserved
+  });
+});
