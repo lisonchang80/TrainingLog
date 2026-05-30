@@ -363,3 +363,208 @@ describe('templateDraft — computeTemplateDiff', () => {
     ]);
   });
 });
+
+describe('templateDraft — exercisesEqual short-circuits', () => {
+  it('catches a different exercise-list length', () => {
+    const a = buildTemplate();
+    const b = cloneTemplate(a);
+    b.exercises.push({
+      id: 'ex-extra',
+      template_id: 'tpl-1',
+      exercise_id: 'row',
+      ordering: 1,
+      section: 'general',
+      parent_id: null,
+      notes: null,
+      rest_seconds: null,
+      reusable_superset_id: null,
+      sets: [],
+    });
+    expect(templatesEqual(a, b)).toBe(false);
+  });
+
+  it('catches an exercise_id / ordering / section change in place', () => {
+    const a = buildTemplate();
+
+    const swapped = cloneTemplate(a);
+    swapped.exercises[0].exercise_id = 'squat';
+    expect(templatesEqual(a, swapped)).toBe(false);
+
+    const reordered = cloneTemplate(a);
+    reordered.exercises[0].ordering = 9;
+    expect(templatesEqual(a, reordered)).toBe(false);
+
+    const resectioned = cloneTemplate(a);
+    resectioned.exercises[0].section = 'evergreen';
+    expect(templatesEqual(a, resectioned)).toBe(false);
+  });
+});
+
+describe('templateDraft — computeTemplateDiff per-field exercise updates', () => {
+  it('emits only the ordering field when ordering changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].ordering = 3;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', ordering: 3 }]);
+    expect(diff.exerciseInserts).toEqual([]);
+    expect(diff.exerciseDeletes).toEqual([]);
+  });
+
+  it('emits the section field when section changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].section = 'evergreen';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', section: 'evergreen' }]);
+  });
+
+  it('emits the parent_id field when parent_id changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].parent_id = 'ex-parent';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', parent_id: 'ex-parent' }]);
+  });
+
+  it('emits the notes field when exercise notes change', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].notes = 'focus on form';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', notes: 'focus on form' }]);
+  });
+
+  it('emits the rest_seconds field when rest_seconds changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].rest_seconds = 120;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', rest_seconds: 120 }]);
+  });
+
+  it('emits the reusable_superset_id field when the RS FK changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].reusable_superset_id = 'rs-42';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([
+      { id: 'ex-1', reusable_superset_id: 'rs-42' },
+    ]);
+  });
+
+  it('bundles multiple changed exercise fields into one update patch', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].ordering = 5;
+    d.exercises[0].section = 'evergreen';
+    d.exercises[0].rest_seconds = 30;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([
+      { id: 'ex-1', ordering: 5, section: 'evergreen', rest_seconds: 30 },
+    ]);
+  });
+
+  it('emits no exercise update when nothing changed on the exercise', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([]);
+  });
+});
+
+describe('templateDraft — computeTemplateDiff per-field set updates', () => {
+  it('emits the position field when a set is repositioned', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[0].position = 9;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([{ id: 's1', position: 9 }]);
+  });
+
+  it('emits the kind field when a set kind changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[0].kind = 'warmup';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([{ id: 's1', kind: 'warmup' }]);
+  });
+
+  it('emits the parent_set_id field when a dropset chain link changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[1].parent_set_id = 's1';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([{ id: 's2', parent_set_id: 's1' }]);
+  });
+
+  it('emits the notes field when set notes change', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[0].notes = 'last rep grind';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([{ id: 's1', notes: 'last rep grind' }]);
+  });
+
+  it('bundles multiple changed set fields into one update patch', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[0].position = 4;
+    d.exercises[0].sets[0].kind = 'warmup';
+    d.exercises[0].sets[0].reps = 12;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([
+      { id: 's1', position: 4, kind: 'warmup', reps: 12 },
+    ]);
+  });
+});
+
+describe('templateDraft — computeTemplateDiff CASCADE dedup edge', () => {
+  it('drops a set queued for delete when its parent exercise is also deleted', () => {
+    const c = buildTemplate();
+    // Add a second committed exercise (with a set) that the draft removes.
+    c.exercises.push({
+      id: 'ex-2',
+      template_id: 'tpl-1',
+      exercise_id: 'row',
+      ordering: 1,
+      section: 'general',
+      parent_id: null,
+      notes: null,
+      rest_seconds: null,
+      reusable_superset_id: null,
+      sets: [
+        {
+          id: 's-row',
+          position: 0,
+          kind: 'working',
+          reps: 10,
+          weight: 50,
+          parent_set_id: null,
+          notes: null,
+        },
+      ],
+    });
+    const d = cloneTemplate(c);
+    d.exercises = d.exercises.filter((e) => e.id !== 'ex-2');
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseDeletes).toEqual(['ex-2']);
+    // The row set cascades with the parent exercise; no explicit set delete.
+    expect(diff.setDeletes).toEqual([]);
+  });
+
+  it('returns a fully-empty diff when committed and draft are identical', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff).toEqual({
+      templatePatch: null,
+      exerciseInserts: [],
+      exerciseUpdates: [],
+      exerciseDeletes: [],
+      setInserts: [],
+      setUpdates: [],
+      setDeletes: [],
+    });
+  });
+});
