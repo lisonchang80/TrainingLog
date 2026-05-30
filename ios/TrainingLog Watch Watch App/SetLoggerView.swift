@@ -518,6 +518,14 @@ private struct SessionCardListPage: View {
         return cell.field == .weight ? 500 : 100
     }
 
+    /// Phase F: exercises the user hasn't deleted on the Watch. Drives
+    /// both the empty-state branch and the card `ForEach` so a deleted
+    /// card disappears immediately (and the shrunk tree is what the
+    /// live-mirror projection pushes for the E2 end-session purge).
+    private var visibleExercises: [SessionSnapshotExercise] {
+        snapshot.exercises.filter { !state.isExerciseDeleted($0.sessionExerciseId) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
@@ -535,7 +543,7 @@ private struct SessionCardListPage: View {
                 // Pre-fix: empty exercises array silently rendered as
                 // an empty ScrollView (after the mock-fallback removal);
                 // user had no signal what to do.
-                if snapshot.exercises.isEmpty {
+                if visibleExercises.isEmpty {
                     VStack(alignment: .center, spacing: 6) {
                         Image(systemName: "dumbbell")
                             .font(.title3)
@@ -552,7 +560,8 @@ private struct SessionCardListPage: View {
                     .padding(.vertical, 20)
                 } else {
                     // ExerciseCard list (continuous vertical scroll).
-                    ForEach(snapshot.exercises, id: \.sessionExerciseId) { ex in
+                    // Phase F: deleted exercises filtered out (visibleExercises).
+                    ForEach(visibleExercises, id: \.sessionExerciseId) { ex in
                         ExerciseCard(exercise: ex, state: state)
                     }
                 }

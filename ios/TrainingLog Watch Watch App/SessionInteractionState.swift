@@ -20,11 +20,15 @@
 //    - Input-mode-aware commit semantics: keypad commits on Done
 //      (explicit), crown commits live (tap-outside).
 //
-//  Phase C does NOT manage:
+//  Phase F partial (2026-05-31 — delete only):
+//    - `deletedExerciseIds` / `deletedSetIds` — deletion overlay. Both
+//      render + live-mirror projection filter these out (snapshot stays
+//      immutable). Unblocks the E2 end-session purge device verification.
+//
+//  Still NOT managed here:
 //    - Type cycling — Phase D
 //    - -/+ cluster CRUD — Phase E
-//    - Swipe gestures — Phase F
-//    - Long-press reorder — Phase F
+//    - Swipe +1 set (right) / long-press reorder — Phase E/F
 //    - Auto-advance after final ✓ — Phase H
 //    - Persisting to repo — Phase H
 //
@@ -90,6 +94,27 @@ final class SessionInteractionState: ObservableObject {
     /// Per-cell edited values. Display layer prefers these over the
     /// snapshot's planned values via `displayValue(setId:field:fallback:)`.
     @Published var editedValues: [EditedValueKey: Double] = [:]
+
+    // MARK: - Phase F deletion state (D11 Phase F partial — delete only)
+
+    /// IDs of `session_exercise` rows the user deleted on the Watch
+    /// (via the D15 ⋯ menu → 刪除 → confirm). Like the rest of this
+    /// class these are an OVERLAY over the immutable start snapshot:
+    /// the render path (`SessionCardListPage`) and the live-mirror
+    /// projection (`LiveMirror.project`) both FILTER these out, leaving
+    /// `snapshot` itself untouched. A shrunk live-mirror snapshot is what
+    /// lets the iPhone end-session reconcile purge the deleted rows (E2 —
+    /// ADR-0019 § "WC Ship-Blocker Fixes").
+    @Published var deletedExerciseIds: Set<String> = []
+
+    /// IDs of individual `set` rows the user deleted on the Watch (left-
+    /// swipe on a `{}` Active working/warmup row — D11 spec line 1592).
+    /// Same overlay semantics as `deletedExerciseIds`. NOTE: the iPhone
+    /// reconcile matches sets by `(session_exercise_id, ordinal)` VALUE,
+    /// so the projection must keep the SURVIVING sets' original `ordinal`
+    /// (it filters, never re-indexes) — that is what makes a mid-list set
+    /// delete purge the right row at end-session.
+    @Published var deletedSetIds: Set<String> = []
 
     // MARK: - Active row (Phase B)
 
@@ -247,6 +272,40 @@ final class SessionInteractionState: ObservableObject {
     /// Cancel button later (Phase C does not expose this in UI).
     func discardActiveCell() {
         activeCell = nil
+    }
+
+    // MARK: - Deletion (Phase F)
+
+    func isExerciseDeleted(_ id: String) -> Bool {
+        deletedExerciseIds.contains(id)
+    }
+
+    func isSetDeleted(_ id: String) -> Bool {
+        deletedSetIds.contains(id)
+    }
+
+    /// Delete a single set row. Marks it deleted (render + projection
+    /// filter it out) and scrubs every other overlay that referenced it
+    /// so a stale ✓ / edited value / active highlight can't linger on a
+    /// row the user just removed.
+    func deleteSet(setId: String) {
+        deletedSetIds.insert(setId)
+        loggedSetIds.remove(setId)
+        editedValues = editedValues.filter { $0.key.setId != setId }
+        if activeSetId == setId { activeSetId = nil }
+        if activeCell?.setId == setId { activeCell = nil }
+    }
+
+    /// Delete a whole exercise (D15 ⋯ menu 刪除 → confirm). Marks the
+    /// exercise deleted and cascades `deleteSet` over its set IDs so the
+    /// per-set overlays are cleaned up too. The caller passes the set IDs
+    /// from the immutable snapshot (`exercise.sets.map(\.setId)`); the
+    /// class holds no exercise→sets map of its own.
+    func deleteExercise(sessionExerciseId: String, setIds: [String]) {
+        deletedExerciseIds.insert(sessionExerciseId)
+        for sid in setIds {
+            deleteSet(setId: sid)
+        }
     }
 
     // MARK: - Display value

@@ -54,10 +54,23 @@ enum LiveMirror {
     static func project(
         base: SessionSnapshot,
         logged: Set<String>,
-        edited: [EditedValueKey: Double]
+        edited: [EditedValueKey: Double],
+        deletedExercises: Set<String>,
+        deletedSets: Set<String>
     ) -> SessionSnapshot {
-        let exercises = base.exercises.map { ex -> SessionSnapshotExercise in
-            let sets = ex.sets.map { s -> SessionSnapshotSet in
+        // Phase F: drop exercises / sets the user deleted on the Watch.
+        // The projection is what reaches the iPhone — a deleted row absent
+        // here is what the END-session reconcile purges (E2). The surviving
+        // sets keep their ORIGINAL `ordinal` (filter, never re-index): the
+        // iPhone matches sets by `(session_exercise_id, ordinal)` value, so
+        // preserving ordinals is what makes a mid-list delete purge the
+        // right row instead of shifting data onto a neighbour.
+        let exercises = base.exercises
+            .filter { !deletedExercises.contains($0.sessionExerciseId) }
+            .map { ex -> SessionSnapshotExercise in
+            let sets = ex.sets
+                .filter { !deletedSets.contains($0.setId) }
+                .map { s -> SessionSnapshotSet in
                 // Edited weight overrides the planned value; absent → keep
                 // the snapshot's planned weight (may itself be nil).
                 let weight = edited[EditedValueKey(setId: s.setId, field: .weight)] ?? s.weight
@@ -139,6 +152,17 @@ final class LiveMirrorProducer: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.dirty = true }
             .store(in: &cancellables)
+        // Phase F: a delete must also mark the mirror dirty so the shrunk
+        // tree is pushed (within the 15s window, and definitely on the
+        // [完成] `emitFinal()` force-push that feeds end-session reconcile).
+        interaction.$deletedExerciseIds
+            .dropFirst()
+            .sink { [weak self] _ in self?.dirty = true }
+            .store(in: &cancellables)
+        interaction.$deletedSetIds
+            .dropFirst()
+            .sink { [weak self] _ in self?.dirty = true }
+            .store(in: &cancellables)
     }
 
     /// Drive from `.task { await producer.run() }` so the loop inherits the
@@ -169,7 +193,9 @@ final class LiveMirrorProducer: ObservableObject {
         return LiveMirror.project(
             base: base,
             logged: interaction.loggedSetIds,
-            edited: interaction.editedValues
+            edited: interaction.editedValues,
+            deletedExercises: interaction.deletedExerciseIds,
+            deletedSets: interaction.deletedSetIds
         )
     }
 
@@ -184,7 +210,9 @@ final class LiveMirrorProducer: ObservableObject {
         let live = LiveMirror.project(
             base: base,
             logged: interaction.loggedSetIds,
-            edited: interaction.editedValues
+            edited: interaction.editedValues,
+            deletedExercises: interaction.deletedExerciseIds,
+            deletedSets: interaction.deletedSetIds
         )
         coordinator.updateLiveMirror(live)
         dirty = false

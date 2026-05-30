@@ -43,7 +43,10 @@ struct ExerciseCard: View {
     // drives the history sub-page push.
     //
     // TODO: D9 wire `skipped` flag to repo (currently in-memory only).
-    // TODO: D9 wire DELETE session_exercise CASCADE on delete confirm.
+    // Phase F (2026-05-31): delete-confirm now removes the exercise from
+    // `SessionInteractionState` (overlay) → the live-mirror projection
+    // drops it → the iPhone END-session reconcile purges the row (E2). No
+    // direct DB write from the Watch — deletion propagates via the mirror.
     // TODO: D9 wire ExerciseHistory real DB query (replace mock).
     // TODO: D15 wire superset card variant (3-row header [超] + A ＋ B)
     //       when D11 frozen spec sweep lands the cluster card type.
@@ -57,8 +60,13 @@ struct ExerciseCard: View {
     /// Grouped rows for rendering. Consecutive `dropset` rows are
     /// folded into a `cluster` group with the first dropset as the
     /// cluster header and the remaining ones as sub-sets.
+    ///
+    /// Phase F: sets the user left-swipe-deleted are filtered BEFORE
+    /// grouping, so the row vanishes and the progress bar / working-set
+    /// numbering recompute off the surviving rows automatically.
     private var rowGroups: [SetRowGroup] {
-        return SetRowGroup.group(sets: exercise.sets)
+        let visibleSets = exercise.sets.filter { !state.isSetDeleted($0.setId) }
+        return SetRowGroup.group(sets: visibleSets)
     }
 
     /// Progress bar segments. Work sets + clusters each count as 1
@@ -135,11 +143,23 @@ struct ExerciseCard: View {
                         exerciseName: exercise.exerciseName,
                         isCluster: false,
                         onConfirm: {
-                            // TODO: D9 wire DELETE session_exercise
-                            // CASCADE — for now just dismiss back to
-                            // D11 (caller would auto-scroll to next
-                            // exercise per spec line 2208).
+                            // Phase F (gap 1) — remove the exercise from
+                            // the Watch's local interaction state. The
+                            // card disappears (SessionCardListPage filters
+                            // `deletedExerciseIds`) and the live-mirror
+                            // projection drops it → iPhone end-session
+                            // reconcile purges the row (E2 chain).
                             dotsMenuOpen = false
+                            // Defer one runloop so the confirm + menu sheets
+                            // finish dismissing BEFORE this card (their host)
+                            // is removed from the list — tearing a view down
+                            // mid-sheet-dismiss glitches on watchOS.
+                            DispatchQueue.main.async {
+                                state.deleteExercise(
+                                    sessionExerciseId: exercise.sessionExerciseId,
+                                    setIds: exercise.sets.map { $0.setId }
+                                )
+                            }
                         }
                     )
                 }
@@ -276,13 +296,56 @@ private struct ProgressBarItem: Identifiable, Equatable {
 ///
 /// Per spec line 1582: tap row 中段 → `{}` Active (4-edge border)
 /// Per spec line 1593: tap ◯/✓ → exit Active + save (we toggle state)
+///
+/// Phase F (gap 2) — left-swipe on a `{}` Active row deletes it, per D11
+/// spec line 1592 「{} Active | swipe left row | row deleted」. The gesture
+/// is gated on the row being Active so a non-Active row's horizontal swipe
+/// still reaches the TabView for page paging (spec line 1576-1577
+/// 「非 {} Active 區域 → swipe-to-page」). Warmup + working rows only —
+/// cluster sub-sets keep their min-2 invariant and are removed by deleting
+/// the whole exercise via the ⋯ menu.
 private struct InteractiveSetRow<Content: View>: View {
     @ObservedObject var state: SessionInteractionState
     let setId: String
     let hasCheckmark: Bool
     @ViewBuilder let content: () -> Content
 
+    /// Live horizontal offset while a left-swipe-to-delete is in progress.
+    /// 0 at rest; tracks the finger left, then animates to a large negative
+    /// value (slide-out) on commit or springs back to 0 on cancel.
+    @State private var dragOffset: CGFloat = 0
+
+    private var rowIsActive: Bool { state.isActive(setId: setId) }
+
     var body: some View {
+        ZStack(alignment: .trailing) {
+            // Red delete affordance revealed in the trailing gap as the
+            // row slides left. Absent at rest (no peek-through).
+            if dragOffset < -6 {
+                Image(systemName: "trash.fill")
+                    .font(.body)
+                    .foregroundStyle(.red)
+                    .padding(.trailing, 10)
+            }
+
+            rowContent
+                .offset(x: dragOffset)
+        }
+        .padding(.vertical, 1)
+        // `.highPriorityGesture` so the Active row's left-swipe wins over
+        // the ancestor TabView page swipe (spec: Active row swipe = delete,
+        // NOT page). `including:` masks the gesture OFF when not Active
+        // (`.subviews` → only the content's tap-to-activate / cell taps run,
+        // and the horizontal swipe falls through to the TabView for paging).
+        // minimumDistance 14 means a tap (≈0 movement) never starts the drag
+        // → cell taps + ◯ taps are unaffected.
+        .highPriorityGesture(
+            deleteDragGesture,
+            including: rowIsActive ? .all : .subviews
+        )
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 4) {
             content()
                 .padding(.horizontal, 4)
@@ -290,9 +353,7 @@ private struct InteractiveSetRow<Content: View>: View {
                 .background(
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(
-                            state.isActive(setId: setId)
-                                ? Color.green
-                                : Color.clear,
+                            rowIsActive ? Color.green : Color.clear,
                             lineWidth: 2.0
                         )
                 )
@@ -301,7 +362,7 @@ private struct InteractiveSetRow<Content: View>: View {
                     // Only activate the row on tap-anywhere when not
                     // already Active. Once Active, cells own the taps
                     // (so they can route to `[]` Active per Phase C).
-                    if !state.isActive(setId: setId) {
+                    if !rowIsActive {
                         state.activate(setId: setId)
                     }
                 }
@@ -323,7 +384,39 @@ private struct InteractiveSetRow<Content: View>: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 1)
+        // Opaque-ish hit area so a horizontal drag anywhere on the row is
+        // captured (and the red affordance never bleeds through at rest).
+        .background(Color.black.opacity(0.001))
+    }
+
+    private var deleteDragGesture: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { value in
+                // Track only a horizontal-dominant LEFT drag; ignore
+                // vertical (that's a scroll) and rightward motion.
+                guard value.translation.width < 0,
+                      abs(value.translation.width) > abs(value.translation.height)
+                else { return }
+                dragOffset = max(value.translation.width, -120)
+            }
+            .onEnded { value in
+                let committedLeft = value.translation.width < -55
+                    && abs(value.translation.width) > abs(value.translation.height)
+                if committedLeft {
+                    // Slide the row out, then remove from state.
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        dragOffset = -400
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                        state.deleteSet(setId: setId)
+                    }
+                } else {
+                    // Didn't cross the threshold — spring back.
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        dragOffset = 0
+                    }
+                }
+            }
     }
 }
 
