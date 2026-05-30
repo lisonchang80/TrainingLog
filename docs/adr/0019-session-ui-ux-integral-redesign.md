@@ -3009,3 +3009,52 @@ ALTER TABLE session ADD COLUMN initiator TEXT;  -- 'iphone' | 'watch'、NULL 容
 - ADR-0019 § Slice 13d Amendment NEW-Q42 / NEW-Q44 — 修訂見上述 inline marker
 - ADR-0019 § Slice 13d D14 (finish page) View 6 "WC unreachable fallback 視覺" — 已預設 fallback、NEW-Q50 落地後此 view 仍適用（end-fail hint banner per Q7）
 - ADR-0019 § Slice 13d D16 (settings) Q3 combo unreachable self-heal — handshake reply 帶 settings 模式、NEW-Q50 改 TUI 後此 self-heal 跟 reverse TUI reconcile 共用同 channel
+
+## Slice 13d — WC Ship-Blocker Fixes：E1/E2/E3 end-session reconcile（grill 拍板 2026-05-30）
+
+### Trigger / Context
+
+2026-05-30 overnight 唯讀稽核 Audit E（`/tmp/overnight-reports-2026-05-30/E-wc-sync-audit.md`）在 WC 同步路徑抓出 3 個 HIGH ship-blocker。本段是 2026-05-30 在場 grill（Q1–Q6）的拍板，落在 `slice/13d-wc-end-reconcile`。本質上是**補完 D7 當初刻意延後的 end-session purge**（見 `replaceLiveMirror.ts` module doc：「purging snapshot-orphans 是 end-session reconcile（D7）的工作」）。
+
+### 三個 bug
+
+- **E1 — Watch-led end 在 iPhone unreachable 時遺失 → 永久殭屍 session（HIGH）**。`Coordinator.sendEndToiPhone` 只走 `sendMessage` + 硬性 `isReachable`、無 `transferUserInfo` 後備；iPhone 也只在 `addMessageListener('end-session')` 收。iPhone 背景/鎖屏/離線時 Watch 按 [完成]，iPhone 永遠收不到 → `ended_at` 永遠 NULL → `getActiveSession`（index.tsx:1009）擋掉下次任何開始。**非永久不可逆**：iPhone 仍可手動「結束/放棄」清掉（Q5）。
+- **E2 — Watch 端 set/exercise 刪除不傳播 → 殘列進歷史（HIGH）**。`replaceLiveMirror` 是 INSERT…ON CONFLICT DO UPDATE only（只增不刪、明文 authority-but-not-purge），end path 也無 purge 步驟。Watch 端刪掉的列留在 iPhone DB 進歷史。
+- **E3 — `pushStartToWatch` 在非正向 ack 也翻 `is_watch_tracked=true`（HIGH，潛伏）**。watchSessionStart.ts:111「任何回覆（或空回覆）＝acked」；只在 iPhone-led 路徑（`start-from-iphone`）。Watch-led 路徑（handshake.ts:1101 無條件翻 true）是正確的、不碰。今天剛好沒爆（Watch 對 unknown kind 回 `{ok:false}`），風險在空回覆邊界 + 未來 Watch 加 handler 但沒帶 `{ok}`。
+
+### Decisions（Q1–Q6 拍板）
+
+| Q | 拍板 |
+|---|---|
+| Q1 | **合成**：`end-session` envelope 帶「最終權威快照」，iPhone 收到時一次做完 reconcile-by-membership + finalize；live-mirror（15s）維持只增不刪。理由：NEW-Q50 已把 live-mirror 定為 snapshot latest-wins、砍掉 event/LWW reducer，再加事件式刪除是走回頭路 + 重開 Bug X 坑；Watch-led 進行中 iPhone 是唯讀 5-tile，刪除不需即時可見。 |
+| Q2 | **dual-fire**：`sendMessage`（reachable 即時）+ `transferUserInfo`（永遠送、OS 佇列保證最終送達），兩條都路由到同一個 finalize+reconcile handler，靠 `ended_at` idempotent gate 去重。end 是終態且 idempotent，雙路徑不會分歧（不同於 E4 的 start 雙 listener 會矛盾）。 |
+| Q3 | **守門式 purge**：用既有 `parseLiveMirrorSnapshot` 嚴格 parser 當閘門。parse=null（bad-payload）→ **finalize-only、完全不 purge**；parse 成功但 `exercises` 空而 DB 有 >0 列 → 視為可疑、一樣 skip purge。只有「parse 成功且非可疑」才 purge（沿用位置/rank 自然鍵，繼承 Bug X Approach A）：upsert 全部位置 → 刪每動作 ordinal 超出快照 set 數的尾端 set、刪位置超出快照動作數的尾端 session_exercise（set 靠 FK CASCADE）。失敗往「保留資料」倒（殘列可復原、誤刪不可逆）。 |
+| Q4 | **envelope 帶 Watch `endedAt`**：`end-session` payload `{sessionId, side}` → `{sessionId, side, endedAt, snapshot}`；`finalizeEndAndRoute` 收 optional `endedAt`，Watch-led 用 envelope 值、iPhone-led 維持 `Date.now()`。否則延遲送達 → `ended_at` 記成收到時間，連 HK kcal/HR 的 `[started_at, ended_at]` 區間都錯。手錶與配對 iPhone 時鐘同步、skew 可忽略。 |
+| Q4衍生 | **purge 只在第一次 finalize（`ended_at` idempotent gate 內）跑一次**。dual-fire 第二條 + 日後任何遲到重送都被 gate 擋、不重跑 purge。理由：使用者結束後可能進歷史頁編輯模式（Round G）手動加組，遲到重送帶舊快照若無條件 purge 會刪掉手動加的列。代價：極罕見「第一條壞、第二條好」少 purge 一次（退回 E2 殘列嚴重度、可復原），與 Q3 一致。 |
+| Q5 | **不加復原碼**：forward-fix 防新殭屍；既有殭屍靠 iPhone 既有「結束訓練」(寫 ended_at) / ⋯ 選單「放棄訓練」(discardSession CASCADE, index.tsx:2094) 手動清。不加開機 stale-session 掃描（避免啟發式誤判真的很長的訓練）。 |
+| Q6 | **`pushStartToWatch` 要求明確 `{ok:true}` 才翻 `is_watch_tracked`**：`ok:false` / 空 / undefined / 沒帶 ok 一律當「Watch 沒接管」→ 留 false（ACK_NO_OK）。不影響 handshake / onStartFromWatch 的 Watch-led 無條件翻 true（那條 Watch 本來就是 owner）。 |
+
+### Impl checklist
+
+TS-first（可測、無 device）：
+1. `payloadSchema.ts` — `EndSessionPayload` 擴 `endedAt: number` + `snapshot: SessionSnapshot`（沿用 live-mirror 同一 snapshot 形狀）。
+2. 新 `src/services/endSessionReconcile.ts`（或併入既有 end 路徑）— 守門式 purge（Q3）+ finalize；purge 為位置式 tail-delete，包在同一 transaction。注意這**不是**既有 `endSessionReconciler.ts`（那是 D7 partial 的 reducer scaffold，無 runtime caller；本次決定是否接它或新寫，impl 時定）。
+3. `finalizeEndAndRoute`（index.tsx:2132）— 收 optional `endedAt`；Watch-led 傳 envelope 值；purge 放在 `ended_at` gate 內（Q4衍生）。
+4. iPhone E1 listener — 加 `addUserInfoListener('end-session', …)` 路由到同一 finalize（TUI 後備），與既有 `addMessageListener('end-session')`（index.tsx:436）並存、靠 `ended_at` gate 去重。
+5. E3 — `watchSessionStart.ts:111` 改為要求 `reply?.ok === true`。
+6. jest：endSessionReconcile（purge tail / 守門 null / 守門可疑空 / idempotent 重送 no-op）、E1 dual-channel finalize idempotent、E3 ack 收斂。
+
+Swift（device-gated、停在此邊界等使用者）：
+7. `Coordinator.sendEndToiPhone` — 加 `transferUserInfo` 後備、payload 帶 `endedAt` + 最終 `SessionSnapshot`（emitFinal 的完整樹、非 throttled/dirty 子集）。
+8. 實機 smoke：iPhone 背景時 Watch [完成] → 回前景 session 已結束無殭屍；Watch 端刪一組 → iPhone 歷史無殘列；Watch 端刪一動作 → 同上；正常 [完成] regression。
+
+### Deferred（本輪不碰、除非另議）
+
+- **E4**（MED）— 雙 `start-from-watch` listener（TUI + v1 sendMessage）可給矛盾 ack；收斂成單 channel。
+- **E6**（LOW）— payloadSchema header「13/14 kinds」過時註解（實為 16）+ `updateApplicationContext` legacy envelope-shaped fn vs `updateAppContext` bare-snapshot 兩個 wrapper 的形狀契約。
+
+### Cross-link
+
+- `replaceLiveMirror.ts` module doc「authority-but-not-purge … purge 是 D7 的工作」— 本段即落地該 purge。
+- ADR-0003 § single active session per device — E1 殭屍違反此 invariant、本修復回復之。
+- ADR-0008 § HK trigger-only — E1 的 Watch teardown（`session.end()` + `endCollection` + `discardWorkout`，見 2026-05-29 D31 lifecycle fix）不變。
