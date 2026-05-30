@@ -97,25 +97,31 @@ export async function pushStartToWatch(
   });
 
   if (result.ok) {
-    // Watch may echo `{ok: false, reason: ...}` even when the channel
-    // delivers — Q11 routes that to a stay-false reconcile rather than
-    // a flag flip. Treat `reply.ok === false` (explicit) as ACK_NO_OK.
-    if (result.reply && result.reply.ok === false) {
-      return {
-        acked: false,
-        code: 'ACK_NO_OK',
-        raw: result,
-        startedAt,
-      };
+    // E3 fix (grill 2026-05-30, Q6): require an EXPLICIT positive
+    // `{ok: true}` ack before flipping `is_watch_tracked`. The Watch only
+    // "tracks" an iPhone-led session if it actually ADOPTED it and said so.
+    // Anything else — `{ok: false}`, an empty/undefined reply payload, or
+    // a reply with no `ok` field — means the Watch did NOT adopt it, so
+    // the flag stays false (ACK_NO_OK).
+    //
+    // The previous logic treated ANY reply (incl. empty/undefined) as an
+    // ack and flipped the flag true, which would falsely render the
+    // 5-tile "Watch-tracked" detail UI for a session the Watch never
+    // adopted (e.g. the lib/bridge empty-reply edge, or a future Watch
+    // handler that acks without `{ok}`). NOTE: the Watch-LED path
+    // (`onStartFromWatch` in handshake.ts) flips the flag unconditionally
+    // and is CORRECT — there the Watch is the owner; this guard is only
+    // for the iPhone-led `start-from-iphone` push.
+    if (result.reply?.ok === true) {
+      try {
+        await setIsWatchTracked(db, { id: sessionId, value: true });
+      } catch {
+        // Setter is silent no-op on missing id; any other error is rare
+        // (sqlite locked etc) — swallow to keep Q11 silent contract.
+      }
+      return { acked: true, code: null, raw: result, startedAt };
     }
-    // Default: any reply (or no reply payload) = Watch acknowledged.
-    try {
-      await setIsWatchTracked(db, { id: sessionId, value: true });
-    } catch {
-      // Setter is silent no-op on missing id; any other error is rare
-      // (sqlite locked etc) — swallow to keep Q11 silent contract.
-    }
-    return { acked: true, code: null, raw: result, startedAt };
+    return { acked: false, code: 'ACK_NO_OK', raw: result, startedAt };
   }
 
   // Non-ok send result — code is one of UNPAIRED / NOT_REACHABLE /

@@ -1,6 +1,11 @@
 /**
  * Slice 13d / NEW-Q50 (2026-05-29) — iPhone-side live-mirror reconcile.
  * Bug X fix (2026-05-30, task #270, "Approach A") — natural-key reconcile.
+ * Slice 13d WC ship-blocker E2 (2026-05-30) — `purgeTail` option added so
+ *   the END-session reconcile can finally DELETE snapshot-orphans (the
+ *   step this module's doc historically deferred to "D7"). Same single
+ *   position/ordinal reconcile is shared by both callers so the Bug X
+ *   alignment logic stays single-sourced.
  *
  * Supersedes the 6-kind reducer (`liveMirrorReducer.ts`, deleted) +
  * per-field LWW (`setModifiedReducer.ts`, deleted). The Watch is the SoT
@@ -33,9 +38,11 @@
  * updated last time → UPDATE with identical values = a no-op. No row
  * counts grow.
  *
- * Authority-but-not-purge: rows present in the iPhone DB but absent from
- * the snapshot are LEFT ALONE — purging snapshot-orphans is end-session
- * reconcile's job (D7), not the live-mirror replace's.
+ * Authority-but-not-purge (live mirror, `purgeTail: false`): rows present
+ * in the iPhone DB but absent from the snapshot are LEFT ALONE during a
+ * LIVE mirror tick — purging snapshot-orphans is END-session reconcile's
+ * job (`purgeTail: true`, called from `reconcileEndSnapshot`), NOT the
+ * live-mirror replace's. See ADR-0019 § "WC Ship-Blocker Fixes E1/E2/E3".
  *
  * Wrapped in a single transaction so a partial failure (Watch sent a
  * malformed mid-snapshot) doesn't leave a half-replaced mirror.
@@ -44,15 +51,48 @@
 import type { Database } from '../db/types';
 import type { SessionSnapshot } from '../adapters/watch/handshake';
 
+export interface ReconcileSessionTreeOptions {
+  /**
+   * When true, after upserting every snapshot-present row, DELETE the
+   * iPhone-side rows that the snapshot no longer contains:
+   *   - session_exercise rows whose id was not touched this pass (their
+   *     `set` children CASCADE),
+   *   - within each kept exercise, `set` rows whose id was not touched.
+   * This is the E2 fix — it makes the snapshot AUTHORITATIVE (membership
+   * = deletion). ONLY the end-session reconcile passes true, and ONLY
+   * after `reconcileEndSnapshot` has run its Q3 guards (parse OK + not a
+   * suspiciously-empty snapshot). The live-mirror tick passes false.
+   */
+  purgeTail: boolean;
+}
+
+export interface ReconcileSessionTreeResult {
+  exerciseCount: number;
+  setCount: number;
+  /** Rows deleted by the tail purge (0 when `purgeTail` is false). */
+  purgedExercises: number;
+  purgedSets: number;
+}
+
 /**
- * Replace the iPhone-side mirror of an active session with a Watch-
- * supplied snapshot, reconciling onto any canonical (template-built)
- * tree by natural key. Called by D32's applicationContext listener.
+ * Reconcile the iPhone-side mirror of a session against a Watch-supplied
+ * snapshot by natural position key. Shared core for both the live-mirror
+ * tick (`replaceLiveMirror`, purgeTail false) and the end-session
+ * membership reconcile (`reconcileEndSnapshot`, purgeTail true).
+ *
+ * NOTE: with `purgeTail: true` this TRUSTS the snapshot as ground truth
+ * and deletes anything absent. Callers MUST gate against a malformed /
+ * empty snapshot first (see `reconcileEndSnapshot`'s Q3 guards) — calling
+ * this directly with an empty snapshot + purgeTail would wipe the tree.
  */
-export async function replaceLiveMirror(
+export async function reconcileSessionTree(
   db: Database,
   snapshot: SessionSnapshot,
-): Promise<void> {
+  opts: ReconcileSessionTreeOptions,
+): Promise<ReconcileSessionTreeResult> {
+  let purgedExercises = 0;
+  let purgedSets = 0;
+
   await db.withTransactionAsync(async () => {
     // ----- session row -----
     // Mirror only the snapshot-bound columns. `started_at` and `title`
@@ -92,6 +132,13 @@ export async function replaceLiveMirror(
       (a, b) => a.ordering - b.ordering,
     );
 
+    // E2: accumulate the ids we touch so the tail purge can delete the
+    // rest. Flat lists — the purge deletes by session scope (NOT relying
+    // on FK CASCADE, which requires PRAGMA foreign_keys=ON and is not
+    // guaranteed on every adapter / the test DB).
+    const keptSeIds: string[] = [];
+    const keptSetIds: string[] = [];
+
     for (let i = 0; i < snapExercises.length; i++) {
       const ex = snapExercises[i];
       const canonical = canonicalSes[i];
@@ -126,6 +173,7 @@ export async function replaceLiveMirror(
           ex.plannedSets,
         );
       }
+      keptSeIds.push(seId);
 
       // ----- set rows (reconcile by (session_exercise_id, ordering)) -----
       for (const s of ex.sets) {
@@ -151,6 +199,7 @@ export async function replaceLiveMirror(
             s.is_logged ? 1 : 0,
             existingSet.id,
           );
+          keptSetIds.push(existingSet.id);
         } else {
           // Watch-authored set with no canonical counterpart — INSERT.
           await db.runAsync(
@@ -182,8 +231,67 @@ export async function replaceLiveMirror(
             // Watch). UPDATE branch preserves the existing created_at.
             snapshot.startedAt,
           );
+          keptSetIds.push(s.setId);
         }
       }
     }
+
+    // ----- E2 tail purge (end-session reconcile only) -----
+    // Snapshot is authoritative: any iPhone row not touched above is a
+    // Watch-side deletion the mirror never propagated. Delete it now.
+    if (opts.purgeTail) {
+      // Delete sets FIRST (explicit — do NOT rely on FK CASCADE, which
+      // needs PRAGMA foreign_keys=ON and isn't guaranteed across adapters),
+      // then the orphan exercises. A set is purged when its id wasn't
+      // touched this pass — covers BOTH a tail set in a kept exercise AND
+      // any set under an exercise being purged. `NOT IN ('')` when the
+      // keep-list is empty deletes every matching row (no real id == '').
+      const setKeep = keptSetIds.length > 0 ? keptSetIds : [''];
+      const setPlaceholders = setKeep.map(() => '?').join(', ');
+      const setDel = await db.runAsync(
+        `DELETE FROM "set"
+          WHERE session_id = ? AND id NOT IN (${setPlaceholders})`,
+        snapshot.sessionId,
+        ...setKeep,
+      );
+      purgedSets = setDel.changes ?? 0;
+
+      const seKeep = keptSeIds.length > 0 ? keptSeIds : [''];
+      const sePlaceholders = seKeep.map(() => '?').join(', ');
+      const seDel = await db.runAsync(
+        `DELETE FROM session_exercise
+          WHERE session_id = ? AND id NOT IN (${sePlaceholders})`,
+        snapshot.sessionId,
+        ...seKeep,
+      );
+      purgedExercises = seDel.changes ?? 0;
+    }
   });
+
+  const setCount = snapshot.exercises.reduce(
+    (acc, ex) => acc + ex.sets.length,
+    0,
+  );
+  return {
+    exerciseCount: snapshot.exercises.length,
+    setCount,
+    purgedExercises,
+    purgedSets,
+  };
+}
+
+/**
+ * Replace the iPhone-side mirror of an active session with a Watch-
+ * supplied snapshot, reconciling onto any canonical (template-built)
+ * tree by natural key. Called by D32's applicationContext listener.
+ *
+ * Live-mirror semantics: upsert-only, NEVER purge (a mid-session tick is
+ * not authoritative about deletions — that is the end-session reconcile's
+ * job). Thin wrapper over `reconcileSessionTree` with `purgeTail: false`.
+ */
+export async function replaceLiveMirror(
+  db: Database,
+  snapshot: SessionSnapshot,
+): Promise<void> {
+  await reconcileSessionTree(db, snapshot, { purgeTail: false });
 }

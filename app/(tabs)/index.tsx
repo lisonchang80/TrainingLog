@@ -40,6 +40,7 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
+import { reconcileEndSnapshot } from '@/src/services/endSnapshotReconcile';
 import { onStartResolve } from '@/src/services/watchSessionResolve';
 import { onDiscardSession } from '@/src/services/watchSessionDiscard';
 import {
@@ -429,28 +430,67 @@ export default function TodayScreen() {
   // remounts via component init. SQLite SoT remains correct across
   // restarts via the idempotent gate above.
   const finalizeEndAndRouteRef = useRef<
-    ((sessionId: string) => Promise<void>) | null
+    | ((
+        sessionId: string,
+        opts?: { endedAt?: number; snapshot?: unknown },
+      ) => Promise<void>)
+    | null
   >(null);
 
   useEffect(() => {
-    const unsubscribe = addMessageListener('end-session', async (env) => {
-      // Defensive: ignore own outbound. iPhone-led envelopes carry
-      // side='iphone' and Apple's WC framework doesn't echo sent
-      // messages to the same device's addMessageListener (reply path
-      // is sendMessage's replyCb). But this guard is cheap insurance
-      // against bridge weirdness or future loopback testing.
-      if (env.payload.side !== 'watch') return;
+    // Slice 13d WC ship-blocker E1/E2 (grill 2026-05-30, Q1/Q2/Q4) —
+    // listen on BOTH WC channels for a Watch-led end:
+    //   - addMessageListener  → instant delivery when iPhone is reachable
+    //   - addUserInfoListener → transferUserInfo backstop, OS-queued so it
+    //     STILL arrives when iPhone was backgrounded / locked / out of
+    //     range at end time. Without this TUI listener a Watch [完成]
+    //     fired while iPhone unreachable was lost forever → session row
+    //     kept ended_at NULL → every future start refused (the E1 zombie).
+    // Both route to the same finalize; the ended_at idempotent gate inside
+    // finalizeEndAndRoute makes the second (dual-fire) delivery a no-op, so
+    // the two channels can't diverge (end is terminal — unlike start, E4).
+    // The envelope now carries `endedAt` (Q4 — real finish time) + the
+    // final `snapshot` (Q1/Q2 — reconcile-by-membership purge); both are
+    // forwarded to finalize.
+    const routeEnd = async (
+      sessionId: string,
+      endedAt?: number,
+      snapshot?: unknown,
+    ) => {
       const fn = finalizeEndAndRouteRef.current;
       if (!fn) return;
       try {
-        await fn(env.payload.sessionId);
+        await fn(sessionId, { endedAt, snapshot });
       } catch (e) {
         console.warn('[watch] end-session handler failed:', e);
       }
+    };
+    // Defensive: ignore own outbound. iPhone-led envelopes carry
+    // side='iphone'; Apple's WC framework doesn't echo a device's own
+    // sends back to its own listeners, but this guard is cheap insurance
+    // against bridge weirdness / future loopback testing.
+    const unsubMsg = addMessageListener('end-session', async (env) => {
+      if (env.payload.side !== 'watch') return;
+      await routeEnd(
+        env.payload.sessionId,
+        env.payload.endedAt,
+        env.payload.snapshot,
+      );
     });
-    return unsubscribe;
-    // Intentional empty deps — handler reads latest finalize closure
-    // via ref. Listener mounts once on component mount, unsubscribes
+    const unsubTui = addUserInfoListener('end-session', async (env) => {
+      if (env.payload.side !== 'watch') return;
+      await routeEnd(
+        env.payload.sessionId,
+        env.payload.endedAt,
+        env.payload.snapshot,
+      );
+    });
+    return () => {
+      unsubMsg();
+      unsubTui();
+    };
+    // Intentional empty deps — handlers read latest finalize closure
+    // via ref. Listeners mount once on component mount, unsubscribe
     // on unmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2129,7 +2169,10 @@ export default function TodayScreen() {
    * 行為保留：ALWAYS endSession + 跑 achievement eval — 只移 alert，路由 +
    * side effects (PR delta cleanup / sessionState end) 全部維持。
    */
-  const finalizeEndAndRoute = async (session_id: string) => {
+  const finalizeEndAndRoute = async (
+    session_id: string,
+    opts?: { endedAt?: number; snapshot?: unknown },
+  ) => {
     // Slice 13d D7 — idempotent gate (ADR-0019 § Q23 + NEW-Q45).
     //
     // Two paths can call this:
@@ -2161,7 +2204,27 @@ export default function TodayScreen() {
       return;
     }
 
-    const ended_at = Date.now();
+    // Q4 (E1): a Watch-led end carries the authoritative finish time on
+    // its envelope — use it so a delayed transferUserInfo delivery (iPhone
+    // was unreachable at end) still records the TRUE ended_at + the correct
+    // HK [started_at, ended_at] kcal/HR window. iPhone-led passes no opts
+    // → falls back to receive-time Date.now() (unchanged behaviour).
+    const ended_at = opts?.endedAt ?? Date.now();
+
+    // Q1/Q2/Q3 (E2): reconcile-by-membership against the Watch's final
+    // snapshot — purge the rows the Watch deleted mid-session that the
+    // non-purging live mirror left behind — BEFORE achievement eval + HK
+    // sync read the tree. Runs ONLY here inside the first-delivery gate
+    // (Q4 derived): a late dual-fire / TUI redelivery is gated out above
+    // (ended_at != null), so it can never re-purge over a later
+    // history-page edit (Round G). `reconcileEndSnapshot` never throws and
+    // self-guards a malformed / suspiciously-empty snapshot (drops to
+    // finalize-only rather than wiping real data). iPhone-led has no
+    // snapshot → skipped entirely.
+    if (opts?.snapshot !== undefined) {
+      await reconcileEndSnapshot(db, session_id, opts.snapshot);
+    }
+
     await endSession(db, { id: session_id, ended_at });
     try {
       await evaluateAndPersistAchievements(db, {

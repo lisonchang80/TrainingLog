@@ -341,14 +341,45 @@ export interface KcalTickPayload {
 
 /**
  * `end-session` — either side → other side (Q10, NEW-Q45). Sender
- * declares "I am finalizing this session at `ts` on `side`"; the
- * receiver runs its own finalize + clears in-memory mirror. iPhone
- * additionally arms a 5-sec reconcile timeout (per ADR-0019 § Q23) —
- * if Watch never ack'd, flip `is_watch_tracked` to false.
+ * declares "I am finalizing this session on `side`"; the receiver runs
+ * its own finalize + clears in-memory mirror. iPhone additionally arms a
+ * 5-sec reconcile timeout (per ADR-0019 § Q23) — if Watch never ack'd,
+ * flip `is_watch_tracked` to false.
+ *
+ * Slice 13d WC ship-blocker fix (E1/E2, grill 2026-05-30, Q1/Q2/Q4):
+ * a Watch-led end now carries an authoritative `endedAt` + final
+ * `snapshot` so the iPhone can finalize at the TRUE finish time AND
+ * reconcile-by-membership (purge rows the Watch deleted) in one txn —
+ * see `finalizeEndAndRoute` + `reconcileAndPurgeToSnapshot`. Both new
+ * fields are OPTIONAL so a pre-fix iPhone-led end (`side: 'iphone'`,
+ * which finalizes locally and needs no snapshot) and any legacy sender
+ * still type-check; the receiver degrades gracefully (Q3/Q4 fail-safe):
+ *   - `endedAt` absent → receiver falls back to its own `Date.now()`.
+ *   - `snapshot` absent → receiver finalizes ONLY, skips the purge.
  */
 export interface EndSessionPayload {
   sessionId: string;
   side: 'iphone' | 'watch';
+  /**
+   * Q4 (E1) — authoritative end timestamp from the SENDER's clock
+   * (epoch ms). The receiver writes this as `session.ended_at` instead
+   * of its own receive-time, so a Watch-led end delivered LATE via
+   * `transferUserInfo` (iPhone was backgrounded / locked / out of range)
+   * still records the real finish moment + the correct HK
+   * `[started_at, ended_at]` kcal/HR window. Watch & paired iPhone
+   * clocks are pairing-synced so skew is negligible.
+   */
+  endedAt?: number;
+  /**
+   * Q1+Q2 (E2) — final authoritative session-tree snapshot the receiver
+   * reconciles against (membership purge + finalize in one txn). Same
+   * opaque-JSON shape as `StartFromIphonePayload.snapshot` (concrete
+   * `SessionSnapshot` lives in `handshake.ts`; the receiver re-validates
+   * it via `parseLiveMirrorSnapshot` — NOT here — which is the Q3
+   * guarded-purge gate: a malformed / suspiciously-empty snapshot drops
+   * to finalize-only rather than wiping real data).
+   */
+  snapshot?: Record<string, JsonValue>;
 }
 
 /**

@@ -181,6 +181,29 @@ describe('Slice 13d D6 — pushStartToWatch orchestrator', () => {
     expect((await getSession(db, 'sess-6'))?.is_watch_tracked).toBe(false);
   });
 
+  it('E3 (Q6) — delivered reply with no {ok:true} → ACK_NO_OK, flag NOT flipped', async () => {
+    // The E3 ship-blocker fix: a reply that arrives but carries no explicit
+    // `{ok:true}` (lib/bridge empty-reply quirk, or a future Watch handler
+    // that acks without `ok`) must NOT flip `is_watch_tracked` — the Watch
+    // never confirmed it adopted the iPhone-led session. Pre-fix this empty
+    // reply was treated as an ack and flipped the flag → false 5-tile UI.
+    const bridge = makeBridge({
+      sendMessage: jest.fn((_msg, replyCb) => {
+        replyCb?.({}); // channel delivered, but no `ok` field
+      }),
+    });
+    installBridge(bridge);
+    const { pushStartToWatch } = loadOrchestrator();
+
+    await createSession(db, { id: 'sess-e3', started_at: 7_000 });
+
+    const result = await pushStartToWatch(db, 'sess-e3', {});
+
+    expect(result.acked).toBe(false);
+    expect(result.code).toBe('ACK_NO_OK');
+    expect((await getSession(db, 'sess-e3'))?.is_watch_tracked).toBe(false);
+  });
+
   it('non-existent sessionId — ack ok but UPDATE is no-op, no throw', async () => {
     // The setter silently no-ops on missing row (sessionRepository
     // convention). pushStartToWatch should still resolve cleanly with
