@@ -1,0 +1,56 @@
+#!/bin/bash
+# Pre-commit hook: tsc + jest gate
+#
+# Blocks commits where TypeScript fails or jest tests fail.
+# Bypass with `git commit --no-verify` (only when you know why — per /cp skill).
+#
+# Canonical version-controlled source. Install into this repo's hooks dir with:
+#   ./.githooks/install.sh
+# (the live copy lives in .git/hooks/ and is not itself tracked.)
+
+set -e
+# pipefail is REQUIRED for the jest gate below: `npm test ... | tail -20` otherwise
+# reports tail's exit status (always 0), swallowing jest failures and letting broken
+# commits through. With pipefail the pipeline takes the first non-zero status (npm test).
+set -o pipefail
+
+# Resolve the worktree's working directory (works across git worktree add'ed branches)
+WORKTREE_DIR=$(git rev-parse --show-toplevel)
+cd "$WORKTREE_DIR"
+
+echo "[pre-commit] worktree: $WORKTREE_DIR"
+
+# Skip the hook entirely on docs-only / config-only commits (no source code touched)
+CHANGED_TS_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep -v '^node_modules/' || true)
+if [ -z "$CHANGED_TS_TSX" ]; then
+  echo "[pre-commit] no .ts/.tsx files staged — skipping tsc + jest"
+  exit 0
+fi
+
+# Ensure node_modules is present (worktree may have just been created and uninstalled)
+if [ ! -d node_modules ]; then
+  echo "[pre-commit] node_modules missing — run 'npm install' in this worktree first."
+  echo "[pre-commit] bypass with --no-verify if you know what you're doing."
+  exit 1
+fi
+
+# Stage 1: TypeScript
+echo "[pre-commit] running: npx tsc --noEmit ..."
+if ! npx tsc --noEmit; then
+  echo "[pre-commit] ❌ tsc failed — fix type errors before commit"
+  echo "[pre-commit] bypass with --no-verify ONLY if you know why"
+  exit 1
+fi
+echo "[pre-commit] ✓ tsc clean"
+
+# Stage 2: jest
+echo "[pre-commit] running: npm test (jest) ..."
+# NOTE: relies on `set -o pipefail` above — without it the `| tail -20` masks jest's exit code.
+if ! npm test --silent 2>&1 | tail -20; then
+  echo "[pre-commit] ❌ jest failed — fix test failures before commit"
+  echo "[pre-commit] bypass with --no-verify ONLY if you know why"
+  exit 1
+fi
+echo "[pre-commit] ✓ tests pass"
+
+echo "[pre-commit] ✓ all checks passed, commit allowed"

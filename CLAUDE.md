@@ -22,6 +22,7 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 ## Testing
 
 - `npm test` — jest with `ts-jest` preset, `testEnvironment: node`. Tests live in `tests/` and exercise pure logic / adapter code paths via the `Database` interface (production = expo-sqlite, tests = better-sqlite3 in-memory).
+- **Pre-commit gate**: a `tsc --noEmit` + `npm test` hook blocks commits when types or tests fail (skipped for commits that touch no `.ts/.tsx`). Canonical source is tracked at [`.githooks/pre-commit`](.githooks/pre-commit); install/refresh the live hook with `./.githooks/install.sh`.
 
 ## Agent skills
 
