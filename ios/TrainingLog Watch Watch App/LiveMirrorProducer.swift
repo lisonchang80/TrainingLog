@@ -51,6 +51,25 @@ import Combine
 /// start snapshot to produce the CURRENT session state. No I/O, no clock —
 /// deterministic so the merge can be reasoned about in isolation.
 enum LiveMirror {
+    /// Merge one exercise's base snapshot sets with the Watch overlay —
+    /// drop deleted, add added — and return them in WATCH DISPLAY order
+    /// (by `displayRank`: base = its ordinal, added = its fractional rank).
+    /// Shared by the card renderer (`ExerciseCard.rowGroups`) and the
+    /// projection below so both agree on membership + order.
+    static func mergeSets(
+        base: [SessionSnapshotSet],
+        deletedSets: Set<String>,
+        addedSets: [AddedSet],
+        sessionExerciseId: String
+    ) -> [SessionSnapshotSet] {
+        let visibleBase = base.filter { !deletedSets.contains($0.setId) }
+        let addedHere = addedSets.filter { $0.sessionExerciseId == sessionExerciseId }
+        var ranked: [(set: SessionSnapshotSet, rank: Double)] =
+            visibleBase.map { ($0, Double($0.ordinal)) }
+        ranked += addedHere.map { ($0.asSnapshotSet(), $0.displayRank) }
+        return ranked.sorted { $0.rank < $1.rank }.map { $0.set }
+    }
+
     static func project(
         base: SessionSnapshot,
         logged: Set<String>,
@@ -71,12 +90,12 @@ enum LiveMirror {
         let exercises = base.exercises
             .filter { !deletedExercises.contains($0.sessionExerciseId) }
             .map { ex -> SessionSnapshotExercise in
-            let baseSets = ex.sets.filter { !deletedSets.contains($0.setId) }
-            let added = addedSets
-                .filter { $0.sessionExerciseId == ex.sessionExerciseId }
-                .map { $0.asSnapshotSet() }
-            let sets = (baseSets + added)
-                .sorted { $0.ordinal < $1.ordinal }
+            let sets = mergeSets(
+                base: ex.sets,
+                deletedSets: deletedSets,
+                addedSets: addedSets,
+                sessionExerciseId: ex.sessionExerciseId
+            )
                 .map { s -> SessionSnapshotSet in
                 // Edited weight overrides the planned value; absent → keep
                 // the snapshot's planned weight (may itself be nil).

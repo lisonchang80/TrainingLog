@@ -73,17 +73,28 @@ struct EditedValueKey: Hashable {
 }
 
 /// A set the user added on the Watch (right-swipe → ＋ → tap, D11 spec
-/// line 1593 「swipe right row | +1 row inserted」). Lives in an OVERLAY
-/// list — the immutable start snapshot never gains rows; render + live-
-/// mirror projection MERGE these in. `ordinal` is chosen at add time as
-/// `max(existing ordinals in the exercise) + 1` so it never collides with
-/// a canonical set's ordinal → the iPhone reconcile (which matches sets by
-/// `(session_exercise_id, ordinal)` value) treats it as a Watch-authored
-/// INSERT. Editable / loggable / deletable by `id` like any other set.
+/// line 1593). Lives in an OVERLAY list — the immutable start snapshot
+/// never gains rows; render + live-mirror projection MERGE these in.
+///
+/// Two ordering keys, deliberately decoupled:
+///   - `ordinal` (Int, wire) — chosen at add time as `max(every ordinal in
+///     the exercise, incl. tombstoned) + 1`, so it never collides with a
+///     canonical set's ordinal → the iPhone reconcile (which matches sets
+///     by `(session_exercise_id, ordinal)` VALUE) treats it as a Watch-
+///     authored INSERT. (iPhone history therefore orders added sets after
+///     the template sets — integer ordinals leave no room to insert
+///     between canonical rows without renumbering, which would break the
+///     value-match.)
+///   - `displayRank` (Double, UI only) — places the row on the WATCH right
+///     after the row it was added from (midpoint between that row's rank
+///     and the next), so an inserted set shows at the next line, not last.
+///
+/// Editable / loggable / deletable by `id` like any other set.
 struct AddedSet: Identifiable, Equatable {
     let id: String
     let sessionExerciseId: String
     var ordinal: Int
+    var displayRank: Double
     var weight: Double?
     var reps: Int?
     var setKind: String
@@ -347,26 +358,49 @@ final class SessionInteractionState: ObservableObject {
         if activeCell?.setId == setId { activeCell = nil }
     }
 
-    /// Append a new working/warmup set to an exercise (right-swipe → ＋).
-    /// `baseMaxOrdinal` is the largest `ordinal` among the exercise's base
-    /// snapshot sets (the caller has them); the new set is placed one past
-    /// the max of that and any already-added sets so its ordinal is unique
-    /// within the exercise → the iPhone reconcile INSERTs it (no canonical
-    /// match). Prefills weight/reps from the swiped row (「同種類的下一個」).
-    /// Returns the new set id (so the caller could activate it if desired).
+    /// Insert a new set into an exercise right AFTER `afterSetId` (the
+    /// swiped row) — 「新增至下一行」. `baseSets` is the exercise's full set
+    /// list from the immutable snapshot (the caller has it).
+    ///   - `displayRank`: midpoint between the anchor's rank and the next
+    ///     visible row's rank (or anchor+1 if the anchor is last), so the
+    ///     new row shows at the NEXT line on the Watch.
+    ///   - `ordinal` (wire): one past every ordinal in the exercise incl.
+    ///     tombstoned ones — unique, never collides with a canonical row →
+    ///     the iPhone reconcile INSERTs it.
+    /// Prefills weight/reps from the swiped row (「同種類的下一個」) and
+    /// MOVES the Active highlight onto the new set. Returns the new id.
     @discardableResult
     func addSet(
         sessionExerciseId: String,
-        baseMaxOrdinal: Int,
+        afterSetId: String,
+        baseSets: [SessionSnapshotSet],
         weight: Double?,
         reps: Int?,
         setKind: String
     ) -> String {
-        let addedMax = addedSets
+        // Display ranks of the CURRENT visible sets (base = ordinal value,
+        // added = its displayRank).
+        var ranks: [(id: String, rank: Double)] = baseSets
+            .filter { !deletedSetIds.contains($0.setId) }
+            .map { ($0.setId, Double($0.ordinal)) }
+        ranks += addedSets
+            .filter { $0.sessionExerciseId == sessionExerciseId }
+            .map { ($0.id, $0.displayRank) }
+
+        let anchorRank = ranks.first { $0.id == afterSetId }?.rank
+            ?? (ranks.map { $0.rank }.max() ?? 0)
+        let nextRank = ranks.map { $0.rank }.filter { $0 > anchorRank }.min()
+        let displayRank = nextRank.map { ($0 + anchorRank) / 2 } ?? (anchorRank + 1)
+
+        // Wire ordinal: count tombstoned base sets too (ordinals never
+        // reused — a reused ordinal would re-match a purged canonical row).
+        let baseMaxOrdinal = baseSets.map { $0.ordinal }.max() ?? 0
+        let addedMaxOrdinal = addedSets
             .filter { $0.sessionExerciseId == sessionExerciseId }
             .map { $0.ordinal }
             .max() ?? 0
-        let nextOrdinal = max(baseMaxOrdinal, addedMax) + 1
+        let nextOrdinal = max(baseMaxOrdinal, addedMaxOrdinal) + 1
+
         addCounter += 1
         let id = "ADD-\(addCounter)"
         addedSets.append(
@@ -374,11 +408,15 @@ final class SessionInteractionState: ObservableObject {
                 id: id,
                 sessionExerciseId: sessionExerciseId,
                 ordinal: nextOrdinal,
+                displayRank: displayRank,
                 weight: weight,
                 reps: reps,
                 setKind: setKind
             )
         )
+        // Active moves onto the freshly-added set (ready to edit).
+        activeSetId = id
+        activeCell = nil
         return id
     }
 

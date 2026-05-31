@@ -62,29 +62,24 @@ struct ExerciseCard: View {
     /// cluster header and the remaining ones as sub-sets.
     ///
     /// Phase F: left-swipe-deleted sets are filtered out and right-swipe-
-    /// added sets are merged in (sorted by `ordinal`) BEFORE grouping, so
-    /// the rows + progress bar + working-set numbering recompute off the
-    /// live set list automatically.
+    /// added sets are merged in (by WATCH display order) BEFORE grouping,
+    /// so the rows + progress bar + working-set numbering recompute off the
+    /// live set list automatically. Shared with the live-mirror projection
+    /// via `LiveMirror.mergeSets` so card + iPhone agree on membership.
     private var rowGroups: [SetRowGroup] {
-        let baseSets = exercise.sets.filter { !state.isSetDeleted($0.setId) }
-        let added = state.addedSets
-            .filter { $0.sessionExerciseId == exercise.sessionExerciseId }
-            .map { $0.asSnapshotSet() }
-        let merged = (baseSets + added).sorted { $0.ordinal < $1.ordinal }
+        let merged = LiveMirror.mergeSets(
+            base: exercise.sets,
+            deletedSets: state.deletedSetIds,
+            addedSets: state.addedSets,
+            sessionExerciseId: exercise.sessionExerciseId
+        )
         return SetRowGroup.group(sets: merged)
     }
 
-    /// Largest `ordinal` among this exercise's BASE snapshot sets (incl.
-    /// any tombstoned ones — ordinals are never reused). Passed to
-    /// `addSet` so a new set lands one past every existing ordinal.
-    private var baseMaxOrdinal: Int {
-        exercise.sets.map { $0.ordinal }.max() ?? 0
-    }
-
-    /// +1 set (right-swipe → ＋). Append a new set to THIS exercise,
-    /// prefilled with the swiped row's CURRENT displayed weight/reps + the
-    /// same kind (「同種類的下一個」). The new set is editable / loggable /
-    /// deletable like any other (its `id` keys every overlay).
+    /// +1 set (right-swipe → ＋ on row `set`). Insert a new set right AFTER
+    /// that row (「新增至下一行」), prefilled with the swiped row's CURRENT
+    /// displayed weight/reps + same kind (「同種類的下一個」). The new set
+    /// becomes Active and is editable / loggable / deletable like any other.
     private func addSet(from set: SessionSnapshotSet) {
         let weight = state.displayValue(
             setId: set.setId, field: .weight, fallback: set.weight
@@ -94,7 +89,8 @@ struct ExerciseCard: View {
         )
         state.addSet(
             sessionExerciseId: exercise.sessionExerciseId,
-            baseMaxOrdinal: baseMaxOrdinal,
+            afterSetId: set.setId,
+            baseSets: exercise.sets,
             weight: weight,
             reps: repsValue.map { Int($0.rounded()) },
             setKind: set.setKind
@@ -491,19 +487,23 @@ private struct InteractiveSetRow<Content: View>: View {
     private var revealGesture: some Gesture {
         // minimumDistance 5: low enough to claim the drag before the TabView
         // pages, high enough that a tap (≈0 travel) never starts it → cell
-        // taps + ◯ taps unaffected. Direction decides 🗑 (left) vs ＋ (right)
-        // on release; a small / vertical drag clears.
+        // taps + ◯ taps unaffected. Direction TOGGLES (per 2026-05-31):
+        //   left  → 🗑 ; but if ＋ is showing, left RESTORES to ◯
+        //   right → ＋ ; but if 🗑 is showing, right RESTORES to ◯
         DragGesture(minimumDistance: 5)
             .onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height)
                 else { return }
                 let next: RowReveal
                 if value.translation.width < -28 {
-                    next = .delete
-                } else if value.translation.width > 28 && onAddSet != nil {
-                    next = .add
+                    // Left-swipe: cancel a shown ＋, else reveal 🗑.
+                    next = (reveal == .add) ? .none : .delete
+                } else if value.translation.width > 28 {
+                    // Right-swipe: cancel a shown 🗑, else reveal ＋ (if able).
+                    next = (reveal == .delete) ? .none : (onAddSet != nil ? .add : .none)
                 } else {
-                    next = .none
+                    // Sub-threshold horizontal nudge — leave the state as-is.
+                    return
                 }
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                     reveal = next
