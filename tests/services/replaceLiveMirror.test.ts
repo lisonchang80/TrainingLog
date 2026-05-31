@@ -121,6 +121,254 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     ]);
   });
 
+  it('dropset chain (freestyle) — head + follower both INSERT, follower keeps the wire head id', async () => {
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              {
+                setId: 'h1',
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: null,
+              },
+              {
+                setId: 'f1',
+                ordinal: 1,
+                weight: 40,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: 'h1',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const rows = await db.getAllAsync<{
+      id: string;
+      parent_set_id: string | null;
+    }>(
+      `SELECT id, parent_set_id FROM "set" WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    expect(rows).toEqual([
+      { id: 'h1', parent_set_id: null },
+      { id: 'f1', parent_set_id: 'h1' },
+    ]);
+  });
+
+  it('dropset chain (canonical head) — follower parent_set_id resolves to the on-device head id, not the wire id', async () => {
+    // Pre-seed a canonical (template-built) tree: 1 working set with id 'c1'.
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      'sess-1',
+      1_700_000_000_000,
+      'Push Day',
+    );
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets)
+       VALUES (?, ?, ?, ?, ?)`,
+      'se-canonical',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+      0,
+      3,
+    );
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, session_exercise_id,
+         weight_kg, reps, set_kind, is_logged, ordering, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'c1',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+      'se-canonical',
+      80,
+      8,
+      'working',
+      0,
+      0,
+      1_700_000_000_000,
+    );
+
+    // Watch live-mirror: the user cycled the working set to a dropset HEAD
+    // (wire id 'w-head', ≠ canonical 'c1') and added a follower whose parent
+    // points at the WIRE head id.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-wire',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              {
+                setId: 'w-head',
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: null,
+              },
+              {
+                setId: 'w-foll',
+                ordinal: 1,
+                weight: 40,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: 'w-head',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Head matched the canonical row → UPDATE in place ('c1', now dropset,
+    // parent still null). Follower INSERTed with the RESOLVED parent = the
+    // on-device head id 'c1' (NOT the wire id 'w-head').
+    const rows = await db.getAllAsync<{
+      id: string;
+      set_kind: string;
+      parent_set_id: string | null;
+      ordering: number;
+    }>(
+      `SELECT id, set_kind, parent_set_id, ordering FROM "set"
+        WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    expect(rows).toEqual([
+      { id: 'c1', set_kind: 'dropset', parent_set_id: null, ordering: 0 },
+      { id: 'w-foll', set_kind: 'dropset', parent_set_id: 'c1', ordering: 1 },
+    ]);
+  });
+
+  it('dropset chain (re-sync) — an existing follower with NULL parent is retro-fixed via UPDATE', async () => {
+    // Simulate a session whose follower was first synced by an OLDER reconcile
+    // (no parent_set_id column written) → head 'c1' + follower 'f-old' (NULL).
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      'sess-1',
+      1_700_000_000_000,
+      'Push Day',
+    );
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets)
+       VALUES (?, ?, ?, ?, ?)`,
+      'se-1',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+      0,
+      2,
+    );
+    for (const [id, ord, parent] of [
+      ['c1', 0, null],
+      ['f-old', 1, null],
+    ] as const) {
+      await db.runAsync(
+        `INSERT INTO "set" (id, session_id, exercise_id, session_exercise_id,
+           weight_kg, reps, set_kind, is_logged, ordering, created_at, parent_set_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        'sess-1',
+        BUILTIN_BENCH_PRESS_ID,
+        'se-1',
+        80,
+        8,
+        'dropset',
+        0,
+        ord,
+        1_700_000_000_000,
+        parent,
+      );
+    }
+
+    // A fresh live-mirror tick carrying the chain link (Watch wire ids).
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-wire',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              {
+                setId: 'w-head',
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: null,
+              },
+              {
+                setId: 'w-foll',
+                ordinal: 1,
+                weight: 40,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: 'w-head',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // 'f-old' matched by (session_exercise_id, ordinal) → UPDATE retro-wrote
+    // its parent to the on-device head 'c1'. 'c1' stays a head (NULL).
+    const rows = await db.getAllAsync<{
+      id: string;
+      parent_set_id: string | null;
+    }>(
+      `SELECT id, parent_set_id FROM "set" WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    expect(rows).toEqual([
+      { id: 'c1', parent_set_id: null },
+      { id: 'f-old', parent_set_id: 'c1' },
+    ]);
+  });
+
   it('idempotency — re-applying the same snapshot leaves the DB unchanged', async () => {
     await replaceLiveMirror(db, snapshot());
     await replaceLiveMirror(db, snapshot());
@@ -271,7 +519,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     ]);
   });
 
-  it('snapshot does NOT delete iPhone-side rows missing from snapshot (purge is end-session job)', async () => {
+  it('live mirror DELETES a set the Watch dropped from a present exercise (per-exercise set purge)', async () => {
     // First snapshot: 2 sets under se-1.
     const initial = snapshot({
       exercises: [
@@ -310,9 +558,11 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     });
     await replaceLiveMirror(db, initial);
 
-    // Second snapshot: only set-1 (set-2 vanished from Watch). Per
-    // NEW-Q50 contract the replace MUST NOT delete set-2 — that's
-    // end-session reconcile's job.
+    // Second snapshot: only set-1 (set-2 vanished from Watch). The live
+    // mirror keeps each PRESENT exercise's set list in lockstep with the
+    // Watch (per-exercise purge), so set-2 is deleted now — not deferred to
+    // end-session. (Absent EXERCISES stay end-session's job; this only
+    // touches sets under exercises the snapshot still contains.)
     const reduced = snapshot({
       exercises: [
         {
@@ -343,7 +593,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
       `SELECT id FROM "set" WHERE session_id = ? ORDER BY id ASC`,
       'sess-1',
     );
-    expect(setIds.map((r) => r.id)).toEqual(['set-1', 'set-2']);
+    expect(setIds.map((r) => r.id)).toEqual(['set-1']);
   });
 
   it('reconcile (Bug X / Approach A) — mirror onto an existing template-built tree UPDATES in place (no duplicate, template_id preserved)', async () => {

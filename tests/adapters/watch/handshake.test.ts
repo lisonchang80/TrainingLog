@@ -336,6 +336,7 @@ describe('WC handshake — buildStartFromIphone', () => {
               notes: null,
               set_kind: 'working',
               is_logged: true,
+              parent_set_id: null,
             },
           ],
         },

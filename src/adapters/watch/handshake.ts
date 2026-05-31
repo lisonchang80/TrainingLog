@@ -441,6 +441,16 @@ export interface SessionSnapshotSet {
   notes: string | null;
   set_kind: 'warmup' | 'working' | 'dropset' | 'superset';
   is_logged: boolean;
+  /**
+   * Dropset-chain parent: NULL for a head / working / warmup row; on a
+   * follower it carries the HEAD row's `setId`. The iPhone reconcile resolves
+   * this (wire id → on-device id) to fold a head + its followers into one
+   * cluster. OPTIONAL because it travels ABSENT over WC for non-followers
+   * (Swift `JSONEncoder` drops nil); `parseLiveMirrorSnapshot` normalises
+   * absent → null, so a parsed snapshot always carries the field, while raw
+   * fixtures / wire dicts may omit it.
+   */
+  parent_set_id?: string | null;
 }
 
 // ---------------------------------------------------------------------
@@ -541,6 +551,7 @@ function snapshotToWire(snapshot: SessionSnapshot): Record<string, JsonValue> {
         notes: s.notes,
         set_kind: s.set_kind,
         is_logged: s.is_logged,
+        parent_set_id: s.parent_set_id ?? null,
       })),
     })),
   };
@@ -934,6 +945,7 @@ export async function fetchSessionSnapshot(
         set_kind:
           (s.set_kind as SessionSnapshotSet['set_kind']) ?? 'working',
         is_logged: s.is_logged === 1,
+        parent_set_id: s.parent_set_id ?? null,
       })),
     };
   });

@@ -70,6 +70,19 @@ export interface ReconcileSessionTreeOptions {
    * suspiciously-empty snapshot). The live-mirror tick passes false.
    */
   purgeTail: boolean;
+  /**
+   * LIVE-mirror authority over SET membership WITHIN the exercises the
+   * snapshot contains: after upserting an exercise's sets, DELETE that
+   * exercise's other set rows (the Watch sends the exercise's FULL current
+   * set list each tick, so a leftover is a Watch-side removal). Unlike
+   * `purgeTail` this does NOT touch absent EXERCISES (those stay end-session's
+   * job) — it just keeps the live mirror's per-exercise set list in lockstep
+   * with the Watch so dropset structure edits (add / remove child, deconstruct)
+   * don't leave orphan rows visible mid-session. Safe for WC applicationContext
+   * (delivers complete snapshots, not partial diffs). The live caller passes
+   * true; end-session passes false (its `purgeTail` already covers everything).
+   */
+  purgeSetsInPresentExercises?: boolean;
 }
 
 export interface ReconcileSessionTreeResult {
@@ -181,6 +194,13 @@ export async function reconcileSessionTree(
     // guaranteed on every adapter / the test DB).
     const keptSeIds: string[] = [];
     const keptSetIds: string[] = [];
+    // Dropset chains: a follower's `parent_set_id` on the wire is the HEAD's
+    // WIRE setId, but on-device the head may have been matched onto a canonical
+    // (template) row with a DIFFERENT id. Map wire-id → on-device-id as each
+    // set is resolved so a follower (always later in `ordering` than its head)
+    // can translate its parent to the real on-device id. Heads carry
+    // `parent_set_id = null`, so only followers consult the map.
+    const setIdMap = new Map<string, string>();
 
     for (const ex of snapExercises) {
       const queue = canonicalByExercise.get(ex.exerciseId);
@@ -217,6 +237,8 @@ export async function reconcileSessionTree(
         );
       }
       keptSeIds.push(seId);
+      // Set ids touched for THIS exercise — drives the live per-exercise purge.
+      const exSetIds: string[] = [];
 
       // ----- set rows (reconcile by (session_exercise_id, ordering)) -----
       for (const s of ex.sets) {
@@ -227,30 +249,88 @@ export async function reconcileSessionTree(
           s.ordinal,
         );
 
+        // Translate a follower's wire parent into the on-device head id (the
+        // head was resolved earlier this pass — lower ordinal). A head row has
+        // `parent_set_id = null` and skips this. A dangling parent (head not
+        // seen / dropped) collapses to null rather than a broken FK.
+        const resolvedParentId =
+          s.parent_set_id != null
+            ? setIdMap.get(s.parent_set_id) ?? null
+            : null;
+
         if (existingSet) {
-          // Canonical set — overwrite only the mirror-bound (logged)
-          // columns; preserve id / exercise_id / session_exercise_id /
-          // created_at / parent_set_id.
-          await db.runAsync(
-            `UPDATE "set" SET
-               weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?
-             WHERE id = ?`,
-            s.weight,
-            s.reps,
-            s.notes,
-            s.set_kind,
-            s.is_logged ? 1 : 0,
-            existingSet.id,
-          );
+          // Overwrite the mirror-bound (logged) columns. `parent_set_id` is
+          // structural so we normally DON'T touch it (preserve id /
+          // exercise_id / session_exercise_id / created_at) — base sets lose
+          // the template's chain linkage crossing the fat-tree, so blindly
+          // writing it would null out a real canonical follower. BUT when the
+          // Watch explicitly says this row is a follower (resolved parent
+          // present), write it — that retro-fixes a follower first synced by
+          // an older reconcile (no parent column) WITHOUT a fresh session, and
+          // is safe because a head / canonical row sends parent = null and so
+          // skips this branch.
+          if (s.set_kind !== 'dropset') {
+            // A non-dropset row NEVER has a chain parent (dropset-chain-
+            // semantics invariant). Clear any stale value — e.g. a row that
+            // was a dropset follower then got deconstructed back to working;
+            // without this the stale parent would silently re-fold it if it
+            // later cycles to dropset again.
+            await db.runAsync(
+              `UPDATE "set" SET
+                 weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?,
+                 parent_set_id = NULL
+               WHERE id = ?`,
+              s.weight,
+              s.reps,
+              s.notes,
+              s.set_kind,
+              s.is_logged ? 1 : 0,
+              existingSet.id,
+            );
+          } else if (resolvedParentId !== null) {
+            // Dropset follower — write the resolved on-device head id (also
+            // retro-fixes a follower first synced by an older reconcile).
+            await db.runAsync(
+              `UPDATE "set" SET
+                 weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?,
+                 parent_set_id = ?
+               WHERE id = ?`,
+              s.weight,
+              s.reps,
+              s.notes,
+              s.set_kind,
+              s.is_logged ? 1 : 0,
+              resolvedParentId,
+              existingSet.id,
+            );
+          } else {
+            // Dropset HEAD, or a follower whose parent the Watch didn't carry
+            // (template fat-tree drops parent_set_id) — preserve the existing
+            // parent so a real canonical follower isn't nulled out.
+            await db.runAsync(
+              `UPDATE "set" SET
+                 weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?
+               WHERE id = ?`,
+              s.weight,
+              s.reps,
+              s.notes,
+              s.set_kind,
+              s.is_logged ? 1 : 0,
+              existingSet.id,
+            );
+          }
           keptSetIds.push(existingSet.id);
+          exSetIds.push(existingSet.id);
+          setIdMap.set(s.setId, existingSet.id);
         } else {
-          // Watch-authored set with no canonical counterpart — INSERT.
+          // Watch-authored set with no canonical counterpart — INSERT. A
+          // dropset follower carries the resolved on-device head id.
           await db.runAsync(
             `INSERT INTO "set"
                (id, session_id, exercise_id, session_exercise_id,
                 weight_kg, reps, notes, set_kind, is_logged,
-                ordering, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ordering, created_at, parent_set_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                weight_kg = excluded.weight_kg,
                reps = excluded.reps,
@@ -258,7 +338,8 @@ export async function reconcileSessionTree(
                set_kind = excluded.set_kind,
                is_logged = excluded.is_logged,
                ordering = excluded.ordering,
-               session_exercise_id = excluded.session_exercise_id`,
+               session_exercise_id = excluded.session_exercise_id,
+               parent_set_id = excluded.parent_set_id`,
             s.setId,
             snapshot.sessionId,
             ex.exerciseId,
@@ -273,9 +354,30 @@ export async function reconcileSessionTree(
             // on INSERT (best-effort — true creation moment unknown to the
             // Watch). UPDATE branch preserves the existing created_at.
             snapshot.startedAt,
+            resolvedParentId,
           );
           keptSetIds.push(s.setId);
+          exSetIds.push(s.setId);
+          setIdMap.set(s.setId, s.setId);
         }
+      }
+
+      // ----- live per-exercise SET purge -----
+      // Keep the live mirror's per-exercise set list in lockstep with the
+      // Watch so dropset structure edits don't leave orphan rows mid-session
+      // (the in-progress iPhone view was the only place these showed —
+      // end-session `purgeTail` already cleaned history). Only deletes sets
+      // UNDER this present exercise; absent exercises stay end-session's job.
+      if (opts.purgeSetsInPresentExercises) {
+        const keep = exSetIds.length > 0 ? exSetIds : [''];
+        const placeholders = keep.map(() => '?').join(', ');
+        const del = await db.runAsync(
+          `DELETE FROM "set"
+            WHERE session_exercise_id = ? AND id NOT IN (${placeholders})`,
+          seId,
+          ...keep,
+        );
+        purgedSets += del.changes ?? 0;
       }
     }
 
@@ -378,5 +480,8 @@ export async function replaceLiveMirror(
   db: Database,
   snapshot: SessionSnapshot,
 ): Promise<void> {
-  await reconcileSessionTree(db, snapshot, { purgeTail: false });
+  await reconcileSessionTree(db, snapshot, {
+    purgeTail: false,
+    purgeSetsInPresentExercises: true,
+  });
 }

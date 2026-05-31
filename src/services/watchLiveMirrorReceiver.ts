@@ -151,6 +151,9 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
       const rpe = rawSet.rpe ?? null;
       const rest_sec = rawSet.rest_sec ?? null;
       const notes = rawSet.notes ?? null;
+      // Dropset-chain parent. Like the other nullables it travels ABSENT for a
+      // non-follower (Watch JSONEncoder drops nil) → normalise absent → null.
+      const parent_set_id = rawSet.parent_set_id ?? null;
       if (typeof setId !== 'string' || setId.length === 0) return null;
       if (typeof ordinal !== 'number' || !Number.isFinite(ordinal)) return null;
       if (!isNullableFiniteNumber(weight)) return null;
@@ -158,6 +161,7 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
       if (!isNullableFiniteNumber(rpe)) return null;
       if (!isNullableFiniteNumber(rest_sec)) return null;
       if (notes !== null && typeof notes !== 'string') return null;
+      if (parent_set_id !== null && typeof parent_set_id !== 'string') return null;
       if (typeof set_kind !== 'string' || !VALID_SET_KINDS.has(set_kind)) {
         return null;
       }
@@ -173,6 +177,7 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
         notes: notes as string | null,
         set_kind: set_kind as SessionSnapshotSet['set_kind'],
         is_logged,
+        parent_set_id: parent_set_id as string | null,
       });
     }
 

@@ -51,6 +51,13 @@ struct SessionSnapshotSet: Codable, Equatable {
     let notes: String?
     let setKind: String
     let isLogged: Bool
+    /// Dropset-chain parent. NULL for a head / working / warmup row; on a
+    /// follower it holds the HEAD row's `setId`. The iPhone reconcile folds a
+    /// head + its followers into one cluster via this (replaces the old
+    /// "consecutive dropset" visual-only heuristic for cross-device parity).
+    /// JSONEncoder omits nil → it travels ABSENT for non-followers; the iPhone
+    /// `parseLiveMirrorSnapshot` normalises absent → null.
+    let parentSetId: String?
 
     enum CodingKeys: String, CodingKey {
         case setId
@@ -62,6 +69,35 @@ struct SessionSnapshotSet: Codable, Equatable {
         case restSec = "rest_sec"
         case setKind = "set_kind"
         case isLogged = "is_logged"
+        case parentSetId = "parent_set_id"
+    }
+
+    /// Memberwise init with `parentSetId` defaulted so the ~16 existing
+    /// call sites that don't deal with dropset chains stay unchanged; only
+    /// the projection / merge / added-set paths thread a real parent through.
+    /// (A custom init doesn't disable the synthesized Codable conformance.)
+    init(
+        setId: String,
+        ordinal: Int,
+        weight: Double?,
+        reps: Int?,
+        rpe: Double?,
+        restSec: Int?,
+        notes: String?,
+        setKind: String,
+        isLogged: Bool,
+        parentSetId: String? = nil
+    ) {
+        self.setId = setId
+        self.ordinal = ordinal
+        self.weight = weight
+        self.reps = reps
+        self.rpe = rpe
+        self.restSec = restSec
+        self.notes = notes
+        self.setKind = setKind
+        self.isLogged = isLogged
+        self.parentSetId = parentSetId
     }
 }
 

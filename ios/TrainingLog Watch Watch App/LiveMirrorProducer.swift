@@ -95,7 +95,8 @@ enum LiveMirror {
             restSec: s.restSec,
             notes: s.notes,
             setKind: kind,
-            isLogged: s.isLogged
+            isLogged: s.isLogged,
+            parentSetId: s.parentSetId
         )
     }
 
@@ -158,7 +159,8 @@ enum LiveMirror {
                     restSec: s.restSec,
                     notes: s.notes,
                     setKind: s.setKind,
-                    isLogged: logged.contains(s.setId)
+                    isLogged: logged.contains(s.setId),
+                    parentSetId: s.parentSetId
                 )
             }
             return SessionSnapshotExercise(
@@ -192,10 +194,14 @@ final class LiveMirrorProducer: ObservableObject {
     private var lastEmit: Date?
     private var cancellables = Set<AnyCancellable>()
 
-    /// Q6=a — coalesce mutations into at most one push per 15s.
-    private let throttle: TimeInterval = 15
+    /// Coalesce window — at most one push per 0.5s. Was 15s (NEW-Q50 Q6=a);
+    /// lowered + paired with immediate emit-on-mutation (`markDirty`) so the
+    /// iPhone live mirror reflects a Watch edit in well under 1s (user request
+    /// 2026-06-01). A spaced-out edit pushes instantly; a burst coalesces to
+    /// ≤2 pushes/sec. Safe for WC applicationContext (latest-state, coalesced).
+    private let throttle: TimeInterval = 0.5
     /// How often the loop wakes to re-check (dirty && elapsed ≥ throttle).
-    private let pollNanos: UInt64 = 3_000_000_000
+    private let pollNanos: UInt64 = 500_000_000
 
     /// Bind the producer to this session's base snapshot + live overlay +
     /// outbound coordinator, and start watching the overlay for mutations.
@@ -213,39 +219,39 @@ final class LiveMirrorProducer: ObservableObject {
         // skip that so only genuine post-configure mutations mark dirty.
         interaction.$loggedSetIds
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         interaction.$editedValues
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         // Phase F: a delete must also mark the mirror dirty so the shrunk
         // tree is pushed (within the 15s window, and definitely on the
         // [完成] `emitFinal()` force-push that feeds end-session reconcile).
         interaction.$deletedExerciseIds
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         interaction.$deletedSetIds
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         interaction.$addedSets
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         // Phase F: a # type-cycle changes set_kind (+ may add/remove sub-
         // sets) — mark dirty so the new tree reaches iPhone (15s tick or the
         // [完成] `emitFinal()` force-push that feeds end-session reconcile).
         interaction.$setKindOverrides
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
         // Phase F: a reorder changes display order → re-derived wire ordinals
         // → mark dirty so the reordered tree reaches iPhone.
         interaction.$setRankOverrides
             .dropFirst()
-            .sink { [weak self] _ in self?.dirty = true }
+            .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
     }
 
@@ -284,6 +290,15 @@ final class LiveMirrorProducer: ObservableObject {
             kindOverrides: interaction.setKindOverrides,
             rankOverrides: interaction.setRankOverrides
         )
+    }
+
+    /// A mutation happened. Push IMMEDIATELY when the coalesce window has
+    /// elapsed (so a spaced-out edit reaches the iPhone in well under 1s);
+    /// otherwise just flag dirty and let the poll loop emit the latest once
+    /// `throttle` passes (bursts coalesce to ≤2 pushes/sec).
+    private func markDirty() {
+        dirty = true
+        if shouldEmitNow() { emit(force: false) }
     }
 
     private func shouldEmitNow() -> Bool {
