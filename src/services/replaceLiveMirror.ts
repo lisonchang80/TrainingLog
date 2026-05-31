@@ -78,6 +78,13 @@ export interface ReconcileSessionTreeResult {
   /** Rows deleted by the tail purge (0 when `purgeTail` is false). */
   purgedExercises: number;
   purgedSets: number;
+  /**
+   * Rows deleted by the PRECISE tombstone purge (Q5, slice 13d
+   * sync-refactor) — driven by `snapshot.deletedIds`, independent of
+   * `purgeTail`. 0 when the snapshot carries no `deletedIds`.
+   */
+  tombstonedExercises: number;
+  tombstonedSets: number;
 }
 
 /**
@@ -98,6 +105,8 @@ export async function reconcileSessionTree(
 ): Promise<ReconcileSessionTreeResult> {
   let purgedExercises = 0;
   let purgedSets = 0;
+  let tombstonedExercises = 0;
+  let tombstonedSets = 0;
 
   await db.withTransactionAsync(async () => {
     // ----- session row -----
@@ -300,6 +309,46 @@ export async function reconcileSessionTree(
       );
       purgedExercises = seDel.changes ?? 0;
     }
+
+    // ----- Tombstone purge (Q5 precise live-delete, both directions) -----
+    // Independent of `purgeTail`: delete EXACTLY the ids the originator
+    // marked deleted THIS session. Precise (not a mass-purge of absent
+    // rows), so it propagates a live delete <1s without the stale-snapshot
+    // over-purge risk that `purgeTail: true` carries. An id that matches no
+    // local row is a harmless no-op — if a divergent-id row exists for it,
+    // the authoritative end-session mass-purge still removes it (see the
+    // SessionSnapshot tombstone id contract).
+    const tomb = snapshot.deletedIds;
+    if (tomb) {
+      if (tomb.setIds.length > 0) {
+        const ph = tomb.setIds.map(() => '?').join(', ');
+        const r = await db.runAsync(
+          `DELETE FROM "set" WHERE session_id = ? AND id IN (${ph})`,
+          snapshot.sessionId,
+          ...tomb.setIds,
+        );
+        tombstonedSets += r.changes ?? 0;
+      }
+      if (tomb.exerciseIds.length > 0) {
+        const ph = tomb.exerciseIds.map(() => '?').join(', ');
+        // Delete the exercise's sets FIRST (explicit — do NOT rely on FK
+        // CASCADE), then the orphaned exercise rows.
+        const rs = await db.runAsync(
+          `DELETE FROM "set"
+            WHERE session_id = ? AND session_exercise_id IN (${ph})`,
+          snapshot.sessionId,
+          ...tomb.exerciseIds,
+        );
+        tombstonedSets += rs.changes ?? 0;
+        const re = await db.runAsync(
+          `DELETE FROM session_exercise
+            WHERE session_id = ? AND id IN (${ph})`,
+          snapshot.sessionId,
+          ...tomb.exerciseIds,
+        );
+        tombstonedExercises += re.changes ?? 0;
+      }
+    }
   });
 
   const setCount = snapshot.exercises.reduce(
@@ -311,6 +360,8 @@ export async function reconcileSessionTree(
     setCount,
     purgedExercises,
     purgedSets,
+    tombstonedExercises,
+    tombstonedSets,
   };
 }
 

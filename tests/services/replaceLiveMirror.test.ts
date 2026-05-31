@@ -19,7 +19,10 @@
 
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
-import { replaceLiveMirror } from '../../src/services/replaceLiveMirror';
+import {
+  replaceLiveMirror,
+  reconcileSessionTree,
+} from '../../src/services/replaceLiveMirror';
 import type { SessionSnapshot } from '../../src/adapters/watch/handshake';
 
 const BUILTIN_BENCH_PRESS_ID = '00000000-0000-4000-8000-000000000001';
@@ -478,5 +481,133 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
       ended_at: 1_700_000_500_000,
       bodyweight_snapshot_kg: 75.5,
     });
+  });
+});
+
+// =====================================================================
+// Phase D — tombstone precise-purge (Q5 live-delete, slice 13d sync-refactor)
+// =====================================================================
+
+describe('reconcileSessionTree — tombstone precise purge (deletedIds)', () => {
+  let db: BetterSqliteDatabase;
+
+  // Two-exercise / multi-set seed so we can assert PRECISE deletion.
+  function twoExerciseSnapshot(
+    overrides: Partial<SessionSnapshot> = {},
+  ): SessionSnapshot {
+    return {
+      sessionId: 'sess-1',
+      title: 'Push Day',
+      startedAt: 1_700_000_000_000,
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: '00000000-0000-4000-8000-000000000001',
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 2,
+          sets: [
+            { setId: 'set-1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+            { setId: 'set-2', ordinal: 1, weight: 80, reps: 6, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+          ],
+        },
+        {
+          sessionExerciseId: 'se-2',
+          exerciseId: '00000000-0000-4000-8000-000000000002',
+          exerciseName: 'Squat',
+          ordering: 1,
+          plannedSets: 1,
+          sets: [
+            { setId: 'set-3', ordinal: 0, weight: 100, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: false },
+          ],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  const idsOf = async (table: 'set' | 'session_exercise') => {
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM "${table}" WHERE session_id = ? ORDER BY id`,
+      'sess-1',
+    );
+    return rows.map((r) => r.id);
+  };
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    // Seed the full two-exercise tree first (legacy live tick, no deletes).
+    await replaceLiveMirror(db, twoExerciseSnapshot());
+  });
+
+  afterEach(() => db.close());
+
+  it('removes a tombstoned set but keeps siblings (live tick, purgeTail false)', async () => {
+    // set-2 is tombstoned AND still listed in the snapshot exercise — the
+    // tombstone wins (precise delete runs after upsert).
+    const res = await reconcileSessionTree(
+      db,
+      twoExerciseSnapshot({ deletedIds: { exerciseIds: [], setIds: ['set-2'] } }),
+      { purgeTail: false },
+    );
+    expect(res.tombstonedSets).toBe(1);
+    expect(res.tombstonedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-3']);
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+  });
+
+  it('removes a tombstoned exercise AND its sets, keeps the other exercise', async () => {
+    const res = await reconcileSessionTree(
+      db,
+      twoExerciseSnapshot({ deletedIds: { exerciseIds: ['se-2'], setIds: [] } }),
+      { purgeTail: false },
+    );
+    expect(res.tombstonedExercises).toBe(1);
+    expect(res.tombstonedSets).toBe(1); // set-3 (child of se-2)
+    expect(await idsOf('session_exercise')).toEqual(['se-1']);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2']);
+  });
+
+  it('contrast — a snapshot-ABSENT-but-not-tombstoned set survives (only tombstones delete on a live tick)', async () => {
+    // se-1 now lists ONLY set-1 (set-2 absent), no tombstone → set-2 STAYS
+    // (the existing purgeTail-false invariant). This is the row the
+    // tombstone test above deletes — proving deletion is driven by the
+    // tombstone, not by snapshot absence.
+    const onlySet1 = twoExerciseSnapshot();
+    const trimmed: SessionSnapshot = {
+      ...onlySet1,
+      exercises: onlySet1.exercises.map((ex) =>
+        ex.sessionExerciseId === 'se-1'
+          ? { ...ex, sets: ex.sets.filter((s) => s.setId === 'set-1') }
+          : ex,
+      ),
+    };
+    const res = await reconcileSessionTree(db, trimmed, { purgeTail: false });
+    expect(res.tombstonedSets).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2', 'set-3']);
+  });
+
+  it('tombstone for an id with no local row is a harmless no-op', async () => {
+    const res = await reconcileSessionTree(
+      db,
+      twoExerciseSnapshot({
+        deletedIds: { exerciseIds: ['se-ghost'], setIds: ['set-ghost'] },
+      }),
+      { purgeTail: false },
+    );
+    expect(res.tombstonedSets).toBe(0);
+    expect(res.tombstonedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2', 'set-3']);
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+  });
+
+  it('no deletedIds → tombstoned counts are 0 (backward compatible)', async () => {
+    const res = await reconcileSessionTree(db, twoExerciseSnapshot(), {
+      purgeTail: false,
+    });
+    expect(res.tombstonedSets).toBe(0);
+    expect(res.tombstonedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2', 'set-3']);
   });
 });
