@@ -264,14 +264,20 @@ struct SetLoggerView: View {
             // pure UX hazard.
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.body)
+                // Hide the ⚙ while a cell is in `[]` Active — the 2026-05-31
+                // full-screen keypad owns the screen and the gear must not
+                // peek over it (per user「不需要齒輪」). Crown mode hides it
+                // too (harmless — you don't reach for settings mid-edit).
+                if interactionState.activeCell == nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.body)
+                        }
+                        .accessibilityLabel("設定")
                     }
-                    .accessibilityLabel("設定")
                 }
             }
             .sheet(isPresented: $showSettings) {

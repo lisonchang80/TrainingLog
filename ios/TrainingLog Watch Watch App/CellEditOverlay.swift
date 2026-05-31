@@ -53,11 +53,12 @@ struct CellEditOverlay: View {
         if let cell = state.activeCell {
             switch inputMode {
             case .keypad:
-                // Per user 2026-05-29 polish: entire screen blacks out
-                // during keypad mode — only buffer + keypad visible.
-                ZStack(alignment: .bottom) {
+                // Per user 2026-05-29 polish + 2026-05-31 full-screen: the
+                // entire screen blacks out during keypad mode AND the keypad
+                // fills it (big keys). Only buffer + keypad visible.
+                ZStack {
                     Color.black.ignoresSafeArea()
-                    KeypadOverlay(cell: cell, state: state, inputModeRaw: $inputModeRaw)
+                    KeypadOverlay(cell: cell, state: state)
                 }
             case .crown:
                 // Per user 2026-05-29 polish 4: crown mode is INLINE —
@@ -100,57 +101,57 @@ private enum KeypadKey: Hashable {
 private struct KeypadOverlay: View {
     let cell: ActiveCell
     @ObservedObject var state: SessionInteractionState
-    @Binding var inputModeRaw: String
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             bufferDisplay
+            // Per user 2026-05-31: the keypad fills the whole screen (big
+            // keys). The four key rows split the remaining height evenly;
+            // the buffer row is pinned compact at the top.
             ForEach(KeypadKey.layout.indices, id: \.self) { rowIdx in
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     ForEach(KeypadKey.layout[rowIdx].indices, id: \.self) { colIdx in
                         keyButton(KeypadKey.layout[rowIdx][colIdx])
                     }
                 }
+                .frame(maxHeight: .infinity)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 4)
-        .padding(.bottom, 4)
-        .frame(maxWidth: .infinity)
-        // Per user 2026-05-29 polish: opaque full-bleed keypad backdrop
-        // — earlier the session list under the keypad area (below the
-        // Done row) showed through 0.92 alpha, looking noisy. Now the
-        // background fills the entire bottom strip including the safe
-        // area so nothing peeks past the Done row.
-        .background(
-            Color.black.ignoresSafeArea(edges: .bottom)
-        )
-        .transition(.move(edge: .bottom))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.ignoresSafeArea())
+        .transition(.opacity)
     }
 
     private var bufferDisplay: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(cell.buffer.isEmpty ? "0" : cell.buffer)
-                .font(.headline)
+                .font(.title3)
                 .monospacedDigit()
                 .foregroundStyle(.primary)
             Text(cell.field.unit)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            // Mode-switch chip — Phase C debug affordance until D16
-            // settings sheet lands. Tap to flip keypad ↔ crown.
+            // Back / cancel — the old ↻ mode-switch chip is repurposed
+            // (per user 2026-05-31) into a 返回 icon = DISCARD the in-flight
+            // edit and close the cell WITHOUT committing. Crown mode is still
+            // reachable via ⚙ 設定 → 輸入方式; this button no longer flips
+            // input modes.
             Button {
-                inputModeRaw = InputMode.crown.rawValue
+                state.discardActiveCell()
             } label: {
-                Text("↻")
-                    .font(.caption2)
+                Image(systemName: "chevron.backward")
+                    .font(.body)
                     .foregroundStyle(.secondary)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 4)
-        .padding(.bottom, 2)
+        .frame(height: 34)
     }
 
     @ViewBuilder
@@ -158,20 +159,28 @@ private struct KeypadOverlay: View {
         Button {
             tap(key)
         } label: {
-            Text(key.label)
-                .font(key == .done ? .caption : .body)
-                .monospacedDigit()
-                .foregroundStyle(key == .done ? Color.green : Color.primary)
-                .frame(maxWidth: .infinity, minHeight: 24)
-                .contentShape(Rectangle())
+            Group {
+                if key == .done {
+                    // Done rendered as a green ✓ per the 2026-05-31 layout.
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.green)
+                } else {
+                    Text(key.label)
+                        .foregroundStyle(Color.primary)
+                }
+            }
+            .font(.title3)
+            .monospacedDigit()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: 6)
                 .fill(Color.secondary.opacity(0.18))
         )
         // Hide the dot key for reps (integer-only).
-        .opacity(key == .dot && cell.field == .reps ? 0.3 : 1.0)
+        .opacity(key == .dot && cell.field == .reps ? 0.25 : 1.0)
         .disabled(key == .dot && cell.field == .reps)
     }
 
