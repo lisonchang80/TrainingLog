@@ -21,6 +21,7 @@
 //
 
 import SwiftUI
+import WatchKit
 
 struct ExerciseCard: View {
     let exercise: SessionSnapshotExercise
@@ -57,6 +58,16 @@ struct ExerciseCard: View {
     @State private var pendingConfirm: Bool = false
     @State private var pendingHistorySide: Int? = nil
 
+    // MARK: - Reorder (Phase F long-press drag) state
+    //
+    // `reorder` is non-nil while one group is in move mode (long-pressed on
+    // its Active row). `reorderMidYs` caches each group's midY in the
+    // "exerciseReorder" coordinate space (via a PreferenceKey) so the drop
+    // target index can be computed from the finger's Y. A whole D cluster
+    // moves as one unit (its member setIds renumber contiguously).
+    @State private var reorder: ReorderState? = nil
+    @State private var reorderMidYs: [Int: CGFloat] = [:]
+
     /// Grouped rows for rendering. Consecutive `dropset` rows are
     /// folded into a `cluster` group with the first dropset as the
     /// cluster header and the remaining ones as sub-sets.
@@ -71,9 +82,22 @@ struct ExerciseCard: View {
             base: exercise.sets,
             deletedSets: state.deletedSetIds,
             addedSets: state.addedSets,
+            kindOverrides: state.setKindOverrides,
+            rankOverrides: state.setRankOverrides,
             sessionExerciseId: exercise.sessionExerciseId
         )
         return SetRowGroup.group(sets: merged)
+    }
+
+    /// tap 編號 → cycle this row's type (工作→熱→D→工作). `set` is the merged
+    /// (effective-kind) set from `rowGroups`, so its id/kind already reflect
+    /// any prior cycle. The state method owns the renumber + D add/remove.
+    private func cycleType(_ set: SessionSnapshotSet) {
+        state.cycleSetKind(
+            setId: set.setId,
+            sessionExerciseId: exercise.sessionExerciseId,
+            baseSets: exercise.sets
+        )
     }
 
     /// +1 set (right-swipe → ＋ on row `set`). Insert a new set right AFTER
@@ -270,9 +294,109 @@ struct ExerciseCard: View {
                         .padding(.vertical, 2)
                 }
                 groupRow(group)
+                    // Move-mode highlight on the long-pressed group.
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.orange, lineWidth: 2)
+                            .opacity(reorder?.fromIndex == idx ? 1 : 0)
+                    )
+                    // The dragged group follows the finger + floats above.
+                    .offset(y: reorder?.fromIndex == idx ? (reorder?.translation ?? 0) : 0)
+                    .zIndex(reorder?.fromIndex == idx ? 1 : 0)
+                    .background(groupMidYReader(idx))
+                    // Reorder: long-press (0.45s) on the Active row → move mode
+                    // → vertical drag. The long-press gate keeps a quick
+                    // horizontal swipe (delete / +1 reveal) and the TabView
+                    // page-swipe untouched — only a deliberate hold engages.
+                    .highPriorityGesture(reorderGesture(groupIndex: idx, group: group))
             }
         }
         .padding(.horizontal, 4)
+        .coordinateSpace(name: "exerciseReorder")
+        .onPreferenceChange(GroupMidYKey.self) { reorderMidYs = $0 }
+    }
+
+    // MARK: - Reorder helpers (Phase F long-press drag)
+
+    /// The setIds a render group owns, in internal order — single set for
+    /// working/warmup; header + sub-sets for a D cluster (so the cluster
+    /// moves as one unit).
+    private func groupMembers(_ g: SetRowGroup) -> [String] {
+        switch g {
+        case .warmup(let s): return [s.setId]
+        case .working(let s, _): return [s.setId]
+        case .cluster(let h, let subs, _): return [h.setId] + subs.map { $0.setId }
+        }
+    }
+
+    /// Reports a group's midY (in the "exerciseReorder" space) up via a
+    /// preference so the drop target can be computed from the finger's Y.
+    private func groupMidYReader(_ idx: Int) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: GroupMidYKey.self,
+                value: [idx: proxy.frame(in: .named("exerciseReorder")).midY]
+            )
+        }
+    }
+
+    /// Insertion index (among the OTHER groups) for the current finger Y.
+    private func reorderTargetIndex(from idx: Int, translationY: CGFloat) -> Int {
+        let fingerY = (reorderMidYs[idx] ?? 0) + translationY
+        var target = 0
+        for (i, midY) in reorderMidYs where i != idx {
+            if midY < fingerY { target += 1 }
+        }
+        return target
+    }
+
+    /// Long-press → drag reorder. Sequenced so move mode only engages after a
+    /// deliberate 0.45s hold on an Active row.
+    private func reorderGesture(groupIndex idx: Int, group: SetRowGroup) -> some Gesture {
+        let repId = groupMembers(group).first ?? ""
+        return LongPressGesture(minimumDuration: 0.45)
+            .sequenced(before: DragGesture(coordinateSpace: .named("exerciseReorder")))
+            .onChanged { value in
+                switch value {
+                case .first(true):
+                    // Long press recognised — enter move mode IFF this group's
+                    // row is Active (spec: long-press only in {} Active).
+                    if state.isActive(setId: repId), reorder == nil {
+                        reorder = ReorderState(fromIndex: idx, translation: 0)
+                        WKInterfaceDevice.current().play(.start)
+                    }
+                case .second(true, let drag?):
+                    if reorder?.fromIndex == idx {
+                        reorder?.translation = drag.translation.height
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { value in
+                guard reorder?.fromIndex == idx else { reorder = nil; return }
+                if case .second(_, let drag?) = value {
+                    let to = reorderTargetIndex(from: idx, translationY: drag.translation.height)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        commitReorder(from: idx, to: to)
+                    }
+                }
+                reorder = nil
+            }
+    }
+
+    /// Commit: move the group at `from` to position `to` (index among the
+    /// OTHER groups) and hand the new display order to the state, which
+    /// renumbers the rank overrides (display) — wire ordinals re-derive from
+    /// the present pool in the projection so the iPhone history follows.
+    private func commitReorder(from: Int, to: Int) {
+        var members = rowGroups.map { groupMembers($0) }
+        guard from >= 0, from < members.count else { return }
+        let moved = members.remove(at: from)
+        let t = max(0, min(to, members.count))
+        members.insert(moved, at: t)
+        state.applyReorder(orderedGroups: members)
+        WKInterfaceDevice.current().play(.click)
     }
 
     @ViewBuilder
@@ -287,7 +411,7 @@ struct ExerciseCard: View {
                 setId: set.setId,
                 hasCheckmark: true,
                 onAddSet: { addSet(from: set) },
-                content: { SetRowWarmupContent(set: set, state: state) }
+                content: { SetRowWarmupContent(set: set, state: state, onCycleType: { cycleType(set) }) }
             )
 
         case .working(let set, let index):
@@ -296,18 +420,19 @@ struct ExerciseCard: View {
                 setId: set.setId,
                 hasCheckmark: true,
                 onAddSet: { addSet(from: set) },
-                content: { SetRowWorkingContent(set: set, displayIndex: index, state: state) }
+                content: { SetRowWorkingContent(set: set, displayIndex: index, state: state, onCycleType: { cycleType(set) }) }
             )
 
         case .cluster(let header, let subs, let clusterIndex):
             // Cluster is a single Active unit: tap any sub-row
             // activates the whole cluster, tap header ✓ logs the
-            // whole cluster.
+            // whole cluster. tap header 編號 D1 → deconstruct (→工作).
             ClusterSetGroup(
                 state: state,
                 header: header,
                 subs: subs,
-                clusterIndex: clusterIndex
+                clusterIndex: clusterIndex,
+                onCycleHeaderType: { cycleType(header) }
             )
         }
     }
@@ -318,6 +443,23 @@ struct ExerciseCard: View {
 private struct ProgressBarItem: Identifiable, Equatable {
     let id: String
     let filled: Bool
+}
+
+// MARK: - Reorder support types
+
+/// Active long-press-drag reorder: which group is moving + its live offset.
+private struct ReorderState: Equatable {
+    var fromIndex: Int
+    var translation: CGFloat
+}
+
+/// Collects each render group's midY (in the "exerciseReorder" coordinate
+/// space) so the drop target index can be derived from the finger's Y.
+private struct GroupMidYKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
 
 // MARK: - Interactive row (warmup + working)
@@ -525,6 +667,9 @@ private struct ClusterSetGroup: View {
     let header: SessionSnapshotSet
     let subs: [SessionSnapshotSet]
     let clusterIndex: Int
+    /// tap header 編號 `D{n}` while the cluster is Active → deconstruct it
+    /// back to a working set (sub-sets dropped). See `ExerciseCard.cycleType`.
+    let onCycleHeaderType: () -> Void
 
     private var groupId: String { header.setId }
 
@@ -535,7 +680,8 @@ private struct ClusterSetGroup: View {
                     set: header,
                     clusterIndex: clusterIndex,
                     clusterId: groupId,
-                    state: state
+                    state: state,
+                    onCycleType: onCycleHeaderType
                 )
                 ForEach(subs, id: \.setId) { sub in
                     SetRowClusterSubContent(
@@ -675,6 +821,8 @@ enum SetRowGroup: Identifiable {
 private struct SetRowWarmupContent: View {
     let set: SessionSnapshotSet
     @ObservedObject var state: SessionInteractionState
+    /// tap 編號「熱」→ cycle type (active) / activate (idle).
+    var onCycleType: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 4) {
@@ -684,6 +832,11 @@ private struct SetRowWarmupContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if rowIsActive { onCycleType() }
+                    else { state.activate(setId: set.setId) }
+                }
             CellBox(
                 value: formatWeight(displayWeight),
                 unit: "kg",
@@ -724,6 +877,8 @@ private struct SetRowWorkingContent: View {
     let set: SessionSnapshotSet
     let displayIndex: Int
     @ObservedObject var state: SessionInteractionState
+    /// tap 編號 → cycle type (active) / activate (idle).
+    var onCycleType: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 4) {
@@ -733,6 +888,11 @@ private struct SetRowWorkingContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if rowIsActive { onCycleType() }
+                    else { state.activate(setId: set.setId) }
+                }
             CellBox(
                 value: formatWeight(displayWeight),
                 unit: "kg",
@@ -773,6 +933,8 @@ private struct SetRowClusterHeaderContent: View {
     let clusterIndex: Int
     let clusterId: String
     @ObservedObject var state: SessionInteractionState
+    /// tap 編號 `D{n}` → deconstruct cluster (active) / activate (idle).
+    var onCycleType: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 4) {
@@ -782,6 +944,11 @@ private struct SetRowClusterHeaderContent: View {
                 .frame(width: 20, alignment: .center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if clusterActive { onCycleType() }
+                    else { state.activate(setId: clusterId) }
+                }
             CellBox(
                 value: formatWeight(displayWeight),
                 unit: "kg",

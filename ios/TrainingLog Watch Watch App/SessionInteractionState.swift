@@ -168,6 +168,25 @@ final class SessionInteractionState: ObservableObject {
     /// `ordinal`). See `AddedSet`.
     @Published var addedSets: [AddedSet] = []
 
+    /// Per-set `set_kind` override (D11 Phase F — # type cycling, grill
+    /// 2026-05-31 line 1548-1558). Tapping a row's number cycles
+    /// 工作→熱→D→工作; the chosen kind is stored here keyed by setId. Render
+    /// (`LiveMirror.mergeSets`) + projection apply it, so `SetRowGroup.group`
+    /// re-derives the working-set numbering + progress bar automatically and
+    /// the iPhone reconcile UPDATEs the mirror-bound `set_kind` column.
+    /// Entering / leaving `dropset` additionally adds / removes the cluster's
+    /// sub-sets — see `cycleSetKind`.
+    @Published var setKindOverrides: [String: String] = [:]
+
+    /// Per-set DISPLAY-rank override (D11 Phase F — long-press reorder). When
+    /// present it replaces the natural rank (base = ordinal, added =
+    /// displayRank) that `LiveMirror.mergeSets` sorts by — that is the entire
+    /// Watch-side reorder. Decoupled from the WIRE ordinal: the projection
+    /// re-derives wire ordinals from the present ordinal pool in display
+    /// order, so the iPhone history follows WITHOUT introducing new ordinal
+    /// values (delete-purge / add-INSERT value-match stays intact).
+    @Published var setRankOverrides: [String: Double] = [:]
+
     /// Monotonic counter for minting unique `AddedSet` ids within this
     /// session. Survives view re-mounts (the state object outlives them).
     private var addCounter = 0
@@ -354,6 +373,8 @@ final class SessionInteractionState: ObservableObject {
         }
         loggedSetIds.remove(setId)
         editedValues = editedValues.filter { $0.key.setId != setId }
+        setKindOverrides[setId] = nil
+        setRankOverrides[setId] = nil
         if activeSetId == setId { activeSetId = nil }
         if activeCell?.setId == setId { activeCell = nil }
     }
@@ -376,16 +397,20 @@ final class SessionInteractionState: ObservableObject {
         baseSets: [SessionSnapshotSet],
         weight: Double?,
         reps: Int?,
-        setKind: String
+        setKind: String,
+        activateNew: Bool = true
     ) -> String {
-        // Display ranks of the CURRENT visible sets (base = ordinal value,
-        // added = its displayRank).
-        var ranks: [(id: String, rank: Double)] = baseSets
+        // Display ranks of the CURRENT visible sets, honouring any reorder
+        // override (so an added set lands correctly even after a reorder).
+        let visibleIds: [String] = baseSets
             .filter { !deletedSetIds.contains($0.setId) }
-            .map { ($0.setId, Double($0.ordinal)) }
-        ranks += addedSets
-            .filter { $0.sessionExerciseId == sessionExerciseId }
-            .map { ($0.id, $0.displayRank) }
+            .map { $0.setId }
+            + addedSets
+                .filter { $0.sessionExerciseId == sessionExerciseId }
+                .map { $0.id }
+        let ranks: [(id: String, rank: Double)] = visibleIds.map {
+            ($0, effectiveRank(setId: $0, baseSets: baseSets))
+        }
 
         let anchorRank = ranks.first { $0.id == afterSetId }?.rank
             ?? (ranks.map { $0.rank }.max() ?? 0)
@@ -414,9 +439,14 @@ final class SessionInteractionState: ObservableObject {
                 setKind: setKind
             )
         )
-        // Active moves onto the freshly-added set (ready to edit).
-        activeSetId = id
-        activeCell = nil
+        // Active moves onto the freshly-added set (ready to edit) — unless
+        // the caller opted out (type-cycling into D seeds a sub-set but keeps
+        // the header Active, so a follow-up number-tap deconstructs the SAME
+        // row).
+        if activateNew {
+            activeSetId = id
+            activeCell = nil
+        }
         return id
     }
 
@@ -434,6 +464,98 @@ final class SessionInteractionState: ObservableObject {
         // (the projection already excludes the whole exercise, but keep the
         // overlay tidy so they can't resurface).
         addedSets.removeAll { $0.sessionExerciseId == sessionExerciseId }
+    }
+
+    // MARK: - Type cycling (Phase F — grill line 1548-1558)
+
+    /// Cycle a row's `set_kind` on tapping its number: 工作 → 熱 → D → 工作.
+    /// Effects are immediate (grill「即時生效」):
+    ///   - the override drives `LiveMirror.mergeSets` → `SetRowGroup.group`
+    ///     renumbers working sets 1..N + recomputes the progress bar
+    ///     automatically (warmup穿插、cluster D1/D2 自動編號);
+    ///   - entering `dropset` (D) seeds ONE sub-set with the header's current
+    ///     values (grill「切到 D 預設: 1 sub-set、數值同 header」), keeping the
+    ///     header Active;
+    ///   - leaving `dropset` (tap header D1 → 工作) drops every consecutive
+    ///     dropset sub-set after the header (grill「解構 D: sub-set 全砍」).
+    /// `baseSets` is the exercise's immutable snapshot set list.
+    func cycleSetKind(setId: String, sessionExerciseId: String, baseSets: [SessionSnapshotSet]) {
+        // Display-ordered sets with the CURRENT effective kinds. Computed
+        // before the flip below so the dropset-deconstruct branch still sees
+        // the cluster it is tearing down.
+        let ordered = LiveMirror.mergeSets(
+            base: baseSets,
+            deletedSets: deletedSetIds,
+            addedSets: addedSets,
+            kindOverrides: setKindOverrides,
+            rankOverrides: setRankOverrides,
+            sessionExerciseId: sessionExerciseId
+        )
+        guard let idx = ordered.firstIndex(where: { $0.setId == setId }) else { return }
+        let current = ordered[idx].setKind
+        let next: String
+        switch current {
+        case "working": next = "warmup"
+        case "warmup": next = "dropset"
+        case "dropset": next = "working"
+        default: next = "warmup"
+        }
+        setKindOverrides[setId] = next
+
+        if next == "dropset" {
+            // Enter D — seed 1 sub-set with the header's current values,
+            // inserted right after it; keep the header Active.
+            let w = displayValue(setId: setId, field: .weight, fallback: ordered[idx].weight)
+            let r = displayValue(setId: setId, field: .reps,
+                                 fallback: ordered[idx].reps.map { Double($0) })
+            addSet(
+                sessionExerciseId: sessionExerciseId,
+                afterSetId: setId,
+                baseSets: baseSets,
+                weight: w,
+                reps: r.map { Int($0.rounded()) },
+                setKind: "dropset",
+                activateNew: false
+            )
+        } else if current == "dropset" {
+            // Deconstruct D — drop the consecutive dropset sub-sets that
+            // follow this header in display order.
+            var j = idx + 1
+            while j < ordered.count && ordered[j].setKind == "dropset" {
+                deleteSet(setId: ordered[j].setId)
+                j += 1
+            }
+        }
+    }
+
+    // MARK: - Reorder (Phase F — long-press drag)
+
+    /// Effective DISPLAY rank of a set: the reorder override if present, else
+    /// the base set's ordinal (as Double) or an added set's displayRank.
+    /// Drives the merge sort order — decoupled from the WIRE ordinal (the
+    /// projection re-derives those from the present pool).
+    func effectiveRank(setId: String, baseSets: [SessionSnapshotSet]) -> Double {
+        if let r = setRankOverrides[setId] { return r }
+        if let a = addedSets.first(where: { $0.id == setId }) { return a.displayRank }
+        if let b = baseSets.first(where: { $0.setId == setId }) { return Double(b.ordinal) }
+        return 0
+    }
+
+    /// Commit a reorder. `orderedGroups` is the new DISPLAY order: each inner
+    /// array is a render group's member setIds in their internal order
+    /// (single set for working/warmup; header + sub-sets for a D cluster, so a
+    /// cluster moves as one unit). Renumbers the rank overrides 0..N-1 —
+    /// display only; the projection re-derives wire ordinals from the present
+    /// ordinal pool so the iPhone history follows without breaking the
+    /// delete-purge / add-INSERT value-match.
+    func applyReorder(orderedGroups: [[String]]) {
+        var rank = 0.0
+        for group in orderedGroups {
+            for sid in group {
+                setRankOverrides[sid] = rank
+                rank += 1
+            }
+        }
     }
 
     // MARK: - Display value

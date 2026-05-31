@@ -60,14 +60,43 @@ enum LiveMirror {
         base: [SessionSnapshotSet],
         deletedSets: Set<String>,
         addedSets: [AddedSet],
+        kindOverrides: [String: String],
+        rankOverrides: [String: Double],
         sessionExerciseId: String
     ) -> [SessionSnapshotSet] {
         let visibleBase = base.filter { !deletedSets.contains($0.setId) }
         let addedHere = addedSets.filter { $0.sessionExerciseId == sessionExerciseId }
+        // Sort key = reorder override if present, else the natural rank
+        // (base = ordinal, added = displayRank). This is the entire Watch-
+        // side reorder; the wire ordinal is re-derived in `project`.
         var ranked: [(set: SessionSnapshotSet, rank: Double)] =
-            visibleBase.map { ($0, Double($0.ordinal)) }
-        ranked += addedHere.map { ($0.asSnapshotSet(), $0.displayRank) }
-        return ranked.sorted { $0.rank < $1.rank }.map { $0.set }
+            visibleBase.map { ($0, rankOverrides[$0.setId] ?? Double($0.ordinal)) }
+        ranked += addedHere.map { ($0.asSnapshotSet(), rankOverrides[$0.id] ?? $0.displayRank) }
+        return ranked
+            .sorted { $0.rank < $1.rank }
+            .map { applyKindOverride($0.set, kindOverrides) }
+    }
+
+    /// Apply a per-set `set_kind` override (# type cycling). Returns the set
+    /// unchanged when no (or a no-op) override applies. Shared by the card
+    /// renderer + the projection so both agree on the effective kind that
+    /// drives numbering / cluster folding / progress bar.
+    private static func applyKindOverride(
+        _ s: SessionSnapshotSet,
+        _ overrides: [String: String]
+    ) -> SessionSnapshotSet {
+        guard let kind = overrides[s.setId], kind != s.setKind else { return s }
+        return SessionSnapshotSet(
+            setId: s.setId,
+            ordinal: s.ordinal,
+            weight: s.weight,
+            reps: s.reps,
+            rpe: s.rpe,
+            restSec: s.restSec,
+            notes: s.notes,
+            setKind: kind,
+            isLogged: s.isLogged
+        )
     }
 
     static func project(
@@ -76,7 +105,9 @@ enum LiveMirror {
         edited: [EditedValueKey: Double],
         deletedExercises: Set<String>,
         deletedSets: Set<String>,
-        addedSets: [AddedSet]
+        addedSets: [AddedSet],
+        kindOverrides: [String: String],
+        rankOverrides: [String: Double]
     ) -> SessionSnapshot {
         // Phase F: drop exercises / sets the user deleted on the Watch and
         // MERGE in the sets they added. The projection is what reaches the
@@ -90,13 +121,23 @@ enum LiveMirror {
         let exercises = base.exercises
             .filter { !deletedExercises.contains($0.sessionExerciseId) }
             .map { ex -> SessionSnapshotExercise in
-            let sets = mergeSets(
+            let merged = mergeSets(
                 base: ex.sets,
                 deletedSets: deletedSets,
                 addedSets: addedSets,
+                kindOverrides: kindOverrides,
+                rankOverrides: rankOverrides,
                 sessionExerciseId: ex.sessionExerciseId
             )
-                .map { s -> SessionSnapshotSet in
+            // Reorder / mid-insert round-trip: the WIRE ordinal of each set =
+            // the present ordinal pool SORTED, laid back out in DISPLAY order.
+            // Identity for the un-reordered case; for a reorder or a mid-list
+            // +1 it makes the iPhone value-match render the Watch's order. The
+            // pool's VALUE SET is unchanged, so the reconcile's delete-purge
+            // (absent ordinal) + add-INSERT (max+1) semantics stay intact —
+            // only the ordinal↔content assignment permutes.
+            let sortedOrdinals = merged.map { $0.ordinal }.sorted()
+            let sets = merged.enumerated().map { (i, s) -> SessionSnapshotSet in
                 // Edited weight overrides the planned value; absent → keep
                 // the snapshot's planned weight (may itself be nil).
                 let weight = edited[EditedValueKey(setId: s.setId, field: .weight)] ?? s.weight
@@ -110,7 +151,7 @@ enum LiveMirror {
                 }
                 return SessionSnapshotSet(
                     setId: s.setId,
-                    ordinal: s.ordinal,
+                    ordinal: sortedOrdinals[i],
                     weight: weight,
                     reps: reps,
                     rpe: s.rpe,
@@ -193,6 +234,19 @@ final class LiveMirrorProducer: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.dirty = true }
             .store(in: &cancellables)
+        // Phase F: a # type-cycle changes set_kind (+ may add/remove sub-
+        // sets) — mark dirty so the new tree reaches iPhone (15s tick or the
+        // [完成] `emitFinal()` force-push that feeds end-session reconcile).
+        interaction.$setKindOverrides
+            .dropFirst()
+            .sink { [weak self] _ in self?.dirty = true }
+            .store(in: &cancellables)
+        // Phase F: a reorder changes display order → re-derived wire ordinals
+        // → mark dirty so the reordered tree reaches iPhone.
+        interaction.$setRankOverrides
+            .dropFirst()
+            .sink { [weak self] _ in self?.dirty = true }
+            .store(in: &cancellables)
     }
 
     /// Drive from `.task { await producer.run() }` so the loop inherits the
@@ -226,7 +280,9 @@ final class LiveMirrorProducer: ObservableObject {
             edited: interaction.editedValues,
             deletedExercises: interaction.deletedExerciseIds,
             deletedSets: interaction.deletedSetIds,
-            addedSets: interaction.addedSets
+            addedSets: interaction.addedSets,
+            kindOverrides: interaction.setKindOverrides,
+            rankOverrides: interaction.setRankOverrides
         )
     }
 
@@ -244,7 +300,9 @@ final class LiveMirrorProducer: ObservableObject {
             edited: interaction.editedValues,
             deletedExercises: interaction.deletedExerciseIds,
             deletedSets: interaction.deletedSetIds,
-            addedSets: interaction.addedSets
+            addedSets: interaction.addedSets,
+            kindOverrides: interaction.setKindOverrides,
+            rankOverrides: interaction.setRankOverrides
         )
         coordinator.updateLiveMirror(live)
         dirty = false
