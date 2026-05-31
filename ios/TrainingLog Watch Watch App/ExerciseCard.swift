@@ -340,9 +340,10 @@ private struct ProgressBarItem: Identifiable, Equatable {
 /// 2026-05-31 device feedback. Two-step (iOS-Mail style), both directions:
 ///   1. tap row → `{}` Active (green border)
 ///   2a. LEFT-swipe  → the trailing ◯ swaps to a red 🗑 → tap 🗑 = delete
-///   2b. RIGHT-swipe → the trailing ◯ swaps to a green ＋ → tap ＋ = add a
-///       new set at the end of this exercise (「新增最後一組」),
-///       prefilled with this row's weight/reps (「同種類的下一個」).
+///   2b. RIGHT-swipe → a green ＋ appears on the LEADING edge (`＋ 1 80 8`,
+///       row shifts right) → tap ＋ = add a new set at the end of this
+///       exercise (「新增最後一組」), prefilled with this row's weight/reps
+///       (「同種類的下一個」).
 /// Explicit tap (NOT swipe-past-threshold) so an over-eager swipe can't
 /// nuke / spawn a set, and one swipe can't take out two.
 ///
@@ -378,6 +379,26 @@ private struct InteractiveSetRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            // Right-swipe reveals a ＋ on the LEADING edge (per user
+            // 2026-05-31: ＋ comes from the left, pushing the row right —
+            // iOS-Mail leading action). Tap = add a set.
+            if reveal == .add {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        reveal = .none
+                        onAddSet?()
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(.green)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
             content()
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
@@ -421,8 +442,9 @@ private struct InteractiveSetRow<Content: View>: View {
         }
     }
 
-    /// Trailing slot: ◯ normally; swaps to a red 🗑 (left-swipe) or a green
-    /// ＋ (right-swipe) once revealed.
+    /// Trailing slot: ◯ normally; swaps to a red 🗑 on a left-swipe. On a
+    /// right-swipe (.add) the trailing ◯ is dropped — the ＋ shows on the
+    /// LEADING edge instead (see `body`), matching `＋  1  80  8`.
     @ViewBuilder
     private var trailingControl: some View {
         switch reveal {
@@ -443,20 +465,8 @@ private struct InteractiveSetRow<Content: View>: View {
             .transition(.move(edge: .trailing).combined(with: .opacity))
 
         case .add:
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    reveal = .none
-                    onAddSet?()
-                }
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.body)
-                    .foregroundStyle(.green)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .transition(.move(edge: .leading).combined(with: .opacity))
+            // ＋ lives on the leading edge in this state; trailing is empty.
+            EmptyView()
 
         case .none:
             if hasCheckmark {
