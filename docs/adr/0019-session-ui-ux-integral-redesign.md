@@ -3243,3 +3243,74 @@ Swift（device-gated、停在此邊界等使用者）：
 **落地**：`500e235`（`watchLiveMirrorReceiver.ts` parseLiveMirrorSnapshot，含完整 inline 契約註解 + 守門迴圈）。對抗稽核確認 forward S1-S8（含跨-session namespacing / idempotency / producer-faithful head delete）全乾淨。
 
 **Cross-link**：`watchLiveMirrorReceiver.ts parseLiveMirrorSnapshot` S7b 段；skill `dropset-chain-semantics`；overnight 報告 S7b。
+
+---
+
+## Slice 13d — Watch⇄iPhone 同步重構（三車道對稱同步，grill 拍板 2026-05-31）
+
+### Trigger / Context
+
+使用者要求 4 個同步情境同時成立：(1) iPhone 前景 + Watch 開 → 雙向即時 <1s **完全對稱**；(2) iPhone 背景 + Watch 完成 → 之後開歷史看得到；(3) iPhone 被砍 + Watch 完成 → 冷開歷史看得到（含整場被砍）；(4) 斷線 + Watch 完成 → 重連看得到。情境 2-4 = Watch 優先；「歷史看得到」指 app 內 SQLite 訓練紀錄（**非** Apple 健康 HKWorkout）。使用模式經澄清 = **交錯/接力**（手機做手錶做不到的事——新增動作、改備註——改完換手回手錶），**不會兩台同時敲同一格**；且備註/reorder 也要即時渲染到手錶。
+
+本段是 2026-05-31 在場 grill（Q1–Q6）的拍板。**承接** 上一段 WC Ship-Blocker（E1/E2/E3）已把 end-session 的耐久 + 守門 purge 補完；本段把同步從「Watch→iPhone 單向 live-mirror」推進到「雙向對稱 + 精確刪除傳播」。
+
+### 既有架構基線（2026-05-31 盤點）
+
+- 現役 live-mirror：**Watch→iPhone 單向**、`updateApplicationContext`、15s throttle、`replaceLiveMirror` 整包 upsert（`purgeTail:false`）。
+- D19/D20 的 `liveMirrorReducer.ts` + `setModifiedReducer.ts`（per-field LWW）**已刪除**，被 snapshot-replace 取代（NEW-Q50：session 內 Watch 為唯一權威）。
+- iPhone→Watch **即時路徑不存在**（G4）；iPhone 對 Watch 的出站只有 `pushStartToWatch`（送空 `{}` snapshot）/`pushEndToWatch`/start-reconcile，全是控制訊息、無 live 變動推播。
+- Watch 端 `WCSessionDelegate` 只認 `end-session`(message, side==iphone) + `start-reconcile`(TUI)，**無 `didReceiveApplicationContext`**；in-session 狀態 = `SessionInteractionState`（疊在不可變 base `SessionSnapshot` 上的 overlay、只持差異）；**Watch 無任何備註顯示/編輯 UI**（`notes` 投影恆 `nil`）。
+
+### Decisions（Q1–Q6 拍板）
+
+| Q | 拍板 |
+|---|---|
+| Q1 | **整包快照雙向、不復活 per-field LWW**。並發模型=交錯/接力（一次一台主動編），不會同格衝突；依賴現役 live-tick 的 `purgeTail:false` upsert 語義 → 新增天生安全。殘留風險（同格欄位 <1s 窗內被舊值覆蓋）在接力使用下機率極低，用單調 `rev` 再縮小。維持 NEW-Q50 精簡，不走回 event/LWW reducer 老路。 |
+| Q2 | **三車道分工**。前景兩邊 reachable：`sendMessage`（整包快照、debounce ~250–300ms、雙向）= <1s 主力。背景底盤（永遠開）：`updateApplicationContext`（整包快照、雙向）= sendMessage 漏送/不 reachable 時最終收斂——**applicationContext 本質達不到 <1s（Apple 速率限制 + latest-replace），降為收斂底盤、不扛即時**。整包快照（非 delta）→ 自癒、不需 sequence number。throttle 放寬。 |
+| Q3 | **完成/放棄 = 帶 `endedAt`（或 discard 標記）的最終快照走雙車道**：`sendMessage`（最終快照、**fire-and-forget 不判讀** → 修掉 G3 誤判）讓前景 iPhone <1s 反映已結束；`transferUserInfo`(TUI)（同一份）= **唯一耐久保證**。收端冪等：帶 `endedAt` 就 `reconcile(purgeTail:true)` + 寫 `ended_at`；雙遞送/重複套用皆 no-op（靠 `ended_at` gate）。= 保留 E1 dual-fire 精神、清掉 sendMessage 誤判雜訊。**此項 E1/E2/E3 段已落地大半**（dual-fire + endedAt + 守門 purge），本段僅確認 sendMessage 改 fire-and-forget。 |
+| Q4 | **耐久車道（情境 2/3/4）傳輸層已健全、不重寫**。`react-native-watch-connectivity@2.0.0` 的 TUI 進原生持久佇列 + `_getMissedUserInfo()` 冷啟動自動補送 + adapter（`connectivity.ts:488-490`）正確處理「陣列批次」+ 冪等 reconcile。情境 3 全砍還原鏈：冷啟動 → FIFO 補送 → `start-from-watch`(TUI, INSERT OR IGNORE 長 session 列) → `end-session`(填樹 + ended_at)。**補三保證**：① end handler 查無 session 列→用快照 title/startedAt 自建再 reconcile（已由 `reconcileSessionTree` 的 session 列 `INSERT…ON CONFLICT` upsert 涵蓋大半）② **boot-order**：確保 SQLite open 後才掛 userInfo listener（現況=隱性 gate，靠 `DatabaseProvider` 卡子樹；建議改顯式 DB+bridge ready gate）③ 三情境實機 smoke（情境 3 冷啟動補送無可取代）。 |
+| Q5 | **雙向刪除 = 墓碑清單（tombstones）**。live 快照 = 在場列(upsert, `purgeTail:false` 保新增安全) + 「本場已刪 id 清單(`deletedIds`)」；收端**只精確 purge 清單內的 id**，不 mass-purge → 無閃爍/鬼影。解決「新增安全要 purgeTail:false、刪除傳播要 purgeTail:true」的互斥張力。**墓碑可靠的前提是兩端共用 canonical id**（= Phase C 讓 Watch 採 iPhone 的 id）；未匹配的墓碑 = 安全 no-op（end mass-purge 仍會收尾）。**此項已落地（Phase D，`184c902`）**：`reconcileSessionTree` 第三模式「精確 purge」consume `snapshot.deletedIds`、獨立於 purgeTail、+5 test。 |
+| Q6 | **反向渲染 = 完全對稱全即時**。iPhone 端**所有**改動（動作增刪、set 值/增刪、**備註、reorder、標題**）全部 <1s 渲染到 Watch。隱含 **net-new Watch 備註顯示 UI**（Watch 目前無備註 UI）。reorder：Watch 動作清單順序跟快照 ordering 即時重排。**payload 契約（同 Bug Y）**：反向快照必帶**已在地化動作名** + 目標組數等顯示資料（Watch 無完整動作庫）。 |
+
+### 三車道架構（總覽）
+
+```
+                ┌──────────────── 前景 <1s 主力 ────────────────┐
+   Watch ⇄ iPhone   sendMessage（整包快照, debounce 250-300ms, 雙向, fire-and-forget）
+                └──────────────────────────────────────────────┘
+                ┌──────────────── 背景收斂底盤 ─────────────────┐
+   Watch ⇄ iPhone   updateApplicationContext（整包快照, latest-replace, 雙向）
+                └──────────────────────────────────────────────┘
+                ┌──────────────── 耐久保證（end）──────────────┐
+   Watch → iPhone   transferUserInfo（最終快照+endedAt, FIFO, 冷啟補送）
+                └──────────────────────────────────────────────┘
+   快照 schema：rev(單調,防亂序) + originator(echo抑制) + deletedIds(墓碑) + notes + 在地化 exerciseName
+```
+
+### 已落地（本 ADR 段落寫成時）
+
+- **Phase A — protocol/schema**（`503c259`，已 ship main `184c902`）：`SessionSnapshot` 加 optional `rev`/`originator`/`deletedIds`（`handshake.ts` 型別 + `snapshotToWire` present-才投影 + `watchLiveMirrorReceiver.parseLiveMirrorSnapshot` 容忍解析）；向後相容；+6 test。
+- **Phase D — 墓碑精確 purge**（`184c902`）：`reconcileSessionTree` 第三模式 consume `deletedIds`、+5 test。
+- 兩者皆**行為中性的純 TS 地基**（沒 producer 推、沒 receiver 用就 inert）。
+
+### Impl territory（A/B/C/D，剩 B+C）
+
+- **A**（schema, TS）✅ shipped。
+- **D**（墓碑 purge, TS）✅ shipped。
+- **B — iPhone producer + 快車道 + echo + boot-order（TS, runtime）**：見 `docs/slice-13d-sync-phase-bc-plan.md` Phase B。
+- **C — Watch receiver + 備註 UI + 對稱渲染（Swift, device-gated + 需視覺參考）**：見同檔 Phase C。
+
+**B 與 C 命運相綁**：B producer 推的快照**沒有 C 的 Watch receiver 收就無可觀察效果**（盲做無法驗證、且 C 落地時可能逼 B 返工）→ **建議 B+C 一起做**，需 Watch UI 視覺參考（per `feedback_watch_ui_reference`）+ 實機 smoke。
+
+### Deferred / 相鄰非核心
+
+- **G1** — start-from-iphone TUI 化（目前 sendMessage 無 TUI 後備）。
+- per-field LWW（D19/D20）**不復活**（Q1）。
+- 同格 <1s 競態的進一步保護（rev 已預留、接力使用下不需更多）。
+
+### Cross-link
+
+- `docs/slice-13d-sync-phase-bc-plan.md` — 本段的 turnkey 逐檔落地計畫（含 file:line 接點 + 5 大現況缺口）。
+- 上一段 WC Ship-Blocker（E1/E2/E3）— Q3 的 end 雙車道 + 守門 purge 已在該段落地。
+- `replaceLiveMirror.ts` / `reconcileSessionTree` — Phase D 墓碑模式所在。
+- ADR-0008 § multi-device — Watch 優先（情境 2-4）符合 v1 scope。
