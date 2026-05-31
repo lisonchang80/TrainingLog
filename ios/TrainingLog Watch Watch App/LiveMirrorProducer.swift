@@ -56,20 +56,27 @@ enum LiveMirror {
         logged: Set<String>,
         edited: [EditedValueKey: Double],
         deletedExercises: Set<String>,
-        deletedSets: Set<String>
+        deletedSets: Set<String>,
+        addedSets: [AddedSet]
     ) -> SessionSnapshot {
-        // Phase F: drop exercises / sets the user deleted on the Watch.
-        // The projection is what reaches the iPhone — a deleted row absent
-        // here is what the END-session reconcile purges (E2). The surviving
-        // sets keep their ORIGINAL `ordinal` (filter, never re-index): the
-        // iPhone matches sets by `(session_exercise_id, ordinal)` value, so
+        // Phase F: drop exercises / sets the user deleted on the Watch and
+        // MERGE in the sets they added. The projection is what reaches the
+        // iPhone — a deleted row absent here is what the END-session
+        // reconcile purges (E2); an added row present here (with an ordinal
+        // past every canonical one) is INSERTed. Surviving base sets keep
+        // their ORIGINAL `ordinal` (filter, never re-index): the iPhone
+        // matches sets by `(session_exercise_id, ordinal)` value, so
         // preserving ordinals is what makes a mid-list delete purge the
         // right row instead of shifting data onto a neighbour.
         let exercises = base.exercises
             .filter { !deletedExercises.contains($0.sessionExerciseId) }
             .map { ex -> SessionSnapshotExercise in
-            let sets = ex.sets
-                .filter { !deletedSets.contains($0.setId) }
+            let baseSets = ex.sets.filter { !deletedSets.contains($0.setId) }
+            let added = addedSets
+                .filter { $0.sessionExerciseId == ex.sessionExerciseId }
+                .map { $0.asSnapshotSet() }
+            let sets = (baseSets + added)
+                .sorted { $0.ordinal < $1.ordinal }
                 .map { s -> SessionSnapshotSet in
                 // Edited weight overrides the planned value; absent → keep
                 // the snapshot's planned weight (may itself be nil).
@@ -163,6 +170,10 @@ final class LiveMirrorProducer: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.dirty = true }
             .store(in: &cancellables)
+        interaction.$addedSets
+            .dropFirst()
+            .sink { [weak self] _ in self?.dirty = true }
+            .store(in: &cancellables)
     }
 
     /// Drive from `.task { await producer.run() }` so the loop inherits the
@@ -195,7 +206,8 @@ final class LiveMirrorProducer: ObservableObject {
             logged: interaction.loggedSetIds,
             edited: interaction.editedValues,
             deletedExercises: interaction.deletedExerciseIds,
-            deletedSets: interaction.deletedSetIds
+            deletedSets: interaction.deletedSetIds,
+            addedSets: interaction.addedSets
         )
     }
 
@@ -212,7 +224,8 @@ final class LiveMirrorProducer: ObservableObject {
             logged: interaction.loggedSetIds,
             edited: interaction.editedValues,
             deletedExercises: interaction.deletedExerciseIds,
-            deletedSets: interaction.deletedSetIds
+            deletedSets: interaction.deletedSetIds,
+            addedSets: interaction.addedSets
         )
         coordinator.updateLiveMirror(live)
         dirty = false

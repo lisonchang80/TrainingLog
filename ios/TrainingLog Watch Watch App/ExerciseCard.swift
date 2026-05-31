@@ -61,12 +61,44 @@ struct ExerciseCard: View {
     /// folded into a `cluster` group with the first dropset as the
     /// cluster header and the remaining ones as sub-sets.
     ///
-    /// Phase F: sets the user left-swipe-deleted are filtered BEFORE
-    /// grouping, so the row vanishes and the progress bar / working-set
-    /// numbering recompute off the surviving rows automatically.
+    /// Phase F: left-swipe-deleted sets are filtered out and right-swipe-
+    /// added sets are merged in (sorted by `ordinal`) BEFORE grouping, so
+    /// the rows + progress bar + working-set numbering recompute off the
+    /// live set list automatically.
     private var rowGroups: [SetRowGroup] {
-        let visibleSets = exercise.sets.filter { !state.isSetDeleted($0.setId) }
-        return SetRowGroup.group(sets: visibleSets)
+        let baseSets = exercise.sets.filter { !state.isSetDeleted($0.setId) }
+        let added = state.addedSets
+            .filter { $0.sessionExerciseId == exercise.sessionExerciseId }
+            .map { $0.asSnapshotSet() }
+        let merged = (baseSets + added).sorted { $0.ordinal < $1.ordinal }
+        return SetRowGroup.group(sets: merged)
+    }
+
+    /// Largest `ordinal` among this exercise's BASE snapshot sets (incl.
+    /// any tombstoned ones — ordinals are never reused). Passed to
+    /// `addSet` so a new set lands one past every existing ordinal.
+    private var baseMaxOrdinal: Int {
+        exercise.sets.map { $0.ordinal }.max() ?? 0
+    }
+
+    /// +1 set (right-swipe → ＋). Append a new set to THIS exercise,
+    /// prefilled with the swiped row's CURRENT displayed weight/reps + the
+    /// same kind (「同種類的下一個」). The new set is editable / loggable /
+    /// deletable like any other (its `id` keys every overlay).
+    private func addSet(from set: SessionSnapshotSet) {
+        let weight = state.displayValue(
+            setId: set.setId, field: .weight, fallback: set.weight
+        )
+        let repsValue = state.displayValue(
+            setId: set.setId, field: .reps, fallback: set.reps.map { Double($0) }
+        )
+        state.addSet(
+            sessionExerciseId: exercise.sessionExerciseId,
+            baseMaxOrdinal: baseMaxOrdinal,
+            weight: weight,
+            reps: repsValue.map { Int($0.rounded()) },
+            setKind: set.setKind
+        )
     }
 
     /// Progress bar segments. Work sets + clusters each count as 1
@@ -258,6 +290,7 @@ struct ExerciseCard: View {
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
+                onAddSet: { addSet(from: set) },
                 content: { SetRowWarmupContent(set: set, state: state) }
             )
 
@@ -266,6 +299,7 @@ struct ExerciseCard: View {
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
+                onAddSet: { addSet(from: set) },
                 content: { SetRowWorkingContent(set: set, displayIndex: index, state: state) }
             )
 
@@ -302,13 +336,15 @@ private struct ProgressBarItem: Identifiable, Equatable {
 /// Per spec line 1582: tap row 中段 → `{}` Active (4-edge border)
 /// Per spec line 1593: tap ◯/✓ → exit Active + save (we toggle state)
 ///
-/// Phase F (gap 2) — swipe-to-reveal delete, per D11 spec line 1592 +
-/// 2026-05-31 device feedback. Two-step (iOS-Mail style):
+/// Phase F (gap 2 + +1) — swipe-to-reveal, per D11 spec lines 1592-1593 +
+/// 2026-05-31 device feedback. Two-step (iOS-Mail style), both directions:
 ///   1. tap row → `{}` Active (green border)
-///   2. LEFT-swipe the Active row → the trailing ◯ swaps to a red 🗑
-///   3. tap 🗑 → delete the set
-/// Explicit tap-to-delete (NOT swipe-past-threshold) so an over-eager
-/// swipe can't nuke a set, and one swipe can't take out two.
+///   2a. LEFT-swipe  → the trailing ◯ swaps to a red 🗑 → tap 🗑 = delete
+///   2b. RIGHT-swipe → the trailing ◯ swaps to a green ＋ → tap ＋ = add a
+///       new set at the end of this exercise (「新增最後一組」),
+///       prefilled with this row's weight/reps (「同種類的下一個」).
+/// Explicit tap (NOT swipe-past-threshold) so an over-eager swipe can't
+/// nuke / spawn a set, and one swipe can't take out two.
 ///
 /// Gated on the row being Active so a non-Active row's horizontal swipe
 /// still pages the TabView (spec line 1576-1577). The reveal gesture uses
@@ -318,15 +354,25 @@ private struct ProgressBarItem: Identifiable, Equatable {
 ///
 /// Warmup + working rows only — cluster sub-sets keep their min-2
 /// invariant and are removed by deleting the whole exercise via ⋯ menu.
+private enum RowReveal {
+    case none
+    case delete
+    case add
+}
+
 private struct InteractiveSetRow<Content: View>: View {
     @ObservedObject var state: SessionInteractionState
     let setId: String
     let hasCheckmark: Bool
+    /// Invoked when the user taps the revealed ＋ (right-swipe). nil ⇒ the
+    /// row offers no +1 affordance. The closure owns the add semantics
+    /// (ordinal + prefill) — see `ExerciseCard.groupRow`.
+    let onAddSet: (() -> Void)?
     @ViewBuilder let content: () -> Content
 
-    /// Whether the trailing 🗑 is revealed (set by a left-swipe on the
-    /// Active row, cleared on tap-elsewhere / leaving Active / delete).
-    @State private var revealed = false
+    /// Which trailing affordance (if any) the swipe has revealed. Cleared
+    /// on tap-elsewhere / leaving Active / acting on it.
+    @State private var reveal: RowReveal = .none
 
     private var rowIsActive: Bool { state.isActive(setId: setId) }
 
@@ -347,9 +393,9 @@ private struct InteractiveSetRow<Content: View>: View {
                     if !rowIsActive {
                         // Not Active yet → activate (cells own taps once Active).
                         state.activate(setId: setId)
-                    } else if revealed {
-                        // Revealed → a tap on the row (not the 🗑) cancels it.
-                        withAnimation(.easeOut(duration: 0.15)) { revealed = false }
+                    } else if reveal != .none {
+                        // Revealed → a tap on the row (not the 🗑/＋) cancels it.
+                        withAnimation(.easeOut(duration: 0.15)) { reveal = .none }
                     }
                 }
 
@@ -367,18 +413,20 @@ private struct InteractiveSetRow<Content: View>: View {
             including: rowIsActive ? .all : .subviews
         )
         // Leaving Active (tap 框外 / 切到別 row / ✓) closes the reveal so a
-        // stale 🗑 can't linger on an idle row.
+        // stale 🗑/＋ can't linger on an idle row.
         .onChange(of: rowIsActive) { _, active in
-            if !active && revealed {
-                withAnimation(.easeOut(duration: 0.15)) { revealed = false }
+            if !active && reveal != .none {
+                withAnimation(.easeOut(duration: 0.15)) { reveal = .none }
             }
         }
     }
 
-    /// Trailing slot: ◯ normally; swaps to a red 🗑 once revealed.
+    /// Trailing slot: ◯ normally; swaps to a red 🗑 (left-swipe) or a green
+    /// ＋ (right-swipe) once revealed.
     @ViewBuilder
     private var trailingControl: some View {
-        if revealed {
+        switch reveal {
+        case .delete:
             Button {
                 // Explicit tap = delete (wrap so the row removal animates).
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -393,41 +441,62 @@ private struct InteractiveSetRow<Content: View>: View {
             }
             .buttonStyle(.plain)
             .transition(.move(edge: .trailing).combined(with: .opacity))
-        } else if hasCheckmark {
+
+        case .add:
             Button {
-                state.toggleLogged(setId: setId)
+                withAnimation(.easeOut(duration: 0.2)) {
+                    reveal = .none
+                    onAddSet?()
+                }
             } label: {
-                Image(systemName: state.isLogged(setId: setId)
-                    ? "checkmark.circle.fill"
-                    : "circle")
+                Image(systemName: "plus.circle.fill")
                     .font(.body)
-                    .foregroundStyle(state.isLogged(setId: setId)
-                        ? Color.green
-                        : Color.secondary)
-                    .frame(width: 28, height: 28)
+                    .foregroundStyle(.green)
+                    .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .transition(.move(edge: .leading).combined(with: .opacity))
+
+        case .none:
+            if hasCheckmark {
+                Button {
+                    state.toggleLogged(setId: setId)
+                } label: {
+                    Image(systemName: state.isLogged(setId: setId)
+                        ? "checkmark.circle.fill"
+                        : "circle")
+                        .font(.body)
+                        .foregroundStyle(state.isLogged(setId: setId)
+                            ? Color.green
+                            : Color.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
     private var revealGesture: some Gesture {
         // minimumDistance 5: low enough to claim the drag before the TabView
         // pages, high enough that a tap (≈0 travel) never starts it → cell
-        // taps + ◯ taps unaffected. Reveal/hide decided on release by the
-        // horizontal-dominant translation.
+        // taps + ◯ taps unaffected. Direction decides 🗑 (left) vs ＋ (right)
+        // on release; a small / vertical drag clears.
         DragGesture(minimumDistance: 5)
             .onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height)
                 else { return }
+                let next: RowReveal
                 if value.translation.width < -28 {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        revealed = true
-                    }
-                } else if value.translation.width > 18 {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        revealed = false
-                    }
+                    next = .delete
+                } else if value.translation.width > 28 && onAddSet != nil {
+                    next = .add
+                } else {
+                    next = .none
+                }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    reveal = next
                 }
             }
     }

@@ -20,15 +20,17 @@
 //    - Input-mode-aware commit semantics: keypad commits on Done
 //      (explicit), crown commits live (tap-outside).
 //
-//  Phase F partial (2026-05-31 — delete only):
+//  Phase F partial (2026-05-31 — delete + add set):
 //    - `deletedExerciseIds` / `deletedSetIds` — deletion overlay. Both
 //      render + live-mirror projection filter these out (snapshot stays
 //      immutable). Unblocks the E2 end-session purge device verification.
+//    - `addedSets` — +1-set overlay (right-swipe → ＋). Merged into the
+//      exercise by render + projection. Same immutable-snapshot principle.
 //
 //  Still NOT managed here:
 //    - Type cycling — Phase D
 //    - -/+ cluster CRUD — Phase E
-//    - Swipe +1 set (right) / long-press reorder — Phase E/F
+//    - Long-press reorder — Phase F
 //    - Auto-advance after final ✓ — Phase H
 //    - Persisting to repo — Phase H
 //
@@ -68,6 +70,40 @@ struct ActiveCell: Equatable {
 struct EditedValueKey: Hashable {
     let setId: String
     let field: CellField
+}
+
+/// A set the user added on the Watch (right-swipe → ＋ → tap, D11 spec
+/// line 1593 「swipe right row | +1 row inserted」). Lives in an OVERLAY
+/// list — the immutable start snapshot never gains rows; render + live-
+/// mirror projection MERGE these in. `ordinal` is chosen at add time as
+/// `max(existing ordinals in the exercise) + 1` so it never collides with
+/// a canonical set's ordinal → the iPhone reconcile (which matches sets by
+/// `(session_exercise_id, ordinal)` value) treats it as a Watch-authored
+/// INSERT. Editable / loggable / deletable by `id` like any other set.
+struct AddedSet: Identifiable, Equatable {
+    let id: String
+    let sessionExerciseId: String
+    var ordinal: Int
+    var weight: Double?
+    var reps: Int?
+    var setKind: String
+
+    /// Project to the wire/render set shape. weight/reps/isLogged here are
+    /// only fallbacks — the live overlay (`editedValues` / `loggedSetIds`)
+    /// overrides them downstream, same as for a base snapshot set.
+    func asSnapshotSet() -> SessionSnapshotSet {
+        SessionSnapshotSet(
+            setId: id,
+            ordinal: ordinal,
+            weight: weight,
+            reps: reps,
+            rpe: nil,
+            restSec: nil,
+            notes: nil,
+            setKind: setKind,
+            isLogged: false
+        )
+    }
 }
 
 @MainActor
@@ -115,6 +151,15 @@ final class SessionInteractionState: ObservableObject {
     /// (it filters, never re-indexes) — that is what makes a mid-list set
     /// delete purge the right row at end-session.
     @Published var deletedSetIds: Set<String> = []
+
+    /// Sets the user added on the Watch (right-swipe → ＋). Overlay list
+    /// MERGED into each exercise by render + projection (sorted by
+    /// `ordinal`). See `AddedSet`.
+    @Published var addedSets: [AddedSet] = []
+
+    /// Monotonic counter for minting unique `AddedSet` ids within this
+    /// session. Survives view re-mounts (the state object outlives them).
+    private var addCounter = 0
 
     // MARK: - Active row (Phase B)
 
@@ -284,16 +329,57 @@ final class SessionInteractionState: ObservableObject {
         deletedSetIds.contains(id)
     }
 
-    /// Delete a single set row. Marks it deleted (render + projection
-    /// filter it out) and scrubs every other overlay that referenced it
-    /// so a stale ✓ / edited value / active highlight can't linger on a
-    /// row the user just removed.
+    /// Delete a single set row. A Watch-added set is simply dropped from
+    /// the `addedSets` overlay (it was never in the base snapshot, so it
+    /// needs no tombstone); a base set is tombstoned in `deletedSetIds`
+    /// (render + projection filter it out). Either way scrub the other
+    /// overlays that referenced it so a stale ✓ / edited value / active
+    /// highlight can't linger on a row the user just removed.
     func deleteSet(setId: String) {
-        deletedSetIds.insert(setId)
+        if let idx = addedSets.firstIndex(where: { $0.id == setId }) {
+            addedSets.remove(at: idx)
+        } else {
+            deletedSetIds.insert(setId)
+        }
         loggedSetIds.remove(setId)
         editedValues = editedValues.filter { $0.key.setId != setId }
         if activeSetId == setId { activeSetId = nil }
         if activeCell?.setId == setId { activeCell = nil }
+    }
+
+    /// Append a new working/warmup set to an exercise (right-swipe → ＋).
+    /// `baseMaxOrdinal` is the largest `ordinal` among the exercise's base
+    /// snapshot sets (the caller has them); the new set is placed one past
+    /// the max of that and any already-added sets so its ordinal is unique
+    /// within the exercise → the iPhone reconcile INSERTs it (no canonical
+    /// match). Prefills weight/reps from the swiped row (「同種類的下一個」).
+    /// Returns the new set id (so the caller could activate it if desired).
+    @discardableResult
+    func addSet(
+        sessionExerciseId: String,
+        baseMaxOrdinal: Int,
+        weight: Double?,
+        reps: Int?,
+        setKind: String
+    ) -> String {
+        let addedMax = addedSets
+            .filter { $0.sessionExerciseId == sessionExerciseId }
+            .map { $0.ordinal }
+            .max() ?? 0
+        let nextOrdinal = max(baseMaxOrdinal, addedMax) + 1
+        addCounter += 1
+        let id = "ADD-\(addCounter)"
+        addedSets.append(
+            AddedSet(
+                id: id,
+                sessionExerciseId: sessionExerciseId,
+                ordinal: nextOrdinal,
+                weight: weight,
+                reps: reps,
+                setKind: setKind
+            )
+        )
+        return id
     }
 
     /// Delete a whole exercise (D15 ⋯ menu 刪除 → confirm). Marks the
@@ -306,6 +392,10 @@ final class SessionInteractionState: ObservableObject {
         for sid in setIds {
             deleteSet(setId: sid)
         }
+        // Drop any Watch-added sets that belonged to the removed exercise
+        // (the projection already excludes the whole exercise, but keep the
+        // overlay tidy so they can't resurface).
+        addedSets.removeAll { $0.sessionExerciseId == sessionExerciseId }
     }
 
     // MARK: - Display value
