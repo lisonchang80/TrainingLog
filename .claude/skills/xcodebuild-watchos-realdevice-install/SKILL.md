@@ -38,6 +38,14 @@ App installed:
 ? installationURL: file:///private/var/containers/Bundle/Application/<uuid>/TrainingLog.app/
 ```
 
+**Harmless warning (validated 2026-05-31, ~5 installs in one session)**: both
+`devicectl device install app` and `device process launch` print a
+`Failed to load provisioning paramter list due to error: …Code=1002 "No
+provider was found."` line FIRST, then `App installed:` / `Launched…`. The
+warning is **non-fatal** — the `App installed:` / `installationURL:` line
+right after is the truth. Don't chase it; grep for
+`App installed|installationURL|Launched` to detect real success.
+
 Confirm via `xcrun devicectl device info apps --device <iphone-udid> | grep -i training`.
 
 ### Trap 2 — incremental build SKIPS Watch target
