@@ -62,15 +62,59 @@ watchOS Sim **驗不到拖曳手勢**（AX tree 空、tap 不穩）→ build gre
 - ⚠️ 代價：同動作內 set 的「實體 row 身分（哪個 canonical UUID 裝哪筆內容）」會錯置 → 對歷史**顯示**完全不可見，僅理論上影響 per-set 模板連結（罕見邊界）。
 - ⚠️ **切 D 新建的 dropset sub-set 在 iPhone `parent_set_id=NULL`**（reconcile INSERT 沒設）→ 資料正確（連續 `set_kind=dropset` 列），但 iPhone 歷史是否聚成 cluster 框未驗、屬後續。
 
-## 長按 drag reorder 手勢（group 層級）
+## 長按 drag reorder 手勢（group 層級）— 含 2026-05-31 device-grilled 坑
 
-- 手勢掛在 **group row（`ExerciseCard.setRowsSection` 的 ForEach、OUTER）**，不是 `InteractiveSetRow`。`LongPressGesture(minimumDuration: 0.45).sequenced(before: DragGesture(coordinateSpace: .named(...)))`，用 `.highPriorityGesture`。
-- **長按 0.45s gate 是區隔關鍵**：快速橫滑（reveal 刪/+1）/ TabView 換頁 / ScrollView 捲動都不滿足長按 → reorder 不啟動；只有刻意長按才進 move mode。OUTER `highPriorityGesture` 在長按完成後贏過 INNER reveal 的 `highPriorityGesture`（ancestor 優先）。
-- gate 在 active 列（`state.isActive(setId: repId)`，repId = group 第一個成員 / cluster header）。
-- 落點 index：用 `PreferenceKey` 收集各 group 的 midY（在 named coordinate space）+ 手指 Y 推算（`reorderTargetIndex`）。
-- **cluster(D) 整組移動** = 該 group 的成員 setIds 一起重排：`state.applyReorder(orderedGroups: [[String]])`，每個 inner array 是一個 render group 的成員（單列 = `[setId]`、cluster = `[header]+subs`）→ renumber rank 0..N-1。
-- v1 是「拿起來放下」(只有被拖那組 offset、其他不即時讓位)；live reflow 是後續 polish。
-- 手勢可靠度（跟捲動/換頁/左右滑搶）是**實機未知數**、Sim 驗不到，預期 device 調參。
+掛在 group row（`ExerciseCard.setRowsSection` ForEach、OUTER），用一個擁有
+`@GestureState` 的 wrapper（`ReorderableRow`）：`LongPressGesture(minimumDuration:
+0.5).sequenced(before: DragGesture(coordinateSpace: .named(...)))`。
+
+- **⭐ `.first` vs `.second` 是「瞬間發動」bug 的真因**：sequence gesture 的
+  `.first(true)` 是 **PRESS 階段（isPressing，手指碰下去那刻就送出）**、**不是長按完成**！
+  把橘框/震動接在 `.first(true)` → 一碰就觸發,**跟 `minimumDuration` 完全無關**(調
+  0.45→0.7s 完全沒差別,因為門檻根本沒參與)。正解:橘框 + 震動只在 **`.second`**
+  (長按真正撐過門檻、進入 drag 階段)才發。震動用 `@State didEnterMove` 旗標只發一次。
+- **`@GestureState`(不是 `@State`)存 move-mode + offset**:手勢一結束/取消「自動歸零」
+  → 橘框不會殘留。`@State` 在「長按了沒拖就放開」時 `.onEnded` 不觸發 → 橘框卡死 +
+  擋住 cell 點擊(2026-05-31 device bug)。
+- **`.simultaneousGesture`(不是 `.highPriorityGesture`)讓 cell 點得到**:highPriority
+  長按對整列(含 cell)最高優先 → 快速點 cell 被吃掉、稍按久變橘。simultaneous 讓長按
+  跟 cell tap 並行判斷:快速點 → cell;按住 0.5s → reorder。
+- gate 在 active 列:`.simultaneousGesture(g, including: isActive ? .all : .subviews)`
+  → idle 列 `.subviews` 完全 inert,捲動/tap-to-activate 正常(否則「進 session 滑不動/
+  無法 active」)。
+- 落點 index:`PreferenceKey` 收 group midY(named space)+ 手指 Y。midY reader 掛在
+  wrapper **外面**(`.offset` 是非佈局 transform,不會歪掉靜態 slot Y)。
+- **cluster(D) 整組移動** = 成員 setIds 一起重排:`state.applyReorder([[String]])`。
+- 手勢可靠度 Sim 驗不到、device-only。
+
+## 遞減組 cluster（dropset chain）— 2026-06-01
+
+- **視覺**:綠色 Active 框(同一般組,user Q1)、整 chain 一個框、✓ 在框「外」右上 →
+  缺角多邊形(`ClusterNotchedBorder`,tangent-arc 圓角化全 6 角)。子步 `[－]/[＋]` 只在
+  Active 時出現、`[－]` 在剩最後 1 個子步時 disabled+灰(min-1-child)。
+- **⭐ CellBox 對齊**:`CellBox` 會自動展開(`Text.frame(maxWidth:.infinity)`),所以 head
+  被缺角 notch padding 擠窄、子步沒擠 → cells 不等寬。修法 = cluster cells **釘死固定寬**
+  `.frame(width: CellMetrics.weightWidth/.repsWidth)` + head/follower 用**相同 HStack 骨架**
+  (相同 leading 寬 + inline trailing 保留,不要一個用 `.padding(.trailing)` 一個用內部 spacer)。
+- **資料層 `parentSetId`(Stage 2,純 TS+Swift 無 migration)**:`SessionSnapshotSet` /
+  `AddedSet` 加 `parentSetId`(custom init 帶 default 免改 ~16 建構點);`cycleSetKind` 種子步
+  / `[＋]` 帶 `parentSetId = head`;wire Codable 自動帶(nil→absent)。**iPhone reconcile 靠
+  `setIdMap`(wire id → on-device id)即時翻譯 follower 的 parent** — head 是 canonical 時
+  c1≠wire id 也正確;**非 dropset 列一律清 `parent_set_id`**(解構後再 cycle 才不被 stale 誤折)。
+- **iPhone 折疊要「ordering 連續」**(`computeSessionSetLayout` 按序連續吃 follower),不是純
+  parent_set_id → follower 的 wire ordinal 必須緊接 head。
+
+## live-mirror 即時鏡像（`LiveMirrorProducer` + `replaceLiveMirror`）— 2026-06-01
+
+- **sync <1s**:throttle 15s → **0.5s + `markDirty()` 立即推送**(超過 coalesce 窗就馬上 emit,
+  否則 poll 合併;burst ≤2 次/秒)。改了 NEW-Q50 Q6=a 的 15s 設計。
+- **live per-動作 set purge**:原 E2 契約「live 只 upsert 不刪」→ 遞減組改結構時孤兒列累積
+  (「變一堆組」)。修法 = `purgeSetsInPresentExercises` 選項,live 對**快照裡有的動作**刪掉它
+  多餘的 set(缺席的整個動作仍留 end-session)。對 WC applicationContext(完整快照)安全。
+- **⚠️ 未解:ordinal value-shuffle「吃掉下面的組」**:`project()` 的 pool-permute(為 reorder/
+  中插做的)把 follower 的 `set_kind/parent` 洗到下面 canonical 工作列上 → per-動作 purge 清孤兒
+  但擋不住這個洗。**歷史(end-session purge)正確、live 仍會暫態吃**。深解待辦(可能要 dropset 不
+  參與 permute / 給 follower 高 ordinal INSERT)。
 
 ## 全屏鍵盤（`CellEditOverlay` keypad mode）
 
@@ -86,9 +130,14 @@ watchOS Sim **驗不到拖曳手勢**（AX tree 空、tap 不穩）→ build gre
 - ❌ swipe-past-threshold 直接刪/加 → 一滑就動 + 誤觸換頁。
 - ❌ 加 set 時 re-index 既有 set 的 ordinal → 破壞 iPhone 值配對、purge/UPDATE 錯列。
 - ❌ 以為 watchOS Sim 能驗手勢 → 浪費時間，手勢只能實機驗。
+- ❌ 把橘框/震動接在 reorder gesture 的 `.first(true)` → 一碰就發動(那是 press 階段、不是長按完成)。
+- ❌ reorder/reveal 用 `.highPriorityGesture` 蓋整列 → 吃掉 cell 點擊 / 擋掉垂直捲動。
+- ❌ cluster head 與 follower 用不同 HStack 骨架 → cells 不對齊(CellBox 會展開)。
+- ❌ 純 TS 改動(reconcile)後叫 user 重裝機 → TS 是 Metro 熱載,Reload JS 就好;只有 Swift 改才 build。
 
 ## Cross-references
 
+- `watch-sim-screenshot` — Sim 出圖驗視覺(layout/對齊/顏色,不含手勢)
 - `watch-swiftui-phase-ship` — Sim verify + commit/cherry-pick 流程（build 層）
 - `xcodebuild-watchos-realdevice-install` — 實機 build+install（手勢真驗在這）
 - `~/.claude/projects/-Users-hao800922/memory/project_traininglog_watch_setlogger_backlog.md` — D11 Phase F 現況（F2 三項：全屏鍵盤 / # cycling / 長按 reorder 已實作待實機驗）
