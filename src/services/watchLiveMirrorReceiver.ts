@@ -186,11 +186,44 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
     });
   }
 
-  return { sessionId, title, startedAt, exercises: parsedExercises };
+  const result: SessionSnapshot = {
+    sessionId,
+    title,
+    startedAt,
+    exercises: parsedExercises,
+  };
+
+  // Bidirectional sync optional fields (slice 13d sync-refactor, 2026-05-31).
+  // Absent is valid — legacy producers (pre-refactor Watch) omit them. A
+  // PRESENT-but-malformed field fails the whole parse → bad-payload → tick
+  // dropped (self-heals on the next snapshot).
+  const { rev, originator, deletedIds } = ctx;
+  if (rev !== undefined) {
+    if (typeof rev !== 'number' || !Number.isFinite(rev)) return null;
+    result.rev = rev;
+  }
+  if (originator !== undefined) {
+    if (originator !== 'watch' && originator !== 'iphone') return null;
+    result.originator = originator;
+  }
+  if (deletedIds !== undefined) {
+    if (!isObject(deletedIds)) return null;
+    // Each sub-array is independently optional (absent → empty).
+    const exRaw = deletedIds.exerciseIds === undefined ? [] : deletedIds.exerciseIds;
+    const setRaw = deletedIds.setIds === undefined ? [] : deletedIds.setIds;
+    if (!isStringArray(exRaw) || !isStringArray(setRaw)) return null;
+    result.deletedIds = { exerciseIds: exRaw, setIds: setRaw };
+  }
+
+  return result;
 }
 
 function isNullableFiniteNumber(v: unknown): boolean {
   return v === null || (typeof v === 'number' && Number.isFinite(v));
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
 }
 
 /**

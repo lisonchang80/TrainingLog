@@ -264,6 +264,70 @@ describe('Slice 13d D32 — parseLiveMirrorSnapshot validator', () => {
     expect(parsed?.sessionId).toBe('sess-1');
   });
 
+  // ---- Bidirectional sync optional fields (slice 13d sync-refactor) ----
+
+  it('parses rev / originator / deletedIds when present', () => {
+    const parsed = parseLiveMirrorSnapshot({
+      sessionId: 'sess-1',
+      title: '',
+      startedAt: 1,
+      exercises: [],
+      rev: 42,
+      originator: 'iphone',
+      deletedIds: { exerciseIds: ['se-x'], setIds: ['set-a', 'set-b'] },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.rev).toBe(42);
+    expect(parsed?.originator).toBe('iphone');
+    expect(parsed?.deletedIds).toEqual({
+      exerciseIds: ['se-x'],
+      setIds: ['set-a', 'set-b'],
+    });
+  });
+
+  it('legacy snapshot WITHOUT the new fields still parses (fields undefined)', () => {
+    const parsed = parseLiveMirrorSnapshot({
+      sessionId: 'sess-1',
+      title: '',
+      startedAt: 1,
+      exercises: [],
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.rev).toBeUndefined();
+    expect(parsed?.originator).toBeUndefined();
+    expect(parsed?.deletedIds).toBeUndefined();
+  });
+
+  it('tolerates a deletedIds with only one sub-array present (other → empty)', () => {
+    const parsed = parseLiveMirrorSnapshot({
+      sessionId: 'sess-1',
+      title: '',
+      startedAt: 1,
+      exercises: [],
+      deletedIds: { setIds: ['set-a'] },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.deletedIds).toEqual({ exerciseIds: [], setIds: ['set-a'] });
+  });
+
+  it.each([
+    ['non-number rev', { rev: 'x' }],
+    ['NaN rev', { rev: NaN }],
+    ['unknown originator', { originator: 'phone' }],
+    ['non-object deletedIds', { deletedIds: 'nope' }],
+    ['deletedIds.exerciseIds with a non-string', { deletedIds: { exerciseIds: [1] } }],
+    ['deletedIds.setIds with a non-string', { deletedIds: { setIds: [{}] } }],
+  ])('rejects a present-but-malformed %s', (_label, extra) => {
+    const parsed = parseLiveMirrorSnapshot({
+      sessionId: 'sess-1',
+      title: '',
+      startedAt: 1,
+      exercises: [],
+      ...extra,
+    });
+    expect(parsed).toBeNull();
+  });
+
   it.each([
     ['null', null],
     ['undefined', undefined],

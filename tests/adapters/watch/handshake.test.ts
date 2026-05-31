@@ -341,6 +341,28 @@ describe('WC handshake — buildStartFromIphone', () => {
         },
       ],
     });
+    // Legacy snapshot omits the bidirectional fields → wire stays clean.
+    expect(out.snapshot).not.toHaveProperty('rev');
+    expect(out.snapshot).not.toHaveProperty('originator');
+    expect(out.snapshot).not.toHaveProperty('deletedIds');
+  });
+
+  it('projects rev / originator / deletedIds when present (bidirectional sync)', () => {
+    const snapshot: SessionSnapshot = {
+      sessionId: 'sess-bi',
+      title: '',
+      startedAt: 1_700_000_000_000,
+      exercises: [],
+      rev: 7,
+      originator: 'iphone',
+      deletedIds: { exerciseIds: ['se-gone'], setIds: ['set-gone'] },
+    };
+    const out = buildStartFromIphone(snapshot);
+    expect(out.snapshot).toMatchObject({
+      rev: 7,
+      originator: 'iphone',
+      deletedIds: { exerciseIds: ['se-gone'], setIds: ['set-gone'] },
+    });
   });
 });
 

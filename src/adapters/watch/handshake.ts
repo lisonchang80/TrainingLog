@@ -383,6 +383,43 @@ export interface SessionSnapshot {
   /** Epoch ms. */
   startedAt: number;
   exercises: ReadonlyArray<SessionSnapshotExercise>;
+  /**
+   * Bidirectional sync refactor (slice 13d sync-refactor, 2026-05-31).
+   * All three are OPTIONAL — legacy producers (pre-refactor Watch /
+   * iPhone) omit them and the receiver tolerates their absence:
+   *
+   *   - `rev` — per-`originator` monotonic version. The receiver MAY
+   *     ignore a snapshot whose `rev` is <= the last `rev` it applied
+   *     from the same `originator` (out-of-order / stale-packet guard,
+   *     and same-field latest-wins). Absent → no ordering guard (legacy).
+   *   - `originator` — which side produced this snapshot. Used for echo
+   *     suppression (don't re-emit a snapshot you just applied) and for
+   *     per-originator `rev` tracking.
+   *   - `deletedIds` — tombstones: row ids the originator deleted during
+   *     THIS session. The receiver PRECISELY purges these (NOT a
+   *     mass-purge of snapshot-absent rows — see `reconcileSessionTree`).
+   *     This is what propagates a live delete <1s in either direction.
+   *     Absent → no live deletions in this tick.
+   *
+   * Tombstone id contract: `deletedIds` reference the originator's row
+   * ids. Cross-device purge-by-id is only reliable once both sides share
+   * ids (the Watch receiver adopts the iPhone's canonical ids — a Phase C
+   * concern). Until then a tombstone that finds no local row is a safe
+   * no-op (the row still gets removed by the authoritative end-session
+   * mass-purge), so honouring tombstones is a monotonic improvement with
+   * no regression.
+   */
+  rev?: number;
+  originator?: SnapshotOriginator;
+  deletedIds?: SessionTombstones;
+}
+
+export type SnapshotOriginator = 'watch' | 'iphone';
+
+/** Row ids the originator deleted during the current session (Q5 墓碑). */
+export interface SessionTombstones {
+  exerciseIds: ReadonlyArray<string>;
+  setIds: ReadonlyArray<string>;
 }
 
 export interface SessionSnapshotExercise {
@@ -484,7 +521,7 @@ export function buildStartFromIphone(
 }
 
 function snapshotToWire(snapshot: SessionSnapshot): Record<string, JsonValue> {
-  return {
+  const wire: Record<string, JsonValue> = {
     sessionId: snapshot.sessionId,
     title: snapshot.title,
     startedAt: snapshot.startedAt,
@@ -507,6 +544,17 @@ function snapshotToWire(snapshot: SessionSnapshot): Record<string, JsonValue> {
       })),
     })),
   };
+  // Bidirectional sync fields — project ONLY when present so legacy wire
+  // payloads stay byte-identical (and stay plist-clean: no key, not null).
+  if (snapshot.rev !== undefined) wire.rev = snapshot.rev;
+  if (snapshot.originator !== undefined) wire.originator = snapshot.originator;
+  if (snapshot.deletedIds !== undefined) {
+    wire.deletedIds = {
+      exerciseIds: [...snapshot.deletedIds.exerciseIds],
+      setIds: [...snapshot.deletedIds.setIds],
+    };
+  }
+  return wire;
 }
 
 // ---------------------------------------------------------------------
