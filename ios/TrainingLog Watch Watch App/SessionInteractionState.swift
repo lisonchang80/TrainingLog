@@ -98,6 +98,10 @@ struct AddedSet: Identifiable, Equatable {
     var weight: Double?
     var reps: Int?
     var setKind: String
+    /// Dropset-chain parent (the HEAD row's setId) when this added set is a
+    /// dropset follower seeded by `cycleSetKind`/`addDropsetChild`; nil for a
+    /// plain +1 set. Carried onto the wire so the iPhone folds the chain.
+    var parentSetId: String? = nil
 
     /// Project to the wire/render set shape. weight/reps/isLogged here are
     /// only fallbacks — the live overlay (`editedValues` / `loggedSetIds`)
@@ -112,7 +116,8 @@ struct AddedSet: Identifiable, Equatable {
             restSec: nil,
             notes: nil,
             setKind: setKind,
-            isLogged: false
+            isLogged: false,
+            parentSetId: parentSetId
         )
     }
 }
@@ -398,7 +403,8 @@ final class SessionInteractionState: ObservableObject {
         weight: Double?,
         reps: Int?,
         setKind: String,
-        activateNew: Bool = true
+        activateNew: Bool = true,
+        parentSetId: String? = nil
     ) -> String {
         // Display ranks of the CURRENT visible sets, honouring any reorder
         // override (so an added set lands correctly even after a reorder).
@@ -436,7 +442,8 @@ final class SessionInteractionState: ObservableObject {
                 displayRank: displayRank,
                 weight: weight,
                 reps: reps,
-                setKind: setKind
+                setKind: setKind,
+                parentSetId: parentSetId
             )
         )
         // Active moves onto the freshly-added set (ready to edit) — unless
@@ -515,7 +522,9 @@ final class SessionInteractionState: ObservableObject {
                 weight: w,
                 reps: r.map { Int($0.rounded()) },
                 setKind: "dropset",
-                activateNew: false
+                activateNew: false,
+                // The cycled row IS the chain head → seed follower points at it.
+                parentSetId: setId
             )
         } else if current == "dropset" {
             // Deconstruct D — drop the consecutive dropset sub-sets that

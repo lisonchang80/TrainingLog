@@ -60,12 +60,14 @@ struct ExerciseCard: View {
 
     // MARK: - Reorder (Phase F long-press drag) state
     //
-    // `reorder` is non-nil while one group is in move mode (long-pressed on
-    // its Active row). `reorderMidYs` caches each group's midY in the
-    // "exerciseReorder" coordinate space (via a PreferenceKey) so the drop
-    // target index can be computed from the finger's Y. A whole D cluster
-    // moves as one unit (its member setIds renumber contiguously).
-    @State private var reorder: ReorderState? = nil
+    // Move-mode highlight + live offset live in each row's OWN `@GestureState`
+    // (see `ReorderableRow`) so they AUTO-RESET the instant the finger lifts —
+    // a plain `@State` left the orange frame STUCK when the user long-pressed
+    // without dragging (the sequenced gesture's `.onEnded` doesn't fire with no
+    // drag), which also blocked cell taps (device bug 2026-05-31). Here we only
+    // cache each group's midY (in the "exerciseReorder" space, via a
+    // PreferenceKey) so the drop-target index can be computed from the finger's
+    // Y. A whole D cluster moves as one unit (members renumber contiguously).
     @State private var reorderMidYs: [Int: CGFloat] = [:]
 
     /// Grouped rows for rendering. Consecutive `dropset` rows are
@@ -293,22 +295,27 @@ struct ExerciseCard: View {
                     Divider()
                         .padding(.vertical, 2)
                 }
-                groupRow(group)
-                    // Move-mode highlight on the long-pressed group.
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.orange, lineWidth: 2)
-                            .opacity(reorder?.fromIndex == idx ? 1 : 0)
-                    )
-                    // The dragged group follows the finger + floats above.
-                    .offset(y: reorder?.fromIndex == idx ? (reorder?.translation ?? 0) : 0)
-                    .zIndex(reorder?.fromIndex == idx ? 1 : 0)
-                    .background(groupMidYReader(idx))
-                    // Reorder: long-press (0.45s) on the Active row → move mode
-                    // → vertical drag. The long-press gate keeps a quick
-                    // horizontal swipe (delete / +1 reveal) and the TabView
-                    // page-swipe untouched — only a deliberate hold engages.
-                    .highPriorityGesture(reorderGesture(groupIndex: idx, group: group))
+                // The reorder gesture + move-mode highlight live INSIDE
+                // `ReorderableRow` (its `@GestureState` auto-clears on lift —
+                // no stale orange / blocked taps). `isActive` masks the gesture
+                // to `.subviews` on idle rows so they scroll / tap-to-activate
+                // normally (only an Active row arms reorder). The midY reader is
+                // applied OUTSIDE the wrapper so the dragged row's `.offset`
+                // (a non-layout transform) doesn't skew the cached slot Y used
+                // for drop-target math.
+                ReorderableRow(
+                    groupIndex: idx,
+                    isActive: state.isActive(setId: groupMembers(group).first ?? ""),
+                    onCommit: { from, translationY in
+                        let to = reorderTargetIndex(from: from, translationY: translationY)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            commitReorder(from: from, to: to)
+                        }
+                    }
+                ) { isReordering in
+                    groupRow(group, isReordering: isReordering)
+                }
+                .background(groupMidYReader(idx))
             }
         }
         .padding(.horizontal, 4)
@@ -350,41 +357,6 @@ struct ExerciseCard: View {
         return target
     }
 
-    /// Long-press → drag reorder. Sequenced so move mode only engages after a
-    /// deliberate 0.45s hold on an Active row.
-    private func reorderGesture(groupIndex idx: Int, group: SetRowGroup) -> some Gesture {
-        let repId = groupMembers(group).first ?? ""
-        return LongPressGesture(minimumDuration: 0.45)
-            .sequenced(before: DragGesture(coordinateSpace: .named("exerciseReorder")))
-            .onChanged { value in
-                switch value {
-                case .first(true):
-                    // Long press recognised — enter move mode IFF this group's
-                    // row is Active (spec: long-press only in {} Active).
-                    if state.isActive(setId: repId), reorder == nil {
-                        reorder = ReorderState(fromIndex: idx, translation: 0)
-                        WKInterfaceDevice.current().play(.start)
-                    }
-                case .second(true, let drag?):
-                    if reorder?.fromIndex == idx {
-                        reorder?.translation = drag.translation.height
-                    }
-                default:
-                    break
-                }
-            }
-            .onEnded { value in
-                guard reorder?.fromIndex == idx else { reorder = nil; return }
-                if case .second(_, let drag?) = value {
-                    let to = reorderTargetIndex(from: idx, translationY: drag.translation.height)
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        commitReorder(from: idx, to: to)
-                    }
-                }
-                reorder = nil
-            }
-    }
-
     /// Commit: move the group at `from` to position `to` (index among the
     /// OTHER groups) and hand the new display order to the state, which
     /// renumbers the rank overrides (display) — wire ordinals re-derive from
@@ -400,7 +372,7 @@ struct ExerciseCard: View {
     }
 
     @ViewBuilder
-    private func groupRow(_ group: SetRowGroup) -> some View {
+    private func groupRow(_ group: SetRowGroup, isReordering: Bool) -> some View {
         switch group {
         case .warmup(let set):
             // Phase B: warmup gets `{}` Active + ✓ toggle just like
@@ -410,6 +382,7 @@ struct ExerciseCard: View {
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
+                isReordering: isReordering,
                 onAddSet: { addSet(from: set) },
                 content: { SetRowWarmupContent(set: set, state: state, onCycleType: { cycleType(set) }) }
             )
@@ -419,6 +392,7 @@ struct ExerciseCard: View {
                 state: state,
                 setId: set.setId,
                 hasCheckmark: true,
+                isReordering: isReordering,
                 onAddSet: { addSet(from: set) },
                 content: { SetRowWorkingContent(set: set, displayIndex: index, state: state, onCycleType: { cycleType(set) }) }
             )
@@ -427,15 +401,151 @@ struct ExerciseCard: View {
             // Cluster is a single Active unit: tap any sub-row
             // activates the whole cluster, tap header ✓ logs the
             // whole cluster. tap header 編號 D1 → deconstruct (→工作).
+            // [＋]/[－] on a follower add/remove a dropset child.
             ClusterSetGroup(
                 state: state,
                 header: header,
                 subs: subs,
                 clusterIndex: clusterIndex,
-                onCycleHeaderType: { cycleType(header) }
+                isReordering: isReordering,
+                onCycleHeaderType: { cycleType(header) },
+                onAddChild: { afterId in addDropsetChild(afterSetId: afterId, headSetId: header.setId) },
+                onRemoveChild: { childId in state.deleteSet(setId: childId) }
             )
         }
     }
+
+    /// [＋] on a dropset follower → add another dropset child right after it,
+    /// prefilled with that row's CURRENT displayed weight/reps (same kind →
+    /// consecutive → folds into the same cluster). Keeps the cluster Active.
+    /// Stage 1: rides the existing `addSet` (consecutive-dropset visual fold);
+    /// `parent_set_id` threading for the iPhone one-cluster lands in stage 2.
+    private func addDropsetChild(afterSetId: String, headSetId: String) {
+        let merged = LiveMirror.mergeSets(
+            base: exercise.sets,
+            deletedSets: state.deletedSetIds,
+            addedSets: state.addedSets,
+            kindOverrides: state.setKindOverrides,
+            rankOverrides: state.setRankOverrides,
+            sessionExerciseId: exercise.sessionExerciseId
+        )
+        guard let anchor = merged.first(where: { $0.setId == afterSetId }) else { return }
+        let w = state.displayValue(setId: anchor.setId, field: .weight, fallback: anchor.weight)
+        let r = state.displayValue(setId: anchor.setId, field: .reps,
+                                   fallback: anchor.reps.map { Double($0) })
+        state.addSet(
+            sessionExerciseId: exercise.sessionExerciseId,
+            afterSetId: afterSetId,
+            baseSets: exercise.sets,
+            weight: w,
+            reps: r.map { Int($0.rounded()) },
+            setKind: "dropset",
+            activateNew: false,
+            // New child belongs to the SAME chain → parent is the head, not the
+            // follower the ＋ was tapped on.
+            parentSetId: headSetId
+        )
+    }
+}
+
+// MARK: - Reorderable row wrapper (Phase F long-press drag)
+
+/// Wraps one render group with the long-press → drag reorder gesture.
+///
+/// The move-mode highlight + live offset are driven by `@GestureState`, which
+/// SwiftUI resets to `.inactive` the instant the gesture ends OR is cancelled —
+/// including a long-press released WITHOUT a drag, the exact case where a
+/// sequenced gesture's `.onEnded` does NOT fire. A plain `@State` there left
+/// the orange frame STUCK and blocked cell taps (device bug 2026-05-31:
+/// "橘框與綠框共存 / 橘色出現後無法點 #、重量、次數"). With `@GestureState`,
+/// orange exists ONLY while the finger is down → green⇄orange on the SAME row,
+/// never coexisting, and the row is fully tappable again the moment you lift.
+///
+/// `isActive` masks the gesture to `.subviews` on idle rows so the ScrollView
+/// pan + tap-to-activate own the touch (Anomaly 1 fix) — only the Active row
+/// arms reorder.
+private struct ReorderableRow<Content: View>: View {
+    let groupIndex: Int
+    let isActive: Bool
+    /// (fromIndex, finger-Y translation) — parent resolves the drop target.
+    let onCommit: (Int, CGFloat) -> Void
+    /// Built with the live move-mode flag so the row paints its border orange
+    /// (replacing green) while dragging.
+    @ViewBuilder let content: (_ isReordering: Bool) -> Content
+
+    @GestureState private var drag: ReorderDrag = .inactive
+    /// Fires the move-mode haptic exactly ONCE per long-press success (not on
+    /// every drag tick). Re-armed while still pressing / on end.
+    @State private var didEnterMove = false
+
+    var body: some View {
+        content(drag.isMoving)
+            // `.offset` is a non-layout transform → the parent's midY reader
+            // (applied OUTSIDE this wrapper) still measures the static slot.
+            .offset(y: drag.translation)
+            .zIndex(drag.isMoving ? 1 : 0)
+            // SIMULTANEOUS, not highPriority (device fix 2026-05-31): a
+            // highPriority long-press on the Active row claimed EVERY touch
+            // first, so quick cell taps (#/weight/reps) were swallowed and a
+            // slightly-held tap flipped to orange — "點擊瞬間變橘色 / 無法點擊
+            // #、重量、次數". Simultaneous lets the cell tap gestures recognise
+            // INDEPENDENTLY: a quick tap reaches the cell immediately, while
+            // only a deliberate 0.45s hold (no quick release) latches the
+            // long-press into move mode. The `.sequenced` long-press also
+            // pre-claims the touch on hold, so the drag still moves the row.
+            // Idle rows stay inert via the `.subviews` mask (Anomaly 1 fix).
+            .simultaneousGesture(reorderGesture, including: isActive ? .all : .subviews)
+    }
+
+    private var reorderGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.5)
+            .sequenced(before: DragGesture(coordinateSpace: .named("exerciseReorder")))
+            .updating($drag) { value, drag, _ in
+                // Orange + offset ONLY in the `.second` phase — i.e. AFTER the
+                // long-press genuinely COMPLETES. The earlier `.first(true)`
+                // case was the bug behind "瞬間發動": `.first(...)` is the PRESS
+                // phase, delivered from touch-DOWN (LongPressGesture's
+                // isPressing), NOT completion — so the highlight + haptic fired
+                // instantly, independent of `minimumDuration` (which is why
+                // 0.45s→0.7s changed nothing). `.second` only arrives once the
+                // 0.5s hold elapses.
+                if case .second(true, let d) = value {
+                    drag = .moving(d?.translation.height ?? 0)
+                } else {
+                    drag = .inactive
+                }
+            }
+            .onChanged { value in
+                // Haptic exactly once, when the press SUCCEEDS into move mode
+                // (the first `.second`). Re-armed by the press phase (`.first`).
+                switch value {
+                case .second:
+                    if !didEnterMove {
+                        didEnterMove = true
+                        WKInterfaceDevice.current().play(.start)
+                    }
+                default:
+                    didEnterMove = false
+                }
+            }
+            .onEnded { value in
+                didEnterMove = false
+                // Commit only when an actual drag followed the press. A press
+                // with no drag falls through harmlessly — `@GestureState`
+                // resets the highlight either way.
+                if case .second(_, let d?) = value {
+                    onCommit(groupIndex, d.translation.height)
+                }
+            }
+    }
+}
+
+/// Move-mode state for `ReorderableRow`'s `@GestureState`.
+private enum ReorderDrag {
+    case inactive
+    case moving(CGFloat)
+    var isMoving: Bool { if case .moving = self { return true }; return false }
+    var translation: CGFloat { if case .moving(let t) = self { return t }; return 0 }
 }
 
 // MARK: - Progress bar items
@@ -446,12 +556,6 @@ private struct ProgressBarItem: Identifiable, Equatable {
 }
 
 // MARK: - Reorder support types
-
-/// Active long-press-drag reorder: which group is moving + its live offset.
-private struct ReorderState: Equatable {
-    var fromIndex: Int
-    var translation: CGFloat
-}
 
 /// Collects each render group's midY (in the "exerciseReorder" coordinate
 /// space) so the drop target index can be derived from the finger's Y.
@@ -503,6 +607,9 @@ private struct InteractiveSetRow<Content: View>: View {
     @ObservedObject var state: SessionInteractionState
     let setId: String
     let hasCheckmark: Bool
+    /// True while this row is in long-press move mode → border paints orange
+    /// (replacing the Active green) so the two never coexist.
+    var isReordering: Bool = false
     /// Invoked when the user taps the revealed ＋ (right-swipe). nil ⇒ the
     /// row offers no +1 affordance. The closure owns the add semantics
     /// (ordinal + prefill) — see `ExerciseCard.groupRow`.
@@ -543,8 +650,9 @@ private struct InteractiveSetRow<Content: View>: View {
                 .background(
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(
-                            rowIsActive ? Color.green : Color.clear,
-                            lineWidth: 2.0
+                            isReordering ? Color.orange
+                                : (rowIsActive ? Color.green : Color.clear),
+                            lineWidth: isReordering ? 2.5 : 2.0
                         )
                 )
                 .contentShape(Rectangle())
@@ -656,81 +764,137 @@ private struct InteractiveSetRow<Content: View>: View {
 
 // MARK: - Cluster group
 
-/// Cluster acts as a single `{}` Active unit. Border wraps the
-/// header + all sub-rows; the ◯ on the header toggles the whole
-/// cluster's logged state. Sub-sets have no ◯ per spec line 1534.
+/// Cluster (dropset chain) acts as a single `{}` Active unit. The border
+/// wraps the head + all follower rows; the ✓ on the head toggles the whole
+/// chain's logged state. Per the 2026-05-31 grill the head ✓ sits OUTSIDE
+/// the border (top-right) — the border is therefore NOTCHED there, a polygon
+/// with the top-right corner cut out (`ClusterNotchedBorder`). Followers carry
+/// `[－]` (remove this child) + `[＋]` (add a child) and have NO ✓ / no swipe
+/// (per dropset-chain-semantics DR1). Active border is GREEN, consistent with
+/// working rows (user Q1); orange while reordering.
 ///
-/// The cluster's "active id" is the header's set ID — tapping any
-/// row inside the cluster activates the whole group.
+/// The cluster's "active id" is the head's set ID — tapping any row inside
+/// the cluster activates the whole group; whole-cluster swipe/long-press are
+/// owned by the wrapping `ReorderableRow` / `InteractiveSetRow` layer.
 private struct ClusterSetGroup: View {
     @ObservedObject var state: SessionInteractionState
     let header: SessionSnapshotSet
     let subs: [SessionSnapshotSet]
     let clusterIndex: Int
+    /// True while the whole cluster is in long-press move mode → orange border.
+    var isReordering: Bool = false
     /// tap header 編號 `D{n}` while the cluster is Active → deconstruct it
     /// back to a working set (sub-sets dropped). See `ExerciseCard.cycleType`.
     let onCycleHeaderType: () -> Void
+    /// [＋] on a follower → add a new dropset child right after `afterSetId`.
+    let onAddChild: (_ afterSetId: String) -> Void
+    /// [－] on a follower → remove that child set.
+    let onRemoveChild: (_ childSetId: String) -> Void
 
     private var groupId: String { header.setId }
+    private var active: Bool { state.isActive(setId: groupId) }
+
+    /// Notch reserved at the head row's trailing for the ✓ that sits OUTSIDE
+    /// the border. Matches the ✓ button frame.
+    private let notchW: CGFloat = 32
+    private let notchH: CGFloat = 30
 
     var body: some View {
-        HStack(spacing: 4) {
-            VStack(alignment: .leading, spacing: 2) {
-                SetRowClusterHeaderContent(
-                    set: header,
-                    clusterIndex: clusterIndex,
+        VStack(alignment: .leading, spacing: 3) {
+            // Head: D# + cells. Reserve the notch on the right so the cells
+            // don't run under the ✓.
+            SetRowClusterHeaderContent(
+                set: header,
+                clusterIndex: clusterIndex,
+                clusterId: groupId,
+                state: state,
+                onCycleType: onCycleHeaderType
+            )
+
+            // Followers: [－] cells [＋]. Full width (their [＋] sits below the
+            // notch, not next to the ✓).
+            ForEach(subs, id: \.setId) { sub in
+                ClusterFollowerRow(
+                    set: sub,
                     clusterId: groupId,
                     state: state,
-                    onCycleType: onCycleHeaderType
+                    canRemove: subs.count > 1,
+                    onRemove: { onRemoveChild(sub.setId) },
+                    onAdd: { onAddChild(sub.setId) }
                 )
-                ForEach(subs, id: \.setId) { sub in
-                    SetRowClusterSubContent(
-                        set: sub,
-                        clusterId: groupId,
-                        state: state
-                    )
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(
-                        state.isActive(setId: groupId)
-                            ? Color.primary
-                            : Color.clear,
-                        lineWidth: 1.2
-                    )
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Don't auto-activate on tap-anywhere when cluster
-                // is already Active — that would steal cell taps.
-                if !state.isActive(setId: groupId) {
-                    state.activate(setId: groupId)
-                }
-            }
-
-            // Header ✓ controls the whole cluster.
-            VStack {
-                Button {
-                    state.toggleLogged(setId: groupId)
-                } label: {
-                    Image(systemName: state.isLogged(setId: groupId)
-                        ? "checkmark.circle.fill"
-                        : "circle")
-                        .font(.body)
-                        .foregroundStyle(state.isLogged(setId: groupId)
-                            ? Color.green
-                            : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer(minLength: 0)
             }
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(
+            ClusterNotchedBorder(notchW: notchW, notchH: notchH, cornerRadius: 6)
+                .stroke(
+                    isReordering ? Color.orange
+                        : (active ? Color.green : Color.secondary.opacity(0.3)),
+                    lineWidth: isReordering ? 2.5 : 2.0
+                )
+        )
+        // ✓ for the whole chain — lives in the notch, OUTSIDE the border.
+        .overlay(alignment: .topTrailing) {
+            Button {
+                state.toggleLogged(setId: groupId)
+            } label: {
+                Image(systemName: state.isLogged(setId: groupId)
+                    ? "checkmark.circle.fill"
+                    : "circle")
+                    .font(.body)
+                    .foregroundStyle(state.isLogged(setId: groupId)
+                        ? Color.green
+                        : Color.secondary)
+                    .frame(width: notchW, height: notchH)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Don't auto-activate on tap-anywhere when cluster is already
+            // Active — that would steal cell taps.
+            if !active { state.activate(setId: groupId) }
+        }
         .padding(.vertical, 1)
+    }
+}
+
+/// Rounded rect with the TOP-RIGHT corner notched out (an `notchW × notchH`
+/// rectangle), so the cluster's ✓ can sit in the cut, OUTSIDE the stroke,
+/// while the follower rows below extend to full width.
+private struct ClusterNotchedBorder: Shape {
+    var notchW: CGFloat
+    var notchH: CGFloat
+    var cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        // All six corners (incl. the two at the top-right notch) use the same
+        // radius via tangent arcs, so the notch is blunted like every other
+        // corner (user 2026-05-31: 右上兩個直角請鈍化跟其他直角一樣).
+        let r = max(1, min(cornerRadius, min(rect.width, rect.height) / 4))
+        let nW = max(r * 2, min(notchW, rect.width - r * 2))
+        let nH = max(r * 2, min(notchH, rect.height - r * 2))
+        // Notched-rectangle vertices, clockwise from the top-left.
+        let v0 = CGPoint(x: rect.minX, y: rect.minY)              // top-left
+        let v1 = CGPoint(x: rect.maxX - nW, y: rect.minY)        // notch top (A)
+        let v2 = CGPoint(x: rect.maxX - nW, y: rect.minY + nH)   // notch inner (B)
+        let v3 = CGPoint(x: rect.maxX, y: rect.minY + nH)        // right-edge top (C)
+        let v4 = CGPoint(x: rect.maxX, y: rect.maxY)             // bottom-right
+        let v5 = CGPoint(x: rect.minX, y: rect.maxY)            // bottom-left
+        var p = Path()
+        // Start mid-left edge (a non-corner point) so each corner is a clean
+        // tangent-arc round.
+        p.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        p.addArc(tangent1End: v0, tangent2End: v1, radius: r)
+        p.addArc(tangent1End: v1, tangent2End: v2, radius: r)
+        p.addArc(tangent1End: v2, tangent2End: v3, radius: r)
+        p.addArc(tangent1End: v3, tangent2End: v4, radius: r)
+        p.addArc(tangent1End: v4, tangent2End: v5, radius: r)
+        p.addArc(tangent1End: v5, tangent2End: v0, radius: r)
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -958,6 +1122,7 @@ private struct SetRowClusterHeaderContent: View {
                     state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
                 } : nil
             )
+            .frame(width: CellMetrics.weightWidth)
             CellBox(
                 value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
@@ -967,7 +1132,12 @@ private struct SetRowClusterHeaderContent: View {
                     state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
                 } : nil
             )
+            .frame(width: CellMetrics.repsWidth)
             Spacer(minLength: 0)
+            // Reserve the ◯ notch column INLINE (same as the followers' [＋]
+            // column) so the head + follower cells share an identical layout
+            // and line up. The actual ◯ is drawn by the parent's notch overlay.
+            Color.clear.frame(width: 32, height: 22)
         }
     }
 
@@ -982,17 +1152,39 @@ private struct SetRowClusterHeaderContent: View {
     }
 }
 
-/// Cluster sub-set row content — indented, boxed cells. Cells
-/// tappable when the cluster is `{}` Active.
-private struct SetRowClusterSubContent: View {
+/// Cluster follower (dropset child) row — `[－] cells [＋]`. No ✓, no swipe
+/// per dropset-chain-semantics DR1 (only the head carries the ✓; followers
+/// are button-driven). `[－]` removes this child step, `[＋]` adds another
+/// after it. Cells tappable when the cluster is `{}` Active.
+private struct ClusterFollowerRow: View {
     let set: SessionSnapshotSet
     let clusterId: String
     @ObservedObject var state: SessionInteractionState
+    /// False when this is the LAST remaining follower — a dropset chain keeps
+    /// at least 1 child, so [－] greys out (user 2026-05-31 #3).
+    let canRemove: Bool
+    let onRemove: () -> Void
+    let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
-            // Spacer to align with cluster header's number column
-            Text("").frame(width: 20, alignment: .center)
+            // Leading column — same width (20) as the head's `D{n}` so the
+            // cells line up. [－] removes this child (Active only, #2); greyed
+            // + disabled at the min-1-follower floor (#3).
+            if clusterActive {
+                Button(action: onRemove) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(canRemove ? Color.red : Color.gray.opacity(0.4))
+                        .frame(width: 20, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canRemove)
+            } else {
+                Color.clear.frame(width: 20, height: 22)
+            }
+
             CellBox(
                 value: formatWeight(displayWeight),
                 unit: "kg",
@@ -1002,6 +1194,7 @@ private struct SetRowClusterSubContent: View {
                     state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
                 } : nil
             )
+            .frame(width: CellMetrics.weightWidth)
             CellBox(
                 value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
@@ -1011,7 +1204,25 @@ private struct SetRowClusterSubContent: View {
                     state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
                 } : nil
             )
+            .frame(width: CellMetrics.repsWidth)
+
             Spacer(minLength: 0)
+
+            // Trailing column — same width as the head's ◯ notch so every row's
+            // cells stay aligned. [＋] adds a child (Active only, #2); otherwise
+            // a clear spacer keeps the alignment.
+            if clusterActive {
+                Button(action: onAdd) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .frame(width: 32, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear.frame(width: 32, height: 22)
+            }
         }
     }
 
