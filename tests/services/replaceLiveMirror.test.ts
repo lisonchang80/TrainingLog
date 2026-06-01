@@ -703,6 +703,172 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     expect(setRows[0].is_logged).toBe(1);
   });
 
+  it('deconstruct dropset — a follower cycled back to working has its stale parent_set_id CLEARED', async () => {
+    // Seed a synced dropset chain: head 'h1' + follower 'f1' (parent = h1).
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              { setId: 'h1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: null },
+              { setId: 'f1', ordinal: 1, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'h1' },
+            ],
+          },
+        ],
+      }),
+    );
+    // Sanity: f1 has the parent set.
+    const before = await db.getFirstAsync<{ parent_set_id: string | null }>(
+      `SELECT parent_set_id FROM "set" WHERE id = ?`,
+      'f1',
+    );
+    expect(before?.parent_set_id).toBe('h1');
+
+    // User "deconstructs" the dropset — f1 cycles back to a plain working set.
+    // The Watch sends it as set_kind='working' WITHOUT a parent. The reconcile's
+    // non-dropset branch must NULL out the stale parent so it can't silently
+    // re-fold f1 into the chain if it later cycles to dropset again.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              { setId: 'h1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: null },
+              { setId: 'f1', ordinal: 1, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: false, parent_set_id: null },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const after = await db.getAllAsync<{
+      id: string;
+      set_kind: string;
+      parent_set_id: string | null;
+    }>(
+      `SELECT id, set_kind, parent_set_id FROM "set" WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    expect(after).toEqual([
+      { id: 'h1', set_kind: 'dropset', parent_set_id: null },
+      { id: 'f1', set_kind: 'working', parent_set_id: null }, // stale parent cleared
+    ]);
+  });
+
+  it('dropset middle-follower delete — per-exercise purge drops the middle follower, remaining chain links survive', async () => {
+    // Chain: head h + 2 followers f1, f2 (both parent = h).
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              { setId: 'h', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: null },
+              { setId: 'f1', ordinal: 1, weight: 60, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'h' },
+              { setId: 'f2', ordinal: 2, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'h' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Watch deletes the MIDDLE follower f1, re-numbers the survivors so the
+    // remaining follower (f2's data) now sits at ordinal 1. The set reconcile
+    // matches by (session_exercise_id, ordinal), so the on-device row at
+    // ordinal 1 (id 'f1') is UPDATED in place to carry f2's values, and the
+    // now-orphaned ordinal-2 row is dropped by the per-exercise purge. Net: the
+    // chain shrinks to head + one follower (parent still resolves to head 'h').
+    // The id realigns to the ordinal slot — expected for the live mirror; the
+    // canonical history id only matters at end-session reconcile.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              { setId: 'h', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: null },
+              { setId: 'f2', ordinal: 1, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'h' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const rows = await db.getAllAsync<{
+      id: string;
+      parent_set_id: string | null;
+      ordering: number;
+      weight_kg: number | null;
+    }>(
+      `SELECT id, parent_set_id, ordering, weight_kg FROM "set" WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    // Exactly 2 rows — the chain shrank by one (the middle follower).
+    expect(rows).toHaveLength(2);
+    // Head unchanged.
+    expect(rows[0]).toEqual({ id: 'h', parent_set_id: null, ordering: 0, weight_kg: 80 });
+    // The surviving follower carries f2's value (40) and still links to head 'h'
+    // (the deleted middle follower's weight 60 is gone). Id realigned to the
+    // ordinal-1 slot ('f1') by the (session_exercise_id, ordinal) reconcile.
+    expect(rows[1].ordering).toBe(1);
+    expect(rows[1].parent_set_id).toBe('h');
+    expect(rows[1].weight_kg).toBe(40);
+    // The middle follower's old value (60) is no longer present anywhere.
+    expect(rows.some((r) => r.weight_kg === 60)).toBe(false);
+  });
+
+  it('dangling parent — a follower whose head is absent from the snapshot collapses parent to NULL (no broken FK)', async () => {
+    // The snapshot carries ONLY a follower whose parent_set_id references a head
+    // id that never appears in this snapshot (e.g. a malformed / partial Watch
+    // emit). setIdMap.get returns undefined → resolvedParentId = null. The row
+    // INSERTs with parent_set_id NULL rather than a dangling reference.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 1,
+            sets: [
+              { setId: 'orphan', ordinal: 0, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'head-never-sent' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const row = await db.getFirstAsync<{ id: string; parent_set_id: string | null }>(
+      `SELECT id, parent_set_id FROM "set" WHERE session_id = ?`,
+      'sess-1',
+    );
+    expect(row).toEqual({ id: 'orphan', parent_set_id: null });
+  });
+
   it('preserves session-bound columns not in the snapshot (ended_at, bodyweight_snapshot_kg)', async () => {
     // First apply baseline snapshot, then iPhone-side mutate
     // un-mirrored columns, then re-apply snapshot — those columns
