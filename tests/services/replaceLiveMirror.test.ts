@@ -898,6 +898,79 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
       bodyweight_snapshot_kg: 75.5,
     });
   });
+
+  it('regression — cycle a NON-LAST set into a dropset preserves the follower (no ordinal permute)', async () => {
+    // grill-with-docs 2026-06-01 Q1=B. The Watch producer USED to re-stamp the
+    // sorted ordinal pool by DISPLAY POSITION (`sortedOrdinals[i]`), which
+    // collided a mid-list added follower's ordinal with an existing base row
+    // under (session_exercise_id, ordinal) value-match → the follower was
+    // written onto the wrong row then lost. The fix emits each set's OWN stable
+    // ordinal. This test feeds the POST-FIX wire (stable ordinals, head-before-
+    // follower ARRAY order so setIdMap resolves the parent) for the scenario
+    // "cycle the MIDDLE working set into a dropset + add a follower".
+
+    // Seed: 3 plain working sets at ordinals 0,1,2.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              { setId: 'sA', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+              { setId: 'sB', ordinal: 1, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+              { setId: 'sC', ordinal: 2, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // sB → dropset head, add follower sF (own ordinal = max+1 = 3, displayed
+    // mid-list). Post-fix wire: each set keeps its OWN ordinal (sF@3, sC@2);
+    // ARRAY order is display order so the head (sB) precedes its follower (sF).
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              { setId: 'sA', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+              { setId: 'sB', ordinal: 1, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: null },
+              { setId: 'sF', ordinal: 3, weight: 60, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: 'sB' },
+              { setId: 'sC', ordinal: 2, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const rows = await db.getAllAsync<{
+      id: string;
+      ordering: number;
+      set_kind: string;
+      parent_set_id: string | null;
+    }>(
+      `SELECT id, ordering, set_kind, parent_set_id FROM "set"
+         WHERE session_exercise_id = 'se-1' ORDER BY ordering ASC`,
+    );
+    // All four sets present — the follower was NOT lost (the pre-fix permute bug).
+    expect(rows).toEqual([
+      { id: 'sA', ordering: 0, set_kind: 'working', parent_set_id: null },
+      { id: 'sB', ordering: 1, set_kind: 'dropset', parent_set_id: null }, // head
+      { id: 'sC', ordering: 2, set_kind: 'working', parent_set_id: null },
+      { id: 'sF', ordering: 3, set_kind: 'dropset', parent_set_id: 'sB' }, // follower of sB
+    ]);
+  });
 });
 
 // =====================================================================

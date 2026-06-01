@@ -605,16 +605,16 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
   // the check↔write gap). A consequence: if the DB write then FAILS, the mark
   // is already advanced. Verify the recovery behaviour around that.
 
-  it('db-error advances the mark, then a HIGHER rev on a reopened db applies (self-heal)', async () => {
-    // rev 100 claims the mark but the DB write fails (closed db).
+  it('db-error rolls the mark back, then a HIGHER rev on a reopened db applies (self-heal)', async () => {
+    // rev 100 claims the mark, the DB write fails (closed db), and the MED
+    // rollback restores the mark to its prior value (none here).
     db.close();
     const failed = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
     expect(failed.ok).toBe(false);
     if (!failed.ok) expect(failed.code).toBe('db-error');
 
-    // Reopen — the Watch keeps pushing every ~15s with ever-higher revs, so the
-    // NEXT (rev 200) push lands above the claimed-but-failed mark and applies,
-    // re-seeding the iPhone mirror. No stuck state.
+    // Reopen — the Watch keeps pushing with ever-higher revs, so the NEXT
+    // (rev 200) push applies and re-seeds the iPhone mirror. No stuck state.
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
     const healed = await onLiveMirror(db, snapWith({ rev: 200, weight: 90 }));
@@ -622,21 +622,22 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     expect(await weightOf()).toBe(90);
   });
 
-  it('after a db-error claims rev 100, a LOWER rev (50) stays dropped (no clobber by a straggler)', async () => {
+  it('after a db-error, the SAME-rev dual-fire backstop re-applies (MED self-heal)', async () => {
+    // The MED rollback makes the mark track last-APPLIED, not last-SEEN: on a
+    // failed write the claim is rolled back, so the dual-fired applicationContext
+    // backstop — which carries the SAME rev (100) as the failed sendMessage — is
+    // NOT gated out as stale and re-applies, healing within the same emit instead
+    // of waiting for the next Watch mutation. (overnight review MED, 2026-06-01.)
     db.close();
     const failed = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
     expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.code).toBe('db-error');
 
-    // A LATE straggler carrying an OLDER state (rev 50) arrives after recovery.
-    // The claimed mark (100) still gates it out — it must not resurrect a stale
-    // snapshot just because the rev-100 apply happened to fail.
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
-    const straggler = await onLiveMirror(db, snapWith({ rev: 50, weight: 999 }));
-    expect(straggler.ok).toBe(false);
-    if (!straggler.ok) expect(straggler.code).toBe('stale');
-    // Nothing was written for set-1 (rev 100 failed, rev 50 dropped).
-    expect(await weightOf()).toBeNull();
+    const backstop = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    expect(backstop.ok).toBe(true); // same rev re-applies — claim was rolled back
+    expect(await weightOf()).toBe(80);
   });
 
   // ─── Interleave: two sessions keep independent high-water marks ─────
