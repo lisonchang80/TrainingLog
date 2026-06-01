@@ -83,6 +83,32 @@ export interface ReconcileSessionTreeOptions {
    * true; end-session passes false (its `purgeTail` already covers everything).
    */
   purgeSetsInPresentExercises?: boolean;
+  /**
+   * LIVE-mirror liveness gate (H1, 2026-06-01). When true, this reconcile
+   * REQUIRES the session row to already exist AND be un-ended before it
+   * writes anything:
+   *   - row ABSENT  → the session was discarded (放棄) → drop the whole tick.
+   *   - `ended_at` set → the session was finalized (完成) → drop the whole tick.
+   *   - present + live → UPDATE the mirror-bound columns only; NEVER INSERT
+   *     the session row.
+   *
+   * Why a dedicated gate and why INSIDE the transaction: the live mirror
+   * rides `sendMessage`/`applicationContext` while discard/end ride
+   * `transferUserInfo` — three WC channels with NO cross-channel ordering. A
+   * tick already in flight when the user hits 放棄/完成 can land AFTER the
+   * discard's DELETE / the end's `purgeTail`. The unconditional
+   * `INSERT INTO session ... ON CONFLICT` (used by the end path) would then
+   * RESURRECT the just-deleted session as a zombie `ended_at = NULL` row, or
+   * re-INSERT a `set`/`session_exercise` row `purgeTail` just removed
+   * (regressing E2). Checking liveness in the SAME transaction as the writes
+   * is what makes it airtight: a concurrent discard either commits before us
+   * (our `SELECT` sees no row → bail) or after us (it deletes what we wrote)
+   * — both orderings end at "session gone", never a zombie. Only the LIVE
+   * caller (`replaceLiveMirror`) passes true; the end-session reconcile passes
+   * false (it LEGITIMATELY writes an already-`ended_at` row, so it must keep
+   * the unconditional UPSERT path).
+   */
+  requireExistingLiveSession?: boolean;
 }
 
 export interface ReconcileSessionTreeResult {
@@ -98,6 +124,14 @@ export interface ReconcileSessionTreeResult {
    */
   tombstonedExercises: number;
   tombstonedSets: number;
+  /**
+   * Set to `'session-gone'` (and all counts 0) when `requireExistingLiveSession`
+   * was true but the session row was ABSENT (discarded) or already `ended_at`
+   * (finalized) — the whole reconcile was dropped without writing anything
+   * (H1 liveness gate). `null` on a normal applied reconcile. The end path
+   * (gate off) never sets it.
+   */
+  skipped: 'session-gone' | null;
 }
 
 /**
@@ -120,23 +154,49 @@ export async function reconcileSessionTree(
   let purgedSets = 0;
   let tombstonedExercises = 0;
   let tombstonedSets = 0;
+  let skipped: 'session-gone' | null = null;
 
   await db.withTransactionAsync(async () => {
     // ----- session row -----
-    // Mirror only the snapshot-bound columns. `started_at` and `title`
-    // are mirror-bound; other columns (ended_at, bodyweight_snapshot_kg,
-    // is_watch_tracked, ...) are preserved via UPSERT (INSERT OR REPLACE
-    // would null them out).
-    await db.runAsync(
-      `INSERT INTO session (id, started_at, title)
-         VALUES (?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         started_at = excluded.started_at,
-         title = excluded.title`,
-      snapshot.sessionId,
-      snapshot.startedAt,
-      snapshot.title,
-    );
+    if (opts.requireExistingLiveSession) {
+      // LIVE-mirror liveness gate (H1, 2026-06-01) — IN-TRANSACTION so it's
+      // airtight against an unordered discard/end landing in the gap. A live
+      // tick must NEVER create or revive a session row: the start path owns
+      // creation, and a tick that finds no row (or an ended one) is a
+      // late-after-discard / post-finalize straggler. Drop the WHOLE tick.
+      const live = await db.getFirstAsync<{ ended_at: number | null }>(
+        `SELECT ended_at FROM session WHERE id = ?`,
+        snapshot.sessionId,
+      );
+      if (!live || live.ended_at != null) {
+        skipped = 'session-gone';
+        return; // no writes → no zombie, no post-end re-insert
+      }
+      // Present + live → UPDATE the mirror-bound columns only. NEVER INSERT
+      // (an absent row was already handled above as session-gone).
+      await db.runAsync(
+        `UPDATE session SET started_at = ?, title = ? WHERE id = ?`,
+        snapshot.startedAt,
+        snapshot.title,
+        snapshot.sessionId,
+      );
+    } else {
+      // Default / end-session path. Mirror only the snapshot-bound columns.
+      // `started_at` and `title` are mirror-bound; other columns (ended_at,
+      // bodyweight_snapshot_kg, is_watch_tracked, ...) are preserved via UPSERT
+      // (INSERT OR REPLACE would null them out). The end path LEGITIMATELY
+      // writes an already-`ended_at` row, so it keeps the unconditional UPSERT.
+      await db.runAsync(
+        `INSERT INTO session (id, started_at, title)
+           VALUES (?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           started_at = excluded.started_at,
+           title = excluded.title`,
+        snapshot.sessionId,
+        snapshot.startedAt,
+        snapshot.title,
+      );
+    }
 
     // ----- session_exercise rows (reconcile by exercise_id + occurrence) -----
     // Match each snapshot exercise onto a canonical (template-built) row by
@@ -453,6 +513,20 @@ export async function reconcileSessionTree(
     }
   });
 
+  // H1 liveness gate fired — the transaction wrote nothing. Report a clean
+  // zero-count skip so the live caller can surface `code:'session-gone'`.
+  if (skipped) {
+    return {
+      exerciseCount: 0,
+      setCount: 0,
+      purgedExercises: 0,
+      purgedSets: 0,
+      tombstonedExercises: 0,
+      tombstonedSets: 0,
+      skipped,
+    };
+  }
+
   const setCount = snapshot.exercises.reduce(
     (acc, ex) => acc + ex.sets.length,
     0,
@@ -464,6 +538,7 @@ export async function reconcileSessionTree(
     purgedSets,
     tombstonedExercises,
     tombstonedSets,
+    skipped: null,
   };
 }
 
@@ -475,13 +550,19 @@ export async function reconcileSessionTree(
  * Live-mirror semantics: upsert-only, NEVER purge (a mid-session tick is
  * not authoritative about deletions — that is the end-session reconcile's
  * job). Thin wrapper over `reconcileSessionTree` with `purgeTail: false`.
+ *
+ * Liveness gate (H1): passes `requireExistingLiveSession: true` so a tick
+ * that lands after the session was discarded / finalized (unordered WC
+ * channels) is dropped instead of resurrecting a zombie. Returns the
+ * reconcile result so the caller can read `.skipped === 'session-gone'`.
  */
 export async function replaceLiveMirror(
   db: Database,
   snapshot: SessionSnapshot,
-): Promise<void> {
-  await reconcileSessionTree(db, snapshot, {
+): Promise<ReconcileSessionTreeResult> {
+  return reconcileSessionTree(db, snapshot, {
     purgeTail: false,
     purgeSetsInPresentExercises: true,
+    requireExistingLiveSession: true,
   });
 }

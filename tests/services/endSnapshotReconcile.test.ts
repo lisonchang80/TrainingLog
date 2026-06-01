@@ -81,12 +81,36 @@ async function countRows(db: BetterSqliteDatabase) {
   return { exercises: ex?.n ?? 0, sets: sets?.n ?? 0 };
 }
 
+/**
+ * Seed a LIVE (un-ended) session row.
+ *
+ * H1 (2026-06-01): `replaceLiveMirror` now requires a pre-existing live session
+ * (the start path owns creation). These tests seed the iPhone tree via
+ * `replaceLiveMirror` (mirroring the real flow), so the session row must exist
+ * first. `INSERT OR IGNORE` so a test that also builds its own canonical tree
+ * (`seedCanonicalTree`) doesn't UNIQUE-collide.
+ */
+async function seedLiveSession(
+  db: BetterSqliteDatabase,
+  id = 'sess-1',
+  startedAt = 1_700_000_000_000,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, '')`,
+    id,
+    startedAt,
+  );
+}
+
 describe('reconcileEndSnapshot — E2 end-session membership purge', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    // H1: live mirror requires a pre-existing live session. Seed it so the
+    // replaceLiveMirror-based tree seeding below applies (start path owns it).
+    await seedLiveSession(db, 'sess-1');
   });
 
   afterEach(() => {
@@ -215,7 +239,7 @@ describe('reconcileEndSnapshot — E2 end-session membership purge', () => {
   it('legit empty session (snapshot empty + DB empty) → purged no-op', async () => {
     // Session row exists but no exercises (e.g. ended immediately).
     await db.runAsync(
-      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
       'sess-1',
       1_700_000_000_000,
       'Empty',
@@ -308,7 +332,7 @@ async function seedCanonicalTree(
   defs: ExDef[],
 ): Promise<{ seId: string; exerciseId: string; setIds: string[] }[]> {
   await db.runAsync(
-    `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+    `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
     sessionId,
     1_700_000_000_000,
     'Push Day',
@@ -399,6 +423,9 @@ describe('reconcileEndSnapshot — E2 first/middle delete under divergent canoni
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    // H1: live mirror requires a pre-existing live session. Seed it so the
+    // replaceLiveMirror-based tree seeding below applies (start path owns it).
+    await seedLiveSession(db, 'sess-1');
   });
 
   afterEach(() => {

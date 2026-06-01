@@ -58,12 +58,38 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   };
 }
 
+/**
+ * Seed a LIVE (un-ended) session row.
+ *
+ * H1 (2026-06-01): the live mirror no longer CREATES the session row — it
+ * requires the row to already exist + be un-ended (`requireExistingLiveSession`,
+ * via `replaceLiveMirror`). In production the start path
+ * (`onStartFromWatch` → `startSessionFromTemplate` / `createSession`) always
+ * commits the session row before any live tick. These tests mirror that by
+ * pre-seeding the row in `beforeEach`. `INSERT OR IGNORE` so a test that also
+ * builds a canonical tree (its own session INSERT) doesn't UNIQUE-collide.
+ */
+async function seedLiveSession(
+  db: BetterSqliteDatabase,
+  id = 'sess-1',
+  startedAt = 1_700_000_000_000,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, '')`,
+    id,
+    startedAt,
+  );
+}
+
 describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    // H1: live mirror requires a pre-existing live session (start path owns
+    // creation). Seed it so the reconcile body under test actually runs.
+    await seedLiveSession(db, 'sess-1');
   });
 
   afterEach(() => {
@@ -179,7 +205,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
   it('dropset chain (canonical head) — follower parent_set_id resolves to the on-device head id, not the wire id', async () => {
     // Pre-seed a canonical (template-built) tree: 1 working set with id 'c1'.
     await db.runAsync(
-      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
       'sess-1',
       1_700_000_000_000,
       'Push Day',
@@ -276,7 +302,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     // Simulate a session whose follower was first synced by an OLDER reconcile
     // (no parent_set_id column written) → head 'c1' + follower 'f-old' (NULL).
     await db.runAsync(
-      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
       'sess-1',
       1_700_000_000_000,
       'Push Day',
@@ -605,7 +631,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     // position (ordering / ordinal) it must UPDATE the canonical rows —
     // NOT insert a parallel tree (the pre-Approach-A duplicate bug).
     await db.runAsync(
-      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
       'sess-1',
       1_700_000_000_000,
       'A',
@@ -869,15 +895,19 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     expect(row).toEqual({ id: 'orphan', parent_set_id: null });
   });
 
-  it('preserves session-bound columns not in the snapshot (ended_at, bodyweight_snapshot_kg)', async () => {
-    // First apply baseline snapshot, then iPhone-side mutate
-    // un-mirrored columns, then re-apply snapshot — those columns
-    // must survive.
+  it('preserves session-bound columns not in the snapshot (bodyweight_snapshot_kg) on a LIVE tick', async () => {
+    // First apply baseline snapshot, then iPhone-side mutate an un-mirrored
+    // column on the still-LIVE session, then re-apply — it must survive (the
+    // live UPDATE touches only started_at + title).
+    //
+    // NOTE (H1): `ended_at` is deliberately NOT exercised here — a live tick on
+    // an ENDED session is DROPPED by the liveness gate (it does not apply at
+    // all), so "preserve ended_at across a live tick" is moot. That drop is
+    // covered by the H1 gate tests below.
     await replaceLiveMirror(db, snapshot());
 
     await db.runAsync(
-      `UPDATE session SET ended_at = ?, bodyweight_snapshot_kg = ? WHERE id = ?`,
-      1_700_000_500_000,
+      `UPDATE session SET bodyweight_snapshot_kg = ? WHERE id = ?`,
       75.5,
       'sess-1',
     );
@@ -894,7 +924,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     );
     expect(row).toEqual({
       title: 'Push Day renamed',
-      ended_at: 1_700_000_500_000,
+      ended_at: null, // session stayed live the whole time
       bodyweight_snapshot_kg: 75.5,
     });
   });
@@ -1098,7 +1128,7 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     // snapshot-occurrence-2 → canonical-occurrence-2 (FIFO in ordering ASC) —
     // NOT collapse both onto one canonical row, and stay stable across ticks.
     await db.runAsync(
-      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, ?)`,
       'sess-1',
       1_700_000_000_000,
       'A',
@@ -1197,6 +1227,106 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
 });
 
 // =====================================================================
+// H1 (2026-06-01) — live-mirror session-liveness gate
+// =====================================================================
+//
+// `replaceLiveMirror` passes `requireExistingLiveSession: true`, so a live
+// tick that lands after the session was DISCARDED (放棄 → row hard-deleted)
+// or FINALIZED (完成 → `ended_at` set) — the three WC channels have no
+// cross-channel ordering — must be DROPPED, not applied. Without this a late
+// tick would re-`INSERT INTO session ... ON CONFLICT` (zombie `ended_at=NULL`
+// resurrection) or re-insert a row end-session's `purgeTail` just removed
+// (E2 regression). The gate is checked INSIDE the reconcile transaction so a
+// concurrent discard can't slip into a check↔write gap.
+
+describe('replaceLiveMirror — H1 liveness gate', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    // NOTE: deliberately NO seed here — each test controls session presence.
+  });
+
+  afterEach(() => db.close());
+
+  it('discarded session (row ABSENT) → tick dropped, no resurrection', async () => {
+    // No session row at all (simulates: discard hard-deleted it, then a late
+    // live tick arrives on the unordered sendMessage/appContext channel).
+    const result = await replaceLiveMirror(db, snapshot());
+    expect(result.skipped).toBe('session-gone');
+
+    // Nothing was written — no zombie session, no orphan exercise/set rows.
+    const s = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session');
+    const e = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session_exercise');
+    const st = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM "set"');
+    expect([s?.n, e?.n, st?.n]).toEqual([0, 0, 0]);
+  });
+
+  it('finalized session (ended_at set) → tick dropped, no post-purge re-insert (E2 guard)', async () => {
+    await seedLiveSession(db, 'sess-1');
+    // End-session ran: ended_at set + the tree was purged (we leave it empty
+    // here). A late live tick carrying the (now-deleted) exercise+set must NOT
+    // re-introduce them.
+    await db.runAsync(
+      `UPDATE session SET ended_at = ? WHERE id = ?`,
+      1_700_000_100_000,
+      'sess-1',
+    );
+
+    const result = await replaceLiveMirror(db, snapshot());
+    expect(result.skipped).toBe('session-gone');
+
+    // The snapshot's exercise/set were NOT re-inserted (E2 stays fixed).
+    const e = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session_exercise');
+    const st = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM "set"');
+    expect([e?.n, st?.n]).toEqual([0, 0]);
+    // Session row still present + still ended (NOT revived to ended_at=NULL).
+    const row = await db.getFirstAsync<{ ended_at: number | null }>(
+      'SELECT ended_at FROM session WHERE id = ?',
+      'sess-1',
+    );
+    expect(row?.ended_at).toBe(1_700_000_100_000);
+  });
+
+  it('live (un-ended) session → applies + UPDATEs, never INSERTs a 2nd session row', async () => {
+    await seedLiveSession(db, 'sess-1', 999); // placeholder started_at
+
+    const result = await replaceLiveMirror(db, snapshot());
+    expect(result.skipped).toBeNull();
+    expect(result.exerciseCount).toBe(1);
+
+    // Exactly ONE session row (UPDATE in place, not a 2nd INSERT), and the
+    // mirror-bound columns were overwritten from the snapshot.
+    const rows = await db.getAllAsync<{ id: string; started_at: number; title: string }>(
+      'SELECT id, started_at, title FROM session',
+    );
+    expect(rows).toEqual([
+      { id: 'sess-1', started_at: 1_700_000_000_000, title: 'Push Day' },
+    ]);
+    const e = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session_exercise');
+    expect(e?.n).toBe(1);
+  });
+
+  it('apply → discard (row deleted) → late tick dropped, session stays gone (zombie regression)', async () => {
+    await seedLiveSession(db, 'sess-1');
+    const applied = await replaceLiveMirror(db, snapshot());
+    expect(applied.skipped).toBeNull();
+
+    // Discard: hard-delete the whole tree (mirrors discardSession cascade).
+    await db.runAsync('DELETE FROM "set" WHERE session_id = ?', 'sess-1');
+    await db.runAsync('DELETE FROM session_exercise WHERE session_id = ?', 'sess-1');
+    await db.runAsync('DELETE FROM session WHERE id = ?', 'sess-1');
+
+    // A late tick (the one still in flight at 放棄) must NOT resurrect it.
+    const late = await replaceLiveMirror(db, snapshot());
+    expect(late.skipped).toBe('session-gone');
+    const s = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session');
+    expect(s?.n).toBe(0);
+  });
+});
+
+// =====================================================================
 // Phase D — tombstone precise-purge (Q5 live-delete, slice 13d sync-refactor)
 // =====================================================================
 
@@ -1249,6 +1379,9 @@ describe('reconcileSessionTree — tombstone precise purge (deletedIds)', () => 
   beforeEach(async () => {
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    // H1: live mirror requires a pre-existing live session — seed it BEFORE
+    // the live-tick seed below, or the gate would drop the whole setup.
+    await seedLiveSession(db, 'sess-1');
     // Seed the full two-exercise tree first (legacy live tick, no deletes).
     await replaceLiveMirror(db, twoExerciseSnapshot());
   });

@@ -78,7 +78,11 @@ import { replaceLiveMirror } from './replaceLiveMirror';
  */
 type LiveMirrorResult =
   | { ok: true; sessionId: string; exerciseCount: number; setCount: number }
-  | { ok: false; code: 'bad-payload' | 'db-error' | 'stale'; message: string };
+  | {
+      ok: false;
+      code: 'bad-payload' | 'db-error' | 'stale' | 'session-gone';
+      message: string;
+    };
 
 /**
  * Per-session monotonic-`rev` high-water mark (sync fast lane, 2026-06-01).
@@ -300,7 +304,23 @@ export async function onLiveMirror(
     claimedRev = true;
   }
   try {
-    await replaceLiveMirror(db, snapshot);
+    const result = await replaceLiveMirror(db, snapshot);
+    if (result.skipped === 'session-gone') {
+      // H1 liveness gate fired (2026-06-01): the session was discarded (放棄)
+      // or finalized (完成) between this tick's dispatch and now — the three
+      // WC channels (live-mirror on sendMessage/appContext vs discard/end on
+      // transferUserInfo) have no cross-channel ordering, so a tick already
+      // in flight can land after the teardown. The reconcile wrote NOTHING
+      // (no zombie `ended_at=NULL` row, no post-`purgeTail` re-insert). Drop
+      // it cleanly. Leave the rev high-water mark claimed: the session is
+      // terminal so there's no fresher state to wait for, and the dual-fired
+      // backstop would only re-hit the same gate.
+      return {
+        ok: false,
+        code: 'session-gone',
+        message: `live-mirror dropped: session ${snapshot.sessionId} discarded or finalized`,
+      };
+    }
     const setCount = snapshot.exercises.reduce(
       (acc, ex) => acc + ex.sets.length,
       0,
@@ -318,7 +338,15 @@ export async function onLiveMirror(
     // `stale`, leaving the mirror stale-rendered until the NEXT Watch
     // mutation. Roll the claim back so the backstop (or a retry) can re-apply
     // this exact rev and self-heal. (overnight review MED, 2026-06-01.)
-    if (claimedRev) {
+    //
+    // CAS rollback (M1, 2026-06-01): only restore if WE are still the latest
+    // claimant. If a HIGHER rev legitimately claimed + wrote after us, a blind
+    // restore would clobber its mark back down to `prevRev` and re-open the
+    // door for an even-later stale redelivery to re-apply. Unreachable under
+    // single-threaded JS (the catch runs synchronously after the await with no
+    // other handler interleaving), but correct-in-principle if the DB layer
+    // ever becomes genuinely concurrent.
+    if (claimedRev && lastAppliedRev.get(snapshot.sessionId) === snapshot.rev) {
       if (prevRev === undefined) lastAppliedRev.delete(snapshot.sessionId);
       else lastAppliedRev.set(snapshot.sessionId, prevRev);
     }

@@ -66,6 +66,28 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   };
 }
 
+/**
+ * Seed a LIVE (un-ended) session row.
+ *
+ * H1 (2026-06-01): the live mirror no longer CREATES the session row — it
+ * requires the row to already exist + be un-ended (the gate in
+ * `replaceLiveMirror` → `reconcileSessionTree`). Production's start path
+ * (`onStartFromWatch`) always commits the row before any live tick; these
+ * tests mirror that by seeding it. Apply-path tests seed; bad-payload tests
+ * (which assert `COUNT(session) === 0`) deliberately do NOT.
+ */
+async function seedLiveSession(
+  db: BetterSqliteDatabase,
+  id: string,
+  startedAt = 1_700_000_000_000,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT OR IGNORE INTO session (id, started_at, title) VALUES (?, ?, '')`,
+    id,
+    startedAt,
+  );
+}
+
 describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
   let db: BetterSqliteDatabase;
 
@@ -79,6 +101,7 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
   });
 
   it('happy path — set mutation snapshot mirrors to iPhone SQLite', async () => {
+    await seedLiveSession(db, 'sess-1'); // H1: start path owns session creation
     const result = await onLiveMirror(db, snapshot());
 
     expect(result.ok).toBe(true);
@@ -106,6 +129,7 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
   });
 
   it('latest-state-wins — newer snapshot overwrites the stale value (replaces deleted LWW)', async () => {
+    await seedLiveSession(db, 'sess-1');
     await onLiveMirror(db, snapshot());
 
     // A later applicationContext for the SAME set carries a mutated
@@ -156,6 +180,7 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
   });
 
   it('idempotency — same applicationContext applied twice does not double-apply', async () => {
+    await seedLiveSession(db, 'sess-1');
     const ctx = snapshot();
     const first = await onLiveMirror(db, ctx);
     const second = await onLiveMirror(db, ctx);
@@ -226,6 +251,7 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
   });
 
   it('empty exercises — snapshot still mirrors the session row', async () => {
+    await seedLiveSession(db, 'sess-1');
     const result = await onLiveMirror(db, snapshot({ exercises: [] }));
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -495,6 +521,12 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     __resetLiveMirrorRevForTests();
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    // H1: live mirror requires a pre-existing live session. Seed every id this
+    // block exercises so the rev-guard behaviour (not the liveness gate) is
+    // what's under test.
+    for (const id of ['sess-1', 'sess-2', 'A', 'B']) {
+      await seedLiveSession(db, id);
+    }
   });
 
   afterEach(() => {
@@ -617,6 +649,7 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     // (rev 200) push applies and re-seeds the iPhone mirror. No stuck state.
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    await seedLiveSession(db, 'sess-1'); // reopened db — re-seed the live row
     const healed = await onLiveMirror(db, snapWith({ rev: 200, weight: 90 }));
     expect(healed.ok).toBe(true);
     expect(await weightOf()).toBe(90);
@@ -635,6 +668,7 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
 
     db = new BetterSqliteDatabase(':memory:');
     await migrate(db);
+    await seedLiveSession(db, 'sess-1'); // reopened db — re-seed the live row
     const backstop = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
     expect(backstop.ok).toBe(true); // same rev re-applies — claim was rolled back
     expect(await weightOf()).toBe(80);
@@ -763,5 +797,62 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     const afterReset = await onLiveMirror(db, snapWith({ rev: 50, weight: 70 }));
     expect(afterReset.ok).toBe(true);
     expect(await weightOf()).toBe(70);
+  });
+});
+
+describe('Slice 13d H1 — onLiveMirror session-liveness gate', () => {
+  // A live tick that lands after the session was discarded (放棄) or finalized
+  // (完成) must be dropped, NOT applied — otherwise it resurrects a zombie
+  // session or re-inserts a purged row. `onLiveMirror` surfaces this as
+  // `{ok:false, code:'session-gone'}`. (See replaceLiveMirror H1 gate tests for
+  // the reconcile-level assertions.)
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    __resetLiveMirrorRevForTests();
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    // No seed — each test controls session presence.
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('discarded session (row absent) → code:session-gone, nothing written', async () => {
+    const result = await onLiveMirror(db, snapshot());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('session-gone');
+
+    const s = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session');
+    expect(s?.n).toBe(0);
+  });
+
+  it('finalized session (ended_at set) → code:session-gone, no re-insert', async () => {
+    await seedLiveSession(db, 'sess-1');
+    await db.runAsync(
+      'UPDATE session SET ended_at = ? WHERE id = ?',
+      1_700_000_100_000,
+      'sess-1',
+    );
+    const result = await onLiveMirror(db, snapshot());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('session-gone');
+
+    // The snapshot's exercise was NOT re-inserted; session stays ended.
+    const e = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session_exercise');
+    expect(e?.n).toBe(0);
+    const row = await db.getFirstAsync<{ ended_at: number | null }>(
+      'SELECT ended_at FROM session WHERE id = ?',
+      'sess-1',
+    );
+    expect(row?.ended_at).toBe(1_700_000_100_000);
+  });
+
+  it('live (un-ended) session → applies normally', async () => {
+    await seedLiveSession(db, 'sess-1');
+    const result = await onLiveMirror(db, snapshot());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.exerciseCount).toBe(1);
   });
 });
