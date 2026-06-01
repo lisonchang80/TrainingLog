@@ -28,7 +28,8 @@ import WatchKit
 /// Value-based navigation targets pushed from the root list.
 /// `Hashable` is auto-derived from the enum's plain cases.
 private enum WatchSettingsDestination: Hashable {
-    case inputMode
+    // 2026-06-01: `.inputMode` removed — input is keypad-only now (the crown
+    // drives vertical scroll), so the keypad/crown picker is gone.
     case restTimerMode
     case hapticStrength
 }
@@ -40,9 +41,6 @@ private enum WatchSettingsDestination: Hashable {
 /// sub-pages can push without leaking back to D11's nav stack.
 struct WatchSettingsView: View {
     @State private var path: [WatchSettingsDestination] = []
-
-    @AppStorage(WatchSettingsKey.inputMode)
-    private var inputModeRaw: String = WatchSettingsDefault.inputMode
 
     @AppStorage(WatchSettingsKey.autoAdvance)
     private var autoAdvance: Bool = WatchSettingsDefault.autoAdvance
@@ -56,9 +54,6 @@ struct WatchSettingsView: View {
     @AppStorage(WatchSettingsKey.hapticStrength)
     private var hapticStrengthRaw: String = WatchSettingsDefault.hapticStrength
 
-    private var inputMode: InputMode {
-        InputMode(rawValue: inputModeRaw) ?? .keypad
-    }
     private var restTimerMode: RestTimerMode {
         RestTimerMode(rawValue: restTimerModeRaw) ?? .popup
     }
@@ -69,33 +64,26 @@ struct WatchSettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                // Row 1 — 輸入方式 (picker)
-                SettingsPickerRow(
-                    label: "輸入方式",
-                    value: inputMode.shortLabel,
-                    destination: .inputMode
-                )
-
-                // Row 2 — ✓ 後自動跳下組 (toggle)
+                // ✓ 後自動跳下組 (toggle)
                 SettingsToggleRow(
                     label: "✓ 後自動跳下組",
                     isOn: $autoAdvance
                 )
 
-                // Row 3 — Rest timer 模式 (picker)
+                // Rest timer 模式 (picker)
                 SettingsPickerRow(
                     label: "Rest timer 模式",
                     value: restTimerMode.label,
                     destination: .restTimerMode
                 )
 
-                // Row 4 — HR 區間 5 警示 (toggle)
+                // HR 區間 5 警示 (toggle)
                 SettingsToggleRow(
                     label: "HR 區間 5 警示",
                     isOn: $hrZone5Alert
                 )
 
-                // Row 5 — 觸覺回饋 (picker)
+                // 觸覺回饋 (picker)
                 SettingsPickerRow(
                     label: "觸覺回饋",
                     value: hapticStrength.shortLabel,
@@ -105,8 +93,6 @@ struct WatchSettingsView: View {
             .navigationTitle("設定")
             .navigationDestination(for: WatchSettingsDestination.self) { dest in
                 switch dest {
-                case .inputMode:
-                    InputModePickerView()
                 case .restTimerMode:
                     RestTimerModePickerView()
                 case .hapticStrength:
@@ -162,42 +148,6 @@ private struct SettingsPickerRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-// MARK: - View 3: 輸入方式 picker
-
-/// Sub-page for the two input modes (keypad / crown).
-/// Per spec line 2390: tap option → ✓ + 即時生效 + auto-pop back.
-private struct InputModePickerView: View {
-    @AppStorage(WatchSettingsKey.inputMode)
-    private var raw: String = WatchSettingsDefault.inputMode
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        List {
-            ForEach(InputMode.allCases) { mode in
-                PickerOptionRow(
-                    label: mode.label,
-                    isSelected: mode.rawValue == raw
-                ) {
-                    raw = mode.rawValue
-                    WKInterfaceDevice.current().play(.click)
-                    dismiss()
-                }
-            }
-
-            // Bottom hint mirrors spec View 3 footer.
-            Section {
-                Text("鍵盤：4×3 數字面板、Done 退出")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text("滾輪：Crown 旋轉即時生效")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .navigationTitle("輸入方式")
     }
 }
 
@@ -304,12 +254,6 @@ private struct PickerOptionRow: View {
 
 #Preview("D16 sheet root") {
     WatchSettingsView()
-}
-
-#Preview("D16 — 輸入方式 picker") {
-    NavigationStack {
-        InputModePickerView()
-    }
 }
 
 #Preview("D16 — Rest timer 模式 picker") {

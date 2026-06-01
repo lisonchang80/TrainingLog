@@ -19,6 +19,7 @@
 //
 
 import SwiftUI
+import WatchKit
 
 /// Storage backing for the global input mode toggle. String-backed
 /// so `@AppStorage` can persist trivially.
@@ -43,31 +44,17 @@ extension InputMode {
 /// the screen while leaving the top scrollable.
 struct CellEditOverlay: View {
     @ObservedObject var state: SessionInteractionState
-    @AppStorage(InputMode.storageKey) private var inputModeRaw: String = InputMode.keypad.rawValue
-
-    private var inputMode: InputMode {
-        InputMode(rawValue: inputModeRaw) ?? .keypad
-    }
 
     var body: some View {
         if let cell = state.activeCell {
-            switch inputMode {
-            case .keypad:
-                // Per user 2026-05-29 polish + 2026-05-31 full-screen: the
-                // entire screen blacks out during keypad mode AND the keypad
-                // fills it (big keys). Only buffer + keypad visible.
-                ZStack {
-                    Color.black.ignoresSafeArea()
-                    KeypadOverlay(cell: cell, state: state)
-                }
-            case .crown:
-                // Per user 2026-05-29 polish 4: crown mode is INLINE —
-                // no popup. The cell's green `[]` Active border + live
-                // value display (via displayValue → activeCell.buffer)
-                // provide all the feedback the user needs. Crown is
-                // captured at SessionCardListPage level via
-                // `.digitalCrownRotation`. Tap-outside commits.
-                EmptyView()
+            // 2026-06-01: keypad-only. The Digital Crown now scrolls the card
+            // list (vertical scroll), so the crown input mode + the keypad/crown
+            // toggle in ⚙ 設定 were removed (user: 重量次數完全依靠鍵盤、表冠
+            // 改支撐卷軸). Full-screen keypad: the entire screen blacks out and
+            // the keypad fills it (big keys). Only buffer + keypad visible.
+            ZStack {
+                Color.black.ignoresSafeArea()
+                KeypadOverlay(cell: cell, state: state)
             }
         }
     }
@@ -136,9 +123,8 @@ private struct KeypadOverlay: View {
             Spacer()
             // Back / cancel — the old ↻ mode-switch chip is repurposed
             // (per user 2026-05-31) into a 返回 icon = DISCARD the in-flight
-            // edit and close the cell WITHOUT committing. Crown mode is still
-            // reachable via ⚙ 設定 → 輸入方式; this button no longer flips
-            // input modes.
+            // edit and close the cell WITHOUT committing. (Input is keypad-only
+            // as of 2026-06-01 — no mode flip.)
             Button {
                 state.discardActiveCell()
             } label: {
@@ -185,31 +171,14 @@ private struct KeypadOverlay: View {
     }
 
     private func tap(_ key: KeypadKey) {
+        // Haptic on every key press (user 2026-06-01「鍵盤按鈕請給出觸覺回饋」).
+        WKInterfaceDevice.current().play(.click)
         switch key {
         case .digit(let d): state.appendDigit(d)
         case .dot: state.appendDot()
         case .backspace: state.backspace()
         case .done: state.commitActiveCell()
         }
-    }
-}
-
-// Crown mode is now handled INLINE at the page level (see
-// SetLoggerView → SessionCardListPage). No overlay view needed —
-// the active cell's green `[]` Active border + live displayValue
-// is the only visual the user sees. Removed `CrownOverlay` struct
-// 2026-05-29 per user «不要跳出東西».
-//
-// Shared crown formatting helper, used by the inline crown handler.
-func formatCrownValue(_ v: Double, field: CellField) -> String {
-    switch field {
-    case .reps:
-        return String(Int(v.rounded()))
-    case .weight:
-        if v == v.rounded() {
-            return String(format: "%.0f", v)
-        }
-        return String(format: "%.1f", v)
     }
 }
 
