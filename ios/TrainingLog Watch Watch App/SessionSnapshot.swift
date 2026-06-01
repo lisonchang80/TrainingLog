@@ -109,6 +109,41 @@ struct SessionSnapshotExercise: Codable, Equatable {
     let ordering: Int
     let plannedSets: Int
     let sets: [SessionSnapshotSet]
+    /// D15 superset card — cluster linkage (ADR-0018 v014). Two ADJACENT
+    /// exercises sharing the same non-nil `reusableSupersetId` are folded into
+    /// one superset card by `SetLoggerView`; `parentId` is the parent's id on
+    /// the B side (nil on A / solo). The Watch groups by `reusableSupersetId`
+    /// + `ordering` (A = lower ordering), so `parentId` is carried for
+    /// forward-compat only — the local fat-tree build leaves it nil because the
+    /// template's parent_id points at a template_exercise id that doesn't map
+    /// to the freshly minted `sessionExerciseId`. JSONEncoder omits nil → they
+    /// travel ABSENT; synthesized `decodeIfPresent` tolerates absence → nil.
+    let parentId: String?
+    let reusableSupersetId: String?
+
+    /// Memberwise init with the cluster fields defaulted to nil so the existing
+    /// call sites (fat-tree build / mock / producer projection) stay unchanged;
+    /// only the superset-aware paths thread a real `reusableSupersetId` through.
+    /// (A custom init does NOT disable the synthesized Codable conformance.)
+    init(
+        sessionExerciseId: String,
+        exerciseId: String,
+        exerciseName: String,
+        ordering: Int,
+        plannedSets: Int,
+        sets: [SessionSnapshotSet],
+        parentId: String? = nil,
+        reusableSupersetId: String? = nil
+    ) {
+        self.sessionExerciseId = sessionExerciseId
+        self.exerciseId = exerciseId
+        self.exerciseName = exerciseName
+        self.ordering = ordering
+        self.plannedSets = plannedSets
+        self.sets = sets
+        self.parentId = parentId
+        self.reusableSupersetId = reusableSupersetId
+    }
 }
 
 /// Full session tree returned by iPhone after creating (or adopting)

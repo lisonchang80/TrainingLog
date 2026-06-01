@@ -434,7 +434,14 @@ final class PickerViewModel: ObservableObject {
                 exerciseName: ex.exerciseName,
                 ordering: ex.ordering,
                 plannedSets: plannedCount,
-                sets: snapshotSets
+                sets: snapshotSets,
+                // D15 superset card — carry the RS id so SetLoggerView can fold
+                // an adjacent same-RS pair into one card. `parentId` stays nil:
+                // the template's parent_id points at a template_exercise id that
+                // doesn't map to the freshly minted `SE-…` id, and grouping uses
+                // `reusableSupersetId` + `ordering`, so no remap is needed.
+                parentId: nil,
+                reusableSupersetId: ex.reusableSupersetId
             )
         }
         return SessionSnapshot(
