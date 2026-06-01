@@ -285,16 +285,19 @@ export async function onLiveMirror(
   // a fresher sendMessage already applied). Claim the high-water mark BEFORE
   // the `await` below so a concurrent older delivery from the other channel
   // can't pass its own check in the gap between this check and the DB write.
+  let claimedRev = false;
+  let prevRev: number | undefined;
   if (snapshot.rev != null) {
-    const prev = lastAppliedRev.get(snapshot.sessionId);
-    if (prev != null && snapshot.rev <= prev) {
+    prevRev = lastAppliedRev.get(snapshot.sessionId);
+    if (prevRev != null && snapshot.rev <= prevRev) {
       return {
         ok: false,
         code: 'stale',
-        message: `live-mirror rev ${snapshot.rev} <= applied ${prev} (dropped)`,
+        message: `live-mirror rev ${snapshot.rev} <= applied ${prevRev} (dropped)`,
       };
     }
     lastAppliedRev.set(snapshot.sessionId, snapshot.rev);
+    claimedRev = true;
   }
   try {
     await replaceLiveMirror(db, snapshot);
@@ -309,6 +312,16 @@ export async function onLiveMirror(
       setCount,
     };
   } catch (err) {
+    // The rev claim above advanced the high-water mark BEFORE this write
+    // (correct for the concurrency race). But the write didn't land, and the
+    // dual-fired backstop carries the SAME rev → it would now be gated out as
+    // `stale`, leaving the mirror stale-rendered until the NEXT Watch
+    // mutation. Roll the claim back so the backstop (or a retry) can re-apply
+    // this exact rev and self-heal. (overnight review MED, 2026-06-01.)
+    if (claimedRev) {
+      if (prevRev === undefined) lastAppliedRev.delete(snapshot.sessionId);
+      else lastAppliedRev.set(snapshot.sessionId, prevRev);
+    }
     return {
       ok: false,
       code: 'db-error',
