@@ -17,6 +17,16 @@ Validated 2026-05-29 evening (D31 wave 1 `start-resolve`) + 2026-05-29 late-even
 - Adding a new envelope that only exists Watch-internal (no iPhone counterpart) — skip TS side entirely.
 - Adding an iPhone-only event (no Watch involvement) — wrong skill, this is for cross-device WC.
 
+## Variant — LIVE / non-durable kind (e.g. `live-mirror`, 2026-06-01)
+
+The default 8 steps assume a **durable** kind (TUI / `transferUserInfo` + `addUserInfoListener`). A **live** kind (a repeating snapshot stream you want sub-1s, where a dropped tick self-heals on the next push) deviates:
+
+- **Step 5 uses `addMessageListener('kind', …)`, NOT `addUserInfoListener`.** TUI is a durable FIFO queue — for a live stream it would replay stale snapshots late. Live kinds must NOT ride TUI.
+- **Step 6 outbound = DUAL-FIRE but NO TUI**: `sendMessage` when `isReachable` (the instant <1s foreground channel, FIFO-ordered) + `updateApplicationContext` (background backstop, latest-state-replace). NOT `transferUserInfo`.
+- **Anti-reorder guard required**: dual-fire + the late-delivering appContext backstop means the same/stale snapshot can arrive AFTER a fresher one. Stamp a monotonic `rev` (ms-since-epoch, `max(now, prev+1)`) on the producer; the receiver keeps a per-session high-water mark and drops `rev <= lastApplied` (claim BEFORE the await; roll back the claim on db-error so the same-rev backstop self-heals). See `onLiveMirror` (`watchLiveMirrorReceiver.ts`).
+- **No new `watchSession<Verb>.ts` orchestrator** if a receiver already exists (live-mirror reused `onLiveMirror`).
+- **`env.payload` IS the raw payload dict** (the snapshot), same shape both channels deliver, so one receiver serves both. Validated 2026-06-01 (`live-mirror`, 17th kind) — the reverse iPhone→Watch live channel (Phase C) will follow this same variant.
+
 ## The 8 steps
 
 ### Step 1 — TS protocol schema

@@ -70,9 +70,19 @@ Active 列的橫滑 reveal（highPriority）會跟「垂直捲動」+「TabView 
 - **exercise 配對 = `exercise_id` + 出現序**（不是清單位置！位置配對會讓刪首/中動作弄壞歷史）。
 - **整數 ordinal 插不進中間**：要「插在中間列」的顯示位置，用 `AddedSet.displayRank: Double`（夾在兩列 rank 中點）**decouple** wire ordinal（仍 max+1）。代價：Watch 顯示在中間、但 iPhone 歷史該 set 排在該動作**最後**（值對、序差）。「插在最後一組」兩邊才一致。要 iPhone 也中插 = 得 renumber-at-end（會破壞值配對）、屬另一個大改。
 
-## Reorder / 中插 round-trip — 不改 reconcile，靠「ordinal 池 permute」
+## ~~Reorder / 中插 round-trip — 靠「ordinal 池 permute」~~ ❌ 2026-06-01 已廢
 
-2026-05-31 F2：要讓 Watch 的 reorder / 中插 +1 在 **iPhone 歷史也跟著動**，**不要動 reconcile**（值配對鐵律別碰）。整個解法在 Watch 端：
+> ❌ **2026-06-01 翻盤（ADR-0019 § 2026-06-01）**：下面整段的 `sortedOrdinals[i]`
+> permute **已移除**（`484b13f`）。它與 `(se,ordinal)` 值配對**本質互斥**：把
+> 非最後一組 cycle 成遞減組時，mid-list follower 的 permuted ordinal 撞到既有
+> base row → 寫錯列 → **follower 整列消失**（overnight Agent C 抓、jest repro 證實）。
+> **現行 = producer emit 每個 set 自己穩定的 `ordinal`（`s.ordinal`）、不 permute**。
+> 代價：Watch reorder / 中插位置**不再同步到 iPhone**（內容對、順序留原始；end-session
+> 最終快照亦不帶顯示序）。這是 grill 拍板 Q1=B 接受的 cost。若日後要反向對稱
+> reorder，升級路徑 = 加 `displayOrder` wire 欄 或 Watch 採用 iPhone 真 id（見 ADR）。
+> **下面舊敘述保留作歷史**，勿再實作 permute。
+
+2026-05-31 F2（已廢）：要讓 Watch 的 reorder / 中插 +1 在 **iPhone 歷史也跟著動**，**不要動 reconcile**（值配對鐵律別碰）。整個解法在 Watch 端：
 
 - 顯示順序走 `setRankOverrides: [setId: Double]`；reorder = 重排 rank（group 整組移動時成員 rank 連續重排，見下節）。
 - **projection 送出前重指派 wire ordinal**：把該動作「**目前在場的 ordinal 值集合**」**排序後、按顯示順序逐一指派**回各 set（`LiveMirror.project` 內 `let sortedOrdinals = merged.map{$0.ordinal}.sorted()` → `ordinal: sortedOrdinals[i]`）。
@@ -120,8 +130,14 @@ Active 列的橫滑 reveal（highPriority）會跟「垂直捲動」+「TabView 
   / `[＋]` 帶 `parentSetId = head`;wire Codable 自動帶(nil→absent)。**iPhone reconcile 靠
   `setIdMap`(wire id → on-device id)即時翻譯 follower 的 parent** — head 是 canonical 時
   c1≠wire id 也正確;**非 dropset 列一律清 `parent_set_id`**(解構後再 cycle 才不被 stale 誤折)。
-- **iPhone 折疊要「ordering 連續」**(`computeSessionSetLayout` 按序連續吃 follower),不是純
-  parent_set_id → follower 的 wire ordinal 必須緊接 head。
+- **iPhone 折疊（`computeSessionSetLayout`）= 按 `parent_set_id` 聚合，不再要求 ordering 連續**
+  （**2026-06-01 `8ee893f` 改**）。**舊行為**是「sort by ordering → 連續吃 follower、遇非
+  follower 就 break」→ stable-ordinal 的 mid-list follower（wire ordinal=max+1、落在後面 base
+  set 之後）會 break contiguity → **headless head + 孤兒空 label 列**（live 卡 + 歷史都中、=
+  permute 移除後的 display 半邊 bug，overnight Agent A2 抓）。**現行** = head 從整個 sorted list
+  按 `parent_set_id===head.id` 聚合所有 follower（gather-then-walk、order-independent）、真孤兒
+  （head 不存在）才單列。**所以 follower 的 wire ordinal 不必再緊接 head**（iPhone-native
+  insertFollower 的 `head.ordering+1` re-pack 變成保險、非必需）。
 - **2026-06-01 cluster 左右滑 + 折組（device-grilled）**：
   - **`SetRowGroup.group` 改按「鏈頭」切組** = dropset 且 `parentSetId == nil` 開新 cluster、`!= nil` 折入當前（不是「連續 dropset」連續性）→ 兩條相鄰鏈才會渲染成 D1/D2 不合併。`parentSetId` 經 `LiveMirror.mergeSets` 帶到每個 set。
   - **cluster 整組左右滑**和一般列同套 reveal（`RowReveal` + highPriority），但裝在 `ClusterSetGroup` 自己身上：**左滑 → notch 的 ✓/◯ 原地變紅 🗑（刪整組）**，跟一般列 ◯→🗑 一樣（user 要求；**不要**在框右邊另開一顆 🗑）。右滑 → leading 露 **＋（不加 D 字）**。`notchSlot` 用 `switch reveal { .delete 🗑 / .add 隱藏 / .none ✓◯ }`。
@@ -135,10 +151,15 @@ Active 列的橫滑 reveal（highPriority）會跟「垂直捲動」+「TabView 
 - **live per-動作 set purge**:原 E2 契約「live 只 upsert 不刪」→ 遞減組改結構時孤兒列累積
   (「變一堆組」)。修法 = `purgeSetsInPresentExercises` 選項,live 對**快照裡有的動作**刪掉它
   多餘的 set(缺席的整個動作仍留 end-session)。對 WC applicationContext(完整快照)安全。
-- **⚠️ 未解:ordinal value-shuffle「吃掉下面的組」**:`project()` 的 pool-permute(為 reorder/
-  中插做的)把 follower 的 `set_kind/parent` 洗到下面 canonical 工作列上 → per-動作 purge 清孤兒
-  但擋不住這個洗。**歷史(end-session purge)正確、live 仍會暫態吃**。深解待辦(可能要 dropset 不
-  參與 permute / 給 follower 高 ordinal INSERT)。
+- **✅ 已解（2026-06-01）:ordinal value-shuffle「吃掉下面的組」** — 兩層一起修：
+  - **DATA 半**（`484b13f` Swift）：移除 `project()` 的 pool-permute、emit 每 set 自己穩定的
+    `ordinal` → 不再把 follower 洗到下面 canonical 工作列上（permute 與 `(se,ordinal)` 值配對
+    本質互斥，是 root cause）。
+  - **DISPLAY 半**（`8ee893f` TS）：`computeSessionSetLayout` 改按 `parent_set_id` 聚合（見上）
+    → stable-ordinal 的 follower 雖不相鄰仍折在 head 下、不變孤兒。
+  - 缺一不可：只做 DATA 半 = follower 不丟但變孤兒（display-broken）；只做 DISPLAY 半 = 還是
+    被 permute 洗掉。代價 = Watch reorder/中插不同步 iPhone（見上節廢案 box）。詳 ADR-0019 §
+    2026-06-01（兩段）+ overnight 報告 A2/C。
 
 ## 全屏鍵盤（`CellEditOverlay` keypad mode）
 
