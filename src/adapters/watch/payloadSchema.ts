@@ -29,10 +29,11 @@
  *   3. Every envelope carries a unique `msgId` so the receiver can
  *      dedupe via the ring buffer (≥256 slots) specified in Q7.
  *
- * The 16 message kinds come straight from ADR-0019 § Slice 13d
+ * The 17 message kinds come straight from ADR-0019 § Slice 13d
  * Amendment table + Agent F codebase inventory (D3 section + the kinds
- * referenced by D5-D24). See per-kind doc-comments below for the
- * decision that introduced each kind.
+ * referenced by D5-D24, plus `live-mirror` — the 17th, sync fast lane
+ * 2026-06-01). See per-kind doc-comments below for the decision that
+ * introduced each kind.
  */
 
 // ---------------------------------------------------------------------
@@ -40,7 +41,7 @@
 // ---------------------------------------------------------------------
 
 /**
- * The 16 message kinds. Order here mirrors the table in
+ * The 17 message kinds. Order here mirrors the table in
  * ADR-0019 § Slice 13d Amendment for grep-ability. New kinds are
  * forbidden without an ADR amendment — the kind set is the cross-end
  * API contract.
