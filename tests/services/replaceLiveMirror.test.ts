@@ -971,6 +971,229 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
       { id: 'sF', ordering: 3, set_kind: 'dropset', parent_set_id: 'sB' }, // follower of sB
     ]);
   });
+
+  it('multi-tick — cycle a MIDDLE set to dropset + add a follower, then reconcile 3× in a row: follower survives + base set stays matched', async () => {
+    // Gap #1 (the canonical bug the fix addresses, stressed across ticks).
+    // The Watch dual-fires + re-emits the SAME snapshot repeatedly (15s
+    // appContext + instant sendMessage). Each redelivery re-runs reconcile.
+    // A single-tick green is not enough: the second+ tick reconciles onto the
+    // rows the FIRST tick created, so any id/parent drift would compound. We
+    // assert idempotent stability — the follower is never lost and the head
+    // stays the SAME on-device row across ticks.
+
+    // Seed: 3 plain working sets sA/sB/sC at ordinals 0/1/2.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              { setId: 'sA', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+              { setId: 'sB', ordinal: 1, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+              { setId: 'sC', ordinal: 2, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // The cycled snapshot — sB→dropset head, follower sF@ordinal 3 (post-fix
+    // stable ordinals, head-before-follower array order). This is the exact
+    // wire shape the Watch re-emits every tick once the user has made the edit.
+    const cycled = snapshot({
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 3,
+          sets: [
+            { setId: 'sA', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+            { setId: 'sB', ordinal: 1, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: null },
+            { setId: 'sF', ordinal: 3, weight: 60, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: 'sB' },
+            { setId: 'sC', ordinal: 2, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, parent_set_id: null },
+          ],
+        },
+      ],
+    });
+
+    // Reconcile the cycled snapshot THREE times in a row (tick redelivery).
+    await replaceLiveMirror(db, cycled);
+    await replaceLiveMirror(db, cycled);
+    await replaceLiveMirror(db, cycled);
+
+    const rows = await db.getAllAsync<{
+      id: string;
+      ordering: number;
+      set_kind: string;
+      parent_set_id: string | null;
+      weight_kg: number | null;
+    }>(
+      `SELECT id, ordering, set_kind, parent_set_id, weight_kg FROM "set"
+         WHERE session_exercise_id = 'se-1' ORDER BY ordering ASC`,
+    );
+    // Exactly four rows — no follower duplication / loss across the 3 ticks.
+    expect(rows).toHaveLength(4);
+    expect(rows).toEqual([
+      { id: 'sA', ordering: 0, set_kind: 'working', parent_set_id: null, weight_kg: 80 },
+      { id: 'sB', ordering: 1, set_kind: 'dropset', parent_set_id: null, weight_kg: 80 }, // base/head stays matched
+      { id: 'sC', ordering: 2, set_kind: 'working', parent_set_id: null, weight_kg: 80 },
+      { id: 'sF', ordering: 3, set_kind: 'dropset', parent_set_id: 'sB', weight_kg: 60 }, // follower survives
+    ]);
+  });
+
+  it('multi-tick — edit the follower weight on a later tick: the SAME follower row updates in place (no duplicate)', async () => {
+    // Gap #1, mutation variant. Tick 1 establishes the chain; tick 2 carries a
+    // mutated follower weight (the user nudged the dropset weight). The follower
+    // must UPDATE in place — not insert a parallel row — and the chain link must
+    // hold. This catches a (session_exercise_id, ordinal) mismatch that would
+    // strand the mutation on a new row.
+    const base = (followerWeight: number): SessionSnapshot =>
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              { setId: 'h', ordinal: 0, weight: 100, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: null },
+              { setId: 'f', ordinal: 1, weight: followerWeight, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: 'h' },
+            ],
+          },
+        ],
+      });
+
+    await replaceLiveMirror(db, base(60));
+    await replaceLiveMirror(db, base(55)); // follower weight nudged 60 → 55
+    await replaceLiveMirror(db, base(50)); // and again 55 → 50
+
+    const rows = await db.getAllAsync<{
+      id: string;
+      parent_set_id: string | null;
+      weight_kg: number | null;
+    }>(
+      `SELECT id, parent_set_id, weight_kg FROM "set"
+         WHERE session_exercise_id = 'se-1' ORDER BY ordering ASC`,
+    );
+    expect(rows).toEqual([
+      { id: 'h', parent_set_id: null, weight_kg: 100 },
+      { id: 'f', parent_set_id: 'h', weight_kg: 50 }, // mutated in place, link intact
+    ]);
+  });
+
+  it('reconcile by exercise_id + occurrence — the SAME exercise appearing twice maps to the right occurrence across ticks', async () => {
+    // Gap #4. A superset / repeated movement: Bench Press appears TWICE in the
+    // session. Seed a canonical (template-built) tree with two se rows for the
+    // SAME exercise_id (occurrences A then B, distinct planned_sets + set
+    // weights). The Watch live mirror carries its OWN se ids for both. The
+    // reconcile must map snapshot-occurrence-1 → canonical-occurrence-1 and
+    // snapshot-occurrence-2 → canonical-occurrence-2 (FIFO in ordering ASC) —
+    // NOT collapse both onto one canonical row, and stay stable across ticks.
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, title) VALUES (?, ?, ?)`,
+      'sess-1',
+      1_700_000_000_000,
+      'A',
+    );
+    // Occurrence 1 — canonical id 'ios-occ-1', ordering 1, planned 3.
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets, template_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'ios-occ-1', 'sess-1', BUILTIN_BENCH_PRESS_ID, 1, 3, 'tpl-X',
+    );
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, session_exercise_id,
+         weight_kg, reps, set_kind, is_logged, ordering, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'ios-occ-1-set', 'sess-1', BUILTIN_BENCH_PRESS_ID, 'ios-occ-1',
+      20, 8, 'working', 0, 1, 1_700_000_000_000,
+    );
+    // Occurrence 2 — canonical id 'ios-occ-2', ordering 2, planned 2.
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets, template_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      'ios-occ-2', 'sess-1', BUILTIN_BENCH_PRESS_ID, 2, 2, 'tpl-X',
+    );
+    await db.runAsync(
+      `INSERT INTO "set" (id, session_id, exercise_id, session_exercise_id,
+         weight_kg, reps, set_kind, is_logged, ordering, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'ios-occ-2-set', 'sess-1', BUILTIN_BENCH_PRESS_ID, 'ios-occ-2',
+      30, 8, 'working', 0, 1, 1_700_000_000_000,
+    );
+
+    // Watch mirror — two occurrences of the SAME exercise_id, Watch ids,
+    // logged distinct weights (occ1=101, occ2=202). Reconcile twice.
+    const watchSnap = snapshot({
+      exercises: [
+        {
+          sessionExerciseId: 'w-occ-1',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 3,
+          sets: [
+            { setId: 'w-occ-1-set', ordinal: 1, weight: 101, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+          ],
+        },
+        {
+          sessionExerciseId: 'w-occ-2',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 1,
+          plannedSets: 2,
+          sets: [
+            { setId: 'w-occ-2-set', ordinal: 1, weight: 202, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+          ],
+        },
+      ],
+    });
+    await replaceLiveMirror(db, watchSnap);
+    await replaceLiveMirror(db, watchSnap); // second tick — must not double-map
+
+    // Exactly TWO session_exercise rows — both canonical, in order, with their
+    // template linkage preserved (no parallel tree, no collapse onto one row).
+    const seRows = await db.getAllAsync<{
+      id: string;
+      ordering: number;
+      planned_sets: number;
+      template_id: string | null;
+    }>(
+      `SELECT id, ordering, planned_sets, template_id FROM session_exercise
+         WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-1',
+    );
+    expect(seRows).toEqual([
+      { id: 'ios-occ-1', ordering: 1, planned_sets: 3, template_id: 'tpl-X' },
+      { id: 'ios-occ-2', ordering: 2, planned_sets: 2, template_id: 'tpl-X' },
+    ]);
+
+    // Each canonical set row carries its OWN occurrence's logged weight — proof
+    // the occurrences didn't cross-contaminate.
+    const occ1Set = await db.getFirstAsync<{ weight_kg: number }>(
+      `SELECT weight_kg FROM "set" WHERE session_exercise_id = 'ios-occ-1'`,
+    );
+    const occ2Set = await db.getFirstAsync<{ weight_kg: number }>(
+      `SELECT weight_kg FROM "set" WHERE session_exercise_id = 'ios-occ-2'`,
+    );
+    expect(occ1Set?.weight_kg).toBe(101);
+    expect(occ2Set?.weight_kg).toBe(202);
+
+    // And exactly two sets total — no duplication across the two ticks.
+    const setCount = await db.getFirstAsync<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM "set" WHERE session_id = ?`,
+      'sess-1',
+    );
+    expect(setCount?.n).toBe(2);
+  });
 });
 
 // =====================================================================
