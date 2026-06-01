@@ -247,6 +247,38 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
     const setRaw = deletedIds.setIds === undefined ? [] : deletedIds.setIds;
     if (!isStringArray(exRaw) || !isStringArray(setRaw)) return null;
     result.deletedIds = { exerciseIds: exRaw, setIds: setRaw };
+
+    // S7b ingest contract (slice 13d, 2026-06-02 grill「源頭」拍板). A set-id
+    // tombstone batch MUST be dropset-chain-complete: if it tombstones a
+    // chain HEAD it must also tombstone every surviving FOLLOWER. Applying a
+    // head-only tombstone would DELETE the head while a follower survives,
+    // leaving that follower's `parent_set_id` dangling → a blank-label
+    // standalone row in History (the S7b orphan).
+    //
+    // The forward Watch producer can NEVER emit this — deletion travels as
+    // absence-from-`sets` and the Swift `SessionSnapshot` wire model has no
+    // `deletedIds` field at all. This guards the SPECULATIVE ingest surface
+    // (Phase C reverse lane / backup-merge): a malformed batch is rejected
+    // fail-closed (whole tick → bad payload → dropped → self-heals on the
+    // next snapshot), forcing any future producer to send chain-complete
+    // tombstones rather than relying on a downstream orphan rescue.
+    //
+    // "Survives" = listed in this snapshot's `sets` AND not itself tombstoned
+    // — so tombstoning a WHOLE chain (head + followers together) is allowed.
+    if (setRaw.length > 0) {
+      const tombSet = new Set(setRaw);
+      for (const ex of parsedExercises) {
+        for (const s of ex.sets) {
+          if (
+            typeof s.parent_set_id === 'string' &&
+            tombSet.has(s.parent_set_id) &&
+            !tombSet.has(s.setId)
+          ) {
+            return null;
+          }
+        }
+      }
+    }
   }
 
   return result;

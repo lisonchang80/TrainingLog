@@ -355,6 +355,56 @@ describe('Slice 13d D32 — parseLiveMirrorSnapshot validator', () => {
     expect(parsed).toBeNull();
   });
 
+  // ---- S7b ingest contract: chain-complete tombstone guard (2026-06-02) ----
+  // A set-id tombstone batch must not orphan a surviving dropset follower. The
+  // forward Watch producer can never emit this (deletion = absence-from-`sets`;
+  // the Swift wire has no `deletedIds`), so this guards the speculative
+  // reverse-lane / backup-merge ingest: a head-only tombstone is rejected
+  // fail-closed, forcing producers to send chain-complete batches.
+  const chainSnapshot = (deletedSetIds: string[]) => ({
+    sessionId: 'sess-1',
+    title: '',
+    startedAt: 1,
+    exercises: [
+      {
+        sessionExerciseId: 'se-1',
+        exerciseId: 'ex-1',
+        exerciseName: 'Deadlift',
+        ordering: 0,
+        plannedSets: 2,
+        sets: [
+          { setId: 'h7', ordinal: 0, set_kind: 'dropset', is_logged: true },
+          {
+            setId: 'f7',
+            ordinal: 1,
+            set_kind: 'dropset',
+            is_logged: true,
+            parent_set_id: 'h7',
+          },
+        ],
+      },
+    ],
+    deletedIds: { exerciseIds: [], setIds: deletedSetIds },
+  });
+
+  it('S7b — rejects a head-only tombstone that would orphan a surviving follower', () => {
+    // h7 (chain head) tombstoned while f7 (parent_set_id=h7) survives in `sets`
+    // → applying it would dangle f7.parent_set_id. Fail-closed: whole tick null.
+    expect(parseLiveMirrorSnapshot(chainSnapshot(['h7']))).toBeNull();
+  });
+
+  it('S7b — allows a chain-COMPLETE tombstone (head + follower together)', () => {
+    const parsed = parseLiveMirrorSnapshot(chainSnapshot(['h7', 'f7']));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.deletedIds).toEqual({ exerciseIds: [], setIds: ['h7', 'f7'] });
+  });
+
+  it('S7b — allows tombstoning a follower only (head survives, no orphan)', () => {
+    const parsed = parseLiveMirrorSnapshot(chainSnapshot(['f7']));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.deletedIds).toEqual({ exerciseIds: [], setIds: ['f7'] });
+  });
+
   it.each([
     ['null', null],
     ['undefined', undefined],
