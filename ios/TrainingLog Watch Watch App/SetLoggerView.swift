@@ -502,28 +502,15 @@ private struct SessionCardListPage: View {
     let snapshot: SessionSnapshot
     @ObservedObject var state: SessionInteractionState
 
-    @AppStorage(InputMode.storageKey) private var inputModeRaw: String = InputMode.keypad.rawValue
-
-    /// Crown rotation value mirrored back into `state.activeCell.buffer`
-    /// when crown mode + a cell is `[]` Active. The `.digitalCrownRotation`
-    /// modifier requires a non-optional Binding<Double>; we wire it
-    /// to this @State, then propagate via `.onChange`.
-    @State private var crownValue: Double = 0
-    @FocusState private var crownFocused: Bool
-
-    private var isInlineCrownActive: Bool {
-        state.activeCell != nil && inputModeRaw == InputMode.crown.rawValue
-    }
-
-    private var crownStep: Double {
-        guard let cell = state.activeCell else { return 1 }
-        return cell.field == .weight ? 0.5 : 1
-    }
-    private var crownUpper: Double {
-        guard let cell = state.activeCell else { return 100 }
-        return cell.field == .weight ? 500 : 100
-    }
-
+    /// 2026-06-01 — the Digital Crown now drives VERTICAL SCROLL of this
+    /// ScrollView (its native behaviour) instead of editing numbers: weight/
+    /// reps are keypad-only, which frees the crown to scroll the card list —
+    /// including while a set is `{}` Active, where the highPriority horizontal
+    /// swipe-reveal still claims left/right drags. The old
+    /// `.digitalCrownRotation` cell-edit hijack + the keypad/crown input-mode
+    /// toggle were removed (user 2026-06-01: 卷軸上下移動交給轉動表冠、重量
+    /// 次數完全依靠鍵盤、齒輪取消切換鍵盤/轉動).
+    ///
     /// Phase F: exercises the user hasn't deleted on the Watch. Drives
     /// both the empty-state branch and the card `ForEach` so a deleted
     /// card disappears immediately (and the shrunk tree is what the
@@ -533,7 +520,15 @@ private struct SessionCardListPage: View {
     }
 
     var body: some View {
-        ScrollView {
+        // 2026-06-01 (build7): HR pane pinned ABOVE the scroll list in a VStack
+        // — NOT `.safeAreaInset`, which interfered with `proxy.scrollTo` so the
+        // auto-scroll landed on the exercise's FIRST row instead of the active
+        // set. With the pane outside the ScrollView, scrollTo .top aligns the
+        // active set to the ScrollView's top = just under the pane.
+        VStack(spacing: 0) {
+            HRFrozenPane()
+            ScrollViewReader { proxy in
+            ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 // Session title (Phase A: read from snapshot).
                 if !snapshot.title.isEmpty {
@@ -592,41 +587,55 @@ private struct SessionCardListPage: View {
             .padding(.horizontal, 4)
             .padding(.bottom, 12)
         }
-        // Inline crown input — only active when cell is `[]` Active AND
-        // input mode is crown. Per user 2026-05-29 polish 4: «轉動表冠
-        // 模式：重量或組的框變綠（Active）、表冠旋轉即轉換數字、不要
-        // 跳出東西». No popup; the active cell's green border + live
-        // displayValue do all the work.
-        .focusable(isInlineCrownActive)
-        .focused($crownFocused)
-        .digitalCrownRotation(
-            $crownValue,
-            from: 0,
-            through: crownUpper,
-            by: crownStep,
-            sensitivity: .medium,
-            isContinuous: false,
-            isHapticFeedbackEnabled: true
-        )
-        .onChange(of: state.activeCell) { _, newCell in
-            // When a cell freshly enters `[]` Active in crown mode,
-            // seed the crown value from the cell's buffer and grab focus.
-            guard let cell = newCell, inputModeRaw == InputMode.crown.rawValue else {
-                crownFocused = false
-                return
+            // Auto-scroll the freshly `{}` Active set to the top via a DEDICATED
+            // per-row anchor (`anchor-<setId>`, placed in
+            // ExerciseCard.setRowsSection) — a UNIQUE id that doesn't collide
+            // with the ForEach id, so scrollTo reliably lands on the active row
+            // (set-id targets hit the exercise's first row instead). Crown
+            // scrolls the ScrollView natively (no `.digitalCrownRotation`).
+            .onChange(of: state.activeSetId) { _, newId in
+                guard let id = newId else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo("anchor-\(id)", anchor: .top)
+                }
             }
-            crownValue = Double(cell.buffer) ?? 0
-            // Defer focus to next runloop tick so SwiftUI has applied
-            // the .focusable(...) change before we set @FocusState.
-            DispatchQueue.main.async {
-                crownFocused = true
             }
         }
-        .onChange(of: crownValue) { _, newValue in
-            // Mirror rotation back into the state buffer; displayValue
-            // surfaces this live on the active cell.
-            guard isInlineCrownActive else { return }
-            state.updateActiveCellBuffer(formatCrownValue(newValue, field: state.activeCell?.field ?? .weight))
+    }
+}
+
+// MARK: - Frozen HR pane (reserved placeholder)
+
+/// Pinned top strip on the session card page reserving space for the live
+/// heart-rate readout (user 2026-06-01「HR 凍結窗格保留區」). Sits ABOVE the
+/// ScrollView in a VStack so it stays put while the card list scrolls beneath
+/// it, and a freshly-activated set auto-scrolls to just below it (build7 moved
+/// it off `.safeAreaInset`, which had broken `proxy.scrollTo`).
+///
+/// Placeholder for now — HealthKitController doesn't publish a live HR value
+/// yet (only auth status); the real value wires in with the D10 in-session
+/// top bar (NEW-Q32 ♥/🔥 Row 2). Kept deliberately compact (~one row).
+private struct HRFrozenPane: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "heart.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+            Text("--")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text("bpm")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 }

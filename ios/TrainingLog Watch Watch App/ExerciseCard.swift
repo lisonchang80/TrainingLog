@@ -295,6 +295,14 @@ struct ExerciseCard: View {
                     Divider()
                         .padding(.vertical, 2)
                 }
+                // Dedicated zero-height scroll anchor at this row's TOP. Unique
+                // id (`anchor-<setId>`, NOT the ForEach id) so the page's
+                // ScrollViewReader scrolls THIS row to just below the HR pane on
+                // activation — targeting the row's own id hit the exercise's
+                // first row instead (user 2026-06-01).
+                Color.clear
+                    .frame(height: 0)
+                    .id("anchor-\(group.id)")
                 // The reorder gesture + move-mode highlight live INSIDE
                 // `ReorderableRow` (its `@GestureState` auto-clears on lift —
                 // no stale orange / blocked taps). `isActive` masks the gesture
@@ -410,7 +418,17 @@ struct ExerciseCard: View {
                 isReordering: isReordering,
                 onCycleHeaderType: { cycleType(header) },
                 onAddChild: { afterId in addDropsetChild(afterSetId: afterId, headSetId: header.setId) },
-                onRemoveChild: { childId in state.deleteSet(setId: childId) }
+                onRemoveChild: { childId in state.deleteSet(setId: childId) },
+                // Left-swipe the whole cluster → delete every member set.
+                onDeleteCluster: {
+                    for sid in ([header.setId] + subs.map { $0.setId }) {
+                        state.deleteSet(setId: sid)
+                    }
+                },
+                // Right-swipe the whole cluster → add another D (a fresh chain).
+                onAddDropset: {
+                    addAnotherDropset(header: header, subs: subs)
+                }
             )
         }
     }
@@ -445,6 +463,51 @@ struct ExerciseCard: View {
             // follower the ＋ was tapped on.
             parentSetId: headSetId
         )
+    }
+
+    /// Right-swipe a cluster → add ANOTHER D after it: a fresh dropset HEAD
+    /// (`parentSetId == nil`) inserted after the cluster's last member, then a
+    /// COPY of every follower so the new cluster matches the source's full
+    /// structure (user 2026-06-01「完整新增一個 cluster — 3 行不該只複製 2
+    /// 行」). The new head's nil-parent is what makes `SetRowGroup.group` start
+    /// a separate cluster (D2) instead of extending this one. Each new row
+    /// copies its source row's displayed weight/reps.
+    private func addAnotherDropset(header: SessionSnapshotSet, subs: [SessionSnapshotSet]) {
+        let lastMemberId = subs.last?.setId ?? header.setId
+        let hw = state.displayValue(setId: header.setId, field: .weight, fallback: header.weight)
+        let hr = state.displayValue(setId: header.setId, field: .reps,
+                                    fallback: header.reps.map { Double($0) })
+        // New chain head (nil parent → its own cluster), after the source
+        // cluster's last member; becomes Active.
+        let newHeadId = state.addSet(
+            sessionExerciseId: exercise.sessionExerciseId,
+            afterSetId: lastMemberId,
+            baseSets: exercise.sets,
+            weight: hw,
+            reps: hr.map { Int($0.rounded()) },
+            setKind: "dropset",
+            activateNew: true,
+            parentSetId: nil
+        )
+        // Replicate EVERY follower so the new D has the same row count as the
+        // source. Each new follower chains AFTER the previous new row (anchor)
+        // so they stay in order, and copies its source follower's values.
+        var anchor = newHeadId
+        for sub in subs {
+            let sw = state.displayValue(setId: sub.setId, field: .weight, fallback: sub.weight)
+            let sr = state.displayValue(setId: sub.setId, field: .reps,
+                                        fallback: sub.reps.map { Double($0) })
+            anchor = state.addSet(
+                sessionExerciseId: exercise.sessionExerciseId,
+                afterSetId: anchor,
+                baseSets: exercise.sets,
+                weight: sw,
+                reps: sr.map { Int($0.rounded()) },
+                setKind: "dropset",
+                activateNew: false,
+                parentSetId: newHeadId
+            )
+        }
     }
 }
 
@@ -774,8 +837,12 @@ private struct InteractiveSetRow<Content: View>: View {
 /// working rows (user Q1); orange while reordering.
 ///
 /// The cluster's "active id" is the head's set ID — tapping any row inside
-/// the cluster activates the whole group; whole-cluster swipe/long-press are
-/// owned by the wrapping `ReorderableRow` / `InteractiveSetRow` layer.
+/// the cluster activates the whole group. Whole-cluster LONG-PRESS reorder is
+/// owned by the wrapping `ReorderableRow`; whole-cluster SWIPE lives here
+/// (2026-06-01): once the cluster is Active, left-swipe reveals 🗑 (delete the
+/// whole D), right-swipe reveals ＋D (add another dropset chain → D2). Same
+/// reveal-then-tap + highPriority gating as `InteractiveSetRow` so the swipe
+/// beats the TabView page-swipe and only arms on the Active cluster.
 private struct ClusterSetGroup: View {
     @ObservedObject var state: SessionInteractionState
     let header: SessionSnapshotSet
@@ -790,6 +857,14 @@ private struct ClusterSetGroup: View {
     let onAddChild: (_ afterSetId: String) -> Void
     /// [－] on a follower → remove that child set.
     let onRemoveChild: (_ childSetId: String) -> Void
+    /// Left-swipe (reveal-then-tap 🗑) → delete the WHOLE cluster.
+    let onDeleteCluster: () -> Void
+    /// Right-swipe (reveal-then-tap ＋) → add ANOTHER full dropset chain (D2).
+    let onAddDropset: () -> Void
+
+    /// Which swipe affordance the cluster has revealed (mirrors
+    /// `InteractiveSetRow.reveal`). Cleared on tap / leaving Active / acting.
+    @State private var reveal: RowReveal = .none
 
     private var groupId: String { header.setId }
     private var active: Bool { state.isActive(setId: groupId) }
@@ -800,6 +875,49 @@ private struct ClusterSetGroup: View {
     private let notchH: CGFloat = 30
 
     var body: some View {
+        HStack(spacing: 4) {
+            // Right-swipe reveals ＋ on the LEADING edge (cluster shifts right),
+            // matching the working-row ＋. Tap = add another full dropset chain (D2).
+            if reveal == .add {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        reveal = .none
+                        onAddDropset()
+                    }
+                } label: {
+                    // ＋ alone (user 2026-06-01「+即可不用+D」) — adds another
+                    // full dropset cluster.
+                    Image(systemName: "plus.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(.green)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            clusterBox
+        }
+        .padding(.vertical, 1)
+        // Opaque-ish hit area so a horizontal drag anywhere on the cluster is
+        // captured by the reveal gesture.
+        .background(Color.black.opacity(0.001))
+        // Reveal gesture — LOW minimumDistance + highPriority so the Active
+        // cluster claims the horizontal drag before the TabView pages. Masked
+        // OFF when not Active (`.subviews`) so a non-Active swipe pages.
+        .highPriorityGesture(revealGesture, including: active ? .all : .subviews)
+        // Leaving Active closes the reveal so a stale 🗑/＋ can't linger.
+        .onChange(of: active) { _, isActive in
+            if !isActive && reveal != .none {
+                withAnimation(.easeOut(duration: 0.15)) { reveal = .none }
+            }
+        }
+    }
+
+    /// The bordered cluster box (head + followers + ✓ in the notch). Extracted
+    /// so the reveal buttons can sit beside it in the body HStack.
+    private var clusterBox: some View {
         VStack(alignment: .leading, spacing: 3) {
             // Head: D# + cells. Reserve the notch on the right so the cells
             // don't run under the ✓.
@@ -834,8 +952,46 @@ private struct ClusterSetGroup: View {
                     lineWidth: isReordering ? 2.5 : 2.0
                 )
         )
-        // ✓ for the whole chain — lives in the notch, OUTSIDE the border.
+        // The notch slot — ✓/◯ normally; on a LEFT-swipe it becomes a red 🗑
+        // (delete the whole cluster) IN PLACE, exactly like a working row's
+        // ◯→🗑 (user 2026-06-01「左滑 ◯ 改成垃圾桶就好、跟一般組一樣」). On a
+        // right-swipe (.add) it's hidden (the ＋ shows on the leading edge).
         .overlay(alignment: .topTrailing) {
+            notchSlot
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Tap activates an idle cluster; on an Active cluster a tap on the
+            // box (not the 🗑/＋) cancels a shown reveal.
+            if !active {
+                state.activate(setId: groupId)
+            } else if reveal != .none {
+                withAnimation(.easeOut(duration: 0.15)) { reveal = .none }
+            }
+        }
+    }
+
+    /// The notch slot button — `.none` ✓/◯ (toggle logged) / `.delete` red 🗑
+    /// (delete whole cluster, in place) / `.add` hidden (＋ shows on leading).
+    /// Mirrors `InteractiveSetRow.trailingControl` so a cluster's left-swipe
+    /// matches a working row's ◯→🗑.
+    @ViewBuilder
+    private var notchSlot: some View {
+        switch reveal {
+        case .delete:
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { onDeleteCluster() }
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.body)
+                    .foregroundStyle(.red)
+                    .frame(width: notchW, height: notchH)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        case .add:
+            Color.clear.frame(width: notchW, height: notchH)
+        case .none:
             Button {
                 state.toggleLogged(setId: groupId)
             } label: {
@@ -851,13 +1007,28 @@ private struct ClusterSetGroup: View {
             }
             .buttonStyle(.plain)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Don't auto-activate on tap-anywhere when cluster is already
-            // Active — that would steal cell taps.
-            if !active { state.activate(setId: groupId) }
-        }
-        .padding(.vertical, 1)
+    }
+
+    /// Mirror of `InteractiveSetRow.revealGesture`: a short horizontal drag
+    /// toggles the reveal. Left → 🗑 (or cancels a shown ＋D); right → ＋D (or
+    /// cancels a shown 🗑). Vertical drags fall through (crown scrolls the list).
+    private var revealGesture: some Gesture {
+        DragGesture(minimumDistance: 5)
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height)
+                else { return }
+                let next: RowReveal
+                if value.translation.width < -28 {
+                    next = (reveal == .add) ? .none : .delete
+                } else if value.translation.width > 28 {
+                    next = (reveal == .delete) ? .none : .add
+                } else {
+                    return
+                }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    reveal = next
+                }
+            }
     }
 }
 
@@ -925,11 +1096,16 @@ enum SetRowGroup: Identifiable {
     ///   - working row → `.working` with a 1-based running index
     ///     among working rows (warmup + cluster don't bump the
     ///     working counter per D11 spec line 1551 `1 / 2 / 3 / 4 / D1`)
-    ///   - first dropset row → start a cluster, that row becomes the
-    ///     header with a 1-based cluster index
-    ///   - subsequent dropset rows → folded as sub-sets under the
-    ///     current cluster
+    ///   - dropset row that is a CHAIN HEAD (`parent_set_id == nil`) →
+    ///     starts a NEW cluster (so two adjacent chains render D1 / D2,
+    ///     not merged); that row becomes the header (1-based cluster index)
+    ///   - dropset row that is a FOLLOWER (`parent_set_id != nil`) →
+    ///     folded as a sub-set under the current cluster
     ///   - non-dropset row after a cluster closes the cluster
+    ///
+    /// 2026-06-01 — switched the cluster boundary from "consecutive dropset"
+    /// contiguity to chain-head (`parent_set_id`); `parentSetId` travels on
+    /// every set via `LiveMirror.mergeSets`.
     static func group(sets: [SessionSnapshotSet]) -> [SetRowGroup] {
         var out: [SetRowGroup] = []
         var workingCount = 0
@@ -951,7 +1127,17 @@ enum SetRowGroup: Identifiable {
         for s in sets {
             switch s.setKind {
             case "dropset":
-                if pendingCluster == nil {
+                if s.parentSetId == nil {
+                    // Chain HEAD (`parent_set_id == nil`) → close any open chain
+                    // and open a NEW cluster, so two adjacent dropset chains
+                    // render as D1 / D2 instead of merging. This is what makes
+                    // the cluster right-swipe「加 D2」produce a real D2 (a fresh
+                    // head with nil parent) rather than extending D1.
+                    flushCluster()
+                    pendingCluster = (header: s, subs: [])
+                } else if pendingCluster == nil {
+                    // Follower with no open chain (defensive — orphaned parent):
+                    // render it as a head so it still shows.
                     pendingCluster = (header: s, subs: [])
                 } else {
                     pendingCluster?.subs.append(s)
@@ -1010,6 +1196,11 @@ private struct SetRowWarmupContent: View {
                     state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
                 } : nil
             )
+            // Pin to the fixed column width (2026-06-01) so working / warmup
+            // cells line up with the dropset cluster's pinned cells — without
+            // this the CellBox auto-expands to fill the wider non-notch row,
+            // so dropset rows looked narrower / shifted vs normal rows.
+            .frame(width: CellMetrics.weightWidth)
             CellBox(
                 value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
@@ -1019,6 +1210,7 @@ private struct SetRowWarmupContent: View {
                     state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
                 } : nil
             )
+            .frame(width: CellMetrics.repsWidth)
             Spacer(minLength: 0)
         }
     }
@@ -1066,6 +1258,11 @@ private struct SetRowWorkingContent: View {
                     state.activateCell(setId: set.setId, field: .weight, currentValue: displayWeight)
                 } : nil
             )
+            // Pin to the fixed column width (2026-06-01) so working / warmup
+            // cells line up with the dropset cluster's pinned cells — without
+            // this the CellBox auto-expands to fill the wider non-notch row,
+            // so dropset rows looked narrower / shifted vs normal rows.
+            .frame(width: CellMetrics.weightWidth)
             CellBox(
                 value: "\(Int(displayReps?.rounded() ?? 0))",
                 unit: "次",
@@ -1075,6 +1272,7 @@ private struct SetRowWorkingContent: View {
                     state.activateCell(setId: set.setId, field: .reps, currentValue: displayReps)
                 } : nil
             )
+            .frame(width: CellMetrics.repsWidth)
             Spacer(minLength: 0)
         }
     }
