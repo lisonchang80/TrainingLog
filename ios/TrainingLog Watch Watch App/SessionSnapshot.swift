@@ -120,6 +120,47 @@ struct SessionSnapshot: Codable, Equatable {
     /// Epoch ms.
     let startedAt: Int64
     let exercises: [SessionSnapshotExercise]
+    /// Sync fast lane (2026-06-01) — monotonic per-emit revision (ms-since-
+    /// epoch). The live-mirror producer stamps this; the iPhone receiver
+    /// (`onLiveMirror`) keeps a per-session high-water mark and DROPS any
+    /// snapshot whose `rev <= lastApplied`, so a late applicationContext
+    /// backstop can't clobber a fresher `sendMessage`. nil on snapshots that
+    /// aren't live ticks (start-from-watch reply, mock/preview); JSONEncoder
+    /// omits nil → it travels ABSENT and the iPhone parser tolerates that.
+    let rev: Int64?
+    /// `"watch"` | `"iphone"` — which side produced the snapshot (echo
+    /// suppression + forward-compat for the reverse direction). nil ⇒ absent.
+    let originator: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId
+        case title
+        case startedAt
+        case exercises
+        case rev
+        case originator
+    }
+
+    /// Memberwise init with `rev` / `originator` defaulted to nil so the
+    /// existing 4-arg call sites (projection / mock / placeholder / finish
+    /// page / start-from-watch decode) stay unchanged; only the live-mirror
+    /// `emit` path threads a real rev + originator through. (A custom init
+    /// does NOT disable the synthesized Codable conformance.)
+    init(
+        sessionId: String,
+        title: String,
+        startedAt: Int64,
+        exercises: [SessionSnapshotExercise],
+        rev: Int64? = nil,
+        originator: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.title = title
+        self.startedAt = startedAt
+        self.exercises = exercises
+        self.rev = rev
+        self.originator = originator
+    }
 }
 
 /// Reply payload for the `start-from-watch` outbound. Top-level

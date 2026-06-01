@@ -252,24 +252,35 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 
     // MARK: - Outbound: live mirror (D29 — Q6=a)
 
-    /// Push the current session snapshot to iPhone via
-    /// `WCSession.updateApplicationContext` — the Q6=a live-mirror channel.
-    /// Called by `LiveMirrorProducer` on a 15s debounce + dirty flag.
+    /// Push the current session snapshot to iPhone — DUAL-FIRE (sync fast
+    /// lane, 2026-06-01). Called by `LiveMirrorProducer` on a 0.5s coalesce +
+    /// immediate emit-on-mutation.
     ///
-    /// applicationContext has LATEST-STATE-REPLACE semantics: the OS keeps
-    /// only the most recent dict (no FIFO queue), so each call overwrites
-    /// the previous and the iPhone just adopts the latest via
-    /// `replaceLiveMirror` — no merge/LWW needed there. It also does NOT
-    /// require `isReachable`: the OS holds the latest context and delivers
-    /// it when the iPhone next activates. Best-effort + never throws —
-    /// applicationContext is a freshness channel, not a delivery-guaranteed
-    /// one (end-session reconcile is the correctness backstop).
+    /// Two channels, same `dict`:
+    ///   1. `sendMessage` (when `isReachable`) — the INSTANT, FIFO-ordered
+    ///      <1s foreground channel. This is what makes the live mirror
+    ///      actually live: every intermediate dropset-edit state arrives in
+    ///      order (no coalescing-induced skipped structural step). Wrapped as
+    ///      a `{kind:"live-mirror", payload:dict}` envelope so the iPhone
+    ///      `addMessageListener("live-mirror")` routes it to the same
+    ///      rev-guarded `onLiveMirror`.
+    ///   2. `updateApplicationContext` (always) — the BACKSTOP. Latest-state-
+    ///      replace, no FIFO, OS-paced delivery, does NOT require isReachable
+    ///      (survives iPhone-backgrounded). NOT a <1s channel on its own —
+    ///      riding it ALONE was the "又慢、又亂、時有時無（尤其遞減組）"
+    ///      regression this method fixes.
     ///
-    /// Plist constraint: the dict must be plist-serialisable and `NSNull`
-    /// is not a plist type. `JSONEncoder` OMITS nil optionals, so the
-    /// per-set nullable fields arrive ABSENT (not null); the iPhone
-    /// `parseLiveMirrorSnapshot` normalises absent → null. Encoding uses
-    /// the `SessionSnapshot` CodingKeys (snake_case rest_sec/set_kind/
+    /// The iPhone keeps a per-session `rev` high-water mark and drops any
+    /// inbound whose `rev <= lastApplied`, so the late backstop can never
+    /// clobber a fresher fast-lane delivery (and dual-delivery of the same
+    /// emit is a safe no-op). Both paths best-effort + never throw fatally —
+    /// `end-session` reconcile remains the correctness backstop.
+    ///
+    /// Plist constraint: the dict must be plist-serialisable and `NSNull` is
+    /// not a plist type. `JSONEncoder` OMITS nil optionals, so per-set
+    /// nullable fields (and an absent `rev`/`originator`) travel ABSENT; the
+    /// iPhone `parseLiveMirrorSnapshot` normalises absent → null. Encoding
+    /// uses the `SessionSnapshot` CodingKeys (snake_case rest_sec/set_kind/
     /// is_logged), matching the iPhone wire contract exactly.
     func updateLiveMirror(_ snapshot: SessionSnapshot) {
         guard let session, session.activationState == .activated else {
@@ -280,13 +291,41 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             lastOutbound = "live-mirror skip: encode failed"
             return
         }
+
+        // Backstop — applicationContext (always, latest-state-replace).
+        var status = "ctx"
         do {
             try session.updateApplicationContext(dict)
-            lastOutbound =
-                "live-mirror sent sess=\(prefix8(snapshot.sessionId)) ex=\(snapshot.exercises.count)"
         } catch {
-            lastOutbound = "live-mirror error: \(error.localizedDescription)"
+            status = "ctx-err(\(error.localizedDescription))"
         }
+
+        // Fast lane — sendMessage when reachable (instant + ordered).
+        if session.isReachable {
+            let envelope: [String: Any] = [
+                "msgId": UUID().uuidString,
+                "ts": Int64(Date().timeIntervalSince1970 * 1000),
+                "kind": "live-mirror",
+                "payload": dict,
+            ]
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { [weak self] err in
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "live-mirror msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
+                }
+            )
+            status = status == "ctx" ? "ctx+msg" : "\(status)+msg"
+        }
+
+        let revStr = snapshot.rev.map(String.init) ?? "nil"
+        lastOutbound =
+            "live-mirror \(status) sess=\(prefix8(snapshot.sessionId)) "
+            + "ex=\(snapshot.exercises.count) rev=\(revStr)"
     }
 
     // MARK: - Outbound: handshake (Stage 1, D8 Phase 2)

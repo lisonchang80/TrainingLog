@@ -194,6 +194,10 @@ final class LiveMirrorProducer: ObservableObject {
     private var lastEmit: Date?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Monotonic high-water for the per-emit `rev` stamp. Seeded from the
+    /// wall clock on each emit but forced strictly increasing (see `nextRev`).
+    private var revCounter: Int64 = 0
+
     /// Coalesce window — at most one push per 0.5s. Was 15s (NEW-Q50 Q6=a);
     /// lowered + paired with immediate emit-on-mutation (`markDirty`) so the
     /// iPhone live mirror reflects a Watch edit in well under 1s (user request
@@ -306,10 +310,20 @@ final class LiveMirrorProducer: ObservableObject {
         return Date().timeIntervalSince(last) >= throttle
     }
 
+    /// Strictly-monotonic per-emit revision. Seeded from ms-since-epoch so it
+    /// survives a mid-session producer restart (the iPhone's per-session
+    /// high-water mark stays behind a wall-clock value), but forced
+    /// `> previous` so two emits in the same millisecond still differ.
+    private func nextRev() -> Int64 {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        revCounter = max(nowMs, revCounter + 1)
+        return revCounter
+    }
+
     private func emit(force: Bool) {
         guard let base, let interaction, let coordinator else { return }
         if !force && !dirty { return }
-        let live = LiveMirror.project(
+        let projected = LiveMirror.project(
             base: base,
             logged: interaction.loggedSetIds,
             edited: interaction.editedValues,
@@ -318,6 +332,17 @@ final class LiveMirrorProducer: ObservableObject {
             addedSets: interaction.addedSets,
             kindOverrides: interaction.setKindOverrides,
             rankOverrides: interaction.setRankOverrides
+        )
+        // Stamp a monotonic rev + originator so the iPhone receiver can drop
+        // out-of-order / stale redeliveries (the dual-fired sendMessage +
+        // applicationContext channels both land in the rev-guarded onLiveMirror).
+        let live = SessionSnapshot(
+            sessionId: projected.sessionId,
+            title: projected.title,
+            startedAt: projected.startedAt,
+            exercises: projected.exercises,
+            rev: nextRev(),
+            originator: "watch"
         )
         coordinator.updateLiveMirror(live)
         dirty = false
