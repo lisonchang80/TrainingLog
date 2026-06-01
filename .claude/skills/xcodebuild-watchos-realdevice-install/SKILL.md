@@ -339,6 +339,66 @@ A bug VISIBLE on the Watch is not necessarily a Watch-BINARY bug. The Watch read
 
 If the user opens the app and sees React Native red error page `No script URL provided`, that's Metro packager missing, NOT this skill's territory. Fix: `npx expo start --dev-client` from repo root (LAN-reachable from iPhone) → iPhone tap **Reload JS**. This is per-launch and unrelated to Watch binary state.
 
+## Release standalone build — sidestep Metro entirely (flaky network / hotspot)
+
+When the network is slow/unreliable (user on a phone hotspot, weak wifi) a Debug
+dev-client smoke becomes painful: the iPhone can't reach Metro → Reload JS hangs
+→ red screen `TurboModuleManager: Timed out waiting for modules to be invalidated`
+(the reload tear-down times out fetching the bundle). Don't fight Metro — build a
+**Release standalone** that EMBEDS the JS bundle, so the app needs no Metro / no
+network at all (WC iPhone↔Watch is a local peer channel, unaffected). Validated
+2026-06-01 (hotspot device smoke).
+
+Pre-flight: confirm Release signing is development (devicectl-installable), NOT
+distribution-only:
+```bash
+cd ios && xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
+  -configuration Release -showBuildSettings 2>/dev/null \
+  | grep -iE "CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER"
+# Want: CODE_SIGN_IDENTITY = Apple Development + a DEVELOPMENT_TEAM, NO manual
+# distribution profile. (TrainingLog: Apple Development / XQTU89U2J2 → OK.)
+```
+Build + verify the JS bundle is embedded (the standalone proof) + install:
+```bash
+xcodebuild -workspace "<abs>/ios/TrainingLog.xcworkspace" -scheme TrainingLog \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -allowProvisioningUpdates -derivedDataPath /tmp/h1-release-dd clean build \
+  2>&1 | tee /tmp/release-build.log    # use generic/platform=iOS NOT -sdk iphoneos (Trap: WatchKit module err)
+APP=/tmp/h1-release-dd/Build/Products/Release-iphoneos/TrainingLog.app
+ls -la "$APP/main.jsbundle"            # ✅ ~5MB = JS embedded → truly standalone
+xcrun devicectl device install app --device <iphone-udid> "$APP"
+```
+Then the user just OPENS the app — no Metro, no URL, no Reload JS. (Release also
+strips the dev menu → no red error screens. Good for a clean smoke; bad if you
+need fast JS iteration — for that, fix the network or use `--tunnel`.) ~10 min WMO
+build; run it `run_in_background: true`.
+
+## Pull the device's SQLite DB for ground-truth debugging
+
+When a device-only data bug appears (history corruption, lost rows) and you can't
+tell render-bug vs data-bug, **pull the actual SQLite DB and SQL it** rather than
+guessing. expo-sqlite stores `traininglog.db` at `Documents/SQLite/` in the app
+container; development-signed apps allow container access via `devicectl`.
+```bash
+xcrun devicectl device copy from \
+  --device <iphone-udid> \
+  --domain-type appDataContainer --domain-identifier com.lisonchang.TrainingLog \
+  --source Documents/SQLite --destination /tmp/tl-sqlite
+sqlite3 -header -column /tmp/tl-sqlite/traininglog.db "SELECT … FROM \"set\" …"
+```
+Traps validated 2026-06-01:
+- The `Failed to load provisioning parameter list … No provider was found` line is
+  a **non-fatal warning** — the copy/install still succeeds (bundleID +
+  installationURL print after it). Grep it out: `grep -ivE "provisioning|No provider"`.
+- **devicectl device resolution BREAKS over a phone hotspot** (`CoreDeviceError 1011
+  … unable to locate a device matching … ecid_…`). The wifi/network CoreDevice
+  tunnel goes stale. Fix: **connect the iPhone by USB cable** (+ unlock + trust) →
+  `xcrun devicectl list devices` shows it `connected` → copy works. (Earlier
+  `install` may have worked before the tunnel went stale; copy needs it live.)
+- Read-only copy — does not touch the device data. Cross-session compare (multiple
+  rows of the same exercise across sessions) pins intermittent corruption fast: a
+  follower at a gap-ordinal / a head with 0 followers = something purged it.
+
 ## Cost of skipping this skill
 
 2026-05-29 morning: ~45 min lost iterating "rebuild → user reports old Watch UI → re-investigate". Three full xcodebuild rounds (07:12, 07:36, 07:50) all printed `** INSTALL SUCCEEDED **` while iPhone had no app installed. Only at 08:00 did `devicectl install` solve Trap 1, and only after clean build at 07:50 was Watch target actually compiled (Trap 2). User then hit Trap 3 (cached old Watch UI) until iPhone host app was fully deleted at 08:30.
