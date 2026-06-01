@@ -41,6 +41,25 @@ set rows 在 `ScrollView { VStack { ForEach } }`（**不是 List** → 沒有 `.
 
 watchOS Sim **驗不到拖曳手勢**（AX tree 空、tap 不穩）→ build green + at-rest layout 截圖就好，手勢真驗一律走實機（`xcodebuild-watchos-realdevice-install` skill）。每改一輪 Swift = 一次 clean install + devicectl + 戴錶 smoke，預期會迭代好幾輪 device feedback。
 
+## 頁面級捲動 / 手勢架構（2026-06-01 實機 grilled — 3 個 watchOS 硬限制）
+
+set-logger 是 `ScrollView{VStack{ForEach{ExerciseCard 一動作一大框}}}` 包在 paging `TabView` 內。這三條是這次磨出來的，動頁面結構前必讀：
+
+### 1. ⭐ watchOS List ⊥「一動作一大框」— 別為了原生 `.swipeActions` 改 List
+原生逐列 `.swipeActions` **逼每個 set 變獨立 List 列**，而 watchOS 把每列渲染成**有間距的圓角卡片**，且 **`.listRowSpacing` 在 watchOS 不可用（編譯錯）**→ 做不出連續單框。背景負 padding bleed 能勉強填縫但有雙重透明度接縫、user 不接受。**watchOS 上「原生逐列 swipe」與「連續單框」本質互斥**：要單框就留 ScrollView + 自訂 reveal（Pattern 2）。（這次走了一輪 List 重構又整個 revert，教訓夠貴。）
+
+### 2. ⭐ 垂直捲動交給「數位表冠」，繞開手勢三方搶
+Active 列的橫滑 reveal（highPriority）會跟「垂直捲動」+「TabView 換頁」三方搶：highPriority 贏換頁但**吃掉垂直捲動**；simultaneous 放過捲動但**回到誤觸換頁**。解法 = **垂直捲動整個交給數位表冠**（ScrollView 原生 crown 捲動），手指只負責橫滑：
+- 移除 `CellEditOverlay` 的 crown 數字編輯（永遠 keypad）+ `SessionCardListPage` 的 `.digitalCrownRotation` hijack → ScrollView 原生表冠捲動接手。**重量/次數純鍵盤**。
+- 移除 ⚙「輸入方式」鍵盤/表冠切換（`InputModePickerView` + `WatchSettingsDestination.inputMode`；`InputMode` enum 留著、settings-sync 仍帶）。
+- swipe 維持 highPriority（贏換頁），不再煩惱垂直捲動。
+
+### 3. ⭐ auto-scroll「active set 捲到頂」— `scrollTo` 巢狀 id + `.safeAreaInset` 不可靠
+要「點 set → 該 set 捲到頂部凍結窗格下方」。踩了 3 輪都 landed 在**該動作第一列**：
+- ❌ `proxy.scrollTo(activeSetId)` 靠**內層 ForEach 的 `id:`**（setId 在 ExerciseCard 內）→ 跨子視圖 + `.safeAreaInset` 干擾。
+- ❌ 列上加顯式 `.id(group.id)` → 仍第一列。❌ `DispatchQueue.main.async` defer → 變完全不捲。
+- ✅ **正解兩招併用**：(a) 頂部凍結窗格（HR 等）改放 **`VStack` 在 ScrollView 上方**、**不要 `.safeAreaInset`**（它干擾 scrollTo）；(b) 每列頂端放**專用零高度 anchor** `Color.clear.frame(height:0).id("anchor-\(group.id)")`（**獨立前綴 id、不跟 ForEach id 撞**），`proxy.scrollTo("anchor-\(activeSetId)", anchor:.top)` **同步**（不 defer）。觸發 = `.onChange(of: state.activeSetId)`。
+
 ## iPhone reconcile 的 ordinal 鐵律（`src/services/replaceLiveMirror.ts`）
 
 加任何「動結構」的功能前必懂，否則 [完成] 後歷史會錯：
@@ -103,6 +122,11 @@ watchOS Sim **驗不到拖曳手勢**（AX tree 空、tap 不穩）→ build gre
   c1≠wire id 也正確;**非 dropset 列一律清 `parent_set_id`**(解構後再 cycle 才不被 stale 誤折)。
 - **iPhone 折疊要「ordering 連續」**(`computeSessionSetLayout` 按序連續吃 follower),不是純
   parent_set_id → follower 的 wire ordinal 必須緊接 head。
+- **2026-06-01 cluster 左右滑 + 折組（device-grilled）**：
+  - **`SetRowGroup.group` 改按「鏈頭」切組** = dropset 且 `parentSetId == nil` 開新 cluster、`!= nil` 折入當前（不是「連續 dropset」連續性）→ 兩條相鄰鏈才會渲染成 D1/D2 不合併。`parentSetId` 經 `LiveMirror.mergeSets` 帶到每個 set。
+  - **cluster 整組左右滑**和一般列同套 reveal（`RowReveal` + highPriority），但裝在 `ClusterSetGroup` 自己身上：**左滑 → notch 的 ✓/◯ 原地變紅 🗑（刪整組）**，跟一般列 ◯→🗑 一樣（user 要求；**不要**在框右邊另開一顆 🗑）。右滑 → leading 露 **＋（不加 D 字）**。`notchSlot` 用 `switch reveal { .delete 🗑 / .add 隱藏 / .none ✓◯ }`。
+  - **右滑 ＋ 要複製「完整」cluster**：新 head（`parentSetId=nil`）+ **逐一複製來源每個 follower**（行數=來源組，3 行不能只生 2 行）、每列複製來源顯示值。
+  - **CellBox 對齊要釘「所有列」**：一般/熱身列也要 `.frame(width: CellMetrics.weightWidth/.repsWidth)`，不能只釘 cluster；否則一般列 CellBox 展開、跟遞減組不對齊（user「遞減組與一般組對齊」）。
 
 ## live-mirror 即時鏡像（`LiveMirrorProducer` + `replaceLiveMirror`）— 2026-06-01
 
@@ -119,7 +143,8 @@ watchOS Sim **驗不到拖曳手勢**（AX tree 空、tap 不穩）→ build gre
 ## 全屏鍵盤（`CellEditOverlay` keypad mode）
 
 - keypad mode 整個 `Color.black.ignoresSafeArea()` 全屏、`KeypadVStack` 用 `.frame(maxHeight: .infinity)` 把 4 列按鍵撐滿。
-- buffer 行右側那顆從「`↻` 切 crown」改成「`⬅` 返回 = `state.discardActiveCell()`（取消編輯不存值）」；crown 模式改由 ⚙ 設定 → 輸入方式（`WatchSettingsKey.inputMode` == `InputMode.storageKey` == `"inputMode"`、同 key）。
+- buffer 行右側那顆 = 「`⬅` 返回 = `state.discardActiveCell()`（取消編輯不存值）」。
+- **2026-06-01:輸入「永遠 keypad」** — crown 改去支撐捲動（上面 §頁面級 #2），`CellEditOverlay` 砍掉 crown 分支、`InputModePickerView` 整顆移除（`InputMode` enum + storageKey 留著給 settings-sync）。**每顆鍵按下 `WKInterfaceDevice.current().play(.click)`**（user 要觸覺；CellEditOverlay 要 `import WatchKit`）。
 - 編輯時 (`activeCell != nil`) `SetLoggerView` 用條件 `.toolbar` 藏齒輪。⚠️ 右上**系統時間 watchOS 系統層畫、無 API 可藏**。
 
 ## Anti-patterns

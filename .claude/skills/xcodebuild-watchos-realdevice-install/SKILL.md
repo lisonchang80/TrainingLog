@@ -212,6 +212,15 @@ xcrun xctrace list devices 2>&1 | grep -iE "iPhone|Watch" | grep -v Simulator
 #   Watch = `00008301-...` (do not confuse). When a build looks instant,
 #   FIRST check exit code + that the log has real compile lines before
 #   trusting it.
+#   ⚠️ 2026-06-01 reinforcement: NEVER fire `xctrace list devices` and the
+#   `xcodebuild` build in the SAME parallel tool batch — you'll guess a UDID
+#   and launch a wrong-id build (exit 70, 0 compile). AWAIT the UDID first.
+#   And if a stale/wrong build is still running, `pkill -9 -f 'xcodebuild
+#   -workspace TrainingLog'` BEFORE starting the right one — two concurrent
+#   `clean install`s collide on the same DerivedData. (Cost that day: 1
+#   wasted build + a collision.) The live UDID this session was
+#   `00008120-00124296029B401E` (xctrace), distinct from the coredevice
+#   UUID `devicectl list devices` prints — use the xctrace hardware UDID.
 
 # 1. Clean rebuild (forces Watch target compile per Trap 2)
 cd /path/to/repo/ios
