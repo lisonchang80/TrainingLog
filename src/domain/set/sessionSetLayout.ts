@@ -104,47 +104,60 @@ export function computeSessionSetLayout(
     }
   }
 
-  // Pass 2 — groups. Walk the sorted array. Dropset HEAD consumes its
-  // contiguous followers (where `parent_set_id === head.id`). Anything else
-  // is a one-row group.
-  const groups: SessionSetGroup[] = [];
-  let i = 0;
-  while (i < sorted.length) {
-    const s = sorted[i];
-    const isDropset = s.set_kind === 'dropset';
-    const isFollower = isDropset && (s.parent_set_id ?? null) !== null;
-    const isHead = isDropset && !isFollower;
+  // Pass 2 — groups. A dropset HEAD gathers ALL of its followers
+  // (`parent_set_id === head.id`) wherever they sit in the sorted order — NOT
+  // only the ones contiguous after it. This is what makes the cluster fold
+  // correctly even when a follower's `ordering` lands PAST a later working set:
+  // the WC live mirror emits a Watch-added follower at ordinal `max+1`, so it
+  // cannot always be contiguous with its head (a mid-list head + a later base
+  // set would otherwise strand the follower as an orphan). See ADR-0019 §
+  // 2026-06-01 (遞減組 reconcile). The cluster renders as ONE group at the
+  // HEAD's sorted position; gathered followers are skipped when reached.
+  //
+  // Order-independent: gather first (head.id → follower sorted-indices, marking
+  // them consumed), then walk. A follower whose head is PRESENT is never
+  // emitted standalone; a TRUE orphan (head absent, never consumed) still
+  // renders standalone (defensive — DB drift / partial deletes).
+  const headIds = new Set<string>();
+  for (const s of sorted) {
+    if (s.set_kind === 'dropset' && (s.parent_set_id ?? null) === null) {
+      headIds.add(s.id);
+    }
+  }
+  const followersByHead = new Map<string, number[]>(); // head.id → sorted follower indices (ascending)
+  const consumed = new Set<number>();
+  for (let k = 0; k < sorted.length; k += 1) {
+    const s = sorted[k];
+    const parent = s.parent_set_id ?? null;
+    if (s.set_kind === 'dropset' && parent !== null && headIds.has(parent)) {
+      const list = followersByHead.get(parent);
+      if (list) list.push(k);
+      else followersByHead.set(parent, [k]);
+      consumed.add(k);
+    }
+  }
 
-    if (isHead) {
-      const followers: SessionSetLayoutInput[] = [];
-      const followerIndices: number[] = [];
-      let j = i + 1;
-      while (j < sorted.length) {
-        const next = sorted[j];
-        if (next.set_kind === 'dropset' && next.parent_set_id === s.id) {
-          followers.push(next);
-          followerIndices.push(j);
-          j += 1;
-        } else {
-          break;
-        }
-      }
+  const groups: SessionSetGroup[] = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (consumed.has(i)) continue;
+    const s = sorted[i];
+    if (s.set_kind === 'dropset' && (s.parent_set_id ?? null) === null) {
+      const idxs = followersByHead.get(s.id) ?? [];
       groups.push({
         head: s,
-        followers,
+        followers: idxs.map((j) => sorted[j]),
         headIndex: i,
-        followerIndices,
+        followerIndices: idxs,
       });
-      i = j;
     } else {
-      // Non-dropset row, OR orphan follower (defensive — render standalone).
+      // Non-dropset row, OR a TRUE orphan follower (head absent — not
+      // consumed above) — render standalone.
       groups.push({
         head: s,
         followers: [],
         headIndex: i,
         followerIndices: [],
       });
-      i += 1;
     }
   }
 

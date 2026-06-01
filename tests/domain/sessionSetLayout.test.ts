@@ -147,4 +147,29 @@ describe('computeSessionSetLayout', () => {
       a.groups.map((g) => g.followers.map((f) => f.id)),
     ).toEqual(b.groups.map((g) => g.followers.map((f) => f.id)));
   });
+
+  it('non-contiguous follower (ordering past a later working set) still folds under its head', () => {
+    // F1 regression (overnight audit + ADR-0019 § 2026-06-01): the WC live
+    // mirror emits a Watch-added dropset follower at ordinal max+1, so a
+    // MID-LIST head's follower can sit AFTER a later working set in ordering.
+    // The fold must group it under its head by parent_set_id — NOT strand it
+    // as an orphan (the pre-(iii) ordering-contiguity behaviour).
+    const out = computeSessionSetLayout([
+      mk('a', 'working', 0),
+      mk('b', 'dropset', 1, null), // head, mid-list
+      mk('c', 'working', 2), // base set BETWEEN head and its follower
+      mk('f', 'dropset', 3, 'b'), // follower at max+1 — NON-contiguous with head
+    ]);
+    // 3 groups, in head-position (sorted) order: [a], cluster[b+f], [c].
+    expect(out.groups.map((g) => g.head.id)).toEqual(['a', 'b', 'c']);
+    // The follower folds into the head's group despite the ordering gap.
+    expect(out.groups[1].followers.map((f) => f.id)).toEqual(['f']);
+    // …and is NOT emitted as a standalone orphan group.
+    expect(out.groups.some((g) => g.head.id === 'f')).toBe(false);
+    // Labels unchanged (Pass 1 is id-keyed, independent of grouping).
+    expect(out.labels.get('a')).toBe('1');
+    expect(out.labels.get('b')).toBe('D1');
+    expect(out.labels.get('c')).toBe('2');
+    expect(out.labels.get('f')).toBe('');
+  });
 });
