@@ -1,0 +1,29 @@
+diff --git a/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm b/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
+index 0085603..96b83e8 100644
+--- a/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
++++ b/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
+@@ -502,11 +502,20 @@ - (void)   session:(WCSession *)session
+ 
+ - (void)dispatchEventWithName:(NSString *)name
+                          body:(NSDictionary<NSString *, id> *)body {
+-  if (!hasObservers) {
+-    [pendingEvents addObject:@{@"name": name, @"body": body}];
+-  } else {
+-    [self sendEventWithName:name body:body];
++  // #287 Fix A (TrainingLog) — New Arch + singleton RCTEventEmitter:
++  // `hasObservers` can be stuck NO on the WCSession-delegate instance, so
++  // the original gate buffered inbound events into `pendingEvents` forever
++  // and they never reached JS (Release standalone). Emit unconditionally;
++  // RCTEventEmitter no-ops harmlessly when JS has no listener. Also flush
++  // any events that were buffered before observers attached so a cold-boot
++  // race can't lose the Watch's first envelope.
++  if (pendingEvents.count > 0) {
++    for (NSDictionary *event in pendingEvents) {
++      [self sendEventWithName:[event objectForKey:@"name"] body:[event objectForKey:@"body"]];
++    }
++    [pendingEvents removeAllObjects];
+   }
++  [self sendEventWithName:name body:body];
+ }
+ 
+ @end
