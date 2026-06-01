@@ -145,6 +145,23 @@ export interface ReconcileSessionTreeResult {
  * empty snapshot first (see `reconcileEndSnapshot`'s Q3 guards) — calling
  * this directly with an empty snapshot + purgeTail would wipe the tree.
  */
+/**
+ * Session-namespaced on-device id for a Watch-authored set whose wire id
+ * collides with a row from a DIFFERENT session (see the set INSERT branch).
+ *
+ * The Watch mints freestyle set ids ("ADD-<n>") from an in-memory counter that
+ * resets to 0 on app relaunch, so two different sessions can both mint "ADD-1".
+ * `set.id` is the PRIMARY KEY, so persisting the raw wire id lets a later
+ * session's `INSERT … ON CONFLICT(id) DO UPDATE` clobber a prior session's row.
+ * When that cross-session collision is detected we divert to this namespaced
+ * id. The `::` separator never appears in a Watch wire id or a UUID, so the
+ * transform is unambiguous + deterministic — every path that needs the diverted
+ * id (tombstone purge, parent resolution) recomputes it from (sessionId, wireId).
+ */
+function localizeSetId(sessionId: string, wireId: string): string {
+  return `${sessionId}::${wireId}`;
+}
+
 export async function reconcileSessionTree(
   db: Database,
   snapshot: SessionSnapshot,
@@ -385,6 +402,29 @@ export async function reconcileSessionTree(
         } else {
           // Watch-authored set with no canonical counterpart — INSERT. A
           // dropset follower carries the resolved on-device head id.
+          //
+          // Cross-session id-collision guard (2026-06-01, device-DB-proven):
+          // the Watch mints freestyle set ids ("ADD-<n>") from an in-memory
+          // counter that resets on app relaunch, so a LATER session can mint a
+          // wire id that ALREADY exists on-device under an EARLIER session.
+          // `set.id` is the PRIMARY KEY, so a raw INSERT … ON CONFLICT(id) DO
+          // UPDATE would clobber the prior session's row in place (moving its
+          // session_exercise_id + parent_set_id to THIS session while leaving
+          // session_id stale → the old session's follower becomes a
+          // cross-session orphan and this session can't find its own). When the
+          // wire id already belongs to a DIFFERENT session, divert to a
+          // session-namespaced on-device id so the rows stay distinct. A
+          // same-session hit (or no hit) keeps the raw id — the normal
+          // idempotent live-tick path (re-match is by (se, ordinal) above, so
+          // within-session ticks never reach this branch a 2nd time anyway).
+          const foreign = await db.getFirstAsync<{ session_id: string }>(
+            `SELECT session_id FROM "set" WHERE id = ?`,
+            s.setId,
+          );
+          const localSetId =
+            foreign && foreign.session_id !== snapshot.sessionId
+              ? localizeSetId(snapshot.sessionId, s.setId)
+              : s.setId;
           await db.runAsync(
             `INSERT INTO "set"
                (id, session_id, exercise_id, session_exercise_id,
@@ -400,7 +440,7 @@ export async function reconcileSessionTree(
                ordering = excluded.ordering,
                session_exercise_id = excluded.session_exercise_id,
                parent_set_id = excluded.parent_set_id`,
-            s.setId,
+            localSetId,
             snapshot.sessionId,
             ex.exerciseId,
             seId,
@@ -416,9 +456,11 @@ export async function reconcileSessionTree(
             snapshot.startedAt,
             resolvedParentId,
           );
-          keptSetIds.push(s.setId);
-          exSetIds.push(s.setId);
-          setIdMap.set(s.setId, s.setId);
+          keptSetIds.push(localSetId);
+          exSetIds.push(localSetId);
+          // Map the WIRE id → the on-device id so a later follower in THIS pass
+          // resolves its parent to the (possibly diverted) head id.
+          setIdMap.set(s.setId, localSetId);
         }
       }
 
@@ -483,11 +525,19 @@ export async function reconcileSessionTree(
     const tomb = snapshot.deletedIds;
     if (tomb) {
       if (tomb.setIds.length > 0) {
-        const ph = tomb.setIds.map(() => '?').join(', ');
+        // Match BOTH the raw wire id (a non-diverted on-device id, incl.
+        // canonical UUIDs) AND the session-namespaced form (a Watch-authored
+        // set diverted on a cross-session collision — see the INSERT branch).
+        // Scoped to session_id, so neither form can touch another session's row.
+        const tombIds = [
+          ...tomb.setIds,
+          ...tomb.setIds.map((id) => localizeSetId(snapshot.sessionId, id)),
+        ];
+        const ph = tombIds.map(() => '?').join(', ');
         const r = await db.runAsync(
           `DELETE FROM "set" WHERE session_id = ? AND id IN (${ph})`,
           snapshot.sessionId,
-          ...tomb.setIds,
+          ...tombIds,
         );
         tombstonedSets += r.changes ?? 0;
       }

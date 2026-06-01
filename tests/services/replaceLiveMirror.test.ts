@@ -298,6 +298,153 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     ]);
   });
 
+  // ── Cross-session Watch-authored id collision (2026-06-01 device-DB repro) ──
+  // The Watch mints freestyle (dropset-follower / +1) set ids as "ADD-<n>" from
+  // an in-memory counter that resets to 0 on Watch app relaunch — so two
+  // DIFFERENT sessions can both mint "ADD-1". The on-device `set.id` is the
+  // PRIMARY KEY, so a later session's INSERT … ON CONFLICT(id) DO UPDATE used to
+  // CLOBBER a prior session's row in place (moving its parent_set_id +
+  // session_exercise_id to the new session) while leaving session_id stale →
+  // the old session's follower became a cross-session orphan and the new
+  // session couldn't find its own. Fix: detect the cross-session id collision
+  // in the INSERT branch and divert to a session-namespaced on-device id.
+  it('cross-session ADD-1 collision — a later session does NOT clobber an earlier session’s follower', async () => {
+    // Helper: a snapshot with a freestyle dropset HEAD + ONE follower whose
+    // wire id is the colliding "ADD-1". Heads carry unique wire ids per session
+    // (they don’t collide in the wild — only ADD-<n> followers do).
+    const sessSnap = (sessionId: string, headWireId: string): SessionSnapshot =>
+      snapshot({
+        sessionId,
+        exercises: [
+          {
+            sessionExerciseId: `se-${sessionId}`,
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              {
+                setId: headWireId,
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: true,
+                parent_set_id: null,
+              },
+              {
+                setId: 'ADD-1', // ← collides across sessions
+                ordinal: 1,
+                weight: 40,
+                reps: 8,
+                rpe: null,
+                rest_sec: null,
+                notes: null,
+                set_kind: 'dropset',
+                is_logged: false,
+                parent_set_id: headWireId,
+              },
+            ],
+          },
+        ],
+      });
+
+    // Session A — live tick writes head + ADD-1 follower, then A ends.
+    await seedLiveSession(db, 'sess-A');
+    await replaceLiveMirror(db, sessSnap('sess-A', 'headA'));
+    await db.runAsync(
+      `UPDATE session SET ended_at = ? WHERE id = ?`,
+      1_700_000_100_000,
+      'sess-A',
+    );
+
+    // Session B — Watch relaunched, counter reset, mints "ADD-1" AGAIN.
+    await seedLiveSession(db, 'sess-B');
+    await replaceLiveMirror(db, sessSnap('sess-B', 'headB'));
+
+    // Session A's follower MUST still belong to A, parented to A's head.
+    const aFollower = await db.getFirstAsync<{
+      session_id: string;
+      parent_set_id: string | null;
+      session_exercise_id: string;
+    }>(
+      `SELECT s.session_id, s.parent_set_id, s.session_exercise_id
+         FROM "set" s
+        WHERE s.session_id = 'sess-A' AND s.set_kind = 'dropset'
+          AND s.parent_set_id IS NOT NULL`,
+    );
+    expect(aFollower).not.toBeNull();
+    expect(aFollower?.session_id).toBe('sess-A');
+    // Its parent + se must point at A's rows, NOT B's (no cross-session bleed).
+    const aHead = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM "set" WHERE session_id = 'sess-A' AND parent_set_id IS NULL`,
+    );
+    expect(aFollower?.parent_set_id).toBe(aHead?.id);
+    expect(aFollower?.session_exercise_id).toBe('se-sess-A');
+
+    // Session B must have its OWN follower under its own head.
+    const bFollower = await db.getFirstAsync<{
+      session_id: string;
+      parent_set_id: string | null;
+    }>(
+      `SELECT session_id, parent_set_id
+         FROM "set"
+        WHERE session_id = 'sess-B' AND parent_set_id IS NOT NULL`,
+    );
+    expect(bFollower).not.toBeNull();
+    expect(bFollower?.session_id).toBe('sess-B');
+    const bHead = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM "set" WHERE session_id = 'sess-B' AND parent_set_id IS NULL`,
+    );
+    expect(bFollower?.parent_set_id).toBe(bHead?.id);
+
+    // And exactly ONE follower per session (no row got moved or duplicated).
+    const counts = await db.getAllAsync<{ session_id: string; n: number }>(
+      `SELECT session_id, COUNT(*) AS n FROM "set"
+        WHERE parent_set_id IS NOT NULL GROUP BY session_id ORDER BY session_id`,
+    );
+    expect(counts).toEqual([
+      { session_id: 'sess-A', n: 1 },
+      { session_id: 'sess-B', n: 1 },
+    ]);
+  });
+
+  it('within-session idempotency — re-applying a freestyle ADD-1 over ticks does NOT duplicate or divert', async () => {
+    // Same session, repeated ticks: the (se, ordinal) match keeps it a single
+    // row with the RAW wire id (no needless session-namespacing within a
+    // session — the diversion only triggers on a FOREIGN-session collision).
+    await seedLiveSession(db, 'sess-1');
+    const snap = snapshot({
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 2,
+          sets: [
+            { setId: 'h1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: true, parent_set_id: null },
+            { setId: 'ADD-1', ordinal: 1, weight: 40, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'dropset', is_logged: false, parent_set_id: 'h1' },
+          ],
+        },
+      ],
+    });
+    await replaceLiveMirror(db, snap);
+    await replaceLiveMirror(db, snap);
+    await replaceLiveMirror(db, snap);
+
+    const rows = await db.getAllAsync<{ id: string; parent_set_id: string | null }>(
+      `SELECT id, parent_set_id FROM "set" WHERE session_id = 'sess-1' ORDER BY ordering ASC`,
+    );
+    expect(rows).toEqual([
+      { id: 'h1', parent_set_id: null },
+      { id: 'ADD-1', parent_set_id: 'h1' }, // raw id preserved (no foreign collision)
+    ]);
+  });
+
   it('dropset chain (re-sync) — an existing follower with NULL parent is retro-fixed via UPDATE', async () => {
     // Simulate a session whose follower was first synced by an OLDER reconcile
     // (no parent_set_id column written) → head 'c1' + follower 'f-old' (NULL).
