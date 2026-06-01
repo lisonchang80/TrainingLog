@@ -93,6 +93,12 @@ export {
   addUserInfoListener,
   updateAppContext,
   addAppContextListener,
+  // #287 Fix C (2026-06-02) — eager bridge mount at app entry. Called once
+  // from app/_layout.tsx so the singleton RCTEventEmitter has observers
+  // (hasObservers=YES + pendingEvents flush) before the Watch's first
+  // envelope arrives on a Release standalone cold boot.
+  initWatchBridge,
+  __isBridgeMountedForTests,
 } from './connectivity';
 export type { SendResult, SendOptions } from './connectivity';
 

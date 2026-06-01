@@ -15,6 +15,7 @@ import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 import { ThemeProvider, useTheme } from '@/src/theme';
+import { initWatchBridge } from '@/src/adapters/watch';
 
 // Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
 // `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
@@ -81,6 +82,31 @@ export default function RootLayout() {
       const resolved = resolveLocale(stored);
       setLocale(resolved);
     })();
+  }, []);
+
+  // #287 Fix C (2026-06-02) — eager-mount the WatchConnectivity native
+  // bridge listeners at APP ENTRY, before the home screen mounts.
+  //
+  // The npm package's iOS module is a singleton RCTEventEmitter TurboModule
+  // that buffers inbound WCSession events behind `hasObservers`, which only
+  // flips YES once JS calls `addListener` (→ native `startObserving`, which
+  // also flushes the buffer). Previously those listeners registered lazily
+  // from `(tabs)/index.tsx`'s useEffect — on a Release standalone cold boot
+  // the Watch's first envelope could arrive before that screen mounted, get
+  // buffered, and never reach JS (works in Debug+Metro because hot-reload
+  // runs extra startObserving cycles). Mounting here, at the app root that
+  // renders before any tab, closes that race.
+  //
+  // This mounts only the native subscription (the part that fixes
+  // hasObservers + flushes pendingEvents). The per-kind message HANDLERS
+  // still register from the home screen once the DB is ready; envelopes that
+  // arrive before a handler exists are parked in connectivity.ts's
+  // pre-handler replay buffers and replayed on register. `initWatchBridge`
+  // touches no DB, never throws, and is idempotent (won't double-subscribe
+  // with the home screen's `addXListener` calls). Runs in a layout effect so
+  // it fires synchronously after the first commit, ahead of child screens.
+  useEffect(() => {
+    initWatchBridge();
   }, []);
 
   return (

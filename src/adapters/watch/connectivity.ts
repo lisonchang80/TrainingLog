@@ -185,6 +185,98 @@ type InboundHandler<K extends WCMessageKind> = (
 const listeners = new Map<WCMessageKind, Set<InboundHandler<WCMessageKind>>>();
 let bridgeUnsubscribe: (() => void) | null = null;
 
+// ---------------------------------------------------------------------
+// Pre-handler replay buffer (#287 Fix C — Release standalone fix)
+// ---------------------------------------------------------------------
+//
+// Why: Fix C eager-mounts the native 'message' subscription at APP ENTRY
+// (see `initWatchBridge`) so the singleton RCTEventEmitter has
+// `hasObservers=YES` — and flushes its native `pendingEvents` — before the
+// Watch's first envelope arrives. In Release standalone the package's
+// inbound WCSession callbacks were being buffered (gated on `hasObservers`)
+// and never delivered to JS because the lazy home-screen `useEffect`
+// registered the listener too late (root cause: report 01, H1/H2).
+//
+// But eager-mounting the *bridge* alone isn't enough: the per-kind
+// HANDLERS (onHandshakeRequest / onStartFromWatch / onLiveMirror …) still
+// register later, from `(tabs)/index.tsx`, because they need the DB. So an
+// envelope that the native side now correctly delivers to JS at cold-boot
+// could still arrive in the window AFTER the bridge is mounted but BEFORE
+// the handler for its kind exists — and be dropped on the floor.
+//
+// This buffer closes that window: when the dispatch loop finds no handler
+// for an inbound kind, the envelope is parked here (bounded, FIFO). When a
+// handler later registers for that kind via `addMessageListener`, the
+// buffered envelopes are replayed into it. This is the "tolerant of a
+// not-yet-ready DB" behaviour the fix needs — the native subscription is
+// eager, the handler dispatch stays gated on readiness, and nothing is lost
+// in between. Dedupe (`seenMsgId`) runs at intake, so replay can't
+// re-deliver something already handled.
+const PRE_HANDLER_BUFFER_CAP = 64;
+
+type BufferedMessage = {
+  kind: WCMessageKind;
+  msg: Record<string, unknown>;
+  replyHandler?: ReplyHandler;
+};
+const pendingMessageEnvelopes: BufferedMessage[] = [];
+
+function bufferPreHandlerMessage(b: BufferedMessage): void {
+  pendingMessageEnvelopes.push(b);
+  // Evict oldest if over cap — a Watch firing into a never-mounted handler
+  // shouldn't grow unbounded. Cap is generous vs. the handful of envelopes
+  // a cold-boot race can produce.
+  while (pendingMessageEnvelopes.length > PRE_HANDLER_BUFFER_CAP) {
+    pendingMessageEnvelopes.shift();
+  }
+}
+
+/** Drain + dispatch any buffered 'message' envelopes whose kind now has a
+ *  registered handler. Called when a handler is added. */
+function replayBufferedMessagesFor(kind: WCMessageKind): void {
+  if (pendingMessageEnvelopes.length === 0) return;
+  const set = listeners.get(kind);
+  if (!set || set.size === 0) return;
+  // Pull out matching buffered envelopes in FIFO order, leave the rest.
+  const remaining: BufferedMessage[] = [];
+  const toReplay: BufferedMessage[] = [];
+  for (const b of pendingMessageEnvelopes) {
+    if (b.kind === kind) toReplay.push(b);
+    else remaining.push(b);
+  }
+  pendingMessageEnvelopes.length = 0;
+  pendingMessageEnvelopes.push(...remaining);
+  for (const b of toReplay) {
+    dispatchMessageToHandlers(b.kind, b.msg, b.replyHandler);
+  }
+}
+
+/** Fire all registered handlers for a 'message' kind. Shared by live
+ *  dispatch + buffered replay. */
+function dispatchMessageToHandlers(
+  kind: WCMessageKind,
+  msg: Record<string, unknown>,
+  replyHandler?: ReplyHandler,
+): void {
+  const set = listeners.get(kind);
+  if (!set || set.size === 0) return;
+  for (const handler of set) {
+    // Fire each handler defensively — one throwing must not stop
+    // siblings (per Q7 channel rules implicit "best-effort dispatch").
+    try {
+      void handler(
+        msg as unknown as WCMessage & {
+          kind: typeof kind;
+          payload: WCPayloadMap[typeof kind];
+        },
+        replyHandler,
+      );
+    } catch {
+      // swallow — handler errors are caller's problem
+    }
+  }
+}
+
 function ensureBridgeListenerMounted(): void {
   if (bridgeUnsubscribe !== null) return;
   bridgeUnsubscribe = bridge().watchEvents.addListener(
@@ -204,24 +296,16 @@ function ensureBridgeListenerMounted(): void {
       const kind = msg.kind as WCMessageKind | undefined;
       const msgId = msg.msgId as string | undefined;
       if (!kind || !msgId) return;
-      if (seenMsgId(msgId)) return; // dedupe
+      if (seenMsgId(msgId)) return; // dedupe (intake — replay won't re-fire)
       const set = listeners.get(kind);
-      if (!set || set.size === 0) return;
-      for (const handler of set) {
-        // Fire each handler defensively — one throwing must not stop
-        // siblings (per Q7 channel rules implicit "best-effort dispatch").
-        try {
-          void handler(
-            msg as unknown as WCMessage & {
-              kind: typeof kind;
-              payload: WCPayloadMap[typeof kind];
-            },
-            replyHandler,
-          );
-        } catch {
-          // swallow — handler errors are caller's problem
-        }
+      if (!set || set.size === 0) {
+        // No handler yet (cold-boot race — bridge mounted eagerly, handler
+        // registers later from the home screen once the DB is ready). Park
+        // the envelope; `addMessageListener` will replay it on register.
+        bufferPreHandlerMessage({ kind, msg, replyHandler });
+        return;
       }
+      dispatchMessageToHandlers(kind, msg, replyHandler);
     },
   );
 }
@@ -250,6 +334,9 @@ export function addMessageListener<K extends WCMessageKind>(
     listeners.set(kind, set);
   }
   set.add(handler as InboundHandler<WCMessageKind>);
+  // #287 Fix C — drain any envelopes of this kind that the eagerly-mounted
+  // bridge delivered before this handler existed (cold-boot race).
+  replayBufferedMessagesFor(kind);
   return () => {
     set?.delete(handler as InboundHandler<WCMessageKind>);
   };
@@ -257,6 +344,7 @@ export function addMessageListener<K extends WCMessageKind>(
 
 function __clearListenersForTests(): void {
   listeners.clear();
+  pendingMessageEnvelopes.length = 0;
   if (bridgeUnsubscribe) {
     try {
       bridgeUnsubscribe();
@@ -475,6 +563,62 @@ const userInfoListeners = new Map<
 >();
 let userInfoBridgeUnsubscribe: (() => void) | null = null;
 
+// #287 Fix C — same pre-handler replay buffer as the 'message' channel.
+// start-from-watch / start-resolve / discard-session ride TUI (`user-info`)
+// and their handlers register lazily from the home screen; a TUI envelope
+// the eagerly-mounted bridge surfaces before the handler exists is parked
+// here and replayed on register. TUI is OS-queued (durable) so this is a
+// belt-and-braces guard for the cold-boot window, mirroring the message path.
+const pendingUserInfoEnvelopes: { kind: WCMessageKind; msg: Record<string, unknown> }[] =
+  [];
+
+function bufferPreHandlerUserInfo(b: {
+  kind: WCMessageKind;
+  msg: Record<string, unknown>;
+}): void {
+  pendingUserInfoEnvelopes.push(b);
+  while (pendingUserInfoEnvelopes.length > PRE_HANDLER_BUFFER_CAP) {
+    pendingUserInfoEnvelopes.shift();
+  }
+}
+
+function dispatchUserInfoToHandlers(
+  kind: WCMessageKind,
+  msg: Record<string, unknown>,
+): void {
+  const set = userInfoListeners.get(kind);
+  if (!set || set.size === 0) return;
+  for (const handler of set) {
+    // Best-effort dispatch — one handler throwing must not
+    // stop siblings or sibling-kind dispatch in this batch.
+    try {
+      void handler(
+        msg as unknown as WCMessage & {
+          kind: typeof kind;
+          payload: WCPayloadMap[typeof kind];
+        },
+      );
+    } catch {
+      // swallow
+    }
+  }
+}
+
+function replayBufferedUserInfoFor(kind: WCMessageKind): void {
+  if (pendingUserInfoEnvelopes.length === 0) return;
+  const set = userInfoListeners.get(kind);
+  if (!set || set.size === 0) return;
+  const remaining: { kind: WCMessageKind; msg: Record<string, unknown> }[] = [];
+  const toReplay: { kind: WCMessageKind; msg: Record<string, unknown> }[] = [];
+  for (const b of pendingUserInfoEnvelopes) {
+    if (b.kind === kind) toReplay.push(b);
+    else remaining.push(b);
+  }
+  pendingUserInfoEnvelopes.length = 0;
+  pendingUserInfoEnvelopes.push(...remaining);
+  for (const b of toReplay) dispatchUserInfoToHandlers(b.kind, b.msg);
+}
+
 function ensureUserInfoBridgeListenerMounted(): void {
   if (userInfoBridgeUnsubscribe !== null) return;
   userInfoBridgeUnsubscribe = bridge().watchEvents.addListener(
@@ -493,21 +637,12 @@ function ensureUserInfoBridgeListenerMounted(): void {
         const kind = msg.kind as WCMessageKind | undefined;
         if (!kind) continue;
         const set = userInfoListeners.get(kind);
-        if (!set || set.size === 0) continue;
-        for (const handler of set) {
-          // Best-effort dispatch — one handler throwing must not
-          // stop siblings or sibling-kind dispatch in this batch.
-          try {
-            void handler(
-              msg as unknown as WCMessage & {
-                kind: typeof kind;
-                payload: WCPayloadMap[typeof kind];
-              },
-            );
-          } catch {
-            // swallow
-          }
+        if (!set || set.size === 0) {
+          // No handler yet (cold-boot race) — park + replay on register.
+          bufferPreHandlerUserInfo({ kind, msg });
+          continue;
         }
+        dispatchUserInfoToHandlers(kind, msg);
       }
     },
   );
@@ -536,6 +671,9 @@ export function addUserInfoListener<K extends WCMessageKind>(
     userInfoListeners.set(kind, set);
   }
   set.add(handler as UserInfoHandler<WCMessageKind>);
+  // #287 Fix C — replay any TUI envelopes of this kind that landed before
+  // this handler registered (cold-boot race).
+  replayBufferedUserInfoFor(kind);
   return () => {
     set?.delete(handler as UserInfoHandler<WCMessageKind>);
   };
@@ -543,6 +681,7 @@ export function addUserInfoListener<K extends WCMessageKind>(
 
 function __clearUserInfoListenersForTests(): void {
   userInfoListeners.clear();
+  pendingUserInfoEnvelopes.length = 0;
   if (userInfoBridgeUnsubscribe) {
     try {
       userInfoBridgeUnsubscribe();
@@ -639,4 +778,77 @@ function __clearAppContextListenersForTests(): void {
     }
     appContextBridgeUnsubscribe = null;
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  Section 11 — Eager bridge mount (#287 Fix C — Release standalone fix)
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Mount ALL THREE native WC event subscriptions ('message', 'user-info',
+ * 'application-context') at APP ENTRY — before the home screen mounts and
+ * before the per-kind handlers (which need the DB) register.
+ *
+ * Why this is the fix for #287:
+ *   The npm package's iOS module is a singleton `RCTEventEmitter`
+ *   TurboModule that gates every inbound emit behind `hasObservers`, and
+ *   `hasObservers` only flips `YES` when JS calls `addListener` (→ native
+ *   `startObserving`, which ALSO flushes the module's `pendingEvents`
+ *   buffer). Under New Arch + Release standalone, the app's previous design
+ *   registered those listeners LAZILY — on the first `addXListener` call
+ *   inside the home-screen `(tabs)/index.tsx` `useEffect`. On a Release cold
+ *   boot, the Watch's first envelope (handshake / start-from-watch / first
+ *   live-mirror) can arrive BEFORE React mounts that screen, so it lands
+ *   while `hasObservers=NO`, gets buffered in the native `pendingEvents`,
+ *   and is never flushed → the iPhone never sees the Watch's WC events.
+ *   Debug+Metro masks it because hot-reload runs extra `startObserving`
+ *   cycles that flip `hasObservers=YES` in time.
+ *
+ *   Calling this at app entry makes the JS `addListener` (hence native
+ *   `startObserving` + `pendingEvents` flush) run as early as possible,
+ *   so `hasObservers=YES` before the first envelope arrives.
+ *
+ * Split design (bridge-eager / handler-gated):
+ *   This mounts only the NATIVE bridge subscription — the part that fixes
+ *   `hasObservers`. It does NOT register the message HANDLERS
+ *   (onHandshakeRequest / onStartFromWatch / onLiveMirror …): those need a
+ *   ready DB and still register from the home screen via
+ *   `addMessageListener` / `addUserInfoListener` / `addAppContextListener`.
+ *   Envelopes that the now-mounted bridge delivers in the window before a
+ *   handler exists are parked in the per-channel pre-handler replay buffers
+ *   (see `pendingMessageEnvelopes` / `pendingUserInfoEnvelopes`) and
+ *   replayed when the handler registers. So nothing is lost and no DB
+ *   dependency is pulled into app entry.
+ *
+ * Safe to call before the DB is ready and safe to call from outside the
+ * DatabaseProvider gate. It does NOT touch the DB, never throws (the bridge
+ * load is wrapped), and is idempotent: each `ensure*Mounted` early-returns
+ * if its subscription already exists, so a later `addXListener` from the
+ * home screen does NOT double-subscribe. Re-invoking `initWatchBridge` is
+ * also a no-op.
+ *
+ * Returns `true` if the bridge mounted (or was already mounted), `false` if
+ * the native lib was unavailable (e.g. running where the TurboModule can't
+ * load) — in which case the app simply proceeds without WC, as before.
+ */
+export function initWatchBridge(): boolean {
+  try {
+    ensureBridgeListenerMounted();
+    ensureUserInfoBridgeListenerMounted();
+    ensureAppContextBridgeListenerMounted();
+    return true;
+  } catch {
+    // Bridge/native lib unavailable — proceed without WC. This matches the
+    // pre-fix behaviour where the lazy mount would have thrown/no-op'd too.
+    return false;
+  }
+}
+
+/**
+ * Test introspection — `true` iff the eager 'message' bridge subscription
+ * is currently mounted. Lets a jest test assert app-entry mount happened
+ * independent of any per-kind handler registration.
+ */
+export function __isBridgeMountedForTests(): boolean {
+  return bridgeUnsubscribe !== null;
 }
