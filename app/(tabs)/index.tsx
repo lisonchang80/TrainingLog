@@ -648,6 +648,19 @@ export default function TodayScreen() {
       await onLiveMirror(db, ctx);
       refreshRef.current?.();
     });
+    // Sync fast lane (2026-06-01) — the SAME live-mirror snapshot, dual-fired
+    // by the Watch over `sendMessage` for instant (<1s, FIFO-ordered) delivery
+    // when the iPhone is reachable. applicationContext (above) stays as the
+    // background backstop. Both route to the rev-guarded `onLiveMirror`, which
+    // drops a stale redelivery so the two channels never clobber each other.
+    // `env.payload` IS the raw SessionSnapshot dict (same shape the appContext
+    // path delivers), so `onLiveMirror` consumes it identically. Riding
+    // applicationContext alone was the "又慢、又亂、時有時無（尤其遞減組）"
+    // regression — sendMessage is the real-time channel.
+    const unsubLiveMirrorMsg = addMessageListener('live-mirror', async (env) => {
+      await onLiveMirror(db, env.payload);
+      refreshRef.current?.();
+    });
     return () => {
       unsubHandshake();
       unsubStartFromWatch();
@@ -655,6 +668,7 @@ export default function TodayScreen() {
       unsubStartResolve();
       unsubDiscardSession();
       unsubLiveMirror();
+      unsubLiveMirrorMsg();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.

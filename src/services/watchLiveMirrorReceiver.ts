@@ -78,7 +78,32 @@ import { replaceLiveMirror } from './replaceLiveMirror';
  */
 type LiveMirrorResult =
   | { ok: true; sessionId: string; exerciseCount: number; setCount: number }
-  | { ok: false; code: 'bad-payload' | 'db-error'; message: string };
+  | { ok: false; code: 'bad-payload' | 'db-error' | 'stale'; message: string };
+
+/**
+ * Per-session monotonic-`rev` high-water mark (sync fast lane, 2026-06-01).
+ *
+ * The Watch DUAL-FIRES every live snapshot — `sendMessage` (instant, FIFO,
+ * the <1s foreground channel) AND `updateApplicationContext` (background
+ * backstop, latest-state-replace, OS-paced delivery). Both land in
+ * `onLiveMirror`. Without a guard, a LATE applicationContext redelivery can
+ * arrive carrying an OLDER state than a `sendMessage` already applied and
+ * clobber it — the visible "亂七八糟 / 遞減組跳號" reorder. Each snapshot
+ * carries a monotonic `rev` (ms-since-epoch from the Watch producer); we drop
+ * any inbound whose `rev <= lastApplied[sessionId]`.
+ *
+ * In-memory + per-session — resets cleanly on iPhone app restart (a fresh
+ * Watch push then re-seeds it; revs are absolute ms so always "fresh enough").
+ * Keyed by sessionId (a UUID, never reused), so the map only grows by one
+ * entry per session over the app's lifetime — negligible. `null`/absent `rev`
+ * (a legacy pre-fix producer) bypasses the guard entirely (back-compat).
+ */
+const lastAppliedRev = new Map<string, number>();
+
+/** Clear all per-session rev high-water marks. Test-only. */
+export function __resetLiveMirrorRevForTests(): void {
+  lastAppliedRev.clear();
+}
 
 const VALID_SET_KINDS: ReadonlySet<string> = new Set([
   'warmup',
@@ -254,6 +279,22 @@ export async function onLiveMirror(
       code: 'bad-payload',
       message: 'applicationContext did not parse to a SessionSnapshot',
     };
+  }
+  // Anti-reorder guard (sync fast lane). Drop a stale / out-of-order
+  // redelivery (typically a late applicationContext backstop arriving after
+  // a fresher sendMessage already applied). Claim the high-water mark BEFORE
+  // the `await` below so a concurrent older delivery from the other channel
+  // can't pass its own check in the gap between this check and the DB write.
+  if (snapshot.rev != null) {
+    const prev = lastAppliedRev.get(snapshot.sessionId);
+    if (prev != null && snapshot.rev <= prev) {
+      return {
+        ok: false,
+        code: 'stale',
+        message: `live-mirror rev ${snapshot.rev} <= applied ${prev} (dropped)`,
+      };
+    }
+    lastAppliedRev.set(snapshot.sessionId, snapshot.rev);
   }
   try {
     await replaceLiveMirror(db, snapshot);

@@ -115,6 +115,17 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         kcal: 215.5,
         sampleTs: 1_700_000_000_000,
       } as unknown as WCPayloadMap[K];
+    case 'live-mirror':
+      // Sync fast lane (2026-06-01) — Watch→iPhone live snapshot over
+      // sendMessage. Payload IS the raw SessionSnapshot dict (rev-stamped).
+      return {
+        sessionId: 'sess-1',
+        title: 'Push day',
+        startedAt: 1_700_000_000_000,
+        exercises: [],
+        rev: 1_700_000_000_500,
+        originator: 'watch',
+      } as unknown as WCPayloadMap[K];
     case 'end-session':
       return {
         sessionId: 'sess-1',

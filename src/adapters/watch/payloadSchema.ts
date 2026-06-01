@@ -59,12 +59,13 @@ export type WCMessageKind =
   | 'exercise-deleted'
   | 'hr-tick'
   | 'kcal-tick'
+  | 'live-mirror'
   | 'end-session'
   | 'discard-session'
   | 'settings-sync';
 
 /**
- * All 16 kinds as a frozen tuple — used by the type guard, jest
+ * All 17 kinds as a frozen tuple — used by the type guard, jest
  * `it.each` tables, and the Swift mirror generator (D4/D5). Keep in
  * sync with `WCMessageKind` literal union above.
  *
@@ -77,6 +78,16 @@ export type WCMessageKind =
  * `existingSessionId` via `discardSession` cascade. Fire-and-forget;
  * no reply. `end-reconcile` (iPhone→Watch for end-session ack) still
  * deferred to a later wire-in.
+ *
+ * Sync fast-lane (2026-06-01) — `live-mirror` added as Watch → iPhone
+ * live-session snapshot over `sendMessage` (the <1s foreground fast
+ * lane), DUAL-FIRED with the existing `updateApplicationContext`
+ * backstop. Carries a monotonic `rev` so the iPhone receiver
+ * (`onLiveMirror`) drops out-of-order / stale redeliveries. Fixes the
+ * "又慢、又亂、時有時無（尤其遞減組）" live-sync regression that came
+ * from riding applicationContext alone (latest-replace, OS-paced,
+ * unreliable foreground). NOT durable (no TUI): a dropped live tick
+ * self-heals on the next push; `end-session` is the correctness backstop.
  */
 export const WC_MESSAGE_KINDS = [
   'handshake',
@@ -92,6 +103,7 @@ export const WC_MESSAGE_KINDS = [
   'exercise-deleted',
   'hr-tick',
   'kcal-tick',
+  'live-mirror',
   'end-session',
   'discard-session',
   'settings-sync',
@@ -160,6 +172,47 @@ export interface StartFromIphonePayload {
    * "JSON-primitive-clean object", not field-level structure.
    */
   snapshot: Record<string, JsonValue>;
+}
+
+/**
+ * `live-mirror` — Watch → iPhone live-session snapshot (sync fast lane,
+ * 2026-06-01). Fires on every in-session mutation (logged ✓ / cell edit /
+ * add-remove set / # type-cycle / reorder / delete), coalesced to ≤2/s by
+ * a 0.5s window on the Watch producer (`LiveMirrorProducer`).
+ *
+ * Transport — DUAL-FIRE (Watch `WatchConnectivityCoordinator.updateLiveMirror`):
+ *   - `sendMessage` when iPhone `isReachable` — the instant, FIFO-ordered
+ *     <1s foreground channel. This is what makes the live mirror actually
+ *     live (every intermediate dropset-edit state arrives in order — no
+ *     coalescing-induced skipped structural step).
+ *   - `updateApplicationContext` always — the background backstop (latest-
+ *     state-replace, survives iPhone-backgrounded). NOT a real-time channel.
+ *
+ * The payload IS the full `SessionSnapshot` dict directly (NOT wrapped in a
+ * `snapshot` field — same raw shape the applicationContext path delivers and
+ * `parseLiveMirrorSnapshot` / `replaceLiveMirror` consume), so one receiver
+ * (`onLiveMirror`) serves both channels. Concrete nested shape lives in
+ * `watchLiveMirrorReceiver.ts` (runtime-validated there) to avoid a cyclic
+ * import with the SQLite repo layer — hence the loose nested typing here.
+ *
+ * `rev` is a monotonic ms-since-epoch stamp from the producer; the iPhone
+ * keeps a per-session high-water mark and DROPS any snapshot whose
+ * `rev <= lastApplied` — this kills the "late appContext clobbers a fresher
+ * sendMessage" reorder (a key cause of the 亂七八糟 / dropset scramble).
+ */
+export interface LiveMirrorPayload {
+  sessionId: string;
+  title: string;
+  /** Epoch ms. */
+  startedAt: number;
+  /** Opaque session-tree exercises (validated by `parseLiveMirrorSnapshot`). */
+  exercises: JsonValue[];
+  /** Monotonic revision (ms-since-epoch at emit) — anti-reorder. */
+  rev?: number;
+  /** Which side produced it (echo suppression / forward-compat). */
+  originator?: 'watch' | 'iphone';
+  /** Tombstones (Phase D precise-purge). */
+  deletedIds?: { exerciseIds?: string[]; setIds?: string[] };
 }
 
 /**
@@ -461,7 +514,7 @@ export interface WCEnvelope<K extends WCMessageKind, P> {
 }
 
 /**
- * Discriminated union of all 13 envelope shapes. TypeScript narrows
+ * Discriminated union of all 17 envelope shapes. TypeScript narrows
  * `payload` automatically when you switch on `kind`.
  */
 export type WCMessage =
@@ -478,6 +531,7 @@ export type WCMessage =
   | WCEnvelope<'exercise-deleted', ExerciseDeletedPayload>
   | WCEnvelope<'hr-tick', HrTickPayload>
   | WCEnvelope<'kcal-tick', KcalTickPayload>
+  | WCEnvelope<'live-mirror', LiveMirrorPayload>
   | WCEnvelope<'end-session', EndSessionPayload>
   | WCEnvelope<'discard-session', DiscardSessionPayload>
   | WCEnvelope<'settings-sync', SettingsSyncPayload>;
@@ -504,6 +558,7 @@ export interface WCPayloadMap {
   'exercise-deleted': ExerciseDeletedPayload;
   'hr-tick': HrTickPayload;
   'kcal-tick': KcalTickPayload;
+  'live-mirror': LiveMirrorPayload;
   'end-session': EndSessionPayload;
   'discard-session': DiscardSessionPayload;
   'settings-sync': SettingsSyncPayload;

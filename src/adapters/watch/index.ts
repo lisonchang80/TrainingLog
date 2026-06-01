@@ -36,6 +36,7 @@ export type {
   ExerciseDeletedPayload,
   HrTickPayload,
   KcalTickPayload,
+  LiveMirrorPayload,
   EndSessionPayload,
   DiscardSessionPayload,
   SettingsSyncPayload,

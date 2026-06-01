@@ -26,6 +26,7 @@ import { migrate } from '../../src/db/migrate';
 import {
   onLiveMirror,
   parseLiveMirrorSnapshot,
+  __resetLiveMirrorRevForTests,
 } from '../../src/services/watchLiveMirrorReceiver';
 import type { SessionSnapshot } from '../../src/adapters/watch';
 
@@ -479,5 +480,122 @@ describe('Slice 13d D29 — parser tolerates WC-omitted nil optionals (absent �
     expect(s?.rpe).toBeNull();
     expect(s?.rest_sec).toBeNull();
     expect(s?.notes).toBeNull();
+  });
+});
+
+describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () => {
+  // The Watch dual-fires every live snapshot over sendMessage (instant) AND
+  // applicationContext (late backstop). A late appContext can carry an OLDER
+  // state than a sendMessage already applied; without the per-session rev
+  // high-water mark it would clobber the fresher value — the "亂七八糟 /
+  // 遞減組跳號" reorder. The guard drops any inbound whose rev <= lastApplied.
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    __resetLiveMirrorRevForTests();
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  /** A snapshot for set-1 with a given rev + weight (rev omitted → legacy). */
+  function snapWith(opts: {
+    rev?: number;
+    weight: number;
+    sessionId?: string;
+  }): SessionSnapshot {
+    const s = snapshot({
+      sessionId: opts.sessionId ?? 'sess-1',
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 3,
+          sets: [
+            {
+              setId: 'set-1',
+              ordinal: 0,
+              weight: opts.weight,
+              reps: 8,
+              rpe: null,
+              rest_sec: 90,
+              notes: null,
+              set_kind: 'working',
+              is_logged: true,
+            },
+          ],
+        },
+      ],
+    });
+    if (opts.rev !== undefined) s.rev = opts.rev;
+    return s;
+  }
+
+  async function weightOf(): Promise<number | null> {
+    const row = await db.getFirstAsync<{ weight_kg: number }>(
+      'SELECT weight_kg FROM "set" WHERE id = ?',
+      'set-1',
+    );
+    return row?.weight_kg ?? null;
+  }
+
+  it('drops an out-of-order (lower-rev) redelivery and does NOT clobber', async () => {
+    const a = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    expect(a.ok).toBe(true);
+
+    // A LATE applicationContext carrying an older state (rev 50, weight 999).
+    const b = await onLiveMirror(db, snapWith({ rev: 50, weight: 999 }));
+    expect(b.ok).toBe(false);
+    if (!b.ok) expect(b.code).toBe('stale');
+
+    // The fresher 80 survives — the stale 999 was dropped before any write.
+    expect(await weightOf()).toBe(80);
+  });
+
+  it('applies a newer (higher-rev) snapshot', async () => {
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    const r = await onLiveMirror(db, snapWith({ rev: 200, weight: 90 }));
+    expect(r.ok).toBe(true);
+    expect(await weightOf()).toBe(90);
+  });
+
+  it('drops an equal-rev redelivery (dual-fire dedup: sendMessage + appContext same rev)', async () => {
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    // The other channel delivers the SAME emit (same rev). Even if its
+    // payload differed, rev <= mark → dropped (no late clobber).
+    const dup = await onLiveMirror(db, snapWith({ rev: 100, weight: 999 }));
+    expect(dup.ok).toBe(false);
+    if (!dup.ok) expect(dup.code).toBe('stale');
+    expect(await weightOf()).toBe(80);
+  });
+
+  it('high-water mark is per-session — a different session is not gated', async () => {
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80, sessionId: 'sess-1' }));
+    // sess-2 has its own (empty) mark; even a "lower" rev applies — it is the
+    // first snapshot for that session, not an out-of-order one.
+    const other = snapshot({ sessionId: 'sess-2', exercises: [] });
+    other.rev = 50;
+    const r = await onLiveMirror(db, other);
+    expect(r.ok).toBe(true);
+
+    const row = await db.getFirstAsync<{ id: string }>(
+      'SELECT id FROM session WHERE id = ?',
+      'sess-2',
+    );
+    expect(row).not.toBeNull();
+  });
+
+  it('absent rev (legacy producer) bypasses the guard entirely', async () => {
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    // No rev → no comparison → applies even though it would be "behind" the
+    // mark. Preserves backward-compat with a pre-fix appContext-only producer.
+    const r = await onLiveMirror(db, snapWith({ weight: 77 }));
+    expect(r.ok).toBe(true);
+    expect(await weightOf()).toBe(77);
   });
 });
