@@ -246,6 +246,58 @@ describe('computeSessionSetLayout', () => {
     expect(out.labels.get('c')).toBe('2');
     expect(out.labels.get('f')).toBe('');
   });
+
+  it('namespaced post-completion ids (sess::ADD-n) fold by opaque id — no prefix-stripping', () => {
+    // Post-completion / Watch-sync data shape. The iPhone reconcile
+    // (`replaceLiveMirror`, commit 0915e16) diverts a Watch-authored set id to
+    // `${sessionId}::${wireId}` on a cross-session collision, AND remaps the
+    // follower's `parent_set_id` to the SAME namespaced head id at write time.
+    // So a well-formed namespaced chain has follower.parent_set_id === the
+    // namespaced head id. The fold is pure string-equality on opaque ids — it
+    // must NOT try to strip the `${sess}::` prefix to match (that would be a
+    // fragile mis-fix; the `::` separator is an on-device id detail the layout
+    // layer is intentionally blind to). This pins the post-completion history
+    // shape that Issue 2 ("完成後歷史排版異常") was reported against.
+    const out = computeSessionSetLayout([
+      mk('S-1::ADD-1', 'dropset', 1, null), // namespaced head
+      mk('S-1::ADD-2', 'dropset', 2, 'S-1::ADD-1'), // follower → namespaced head
+      mk('S-1::ADD-3', 'dropset', 3, 'S-1::ADD-1'),
+    ]);
+    expect(out.labels.get('S-1::ADD-1')).toBe('D1');
+    expect(out.labels.get('S-1::ADD-2')).toBe('');
+    expect(out.labels.get('S-1::ADD-3')).toBe('');
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0].head.id).toBe('S-1::ADD-1');
+    expect(out.groups[0].followers.map((f) => f.id)).toEqual([
+      'S-1::ADD-2',
+      'S-1::ADD-3',
+    ]);
+  });
+
+  it('namespaced head + follower with stale RAW parent (broken FK) → defensive standalone', () => {
+    // Legacy-corruption guard (commit 0915e16 NOTE: "legacy corrupted rows
+    // already in a device DB stay corrupt"). If a follower's parent_set_id is
+    // the RAW wire id ('ADD-1') while the head landed on-device as the
+    // namespaced id ('S-1::ADD-1') — i.e. the producer failed to remap the FK —
+    // the two ids genuinely don't match. The layout fn must treat this as the
+    // documented orphan case (each row standalone, no crash, head NOT reused),
+    // NOT silently re-pair by stripping the namespace. Fixing the underlying
+    // mismatch is the producer's job (out of this fn's scope); the layout fn's
+    // contract is to degrade gracefully on inconsistent DB data.
+    const out = computeSessionSetLayout([
+      mk('S-1::ADD-1', 'dropset', 1, null), // namespaced head
+      mk('S-1::ADD-2', 'dropset', 2, 'ADD-1'), // parent points at the RAW id → no match
+    ]);
+    // Both render standalone (the follower's parent resolves to no present head).
+    expect(out.groups.map((g) => g.head.id)).toEqual([
+      'S-1::ADD-1',
+      'S-1::ADD-2',
+    ]);
+    expect(out.groups.every((g) => g.followers.length === 0)).toBe(true);
+    // The head still gets its D-label; the unmatched follower keeps blank.
+    expect(out.labels.get('S-1::ADD-1')).toBe('D1');
+    expect(out.labels.get('S-1::ADD-2')).toBe('');
+  });
 });
 
 // ---------------------------------------------------------------------------
