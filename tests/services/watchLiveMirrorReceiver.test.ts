@@ -727,6 +727,33 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     expect(await weightOf()).toBe(88);
   });
 
+  it('claim-before-await — the mark advances synchronously at call time, BEFORE the DB write awaits', async () => {
+    // Gap #2 — verify the source's "claim BEFORE await" ordering, which is what
+    // makes the guard race-safe: in production WC delivers messages serially,
+    // but the guard still claims the high-water mark synchronously (before the
+    // first `await`) so an older redelivery that arrives the instant after can
+    // never pass its rev<=mark check in the check↔write gap.
+    //
+    // NOTE we do NOT model true-parallel transactions here: better-sqlite3
+    // transactions are synchronous and non-reentrant ("cannot start a
+    // transaction within a transaction"), and production never has two
+    // onLiveMirror writes truly overlapping on one db handle. We instead start
+    // the newer call (claiming the mark synchronously) and assert that a
+    // SUBSEQUENT older call observes the already-advanced mark even though the
+    // newer write has not yet been awaited to completion.
+    const newerPromise = onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    // The mark is ALREADY 100 (claimed synchronously above) before we await.
+    // An older redelivery created now is dropped as stale on its synchronous
+    // guard check — it never reaches a DB write, so no transaction collision.
+    const olderResult = await onLiveMirror(db, snapWith({ rev: 50, weight: 999 }));
+    expect(olderResult.ok).toBe(false);
+    if (!olderResult.ok) expect(olderResult.code).toBe('stale');
+
+    const newerResult = await newerPromise;
+    expect(newerResult.ok).toBe(true);
+    expect(await weightOf()).toBe(80); // the stale 999 never landed
+  });
+
   it('__resetLiveMirrorRevForTests clears the mark (app-restart re-seed semantics)', async () => {
     await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
     // Without a reset, rev 50 would be stale. After a reset (mimicking an

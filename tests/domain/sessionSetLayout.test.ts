@@ -148,6 +148,79 @@ describe('computeSessionSetLayout', () => {
     ).toEqual(b.groups.map((g) => g.followers.map((f) => f.id)));
   });
 
+  it('head-delete with TWO surviving followers → each renders standalone, none crash, no head reused', () => {
+    // Gap #3. The Watch deleted the dropset HEAD but its followers linger in the
+    // tree for a tick (parent_set_id still points at the now-absent head). The
+    // fold must NOT crash and must NOT promote a follower to a head — each
+    // orphaned follower renders as its OWN standalone group (defensive: DB drift
+    // / a partial Watch delete that removed the head before the children).
+    const out = computeSessionSetLayout([
+      mk('a', 'working', 0),
+      mk('f1', 'dropset', 1, 'gone-head'),
+      mk('f2', 'dropset', 2, 'gone-head'),
+    ]);
+    // Three standalone groups in sorted order — the two orphans are NOT folded
+    // into one group (their head is absent) and neither is silently dropped.
+    expect(out.groups.map((g) => g.head.id)).toEqual(['a', 'f1', 'f2']);
+    expect(out.groups.every((g) => g.followers.length === 0)).toBe(true);
+    // Followers keep the blank label (parent_set_id !== null → '').
+    expect(out.labels.get('f1')).toBe('');
+    expect(out.labels.get('f2')).toBe('');
+    // The working set's counter is unaffected by the orphans.
+    expect(out.labels.get('a')).toBe('1');
+  });
+
+  it('mixed survivors — one chain loses its head while another intact chain coexists', () => {
+    // Gap #3. Interleave an INTACT chain (h2 + g) with an ORPHANED follower set
+    // (o1/o2 whose head 'dead' is absent). The intact chain folds; the orphans
+    // each stand alone. Cross-chain isolation — a missing head in one chain must
+    // not corrupt the grouping of the healthy one.
+    const out = computeSessionSetLayout([
+      mk('o1', 'dropset', 0, 'dead'), // orphan follower (head absent)
+      mk('h2', 'dropset', 1, null), // intact head
+      mk('g', 'dropset', 2, 'h2'), // its follower
+      mk('o2', 'dropset', 3, 'dead'), // another orphan of the same dead head
+    ]);
+    // h2 folds g; o1 and o2 each render standalone.
+    expect(out.groups.map((g) => g.head.id)).toEqual(['o1', 'h2', 'o2']);
+    const intact = out.groups.find((g) => g.head.id === 'h2');
+    expect(intact?.followers.map((f) => f.id)).toEqual(['g']);
+    // Orphans carry no followers (they are not heads — parent_set_id set).
+    expect(out.groups.find((g) => g.head.id === 'o1')?.followers).toEqual([]);
+    expect(out.groups.find((g) => g.head.id === 'o2')?.followers).toEqual([]);
+    // Only the intact head consumes a D-label; orphans + follower are blank.
+    expect(out.labels.get('h2')).toBe('D1');
+    expect(out.labels.get('g')).toBe('');
+    expect(out.labels.get('o1')).toBe('');
+    expect(out.labels.get('o2')).toBe('');
+  });
+
+  it('three interleaved dropset chains all fold correctly (D1/D2/D3 + followers under right heads)', () => {
+    // Gap #3 — multiple chains, denser than the existing 2-chain case, with
+    // followers at non-contiguous ordinals (max+1 emit) to stress fold-by-parent
+    // across THREE clusters at once.
+    const out = computeSessionSetLayout([
+      mk('w1', 'working', 0),
+      mk('hA', 'dropset', 1, null),
+      mk('hB', 'dropset', 2, null),
+      mk('hC', 'dropset', 3, null),
+      mk('fA', 'dropset', 4, 'hA'), // follower of the FIRST head, appended last
+      mk('fB', 'dropset', 5, 'hB'),
+      mk('fC', 'dropset', 6, 'hC'),
+    ]);
+    // Heads keep their sorted positions; each gathers only its own follower.
+    expect(out.groups.map((g) => g.head.id)).toEqual(['w1', 'hA', 'hB', 'hC']);
+    expect(out.groups.find((g) => g.head.id === 'hA')?.followers.map((f) => f.id)).toEqual(['fA']);
+    expect(out.groups.find((g) => g.head.id === 'hB')?.followers.map((f) => f.id)).toEqual(['fB']);
+    expect(out.groups.find((g) => g.head.id === 'hC')?.followers.map((f) => f.id)).toEqual(['fC']);
+    // D-labels assigned by head sorted-position order.
+    expect(out.labels.get('hA')).toBe('D1');
+    expect(out.labels.get('hB')).toBe('D2');
+    expect(out.labels.get('hC')).toBe('D3');
+    // No follower leaked into a standalone group.
+    expect(out.groups.some((g) => ['fA', 'fB', 'fC'].includes(g.head.id))).toBe(false);
+  });
+
   it('non-contiguous follower (ordering past a later working set) still folds under its head', () => {
     // F1 regression (overnight audit + ADR-0019 § 2026-06-01): the WC live
     // mirror emits a Watch-added dropset follower at ordinal max+1, so a
