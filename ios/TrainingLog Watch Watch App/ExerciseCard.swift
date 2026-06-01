@@ -527,7 +527,9 @@ struct ExerciseCard: View {
 /// `isActive` masks the gesture to `.subviews` on idle rows so the ScrollView
 /// pan + tap-to-activate own the touch (Anomaly 1 fix) — only the Active row
 /// arms reorder.
-private struct ReorderableRow<Content: View>: View {
+// Internal (not private) so SupersetCard reuses the same long-press
+// reorder wrapper for its pair rows.
+struct ReorderableRow<Content: View>: View {
     let groupIndex: Int
     let isActive: Bool
     /// (fromIndex, finger-Y translation) — parent resolves the drop target.
@@ -604,7 +606,7 @@ private struct ReorderableRow<Content: View>: View {
 }
 
 /// Move-mode state for `ReorderableRow`'s `@GestureState`.
-private enum ReorderDrag {
+enum ReorderDrag {
     case inactive
     case moving(CGFloat)
     var isMoving: Bool { if case .moving = self { return true }; return false }
@@ -622,7 +624,10 @@ private struct ProgressBarItem: Identifiable, Equatable {
 
 /// Collects each render group's midY (in the "exerciseReorder" coordinate
 /// space) so the drop target index can be derived from the finger's Y.
-private struct GroupMidYKey: PreferenceKey {
+// Internal (not private) so SupersetCard's pair reorder reuses the same
+// midY preference plumbing (each card consumes only its own subtree's
+// values via a scoped `.onPreferenceChange`, so sharing the type is safe).
+struct GroupMidYKey: PreferenceKey {
     static var defaultValue: [Int: CGFloat] = [:]
     static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
@@ -660,7 +665,9 @@ private struct GroupMidYKey: PreferenceKey {
 ///
 /// Warmup + working rows only — cluster sub-sets keep their min-2
 /// invariant and are removed by deleting the whole exercise via ⋯ menu.
-private enum RowReveal {
+// Internal (not private) so SupersetCard's pair box reuses the same
+// left/right swipe reveal states.
+enum RowReveal {
     case none
     case delete
     case add
@@ -1437,7 +1444,9 @@ private struct ClusterFollowerRow: View {
 
 // MARK: - Helpers
 
-private func formatWeight(_ w: Double?) -> String {
+// Internal (not private) so SupersetCard.swift can reuse the same weight
+// formatting (— for nil, integer when whole, one decimal otherwise).
+func formatWeight(_ w: Double?) -> String {
     guard let w else { return "—" }
     if w == w.rounded() {
         return String(format: "%.0f", w)

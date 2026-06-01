@@ -519,6 +519,48 @@ private struct SessionCardListPage: View {
         snapshot.exercises.filter { !state.isExerciseDeleted($0.sessionExerciseId) }
     }
 
+    /// D15 — a rendered card is either a solo exercise or a superset PAIR.
+    private enum CardUnit: Identifiable {
+        case solo(SessionSnapshotExercise)
+        case superset(a: SessionSnapshotExercise, b: SessionSnapshotExercise)
+        var id: String {
+            switch self {
+            case .solo(let ex):
+                return ex.sessionExerciseId
+            case .superset(let a, let b):
+                return "ss-\(a.sessionExerciseId)-\(b.sessionExerciseId)"
+            }
+        }
+    }
+
+    /// Fold the visible exercises into card units: two ADJACENT exercises that
+    /// share the same non-nil `reusableSupersetId` become one superset card
+    /// (a Reusable Superset is a fixed-2 entity exploded into consecutive rows,
+    /// per ADR-0018). Grouping by RS id (not parent_id) needs no id remap — the
+    /// id is a foreign key copied verbatim through the fat-tree build. A = the
+    /// lower-`ordering` side. Everything else renders solo.
+    private var cardUnits: [CardUnit] {
+        let ex = visibleExercises
+        var out: [CardUnit] = []
+        var i = 0
+        while i < ex.count {
+            let cur = ex[i]
+            if let rs = cur.reusableSupersetId, !rs.isEmpty,
+               i + 1 < ex.count,
+               ex[i + 1].reusableSupersetId == rs {
+                let next = ex[i + 1]
+                let a = cur.ordering <= next.ordering ? cur : next
+                let b = cur.ordering <= next.ordering ? next : cur
+                out.append(.superset(a: a, b: b))
+                i += 2
+            } else {
+                out.append(.solo(cur))
+                i += 1
+            }
+        }
+        return out
+    }
+
     var body: some View {
         // 2026-06-01 (build7): HR pane pinned ABOVE the scroll list in a VStack
         // — NOT `.safeAreaInset`, which interfered with `proxy.scrollTo` so the
@@ -560,10 +602,16 @@ private struct SessionCardListPage: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
                 } else {
-                    // ExerciseCard list (continuous vertical scroll).
-                    // Phase F: deleted exercises filtered out (visibleExercises).
-                    ForEach(visibleExercises, id: \.sessionExerciseId) { ex in
-                        ExerciseCard(exercise: ex, state: state)
+                    // Card list (continuous vertical scroll). Phase F: deleted
+                    // exercises filtered out (visibleExercises). D15: adjacent
+                    // same-RS pairs fold into one SupersetCard (see cardUnits).
+                    ForEach(cardUnits) { unit in
+                        switch unit {
+                        case .solo(let ex):
+                            ExerciseCard(exercise: ex, state: state)
+                        case .superset(let a, let b):
+                            SupersetCard(state: state, exerciseA: a, exerciseB: b)
+                        }
                     }
                 }
 

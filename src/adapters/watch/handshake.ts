@@ -185,6 +185,26 @@ export interface Stage1TemplateExercise {
    * so older iPhone payloads still parse.
    */
   sets: ReadonlyArray<Stage1TemplateSet>;
+  /**
+   * D15 superset card — cluster linkage from `template_exercise`. The Watch
+   * builds its SessionSnapshot locally from this fat tree (NEW-Q50), so the
+   * linkage must travel here (not just the dormant session-snapshot path).
+   *
+   *   - `reusableSupersetId` — RS identity (template_exercise.reusable_superset_id,
+   *     v013). Two ADJACENT exercises sharing the same non-null value form one
+   *     superset; the Watch folds them into a single superset card. Copied
+   *     verbatim (foreign id → no remap), so grouping by it needs no id rewrite
+   *     when the Watch mints fresh sessionExerciseIds.
+   *   - `parentId` — template_exercise.parent_id (v009): null on the A side /
+   *     a solo row, the parent template_exercise's id on the B side. Carried
+   *     for forward-compat + A/B disambiguation; grouping uses reusableSupersetId
+   *     + `ordering` so no parent-id remap is required.
+   *
+   * Both OPTIONAL — older iPhone payloads omit them; Swift decode tolerates
+   * absence (defaults to nil → solo render).
+   */
+  parentId?: string | null;
+  reusableSupersetId?: string | null;
 }
 
 /**
@@ -429,6 +449,26 @@ export interface SessionSnapshotExercise {
   ordering: number;
   plannedSets: number;
   sets: ReadonlyArray<SessionSnapshotSet>;
+  /**
+   * Cluster linkage (ADR-0018 v014, shipped to the Watch for D15 superset
+   * card). On the parent (A side) / a solo exercise this is null; on the
+   * child (B side) of a superset it holds the parent session_exercise's
+   * `sessionExerciseId`. The Watch pairs A+B by matching `parentId` to a
+   * preceding exercise's `sessionExerciseId` to fold them into one
+   * superset card. OPTIONAL — older wire payloads omit it; consumers
+   * default to null (solo render). Authored ONLY on iPhone (template
+   * snapshot path); the Watch never creates a superset, so the reverse
+   * live-mirror leaves it absent and the iPhone reconcile preserves the
+   * DB value.
+   */
+  parentId?: string | null;
+  /**
+   * Reusable Superset identity (ADR-0018 v014). NULL = solo / manual /
+   * ad-hoc; NOT NULL = the two rows sharing this id form one RS-exploded
+   * superset. Travels alongside `parentId` so the Watch can label the
+   * card and route the ⋯ menu A/B history. OPTIONAL — see `parentId`.
+   */
+  reusableSupersetId?: string | null;
 }
 
 export interface SessionSnapshotSet {
@@ -541,6 +581,11 @@ function snapshotToWire(snapshot: SessionSnapshot): Record<string, JsonValue> {
       exerciseName: ex.exerciseName,
       ordering: ex.ordering,
       plannedSets: ex.plannedSets,
+      // Cluster linkage (D15 superset card) — null travels as JSON null,
+      // which is plist-clean inside the `start-from-iphone` reply (this is
+      // a sendMessage reply, not applicationContext, so null keys are fine).
+      parentId: ex.parentId ?? null,
+      reusableSupersetId: ex.reusableSupersetId ?? null,
       sets: ex.sets.map((s) => ({
         setId: s.setId,
         ordinal: s.ordinal,
@@ -680,11 +725,13 @@ async function loadTemplateExerciseTree(
     default_sets: number;
     default_reps: number | null;
     default_weight_kg: number | null;
+    parent_id: string | null;
+    reusable_superset_id: string | null;
   };
   const rows = await db.getAllAsync<Row>(
     `SELECT te.id, te.exercise_id, e.name AS exercise_name,
             te.ordering, te.default_sets, te.default_reps,
-            te.default_weight_kg
+            te.default_weight_kg, te.parent_id, te.reusable_superset_id
        FROM template_exercise te
        LEFT JOIN exercise e ON e.id = te.exercise_id
       WHERE te.template_id = ?
@@ -738,6 +785,11 @@ async function loadTemplateExerciseTree(
       defaultSets: r.default_sets,
       defaultReps: r.default_reps,
       defaultWeightKg: r.default_weight_kg,
+      // D15 superset card — carry cluster linkage so the Watch can fold an
+      // adjacent same-RS pair into a superset card when it builds the local
+      // SessionSnapshot. Verbatim copy (foreign id → no remap).
+      parentId: r.parent_id ?? null,
+      reusableSupersetId: r.reusable_superset_id ?? null,
       // `position` is intentionally omitted from the projection —
       // the array index IS the position because we ORDER BY
       // position ASC above. Field names are single chars (k/r/w)
@@ -934,6 +986,11 @@ export async function fetchSessionSnapshot(
       exerciseName: tExercise(se.exercise_name),
       ordering: se.ordering,
       plannedSets: se.planned_sets,
+      // Cluster linkage (D15 superset card). listSessionExercisesWithName
+      // already SELECTs these columns; pass them through so the Watch can
+      // fold a parent+child pair into one superset card.
+      parentId: se.parent_id ?? null,
+      reusableSupersetId: se.reusable_superset_id ?? null,
       sets: bucket.map((s) => ({
         setId: s.id,
         ordinal: s.ordering,

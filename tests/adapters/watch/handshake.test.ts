@@ -296,6 +296,8 @@ describe('WC handshake — buildStartFromIphone', () => {
           exerciseName: 'Bench Press',
           ordering: 1,
           plannedSets: 3,
+          parentId: null,
+          reusableSupersetId: null,
           sets: [
             {
               setId: 'set-1',
@@ -325,6 +327,8 @@ describe('WC handshake — buildStartFromIphone', () => {
           exerciseName: 'Bench Press',
           ordering: 1,
           plannedSets: 3,
+          parentId: null,
+          reusableSupersetId: null,
           sets: [
             {
               setId: 'set-1',
@@ -540,6 +544,8 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
         defaultSets: 3,
         defaultReps: 8,
         defaultWeightKg: 60,
+        parentId: null,
+        reusableSupersetId: null,
         // 2026-05-29 SetLogger sets[] fix — no template_set rows
         // seeded, so the loader returns an empty array (consumer
         // falls back to default_* path).
@@ -550,6 +556,76 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       expect(list[0].exercises[1].defaultWeightKg).toBeNull();
       expect(list[0].exercises[1].ordering).toBe(2);
       expect(list[0].exercises[1].sets).toEqual([]);
+    });
+
+    // D15 superset card — the fat tree must carry the cluster linkage
+    // (reusable_superset_id + parent_id) so the Watch can fold an adjacent
+    // same-RS pair into one superset card when it builds the local
+    // SessionSnapshot. A = parent (parent_id NULL), B = child (parent_id = A).
+    it('carries reusable_superset_id + parent_id linkage for a superset pair', async () => {
+      const now = 1_700_000_000_000;
+      const ROW = '00000000-0000-4000-8000-000000000002';
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-ss',
+        'Superset Template',
+        now,
+        now,
+      );
+      // RS entity the two rows are exploded from (FK target of
+      // template_exercise.reusable_superset_id).
+      await db.runAsync(
+        `INSERT INTO superset (id, name, color_hex, use_count, created_at, updated_at)
+         VALUES (?, ?, NULL, 0, ?, ?)`,
+        'rs-1',
+        'Bench + Row',
+        now,
+        now,
+      );
+      // A side — parent (parent_id NULL), carries the RS id.
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, parent_id, reusable_superset_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+        'te-a',
+        'tpl-ss',
+        BENCH,
+        1,
+        3,
+        8,
+        60,
+        'rs-1',
+      );
+      // B side — child (parent_id = A's te id), same RS id, adjacent ordering.
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, parent_id, reusable_superset_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'te-b',
+        'tpl-ss',
+        ROW,
+        2,
+        3,
+        10,
+        40,
+        'te-a',
+        'rs-1',
+      );
+      const list = await loadTemplatesFullTree(db);
+      expect(list).toHaveLength(1);
+      expect(list[0].exercises).toHaveLength(2);
+      const [a, b] = list[0].exercises;
+      // A side: RS id present, no parent.
+      expect(a.templateExerciseId).toBe('te-a');
+      expect(a.parentId).toBeNull();
+      expect(a.reusableSupersetId).toBe('rs-1');
+      // B side: RS id present (same as A → groups), parent points at A.
+      expect(b.templateExerciseId).toBe('te-b');
+      expect(b.parentId).toBe('te-a');
+      expect(b.reusableSupersetId).toBe('rs-1');
     });
 
     // 2026-05-29 SetLogger sets[] fix — happy path
@@ -994,6 +1070,8 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
       defaultSets: 3,
       defaultReps: 8,
       defaultWeightKg: 60,
+      parentId: null,
+      reusableSupersetId: null,
       // 2026-05-29 SetLogger sets[] fix — loader returns empty
       // sets[] when no template_set rows exist for this exercise.
       sets: [],
@@ -1727,6 +1805,8 @@ describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () =
         defaultSets: 4,
         defaultReps: 8,
         defaultWeightKg: 70,
+        parentId: null,
+        reusableSupersetId: null,
         // 2026-05-29 SetLogger sets[] fix — no template_set rows
         // seeded for this fixture, so loader returns sets: [].
         sets: [],

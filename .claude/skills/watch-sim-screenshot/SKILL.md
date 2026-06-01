@@ -9,10 +9,19 @@ description: Visual-verify a watchOS SwiftUI change by rendering it in the watch
 
 You changed a Watch SwiftUI view and want to SEE the result before committing a
 5-10 min real-device build (`xcodebuild-watchos-realdevice-install`). The Sim
-RENDERS the view fine. **It cannot drive drag/long-press gestures** — reorder,
-swipe-to-reveal, and `.swipeActions` at-rest are NOT screenshot-able, so those
-still need device verification. Use this for LAYOUT / colour / alignment /
-border / spacing checks.
+RENDERS the view fine. Use this for LAYOUT / colour / alignment / border /
+spacing checks AND for scripted interaction.
+
+**Gestures via the ios-simulator MCP (2026-06-01 — supersedes the old "cannot
+drive gestures" note):** `mcp__ios-simulator__ui_tap {x,y}` drives taps;
+`ui_tap` to activate then `ui_swipe {x_start,y_start,x_end,y_end,duration}`
+drives left/right swipe-to-reveal — both work on the watch Sim. Coords are in
+POINTS (app AXFrame ≈ 211×257 pt on Ultra 49mm; the PNG is 2× = 421 px wide, so
+point = px ÷ 2). `ui_describe_all` returns only the app frame (watchOS SwiftUI
+exposes no deep a11y tree) → tap by computed point. The ONLY gesture you can't
+script is a **long-press-then-drag reorder** (`ui_swipe` is continuous motion,
+not hold-then-drag) → manual / device verify. `terminate` + `launch` between
+probes resets in-memory state.
 
 ## The 4 steps
 
@@ -72,6 +81,39 @@ its product lands under `Index.noindex/` stale + with no Info.plist.)
 
 Also: `.listRowSeparator(.hidden)` is **unavailable on watchOS** (compile error)
 — watchOS List has no separators to hide; just drop the modifier.
+
+**Trap — in a git WORKTREE (no `ios/Pods`) the `-scheme` build FAILS HARD, no
+binary** (2026-06-01). The "TrainingLog Watch Watch App" scheme pulls in the
+HOST iOS target, whose `Pods-TrainingLog.debug.xcconfig` is missing in a fresh
+worktree (`pod install` not run) → `error: Unable to open base configuration
+reference file …` and NO watch binary. Two fixes that need NO `pod install`:
+- **Quick compile-check only:** `xcodebuild build -target "TrainingLog Watch
+  Watch App" -sdk watchsimulator CODE_SIGNING_ALLOWED=NO` — the watch target has
+  no dependencies, so it builds alone (no host, no Pods). But `-target` can't
+  take `-derivedDataPath` and won't produce a clean installable .app.
+- **Installable build + Xcode-Canvas previews:** add a Watch-only SHARED scheme
+  `ios/TrainingLog.xcodeproj/xcshareddata/xcschemes/WatchPreview.xcscheme` whose
+  BuildAction lists ONLY the watch target's `BuildableReference` with
+  `buildImplicitDependencies = "NO"`. Get the blueprint id from the watch
+  `PBXNativeTarget` block in project.pbxproj (BuildableName = `TrainingLog Watch
+  Watch App.app`). Then build `-scheme "WatchPreview" -derivedDataPath …` →
+  clean watch .app, no Pods. Xcode Live Preview also fails in a worktree for the
+  same reason (Canvas builds via the scheme → host → Pods); selecting the
+  WatchPreview scheme makes the Canvas build watch-only too.
+
+### Mounting the REAL page (HR frozen pane + active-set auto-scroll)
+
+A bare `ScrollView { MyCard }` smoke MISSES the page chrome: the top HR frozen
+pane and the `ScrollViewReader` that auto-scrolls the active set under it both
+live in `SessionCardListPage` (private in SetLoggerView.swift), and the keypad
+overlay (`CellEditOverlay`) is mounted at the page level — NOT inside the card.
+To verify those WITH your card: temporarily make `SessionCardListPage` internal
+(was private) and root the smoke at `ZStack { SessionCardListPage(snapshot:
+mockSnap, state: smokeState); CellEditOverlay(state: smokeState) }` with a
+multi-card mock so a lower card can scroll up. Revert the `private` too. Without
+`CellEditOverlay` in the smoke, tapping a cell sets `activeCell` but no keypad
+draws → looks like a "keypad doesn't open" bug that is really just the missing
+overlay.
 
 ### 3. Install + launch on the booted watch Sim
 

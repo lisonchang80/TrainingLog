@@ -105,6 +105,13 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
     /// fallback so picker still renders; consumer then falls back
     /// to the legacy default_* path).
     let sets: [Stage1TemplateSetDTO]
+    /// D15 superset card — cluster linkage from `template_exercise`
+    /// (handshake.ts `Stage1TemplateExercise.parentId` /
+    /// `reusableSupersetId`). The Watch folds two ADJACENT exercises sharing
+    /// the same non-nil `reusableSupersetId` into one superset card. Tolerant
+    /// decode: missing key → nil (older iPhone payloads → solo render).
+    let parentId: String?
+    let reusableSupersetId: String?
 
     enum CodingKeys: String, CodingKey {
         case templateExerciseId
@@ -115,6 +122,8 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         case defaultReps
         case defaultWeightKg
         case sets
+        case parentId
+        case reusableSupersetId
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +137,9 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         self.defaultWeightKg = try? c.decode(Double.self, forKey: .defaultWeightKg)
         // Tolerant: missing key → [] for back-compat with pre-fix wire.
         self.sets = (try? c.decode([Stage1TemplateSetDTO].self, forKey: .sets)) ?? []
+        // Tolerant: missing key → nil (older payloads / solo rows).
+        self.parentId = try? c.decode(String.self, forKey: .parentId)
+        self.reusableSupersetId = try? c.decode(String.self, forKey: .reusableSupersetId)
     }
 
     init(
@@ -138,7 +150,9 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         defaultSets: Int,
         defaultReps: Int?,
         defaultWeightKg: Double?,
-        sets: [Stage1TemplateSetDTO] = []
+        sets: [Stage1TemplateSetDTO] = [],
+        parentId: String? = nil,
+        reusableSupersetId: String? = nil
     ) {
         self.templateExerciseId = templateExerciseId
         self.exerciseId = exerciseId
@@ -148,6 +162,8 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         self.defaultReps = defaultReps
         self.defaultWeightKg = defaultWeightKg
         self.sets = sets
+        self.parentId = parentId
+        self.reusableSupersetId = reusableSupersetId
     }
 }
 

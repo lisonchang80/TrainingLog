@@ -177,7 +177,12 @@ enum LiveMirror {
                 exerciseName: ex.exerciseName,
                 ordering: ex.ordering,
                 plannedSets: ex.plannedSets,
-                sets: sets
+                sets: sets,
+                // D15 superset card — preserve cluster linkage on the reverse
+                // mirror so it round-trips for forward-compat (the iPhone
+                // reconcile currently preserves the DB value either way).
+                parentId: ex.parentId,
+                reusableSupersetId: ex.reusableSupersetId
             )
         }
         return SessionSnapshot(
