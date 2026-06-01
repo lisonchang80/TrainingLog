@@ -50,6 +50,15 @@ struct PickerRootView: View {
     @StateObject private var vm: PickerViewModel
     @State private var path: [PickerDestination] = []
 
+    /// Bumped on session-end return so the carousel List re-creates and resets
+    /// its scroll to the TOP (user 2026-06-01: 完成/放棄後回第一頁、捲到最上層).
+    /// `.id(listResetToken)` on the List drives the reset — a LOOP-SAFE
+    /// alternative to `ScrollViewReader` (which + a `.carousel` List inside this
+    /// NavigationStack triggered a scene-update render-loop watchdog kill,
+    /// 0x8badf00d, see the List comment). The token only changes on return →
+    /// the id is otherwise stable → no loop.
+    @State private var listResetToken = 0
+
     /// Inject a view model. Default to .mockDefault() for production
     /// preview in Phase 1; Phase 2 caller passes a VM bound to the
     /// WatchConnectivityCoordinator.
@@ -95,6 +104,9 @@ struct PickerRootView: View {
                 // idempotent so re-mount is safe.
                 await vm.bootstrap()
             }
+            // Re-create the List (→ scroll resets to top) on session-end
+            // return. Stable at all other times so there's no render loop.
+            .id(listResetToken)
         }
     }
 
@@ -222,7 +234,12 @@ struct PickerRootView: View {
             PickerSetLoggerPlaceholderView(
                 selection: selection,
                 vm: vm,
-                onSessionEnd: { path.removeAll() }
+                onSessionEnd: {
+                    // Pop back to the picker root + reset its scroll to the top
+                    // by re-creating the List (listResetToken → `.id`).
+                    path.removeAll()
+                    listResetToken += 1
+                }
             )
         }
     }
