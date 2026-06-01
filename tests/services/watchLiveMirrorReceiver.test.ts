@@ -598,4 +598,142 @@ describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () 
     expect(r.ok).toBe(true);
     expect(await weightOf()).toBe(77);
   });
+
+  // ─── Self-heal: a db-error claims the mark BEFORE the await ──────────
+  // The guard `lastAppliedRev.set(...)` runs BEFORE `await replaceLiveMirror`
+  // (so a concurrent older delivery from the other channel can't slip past in
+  // the check↔write gap). A consequence: if the DB write then FAILS, the mark
+  // is already advanced. Verify the recovery behaviour around that.
+
+  it('db-error advances the mark, then a HIGHER rev on a reopened db applies (self-heal)', async () => {
+    // rev 100 claims the mark but the DB write fails (closed db).
+    db.close();
+    const failed = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.code).toBe('db-error');
+
+    // Reopen — the Watch keeps pushing every ~15s with ever-higher revs, so the
+    // NEXT (rev 200) push lands above the claimed-but-failed mark and applies,
+    // re-seeding the iPhone mirror. No stuck state.
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const healed = await onLiveMirror(db, snapWith({ rev: 200, weight: 90 }));
+    expect(healed.ok).toBe(true);
+    expect(await weightOf()).toBe(90);
+  });
+
+  it('after a db-error claims rev 100, a LOWER rev (50) stays dropped (no clobber by a straggler)', async () => {
+    db.close();
+    const failed = await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    expect(failed.ok).toBe(false);
+
+    // A LATE straggler carrying an OLDER state (rev 50) arrives after recovery.
+    // The claimed mark (100) still gates it out — it must not resurrect a stale
+    // snapshot just because the rev-100 apply happened to fail.
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    const straggler = await onLiveMirror(db, snapWith({ rev: 50, weight: 999 }));
+    expect(straggler.ok).toBe(false);
+    if (!straggler.ok) expect(straggler.code).toBe('stale');
+    // Nothing was written for set-1 (rev 100 failed, rev 50 dropped).
+    expect(await weightOf()).toBeNull();
+  });
+
+  // ─── Interleave: two sessions keep independent high-water marks ─────
+
+  it('two sessions interleaved keep independent marks (one stale drop does not gate the other)', async () => {
+    // Per-session distinct exercise/set ids (the `set`/`session_exercise` PKs
+    // are global ids — sharing 'set-1' across sessions would UPSERT one row).
+    function sessSnap(opts: {
+      rev: number;
+      weight: number;
+      sessionId: string;
+    }): SessionSnapshot {
+      const s = snapshot({
+        sessionId: opts.sessionId,
+        exercises: [
+          {
+            sessionExerciseId: `se-${opts.sessionId}`,
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            sets: [
+              {
+                setId: `set-${opts.sessionId}`,
+                ordinal: 0,
+                weight: opts.weight,
+                reps: 8,
+                rpe: null,
+                rest_sec: 90,
+                notes: null,
+                set_kind: 'working',
+                is_logged: true,
+              },
+            ],
+          },
+        ],
+      });
+      s.rev = opts.rev;
+      return s;
+    }
+    const weightFor = async (sessionId: string) => {
+      const row = await db.getFirstAsync<{ weight_kg: number }>(
+        'SELECT weight_kg FROM "set" WHERE session_id = ? AND id = ?',
+        sessionId,
+        `set-${sessionId}`,
+      );
+      return row?.weight_kg ?? null;
+    };
+
+    // Interleave: A@100, B@100, A@90 (stale for A), B@200 (fresh for B).
+    expect((await onLiveMirror(db, sessSnap({ rev: 100, weight: 80, sessionId: 'A' }))).ok).toBe(true);
+    expect((await onLiveMirror(db, sessSnap({ rev: 100, weight: 50, sessionId: 'B' }))).ok).toBe(true);
+
+    // A@90 is behind A's mark (100) → dropped, A keeps 80.
+    const aStale = await onLiveMirror(db, sessSnap({ rev: 90, weight: 999, sessionId: 'A' }));
+    expect(aStale.ok).toBe(false);
+    if (!aStale.ok) expect(aStale.code).toBe('stale');
+
+    // B@200 is ahead of B's mark (100) → applies, unaffected by A's gating.
+    const bFresh = await onLiveMirror(db, sessSnap({ rev: 200, weight: 60, sessionId: 'B' }));
+    expect(bFresh.ok).toBe(true);
+
+    expect(await weightFor('A')).toBe(80); // A unchanged by its stale drop
+    expect(await weightFor('B')).toBe(60); // B advanced independently
+  });
+
+  it('absent-rev tick after a present-rev tick still applies AND does not corrupt the mark', async () => {
+    // rev 100 → mark = 100.
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    // A legacy (rev-absent) tick bypasses the guard and applies (weight 77).
+    // Crucially it must NOT touch the high-water mark.
+    const legacy = await onLiveMirror(db, snapWith({ weight: 77 }));
+    expect(legacy.ok).toBe(true);
+    expect(await weightOf()).toBe(77);
+
+    // The mark is still 100: a subsequent rev-90 (< 100) is STILL dropped — the
+    // absent tick neither advanced nor reset the mark.
+    const stale = await onLiveMirror(db, snapWith({ rev: 90, weight: 999 }));
+    expect(stale.ok).toBe(false);
+    if (!stale.ok) expect(stale.code).toBe('stale');
+    expect(await weightOf()).toBe(77); // legacy value survives, stale dropped
+
+    // And a rev-101 (> 100) applies — confirms the mark is exactly 100, not
+    // bumped by the absent tick.
+    const fresh = await onLiveMirror(db, snapWith({ rev: 101, weight: 88 }));
+    expect(fresh.ok).toBe(true);
+    expect(await weightOf()).toBe(88);
+  });
+
+  it('__resetLiveMirrorRevForTests clears the mark (app-restart re-seed semantics)', async () => {
+    await onLiveMirror(db, snapWith({ rev: 100, weight: 80 }));
+    // Without a reset, rev 50 would be stale. After a reset (mimicking an
+    // iPhone app restart that drops the in-memory map), the first push for the
+    // session re-seeds the mark unconditionally — even a "lower" absolute rev.
+    __resetLiveMirrorRevForTests();
+    const afterReset = await onLiveMirror(db, snapWith({ rev: 50, weight: 70 }));
+    expect(afterReset.ok).toBe(true);
+    expect(await weightOf()).toBe(70);
+  });
 });
