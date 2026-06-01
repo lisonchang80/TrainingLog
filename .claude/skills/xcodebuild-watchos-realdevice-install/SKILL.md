@@ -341,13 +341,44 @@ If the user opens the app and sees React Native red error page `No script URL pr
 
 ## Release standalone build — sidestep Metro entirely (flaky network / hotspot)
 
+> ⚠️⚠️ **DO NOT use a Release standalone build to smoke Watch↔iPhone WC sync — it
+> BREAKS the sync (validated 2026-06-02, a full session lost to this).** Symptom:
+> start a workout on the Watch → iPhone shows NOTHING (no 進行中 banner / live
+> mirror / no history record on finish). The SAME code on **Debug + Metro syncs
+> fine**. Ruled out, in order: stale Watch binary (clean Trap-3 reinstall of BOTH
+> apps still dead), entitlements (source declares only HealthKit; WCSession needs
+> no App Group; TestFlight Release proves Release-WCSession CAN work), and merged
+> code (the `start-from-watch` / `handshake` SEND+RECEIVE path was UNCHANGED by
+> the branches in flight — fast-lane only touched `updateLiveMirror`; superset
+> only added optional passthrough fields; `addMessageListener` correctly
+> multiplexes by kind). It is the **iPhone-side Release build/JS** — the WC inbound
+> path (react-native-watch-connectivity event forwarding / WCSession activation)
+> behaves differently under Release standalone than Debug+Metro. This is a real
+> **App-Store ship-blocker** (App Store = Release) tracked separately; until it's
+> root-caused, **WC-sync smoke MUST run on Debug + Metro** (Metro over the
+> USB-connected Mac is stable enough even on hotspot — `curl -s
+> localhost:8081/status` → `packager-status:running` to confirm Metro is up).
+>
+> Release standalone is still fine for **non-WC** smoke (UI, DB, HK, anything that
+> doesn't depend on the Watch sending to the iPhone).
+
 When the network is slow/unreliable (user on a phone hotspot, weak wifi) a Debug
 dev-client smoke becomes painful: the iPhone can't reach Metro → Reload JS hangs
 → red screen `TurboModuleManager: Timed out waiting for modules to be invalidated`
-(the reload tear-down times out fetching the bundle). Don't fight Metro — build a
-**Release standalone** that EMBEDS the JS bundle, so the app needs no Metro / no
-network at all (WC iPhone↔Watch is a local peer channel, unaffected). Validated
-2026-06-01 (hotspot device smoke).
+(the reload tear-down times out fetching the bundle). For a smoke that does NOT
+exercise WC sync, build a **Release standalone** that EMBEDS the JS bundle, so the
+app needs no Metro / no network at all. Validated 2026-06-01 (hotspot device
+smoke) — but see the WC-sync warning above. **Two more device-install gotchas
+re-validated 2026-06-02:**
+- `devicectl device install app` of the iPhone host updates ONLY the iPhone +
+  its embedded Watch bundle staging — it does NOT push the new Watch app to the
+  wrist (Apple Watch sync must, and is lazy). So a fresh iPhone build paired with
+  a STALE Watch binary = protocol mismatch = WC dead. Confirm the Watch actually
+  took the new build via an on-Watch UI marker (e.g. "does the new SupersetCard
+  render?") before blaming code.
+- The recurring `Failed to load provisioning paramter list … No provider was
+  found.` from `devicectl install/launch/copy` is **non-fatal** — the app still
+  installs (`App installed:` prints right after). Don't chase it.
 
 Pre-flight: confirm Release signing is development (devicectl-installable), NOT
 distribution-only:
