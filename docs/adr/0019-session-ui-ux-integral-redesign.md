@@ -941,6 +941,7 @@ Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's 
 
 | 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
 |---|---|---|---|---|---|
+| 2026-06-01 evening | 遞減組 render fold = by parent_set_id（B-fix 的 display 半邊、grill 前提更正）| grill 前提誤判「iPhone 折疊按 parent link 非 ordinal 相鄰、index.tsx:1426」→ 以為 stable-ordinal 的 B-fix display-safe | **更正**：真正的 render fold 是 `computeSessionSetLayout` 的 **ordering-相鄰 gather**（`else break`）→ stable-ordinal 的 mid-list follower 變孤兒（headless head + 空 label 列、live+歷史都中）。**改 `computeSessionSetLayout` 按 `parent_set_id` 聚合所有 follower 不論相鄰**（gather-then-walk、真孤兒仍單列）。A2 建議的 reconcile re-pack 不採（位移 base ordering → tick 2 重 corrupt）。B-fix data 半 + 本 display 半缺一不可 | overnight 互動稽核 Agent A2 抓 F1（grill 漏讀 render fold）→ grill-with-docs re-decision Q1=(iii)（vs (ii) id-adoption / displayOrder 欄）| `8ee893f`（fix）+ 本 docs commit |
 | 2026-06-01 | 遞減組 live-mirror reconcile 修法 = 拿掉 producer ordinal permute | `e240e95` `LiveMirrorProducer.project()` 用 `sortedOrdinals[i]`（按**顯示位置**重蓋 ordinal）編碼顯示序；+ 2026-06-01 transport amendment 隱含背書「permute INSERT/delete semantics 不變」 | **拿掉 permute、emit 每個 set 自己穩定的 ordinal**：base 按 `(se,ordinal)` 不再碰撞→不丟 follower；follower convergent id INSERT + `parent_set_id` 折疊；divergent-id head 仍靠 `setIdMap`。代價 = Watch reorder / 中插不同步 iPhone（內容正確、順序留原始；比舊的 content-scramble **嚴格更好**）。**permute 與 `(se,ordinal)` 身分配對互斥 = root cause**（C 證明 producer 註解「only ordinal↔content 重排、INSERT/delete 不變」為 false） | grill-with-docs 2026-06-01（overnight Agent C 抓 HIGH + 我 jest repro 確認「cycle 非最後組成遞減組 → follower 整列消失、空頭 dropset」）；Q1=B（vs A=Watch 採真 id / C=加 displayOrder wire 欄）、Q2=接受 reorder 不同步 | (本 commit、branch `slice/13d-livemirror-fastlane`) |
 | 2026-05-28 night | D10 in-session shell spec freeze + NEW-Q49 iPhone freestyle 不 push 直到首動作 + D6 commit table sweep + D10 commit table sweep | (D10 commit table line 1264 2026-05-26) description「SwiftUI top sticky 2-row + per-exercise card with segmented progress bar」未指明 page layout（TabView vs single）、未指明 finish entry、未拍 transient empty state；(D6 commit table line 1260) push 行為「加 start session 時 WC sendMessage to Watch」未細分 freestyle / template-based | **D10 freeze**：TabView pageStyle 三 page (音樂 ← session card → 完成頁、左右 swipe edge、連續可滑回 per D11 line 1573)、中央 page 2-row sticky top bar (Row 1 ⏱+🕐、Row 2 ♥+🔥+⚙)、連續 ScrollView 動作卡 list + Crown 滾動 (Q2=A)、無 active card highlight (Q3=A)、無 session title (Q1=A)、無 bottom finish button (Q4 = 右滑 edge 進 D14)、cell edit 時 top bar dim 50% (Q6=A)、⏱ elapsed 從 `session.started_at` + Watch local clock (Q8=A)、♥ HR + 🔥 kcal 走 D17/D18 live observer (Q9=A) dynamic ~1Hz 更新、page indicator = TabView 系統 dot (Q10=A)、無 empty state (D8 picker 無 freestyle entry per Q5)。**NEW-Q49 新增**：iPhone freestyle 不 push 到 Watch 直到 +首動作（Q7=C）— +動作 path 加首次 push 觸發、is_watch_tracked 留 false 直到此點；template-based 不變、立即 push。**D6/D10 commit table sweep**：D6 加 freestyle gate cross-ref；D10 描述補 TabView pageStyle + freeze 日期 + 指向 D10 spec section。 | User session 2026-05-28 night 13d slice 推進、D10 ASCII mock 3-round iteration（v1→v2→v3 lock）；anchor D11 frozen line 1573-1574 swipe-to-page + NEW-Q32 top bar + D17/D18 live observer；途中 Q4「與體能訓練相似、頁面右滑」+ Q5「沒有空白訓練」由 user trigger grep ADR 確認既有拍板；watch-view-spec-freeze skill recipe 套用第 6 次（Step 3.5 sweep 第 3 次） | 本 commit（D10 freeze + NEW-Q49 + D6/D10 commit table sweep 一次 commit）|
 | 2026-05-28 evening | D16 ⚙ settings spec freeze + NEW-Q39 chip retract + D11 line 1597 settings dependency cross-ref | (NEW-Q39 2026-05-26) Rest timer 模式 3 選項 `popup/chip/off`、其餘 4 項 (輸入方式 / ✓ 後自動跳下組 / HR alert zone5 / 觸覺回饋) spec list-only 無 visual mock + 入口 / store / sync timing 拍板；(D11 line 1597 2026-05-28) Settings dependency 段只列 Input mode toggle 單條、未跟 D16 cross-ref；(D16 commit table line 1269 2026-05-26) 描述「per-session 套用」與 Q4 global persistent 拍板對立 | **D16 freeze**：原生 `.sheet` 樣式 (Q1=C)、5-item 滾動 list (2 toggle + 3 picker)、Rest timer 砍 chip 剩 2 選項 (Q2=B)、HR z5 警示單純 toggle (Q3=A 進 z5 觸發振動 + 短音)、全 global persistent 跨 session 帶 default (Q1=A `鍵盤/ON/彈窗/OFF/中`)、iPhone 端無對應 UI 純 SQLite mirror (Q2=B)、session 結束時 channel #12 push iPhone + WC unreachable 走「⚠️ Watch UI 顯小提示 + handshake reply 自帶 unsynced 設定 self-heal」(Q3 combo)、觸覺回饋三處共享同強度 (Q4=A)、Store strategy = Watch `@AppStorage` 本地 + iPhone `app_settings` SQLite mirror via channel #12 雙向 sync (Q6=A、Watch local 為 session 內 operational SoT)。**NEW-Q39 patch**：Rest timer 3→2 選項、chip retract 跟 slice 10d X1 對齊；inline strikethrough 標 retract。**D11 sweep**：line 1597 Settings dependency 加 D16 cross-ref marker。**D16 commit table**：描述從「per-session 套用」改寫為「global persistent + 結束時 push iPhone」對齊 Q4/Q5。 | User session 2026-05-28 evening 13d slice 推進、D16 ASCII mock 2-round iteration（v1→v2 lock）；anchor NEW-Q39 5 項；途中 cross-check 發現 NEW-Q39 vs slice 10d X1 chip retract 不一致、定為 doc bug；user 主動詢問 Q6 store strategy 「沒 Q4/Q5 限制怎麼選」、確認 A 仍是 first-principles 推薦；watch-view-spec-freeze skill recipe 套用第 5 次 | 本 commit（D16 freeze + NEW-Q39 patch + D11 cross-ref + commit table sweep 一次 commit）|
@@ -3093,7 +3094,7 @@ Swift（device-gated、停在此邊界等使用者）：
 
 **拍板（Q1=B）**：拿掉 permute。`project()` emit 每個 set **自己穩定的 ordinal**（`s.ordinal`，不再 `sortedOrdinals[i]`）。
 - base set 按 `(se,ordinal)` 不再碰撞 → 不丟 follower、不寫錯 row。
-- Watch-added follower（convergent id、`AddedSet.ordinal = max(all)+1` 密集唯一、不重用）用自己的 id INSERT、靠 `parent_set_id` 折疊（iPhone 折疊按 parent link 非 ordinal 相鄰，index.tsx:1426）。
+- Watch-added follower（convergent id、`AddedSet.ordinal = max(all)+1` 密集唯一、不重用）用自己的 id INSERT、靠 `parent_set_id` 折疊（**⚠️ 2026-06-01 evening 更正**：原寫「iPhone 折疊按 parent link 非 ordinal 相鄰，index.tsx:1426」**讀錯了** — 1426 是 new-cluster 排序數學；真正的 render fold 是 `computeSessionSetLayout` 的 **ordering-相鄰** gather，stable-ordinal 的 mid-list follower 因此變孤兒 → 需 (iii) 補丁，見下段「render fold by-parent」）。
 - divergent-id head 仍靠既有 `setIdMap`（wire id→device id）解析 follower 的 parent。
 - wire 陣列維持**顯示序**（head 在 follower 前）以保 `setIdMap` parent 解析順序。
 
@@ -3106,3 +3107,22 @@ Swift（device-gated、停在此邊界等使用者）：
 **落地**：`slice/13d-livemirror-fastlane`（與 transport fix 同 branch）→ 一次實機 smoke 驗整條遞減組。regression test = repro（cycle 非最後組 → follower 保留 + parent 正確）+ reorder no-op。
 
 **Cross-link**：`watch-setlogger-overlay-gesture` skill「iPhone reconcile 的 ordinal 配對鐵律」；`dropset-chain-semantics`；overnight 報告 `C-sync-drift-and-shipped-audit.md`。
+
+---
+
+## 2026-06-01 evening — render fold by parent_set_id（F1：B-fix 的 display 半邊）
+
+**Trigger**：overnight 互動稽核（Agent A2）發現上面的 B-fix（stable ordinal）**data-safe 但 display-broken**。我 grill 的前提讀錯了。
+
+**真相**：`computeSessionSetLayout`（`src/domain/set/sessionSetLayout.ts`）的 render fold 是「sort by `ordering` → gather **相鄰**的 follower（`parent_set_id===head.id`）、遇非 follower 就 `break`」。並非按 parent link 不論位置。stable-ordinal 把 Watch-added follower emit 在 `max+1`，所以 **mid-list head 的 follower 會落在後面 base set 之後** → contiguity 斷掉 → headless head + 孤兒 follower 列（live 卡 + 歷史都中）。= 換個機制的同一個「亂」。（iPhone-native `insertFollower` 早在 2026-05-20 就因此 re-pack follower 到 `head.ordering+1`，見 index.tsx:1342。）
+
+**為何不採 A2 建議的「reconcile re-pack ordering」**：re-pack 會位移 base set 的 `ordering`，下一個 snapshot 的 `(se,ordinal)` 配對就對不上 → tick 2 重新 corrupt（A2 只驗了單次 reconcile、沒驗 repeated live）。
+
+**拍板（Q1=(iii)）**：改 `computeSessionSetLayout` 的 fold —— head 按 `parent_set_id` 聚合**所有** follower（不論 ordering 相鄰與否、gather-then-walk order-independent），聚到的 follower 標記 consumed 不再單列；**真孤兒**（head 不存在、未被 consumed）仍單列（防呆保留）。cluster 渲染成一個 group、落在 head 的 sorted 位置。與 contiguous 既有資料相容；consumer 只讀 head/followers 不讀 indices；Pass 1 labels 不變。
+
+**完整修法 = 兩半**：
+- **DATA 半**（`484b13f` Swift）：producer emit stable ordinal → 不丟 follower。
+- **DISPLAY 半**（`8ee893f` TS，本段）：render fold by parent_set_id → follower 永遠折在 head 下、不孤兒。
+兩者缺一不可。Watch reorder 不同步 iPhone 的 Q2 代價不變。
+
+**Cross-link**：overnight 報告 `A2-bfix-interaction-audit.md`；index.tsx:1342（2026-05-20 native re-pack，現變保險而非必需）；`dropset-chain-semantics` skill。
