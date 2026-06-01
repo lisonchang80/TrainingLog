@@ -3058,3 +3058,26 @@ Swift（device-gated、停在此邊界等使用者）：
 - `replaceLiveMirror.ts` module doc「authority-but-not-purge … purge 是 D7 的工作」— 本段即落地該 purge。
 - ADR-0003 § single active session per device — E1 殭屍違反此 invariant、本修復回復之。
 - ADR-0008 § HK trigger-only — E1 的 Watch teardown（`session.end()` + `endCollection` + `discardWorkout`，見 2026-05-29 D31 lifecycle fix）不變。
+
+---
+
+## 2026-06-01 — Live-mirror fast lane（`sendMessage` + `rev` 反序守門）
+
+**Trigger**：使用者回報 Watch→iPhone in-session 即時同步「又慢、又亂、時有時無（尤其遞減組）」。`e240e95` 已把 Watch producer throttle 15s→0.5s + markDirty 立即 emit，仍未解。
+
+**根因**：live mirror **只**走 `updateApplicationContext`（NEW-Q50 Q6=a 拍板）。applicationContext 是 Apple 的 latest-state-replace、OS 排程投遞、前景不保證即時的「收斂底盤」通道——producer 端調 throttle 無法克服傳輸層特性。對照之下 end-session / start-resolve / discard 等所有其它 outbound 早已是 **dual-fire**（`transferUserInfo` 永遠 + `sendMessage` when `isReachable`）；`updateLiveMirror` 是唯一漏接 dual-fire 的 outbound。
+
+**翻盤的既有拍板**：
+- ⚠️ **NEW-Q50 Q6=a「live mirror 走 applicationContext（15s throttle）」修訂**：applicationContext 降為**背景墊底**；前景即時改由 `sendMessage` 快車道擔綱（= 2026-05-31 sync-refactor grill Q2 的決定，於此落地 Watch→iPhone 半邊）。
+
+**決定**：
+1. **新 WC kind `live-mirror`**（第 17 種；WC kind 總數 16→17）。Watch→iPhone，payload 即原始 `SessionSnapshot` dict（與 appContext 同 shape），由 `onLiveMirror` runtime-validate。**非耐久**（不走 TUI——live tick 掉了下一次 push 自癒，`end-session` 才是正確性後備）。
+2. **`updateLiveMirror` dual-fire**：`sendMessage`（reachable 時，瞬時 + FIFO 有序，<1s 前景主力，遞減組每個中間態照序到、不跳步）+ `updateApplicationContext`（永遠，背景墊底）。
+3. **producer 蓋單調 `rev`**（ms-since-epoch、`max(now, prev+1)` 嚴格遞增、restart-safe）+ `originator:"watch"`。
+4. **iPhone `onLiveMirror` 加 per-session `rev` high-water-mark 守門**：`rev <= lastApplied` 即丟（claim-before-await，避免雙通道/遲到 backstop 用舊態覆蓋新態 = 「亂七八糟」的主因）。absent `rev`（legacy producer）跳過守門（向後相容）。
+
+**落地**：TS `5ceb8fe`（payloadSchema 17th kind + `LiveMirrorPayload` + `onLiveMirror` rev 守門 + index.tsx `addMessageListener('live-mirror')`；tsc 0 + jest 192/2103，+6 case）。Swift（SessionSnapshot rev/originator + LiveMirrorProducer 蓋 rev + coordinator dual-fire）同 branch 隨後 commit。**實機 smoke 為唯一關卡**（timing/reachability + 遞減組 burst 需真機）。
+
+**修掉 E6 半條**：payloadSchema header「13/14 kinds」過時註解一併更新為 17。
+
+**Cross-link**：`project_sync_refactor_design.md` Q2 三車道；`watchLiveMirrorReceiver.ts` onLiveMirror rev 守門；`wc-add-envelope-kind` skill（第 3 次套用）。
