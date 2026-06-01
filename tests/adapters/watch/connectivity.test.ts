@@ -563,6 +563,125 @@ describe('Slice 13d D6 — connectivity.ts', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  Sync fast lane (2026-06-01) — 'live-mirror' inbound routing
+  //  The Watch dual-fires the live snapshot; the sendMessage leg arrives as
+  //  a {kind:'live-mirror', payload} envelope on the 'message' event and must
+  //  route to an addMessageListener('live-mirror', ...) handler (the index.tsx
+  //  wiring `addMessageListener('live-mirror', env => onLiveMirror(db, env.payload))`).
+  // ═══════════════════════════════════════════════════════════════════
+
+  it("addMessageListener('live-mirror') — inbound message routes to the handler with env.payload = the snapshot", () => {
+    let capturedCallback: ((...args: unknown[]) => void) | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'message') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addMessageListener('live-mirror', handler);
+
+    expect(bridge.watchEvents.addListener).toHaveBeenCalledWith(
+      'message',
+      expect.any(Function),
+    );
+    expect(capturedCallback).not.toBeNull();
+
+    const env = makeEnvelope('live-mirror', {
+      sessionId: 'sess-lm1',
+      title: 'Push Day',
+      startedAt: 1_700_000_000_000,
+      exercises: [],
+      rev: 100,
+    });
+    // Lib 'message' signature: (payload, replyHandler|null).
+    capturedCallback!(env, null);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    // index.tsx reads env.payload — assert it survives the dispatch intact.
+    const [deliveredEnv] = handler.mock.calls[0];
+    expect(deliveredEnv.kind).toBe('live-mirror');
+    expect(deliveredEnv.payload).toEqual({
+      sessionId: 'sess-lm1',
+      title: 'Push Day',
+      startedAt: 1_700_000_000_000,
+      exercises: [],
+      rev: 100,
+    });
+  });
+
+  it("addMessageListener('live-mirror') — a different-kind inbound does not fire the live-mirror handler", () => {
+    let capturedCallback: ((...args: unknown[]) => void) | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'message') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const liveMirrorHandler = jest.fn();
+    mod.addMessageListener('live-mirror', liveMirrorHandler);
+
+    // An hr-tick on the SAME 'message' channel must not reach the live-mirror
+    // handler (per-kind dispatch).
+    const hrEnv = makeEnvelope('hr-tick', {
+      sessionId: 'sess-lm2',
+      bpm: 150,
+      sampleTs: Date.now(),
+    });
+    capturedCallback!(hrEnv, null);
+
+    expect(liveMirrorHandler).not.toHaveBeenCalled();
+  });
+
+  it("addMessageListener('live-mirror') — duplicate msgId is deduped (dual-fire same emit)", () => {
+    let capturedCallback: ((...args: unknown[]) => void) | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'message') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addMessageListener('live-mirror', handler);
+
+    const env = makeEnvelope('live-mirror', {
+      sessionId: 'sess-lm3',
+      title: 'Push Day',
+      startedAt: 1,
+      exercises: [],
+      rev: 1,
+    });
+    // The same envelope (same msgId) redelivered — the ring-buffer dedupe drops
+    // the second. (The rev guard is a SECOND line of defence downstream; this
+    // is the transport-level dedup.)
+    capturedCallback!(env, null);
+    capturedCallback!(env, null);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('addAppContextListener — non-object payload ignored', () => {
     let capturedCallback:
       | ((...args: unknown[]) => void)
