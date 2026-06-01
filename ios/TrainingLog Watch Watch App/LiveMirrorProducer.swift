@@ -130,15 +130,23 @@ enum LiveMirror {
                 rankOverrides: rankOverrides,
                 sessionExerciseId: ex.sessionExerciseId
             )
-            // Reorder / mid-insert round-trip: the WIRE ordinal of each set =
-            // the present ordinal pool SORTED, laid back out in DISPLAY order.
-            // Identity for the un-reordered case; for a reorder or a mid-list
-            // +1 it makes the iPhone value-match render the Watch's order. The
-            // pool's VALUE SET is unchanged, so the reconcile's delete-purge
-            // (absent ordinal) + add-INSERT (max+1) semantics stay intact —
-            // only the ordinal↔content assignment permutes.
-            let sortedOrdinals = merged.map { $0.ordinal }.sorted()
-            let sets = merged.enumerated().map { (i, s) -> SessionSnapshotSet in
+            // Each set carries its OWN stable `ordinal` on the wire — NOT a
+            // display-position re-stamp. The iPhone reconcile matches base
+            // sets by (session_exercise_id, ordinal) VALUE, so the ordinal
+            // MUST stay glued to set identity. The old `sortedOrdinals[i]`
+            // by-display-position re-stamp permuted it to encode display order
+            // and collided a mid-list added follower's ordinal with an
+            // existing base row → wrote the follower onto the wrong row, then
+            // lost it (grill-with-docs 2026-06-01 Q1=B; ADR-0019; overnight
+            // Agent C HIGH). `merged` (display order) is kept ONLY as the
+            // ARRAY order so a dropset HEAD precedes its followers (the
+            // iPhone setIdMap resolves a follower's parent from the head seen
+            // earlier this pass). Consequence (accepted, Q2): a Watch reorder
+            // / mid-insert does NOT propagate to the iPhone — the set keeps
+            // its original ordinal, content intact; the iPhone folds a dropset
+            // by parent_set_id regardless of ordinal. AddedSet ordinals are
+            // dense-unique (max(all)+1, never reused) so no two sets collide.
+            let sets = merged.map { s -> SessionSnapshotSet in
                 // Edited weight overrides the planned value; absent → keep
                 // the snapshot's planned weight (may itself be nil).
                 let weight = edited[EditedValueKey(setId: s.setId, field: .weight)] ?? s.weight
@@ -152,7 +160,7 @@ enum LiveMirror {
                 }
                 return SessionSnapshotSet(
                     setId: s.setId,
-                    ordinal: sortedOrdinals[i],
+                    ordinal: s.ordinal,
                     weight: weight,
                     reps: reps,
                     rpe: s.rpe,
