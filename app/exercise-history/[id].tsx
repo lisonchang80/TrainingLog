@@ -160,7 +160,7 @@ import {
  */
 export default function ExerciseHistoryScreen() {
   const {
-    id,
+    id: idParam,
     clusterMode: clusterModeParam,
     partner: partnerParam,
     side: sideParam,
@@ -185,6 +185,15 @@ export default function ExerciseHistoryScreen() {
     currentSeIdA?: string;
     currentSeIdB?: string;
   }>();
+  // expo-router types `id` as `string` but returns `string | string[]` at
+  // runtime for repeated params; normalize before any SQL bind (an array
+  // would throw "SQLite3 can only bind …" when threaded into a query).
+  const id = Array.isArray(idParam) ? idParam[0] : idParam;
+  // Rules-of-hooks: bail on an invalid id BEFORE the first stateful hook.
+  // `useLocalSearchParams` (above) is the only hook that ran; an invalid id
+  // means the screen can't function, and no hook above performs a required
+  // side-effect (the name-lookup effect below already no-ops on falsy id).
+  if (!id) return null;
   const initialSide: ClusterSide = parseSide(sideParam);
   const db = useDatabase();
   const router = useRouter();
@@ -247,8 +256,6 @@ export default function ExerciseHistoryScreen() {
     }),
     [router, styles.headerBack]
   );
-
-  if (!id) return null;
 
   // Paging mode: caller wired up a cluster partner and asked for
   // cluster_only by default. Solo mode renders the original single page.
