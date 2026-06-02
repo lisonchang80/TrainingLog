@@ -1,5 +1,6 @@
 import {
   computeSessionSetLayout,
+  sortSetsByDisplayRank,
   type SessionSetLayoutInput,
 } from '../../src/domain/set/sessionSetLayout';
 
@@ -308,5 +309,95 @@ describe('computeSessionSetLayout — display_rank sort', () => {
       { id: 'r', set_kind: 'working', ordering: 9, parent_set_id: null, display_rank: 0 }, // → 0
     ]);
     expect(out.groups.map((g) => g.head.id)).toEqual(['r', 'p']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v025 `sortSetsByDisplayRank` — the shared RENDER comparator used by the
+// `app/session/[id].tsx` read-mode builders (buildClusters / buildOrderedItems)
+// so the visible ROW order matches the LABEL order. (Path A, 2026-06-02.)
+// ---------------------------------------------------------------------------
+describe('sortSetsByDisplayRank', () => {
+  it('orders by display_rank, not creation ordering', () => {
+    // Created s1,s2,s3 (ordering 1,2,3) but reordered on the Watch to s3,s1,s2.
+    const sorted = sortSetsByDisplayRank([
+      { id: 's1', ordering: 1, display_rank: 1 },
+      { id: 's2', ordering: 2, display_rank: 2 },
+      { id: 's3', ordering: 3, display_rank: 0 },
+    ]);
+    expect(sorted.map((s) => s.id)).toEqual(['s3', 's1', 's2']);
+  });
+
+  it('null / absent display_rank falls back to ordering', () => {
+    const sorted = sortSetsByDisplayRank([
+      { id: 'a', ordering: 2, display_rank: null },
+      { id: 'b', ordering: 1 }, // absent
+    ]);
+    expect(sorted.map((s) => s.id)).toEqual(['b', 'a']);
+  });
+
+  it('ties break deterministically on ordering', () => {
+    const sorted = sortSetsByDisplayRank([
+      { id: 'y', ordering: 5, display_rank: 1 },
+      { id: 'x', ordering: 4, display_rank: 1 },
+    ]);
+    expect(sorted.map((s) => s.id)).toEqual(['x', 'y']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [
+      { id: 'a', ordering: 2, display_rank: 2 },
+      { id: 'b', ordering: 1, display_rank: 1 },
+    ];
+    sortSetsByDisplayRank(input);
+    expect(input.map((s) => s.id)).toEqual(['a', 'b']); // unchanged
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Path A regression — session-detail read-mode superset labels. Reproduces
+// the `ClusterBlock` pipeline: rows are pre-sorted by `sortSetsByDisplayRank`
+// (buildClusters), cycle labels come from `computeSessionSetLayout(side).labels`
+// keyed by the row at each index. Before the fix the rows used creation
+// `ordering` while the labels followed `display_rank`, so the cycle column read
+// 2,1,3. They must now agree.
+// ---------------------------------------------------------------------------
+describe('session-detail superset cycle labels follow display_rank (Path A)', () => {
+  type Row = { id: string; set_kind: 'warmup' | 'working' | 'dropset'; ordering: number; parent_set_id: string | null; display_rank?: number | null };
+
+  // Mirror ClusterBlock: sort one side's rows, label via computeSessionSetLayout,
+  // then read each visible row's label in display order.
+  function visibleCycleLabels(side: Row[]): string[] {
+    const rows = sortSetsByDisplayRank(side);
+    const labels = computeSessionSetLayout(
+      side.map((s) => ({
+        id: s.id,
+        set_kind: s.set_kind,
+        parent_set_id: s.parent_set_id,
+        ordering: s.ordering,
+        display_rank: s.display_rank,
+      })),
+    ).labels;
+    return rows.map((r) => labels.get(r.id) ?? '');
+  }
+
+  it('a Watch-reordered side reads 1,2,3 in display order, not 2,1,3', () => {
+    // A side created s1,s2,s3 (ordering 1,2,3); Watch reordered to s2,s1,s3.
+    const sideA: Row[] = [
+      { id: 's1', set_kind: 'working', ordering: 1, parent_set_id: null, display_rank: 2 },
+      { id: 's2', set_kind: 'working', ordering: 2, parent_set_id: null, display_rank: 1 },
+      { id: 's3', set_kind: 'working', ordering: 3, parent_set_id: null, display_rank: 3 },
+    ];
+    // Visible rows are s2,s1,s3 and their labels read 1,2,3 (NOT 2,1,3).
+    expect(sortSetsByDisplayRank(sideA).map((s) => s.id)).toEqual(['s2', 's1', 's3']);
+    expect(visibleCycleLabels(sideA)).toEqual(['1', '2', '3']);
+  });
+
+  it('legacy side (no display_rank) is unchanged — creation order labels', () => {
+    const sideA: Row[] = [
+      { id: 'a', set_kind: 'working', ordering: 1, parent_set_id: null },
+      { id: 'b', set_kind: 'working', ordering: 2, parent_set_id: null },
+    ];
+    expect(visibleCycleLabels(sideA)).toEqual(['1', '2']);
   });
 });

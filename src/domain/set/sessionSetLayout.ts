@@ -61,6 +61,32 @@ export interface SessionSetLayoutInput {
   display_rank?: number | null;
 }
 
+/**
+ * Display-order comparator for session sets (#1/#2, 2026-06-02).
+ *
+ * Returns a *new* array sorted by `display_rank ?? ordering` (ordering
+ * tie-break) — the canonical RENDER order. The Watch carries its reorder /
+ * mid-insert order in `display_rank`; iPhone-authored / legacy rows leave it
+ * NULL and fall back to creation `ordering`. Identity stays `ordering`; this
+ * is a pure display sort.
+ *
+ * Extracted so the `app/session/[id].tsx` read-mode cluster / solo builders
+ * (`buildClusters` / `buildOrderedItems`) and any other surface can share ONE
+ * comparator with `computeSessionSetLayout` — otherwise the ROW order
+ * (creation `ordering`) and the LABEL order (this rule, applied inside
+ * `computeSessionSetLayout`) drift apart and the cycle column reads 2,1,3.
+ * The element type only needs `ordering` + an optional `display_rank`.
+ */
+export function sortSetsByDisplayRank<
+  S extends { ordering: number; display_rank?: number | null },
+>(sets: ReadonlyArray<S>): S[] {
+  return [...sets].sort(
+    (a, b) =>
+      (a.display_rank ?? a.ordering) - (b.display_rank ?? b.ordering) ||
+      a.ordering - b.ordering,
+  );
+}
+
 interface SessionSetGroup {
   /** The head row — anchor for swipe gestures + ✓ button. */
   head: SessionSetLayoutInput;

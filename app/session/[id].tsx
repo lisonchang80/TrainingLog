@@ -116,7 +116,10 @@ import {
   getSetting,
   setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
-import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
+import {
+  computeSessionSetLayout,
+  sortSetsByDisplayRank,
+} from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
@@ -2597,18 +2600,25 @@ function buildClusters(
     if (!parentIds.has(parent.id)) continue;
     const child = sessionExercises.find((e) => e.parent_id === parent.id);
     if (!child) continue;
-    const setsA = sets
-      .filter((s) =>
+    // Row order respects the Watch display rank (#1/#2, 2026-06-02): a Watch
+    // reorder / mid-insert moves `display_rank`, so the read-mode cluster card
+    // must order rows by `display_rank ?? ordering` (ordering tie-break) —
+    // mirrors `computeSessionSetLayout` / `sortedSetsFor`. Without this the
+    // row order falls back to creation `ordering` while the LABELS (computed
+    // by `computeSessionSetLayout`, which sorts by display_rank) follow the
+    // display order → the cycle column reads 2,1,3.
+    const setsA = sortSetsByDisplayRank(
+      sets.filter((s) =>
         s.session_exercise_id === parent.id ||
         (s.session_exercise_id == null && s.exercise_id === parent.exercise_id),
-      )
-      .sort((a, b) => a.ordering - b.ordering);
-    const setsB = sets
-      .filter((s) =>
+      ),
+    );
+    const setsB = sortSetsByDisplayRank(
+      sets.filter((s) =>
         s.session_exercise_id === child.id ||
         (s.session_exercise_id == null && s.exercise_id === child.exercise_id),
-      )
-      .sort((a, b) => a.ordering - b.ordering);
+      ),
+    );
     out.push({ parent, child, setsA, setsB });
   }
   return out;
@@ -2637,12 +2647,17 @@ function buildOrderedItems(
       out.push({ kind: 'cluster', cluster });
       continue;
     }
-    const exSets = sets
-      .filter((s) =>
+    // Read-mode solo row order respects Watch display rank (#1/#2,
+    // 2026-06-02), same as the cluster path above: sort by
+    // `display_rank ?? ordering` so a Watch reorder / mid-insert reflects on
+    // the session-detail card and the labels (which already follow
+    // display_rank) line up with the rows.
+    const exSets = sortSetsByDisplayRank(
+      sets.filter((s) =>
         s.session_exercise_id === ex.id ||
         (s.session_exercise_id == null && s.exercise_id === ex.exercise_id),
-      )
-      .sort((a, b) => a.ordering - b.ordering);
+      ),
+    );
     out.push({ kind: 'solo', exercise: ex, sets: exSets });
   }
   return out;
