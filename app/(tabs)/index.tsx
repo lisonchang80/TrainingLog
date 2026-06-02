@@ -98,6 +98,7 @@ import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
+import { computeDeleteWarningSuffix } from '@/src/domain/session/deleteWarningSuffix';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { BodyDataSheet } from '@/components/session/body-data-sheet';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
@@ -1999,16 +2000,10 @@ export default function TodayScreen() {
                 s.session_exercise_id === planRow.id ||
                 s.session_exercise_id === partnerSessionExerciseId,
             );
-            const loggedCount = setsForCluster.filter(
-              (s) => s.is_logged === 1,
-            ).length;
-            const totalSets = setsForCluster.length;
-            const warningSuffix =
-              loggedCount > 0
-                ? tWarningTotalSetsWithLogged(totalSets, loggedCount)
-                : totalSets > 0
-                  ? tWarningTotalSetsUnfinished(totalSets)
-                  : '';
+            const warningSuffix = computeDeleteWarningSuffix(setsForCluster, {
+              withLogged: tWarningTotalSetsWithLogged,
+              unfinished: tWarningTotalSetsUnfinished,
+            });
             Alert.alert(
               t('alert', 'deleteSupersetQ'),
               tRemoveSupersetFromSessionPrompt(
@@ -2067,15 +2062,10 @@ export default function TodayScreen() {
               (s.session_exercise_id == null &&
                 s.exercise_id === planRow.exercise_id),
           );
-          const loggedCount = setsForExercise.filter(
-            (s) => s.is_logged === 1,
-          ).length;
-          const warningSuffix =
-            loggedCount > 0
-              ? tWarningPerExerciseSetsWithLogged(setsForExercise.length, loggedCount)
-              : setsForExercise.length > 0
-                ? tWarningPerExerciseSetsUnfinished(setsForExercise.length)
-                : '';
+          const warningSuffix = computeDeleteWarningSuffix(setsForExercise, {
+            withLogged: tWarningPerExerciseSetsWithLogged,
+            unfinished: tWarningPerExerciseSetsUnfinished,
+          });
           Alert.alert(
             t('alert', 'deleteExerciseQ'),
             tRemoveExerciseFromSessionPrompt(tExercise(planRow.exercise_name), warningSuffix),
