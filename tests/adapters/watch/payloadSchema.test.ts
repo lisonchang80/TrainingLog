@@ -185,6 +185,31 @@ describe('payloadSchema', () => {
     expect(ids.size).toBe(500);
   });
 
+  // The msgId generator prefers crypto.randomUUID (Node 19+ / JSC iOS 17+ /
+  // RN 0.74+) but degrades to a `wc-<epoch>-<counter>-<rand>` fallback on
+  // older runtimes (e.g. an older Hermes lacking randomUUID). ts-jest's node
+  // env HAS randomUUID, so the fallback is otherwise never exercised — stub it
+  // out to verify the degradation path still produces unique, well-formed ids.
+  it('msgId falls back to the counter+epoch form when crypto.randomUUID is unavailable', () => {
+    const g = globalThis as { crypto?: { randomUUID?: () => string } };
+    const realRandomUUID = g.crypto?.randomUUID;
+    // Remove randomUUID so generateMsgId takes the fallback branch.
+    if (g.crypto) {
+      (g.crypto as { randomUUID?: () => string }).randomUUID = undefined;
+    }
+    try {
+      const a = makeEnvelope('hr-tick', { sessionId: 's', bpm: 90, sampleTs: 1 });
+      const b = makeEnvelope('hr-tick', { sessionId: 's', bpm: 91, sampleTs: 2 });
+      expect(a.msgId).toMatch(/^wc-\d+-\d+-[a-z0-9]+$/);
+      expect(b.msgId).toMatch(/^wc-\d+-\d+-[a-z0-9]+$/);
+      expect(a.msgId).not.toBe(b.msgId); // counter increments
+    } finally {
+      if (g.crypto && realRandomUUID) {
+        (g.crypto as { randomUUID?: () => string }).randomUUID = realRandomUUID;
+      }
+    }
+  });
+
   // ---------------------------------------------------------------
   // (c) `ts` is number and within +/-50ms of Date.now()
   // ---------------------------------------------------------------
@@ -230,6 +255,10 @@ describe('payloadSchema', () => {
     const arr = out.arr as unknown[];
     expect(arr[0]).toBe(new Date('2026-03-03T00:00:00.000Z').getTime());
     expect(arr[1]).toBe(42);
+  });
+
+  it('normaliseForWire passes a top-level null through unchanged', () => {
+    expect(normaliseForWire(null)).toBeNull();
   });
 
   // ---------------------------------------------------------------
