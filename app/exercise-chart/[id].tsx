@@ -1042,10 +1042,15 @@ function TrendChart({
 
   const xs = points.map((p) => p.t);
   const ys = points.map((p) => p.value);
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
-  const yMin = Math.min(...ys);
-  const yMax = Math.max(...ys);
+  // Reduce-based min/max instead of `Math.min(...arr)` — the spread throws
+  // `RangeError: Maximum call stack size exceeded` once the array exceeds the
+  // JS argument limit (~64k on Hermes), which a power user with years of
+  // single-exercise history could hit. `xs`/`ys` are non-empty here (the
+  // caller gates on `points.length >= 2`), so the seeds never leak.
+  const xMin = xs.reduce((m, v) => (v < m ? v : m), Infinity);
+  const xMax = xs.reduce((m, v) => (v > m ? v : m), -Infinity);
+  const yMin = ys.reduce((m, v) => (v < m ? v : m), Infinity);
+  const yMax = ys.reduce((m, v) => (v > m ? v : m), -Infinity);
   const xSpan = xMax - xMin || 1;
   const ySpan = yMax - yMin || 1;
   const scaleX = (t: number) => PL + ((t - xMin) / xSpan) * (W - PL - PR);
