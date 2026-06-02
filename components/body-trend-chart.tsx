@@ -127,7 +127,11 @@ export function BodyTrendChart({ metrics, visibility, unit }: Props) {
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => PAD_TOP + f * CHART_H);
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={t('button', 'a11yBodyTrendChart')}>
       <Svg width={WIDTH} height={HEIGHT}>
         {/* Grid */}
         {gridLines.map((y, i) => (

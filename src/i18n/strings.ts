@@ -218,6 +218,14 @@ export const strings = {
       // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: detail-page edit
       // mode toggle button (session/[id].tsx sticky bar).
       a11yEditMode: '編輯模式',
+      // 2026-06-02 a11y batch — accessibilityLabel for data-viz charts wrapped
+      // as accessibilityRole="image". VoiceOver announces the chart type
+      // instead of reading raw axis numbers / nothing.
+      a11yHrZoneChart: '心率區間圖表',
+      a11yBarChart: '長條圖',
+      a11yBodyTrendChart: '身體組成趨勢圖',
+      a11yBodyHeatmap: '訓練部位熱力圖',
+      a11yExerciseTrendChart: '動作趨勢圖',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: '建立中…',
       addProgram: '新增計畫',
@@ -922,6 +930,12 @@ export const strings = {
       // 2026-05-25 wave 2 i18n sweep — accessibilityLabel: detail-page edit
       // mode toggle button (session/[id].tsx sticky bar).
       a11yEditMode: 'Edit mode',
+      // 2026-06-02 a11y batch — accessibilityLabel for data-viz charts.
+      a11yHrZoneChart: 'Heart rate zone chart',
+      a11yBarChart: 'Bar chart',
+      a11yBodyTrendChart: 'Body composition trend chart',
+      a11yBodyHeatmap: 'Trained muscle heatmap',
+      a11yExerciseTrendChart: 'Exercise trend chart',
       // Phase 4.5 batch 2 — template editor / sheet CTAs.
       creating: 'Creating…',
       addProgram: 'Add Program',

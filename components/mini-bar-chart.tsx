@@ -79,7 +79,11 @@ export function MiniBarChart({
     PAD_TOP + usableHeight * (1 - value / max);
 
   return (
-    <View style={{ width, height }}>
+    <View
+      style={{ width, height }}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={t('button', 'a11yBarChart')}>
       <Svg width={width} height={height}>
         {/* Baseline */}
         <Line
