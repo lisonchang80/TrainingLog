@@ -581,6 +581,130 @@ describe('Slice 13d D29 — parser tolerates WC-omitted nil optionals (absent �
   });
 });
 
+describe('parseLiveMirrorSnapshot — per-field fail-closed guards (whole tick dropped)', () => {
+  // The parser is the iPhone-side ingest gate: every type guard that returns
+  // null drops the WHOLE tick (→ bad-payload → self-heals on the next
+  // snapshot) so `replaceLiveMirror`'s SQL binds can never receive an
+  // undefined / wrong-typed value. The forward Watch producer should never
+  // emit these, but a corrupt WC frame (or a future reverse-lane producer)
+  // must be rejected rather than half-applied. These cover the individual
+  // exercise-level and set-level guards the broader happy-path tests skip.
+
+  /** A minimal well-formed snapshot with one exercise + one set. */
+  function base(): Record<string, unknown> {
+    return {
+      sessionId: 's',
+      title: 't',
+      startedAt: 1,
+      exercises: [
+        {
+          sessionExerciseId: 'se',
+          exerciseId: 'ex',
+          exerciseName: 'X',
+          ordering: 0,
+          plannedSets: 1,
+          sets: [
+            {
+              setId: 'set',
+              ordinal: 0,
+              weight: 80,
+              reps: 8,
+              rpe: null,
+              rest_sec: null,
+              notes: null,
+              set_kind: 'working',
+              is_logged: true,
+              parent_set_id: null,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** Mutate exercises[0] then parse. */
+  function withEx(patch: Record<string, unknown>): SessionSnapshot | null {
+    const snap = base();
+    Object.assign((snap.exercises as Record<string, unknown>[])[0], patch);
+    return parseLiveMirrorSnapshot(snap);
+  }
+
+  /** Mutate exercises[0].sets[0] then parse. */
+  function withSet(patch: Record<string, unknown>): SessionSnapshot | null {
+    const snap = base();
+    const set = (
+      (snap.exercises as Record<string, unknown>[])[0].sets as Record<
+        string,
+        unknown
+      >[]
+    )[0];
+    Object.assign(set, patch);
+    return parseLiveMirrorSnapshot(snap);
+  }
+
+  it('sanity — base() parses (so every rejection below is the patch, not the shape)', () => {
+    expect(parseLiveMirrorSnapshot(base())).not.toBeNull();
+  });
+
+  // ---- exercise-level guards ----
+  it('rejects a non-object exercise entry', () => {
+    const snap = base();
+    (snap.exercises as unknown[])[0] = 'nope';
+    expect(parseLiveMirrorSnapshot(snap)).toBeNull();
+  });
+
+  it.each([
+    ['empty sessionExerciseId', { sessionExerciseId: '' }],
+    ['non-string sessionExerciseId', { sessionExerciseId: 7 }],
+    ['empty exerciseId', { exerciseId: '' }],
+    ['non-string exerciseId', { exerciseId: null }],
+    ['non-string exerciseName', { exerciseName: 5 }],
+    ['non-number ordering', { ordering: 'a' }],
+    ['NaN ordering', { ordering: NaN }],
+    ['non-number plannedSets', { plannedSets: 'b' }],
+    ['NaN plannedSets', { plannedSets: NaN }],
+    ['non-array sets', { sets: {} }],
+  ])('rejects exercise with %s', (_label, patch) => {
+    expect(withEx(patch as Record<string, unknown>)).toBeNull();
+  });
+
+  // ---- set-level guards ----
+  it('rejects a non-object set entry', () => {
+    const snap = base();
+    ((snap.exercises as Record<string, unknown>[])[0].sets as unknown[])[0] = 42;
+    expect(parseLiveMirrorSnapshot(snap)).toBeNull();
+  });
+
+  it.each([
+    ['empty setId', { setId: '' }],
+    ['non-string setId', { setId: 1 }],
+    ['non-number ordinal', { ordinal: 'x' }],
+    ['NaN ordinal', { ordinal: NaN }],
+    ['malformed reps (string)', { reps: '8' }],
+    ['malformed rpe (string)', { rpe: '9' }],
+    ['malformed rest_sec (string)', { rest_sec: '90' }],
+    ['Infinity weight', { weight: Infinity }],
+    ['non-string non-null notes (number)', { notes: 5 }],
+    ['non-string non-null parent_set_id (number)', { parent_set_id: 7 }],
+    ['non-boolean is_logged (number)', { is_logged: 1 }],
+    ['non-boolean is_logged (string)', { is_logged: 'true' }],
+  ])('rejects set with %s', (_label, patch) => {
+    expect(withSet(patch as Record<string, unknown>)).toBeNull();
+  });
+
+  it('accepts a string parent_set_id (a real follower link)', () => {
+    expect(withSet({ parent_set_id: 'head-1' })?.exercises[0]?.sets[0]?.parent_set_id).toBe(
+      'head-1',
+    );
+  });
+
+  it('accepts a string notes value', () => {
+    expect(withSet({ notes: 'felt heavy' })?.exercises[0]?.sets[0]?.notes).toBe(
+      'felt heavy',
+    );
+  });
+});
+
 describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () => {
   // The Watch dual-fires every live snapshot over sendMessage (instant) AND
   // applicationContext (late backstop). A late appContext can carry an OLDER
