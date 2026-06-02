@@ -196,6 +196,31 @@ describe('evaluate — pr_per_mg', () => {
     expect(out).toEqual([]);
   });
 
+  it('does not re-unlock a pr_per_mg def already in unlockedIds (line 88 !has false arm)', () => {
+    // Threshold met (count 5 ≥ 1) AND this session breaks the PR — the only
+    // thing stopping the unlock is that it is already unlocked.
+    const defs = [
+      def(10, {
+        category: 'pr_per_mg',
+        mg_id: 'mg-chest',
+        pr_type: 'weight',
+        threshold: 1,
+      }),
+    ];
+    const cumul: CumulativePRCounts = {
+      per_mg: new Map([['mg-chest', { weight: 5, volume: 0 }]]),
+      per_bucket: new Map(),
+    };
+    const out = evaluate({
+      session: session([set({ set_id: 's1', weight_pr_broken: true })]),
+      defs,
+      unlockedIds: new Set([10]),
+      cumulativePRCounts: cumul,
+      totalSessionCount: 5,
+    });
+    expect(out).toEqual([]);
+  });
+
   it('weight + volume PR on same set anchors both', () => {
     const defs = [
       def(10, {
@@ -255,6 +280,105 @@ describe('evaluate — pr_per_bucket', () => {
     expect(out).toEqual([
       { definition_id: 20, session_id: 'sess-1', set_id: 's1' },
     ]);
+  });
+
+  it('does not re-unlock a pr_per_bucket def already in unlockedIds (line 109 !has false arm)', () => {
+    const bucket: BucketKey = 'hypertrophy';
+    const defs = [
+      def(20, {
+        category: 'pr_per_bucket',
+        bucket_id: bucket,
+        pr_type: 'weight',
+        threshold: 10,
+      }),
+    ];
+    const cumul: CumulativePRCounts = {
+      per_mg: new Map(),
+      per_bucket: new Map([[bucket, { weight: 12, volume: 0 }]]),
+    };
+    const out = evaluate({
+      session: session([set({ set_id: 's1', bucket, weight_pr_broken: true })]),
+      defs,
+      unlockedIds: new Set([20]),
+      cumulativePRCounts: cumul,
+      totalSessionCount: 1,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('volume-only first PR (no prior weight record) takes the ?? fallback arm (lines 67/72)', () => {
+    // The set breaks ONLY the volume PR and is the FIRST qualifying set for its
+    // mg + bucket — so the line-67/72 `mgFirstPRSet.get(...) ?? {weight:null,
+    // volume:null}` GET returns undefined and the fallback object is created.
+    const bucket: BucketKey = 'hypertrophy';
+    const defs = [
+      def(11, { category: 'pr_per_mg', mg_id: 'mg-chest', pr_type: 'volume', threshold: 1 }),
+      def(21, { category: 'pr_per_bucket', bucket_id: bucket, pr_type: 'volume', threshold: 1 }),
+    ];
+    const cumul: CumulativePRCounts = {
+      per_mg: new Map([['mg-chest', { weight: 0, volume: 1 }]]),
+      per_bucket: new Map([[bucket, { weight: 0, volume: 1 }]]),
+    };
+    const out = evaluate({
+      session: session([
+        set({
+          set_id: 's1',
+          mg_id: 'mg-chest',
+          bucket,
+          weight_pr_broken: false,
+          volume_pr_broken: true,
+        }),
+      ]),
+      defs,
+      unlockedIds: new Set(),
+      cumulativePRCounts: cumul,
+      totalSessionCount: 1,
+    });
+    expect(out).toEqual(
+      expect.arrayContaining([
+        { definition_id: 11, session_id: 'sess-1', set_id: 's1' },
+        { definition_id: 21, session_id: 'sess-1', set_id: 's1' },
+      ])
+    );
+    expect(out).toHaveLength(2);
+  });
+
+  it('volume PR after weight PR on the same (mg, bucket) reuses the existing first-set record (lines 67/72)', () => {
+    // First set breaks the WEIGHT PR (seeds mgFirstPRSet/bucketFirstPRSet with
+    // {weight: s1, volume: null}); a later set breaks the VOLUME PR for the same
+    // mg + bucket, so the `?? {weight:null,volume:null}` fallback must return the
+    // EXISTING record and fill in its `.volume` slot rather than overwrite.
+    const bucket: BucketKey = 'hypertrophy';
+    const defs = [
+      def(10, { category: 'pr_per_mg', mg_id: 'mg-chest', pr_type: 'weight', threshold: 1 }),
+      def(11, { category: 'pr_per_mg', mg_id: 'mg-chest', pr_type: 'volume', threshold: 1 }),
+      def(20, { category: 'pr_per_bucket', bucket_id: bucket, pr_type: 'weight', threshold: 1 }),
+      def(21, { category: 'pr_per_bucket', bucket_id: bucket, pr_type: 'volume', threshold: 1 }),
+    ];
+    const cumul: CumulativePRCounts = {
+      per_mg: new Map([['mg-chest', { weight: 1, volume: 1 }]]),
+      per_bucket: new Map([[bucket, { weight: 1, volume: 1 }]]),
+    };
+    const out = evaluate({
+      session: session([
+        set({ set_id: 's1', mg_id: 'mg-chest', bucket, weight_pr_broken: true }),
+        set({ set_id: 's2', mg_id: 'mg-chest', bucket, volume_pr_broken: true }),
+      ]),
+      defs,
+      unlockedIds: new Set(),
+      cumulativePRCounts: cumul,
+      totalSessionCount: 1,
+    });
+    // Weight defs anchor to s1; volume defs anchor to s2.
+    expect(out).toEqual(
+      expect.arrayContaining([
+        { definition_id: 10, session_id: 'sess-1', set_id: 's1' },
+        { definition_id: 11, session_id: 'sess-1', set_id: 's2' },
+        { definition_id: 20, session_id: 'sess-1', set_id: 's1' },
+        { definition_id: 21, session_id: 'sess-1', set_id: 's2' },
+      ])
+    );
+    expect(out).toHaveLength(4);
   });
 });
 
