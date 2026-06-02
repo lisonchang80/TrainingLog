@@ -46,6 +46,7 @@ import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
+import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
 import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -1137,8 +1138,7 @@ function HeaderCard({
 }
 
 function formatDate(at: number): string {
-  const d = new Date(at);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return formatLocalYmdFromMs(at);
 }
 
 function FilterChip({
@@ -1302,8 +1302,7 @@ function SessionRow({
     return sum + (v ?? 0);
   }, 0);
 
-  const date = new Date(session.session_started_at);
-  const dateLabel = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const dateLabel = formatLocalYmdFromMs(session.session_started_at);
 
   // Slice 10c overnight #22 — replace `#{ordering}` with set-kind labels
   // (熱 / 1 / D1 …). Map is per-session so warmup / dropset counters reset

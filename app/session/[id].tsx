@@ -125,6 +125,7 @@ import {
   buildOrderedItems,
   type ClusterRow,
 } from '@/src/domain/set/sessionDetailItems';
+import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
 import { computeExerciseProgress } from '@/src/domain/session/exerciseProgress';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import type { Session } from '@/src/domain/session/types';
@@ -2460,11 +2461,7 @@ function formatTimestamp(ms: number): string {
 // ─────────────────────────────────────────────────────────────────────────
 
 function formatDateLabel(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${mo}-${day}`;
+  return formatLocalYmdFromMs(ms);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
