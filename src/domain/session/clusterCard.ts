@@ -56,6 +56,12 @@ export interface ClusterSetInput {
    *  nullable (not optional) to keep type narrowing honest. */
   session_exercise_id: string | null;
   ordering: number;
+  /** v025 (#1/#2, 2026-06-02) — Watch display rank. When present it drives
+   *  the within-side set order (so a Watch reorder / mid-insert inside a
+   *  superset reflects on the iPhone cluster card); absent / null falls back
+   *  to `ordering`. Optional so legacy callers / tests that don't supply it
+   *  keep the original `ordering` behaviour. */
+  display_rank?: number | null;
   set_kind: 'warmup' | 'working' | 'dropset';
   is_logged: number; // 0/1
   weight_kg: number | null;
@@ -165,7 +171,16 @@ function sortedSetsFor<S extends ClusterSetInput>(
         (s.session_exercise_id == null && s.exercise_id === exercise_id),
     )
     .slice()
-    .sort((x, y) => x.ordering - y.ordering);
+    // Sort by Watch display rank when present (#1/#2 — a Watch reorder /
+    // mid-insert inside a superset moves `display_rank`), else fall back to
+    // `ordering` (legacy / non-Watch). Mirrors `computeSessionSetLayout`. The
+    // A/B *side* assignment above stays `ordering`-based (structural); only
+    // the within-side set order respects display_rank. Tie-break on ordering.
+    .sort(
+      (x, y) =>
+        (x.display_rank ?? x.ordering) - (y.display_rank ?? y.ordering) ||
+        x.ordering - y.ordering,
+    );
 }
 
 /**

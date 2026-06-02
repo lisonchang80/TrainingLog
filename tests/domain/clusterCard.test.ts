@@ -617,3 +617,47 @@ describe('computeClusterCycleProgress', () => {
     expect(computeClusterCycleProgress(cycles)).toEqual({ done: 0, total: 0 });
   });
 });
+
+// v025 display_rank in cluster ordering (#1/#2, 2026-06-02). A Watch reorder /
+// mid-insert inside a superset moves `display_rank`; the cluster card must
+// order within-side sets by it (not by creation `ordering`).
+describe('groupClusterSides — display_rank ordering (superset sync)', () => {
+  it('orders an A-side set list by display_rank, not creation ordering', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    // A side created s1,s2,s3 (ordering 1,2,3) but reordered on the Watch to
+    // s3,s1,s2 via display_rank.
+    const sets = [
+      { ...mkSet('s1', 'p', 1), display_rank: 1 },
+      { ...mkSet('s2', 'p', 2), display_rank: 2 },
+      { ...mkSet('s3', 'p', 3), display_rank: 0 },
+      { ...mkSet('b1', 'f', 1), display_rank: 1 },
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    expect(group.a.sets.map((s) => s.id)).toEqual(['s3', 's1', 's2']);
+  });
+
+  it('lockstep superset reorder re-pairs cycles by display_rank', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    // Both sides reordered in lockstep: the cycle that was 2nd (a2/b2) moves
+    // first.
+    const sets = [
+      { ...mkSet('a1', 'p', 1), display_rank: 1 },
+      { ...mkSet('a2', 'p', 2), display_rank: 0 },
+      { ...mkSet('b1', 'f', 1), display_rank: 1 },
+      { ...mkSet('b2', 'f', 2), display_rank: 0 },
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycles(group);
+    expect(cycles.map((c) => [c.a_set?.id, c.b_set?.id])).toEqual([
+      ['a2', 'b2'],
+      ['a1', 'b1'],
+    ]);
+  });
+
+  it('absent display_rank falls back to ordering (legacy unchanged)', () => {
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [mkSet('s2', 'p', 2), mkSet('s1', 'p', 1), mkSet('b1', 'f', 1)];
+    const group = groupClusterSides(exs, sets)[0];
+    expect(group.a.sets.map((s) => s.id)).toEqual(['s1', 's2']);
+  });
+});
