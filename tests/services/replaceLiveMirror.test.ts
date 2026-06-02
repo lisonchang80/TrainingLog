@@ -1777,3 +1777,171 @@ describe('replaceLiveMirror — #4 live exercise purge', () => {
     expect(await idsOf('set')).toEqual(['set-1', 'set-2']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// purgeSetsInPresentExercises — empty-keep fallback (a PRESENT exercise whose
+// snapshot now carries ZERO sets must have all its DB sets purged). This hits
+// the `exSetIds.length > 0 ? exSetIds : ['']` empty-keep branch: the keep-list
+// is `['']` (no real set id == ''), so the DELETE removes every set under
+// that session_exercise. The exercise row itself stays (it is present).
+// ---------------------------------------------------------------------------
+describe('replaceLiveMirror — per-exercise set purge with an emptied present exercise', () => {
+  let db: BetterSqliteDatabase;
+
+  const oneExTwoSets = (): SessionSnapshot => ({
+    sessionId: 'sess-1',
+    title: 'Push Day',
+    startedAt: 1_700_000_000_000,
+    exercises: [
+      {
+        sessionExerciseId: 'se-1',
+        exerciseId: '00000000-0000-4000-8000-000000000001',
+        exerciseName: 'Bench Press',
+        ordering: 0,
+        plannedSets: 2,
+        sets: [
+          { setId: 'set-1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+          { setId: 'set-2', ordinal: 1, weight: 80, reps: 6, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+        ],
+      },
+    ],
+  });
+
+  const idsOf = async (table: 'set' | 'session_exercise') => {
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM "${table}" WHERE session_id = ? ORDER BY id`,
+      'sess-1',
+    );
+    return rows.map((r) => r.id);
+  };
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    await seedLiveSession(db, 'sess-1');
+    await replaceLiveMirror(db, oneExTwoSets());
+  });
+
+  afterEach(() => db.close());
+
+  it('a present exercise whose snapshot lost ALL sets purges every set, keeps the exercise row', async () => {
+    // User deleted both sets on the Watch but kept the (now empty) exercise.
+    const emptied: SessionSnapshot = {
+      ...oneExTwoSets(),
+      exercises: [{ ...oneExTwoSets().exercises[0], plannedSets: 0, sets: [] }],
+    };
+    const res = await replaceLiveMirror(db, emptied);
+    expect(res.purgedSets).toBe(2);
+    expect(res.purgedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual([]);
+    expect(await idsOf('session_exercise')).toEqual(['se-1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcileSessionTree with purgeTail: true — the END-SESSION membership purge
+// (the snapshot is authoritative; any untouched iPhone row is a Watch-side
+// delete the live mirror never propagated). replaceLiveMirror always passes
+// purgeTail:false, so this path is reached only via reconcileEndSnapshot. The
+// direct tests below also cover the empty-keep mass-purge fallback (`['']`)
+// that an EMPTY snapshot triggers — the wipe the suspicious-empty guard one
+// layer up in reconcileEndSnapshot exists to prevent.
+// ---------------------------------------------------------------------------
+describe('reconcileSessionTree — purgeTail (end-session authoritative membership)', () => {
+  let db: BetterSqliteDatabase;
+
+  const twoExTwoSets = (): SessionSnapshot => ({
+    sessionId: 'sess-1',
+    title: 'Push Day',
+    startedAt: 1_700_000_000_000,
+    exercises: [
+      {
+        sessionExerciseId: 'se-1',
+        exerciseId: '00000000-0000-4000-8000-000000000001',
+        exerciseName: 'Bench Press',
+        ordering: 0,
+        plannedSets: 2,
+        sets: [
+          { setId: 'set-1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+          { setId: 'set-2', ordinal: 1, weight: 80, reps: 6, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+        ],
+      },
+      {
+        sessionExerciseId: 'se-2',
+        exerciseId: '00000000-0000-4000-8000-000000000002',
+        exerciseName: 'Squat',
+        ordering: 1,
+        plannedSets: 1,
+        sets: [
+          { setId: 'set-3', ordinal: 0, weight: 100, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: false },
+        ],
+      },
+    ],
+  });
+
+  const idsOf = async (table: 'set' | 'session_exercise') => {
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM "${table}" WHERE session_id = ? ORDER BY id`,
+      'sess-1',
+    );
+    return rows.map((r) => r.id);
+  };
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    await seedLiveSession(db, 'sess-1');
+    // Seed the full tree via a normal live tick first.
+    await replaceLiveMirror(db, twoExTwoSets());
+  });
+
+  afterEach(() => db.close());
+
+  it('drops a tail set absent from the authoritative snapshot (kept exercises survive)', async () => {
+    // Final snapshot omits set-2 (the Watch deleted it mid-session; the live
+    // mirror left it behind). purgeTail removes the untouched row.
+    const trimmed: SessionSnapshot = {
+      ...twoExTwoSets(),
+      exercises: [
+        { ...twoExTwoSets().exercises[0], plannedSets: 1, sets: [twoExTwoSets().exercises[0].sets[0]] },
+        twoExTwoSets().exercises[1],
+      ],
+    };
+    const res = await reconcileSessionTree(db, trimmed, { purgeTail: true });
+    expect(res.purgedSets).toBe(1); // set-2
+    expect(res.purgedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-3']);
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+  });
+
+  it('drops a whole exercise (and its sets) absent from the authoritative snapshot', async () => {
+    const trimmed: SessionSnapshot = {
+      ...twoExTwoSets(),
+      exercises: [twoExTwoSets().exercises[0]], // se-2 gone
+    };
+    const res = await reconcileSessionTree(db, trimmed, { purgeTail: true });
+    expect(res.purgedSets).toBe(1); // set-3 (under se-2)
+    expect(res.purgedExercises).toBe(1); // se-2
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2']);
+    expect(await idsOf('session_exercise')).toEqual(['se-1']);
+  });
+
+  it('an EMPTY authoritative snapshot wipes the whole tree (empty-keep `[""]` mass purge)', async () => {
+    // The wipe the reconcileEndSnapshot suspicious-empty guard exists to
+    // prevent — exercised here directly to lock the empty-keep-list branch.
+    const empty: SessionSnapshot = { ...twoExTwoSets(), exercises: [] };
+    const res = await reconcileSessionTree(db, empty, { purgeTail: true });
+    expect(res.purgedSets).toBe(3); // set-1, set-2, set-3
+    expect(res.purgedExercises).toBe(2); // se-1, se-2
+    expect(await idsOf('set')).toEqual([]);
+    expect(await idsOf('session_exercise')).toEqual([]);
+  });
+
+  it('purgeTail is a no-op when the snapshot still names every row (idempotent end reconcile)', async () => {
+    const res = await reconcileSessionTree(db, twoExTwoSets(), { purgeTail: true });
+    expect(res.purgedSets).toBe(0);
+    expect(res.purgedExercises).toBe(0);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2', 'set-3']);
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+  });
+});
