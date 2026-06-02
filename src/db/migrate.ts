@@ -23,6 +23,7 @@ import { v021_drop_template_exercise_rest_sec } from './schema/v021_drop_templat
 import { v022_program_sub_tag } from './schema/v022_program_sub_tag';
 import { v023_session_title } from './schema/v023_session_title';
 import { v024_session_is_watch_tracked } from './schema/v024_session_is_watch_tracked';
+import { v025_set_display_rank } from './schema/v025_set_display_rank';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -61,6 +62,7 @@ const migrations: Record<number, MigrationFn> = {
   22: v022_program_sub_tag,
   23: v023_session_title,
   24: v024_session_is_watch_tracked,
+  25: v025_set_display_rank,
 };
 
 export async function migrate(db: Database): Promise<void> {
