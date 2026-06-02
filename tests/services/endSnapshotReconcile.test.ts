@@ -289,6 +289,21 @@ describe('reconcileEndSnapshot — E2 end-session membership purge', () => {
     expect(second).toMatchObject({ purged: true, purgedSets: 0, purgedExercises: 0 });
     expect(await countRows(db)).toEqual({ exercises: 1, sets: 1 });
   });
+
+  it('never throws — a DB failure during reconcile surfaces as { purged:false, reason:"db-error" }', async () => {
+    // Q3 contract: failure ALWAYS degrades to "no purge" (recoverable E2
+    // stale-row severity), never a thrown exception the fire-and-forget caller
+    // can't catch. Force a DB failure by closing the connection AFTER the
+    // parse + sessionId-match guards (which run before the try) pass — the
+    // first query inside the try then throws, hitting the db-error catch.
+    db.close();
+    const result = await reconcileEndSnapshot(db, 'sess-1', snapshot());
+    expect(result).toMatchObject({ purged: false, reason: 'db-error' });
+    expect((result as { message?: string }).message).toBeTruthy();
+    // Re-open so afterEach's close() is a no-op-safe double close on a fresh
+    // handle (the closed one above is already torn down).
+    db = new BetterSqliteDatabase(':memory:');
+  });
 });
 
 // =====================================================================
