@@ -1745,7 +1745,7 @@ export default function TemplateEditorView() {
                         compact
                         hideLabel
                         isDropsetFollower={isDropsetFollower}
-                        isClusterLast={isClusterLast}
+                        showAddDrop={isClusterLast}
                         minusDisabled={minusDisabled}
                         hideNoteIndicator
                         onUpdateSet={(set_id, patch) =>
@@ -2603,7 +2603,7 @@ function ExerciseBody({
                           setLabel={setLabels[g.headIdx]}
                           compact={compact}
                           isDropsetFollower={false}
-                          isClusterLast={false}
+                          showAddDrop={false}
                           minusDisabled={false}
                           onUpdateSet={onUpdateSet}
                           onShowSetNote={onShowSetNote}
@@ -2618,7 +2618,7 @@ function ExerciseBody({
                             setLabel={setLabels[g.followerIndices[fIdx]]}
                             compact={compact}
                             isDropsetFollower
-                            isClusterLast={fIdx === g.followers.length - 1}
+                            showAddDrop={fIdx === g.followers.length - 1}
                             minusDisabled={clusterSize <= 2}
                             onUpdateSet={onUpdateSet}
                             onShowSetNote={onShowSetNote}
@@ -2668,7 +2668,7 @@ function ExerciseBody({
                         setLabel={setLabels[g.headIdx]}
                         compact={compact}
                         isDropsetFollower={false}
-                        isClusterLast={false}
+                        showAddDrop={false}
                         minusDisabled={false}
                         onUpdateSet={onUpdateSet}
                         onShowSetNote={onShowSetNote}

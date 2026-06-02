@@ -3433,7 +3433,7 @@ function ExerciseCard({
                             set={headRow}
                             setLabel={labels.get(head.id) ?? ''}
                             isDropsetFollower={false}
-                            isClusterLast={false}
+                            showAddDrop={false}
                             minusDisabled={false}
                             hideNoteIndicator={false}
                             onUpdateSet={(set_id, patch) =>
@@ -3489,7 +3489,7 @@ function ExerciseCard({
                           - shares the parent's SwipeableSetRow (single
                             swipe unit — head + followers travel together)
                       */}
-                      {g.followers.map((fset, fIdx) => {
+                      {g.followers.map((fset) => {
                         const f = setsById.get(fset.id)!;
                         const fRow: SetRowItem = {
                           id: f.id,
@@ -3507,9 +3507,7 @@ function ExerciseCard({
                                 set={fRow}
                                 setLabel=""
                                 isDropsetFollower
-                                isClusterLast={
-                                  fIdx === g.followers.length - 1
-                                }
+                                showAddDrop={true}
                                 minusDisabled={followerMinusDisabled}
                                 hideNoteIndicator={false}
                                 onUpdateSet={(set_id, patch) =>

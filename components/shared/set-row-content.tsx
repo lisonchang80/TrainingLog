@@ -47,8 +47,14 @@ type SetRowContentProps<S extends SetRowItem> = {
   compact?: boolean;
   /** Dropset follower row (no cycle, may show − to remove). */
   isDropsetFollower: boolean;
-  /** Last row of cluster — show + button to append a follower. */
-  isClusterLast: boolean;
+  /**
+   * Whether this dropset follower shows the `+` (append-a-drop) button.
+   * #3 (2026-06-02): the in-session set logger passes `true` for EVERY
+   * follower (每個 child 都能加一個 drop); the template editor keeps the
+   * original chain-last-only behaviour by passing its own `isClusterLast`.
+   * When false a placeholder reserves the slot so input columns stay aligned.
+   */
+  showAddDrop: boolean;
   /** Disable − button (only one follower left, can't go below). */
   minusDisabled: boolean;
   /** Suppress 📝 note indicator (e.g., when caller renders it elsewhere). */
@@ -83,7 +89,7 @@ export function SetRowContent<S extends SetRowItem>({
   setLabel,
   compact,
   isDropsetFollower,
-  isClusterLast,
+  showAddDrop,
   minusDisabled,
   hideNoteIndicator,
   hideLabel,
@@ -198,10 +204,13 @@ export function SetRowContent<S extends SetRowItem>({
         />
       )}
       {/* Dropset follower −/+ — directly after reps, before note slot
-          (2026-05-20 user request: 「請放在次數的右邊」). − always shown
-          (minusDisabled state when chain at minimum 2 rows); + only on
-          chain-last follower; placeholder reserves + slot on non-last
-          followers so input columns stay aligned across all rows. */}
+          (2026-05-20 user request: 「請放在次數的右邊」). #3 (2026-06-02): BOTH
+          − and + show on EVERY follower now, not just the chain-last one — the
+          user wants 每個 child 都能加一個 drop, with the −/+ pair sitting
+          directly to the row's right (the established 「次數右邊」pattern). −
+          stays disabled when the chain is at its 2-row minimum; + appends a new
+          follower to the cluster (`onAddDropsetRow` resolves the head + appends
+          to the chain end — same behaviour the chain-last + always had). */}
       {isDropsetFollower ? (
         <View style={styles.dropsetLeftGroup}>
           <Pressable
@@ -220,7 +229,7 @@ export function SetRowContent<S extends SetRowItem>({
               −
             </Text>
           </Pressable>
-          {isClusterLast ? (
+          {showAddDrop ? (
             <Pressable
               onPress={() => onAddDropsetRow(set.id)}
               hitSlop={6}

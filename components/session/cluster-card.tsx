@@ -438,7 +438,7 @@ export function ClusterCard({
                           set={toSetRowItem(c.a_set)}
                           setLabel={displaySetLabel(c.a_set, aOrdinalMap)}
                           isDropsetFollower={false}
-                          isClusterLast={false}
+                          showAddDrop={false}
                           minusDisabled={true}
                           hideNoteIndicator={true}
                           onUpdateSet={(set_id, patch) =>
@@ -470,7 +470,7 @@ export function ClusterCard({
                           set={toSetRowItem(c.b_set)}
                           setLabel={displaySetLabel(c.b_set, bOrdinalMap)}
                           isDropsetFollower={false}
-                          isClusterLast={false}
+                          showAddDrop={false}
                           minusDisabled={true}
                           hideNoteIndicator={true}
                           onUpdateSet={(set_id, patch) =>
