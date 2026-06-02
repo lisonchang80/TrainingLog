@@ -97,6 +97,7 @@ import {
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
 import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { resolveSetDefaults } from '@/src/domain/set/resolveSetDefaults';
 import {
   groupClusterSides,
   type ClusterGroup,
@@ -859,12 +860,12 @@ export default function SessionDetailScreen() {
         return;
       }
 
-      let weight_kg = 0;
-      let repsNum = 10;
-      if (lastSetInSession) {
-        weight_kg = lastSetInSession.weight_kg ?? 0;
-        repsNum = lastSetInSession.reps ?? repsNum;
-      } else {
+      // Resolve cross-session history ONLY when there is no last-set in the
+      // current session (preserves the no-extra-query optimization). The
+      // async lookup + Date.now() stay in the caller; resolveSetDefaults is a
+      // pure value-map over the already-fetched rows (big-file health #8).
+      let historicalMostRecent = null;
+      if (!lastSetInSession) {
         try {
           const historicalPriors = await listPriorSetsForExercise(
             db,
@@ -872,15 +873,16 @@ export default function SessionDetailScreen() {
             Date.now() + 1,
           );
           if (historicalPriors.length > 0) {
-            const mostRecent = historicalPriors[0];
-            weight_kg = mostRecent.weight_kg ?? 0;
-            repsNum = mostRecent.reps ?? repsNum;
+            historicalMostRecent = historicalPriors[0];
           }
         } catch {
           // History query failure → starter defaults.
         }
       }
-      if (!Number.isInteger(repsNum) || repsNum <= 0) repsNum = 10;
+      const { weight_kg, reps: repsNum } = resolveSetDefaults(
+        lastSetInSession,
+        historicalMostRecent,
+      );
 
       const err = validateRecordSet({
         exercise_id,
