@@ -315,7 +315,18 @@ final class LiveMirrorProducer: ObservableObject {
     /// `throttle` passes (bursts coalesce to ≤2 pushes/sec).
     private func markDirty() {
         dirty = true
-        if shouldEmitNow() { emit(force: false) }
+        guard shouldEmitNow() else { return }
+        // `@Published` publishes in `willSet` — the mutated stored property is
+        // NOT assigned yet when this sink fires. Emitting synchronously here
+        // would project the PRE-mutation overlay, so the iPhone mirrors one
+        // step behind (tap ✓ on set N → iPhone shows set N-1's state). Defer
+        // the emit one main-runloop turn so `willSet`→`didSet` completes first
+        // and `project()` reads the committed post-mutation state. Still well
+        // under the <1s live-mirror budget (next-tick, sub-millisecond).
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.dirty else { return }
+            self.emit(force: false)
+        }
     }
 
     private func shouldEmitNow() -> Bool {
