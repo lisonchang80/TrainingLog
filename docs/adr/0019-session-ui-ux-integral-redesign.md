@@ -3153,3 +3153,93 @@ Swift（device-gated、停在此邊界等使用者）：
 **驗證**：tsc 0 + jest 192/2130（+7 gate 測試：`replaceLiveMirror.test.ts` 4［absent / ended / live-applies / apply→discard→late-drop］+ `watchLiveMirrorReceiver.test.ts` 3）。連帶把既有測試從「live mirror 建 session」改為 model 真實 start-path（beforeEach 先 seed live session row）。**剩實機 smoke**（top-3：放棄殭屍前景+背景兩路 / 中間組 cycle 成遞減組+follower / 整動作刪除）→ ff-merge `slice/13d-livemirror-fastlane` 進 main。已寫進 skill `wc-add-envelope-kind` § LIVE 變體（live kind UPSERT lifecycle row 必帶 liveness gate）。
 
 **Cross-link**：overnight 報告 `A-correctness-audit.md` H1；`replaceLiveMirror.ts` `ReconcileSessionTreeOptions.requireExistingLiveSession`；`watchLiveMirrorReceiver.ts` `onLiveMirror`。
+
+---
+
+## 2026-06-02 — displayRank wire + v025（Watch reorder / 中插位置同步 #1/#2）
+
+**Trigger**：device smoke 抓到 Watch in-session 兩個顯示同步 bug — #1 拖曳換位、#2 中插位置 —— Watch 端順序對，但同步到 iPhone 後跑掉（換位無效、中插的 set 落到最底）。grill 拍板 A。
+
+**Root cause**：wire 只帶 set 的 `ordinal` 值，而它被刻意綁死成 **set 身分配對 key**（`reconcileSessionTree` 按 `(session_exercise_id, set.ordering)` 配對 base set —— DB 欄名為 `ordering`，其值對應 Watch wire 的 `ordinal`，兩邊同值不同名；mid-list 刪除靠這個 VALUE 配對能 purge 對的 row）。身分 key 不能同時編碼顯示位置，所以 iPhone 收到後只能按 `set.ordering` 重排 → Watch 的 reorder / mid-insert 顯示序整個丟掉。（此 amendment 落地了 2026-06-01「遞減組 reconcile」段所說的升級路徑 C：加獨立 display 欄。）
+
+**翻盤的既有拍板**：
+- ⚠️ **2026-06-01「遞減組 reconcile」段 Q2「接受 Watch reorder / 中插不同步到 iPhone」** — 此段把它做回來：reorder / 中插改經獨立 `display_rank` wire 欄同步，**identity `ordering` 仍不動**。
+
+**決定（grill Q=A）**：
+1. **新 schema 欄 `set.display_rank REAL` nullable（migration `v025_set_display_rank`）**，backfill = `ordering`（`WHERE display_rank IS NULL`）。REAL 因 mid-insert rank 是相鄰 midpoint（如 2 與 3 之間 → 2.5）。身分仍 `(session_exercise_id, ordering)`，此欄純 SORT key。
+2. **Watch 上 wire**：Swift `SessionInteractionState.AddedSet.displayRank`（Double）+ `SessionSnapshotSet.displayRank`（CodingKey `display_rank`）；`LiveMirrorProducer.mergeSets` 蓋（base = ordinal、added = fractional rank）、`project`/`applyKindOverride` 保留。JSONEncoder 自動上 wire；舊 Watch build 省略 → iPhone 收到 absent → null → 退回 `ordering` 排序（零行為改變）。
+3. **iPhone landing**：`handshake.ts SessionSnapshotSet.display_rank?: number | null`（OPTIONAL）→ `parseLiveMirrorSnapshot`（nullable-finite 守門）→ `replaceLiveMirror reconcileSessionTree` INSERT + 全部 3 個 UPDATE branch 寫 `display_rank` → `setRepository.listSetsBySession` SELECT。
+4. **每個 RENDER surface 改 sort by `display_rank ?? ordering`**（ordering tie-break）。共 **6 條獨立 set 排序/編號路徑**，必須全補否則 whack-a-mole — 權威清單見 skill `set-ordering-surfaces`（`sessionSetLayout.ts` / `clusterCard.ts sortedSetsFor` / `workingSetOrdinal.ts` / `exerciseHistoryRepository.ts` + `historySetLabel.ts` / `app/session/[id].tsx` 讀模 solo row sequence #5 / cluster row sequence #6）。新增共用 comparator `sortSetsByDisplayRank`（export 自 `sessionSetLayout.ts`），讓 row-order 與 label-order 不會再 drift。
+
+**落地**：branch `slice/13d-displayrank-livepurge`（base main `89fbbed`、未進 main）。smoke 抓出再修 3：`64fdec7`（superset cluster 行序）、`be5ee97`（superset working-set 編號）、`8248c8f`+`2238119`（session-detail 歷史 read-mode 行序與 label）。
+
+**Cross-link**：skill `set-ordering-surfaces`（6 surface 地圖 + identity-vs-display 鐵律）；`v025_set_display_rank.ts`；2026-06-01「遞減組 reconcile」段 Q2 升級路徑 C。
+
+---
+
+## 2026-06-02 — live tick purge 缺席動作（#4 Watch 刪動作 live 不同步）
+
+**Trigger**：device smoke — Watch 刪整個動作後，歷史已正確移除，但**進行中** live mirror 仍顯示該動作（live reconcile 故意不 purge 缺席動作，原本留給 end-session）。
+
+**決定**：`reconcileSessionTree` 新增 `purgeExercisesAbsentFromSnapshot`，由 `replaceLiveMirror` 啟用 → live tick 也會刪掉「不在本次 snapshot 的動作」。producer 永遠送全樹 + H1 liveness gate 守門（找不到 live session row 就整筆 drop，不會把刪掉的動作復活）。
+
+**Cross-link**：`replaceLiveMirror.ts purgeExercisesAbsentFromSnapshot`；H1 § live-mirror session-liveness gate（2026-06-01）。
+
+---
+
+## 2026-06-02 — 遞減組 child 每行顯示 ＋（#3）
+
+**Trigger**：device smoke — 遞減組（dropset chain）只有 chain-last 的 child 顯示 ＋，user 期望每個 child 都能加下一段降重。
+
+**決定**：set-row content 的「顯示 ＋」由 `isClusterLast` gate 換成明確 prop `showAddDrop` —— in-session = true（每個 child 都給 ＋）；template 維持 chain-last；cluster-card / head = false。
+
+**Cross-link**：skill `dropset-chain-semantics`。
+
+---
+
+## 2026-06-02 — expo-sqlite transaction serializer（nested-BEGIN crash）
+
+**Trigger**：device smoke 撞 `onStartFromWatch: cannot start a transaction within a transaction`（+ 隨後 `cannot rollback - no transaction is active`）。
+
+**Root cause**：expo-sqlite 跑**單一**底層連線；`withTransactionAsync` 的 `BEGIN…COMMIT` 跨多個 await，連線允許其它 await 在空檔插入。WC live session 下兩條無跨通道排序的 WC 通道讓 txn 重疊：`replaceLiveMirror` live-mirror tick（`reconcileSessionTree` → txn）與 `onStartFromWatch → startSessionFromTemplate`（也是 txn）同時 in-flight → 第二個的 `BEGIN` 落進第一個未關的 txn 內。
+
+**決定**：新 `src/adapters/sqlite/transactionSerializer.ts`（`createTransactionSerializer`）—— 把每個 transaction 串到前一個之後，等前者 SETTLE（commit 或 rollback）才發自己的 `BEGIN`。只序列化 **transaction**（讀與裸單句寫不序列化 = 最小範圍）。settle-tolerant chain：一個失敗的 txn 不毒化後續。純 + 無 `expo-sqlite` import 故可在 node test env 單測（better-sqlite3 test adapter 同步、重現不了 race，這是唯一檢查排序保證的地方）。並 `openDatabase` 改快取 promise 防雙實例。Deadlock-safe：已稽核每個 call site 皆 flat（無 txn callback 內再 `withTransactionAsync` 巢狀）。
+
+**落地**：`b01b6fe`（4 test）。
+
+**Cross-link**：`transactionSerializer.ts` header doc；`onStartFromWatch` / `startSessionFromTemplate`。
+
+---
+
+## 2026-06-02 — off-by-one `@Published` willSet defer（「同步慢/不同步」真正主因）
+
+**Trigger**：fast-lane（sendMessage + rev guard, 2026-06-01）落地後，user 親證仍「同步慢/按✓顯示上一步」。
+
+**Root cause**（**翻盤 2026-06-01 fast-lane 段的隱含結論**）：`@Published` 在 **`willSet`** 發佈 —— sink 觸發時被改的 stored property **尚未** assign 完。`LiveMirrorProducer.markDirty` 原本在 `willSet` sink 內**同步** `emit()` → `project()` 讀到 **mutation 之前** 的 overlay → iPhone 永遠慢一拍（tap ✓ on set N → iPhone 顯示 set N−1）。這不是傳輸層問題，fast-lane 的 transport fix 蓋不到。
+
+**決定**：`markDirty` 把 emit **defer 一個 main-runloop turn**（`DispatchQueue.main.async`），讓 `willSet`→`didSet` 先完成，`project()` 才讀到 committed post-mutation 狀態。仍遠在 <1s live-mirror 預算內（next-tick、sub-millisecond）。device-verified。
+
+**翻盤的既有拍板**：
+- ⚠️ **2026-06-01 fast-lane 段**把「慢/亂/時有時無」全歸因於傳輸層（applicationContext-only）。修正：傳輸層是其一，但**主因是這個 producer 端 off-by-one**；transport fix 是必要但不充分。
+
+**落地**：`d7740f9`（Swift `LiveMirrorProducer.markDirty`）。
+
+**Cross-link**：`LiveMirrorProducer.swift` markDirty defer；2026-06-01 fast-lane 段（傳輸層、本段補上 producer 端真因）。
+
+---
+
+## 2026-06-02 — S7b ingest 契約 fail-closed（孤兒 follower 守門，源頭非下游 rescue）
+
+**Trigger**：對抗稽核（overnight）揪出潛伏 forward bug S7b。
+
+**Root cause**：若一筆 `deletedIds.setIds` tombstone 了一個 dropset chain **head** 卻沒一起 tombstone 存活的 **follower**，下游 purge 會刪掉 head、留下 follower 的 `parent_set_id` dangling → History 出現空白 label 的孤兒 standalone row。今日 inert（forward Watch producer 永遠不送 `deletedIds` —— Swift `SessionSnapshot` wire model **根本沒這欄**，刪除走 absence-from-`sets`），但 iPhone parser `watchLiveMirrorReceiver` **已接受** wire `deletedIds`，故反向 lane / backup-merge / 未來 Watch build 一啟用即 forward 損壞。
+
+**決定（grill「源頭」拍板）**：**source-side ingest 契約守門、fail-closed**，**不**做下游 orphan rescue。`parseLiveMirrorSnapshot` 在 ingest 時檢查：若 `setIds` tombstone batch **非 dropset-chain-complete**（tombstone 了某 head，卻有 follower 仍 listed-in-`sets` 且自己未被 tombstone）→ 整個 tick 視為 bad payload → 回 `null` → orchestrator drop（下一個 ~15s snapshot 自癒）。整鏈一起 tombstone（head + 所有 follower）允許。
+
+**明確拒絕的替代方案**：producer-side / 下游 rescue（刪 head 時自動 NULL 孤兒 follower）—— user 拍板「不要下游 rescue」，改逼任何未來 producer 送 chain-complete tombstone。
+
+**FK 為何不靠**：查證 prod 沒啟用 `PRAGMA foreign_keys`（FK 不 fire），故 schema CASCADE 排除、守門必須在 parser。
+
+**落地**：`500e235`（`watchLiveMirrorReceiver.ts` parseLiveMirrorSnapshot，含完整 inline 契約註解 + 守門迴圈）。對抗稽核確認 forward S1-S8（含跨-session namespacing / idempotency / producer-faithful head delete）全乾淨。
+
+**Cross-link**：`watchLiveMirrorReceiver.ts parseLiveMirrorSnapshot` S7b 段；skill `dropset-chain-semantics`；overnight 報告 S7b。

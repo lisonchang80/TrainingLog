@@ -140,9 +140,9 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 
 ### 不翻盤、繼續成立
 
-- ✅ **路徑 C 核心模型**（`iPhone = SQLite SoT；Watch = in-memory mirror`）— 仍成立；但 Stage 1 / 2 mapping 在 13d 擴張為完整 16 message-kind 表（見 ADR-0019 § Slice 13d Amendment WC channel mapping table）
+- ✅ **路徑 C 核心模型**（`iPhone = SQLite SoT；Watch = in-memory mirror`）— 仍成立；但 Stage 1 / 2 mapping 在 13d 擴張為完整 16 message-kind 表（2026-06-01 再擴為 **17**，補 `live-mirror`；見 ADR-0019 § Slice 13d Amendment WC channel mapping table + § 2026-06-01 fast-lane）
 
-  > **計數修正（overnight audit 2026-05-30）**：凍結 message-kind set 實為 **16** 種，原文誤記 13。完整 16 種：handshake、start-from-watch、start-from-iphone、start-reconcile、start-resolve、set-completed、set-modified、set-deleted、set-added、exercise-added、exercise-deleted、hr-tick、kcal-tick、end-session、discard-session、settings-sync。其中 `start-resolve` 與 `discard-session` 為 D31 衝突解決流程新增（見 ADR-0019 Slice 13d D31），故「凍結 kind set」的正確基準是 16；權威清單以 `src/adapters/watch/payloadSchema.ts` 的 `WC_MESSAGE_KINDS` 為準。
+  > **計數修正（overnight audit 2026-05-30；2026-06-01 再修為 17）**：13d 凍結 message-kind set 為 **16** 種，原文誤記 13；2026-06-01 sync fast-lane 再補 `live-mirror`（第 17 種）→ 現為 **17**。完整 17 種：handshake、start-from-watch、start-from-iphone、start-reconcile、start-resolve、set-completed、set-modified、set-deleted、set-added、exercise-added、exercise-deleted、hr-tick、kcal-tick、end-session、discard-session、settings-sync、**live-mirror**。其中 `start-resolve` 與 `discard-session` 為 D31 衝突解決流程新增（見 ADR-0019 Slice 13d D31）、`live-mirror` 為 Watch→iPhone in-session fast lane 新增（見 ADR-0019 § 2026-06-01 fast-lane）；權威清單以 `src/adapters/watch/payloadSchema.ts` 的 `WC_MESSAGE_KINDS` 為準。
 - ✅ **UUID 主鍵範圍**（Session / Set / body_metric 三表）— 不變
 - ✅ **Schema 影響最小**（新增僅 `set.is_skipped` + `session.healthkit_workout_uuid`）— 13d 再加 v024 `session.is_watch_tracked INTEGER DEFAULT 0`、總計 3 個 13d-affected column
 - ✅ **Watch v1 17 條** 大部分仍適用（picker / 即時心率 / 增刪組 / 完成勾 / 休息倒數 / 超級組 / 跳過 Exercise / Pre-session 兩態 / In-session 啟動點 / NowPlaying 系統內建）；deferred items：#12 PR 觸覺通知、#14 complication、#15 結束 summary 卡片
@@ -206,3 +206,20 @@ ADR-0008 取代 Q11 的 v1 / v1.5+ 部分；Q11 v2+ 仍保留。
 - Full 8 Q grill log + impl checklist + D-chain 重排 — ADR-0019 § Slice 13d NEW-Q50 段
 - NEW-Q42 / NEW-Q44 inline 翻盤 markers — ADR-0019 § Slice 13d Amendment NEW-Q table
 - D5 HK lifecycle Watch-led（不翻盤、本來就獨立）— ADR-0019 § Slice 13d Amendment Q28 Branch C
+
+---
+
+## 2026-06-02 — #287 Release-standalone WC bridge fix（native patch + eager mount）
+
+> 歸宿說明：#287 屬 **WC 傳輸層 / 原生橋接** 的架構決策（本 ADR 是 WC transport / message-kind owner），故記於此；與此波 sync arc 的 reconcile / liveness 修正（記於 ADR-0019 § 2026-06-02）分流。
+
+**症狀**：WC 同步在 **Release standalone** build 死、Debug + Metro 正常 → App Store ship-blocker。
+
+**Root cause**：`react-native-watch-connectivity` 單例 RCTEventEmitter + TurboModule，在 New Arch + Release 下 WCSession-delegate 實例的 `hasObservers` 與 JS 訂閱脫鉤 → inbound Watch event 卡在 `pendingEvents` 永遠送不到 JS（Debug + Metro 熱重載多跑 `startObserving` 掩蓋了它）。
+
+**Fix A（native，固化）**：`patches/react-native-watch-connectivity+2.0.0.patch` 改 `dispatchEventWithName` 為**無條件 emit** + 先 flush 任何 `pendingEvents`（cold-boot race 不丟首個 envelope）。經 `package.json postinstall: patch-package` 固化。`devicectl process launch --console` 確認 one-instance（`self=0x…` 單一）。
+**Fix C（JS，輔助）**：`app/_layout.tsx` `initWatchBridge()` eager-mount native bridge（DatabaseProvider 之外）；只 native 訂閱 eager、DB handler 仍首頁、pre-handler envelope 進 replay buffer 不丟。
+
+**WC-sync smoke 紀律**：只能在 **Release standalone** 驗（Debug + Metro 會掩蓋）。
+
+**Cross-link**：`patches/react-native-watch-connectivity+2.0.0.patch`（含 `#287 Fix A` 註解）；`app/_layout.tsx initWatchBridge`；skill `xcodebuild-watchos`；overnight 報告 #287。

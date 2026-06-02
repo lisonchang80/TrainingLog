@@ -29,7 +29,7 @@ ALTER TABLE set ADD COLUMN set_kind TEXT
   NOT NULL DEFAULT 'working';
 ALTER TABLE set ADD COLUMN is_logged BOOLEAN NOT NULL DEFAULT 0;
 ALTER TABLE set ADD COLUMN notes TEXT NULL;
-ALTER TABLE set ADD COLUMN position INTEGER NOT NULL;  -- migration 依 created_at 補值
+ALTER TABLE set ADD COLUMN ordering INTEGER NOT NULL;  -- 實際欄名 ordering（早期 doc 誤記 position，2026-06-02 對齊）；migration 依 created_at 補值
 ALTER TABLE set ADD COLUMN parent_set_id TEXT NULL
   REFERENCES set(id) ON DELETE CASCADE;
 
@@ -58,7 +58,7 @@ Row 結構（從左到右）：
 | **tap ✓** | toggle `is_logged`（一鍵翻 ✓↔空白，無 menu 無確認） | UPDATE is_logged |
 | **右滑** | 出現 [新增] + [📝 備註] 兩 button | 新增 = 在當前 row 後 INSERT 新 row（planned 從當前 row 複製）；備註 = 編 set.notes |
 | **左滑** | 出現 [刪除] 紅 button，點即 DELETE，**無二次確認** | DELETE row |
-| **長按** | 進 drag-reorder mode | UPDATE position |
+| **長按** | 進 drag-reorder mode | UPDATE ordering |
 
 「📝 (備註預覽)」存在 `set.notes` 才顯，row 下方一行 inline 淡灰小字。「★」破 PR row（slice 8 PR engine 偵測），多重 PR 顯示細節（一顆 vs 多顆 / 顏色分桶）leftover 不在本 ADR 範圍。✓ 在最右（高頻 + 大拇指 reach）。
 
@@ -82,7 +82,7 @@ Dropset 重新建模為 **cluster**（多 step 單一 set，step 間無休息）
 | Gesture | 行為 |
 |---|---|
 | **左滑** | [刪除整 cluster] 紅 button：一鍵砍首 step + 所有 children（DELETE CASCADE）；**無二次確認** |
-| **長按** | 整 cluster 浮起拖移，children 跟 root 一起移動；cluster 是 reorder 單位（parent_set_id 不變、只 position 重編） |
+| **長按** | 整 cluster 浮起拖移，children 跟 root 一起移動；cluster 是 reorder 單位（parent_set_id 不變、只 ordering 重編） |
 | **右滑** | [新增] + [📝 備註] 兩 button：新增 = 在當前 cluster 後 append **新 cluster**（D# derived；planned 從當前 cluster 首 step 複製）；備註 = 編 `root.notes`（cluster 級備註存 root row） |
 
 子 step 雖 schema 允許 `notes` 但 UI 不暴露編輯入口（dead field for cluster steps；保留欄位是為了將來「per-step 備註」如果決定打開不用 schema migration）。
@@ -143,7 +143,7 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 
 - **頂部右上**：容量目標 chip `已完成 / 計劃`（A1 案，純存在於 per-exercise card；session 頂層**無 chip / 無 stats / 無 AI**）（**2026-05-16 Q6 修訂**：in-session 加 4-tile/5-tile stats panel（3-tile 非 Watch / 5-tile Watch-tracked）；「無 chip / 無 AI」維持。見 ADR-0019 § Q6）
 - **動作圖正下方、第一 set 上方**：per-exercise 備註欄，placeholder「點擊輸入備註」（持久化機制 = backlog #5，待 grill）
-- **set rows**：依 position ASC
+- **set rows**：依 ordering ASC
 - **card 底部 action 列**：`新增一組` + `動作歷史`（slice 8 既有 modal）
 - **list view 卡片下方圓點**：總 set 數 = warmup + working（含熱身計入「5 組」）；圓點視覺後續決定（已 ✓ → 實心）
 
@@ -158,7 +158,7 @@ chip 在 session ended 後仍顯示，分子 / 分母用 immutable 狀態算（r
 | 新增欄位 | `set.set_kind TEXT NOT NULL DEFAULT 'working'` | 取代 `is_warmup BOOLEAN`；CHECK in (warmup, working, dropset) |
 | 新增欄位 | `set.is_logged BOOLEAN NOT NULL DEFAULT 0` | 兩態 row（◯ / ✓） |
 | 新增欄位 | `set.notes TEXT NULL` | per-set 備註（cluster 級存 root row） |
-| 新增欄位 | `set.position INTEGER NOT NULL` | 顯式排序；migration 依 created_at 補值 |
+| 新增欄位 | `set.ordering INTEGER NOT NULL` | 顯式排序；migration 依 created_at 補值（實際欄名 `ordering`，早期 doc 誤記 `position`） |
 | 新增欄位 | `set.parent_set_id TEXT NULL REFERENCES set(id) ON DELETE CASCADE` | dropset cluster B3 連結 |
 | Deprecate | `set.is_warmup BOOLEAN` | 既有資料 migrate 到 set_kind；引擎 code 路徑切換 |
 | Deprecate | `set.is_skipped`（若 v00x 已建） | v008 不再 reference；引擎過濾條件移除 |
@@ -295,4 +295,15 @@ Set-logger plan finalization grill (Round D) 拍板 4 條決策關於 session-fl
 唯一語意關聯點：Q4「auto-expand LAST appended card」延伸了 ADR-0019 Q3 a-1「Session 進入時動作卡全 collapsed default」的行為 — multi-pick 後新增的卡自動展開最後一張（per Q3 c-2 only-one-expanded 模型），但 ADR-0012 per-exercise card 結構 / set row affordance 不變。
 
 詳見 ADR-0019 § Round D Amendment (2026-05-24)。
+
+## 2026-06-02 Cross-link — display_rank 解耦顯示序與身分（ADR-0019 § 2026-06-02）
+
+本文「長按 reorder → UPDATE ordering」「cluster 只 ordering 重編」描述的是 **iPhone 本地** 直接重編排序欄的 v008 模型。Slice 13d Watch 端 reorder / 中插 (+1「插下一行」) 改走 **v025 `set.display_rank REAL`**（nullable、backfill = `ordering`）：
+
+- **身分 / reconcile key = `(session_exercise_id, ordering)`** — Watch wire 配對 base set 靠它（DB 欄 `ordering`，其值對應 Watch wire 的 `ordinal`），**永不**為了顯示位置而 re-stamp。
+- **顯示排序 key = `set.display_rank`** — Watch 把 reorder / mid-insert 順序帶在此欄上 wire；每個 render surface sort by `display_rank ?? ordering`（NULL → 退回 `ordering` = 創建序）。
+
+故本文「UPDATE ordering」在 Watch 同步情境下實為「寫 `display_rank`、不動 `ordering`」。完整 6 條排序 surface 與 wire 鏈見 ADR-0019 § 2026-06-02「displayRank wire + v025」+ skill `set-ordering-surfaces`。
+
+> 註：本文原 schema 段曾用「position」描述此欄、實際 schema 欄名為 `ordering`（v008 起即如此）；2026-06-02 已將本文 `position`→`ordering` 對齊真實欄名（早期 notation 漂移、非本次 sync arc 引入）。
 
