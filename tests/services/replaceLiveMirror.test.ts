@@ -1603,3 +1603,177 @@ describe('reconcileSessionTree — tombstone precise purge (deletedIds)', () => 
     expect(await idsOf('set')).toEqual(['set-1', 'set-2', 'set-3']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v025 display_rank write (#1/#2, 2026-06-02). The Watch reorder / mid-insert
+// rank travels and lands in `set.display_rank` (INSERT + UPDATE), while the
+// wire `ordinal` (→ `set.ordering`, the reconcile identity key) is unchanged.
+// ---------------------------------------------------------------------------
+describe('replaceLiveMirror — v025 display_rank (#1/#2)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    await seedLiveSession(db, 'sess-1');
+  });
+
+  afterEach(() => db.close());
+
+  const oneSet = (displayRank: number | undefined): SessionSnapshot =>
+    snapshot({
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 1,
+          sets: [
+            {
+              setId: 'set-1',
+              ordinal: 0,
+              weight: 80,
+              reps: 8,
+              rpe: null,
+              rest_sec: null,
+              notes: null,
+              set_kind: 'working',
+              is_logged: true,
+              ...(displayRank === undefined ? {} : { display_rank: displayRank }),
+            },
+          ],
+        },
+      ],
+    });
+
+  it('INSERT stores display_rank from the snapshot', async () => {
+    await replaceLiveMirror(db, oneSet(2.5));
+    const row = await db.getFirstAsync<{ display_rank: number | null }>(
+      'SELECT display_rank FROM "set" WHERE id = ?',
+      'set-1',
+    );
+    expect(row?.display_rank).toBe(2.5);
+  });
+
+  it('absent display_rank stored as NULL (legacy Watch build → ordering fallback)', async () => {
+    await replaceLiveMirror(db, oneSet(undefined));
+    const row = await db.getFirstAsync<{ display_rank: number | null }>(
+      'SELECT display_rank FROM "set" WHERE id = ?',
+      'set-1',
+    );
+    expect(row?.display_rank).toBeNull();
+  });
+
+  it('UPDATE overwrites display_rank on re-apply (reorder) — identity ordinal unchanged', async () => {
+    const twoSets = (r1: number, r2: number): SessionSnapshot =>
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 2,
+            sets: [
+              { setId: 'set-1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, display_rank: r1 },
+              { setId: 'set-2', ordinal: 1, weight: 80, reps: 6, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true, display_rank: r2 },
+            ],
+          },
+        ],
+      });
+    await replaceLiveMirror(db, twoSets(0, 1));
+    // Watch reorder: set-2 to the front (rank 0), set-1 second (rank 1).
+    await replaceLiveMirror(db, twoSets(1, 0));
+    const rows = await db.getAllAsync<{ id: string; ordering: number; display_rank: number | null }>(
+      'SELECT id, ordering, display_rank FROM "set" WHERE session_id = ? ORDER BY id',
+      'sess-1',
+    );
+    expect(rows).toEqual([
+      { id: 'set-1', ordering: 0, display_rank: 1 },
+      { id: 'set-2', ordering: 1, display_rank: 0 },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #4 live exercise purge (2026-06-02). A Watch delete-exercise must drop the
+// exercise + its sets from the in-progress iPhone session immediately, not
+// just at end-session. Gated by `purgeExercisesAbsentFromSnapshot` (the live
+// caller passes true; the bare end-session config does not).
+// ---------------------------------------------------------------------------
+describe('replaceLiveMirror — #4 live exercise purge', () => {
+  let db: BetterSqliteDatabase;
+
+  const twoEx = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => ({
+    sessionId: 'sess-1',
+    title: 'Push Day',
+    startedAt: 1_700_000_000_000,
+    exercises: [
+      {
+        sessionExerciseId: 'se-1',
+        exerciseId: '00000000-0000-4000-8000-000000000001',
+        exerciseName: 'Bench Press',
+        ordering: 0,
+        plannedSets: 1,
+        sets: [
+          { setId: 'set-1', ordinal: 0, weight: 80, reps: 8, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: true },
+        ],
+      },
+      {
+        sessionExerciseId: 'se-2',
+        exerciseId: '00000000-0000-4000-8000-000000000002',
+        exerciseName: 'Squat',
+        ordering: 1,
+        plannedSets: 1,
+        sets: [
+          { setId: 'set-2', ordinal: 0, weight: 100, reps: 5, rpe: null, rest_sec: null, notes: null, set_kind: 'working', is_logged: false },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+
+  const idsOf = async (table: 'set' | 'session_exercise') => {
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM "${table}" WHERE session_id = ? ORDER BY id`,
+      'sess-1',
+    );
+    return rows.map((r) => r.id);
+  };
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+    await seedLiveSession(db, 'sess-1');
+    await replaceLiveMirror(db, twoEx()); // seed both exercises
+  });
+
+  afterEach(() => db.close());
+
+  it('live tick deletes a Watch-removed exercise AND its sets', async () => {
+    // Second tick: se-2 absent (user deleted Squat on the Watch).
+    const res = await replaceLiveMirror(db, twoEx({ exercises: [twoEx().exercises[0]] }));
+    expect(res.purgedExercises).toBe(1);
+    expect(res.purgedSets).toBe(1); // set-2 (child of se-2)
+    expect(await idsOf('session_exercise')).toEqual(['se-1']);
+    expect(await idsOf('set')).toEqual(['set-1']);
+  });
+
+  it('present exercises are untouched (no spurious purge)', async () => {
+    const res = await replaceLiveMirror(db, twoEx());
+    expect(res.purgedExercises).toBe(0);
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2']);
+  });
+
+  it('bare reconcile WITHOUT the option keeps the absent exercise (gating — end path)', async () => {
+    // The end-session config (no purgeExercisesAbsentFromSnapshot) leaves the
+    // absent exercise for its own purgeTail — proves the live behaviour is gated.
+    await reconcileSessionTree(db, twoEx({ exercises: [twoEx().exercises[0]] }), {
+      purgeTail: false,
+    });
+    expect(await idsOf('session_exercise')).toEqual(['se-1', 'se-2']);
+    expect(await idsOf('set')).toEqual(['set-1', 'set-2']);
+  });
+});

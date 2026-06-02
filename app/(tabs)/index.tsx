@@ -3206,6 +3206,7 @@ function ExerciseCard({
       set_kind: s.set_kind,
       parent_set_id: s.parent_set_id,
       ordering: s.ordering,
+      display_rank: s.display_rank,
     })),
   );
   const { labels, groups } = layout;

@@ -52,6 +52,13 @@ export interface SessionSetLayoutInput {
   set_kind: 'warmup' | 'working' | 'dropset';
   parent_set_id: string | null;
   ordering: number;
+  /**
+   * v025 (slice 13d 2026-06-02, #1/#2) — Watch display rank. When present it
+   * is the sort key (the Watch's reorder / mid-insert order); absent / null
+   * falls back to `ordering` (legacy = display order == creation order).
+   * Identity stays `ordering`; this only drives the visual sort below.
+   */
+  display_rank?: number | null;
 }
 
 interface SessionSetGroup {
@@ -79,7 +86,13 @@ interface SessionSetLayout {
 export function computeSessionSetLayout(
   sets: ReadonlyArray<SessionSetLayoutInput>,
 ): SessionSetLayout {
-  const sorted = [...sets].sort((a, b) => a.ordering - b.ordering);
+  // Sort by Watch display rank when present, else fall back to `ordering`
+  // (legacy / iPhone-authored rows). `display_rank ?? ordering` keeps a
+  // pre-v025 / non-Watch session byte-identical (display order == creation
+  // order) while letting a Watch reorder / mid-insert (#1/#2) drive the
+  // visible order. Tie-break on `ordering` so equal ranks stay deterministic.
+  const sortKey = (s: SessionSetLayoutInput): number => s.display_rank ?? s.ordering;
+  const sorted = [...sets].sort((a, b) => sortKey(a) - sortKey(b) || a.ordering - b.ordering);
 
   // Pass 1 — labels. Mirror template editor's computeExMeta exactly:
   // warmup → 熱; dropset HEAD → D{clusterIdx++}; dropset follower → '';

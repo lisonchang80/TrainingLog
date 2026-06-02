@@ -557,6 +557,28 @@ describe('Slice 13d D29 — parser tolerates WC-omitted nil optionals (absent �
     expect(s?.rest_sec).toBeNull();
     expect(s?.notes).toBeNull();
   });
+
+  // v025 display_rank (#1/#2, 2026-06-02). Same nullable-optional contract as
+  // the other five: absent (legacy Watch build / JSONEncoder nil-omit) → null;
+  // present fractional value kept; present-but-malformed → reject.
+  it('absent display_rank → null (legacy Watch build)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithSet({}));
+    expect(parsed?.exercises[0]?.sets[0]?.display_rank).toBeNull();
+  });
+
+  it('keeps a present fractional display_rank (mid-insert rank)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithSet({ display_rank: 1.5 }));
+    expect(parsed?.exercises[0]?.sets[0]?.display_rank).toBe(1.5);
+  });
+
+  it('keeps a present 0 display_rank (only null/undefined collapse)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithSet({ display_rank: 0 }));
+    expect(parsed?.exercises[0]?.sets[0]?.display_rank).toBe(0);
+  });
+
+  it('rejects a present-but-malformed display_rank (string)', () => {
+    expect(parseLiveMirrorSnapshot(snapWithSet({ display_rank: '1.5' }))).toBeNull();
+  });
 });
 
 describe('Slice 13d sync fast lane — onLiveMirror rev anti-reorder guard', () => {

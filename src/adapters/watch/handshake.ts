@@ -491,6 +491,20 @@ export interface SessionSnapshotSet {
    * fixtures / wire dicts may omit it.
    */
   parent_set_id?: string | null;
+  /**
+   * Watch display rank (slice 13d 2026-06-02, device-bug #1/#2). The Watch's
+   * effective sort key — a base set = its `ordinal`, a reordered / mid-
+   * inserted set = a fractional override (`setRankOverrides` /
+   * `AddedSet.displayRank`). The Watch already sorts its live snapshot by this
+   * (`LiveMirror.mergeSets`), but the wire `ordinal` is glued to set IDENTITY
+   * (the iPhone reconcile matches by `(session_exercise_id, ordinal)` value),
+   * so the ordinal alone can't carry display order. `display_rank` travels it
+   * → the iPhone lands it in `set.display_rank` and renders by
+   * `display_rank ?? ordering`. OPTIONAL — older Watch builds omit it (Swift
+   * `JSONEncoder` drops nil → absent over WC); `parseLiveMirrorSnapshot`
+   * normalises absent → null and the iPhone then falls back to `ordering`.
+   */
+  display_rank?: number | null;
 }
 
 // ---------------------------------------------------------------------

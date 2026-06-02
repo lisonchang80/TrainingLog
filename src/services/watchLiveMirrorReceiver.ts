@@ -183,12 +183,16 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
       // Dropset-chain parent. Like the other nullables it travels ABSENT for a
       // non-follower (Watch JSONEncoder drops nil) → normalise absent → null.
       const parent_set_id = rawSet.parent_set_id ?? null;
+      // Watch display rank (#1/#2). Nullable like the other optionals — a
+      // legacy Watch build omits it (absent → null → iPhone sorts by ordering).
+      const display_rank = rawSet.display_rank ?? null;
       if (typeof setId !== 'string' || setId.length === 0) return null;
       if (typeof ordinal !== 'number' || !Number.isFinite(ordinal)) return null;
       if (!isNullableFiniteNumber(weight)) return null;
       if (!isNullableFiniteNumber(reps)) return null;
       if (!isNullableFiniteNumber(rpe)) return null;
       if (!isNullableFiniteNumber(rest_sec)) return null;
+      if (!isNullableFiniteNumber(display_rank)) return null;
       if (notes !== null && typeof notes !== 'string') return null;
       if (parent_set_id !== null && typeof parent_set_id !== 'string') return null;
       if (typeof set_kind !== 'string' || !VALID_SET_KINDS.has(set_kind)) {
@@ -207,6 +211,7 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
         set_kind: set_kind as SessionSnapshotSet['set_kind'],
         is_logged,
         parent_set_id: parent_set_id as string | null,
+        display_rank: display_rank as number | null,
       });
     }
 

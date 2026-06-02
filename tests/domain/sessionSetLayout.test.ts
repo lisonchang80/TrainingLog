@@ -246,3 +246,67 @@ describe('computeSessionSetLayout', () => {
     expect(out.labels.get('f')).toBe('');
   });
 });
+
+// ---------------------------------------------------------------------------
+// v025 display_rank sort (#1/#2, 2026-06-02). The Watch reorder / mid-insert
+// travels as `display_rank`; the layout sorts by `display_rank ?? ordering`
+// while identity stays `ordering`.
+// ---------------------------------------------------------------------------
+describe('computeSessionSetLayout — display_rank sort', () => {
+  it('display_rank overrides ordering for visible order + working labels', () => {
+    // Three working sets created A,B,C (ordering 1,2,3) but reordered on the
+    // Watch to C,A,B (display_rank 0,1,2). Render + numbering must follow
+    // display order, not creation order.
+    const out = computeSessionSetLayout([
+      { id: 'A', set_kind: 'working', ordering: 1, parent_set_id: null, display_rank: 1 },
+      { id: 'B', set_kind: 'working', ordering: 2, parent_set_id: null, display_rank: 2 },
+      { id: 'C', set_kind: 'working', ordering: 3, parent_set_id: null, display_rank: 0 },
+    ]);
+    expect(out.groups.map((g) => g.head.id)).toEqual(['C', 'A', 'B']);
+    // Working ordinals follow display order: C=1, A=2, B=3.
+    expect(out.labels.get('C')).toBe('1');
+    expect(out.labels.get('A')).toBe('2');
+    expect(out.labels.get('B')).toBe('3');
+  });
+
+  it('null display_rank falls back to ordering (legacy / iPhone-authored)', () => {
+    const out = computeSessionSetLayout([
+      { id: 'a', set_kind: 'working', ordering: 2, parent_set_id: null, display_rank: null },
+      { id: 'b', set_kind: 'working', ordering: 1, parent_set_id: null }, // display_rank absent
+    ]);
+    expect(out.groups.map((g) => g.head.id)).toEqual(['b', 'a']);
+  });
+
+  it('fractional display_rank places a mid-inserted set between neighbours', () => {
+    // +1「插下一行」after the first set: the inserted row gets a fractional
+    // rank (1.5) between ordering 1 and 2 even though its own ordering (the
+    // wire identity) is max+1 = 3.
+    const out = computeSessionSetLayout([
+      { id: 'first', set_kind: 'working', ordering: 1, parent_set_id: null, display_rank: 1 },
+      { id: 'second', set_kind: 'working', ordering: 2, parent_set_id: null, display_rank: 2 },
+      { id: 'inserted', set_kind: 'working', ordering: 3, parent_set_id: null, display_rank: 1.5 },
+    ]);
+    expect(out.groups.map((g) => g.head.id)).toEqual(['first', 'inserted', 'second']);
+    expect(out.labels.get('first')).toBe('1');
+    expect(out.labels.get('inserted')).toBe('2');
+    expect(out.labels.get('second')).toBe('3');
+  });
+
+  it('equal display_rank ties break deterministically on ordering', () => {
+    const out = computeSessionSetLayout([
+      { id: 'y', set_kind: 'working', ordering: 5, parent_set_id: null, display_rank: 1 },
+      { id: 'x', set_kind: 'working', ordering: 4, parent_set_id: null, display_rank: 1 },
+    ]);
+    expect(out.groups.map((g) => g.head.id)).toEqual(['x', 'y']);
+  });
+
+  it('mixed present/absent display_rank sort by display_rank ?? ordering', () => {
+    // Watch reordered set 'r' to the front (display_rank 0) while a plain
+    // iPhone-authored set 'p' keeps ordering 1 with no rank.
+    const out = computeSessionSetLayout([
+      { id: 'p', set_kind: 'working', ordering: 1, parent_set_id: null }, // → 1
+      { id: 'r', set_kind: 'working', ordering: 9, parent_set_id: null, display_rank: 0 }, // → 0
+    ]);
+    expect(out.groups.map((g) => g.head.id)).toEqual(['r', 'p']);
+  });
+});

@@ -58,6 +58,19 @@ struct SessionSnapshotSet: Codable, Equatable {
     /// JSONEncoder omits nil → it travels ABSENT for non-followers; the iPhone
     /// `parseLiveMirrorSnapshot` normalises absent → null.
     let parentSetId: String?
+    /// Watch display rank (slice 13d 2026-06-02, device-bug #1/#2). The
+    /// effective sort key the Watch renders by: a base set = its `ordinal`, a
+    /// reordered / mid-inserted set = a fractional override
+    /// (`SessionInteractionState.setRankOverrides` / `AddedSet.displayRank`).
+    /// `LiveMirror.mergeSets` already sorts by it, but the wire `ordinal` is
+    /// glued to set IDENTITY (the iPhone reconcile matches by
+    /// `(session_exercise_id, ordinal)` value), so the ordinal alone can't
+    /// carry display order. This travels it → the iPhone lands it in
+    /// `set.display_rank` and renders by `display_rank ?? ordering`.
+    /// JSONEncoder omits nil → it travels ABSENT for a snapshot built without a
+    /// stamped rank; the iPhone `parseLiveMirrorSnapshot` normalises absent →
+    /// null and falls back to `ordering`.
+    let displayRank: Double?
 
     enum CodingKeys: String, CodingKey {
         case setId
@@ -70,12 +83,14 @@ struct SessionSnapshotSet: Codable, Equatable {
         case setKind = "set_kind"
         case isLogged = "is_logged"
         case parentSetId = "parent_set_id"
+        case displayRank = "display_rank"
     }
 
-    /// Memberwise init with `parentSetId` defaulted so the ~16 existing
-    /// call sites that don't deal with dropset chains stay unchanged; only
-    /// the projection / merge / added-set paths thread a real parent through.
-    /// (A custom init doesn't disable the synthesized Codable conformance.)
+    /// Memberwise init with `parentSetId` + `displayRank` defaulted so the
+    /// ~16 existing call sites that don't deal with dropset chains / reorder
+    /// stay unchanged; only the projection / merge / added-set paths thread a
+    /// real parent / rank through. (A custom init doesn't disable the
+    /// synthesized Codable conformance.)
     init(
         setId: String,
         ordinal: Int,
@@ -86,7 +101,8 @@ struct SessionSnapshotSet: Codable, Equatable {
         notes: String?,
         setKind: String,
         isLogged: Bool,
-        parentSetId: String? = nil
+        parentSetId: String? = nil,
+        displayRank: Double? = nil
     ) {
         self.setId = setId
         self.ordinal = ordinal
@@ -98,6 +114,26 @@ struct SessionSnapshotSet: Codable, Equatable {
         self.setKind = setKind
         self.isLogged = isLogged
         self.parentSetId = parentSetId
+        self.displayRank = displayRank
+    }
+
+    /// Copy with `displayRank` stamped — used by `LiveMirror.mergeSets` to
+    /// attach the effective sort rank to each set after sorting, so it travels
+    /// on the wire. Keeps every other field unchanged.
+    func withDisplayRank(_ rank: Double) -> SessionSnapshotSet {
+        SessionSnapshotSet(
+            setId: setId,
+            ordinal: ordinal,
+            weight: weight,
+            reps: reps,
+            rpe: rpe,
+            restSec: restSec,
+            notes: notes,
+            setKind: setKind,
+            isLogged: isLogged,
+            parentSetId: parentSetId,
+            displayRank: rank
+        )
     }
 }
 

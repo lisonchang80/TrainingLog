@@ -2524,6 +2524,7 @@ function SoloExerciseBlock({
           set_kind: s.set_kind,
           parent_set_id: s.parent_set_id,
           ordering: s.ordering,
+          display_rank: s.display_rank,
         }))
       ).labels,
     [sets]
@@ -2674,6 +2675,7 @@ function ClusterBlock({
           set_kind: s.set_kind,
           parent_set_id: s.parent_set_id,
           ordering: s.ordering,
+          display_rank: s.display_rank,
         })),
       ).labels,
     [cluster.setsA],
@@ -2686,6 +2688,7 @@ function ClusterBlock({
           set_kind: s.set_kind,
           parent_set_id: s.parent_set_id,
           ordering: s.ordering,
+          display_rank: s.display_rank,
         })),
       ).labels,
     [cluster.setsB],
@@ -2850,6 +2853,7 @@ function EditableExerciseCard({
           set_kind: s.set_kind,
           parent_set_id: s.parent_set_id,
           ordering: s.ordering,
+          display_rank: s.display_rank,
         })),
       ),
     [sets],

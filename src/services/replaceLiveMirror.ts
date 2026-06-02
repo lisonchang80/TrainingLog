@@ -44,11 +44,16 @@
  * updated last time → UPDATE with identical values = a no-op. No row
  * counts grow.
  *
- * Authority-but-not-purge (live mirror, `purgeTail: false`): rows present
- * in the iPhone DB but absent from the snapshot are LEFT ALONE during a
- * LIVE mirror tick — purging snapshot-orphans is END-session reconcile's
- * job (`purgeTail: true`, called from `reconcileEndSnapshot`), NOT the
- * live-mirror replace's. See ADR-0019 § "WC Ship-Blocker Fixes E1/E2/E3".
+ * Live membership purge (live mirror, `purgeTail: false` but
+ * `purgeSetsInPresentExercises` + `purgeExercisesAbsentFromSnapshot` true):
+ * a LIVE tick mirrors current MEMBERSHIP — Watch-deleted sets (inside a
+ * present exercise) and Watch-deleted whole exercises (#4, 2026-06-02) are
+ * removed so the in-progress iPhone view tracks the Watch. What it still does
+ * NOT do is the unconstrained session-wide tail purge or the unconditional
+ * session-row UPSERT — those stay END-session reconcile's job (`purgeTail:
+ * true`, from `reconcileEndSnapshot`). The producer-sends-full-tree + H1
+ * liveness gate make membership-purge safe live. See ADR-0019 § "WC
+ * Ship-Blocker Fixes E1/E2/E3" + § 2026-06-02 device-bug #4.
  *
  * Wrapped in a single transaction so a partial failure (Watch sent a
  * malformed mid-snapshot) doesn't leave a half-replaced mirror.
@@ -83,6 +88,22 @@ export interface ReconcileSessionTreeOptions {
    * true; end-session passes false (its `purgeTail` already covers everything).
    */
   purgeSetsInPresentExercises?: boolean;
+  /**
+   * LIVE-mirror authority over EXERCISE membership (#4, 2026-06-02). When
+   * true, after upserting every snapshot-present exercise, DELETE the
+   * session_exercise rows the snapshot no longer contains (plus their sets).
+   * This is the live-tick counterpart of `purgeTail` but NARROWER: it removes
+   * whole absent EXERCISES only — it does NOT re-purge tail sets inside present
+   * exercises (that's `purgeSetsInPresentExercises`). Before this, a Watch
+   * delete-exercise propagated to History (end-session `purgeTail`) but NOT to
+   * the in-progress iPhone session (device-bug #4: 刪除動作 live 不同步). Safe on
+   * the live tick: the producer sends the FULL exercise tree every tick (an
+   * absent exercise is a real delete, not a partial diff) and the H1 gate
+   * (`requireExistingLiveSession`) already drops any post-teardown straggler.
+   * The live caller passes true; end-session passes false (its `purgeTail`
+   * already removes absent exercises too).
+   */
+  purgeExercisesAbsentFromSnapshot?: boolean;
   /**
    * LIVE-mirror liveness gate (H1, 2026-06-01). When true, this reconcile
    * REQUIRES the session row to already exist AND be un-ended before it
@@ -355,13 +376,14 @@ export async function reconcileSessionTree(
             await db.runAsync(
               `UPDATE "set" SET
                  weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?,
-                 parent_set_id = NULL
+                 parent_set_id = NULL, display_rank = ?
                WHERE id = ?`,
               s.weight,
               s.reps,
               s.notes,
               s.set_kind,
               s.is_logged ? 1 : 0,
+              s.display_rank ?? null,
               existingSet.id,
             );
           } else if (resolvedParentId !== null) {
@@ -370,7 +392,7 @@ export async function reconcileSessionTree(
             await db.runAsync(
               `UPDATE "set" SET
                  weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?,
-                 parent_set_id = ?
+                 parent_set_id = ?, display_rank = ?
                WHERE id = ?`,
               s.weight,
               s.reps,
@@ -378,6 +400,7 @@ export async function reconcileSessionTree(
               s.set_kind,
               s.is_logged ? 1 : 0,
               resolvedParentId,
+              s.display_rank ?? null,
               existingSet.id,
             );
           } else {
@@ -386,13 +409,15 @@ export async function reconcileSessionTree(
             // parent so a real canonical follower isn't nulled out.
             await db.runAsync(
               `UPDATE "set" SET
-                 weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?
+                 weight_kg = ?, reps = ?, notes = ?, set_kind = ?, is_logged = ?,
+                 display_rank = ?
                WHERE id = ?`,
               s.weight,
               s.reps,
               s.notes,
               s.set_kind,
               s.is_logged ? 1 : 0,
+              s.display_rank ?? null,
               existingSet.id,
             );
           }
@@ -429,8 +454,8 @@ export async function reconcileSessionTree(
             `INSERT INTO "set"
                (id, session_id, exercise_id, session_exercise_id,
                 weight_kg, reps, notes, set_kind, is_logged,
-                ordering, created_at, parent_set_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ordering, created_at, parent_set_id, display_rank)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                weight_kg = excluded.weight_kg,
                reps = excluded.reps,
@@ -439,7 +464,8 @@ export async function reconcileSessionTree(
                is_logged = excluded.is_logged,
                ordering = excluded.ordering,
                session_exercise_id = excluded.session_exercise_id,
-               parent_set_id = excluded.parent_set_id`,
+               parent_set_id = excluded.parent_set_id,
+               display_rank = excluded.display_rank`,
             localSetId,
             snapshot.sessionId,
             ex.exerciseId,
@@ -455,6 +481,9 @@ export async function reconcileSessionTree(
             // Watch). UPDATE branch preserves the existing created_at.
             snapshot.startedAt,
             resolvedParentId,
+            // Watch display rank (#1/#2). Absent on a legacy Watch build →
+            // null → iPhone sort falls back to `ordering`.
+            s.display_rank ?? null,
           );
           keptSetIds.push(localSetId);
           exSetIds.push(localSetId);
@@ -481,6 +510,42 @@ export async function reconcileSessionTree(
         );
         purgedSets += del.changes ?? 0;
       }
+    }
+
+    // ----- live EXERCISE purge (#4, 2026-06-02) -----
+    // Delete session_exercise rows the snapshot no longer contains (a Watch
+    // delete-exercise) plus their sets. NARROWER than `purgeTail`: it removes
+    // whole ABSENT exercises only, never tail sets inside a PRESENT exercise
+    // (that is `purgeSetsInPresentExercises`'s job, run per-exercise above).
+    // Before this, a Watch delete-exercise reached History (end-session
+    // `purgeTail`) but not the in-progress iPhone session. Safe live because
+    // the producer sends the FULL exercise tree each tick + the H1 gate
+    // already dropped post-teardown stragglers. The end path passes false
+    // (its `purgeTail` covers absent exercises too).
+    if (opts.purgeExercisesAbsentFromSnapshot) {
+      const seKeep = keptSeIds.length > 0 ? keptSeIds : [''];
+      const sePlaceholders = seKeep.map(() => '?').join(', ');
+      // Sets under absent exercises FIRST (explicit — do NOT rely on FK
+      // CASCADE). `session_exercise_id IS NOT NULL` keeps a NULL-attributed
+      // legacy/orphan set out of this scope (it can't be tied to a deleted
+      // exercise); SQL's `NULL NOT IN (...)` would already exclude it, but the
+      // predicate is explicit for clarity.
+      const setDel = await db.runAsync(
+        `DELETE FROM "set"
+          WHERE session_id = ?
+            AND session_exercise_id IS NOT NULL
+            AND session_exercise_id NOT IN (${sePlaceholders})`,
+        snapshot.sessionId,
+        ...seKeep,
+      );
+      purgedSets += setDel.changes ?? 0;
+      const seDel = await db.runAsync(
+        `DELETE FROM session_exercise
+          WHERE session_id = ? AND id NOT IN (${sePlaceholders})`,
+        snapshot.sessionId,
+        ...seKeep,
+      );
+      purgedExercises += seDel.changes ?? 0;
     }
 
     // ----- E2 tail purge (end-session reconcile only) -----
@@ -597,9 +662,14 @@ export async function reconcileSessionTree(
  * supplied snapshot, reconciling onto any canonical (template-built)
  * tree by natural key. Called by D32's applicationContext listener.
  *
- * Live-mirror semantics: upsert-only, NEVER purge (a mid-session tick is
- * not authoritative about deletions — that is the end-session reconcile's
- * job). Thin wrapper over `reconcileSessionTree` with `purgeTail: false`.
+ * Live-mirror semantics: upsert + membership-purge WITHIN the live tree —
+ * `purgeSetsInPresentExercises` removes Watch-deleted sets inside a present
+ * exercise, and `purgeExercisesAbsentFromSnapshot` (#4) removes whole Watch-
+ * deleted exercises. Both are safe because the producer sends the FULL tree
+ * each tick (absence = a real delete) and the H1 gate drops stragglers. It
+ * still passes `purgeTail: false` — the unconstrained session-wide tail purge
+ * (and the unconditional session UPSERT) stays the end-session reconcile's
+ * job; the live tick only mirrors current membership.
  *
  * Liveness gate (H1): passes `requireExistingLiveSession: true` so a tick
  * that lands after the session was discarded / finalized (unordered WC
@@ -613,6 +683,9 @@ export async function replaceLiveMirror(
   return reconcileSessionTree(db, snapshot, {
     purgeTail: false,
     purgeSetsInPresentExercises: true,
+    // #4 (2026-06-02): a Watch delete-exercise must propagate to the
+    // in-progress iPhone session, not just to History at end-session.
+    purgeExercisesAbsentFromSnapshot: true,
     requireExistingLiveSession: true,
   });
 }

@@ -145,12 +145,28 @@ export interface SessionSetWithExercise extends SetWithExercise {
    * Cable Crossover + solo Cable Crossover) independently editable.
    */
   session_exercise_id: string | null;
+  /**
+   * v025 (slice 13d 2026-06-02, #1/#2) — Watch display rank. The Watch's
+   * effective sort key: a base set = its `ordering`, a reordered / mid-
+   * inserted set = a fractional override. The session set logger renders by
+   * `display_rank ?? ordering` (see `computeSessionSetLayout`), so a NULL (a
+   * plain iPhone-authored set, or a row synced from a legacy Watch build that
+   * omits the field) falls back to the legacy `ordering` sort. Identity is
+   * still `(session_exercise_id, ordering)` — this is a pure display column.
+   */
+  display_rank: number | null;
 }
 
 /**
  * All sets in a single session, ordered by ordering ascending (the order the
  * user recorded them). Used by the Session detail / summary screen and by
  * the Today screen to show "what you've already done in this session".
+ *
+ * NOTE: the SQL `ORDER BY s.ordering ASC` is preserved (creation order); the
+ * DISPLAY order (Watch reorder / mid-insert) is applied downstream by
+ * `computeSessionSetLayout` sorting on `display_rank ?? ordering`. The two
+ * are decoupled on purpose — order-independent consumers (progress / cluster
+ * keying off ids) keep a stable creation-order iteration.
  */
 export async function listSetsBySession(
   db: Database,
@@ -160,7 +176,7 @@ export async function listSetsBySession(
     `SELECT s.id, s.session_id, s.exercise_id, s.weight_kg, s.reps,
             s.is_skipped, s.ordering, s.created_at,
             s.set_kind, s.parent_set_id, s.is_logged, s.notes,
-            s.session_exercise_id,
+            s.session_exercise_id, s.display_rank,
             e.name AS exercise_name
        FROM "set" s
        JOIN exercise e ON e.id = s.exercise_id

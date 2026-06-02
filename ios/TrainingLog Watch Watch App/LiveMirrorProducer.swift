@@ -74,7 +74,12 @@ enum LiveMirror {
         ranked += addedHere.map { ($0.asSnapshotSet(), rankOverrides[$0.id] ?? $0.displayRank) }
         return ranked
             .sorted { $0.rank < $1.rank }
-            .map { applyKindOverride($0.set, kindOverrides) }
+            // Stamp the effective sort `rank` onto each set as `displayRank`
+            // so the iPhone can render the Watch's display ORDER (#1/#2). The
+            // wire `ordinal` stays glued to set identity (reconcile key); this
+            // is the separate, fractional sort key that carries reorder /
+            // mid-insert. The iPhone sorts by `display_rank ?? ordering`.
+            .map { applyKindOverride($0.set.withDisplayRank($0.rank), kindOverrides) }
     }
 
     /// Apply a per-set `set_kind` override (# type cycling). Returns the set
@@ -96,7 +101,8 @@ enum LiveMirror {
             notes: s.notes,
             setKind: kind,
             isLogged: s.isLogged,
-            parentSetId: s.parentSetId
+            parentSetId: s.parentSetId,
+            displayRank: s.displayRank
         )
     }
 
@@ -168,7 +174,10 @@ enum LiveMirror {
                     notes: s.notes,
                     setKind: s.setKind,
                     isLogged: logged.contains(s.setId),
-                    parentSetId: s.parentSetId
+                    parentSetId: s.parentSetId,
+                    // Preserve the rank stamped by `mergeSets` so it travels on
+                    // the wire (#1/#2 — the iPhone renders by display_rank).
+                    displayRank: s.displayRank
                 )
             }
             return SessionSnapshotExercise(
