@@ -226,6 +226,51 @@ describe('setRepository coverage fill', () => {
     expect(rows[0].weight_kg).toBe(90);
   });
 
+  it('replayCardSetsFromHistoricalSession: source with ONLY unlogged sets → target wiped, 0 inserted', async () => {
+    // Filter leaves sourceSets empty → the `sourceSets.length === 0` early
+    // return fires (card ends up empty, DELETE already applied). Target had
+    // a stale set that must be removed.
+    const srcSession = 'src-empty';
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, ended_at) VALUES (?, ?, ?)`,
+      srcSession,
+      now - 1_000_000,
+      now - 900_000,
+    );
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering,
+         planned_sets, is_evergreen) VALUES (?, ?, ?, 1, 3, 0)`,
+      'src-se',
+      srcSession,
+      exA,
+    );
+    // Only an UNLOGGED working set in the source → filtered to nothing.
+    await insertSet({ id: 'src-un', session_id: srcSession, exercise_id: exA, ordering: 1, session_exercise_id: 'src-se', weight_kg: 999, reps: 1, is_logged: 0 });
+
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering,
+         planned_sets, is_evergreen) VALUES (?, ?, ?, 1, 3, 0)`,
+      'cur-se',
+      sessionId,
+      exA,
+    );
+    await insertSet({ id: 'stale', ordering: 1, session_exercise_id: 'cur-se', weight_kg: 50, reps: 8 });
+
+    const result = await replayCardSetsFromHistoricalSession(db, {
+      current_session_id: sessionId,
+      current_se_id: 'cur-se',
+      source_session_id: srcSession,
+      source_session_exercise_id: 'src-se',
+      source_exercise_id: exA,
+      uuid: randomUUID,
+    });
+
+    expect(result.inserted).toBe(0);
+    const rows = await listSetsBySession(db, sessionId);
+    // Stale set wiped, nothing re-inserted.
+    expect(rows).toHaveLength(0);
+  });
+
   it('replayClusterCardSetsFromHistoricalSession: drops an unlogged working set per side', async () => {
     const srcSession = 'src-cluster';
     await db.runAsync(
