@@ -168,6 +168,7 @@ import {
 } from '@/src/domain/session/sessionManager';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import { listPriorSetsForExercise } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { resolveSetDefaults } from '@/src/domain/set/resolveSetDefaults';
 import { evaluateAndPersistAchievements } from '@/src/adapters/sqlite/achievementRepository';
 import { detectPRBreaks } from '@/src/domain/pr/prEngine';
 import { sortBreaksForDisplay, bucketLabel } from '@/src/domain/pr/buckets';
@@ -1181,15 +1182,12 @@ export default function TodayScreen() {
       return;
     }
 
-    let weight_kg = 0;
-    let repsNum = 10; // Starter default for true first-time exercises
-
-    if (lastSetInSession) {
-      weight_kg = lastSetInSession.weight_kg ?? 0;
-      repsNum = lastSetInSession.reps ?? repsNum;
-    } else {
-      // Fall back to cross-session history (動作記憶) — pull most recent set
-      // for this exercise from any prior session.
+    // Resolve cross-session history (動作記憶) ONLY when there is no last-set
+    // in the current session — preserves the no-extra-query optimization. The
+    // async lookup + Date.now() stay here; resolveSetDefaults is a pure
+    // value-map over the already-fetched rows (big-file health #8).
+    let historicalMostRecent = null;
+    if (!lastSetInSession) {
       try {
         const historicalPriors = await listPriorSetsForExercise(
           db,
@@ -1197,18 +1195,16 @@ export default function TodayScreen() {
           Date.now() + 1 // cutoff exclusive of now+1ms = include all prior
         );
         if (historicalPriors.length > 0) {
-          const mostRecent = historicalPriors[0]; // ORDER BY created_at DESC
-          weight_kg = mostRecent.weight_kg ?? 0;
-          repsNum = mostRecent.reps ?? repsNum;
+          historicalMostRecent = historicalPriors[0]; // ORDER BY created_at DESC
         }
       } catch {
         // History query failure → fall through to starter defaults
       }
     }
-
-    // Final guard: if reps somehow still 0 / non-positive, use starter default
-    // so validator never rejects an auto-add. User can tap-edit afterwards.
-    if (!Number.isInteger(repsNum) || repsNum <= 0) repsNum = 10;
+    const { weight_kg, reps: repsNum } = resolveSetDefaults(
+      lastSetInSession,
+      historicalMostRecent
+    );
 
     const err = validateRecordSet({
       exercise_id,
