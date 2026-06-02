@@ -101,3 +101,43 @@ describe('displaySetLabel', () => {
     expect(displaySetLabel({ id: 'a-work-2', set_kind: 'working' }, map)).toBe('2');
   });
 });
+
+// v025 display_rank renumbering (#1/#2 superset, 2026-06-02). After a Watch
+// reorder / mid-insert the cluster card sorts ROWS by display_rank; the
+// working-set NUMBER must renumber by the same visible order (else labels
+// read 3,2,4,1 — the「插完換完亂跳」bug).
+describe('computeWorkingSetOrdinals — display_rank renumbering', () => {
+  it('numbers working sets by display_rank order, not creation ordering', () => {
+    // Created s1,s2,s3 (ordering 1,2,3) but displayed s3,s1,s2 (display_rank
+    // 0,1,2). Numbers must follow display order: s3=1, s1=2, s2=3.
+    const sets: WorkingSetOrdinalInput[] = [
+      { ...mk('s1', 'working', 1), display_rank: 1 },
+      { ...mk('s2', 'working', 2), display_rank: 2 },
+      { ...mk('s3', 'working', 3), display_rank: 0 },
+    ];
+    const map = computeWorkingSetOrdinals(sets);
+    expect(map.get('s3')).toBe(1);
+    expect(map.get('s1')).toBe(2);
+    expect(map.get('s2')).toBe(3);
+  });
+
+  it('warmup keeps 熱 + does not consume a number even when reordered low', () => {
+    // Warmup pushed to the bottom via display_rank; working sets still 1,2.
+    const sets: WorkingSetOrdinalInput[] = [
+      { ...mk('w', 'warmup', 1), display_rank: 9 },
+      { ...mk('a', 'working', 2), display_rank: 1 },
+      { ...mk('b', 'working', 3), display_rank: 2 },
+    ];
+    const map = computeWorkingSetOrdinals(sets);
+    expect(map.get('a')).toBe(1);
+    expect(map.get('b')).toBe(2);
+    expect(displaySetLabel({ id: 'w', set_kind: 'warmup' }, map)).toBe('熱');
+  });
+
+  it('absent display_rank falls back to ordering (legacy unchanged)', () => {
+    const sets: WorkingSetOrdinalInput[] = [mk('b', 'working', 2), mk('a', 'working', 1)];
+    const map = computeWorkingSetOrdinals(sets);
+    expect(map.get('a')).toBe(1);
+    expect(map.get('b')).toBe(2);
+  });
+});

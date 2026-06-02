@@ -34,16 +34,22 @@ export type WorkingSetOrdinalInput = {
   id: string;
   set_kind: 'warmup' | 'working' | 'dropset';
   ordering: number;
+  /** v025 (#1/#2, 2026-06-02) — Watch display rank. When present the working
+   *  numbering follows DISPLAY order (so a Watch reorder / mid-insert inside a
+   *  superset renumbers 1,2,3… by the visible order, matching the row order
+   *  `groupClusterSides` now produces); absent / null falls back to `ordering`. */
+  display_rank?: number | null;
 };
 
 /**
  * Build a per-id ordinal map: for each set whose `set_kind === 'working'`,
  * assign its 1-based position among the other working sets (after sorting
- * by `ordering` ASC). Warmup and dropset sets are NOT included in the map.
+ * by `display_rank ?? ordering` ASC, so a Watch reorder / mid-insert
+ * renumbers by the VISIBLE order). Warmup and dropset sets are NOT included.
  *
  * Idempotent and order-independent w.r.t. the input array: the function
- * sorts by `ordering` internally, so passing the same logical sequence in
- * any input order yields the same map.
+ * sorts internally (by `display_rank ?? ordering`), so passing the same
+ * logical sequence in any input order yields the same map.
  *
  * @example
  *   computeWorkingSetOrdinals([
@@ -57,7 +63,11 @@ export type WorkingSetOrdinalInput = {
 export function computeWorkingSetOrdinals(
   sets: ReadonlyArray<WorkingSetOrdinalInput>,
 ): Map<string, number> {
-  const sorted = [...sets].sort((a, b) => a.ordering - b.ordering);
+  const sorted = [...sets].sort(
+    (a, b) =>
+      (a.display_rank ?? a.ordering) - (b.display_rank ?? b.ordering) ||
+      a.ordering - b.ordering,
+  );
   const out = new Map<string, number>();
   let n = 0;
   for (const s of sorted) {
