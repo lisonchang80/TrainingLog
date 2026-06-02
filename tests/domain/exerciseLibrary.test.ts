@@ -278,6 +278,18 @@ describe('exerciseLibrary — muscleHighlightMap', () => {
     ]);
     expect(m.get('a')).toBe('primary');
   });
+
+  it('does NOT downgrade primary→secondary when primary is seen first (line 200 continue)', () => {
+    // Reversed order from the test above: primary lands first, so the later
+    // duplicate secondary must hit the `existing === 'primary'` early-continue
+    // rather than overwriting. Guards against a malformed custom-exercise link
+    // list silently dimming a primary mover on the body diagram.
+    const m = muscleHighlightMap([
+      { exercise_id: 'e', muscle_id: 'a', role: 'primary' },
+      { exercise_id: 'e', muscle_id: 'a', role: 'secondary' },
+    ]);
+    expect(m.get('a')).toBe('primary');
+  });
 });
 
 // ---------- ADR-0010 acceptance criteria checks against the seed dataset ----------
