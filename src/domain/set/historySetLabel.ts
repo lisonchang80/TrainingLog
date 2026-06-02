@@ -37,11 +37,22 @@ export interface HistorySetLabelInput {
   id: string;
   set_kind: SetKind;
   ordering: number;
+  /**
+   * v025 (slice 13d 2026-06-02, #1/#2) — Watch display rank. When present the
+   * label counters (working `{N}` / dropset `D{M}`) are assigned in DISPLAY
+   * order (so a Watch reorder / mid-insert on the history card renumbers by the
+   * visible order, matching the row order `computeSessionSetLayout` produces);
+   * absent / null falls back to `ordering` (legacy = display == creation).
+   * Identity stays `ordering`; this only drives the counter assignment order.
+   */
+  display_rank?: number | null;
 }
 
 /**
  * Build a per-id label map for one session's sets. Order-independent:
- * the function sorts by `ordering` internally before assigning counters.
+ * the function sorts by `display_rank ?? ordering` internally before
+ * assigning counters (so a Watch reorder / mid-insert renumbers by the
+ * visible order, matching `computeSessionSetLayout`'s row order).
  *
  * @example
  *   computeHistorySetLabels([
@@ -60,7 +71,11 @@ export interface HistorySetLabelInput {
 export function computeHistorySetLabels(
   sets: ReadonlyArray<HistorySetLabelInput>,
 ): Map<string, string> {
-  const sorted = [...sets].sort((a, b) => a.ordering - b.ordering);
+  const sorted = [...sets].sort(
+    (a, b) =>
+      (a.display_rank ?? a.ordering) - (b.display_rank ?? b.ordering) ||
+      a.ordering - b.ordering,
+  );
   const out = new Map<string, string>();
   let workingN = 0;
   let dropsetN = 0;

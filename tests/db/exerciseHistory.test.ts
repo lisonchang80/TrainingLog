@@ -331,4 +331,71 @@ describe('exerciseHistoryRepository — cross-Session aggregation', () => {
     const sets = await listExerciseHistorySets(db, benchId);
     expect(sets[0].bw_snapshot_kg).toBe(78.5);
   });
+
+  // -------------------------------------------------------------------------
+  // v025 display_rank (Path B, #1/#2, 2026-06-02) — the history queries must
+  // SELECT display_rank so the page render can sort by display_rank ?? ordering.
+  // -------------------------------------------------------------------------
+  it('listExerciseHistoryBySession carries display_rank (NULL by default)', async () => {
+    await createSession(db, { id: 'sess-A', started_at: 1_000 });
+    await insertSet(db, {
+      id: 'set-1',
+      session_id: 'sess-A',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 8,
+      is_skipped: 0,
+      ordering: 1,
+      created_at: 1_001,
+    });
+
+    const grouped = await listExerciseHistoryBySession(db, benchId);
+    expect(grouped).toHaveLength(1);
+    // Field is present (the SELECT emits it); a plain iPhone-authored set has
+    // no Watch rank → NULL → consumer falls back to `ordering`.
+    expect(grouped[0].sets[0]).toHaveProperty('display_rank');
+    expect(grouped[0].sets[0].display_rank).toBeNull();
+  });
+
+  it('listExerciseHistoryBySession surfaces a Watch display_rank value', async () => {
+    await createSession(db, { id: 'sess-A', started_at: 1_000 });
+    // Created s1,s2,s3 (ordering 1,2,3) but Watch reordered to s3,s1,s2 via
+    // display_rank 3,1,2.
+    const seed = [
+      { id: 's1', ordering: 1, display_rank: 3 },
+      { id: 's2', ordering: 2, display_rank: 1 },
+      { id: 's3', ordering: 3, display_rank: 2 },
+    ];
+    for (const s of seed) {
+      await insertSet(db, {
+        id: s.id,
+        session_id: 'sess-A',
+        exercise_id: benchId,
+        weight_kg: 80,
+        reps: 8,
+        is_skipped: 0,
+        ordering: s.ordering,
+        created_at: 1_000 + s.ordering,
+      });
+      await db.runAsync(
+        `UPDATE "set" SET display_rank = ? WHERE id = ?`,
+        s.display_rank,
+        s.id,
+      );
+    }
+
+    const grouped = await listExerciseHistoryBySession(db, benchId);
+    const sets = grouped[0].sets;
+    const byId = new Map(sets.map((x) => [x.set_id, x.display_rank]));
+    expect(byId.get('s1')).toBe(3);
+    expect(byId.get('s2')).toBe(1);
+    expect(byId.get('s3')).toBe(2);
+    // Render order = sort by display_rank ?? ordering → s2(1), s3(2), s1(3).
+    const rendered = [...sets].sort(
+      (a, b) =>
+        (a.display_rank ?? a.ordering) - (b.display_rank ?? b.ordering) ||
+        a.ordering - b.ordering,
+    );
+    expect(rendered.map((x) => x.set_id)).toEqual(['s2', 's3', 's1']);
+  });
 });

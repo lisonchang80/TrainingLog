@@ -30,6 +30,14 @@ interface ExerciseHistorySet {
   weight_kg: number | null;
   reps: number | null;
   ordering: number;
+  /**
+   * v025 (slice 13d 2026-06-02, #1/#2) — Watch display rank. The RENDER sort
+   * key for the per-session history card: a Watch reorder / mid-insert moves
+   * this while identity stays `ordering`. NULL for iPhone-authored / legacy
+   * rows → the consumer falls back to `display_rank ?? ordering`. See
+   * `computeSessionSetLayout` / `computeHistorySetLabels`.
+   */
+  display_rank: number | null;
   created_at: number;
   load_type: LoadType;
   /**
@@ -121,6 +129,7 @@ export async function listExerciseHistorySets(
             s.weight_kg    AS weight_kg,
             s.reps         AS reps,
             s.ordering     AS ordering,
+            s.display_rank AS display_rank,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
             s.set_kind     AS set_kind,
@@ -188,6 +197,7 @@ export async function listExerciseHistoryBySession(
             s.weight_kg    AS weight_kg,
             s.reps         AS reps,
             s.ordering     AS ordering,
+            s.display_rank AS display_rank,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
             s.set_kind     AS set_kind,
@@ -868,6 +878,7 @@ export async function listPriorSetsForExercise(
             s.weight_kg    AS weight_kg,
             s.reps         AS reps,
             s.ordering     AS ordering,
+            s.display_rank AS display_rank,
             s.created_at   AS created_at,
             e.load_type    AS load_type,
             s.set_kind     AS set_kind,

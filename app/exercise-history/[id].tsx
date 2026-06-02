@@ -1429,6 +1429,9 @@ function SessionRow({
           id: s.set_id,
           set_kind: s.set_kind,
           ordering: s.ordering,
+          // #1/#2 (2026-06-02) — number labels follow the Watch display order
+          // so they match the row order computeSessionSetLayout produces.
+          display_rank: s.display_rank,
         }))
       ),
     [session.sets]
@@ -1452,6 +1455,9 @@ function SessionRow({
           set_kind: s.set_kind,
           parent_set_id: s.parent_set_id,
           ordering: s.ordering,
+          // #1/#2 (2026-06-02) — group/row order follows the Watch display
+          // rank (history was the last RENDER surface still sorting by ordering).
+          display_rank: s.display_rank,
         }))
       ).groups,
     [session.sets]

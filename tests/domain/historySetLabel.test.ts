@@ -100,3 +100,55 @@ describe('computeHistorySetLabels (slice 10c #22)', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// v025 display_rank renumbering (Path B, #1/#2, 2026-06-02). The exercise-
+// history card numbers must follow the Watch display order (so they match the
+// row order `computeSessionSetLayout` produces); else labels read out of order
+// after a Watch reorder / mid-insert.
+// ---------------------------------------------------------------------------
+describe('computeHistorySetLabels — display_rank renumbering', () => {
+  it('numbers working sets by display_rank, not creation ordering', () => {
+    // Created s1,s2,s3 (ordering 1,2,3) but reordered on the Watch to s3,s1,s2
+    // (display_rank 0,1,2). Numbers must follow display order: s3=1,s1=2,s2=3.
+    const sets: HistorySetLabelInput[] = [
+      { id: 's1', set_kind: 'working', ordering: 1, display_rank: 1 },
+      { id: 's2', set_kind: 'working', ordering: 2, display_rank: 2 },
+      { id: 's3', set_kind: 'working', ordering: 3, display_rank: 0 },
+    ];
+    expect(computeHistorySetLabels(sets)).toEqual(
+      new Map([
+        ['s3', '1'],
+        ['s1', '2'],
+        ['s2', '3'],
+      ])
+    );
+  });
+
+  it('dropset D-counter follows display_rank too', () => {
+    // Two dropset heads created d1(ord1),d2(ord2) but displayed d2,d1.
+    const sets: HistorySetLabelInput[] = [
+      { id: 'd1', set_kind: 'dropset', ordering: 1, display_rank: 2 },
+      { id: 'd2', set_kind: 'dropset', ordering: 2, display_rank: 1 },
+    ];
+    expect(computeHistorySetLabels(sets)).toEqual(
+      new Map([
+        ['d2', 'D1'],
+        ['d1', 'D2'],
+      ])
+    );
+  });
+
+  it('null / absent display_rank falls back to ordering (legacy unchanged)', () => {
+    const sets: HistorySetLabelInput[] = [
+      { id: 'b', set_kind: 'working', ordering: 2, display_rank: null },
+      { id: 'a', set_kind: 'working', ordering: 1 }, // absent
+    ];
+    expect(computeHistorySetLabels(sets)).toEqual(
+      new Map([
+        ['a', '1'],
+        ['b', '2'],
+      ])
+    );
+  });
+});
