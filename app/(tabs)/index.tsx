@@ -3354,7 +3354,12 @@ function ExerciseCard({
               }: RenderItemParams<(typeof groups)[number]>) => {
                 // Per-id ordinal lookup (slice 10c overnight #7 第 1 點)
                 // — survives drag re-renders where positional index drifts.
-                const head = setsById.get(g.head.id)!;
+                // Guard the lookup: during a drag-reorder the list `data`
+                // (=groups) can transiently lag a `sets` state update, so the
+                // id may briefly be absent from `setsById`; returning null
+                // avoids a render-time throw (mirrors history's `if (!headSet)`).
+                const head = setsById.get(g.head.id);
+                if (!head) return null;
                 const isDropsetCluster =
                   head.set_kind === 'dropset' && g.followers.length > 0;
                 const clusterSize = 1 + g.followers.length;
@@ -3479,7 +3484,8 @@ function ExerciseCard({
                             swipe unit — head + followers travel together)
                       */}
                       {g.followers.map((fset) => {
-                        const f = setsById.get(fset.id)!;
+                        const f = setsById.get(fset.id);
+                        if (!f) return null;
                         const fRow: SetRowItem = {
                           id: f.id,
                           reps: f.reps ?? 0,
