@@ -434,6 +434,49 @@ describe('Slice 13d D6 — connectivity.ts', () => {
     expect(handler).toHaveBeenNthCalledWith(2, env2);
   });
 
+  it('addUserInfoListener — tolerates a malformed native TUI delivery (no throw, no dispatch)', () => {
+    // The native 'user-info' callback receives `payload: P[]`. A corrupt
+    // delivery (non-array arg, falsy / non-object batch entries, or an entry
+    // missing `kind`) must be skipped gracefully — never throw into the native
+    // bridge, never dispatch garbage to a handler.
+    let capturedCallback: ((...args: unknown[]) => void) | null = null;
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'user-info') capturedCallback = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const handler = jest.fn();
+    mod.addUserInfoListener('start-from-iphone', handler);
+
+    // 1. Non-array arg → early return.
+    expect(() => capturedCallback!('not-an-array')).not.toThrow();
+    expect(() => capturedCallback!(undefined)).not.toThrow();
+    // 2. Array with falsy / non-object entries → each `continue`d.
+    expect(() => capturedCallback!([null, 0, 'str', 42])).not.toThrow();
+    // 3. Object entry missing `kind` → `continue`d.
+    expect(() => capturedCallback!([{ payload: { sessionId: 'x' } }])).not.toThrow();
+
+    // None of the malformed deliveries reached the handler.
+    expect(handler).not.toHaveBeenCalled();
+
+    // Sanity: a well-formed envelope mixed into the batch still dispatches.
+    const good = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-good',
+      snapshot: {},
+    });
+    capturedCallback!([null, { nope: 1 }, good]);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(good);
+  });
+
   it('addUserInfoListener — handler throw does not block sibling handlers', () => {
     let capturedCallback:
       | ((...args: unknown[]) => void)
