@@ -225,4 +225,24 @@ describe('Slice 13d D31 wave 2 — onDiscardSession orchestrator', () => {
     expect(await countSets(sessionId)).toBe(1);
     expect(await countUnlocks(sessionId)).toBe(1);
   });
+
+  it('never throws — a DB failure surfaces as { ok:false, code:"db-error" }', async () => {
+    // The handler's contract is to catch any discardSession failure and return
+    // a structured result (the addUserInfoListener caller fire-and-forgets).
+    // Close the connection after the side guard passes so discardSession
+    // throws into the db-error catch.
+    db.close();
+    const env = makeEnvelope('discard-session', {
+      sessionId: 'sess-db-error',
+      side: 'watch',
+    });
+    const result = await onDiscardSession(db, env);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('db-error');
+      expect(result.message).toBeTruthy();
+    }
+    // Re-open so afterEach's close() is safe (the closed handle is torn down).
+    db = new BetterSqliteDatabase(':memory:');
+  });
 });

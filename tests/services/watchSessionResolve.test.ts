@@ -105,4 +105,24 @@ describe('Slice 13d D31 — onStartResolve orchestrator', () => {
     // Canary session still present — we did not run any DELETE.
     expect(await getSession(db, 'sess-guard-canary')).not.toBeNull();
   });
+
+  it('never throws — a DB failure surfaces as { ok:false, code:"db-error" }', async () => {
+    // The orchestrator catches any discardSession failure and returns a
+    // structured result (the start-resolve handler fire-and-forgets). Close
+    // the connection after the bad-payload guard passes so discardSession
+    // throws into the db-error catch.
+    db.close();
+    const env = makeEnvelope('start-resolve', {
+      localSessionId: 'W-db-error',
+      existingSessionId: 'sess-db-error',
+    });
+    const result = await onStartResolve(db, env);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('db-error');
+      expect(result.message).toBeTruthy();
+    }
+    // Re-open so afterEach's close() is safe.
+    db = new BetterSqliteDatabase(':memory:');
+  });
 });
