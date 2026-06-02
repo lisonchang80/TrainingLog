@@ -41,6 +41,7 @@ import {
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
+import { formatLocalYmd } from '@/src/domain/date/localYmd';
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
 import {
   buildCellMap,
@@ -1661,13 +1662,6 @@ function parseIsoToLocalDate(iso: string): Date {
   return new Date(y, m - 1, d);
 }
 
-function formatLocalDateToIso(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 function StartDateModal({
   visible,
   initialIso,
@@ -1695,7 +1689,7 @@ function StartDateModal({
   };
 
   const onConfirm = () => {
-    onPick(formatLocalDateToIso(draft));
+    onPick(formatLocalYmd(draft));
   };
 
   return (
