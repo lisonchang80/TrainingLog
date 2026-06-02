@@ -139,6 +139,11 @@ describe('Module #8 — Body Metric Manager (domain)', () => {
       expect(out).toEqual(['b', 'a', 'c', 'd']);
     });
 
+    it('defaults to ascending when direction is omitted (line 72 default param)', () => {
+      const out = sortByRecordedAt(buildSet()).map((m) => m.id);
+      expect(out).toEqual(['b', 'a', 'c', 'd']);
+    });
+
     it('sorts descending', () => {
       const out = sortByRecordedAt(buildSet(), 'desc').map((m) => m.id);
       expect(out).toEqual(['d', 'a', 'c', 'b']);
