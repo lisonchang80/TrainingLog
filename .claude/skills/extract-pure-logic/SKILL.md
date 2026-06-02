@@ -179,3 +179,33 @@ hide-unchecked filters (→ `src/domain/set/hideUncheckedFilter.ts`) out of the
   DON'T merge**; gate the ff-merge on a Reload-JS device smoke of the affected
   page(s). Same gate model as native/App-Store branches. (Contrast: extracting
   from a small leaf `components/*.tsx` with existing coverage can merge directly.)
+
+## DEDUP (N byte-identical copies) vs single extraction (2026-06-02, more #8)
+
+A second flavour of extraction: not "lift one closure" but "collapse N copies of the
+same logic scattered across files". Validated on `localYmd` (5 copies of a local
+`YYYY-MM-DD` formatter), `deleteWarningSuffix` (4 copies: Today + detail × cluster +
+solo), `resolveSetDefaults` (2 copies: Today + detail `onAddSet`).
+
+- **Survey ALL copies first; confirm byte-identical before collapsing.** Grep every
+  occurrence. If a copy DIFFERS (even subtly), do NOT fold it in blindly — either
+  list the diff and extract only the common core, or leave the divergent one alone.
+  Real examples kept SEPARATE on purpose: `stats-panel` used `YYYY/MM/DD` (slash) and
+  `session-time-editor` used `YYYY-MM-DD HH:MM` (datetime) — both intentionally NOT
+  merged into `localYmd`. Naively unifying them would have changed output.
+- **Inject deps to keep the domain module locale/IO-pure.** When the duplicated logic
+  calls i18n / Date.now / a DB lookup, take them as parameters so the module has zero
+  RN/i18n imports. `computeDeleteWarningSuffix(sets, { withLogged, unfinished })` takes
+  the two i18n message fns as deps; callers pass the right pair (the ONLY thing that
+  differed between the 4 sites). `resolveSetDefaults(lastSet, historical)` keeps the
+  async `listPriorSetsForExercise` lookup + `Date.now()` in the caller — and you MUST
+  preserve caller invariants verbatim (e.g. "only query history when no lastSet";
+  "dropset short-circuit runs before defaults"). State which invariants you preserved.
+- **Thin named wrappers are fine.** Sites with domain-specific names (`formatDateLabel`,
+  `dateKeyFromTimestamp`) can become 1-line delegates to the canonical fn — that IS the
+  dedup (one impl). Don't force every call site to import the canonical name.
+- **Manage the device-smoke surface — defer copies in not-yet-touched screens.** Each
+  screen file a dedup touches joins the branch's Reload-JS merge gate. When collapsing
+  copies, do the ones already in your smoke surface now and DEFER copies that live in a
+  fresh screen (e.g. left `programs.tsx`'s formatter copy for a later commit so the
+  Programs page didn't get pulled into this branch's smoke). Note the deferred copy.
