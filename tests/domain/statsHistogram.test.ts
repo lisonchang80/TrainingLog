@@ -71,6 +71,22 @@ describe('bucketBoundaries', () => {
     // Current week starts Mon May 4
     expect(out[5].start_ms).toBe(new Date(2026, 4, 4).getTime());
   });
+
+  it('defaults `now` to the real clock when omitted (line 99 default branch)', () => {
+    // Don't assert on wall-clock-dependent values — just the invariant shape:
+    // 6 monotonically-increasing buckets, offsets -5..0, current period last.
+    const out = bucketBoundaries('month');
+    expect(out).toHaveLength(6);
+    expect(out.map((b) => b.offset)).toEqual([-5, -4, -3, -2, -1, 0]);
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i].start_ms).toBeGreaterThan(out[i - 1].start_ms);
+      expect(out[i].end_ms).toBe(out[i + 1]?.start_ms ?? out[i].end_ms);
+    }
+    // The newest bucket must contain "right now".
+    const nowMs = Date.now();
+    expect(out[5].start_ms).toBeLessThanOrEqual(nowMs);
+    expect(out[5].end_ms).toBeGreaterThan(nowMs);
+  });
 });
 
 describe('bucketIndexOf', () => {

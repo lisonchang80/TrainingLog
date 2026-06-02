@@ -125,3 +125,65 @@ describe('histogram functions on empty / single inputs', () => {
     expect(out.size).toBe(0);
   });
 });
+
+describe('durationHistogram — non-positive duration guard (line 170)', () => {
+  const now = new Date(2026, 4, 8);
+  const inBucket = new Date(2026, 4, 5).getTime();
+
+  it('excludes a session whose ended_at equals started_at (dur === 0)', () => {
+    const records: StatsSetRecord[] = [
+      buildRecord({
+        session_id: 'zero-dur',
+        set_id: 'a',
+        session_started_at: inBucket,
+        session_ended_at: inBucket,
+      }),
+    ];
+    const out = durationHistogram(records, 'month', now);
+    expect(out.every((b) => b.session_count === 0 && b.total_ms === 0)).toBe(true);
+  });
+
+  it('excludes a session whose ended_at precedes started_at (dur < 0, clock skew)', () => {
+    const records: StatsSetRecord[] = [
+      buildRecord({
+        session_id: 'neg-dur',
+        set_id: 'a',
+        session_started_at: inBucket,
+        session_ended_at: inBucket - 5_000,
+      }),
+    ];
+    const out = durationHistogram(records, 'month', now);
+    expect(out.every((b) => b.session_count === 0)).toBe(true);
+  });
+
+  it('a 1ms session still counts (boundary: dur > 0)', () => {
+    const records: StatsSetRecord[] = [
+      buildRecord({
+        session_id: 'tiny',
+        set_id: 'a',
+        session_started_at: inBucket,
+        session_ended_at: inBucket + 1,
+      }),
+    ];
+    const out = durationHistogram(records, 'month', now);
+    const current = out.find((b) => b.offset === 0)!;
+    expect(current.session_count).toBe(1);
+    expect(current.total_ms).toBe(1);
+  });
+});
+
+describe('histogram default `now` parameter (uses real clock)', () => {
+  // These exercise the `now: Date = new Date()` default-argument branches
+  // (statsEngine.ts:99/162/203). We assert structural shape only — the actual
+  // boundaries depend on the wall clock, which we deliberately do not assert on.
+  it('bucketBoundaries-driven durationHistogram returns 6 buckets with no `now` arg', () => {
+    const out = durationHistogram([], 'month');
+    expect(out).toHaveLength(6);
+    expect(out.every((b) => b.session_count === 0)).toBe(true);
+  });
+
+  it('capacityHistogramByMg returns a map with no `now` arg', () => {
+    const out = capacityHistogramByMg([], 'year');
+    expect(out.size).toBe(0);
+  });
+});

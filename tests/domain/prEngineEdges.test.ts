@@ -111,6 +111,18 @@ describe('Slice 13c — prEngine defensive guards', () => {
       });
       expect(result).toEqual(EMPTY_DELTA);
     });
+
+    it('loaded with negative weight (newVolume === null at line 70)', () => {
+      // A loaded set with negative weight survives the finite check (line 51)
+      // and effectiveLoad returns the negative number (not null, so line 60
+      // passes), but setVolume() returns null via its eff<0 guard — exercising
+      // the `if (newVolume == null) return empty` short-circuit specifically.
+      const result = detectPRBreaks({
+        new_set: LOADED_SET({ weight_kg: -10, reps: 5 }),
+        prior_sets: [],
+      });
+      expect(result).toEqual(EMPTY_DELTA);
+    });
   });
 
   describe('prior_sets loop skips malformed entries', () => {

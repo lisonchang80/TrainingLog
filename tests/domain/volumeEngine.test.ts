@@ -77,4 +77,23 @@ describe('Module #3 — Volume Engine (load_type asymmetry)', () => {
     });
   });
 
+  describe('negative effective load for non-assisted classes', () => {
+    // Guards the `if (eff < 0) return null` branch (volumeEngine.ts:40), distinct
+    // from the assisted-specific eff<=0 guard above. A loaded/bodyweight set with
+    // a negative weight is nonsense input and must yield null (not a negative
+    // volume that would corrupt capacity totals).
+    it('loaded with negative weight returns null', () => {
+      expect(setVolume({ weight_kg: -5, reps: 8, load_type: 'loaded' })).toBeNull();
+    });
+
+    it('bodyweight with negative weight returns null', () => {
+      expect(setVolume({ weight_kg: -1, reps: 10, load_type: 'bodyweight' })).toBeNull();
+    });
+
+    it('loaded with weight=0 returns 0 (boundary — not the negative path)', () => {
+      // eff === 0 is not < 0, so a zero-load logged set is a valid 0-volume set.
+      expect(setVolume({ weight_kg: 0, reps: 10, load_type: 'loaded' })).toBe(0);
+    });
+  });
+
 });
