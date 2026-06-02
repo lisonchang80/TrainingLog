@@ -127,3 +127,55 @@ The op-emit pattern needs the caller to inject `new_set_id` (or any other id-gen
 Tempting because the test file lives next to the component conceptually. Doesn't work — jest's `testMatch` is `.test.ts` only. Even if you fix the glob to include `.tsx`, you then need a jsdom-like env that can render RN, which means installing `@testing-library/react-native` + adjusting `testEnvironment`, which is a separate slice-level decision. Don't do it casually.
 
 If you genuinely need to test rendered behavior (e.g. tap a button → modal opens), that's an integration smoke test — run the Expo simulator and verify by hand. Don't try to bolt a UI test runner onto this repo's jest config.
+
+## Gotchas burned in (2026-06-02, big-file #8 extractions)
+
+Validated extracting `computePRs` (→ `src/domain/pr/historyPrSnapshot.ts`) and the
+hide-unchecked filters (→ `src/domain/set/hideUncheckedFilter.ts`) out of the
+**giant screen files** `app/exercise-history/[id].tsx` (1915 L) and
+`app/session/[id].tsx` (3656 L). Two clean extractions, `2e8dc7f` + `7b81ea3`.
+
+- **Input type lives in an adapter? `import type` it — no layering violation.**
+  When the function's input type is defined in `src/adapters/sqlite/*` (e.g.
+  `ExerciseHistorySession`), the new domain module CAN `import type { ... } from
+  '../../adapters/sqlite/...'`. Precedent: `src/domain/training/todayPlan.ts`,
+  `templateListGroups.ts`, `session/editSnapshotPersistence.ts` all do it.
+  Type-only imports are erased at compile → zero runtime / circular-dep cost (as
+  long as the adapter doesn't import your new module back). Don't fabricate a
+  duplicate "minimal structural" type — just import the real one.
+
+- **Map ALL usages before cutting — decide move-entirely vs import-back, and drop
+  orphan imports.** A symbol used ONLY by the function you're moving (e.g.
+  `PR_ORDER`, `resolveEffectiveLogged`) moves entirely (don't re-export). A symbol
+  the *page* still uses (e.g. `PRKey` in a label fn, `filterUncheckedSolo` at call
+  sites) must be imported back. After the cut, an import that was the SOLE feeder
+  of a moved symbol becomes an orphan (e.g. `BucketKey` once local `PRKey` left) →
+  delete it; but `grep` the other co-imports first (`effectiveLoad`/`setVolume`/
+  `classifyBucket` were still used elsewhere in the file → keep). tsc won't flag
+  unused imports (no `noUnusedLocals`); the PostToolUse eslint --fix does, so
+  cleaning them in the edit avoids churn.
+
+- **Ground test expectations in the REAL primitive behavior, don't guess.** When
+  the extracted fn calls domain primitives (`effectiveLoad`, `setVolume`,
+  `classifyBucket`), READ their bodies before asserting expected numbers —
+  `effectiveLoad('loaded'|'bodyweight')` = `weight`, `('assisted')` = `bw - weight`
+  (null if bw null), `setVolume` = `eff * reps` with `assisted eff<=0 → null`,
+  buckets 1-3/4-6/7-10/11-15/16+. Guessing the formula produces green-looking but
+  wrong assertions that pin the wrong behavior. (Same spirit as §3 "extract
+  verbatim" but for the test side.)
+
+- **Worktree + symlinked node_modules → LSP phantom-diagnostic storm; tsc/jest is
+  ground truth.** Doing the extraction in a `git worktree` with
+  `ln -s <main>/node_modules` fires continuous bursts of "Cannot find module
+  '../../src/...'", "Cannot find name 'expect'/'it'/'describe'", "implicitly has an
+  'any' type" on files you never touched. ALL stale (the TS server mis-resolves
+  across the symlink). Authoritative check = `npx tsc --noEmit` (exit 0) + `npx
+  jest` in the worktree. Cross-ref overnight-parallel-agents #14.
+
+- **Screen-file extractions are device-gated for MERGE.** Extracting from
+  `app/**/[id].tsx` is behavior-preserving by construction (pure cut + import
+  back), and jest+tsc prove the pure logic — but they do NOT prove the screen
+  still renders. So commit on a branch off `main`, run the suite green, **push but
+  DON'T merge**; gate the ff-merge on a Reload-JS device smoke of the affected
+  page(s). Same gate model as native/App-Store branches. (Contrast: extracting
+  from a small leaf `components/*.tsx` with existing coverage can merge directly.)
