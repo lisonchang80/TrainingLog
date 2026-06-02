@@ -207,9 +207,9 @@ export function SessionTimeEditorSheet({
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
           <View style={styles.topBar}>
-            <Pressable onPress={onClose} hitSlop={8} disabled={busy}>
+            <Pressable onPress={onClose} hitSlop={8} disabled={busy} accessibilityRole="button">
               <Text
                 style={[
                   styles.topBarBtnText,
@@ -224,6 +224,7 @@ export function SessionTimeEditorSheet({
               onPress={handleSave}
               hitSlop={8}
               disabled={!isValid || busy}
+              accessibilityRole="button"
             >
               <Text
                 style={[
