@@ -382,25 +382,34 @@ function ChartPageContent({
     new Date().getFullYear()
   );
 
-  const refresh = useCallback(async () => {
-    if (!exerciseId) return;
-    const [h, ss, ps, u, has] = await Promise.all([
-      getExerciseHistoryHeader(db, exerciseId),
-      listExerciseHistoryBySession(db, exerciseId),
-      listProgramsForExercise(db, exerciseId),
-      getUnitPreference(db),
-      hasClusterHistory(db, exerciseId),
-    ]);
-    setHeader(h);
-    setSessions(ss);
-    setPrograms(ps);
-    setUnit(u);
-    setHasClusterRows(has);
-  }, [db, exerciseId]);
+  // `isCancelled` lets the caller (useFocusEffect cleanup) skip the trailing
+  // setState calls if the screen unmounts mid-fetch, mirroring the shell-level
+  // name-lookup effect's `cancelled` flag. Default no-op keeps existing callers
+  // (none today) unchanged.
+  const refresh = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      if (!exerciseId) return;
+      const [h, ss, ps, u, has] = await Promise.all([
+        getExerciseHistoryHeader(db, exerciseId),
+        listExerciseHistoryBySession(db, exerciseId),
+        listProgramsForExercise(db, exerciseId),
+        getUnitPreference(db),
+        hasClusterHistory(db, exerciseId),
+      ]);
+      if (isCancelled()) return;
+      setHeader(h);
+      setSessions(ss);
+      setPrograms(ps);
+      setUnit(u);
+      setHasClusterRows(has);
+    },
+    [db, exerciseId]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      refresh();
+      let cancelled = false;
+      refresh(() => cancelled);
       const f = peekFilter();
       if (f) {
         setBucketFilters(new Set(f.buckets));
@@ -411,6 +420,9 @@ function ChartPageContent({
           setAdvancedOpen(true);
         }
       }
+      return () => {
+        cancelled = true;
+      };
     }, [refresh])
   );
 
