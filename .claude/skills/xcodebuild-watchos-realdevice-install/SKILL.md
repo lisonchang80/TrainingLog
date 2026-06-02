@@ -430,6 +430,51 @@ Traps validated 2026-06-01:
   rows of the same exercise across sessions) pins intermittent corruption fast: a
   follower at a gap-ordinal / a head with 0 followers = something purged it.
 
+## Native RN module patch + on-device WC diagnosis (#287, 2026-06-02)
+
+When a WC-sync bug shows ONLY on a Release standalone build (Debug+Metro masks
+it), you cannot Reload-JS your way out — you must build Release, get it on the
+device, and read NATIVE logs. The #287 saga (`react-native-watch-connectivity`
+singleton `RCTEventEmitter` buffering inbound events behind `hasObservers`):
+
+1. **`pod install` in a non-interactive shell / worktree → `Encoding::CompatibilityError`
+   ("Unicode Normalization not appropriate for ASCII-8BIT")**. CocoaPods needs a
+   UTF-8 locale; the Claude Bash shell lacks one (the user's own Terminal has it
+   via profile). Fix: `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before `pod install`.
+
+2. **Headless NSLog capture without Console.app** — `xcrun devicectl device process
+   launch --console --terminate-existing --device <udid> <bundleid>` as a
+   **background task** streams the app's stdout/NSLog (incl. native-module
+   `NSLog(@"[WC] …")`) into the task output file; `grep` it. Confirms one-vs-two
+   instance via `self=%p`, `hasObservers`, `pendingEvents.count`. **Caveat: when the
+   --console task ends/is-killed it TERMINATES the app** (disruptive mid-test) —
+   relaunch fresh per capture, and don't rely on it staying attached.
+
+3. **Diagnose then patch the native source in `node_modules` directly** (NOT
+   patch-package yet — overnight-skill #38: node_modules is a shared symlink across
+   worktrees). `git apply -p1 <diag.patch>` for behaviour-neutral `NSLog`
+   instrumentation; hand-edit the fix on top. Rebuild Release (`clean build`,
+   `-destination 'id=<udid>'`), `devicectl install`, capture. **Same `self=%p`
+   everywhere = one instance / stale counter → emit-unconditionally fix suffices;
+   different `self` in the delegate callback = two instances → route through the
+   live emitter instead.** #287 was one-instance: Fix A = make `dispatchEventWithName`
+   emit unconditionally + flush `pendingEvents` (RCTEventEmitter no-ops with no JS
+   listener).
+
+4. **Ship the native fix via patch-package** (survives `npm install`). User runs in
+   their own Terminal: `npm install --save-dev patch-package postinstall-postinstall`.
+   Then restore pristine + apply ONLY the clean fix (drop diagnostic noise):
+   `rm -rf node_modules/<pkg> && npm install && git apply -p1 <fix.patch>` →
+   `npx patch-package <pkg>` (writes `patches/<pkg>+<ver>.patch`) →
+   `npm pkg set scripts.postinstall="patch-package"` → verify `npx patch-package`
+   prints `<pkg>@<ver> ✔`. Commit `patches/` + `package.json` + `package-lock.json`.
+
+5. **WC-sync correctness can ONLY be verified on Release standalone (no Metro)** —
+   Debug+Metro's hot-reload runs extra `startObserving` cycles that flip
+   `hasObservers=YES` in time, hiding the bug. But an iPhone-JS-only sync fix
+   (e.g. reconcile change) is Debug+Metro + Reload-JS verifiable; a Watch-Swift or
+   native-module fix needs the full Release rebuild + devicectl install.
+
 ## Cost of skipping this skill
 
 2026-05-29 morning: ~45 min lost iterating "rebuild → user reports old Watch UI → re-investigate". Three full xcodebuild rounds (07:12, 07:36, 07:50) all printed `** INSTALL SUCCEEDED **` while iPhone had no app installed. Only at 08:00 did `devicectl install` solve Trap 1, and only after clean build at 07:50 was Watch target actually compiled (Trap 2). User then hit Trap 3 (cached old Watch UI) until iPhone host app was fully deleted at 08:30.
