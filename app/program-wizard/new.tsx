@@ -356,7 +356,15 @@ export default function ProgramWizardScreen() {
         ? t('button', 'overwrite')
         : t('common', 'create')
     : t('common', 'next');
-  const rightDisabled = isLastStep(state.step) && busy;
+  // Disable 下一步 when the current step is missing a required input
+  // (validateStep returns an error string when invalid, null when OK) —
+  // grey it out (btnDisabled opacity) instead of letting the tap fire the
+  // "Cannot continue" alert. Last step (建立/覆蓋) keeps the busy-only gate;
+  // its own confirm path runs full-draft validation.
+  const currentStepValid = validateStep(state.draft, state.step) === null;
+  const rightDisabled = isLastStep(state.step)
+    ? busy
+    : busy || !currentStepValid;
 
   return (
     <SafeAreaView style={styles.container}>
