@@ -366,6 +366,11 @@ export const strings = {
       hrZoneSection: '心率區間',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health 整合',
+      // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block
+      // (section header / row label / a11y label / mini-sheet heading).
+      bodyweightSection: '體重',
+      recordBodyweight: '紀錄體重',
+      recordBodyweightRow: '＋ 紀錄體重',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -464,6 +469,9 @@ export const strings = {
       deleteAllSameNameTemplatesQ: '刪除所有同名模板？',
       confirmDeleteQ: '確認刪除？',
       saveAsTemplateStubBody: 'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
+      // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
+      invalidBodyweightTitle: '體重輸入無效',
+      invalidBodyweightRange: '請輸入 0–500 之間的正數',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -1067,6 +1075,10 @@ export const strings = {
       hrZoneSection: 'Heart rate zones',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health Integration',
+      // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block.
+      bodyweightSection: 'Bodyweight',
+      recordBodyweight: 'Record bodyweight',
+      recordBodyweightRow: '＋ Record bodyweight',
     },
 
     alert: {
@@ -1166,6 +1178,9 @@ export const strings = {
       deleteAllSameNameTemplatesQ: 'Delete all same-name templates?',
       confirmDeleteQ: 'Confirm delete?',
       saveAsTemplateStubBody: 'Triple UI to be completed in production (ADR-0014). Not implemented in slice 9.5.',
+      // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
+      invalidBodyweightTitle: 'Invalid bodyweight',
+      invalidBodyweightRange: 'Enter a positive number between 0 and 500.',
     },
 
     status: {

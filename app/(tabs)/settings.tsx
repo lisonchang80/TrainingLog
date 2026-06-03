@@ -30,7 +30,7 @@ import {
 } from '@/src/adapters/sqlite/settingsRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
 import { parseWeightInput } from '@/src/domain/body/unitConversion';
-import { t, tBodyweightWithUnit, tSaveOrSaving } from '@/src/i18n';
+import { t, tBodyweightUnitHint, tBodyweightWithUnit, tSaveOrSaving } from '@/src/i18n';
 import {
   loadStoredLocale,
   resolveLocale,
@@ -189,7 +189,7 @@ export default function SettingsScreen() {
   const onSaveBw = async () => {
     const bwKg = parseWeightInput(bwInput, unit);
     if (bwKg == null || bwKg <= 0 || bwKg > 500) {
-      Alert.alert('體重輸入無效', '請輸入 0–500 之間的正數');
+      Alert.alert(t('alert', 'invalidBodyweightTitle'), t('alert', 'invalidBodyweightRange'));
       return;
     }
     setBwBusy(true);
@@ -240,17 +240,17 @@ export default function SettingsScreen() {
         {/* ADR-0024 § 5 — 體重 row。位於單位偏好之下、訓練偏好之上。
             Quick capture via mini sheet → insertBodyMetric. History list /
             chart 仍走既有「資料 → 體重資料」路徑（下方 linkRow）。 */}
-        <Text style={styles.section}>體重</Text>
+        <Text style={styles.section}>{t('page', 'bodyweightSection')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="紀錄體重"
+          accessibilityLabel={t('page', 'recordBodyweight')}
           onPress={onOpenBwSheet}
           style={({ pressed }) => [
             styles.bwRow,
             pressed && styles.btnPressed,
           ]}>
-          <Text style={styles.bwRowLabel}>＋ 紀錄體重</Text>
-          <Text style={styles.bwRowHint}>單位依上方偏好（{unit}）</Text>
+          <Text style={styles.bwRowLabel}>{t('page', 'recordBodyweightRow')}</Text>
+          <Text style={styles.bwRowHint}>{tBodyweightUnitHint(unit)}</Text>
         </Pressable>
 
         <Text style={styles.section}>{t('domain', 'trainingPreferences')}</Text>
@@ -382,7 +382,7 @@ export default function SettingsScreen() {
         onRequestClose={() => setBwSheetOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalHeading}>紀錄體重</Text>
+            <Text style={styles.modalHeading}>{t('page', 'recordBodyweight')}</Text>
             <Text style={styles.modalLabel}>{tBodyweightWithUnit(unit)}</Text>
             <TextInput
               style={styles.modalInput}

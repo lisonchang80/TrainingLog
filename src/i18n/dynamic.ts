@@ -339,6 +339,11 @@ export function tBodyweightWithUnit(unit: string): string {
   return isEn() ? `Bodyweight (${unit})` : `體重 (${unit})`;
 }
 
+/** Settings 體重 row hint — unit follows the preference above. */
+export function tBodyweightUnitHint(unit: string): string {
+  return isEn() ? `Unit follows the preference above (${unit})` : `單位依上方偏好（${unit}）`;
+}
+
 /** PR delta line: `· 從 100 → 120`. */
 export function tPrDeltaLine(priorFormatted: string, newFormatted: string): string {
   return isEn()
