@@ -95,7 +95,11 @@ export function TemplateListSection({
         'New Template',
       );
       await createTemplate(db, { id, name: uniqueName });
-      router.push(`/template/${id}`);
+      // fresh=1 → the editor pre-created this blank template; if the user
+      // leaves WITHOUT saving, the editor's unmount-cleanup deletes it
+      // (else empty「新模板」orphans pile up). Editing an existing row
+      // (onRowPress below) does NOT pass fresh, so it's never auto-deleted.
+      router.push(`/template/${id}?fresh=1`);
     } catch (e) {
       Alert.alert(tt('alert', 'cannotCreateTemplate'), e instanceof Error ? e.message : String(e));
     } finally {

@@ -220,6 +220,7 @@ export default function TemplateEditorView() {
     fromDay,
     fromSubTag,
     fromWizard,
+    fresh,
   } = useLocalSearchParams<{
     id: string;
     dpid?: string;
@@ -238,10 +239,17 @@ export default function TemplateEditorView() {
     // the wizard owns program attachment, and the in-progress new program
     // isn't in the DB yet so the sheet couldn't list it anyway.
     fromWizard?: string;
+    // Generic「blank template pre-created by the entry point」flag (模板訓練
+    // ＋ button). Like fromWizard it triggers orphan-cleanup-on-non-save-exit,
+    // but WITHOUT the skip-meta-sheet save behavior (normal save flow applies).
+    fresh?: string;
   }>();
   const importMode =
     fromProgram != null && fromKind != null && fromDay != null;
   const isFromWizard = fromWizard === '1';
+  // Either entry that pre-creates a blank template row wants orphan cleanup
+  // when the user leaves without saving (wizard「新建模板」or 模板訓練 ＋).
+  const isFreshTemplate = isFromWizard || fresh === '1';
   const importFromProgramId = fromProgram
     ? decodeURIComponent(fromProgram)
     : null;
@@ -509,13 +517,14 @@ export default function TemplateEditorView() {
   //
   // `[]` deps → cleanup runs only on unmount; it closes over the initial
   // (stable) id/db/isFromWizard. Fire-and-forget delete: the transaction
-  // commits before the wizard's useFocusEffect re-lists templates, and any
-  // rare race self-heals on the next refresh. Non-wizard edits no-op.
+  // commits before the entry point's focus-refresh re-lists templates, and
+  // any rare race self-heals on the next refresh. Editing an existing
+  // template (no fresh / fromWizard flag) no-ops.
   // Known gap: a hard force-kill while in the editor leaves the orphan (no
   // unmount fires) — rare; a startup sweep could cover it later if needed.
   useEffect(() => {
     return () => {
-      if (!isFromWizard || savedRef.current) return;
+      if (!isFreshTemplate || savedRef.current) return;
       void executeTemplateDeletion(db, id).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -617,6 +626,9 @@ export default function TemplateEditorView() {
             await incrementUseCount(db, row.reusable_superset_id as string, now);
           }
         }
+        // Persist succeeded — for a fresh (wizard / 模板訓練 ＋) template this
+        // marks it as committed so the unmount orphan-cleanup won't delete it.
+        savedRef.current = true;
         // Re-hydrate so any DB-side cascade lands in committed.
         const refreshed = id ? await getTemplateFull(db, id) : null;
         if (refreshed) {
