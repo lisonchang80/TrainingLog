@@ -46,6 +46,7 @@ import {
   clearPick,
   consumeNewlyCreated,
   consumeNewlyCreatedSuperset,
+  peekPickerExclusions,
   submitPick,
 } from '@/src/domain/exercise/pickerBridge';
 import {
@@ -204,21 +205,32 @@ export default function LibraryScreen() {
       // currently active. Falls back to active session when no param —
       // preserves the Today-screen picker flow.
       if (isPickerMode) {
-        void (async () => {
-          let targetSessionId: string | null = pickerSessionIdParam;
-          if (!targetSessionId) {
-            const active = await getActiveSession(db);
-            targetSessionId = active?.id ?? null;
-          }
-          if (!targetSessionId) {
-            setDisabledExerciseIds(new Set());
-            setDisabledSupersetIds(new Set());
-            return;
-          }
-          const used = await listSessionUsedExercises(db, targetSessionId);
-          setDisabledExerciseIds(used.solo_exercise_ids);
-          setDisabledSupersetIds(used.rs_template_ids);
-        })();
+        // Template-editor path (#2): caller pre-set the already-added ids in
+        // pickerBridge (no session exists for a template). Peek — not consume —
+        // so re-focus within this picker session (e.g. after /exercise/new)
+        // keeps dimming. Takes precedence over the session lookup so an
+        // unrelated active session never bleeds into a template pick.
+        const exclusions = peekPickerExclusions();
+        if (exclusions) {
+          setDisabledExerciseIds(new Set(exclusions.exerciseIds));
+          setDisabledSupersetIds(new Set(exclusions.reusableSupersetIds));
+        } else {
+          void (async () => {
+            let targetSessionId: string | null = pickerSessionIdParam;
+            if (!targetSessionId) {
+              const active = await getActiveSession(db);
+              targetSessionId = active?.id ?? null;
+            }
+            if (!targetSessionId) {
+              setDisabledExerciseIds(new Set());
+              setDisabledSupersetIds(new Set());
+              return;
+            }
+            const used = await listSessionUsedExercises(db, targetSessionId);
+            setDisabledExerciseIds(used.solo_exercise_ids);
+            setDisabledSupersetIds(used.rs_template_ids);
+          })();
+        }
       } else {
         setDisabledExerciseIds(new Set());
         setDisabledSupersetIds(new Set());

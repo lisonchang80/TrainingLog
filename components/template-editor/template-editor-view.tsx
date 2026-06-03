@@ -95,7 +95,11 @@ import {
   reorderTemplateExercises,
   reorderTemplateSetsByGroups,
 } from '@/src/domain/template/templateOps';
-import { consumePick } from '@/src/domain/exercise/pickerBridge';
+import {
+  clearPickerExclusions,
+  consumePick,
+  submitPickerExclusions,
+} from '@/src/domain/exercise/pickerBridge';
 import type { Exercise } from '@/src/domain/exercise/types';
 import type {
   ExerciseSection,
@@ -1647,6 +1651,9 @@ export default function TemplateEditorView() {
           reusableSupersetIds: payload.reusableSupersetIds,
         });
       }
+      // Picker session is over (editor regained focus) — drop the dim-layer
+      // exclusions so a later session-context picker never inherits them.
+      clearPickerExclusions();
     }, []),
   );
 
@@ -2190,7 +2197,28 @@ export default function TemplateEditorView() {
           ]}>
           <Pressable
             style={styles.actionBtn}
-            onPress={() => router.push('/exercise-picker?mode=picker')}>
+            onPress={() => {
+              // #2 dim layer: tell the picker which exercises / reusable
+              // supersets are already in this template so it dims + disables
+              // them (templates have no session for the picker to query).
+              // Mirrors listSessionUsedExercises' solo-vs-RS split.
+              if (draft) {
+                const soloIds: string[] = [];
+                const rsIds = new Set<string>();
+                for (const e of draft.exercises) {
+                  if (e.reusable_superset_id == null) {
+                    soloIds.push(e.exercise_id);
+                  } else {
+                    rsIds.add(e.reusable_superset_id);
+                  }
+                }
+                submitPickerExclusions({
+                  exerciseIds: soloIds,
+                  reusableSupersetIds: [...rsIds],
+                });
+              }
+              router.push('/exercise-picker?mode=picker');
+            }}>
             <Text style={styles.actionBtnText}>{tt('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable

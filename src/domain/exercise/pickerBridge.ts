@@ -126,3 +126,51 @@ export function clearNewlyCreatedSuperset(): void {
 export function peekNewlyCreatedSupersetForTest(): string | null {
   return newlyCreatedSupersetId;
 }
+
+// ---------------------------------------------------------------------------
+// Picker exclusions mailbox — "already added, dim + disable these".
+//
+// The library picker's dim/disable layer normally derives "already in this
+// session" from a live DB lookup (getActiveSession / ?sessionId=). But the
+// Template editor has no session — its already-added exercises live in the
+// in-memory draft. Before opening the picker it writes them here; the picker
+// PEEKS (not consumes) on every focus so re-entering the picker (e.g. after
+// creating a custom exercise) keeps dimming. The Template editor clears this
+// when it regains focus (its consumePick handler), so a later session-context
+// picker never inherits stale template exclusions.
+//
+// peek-not-consume is the key difference from `submitPick` — the payload must
+// survive multiple picker focus cycles within one picker session.
+// ---------------------------------------------------------------------------
+
+export interface PickerExclusions {
+  /** Solo exercise IDs already in the caller (dim by exercise_id). */
+  exerciseIds: string[];
+  /** Reusable-superset template IDs already in the caller. */
+  reusableSupersetIds: string[];
+}
+
+let pickerExclusions: PickerExclusions | null = null;
+
+/** Caller (Template editor) sets this BEFORE pushing the picker. */
+export function submitPickerExclusions(payload: PickerExclusions): void {
+  pickerExclusions = {
+    exerciseIds: [...payload.exerciseIds],
+    reusableSupersetIds: [...payload.reusableSupersetIds],
+  };
+}
+
+/** Picker reads WITHOUT clearing (survives re-focus within a picker session). */
+export function peekPickerExclusions(): PickerExclusions | null {
+  return pickerExclusions == null
+    ? null
+    : {
+        exerciseIds: [...pickerExclusions.exerciseIds],
+        reusableSupersetIds: [...pickerExclusions.reusableSupersetIds],
+      };
+}
+
+/** Caller clears when the picker session ends (e.g. editor regains focus). */
+export function clearPickerExclusions(): void {
+  pickerExclusions = null;
+}

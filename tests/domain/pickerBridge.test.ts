@@ -2,15 +2,18 @@ import {
   clearNewlyCreated,
   clearNewlyCreatedSuperset,
   clearPick,
+  clearPickerExclusions,
   consumeNewlyCreated,
   consumeNewlyCreatedSuperset,
   consumePick,
   peekNewlyCreatedForTest,
   peekNewlyCreatedSupersetForTest,
   peekPickForTest,
+  peekPickerExclusions,
   submitNewlyCreated,
   submitNewlyCreatedSuperset,
   submitPick,
+  submitPickerExclusions,
 } from '../../src/domain/exercise/pickerBridge';
 
 describe('pickerBridge', () => {
@@ -191,5 +194,86 @@ describe('pickerBridge — newlyCreatedSuperset mailbox (slice 9.8b grill Q7)', 
       exerciseIds: ['p1'],
       reusableSupersetIds: ['rs-p'],
     });
+  });
+});
+
+describe('pickerBridge — picker exclusions mailbox (#2 template dim layer)', () => {
+  beforeEach(() => clearPickerExclusions());
+
+  it('returns null when empty', () => {
+    expect(peekPickerExclusions()).toBeNull();
+  });
+
+  it('round-trips an exclusions payload', () => {
+    submitPickerExclusions({
+      exerciseIds: ['e1', 'e2'],
+      reusableSupersetIds: ['rs-A'],
+    });
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['e1', 'e2'],
+      reusableSupersetIds: ['rs-A'],
+    });
+  });
+
+  it('PEEK does NOT clear — survives repeated focus reads', () => {
+    submitPickerExclusions({ exerciseIds: ['e1'], reusableSupersetIds: [] });
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['e1'],
+      reusableSupersetIds: [],
+    });
+    // Critical: a second peek (re-focus after /exercise/new) still returns it.
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['e1'],
+      reusableSupersetIds: [],
+    });
+  });
+
+  it('clearPickerExclusions discards the payload', () => {
+    submitPickerExclusions({ exerciseIds: ['e1'], reusableSupersetIds: ['rs'] });
+    clearPickerExclusions();
+    expect(peekPickerExclusions()).toBeNull();
+  });
+
+  it('submit overwrites prior payload', () => {
+    submitPickerExclusions({ exerciseIds: ['old'], reusableSupersetIds: [] });
+    submitPickerExclusions({
+      exerciseIds: ['new1', 'new2'],
+      reusableSupersetIds: ['rs-new'],
+    });
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['new1', 'new2'],
+      reusableSupersetIds: ['rs-new'],
+    });
+  });
+
+  it('submit copies arrays (caller mutation does not leak in)', () => {
+    const exIds = ['e1'];
+    const rsIds = ['rs-1'];
+    submitPickerExclusions({ exerciseIds: exIds, reusableSupersetIds: rsIds });
+    exIds.push('e2');
+    rsIds.push('rs-2');
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['e1'],
+      reusableSupersetIds: ['rs-1'],
+    });
+  });
+
+  it('peek returns a copy (caller mutation does not corrupt mailbox)', () => {
+    submitPickerExclusions({ exerciseIds: ['e1'], reusableSupersetIds: [] });
+    const out = peekPickerExclusions();
+    out?.exerciseIds.push('mutated');
+    expect(peekPickerExclusions()).toEqual({
+      exerciseIds: ['e1'],
+      reusableSupersetIds: [],
+    });
+  });
+
+  it('is independent of the pick mailbox', () => {
+    submitPick({ exerciseIds: ['p1'], reusableSupersetIds: [] });
+    submitPickerExclusions({ exerciseIds: ['x1'], reusableSupersetIds: [] });
+    expect(peekPickerExclusions()?.exerciseIds).toEqual(['x1']);
+    // Consuming the pick must not touch exclusions.
+    expect(consumePick()?.exerciseIds).toEqual(['p1']);
+    expect(peekPickerExclusions()?.exerciseIds).toEqual(['x1']);
   });
 });
