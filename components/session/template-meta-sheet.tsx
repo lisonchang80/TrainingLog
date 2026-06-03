@@ -466,7 +466,7 @@ export function TemplateMetaSheet({
                 to onConfirm.name unchanged via the `name` state. */}
             {omitName ? null : (
               <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t('page', 'nameFieldLabel')}</Text>
+                <Text style={styles.fieldLabel}>{t('page', 'templateNameFieldLabel')}</Text>
                 <TextInput
                   style={styles.input}
                   value={name}
