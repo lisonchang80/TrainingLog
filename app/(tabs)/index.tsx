@@ -2596,7 +2596,6 @@ export default function TodayScreen() {
 
           {plan.length > 0 && (
             <>
-              <Text style={styles.label}>{t('page', 'todayPlan')}</Text>
               <View style={styles.planList}>
                 {(() => {
                   // ADR-0019 Q16 (slice 10c Phase 7): cluster session_exercise
