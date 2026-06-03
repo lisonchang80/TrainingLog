@@ -753,10 +753,82 @@ export default function TemplateEditorView() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          Alert.alert(
-            tt('alert', 'variantExists'),
-            tt('alert', 'duplicateTemplateTripleEditorBody'),
-          );
+          // #3 ③「覆蓋」= merge X→Y + delete X (ADR-0003 amendment, 拍板 A).
+          // The re-classification the user just confirmed collides with an
+          // existing template Y. Offer [取消][覆蓋] mirroring ①. On 覆蓋:
+          //   1. commitTemplateDraft writes X's body at its OLD classification
+          //      (we did NOT attachTemplateToProgram in this throwing path, so
+          //      X still carries committed's program_id/sub_tag → no
+          //      re-collision on the body commit).
+          //   2. overwriteTemplateBody copies X's body into Y (Y keeps id /
+          //      name / program_id / sub_tag).
+          //   3. executeTemplateDeletion removes X.
+          // Then navigate away — the editor is showing X which is now deleted;
+          // we do NOT re-open Y in the editor (see report's nav note). 取消
+          // just clears busy and keeps the editor on X.
+          const now = () => Date.now();
+          const existing = await findTemplateByTriple(db, {
+            name: args.name || draft.name,
+            program_id: args.program_id ?? null,
+            sub_tag: args.sub_tag ?? null,
+          });
+          if (committed && existing && existing.id !== draft.id) {
+            Alert.alert(
+              tt('alert', 'variantExists'),
+              tt('alert', 'overwriteTemplateConfirm'),
+              [
+                { text: tt('common', 'cancel'), style: 'cancel' },
+                {
+                  text: tt('button', 'overwrite'),
+                  style: 'destructive',
+                  onPress: async () => {
+                    setBusy(true);
+                    try {
+                      // Commit X's body at its OLD classification — pass the
+                      // un-reclassified draft (keep committed's program_id /
+                      // sub_tag) so the body commit can't re-collide.
+                      const bodyDraft: Template = {
+                        ...draft,
+                        program_id: committed.program_id,
+                        sub_tag: committed.sub_tag,
+                      };
+                      await commitTemplateDraft(db, {
+                        committed,
+                        draft: bodyDraft,
+                        now,
+                      });
+                      await overwriteTemplateBody(db, {
+                        source_template_id: draft.id,
+                        target_template_id: existing.id,
+                        uuid: randomUUID,
+                        now,
+                      });
+                      await executeTemplateDeletion(db, draft.id);
+                      savedRef.current = true;
+                      Alert.alert(tt('status', 'saved'), '', [
+                        {
+                          text: tt('common', 'ok'),
+                          onPress: () => router.back(),
+                        },
+                      ]);
+                    } catch (e2) {
+                      Alert.alert(
+                        tt('alert', 'saveFailed'),
+                        e2 instanceof Error ? e2.message : String(e2),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                },
+              ],
+            );
+          } else {
+            Alert.alert(
+              tt('alert', 'variantExists'),
+              tt('alert', 'duplicateTemplateTripleEditorBody'),
+            );
+          }
         } else {
           Alert.alert(tt('alert', 'saveFailed'), msg);
         }
