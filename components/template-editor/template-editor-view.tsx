@@ -373,7 +373,23 @@ export default function TemplateEditorView() {
     return !templatesEqual(draft, committed);
   }, [draft, committed]);
 
-  const onExit = useCallback(() => router.back(), [router]);
+  const onExit = useCallback(async () => {
+    // For a fresh (wizard / 模板訓練 ＋) template that was never saved, delete
+    // the pre-created row BEFORE navigating, so the destination list never even
+    // briefly shows the orphan. (The unmount backstop alone races the list's
+    // focus-refresh — the orphan flashes until the next navigation.) On success
+    // set savedRef so the unmount backstop skips; on failure leave it false so
+    // the backstop retries.
+    if (isFreshTemplate && !savedRef.current) {
+      try {
+        await executeTemplateDeletion(db, id);
+        savedRef.current = true;
+      } catch {
+        /* leave for the unmount backstop to retry */
+      }
+    }
+    router.back();
+  }, [router, isFreshTemplate, db, id]);
 
   const onCancel = useCallback(() => {
     if (!dirty) {
