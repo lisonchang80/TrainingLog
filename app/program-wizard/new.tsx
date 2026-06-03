@@ -235,7 +235,7 @@ export default function ProgramWizardScreen() {
     }
     const r = nextStep(state);
     if ('error' in r) {
-      Alert.alert('Cannot continue', r.error);
+      Alert.alert(t('alert', 'cannotContinue'), r.error);
       return;
     }
     setState(r);

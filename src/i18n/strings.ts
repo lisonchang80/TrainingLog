@@ -472,6 +472,8 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
       invalidBodyweightTitle: '體重輸入無效',
       invalidBodyweightRange: '請輸入 0–500 之間的正數',
+      // i18n leak sweep (2026-06-04) — program wizard step-advance blocked title.
+      cannotContinue: '無法繼續',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -1181,6 +1183,8 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
       invalidBodyweightTitle: 'Invalid bodyweight',
       invalidBodyweightRange: 'Enter a positive number between 0 and 500.',
+      // i18n leak sweep (2026-06-04) — program wizard step-advance blocked title.
+      cannotContinue: 'Cannot continue',
     },
 
     status: {
