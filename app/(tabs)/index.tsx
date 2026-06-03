@@ -116,6 +116,7 @@ import {
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
   listTemplates,
+  overwriteTemplateBody,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import {
@@ -935,14 +936,62 @@ export default function TodayScreen() {
     if (!sheetTemplate) {
       throw new Error('NO_SHEET_TEMPLATE');
     }
-    await cloneTemplateWithSubTag(db, {
-      source_template_id: sheetTemplate.id,
-      new_program_id: program_id,
-      new_sub_tag: sub_tag,
-      uuid: randomUUID,
-    });
-    // Refresh so the new clone shows up in the 模板訓練 list. No need to
-    // touch sheet visibility — sheet keeps `sheetTemplate` as its source.
+    try {
+      await cloneTemplateWithSubTag(db, {
+        source_template_id: sheetTemplate.id,
+        new_program_id: program_id,
+        new_sub_tag: sub_tag,
+        uuid: randomUUID,
+      });
+    } catch (e) {
+      // #3 ④「覆蓋」: the clone's (name, program_id, sub_tag) triple collides
+      // with an existing template Y. Offer [取消][覆蓋] mirroring ①. On 覆蓋,
+      // replace Y's body with the source template's content (Y keeps its
+      // identity) and proceed exactly as the happy clone path would — the
+      // sheet adds the sub_tag chip + activates it, and onSheetStart's
+      // lookup-or-spawn finds Y via findTemplateByTriple. Source untouched.
+      const message = e instanceof Error ? e.message : String(e);
+      if (message !== 'DUPLICATE_TEMPLATE_TRIPLE') throw e;
+      const existing = await findTemplateByTriple(db, {
+        name: sheetTemplate.name,
+        program_id,
+        sub_tag,
+      });
+      if (!existing) throw e; // no Y to resolve — let the sheet alert.
+      // Resolve the user's [取消]/[覆蓋] choice, then act on it.
+      const overwrite = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          t('alert', 'variantExists'),
+          t('alert', 'overwriteTemplateConfirm'),
+          [
+            {
+              text: t('common', 'cancel'),
+              style: 'cancel',
+              onPress: () => resolve(false),
+            },
+            {
+              text: t('button', 'overwrite'),
+              style: 'destructive',
+              onPress: () => resolve(true),
+            },
+          ],
+          { onDismiss: () => resolve(false) },
+        );
+      });
+      if (!overwrite) {
+        // User cancelled — keep the inline state open without surfacing the
+        // sheet's own dup alert. Sentinel swallowed by the sheet's catch.
+        throw new Error('OVERWRITE_CANCELLED');
+      }
+      await overwriteTemplateBody(db, {
+        source_template_id: sheetTemplate.id,
+        target_template_id: existing.id,
+        uuid: randomUUID,
+      });
+    }
+    // Refresh so the new clone (or overwritten Y) shows up in the 模板訓練
+    // list. No need to touch sheet visibility — sheet keeps `sheetTemplate`
+    // as its source.
     await refresh();
   };
 

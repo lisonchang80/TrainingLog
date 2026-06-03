@@ -360,7 +360,13 @@ export function StartTemplateSheet({
       setCustomSubTag('');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+      if (message === 'OVERWRITE_CANCELLED') {
+        // #3 ④: the parent offered [取消][覆蓋] on a triple collision and the
+        // user cancelled. Keep the inline input open (no chip added, no alert)
+        // so they can rename + retry.
+      } else if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
+        // Reached only when the parent couldn't resolve the colliding Y (rare
+        // — e.g. concurrent delete). Surface the legacy rename hint.
         Alert.alert(
           t('alert', 'cannotCreateTemplate'),
           t('alert', 'duplicateTemplateTripleBody')
