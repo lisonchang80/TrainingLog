@@ -61,6 +61,9 @@ export const strings = {
       inProgress: '· 進行中',
       // Phase 4.5 batch 1 — plain "自訂" (no dot prefix) for wizard intensity chip.
       customPlain: '自訂',
+      // i18n leak sweep (2026-06-04) — fallback when an exercise has no name
+      // (template editor rows / reorder sheet). Distinct from unknownExercise.
+      exercisePlaceholder: '(動作)',
     },
 
     /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
@@ -376,6 +379,8 @@ export const strings = {
       newExerciseNavTitle: '新動作',
       // i18n leak sweep (2026-06-04) — template-list-section empty state.
       noTemplatesEmpty: '沒有模板，點 [+ 新建模板] 開始建立。',
+      // i18n leak sweep (2026-06-04) — fatal DB-init error boot screen.
+      dbInitFailed: '資料庫初始化失敗',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -790,6 +795,8 @@ export const strings = {
       inProgress: '· In progress',
       // Phase 4.5 batch 1 — plain "Custom" (no dot prefix) for wizard intensity chip.
       customPlain: 'Custom',
+      // i18n leak sweep (2026-06-04) — fallback when an exercise has no name.
+      exercisePlaceholder: '(exercise)',
     },
 
     domain: {
@@ -1093,6 +1100,8 @@ export const strings = {
       newExerciseNavTitle: 'New Exercise',
       // i18n leak sweep (2026-06-04) — template-list-section empty state.
       noTemplatesEmpty: 'No templates. Tap [+ New Template] to create one.',
+      // i18n leak sweep (2026-06-04) — fatal DB-init error boot screen.
+      dbInitFailed: 'Database initialization failed',
     },
 
     alert: {

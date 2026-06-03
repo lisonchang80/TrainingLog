@@ -112,7 +112,7 @@ import { PALETTE, hashColor } from './palette';
 import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
-import { getLocale, t as tt, tExercise } from '@/src/i18n';
+import { getLocale, t as tt, tExercise, tWarmWorkingSummary } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -1177,8 +1177,8 @@ export default function TemplateEditorView() {
       .map((parent) => {
         const childNames = draft.exercises
           .filter((c) => c.parent_id === parent.id)
-          .map((c) => (c.name ? tExercise(c.name) : '(動作)'));
-        const parentName = parent.name ? tExercise(parent.name) : '(動作)';
+          .map((c) => (c.name ? tExercise(c.name) : tt('common', 'exercisePlaceholder')));
+        const parentName = parent.name ? tExercise(parent.name) : tt('common', 'exercisePlaceholder');
         const name = childNames.length === 0
           ? parentName
           : [parentName, ...childNames].join(' + ');
@@ -1788,18 +1788,18 @@ export default function TemplateEditorView() {
                   <Text style={styles.supersetTag}>{tt('domain', 'supersetChip')}</Text>
                   <View style={styles.flexFill} />
                   <Text style={styles.exSummary}>
-                    {clusterStat.warmupCount}熱+{clusterStat.workingCount}組
+                    {tWarmWorkingSummary(clusterStat.warmupCount, clusterStat.workingCount)}
                   </Text>
                   {isExpanded ? (
                     <Text style={styles.exChevron}>▼</Text>
                   ) : null}
                 </View>
                 <Text style={styles.clusterName}>
-                  {parent.name ? tExercise(parent.name) : '(動作)'}
+                  {parent.name ? tExercise(parent.name) : tt('common', 'exercisePlaceholder')}
                   {children.map((c) => (
                     <Fragment key={c.id}>
                       <Text style={styles.clusterPlus}> + </Text>
-                      {c.name ? tExercise(c.name) : '(動作)'}
+                      {c.name ? tExercise(c.name) : tt('common', 'exercisePlaceholder')}
                     </Fragment>
                   ))}
                 </Text>
@@ -1827,7 +1827,7 @@ export default function TemplateEditorView() {
                 <View style={styles.exClusterSharedLabelSpacer} />
                 <View style={styles.exSuperCol}>
                   <Text style={styles.supersetColName} numberOfLines={1}>
-                    {parent.name ?? '(動作)'}
+                    {parent.name ?? tt('common', 'exercisePlaceholder')}
                   </Text>
                 </View>
                 {children.map((child) => (
@@ -1836,7 +1836,7 @@ export default function TemplateEditorView() {
                     <View
                       style={[styles.exSuperCol, styles.exSuperColWithLeftPad]}>
                       <Text style={styles.supersetColName} numberOfLines={1}>
-                        {child.name ?? '(動作)'}
+                        {child.name ?? tt('common', 'exercisePlaceholder')}
                       </Text>
                     </View>
                   </Fragment>
@@ -2692,7 +2692,7 @@ function ExerciseBody({
           <Text
             style={[styles.exName, compact && styles.exNameCompact]}
             numberOfLines={1}>
-            {exercise.name ? tExercise(exercise.name) : '(動作)'}
+            {exercise.name ? tExercise(exercise.name) : tt('common', 'exercisePlaceholder')}
           </Text>
           {exercise.notes && exercise.notes.trim().length > 0 ? (
             <Pressable
@@ -2704,7 +2704,7 @@ function ExerciseBody({
           ) : null}
           <View style={styles.flexFill} />
           <Text style={styles.exSummary}>
-            {warmups}熱+{workings}組
+            {tWarmWorkingSummary(warmups, workings)}
           </Text>
           {expanded ? <Text style={styles.exChevron}>▼</Text> : null}
         </Pressable>

@@ -518,6 +518,17 @@ export function tDurationBucketFootnote(totalSessions: number): string {
 }
 
 /**
+ * i18n leak sweep (2026-06-04) — template editor exercise/cluster header
+ * warm+working set-count summary. `3熱+2組` / `3 warm + 2 work`.
+ * zh uses the 熱/組 chip vocabulary; en spells it out for clarity.
+ */
+export function tWarmWorkingSummary(warmCount: number, workingCount: number): string {
+  return isEn()
+    ? `${warmCount} warm + ${workingCount} work`
+    : `${warmCount}熱+${workingCount}組`;
+}
+
+/**
  * i18n leak sweep (2026-06-04) — template-list-section row subtitle.
  * `3 個動作 · 編輯於 …` / `3 exercises · Edited …`. Reuses tExerciseCount.
  */
