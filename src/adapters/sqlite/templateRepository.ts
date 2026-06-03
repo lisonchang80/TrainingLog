@@ -1808,6 +1808,209 @@ export async function cloneTemplateWithSubTag(
 }
 
 /**
+ * Template overwrite-on-triple-collision primitive (ADR-0003 amendment,
+ * 2026-06-03 — "Template overwrite on triple collision").
+ *
+ * Replaces the TARGET template's body (template_exercise + template_set rows)
+ * with a deep copy of the SOURCE template's body, while **preserving the
+ * target's identity** (`id` / `name` / `program_id` / `sub_tag` / `color_hex`).
+ * The source row stays completely untouched.
+ *
+ * Used by all four collision sites' 「覆蓋」 paths (ADR-0003 amendment table
+ * ①②③④): the UI re-resolves the colliding template Y via
+ * `findTemplateByTriple` after catching `DUPLICATE_TEMPLATE_TRIPLE`, then calls
+ * this with `target_template_id = Y.id`. ① (session 另存模板) uses
+ * `convertSessionToTemplate`'s `overwriteTemplateId` branch instead — that
+ * source is a session tree, not a template; this primitive is template→template.
+ *
+ * Mechanism (single transaction, mirrors `cloneTemplateWithSubTag`'s COPY
+ * logic but writes into an EXISTING target after wiping it):
+ *   1. Verify both rows exist (throw SOURCE/TARGET_TEMPLATE_NOT_FOUND).
+ *   2. **Explicitly DELETE** the target's template_set rows (child-first),
+ *      THEN its template_exercise rows. FK-safe ordering — does NOT rely on
+ *      CASCADE (the v009 FK cascades, but explicit deletion keeps this robust
+ *      to schema drift, mirroring endSnapshotReconcile's discipline).
+ *   3. Deep-copy the source's template_exercise + template_set into the target,
+ *      remapping old→new ids for `parent_id` / `parent_set_id` (two-pass for FK
+ *      safety) and carrying `reusable_superset_id` verbatim.
+ *   4. Bump the target's `updated_at`. Identity columns are left untouched.
+ *
+ * Empty source → target ends up with an empty body (a valid no-exercise
+ * template). Partial failure rolls back cleanly via the transaction.
+ */
+export async function overwriteTemplateBody(
+  db: Database,
+  args: {
+    source_template_id: string;
+    target_template_id: string;
+    uuid: () => string;
+    now?: () => number;
+  },
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+
+  // Step 1: verify both rows exist.
+  const source = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template WHERE id = ?`,
+    args.source_template_id,
+  );
+  if (!source) {
+    throw new Error('SOURCE_TEMPLATE_NOT_FOUND');
+  }
+  const target = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM template WHERE id = ?`,
+    args.target_template_id,
+  );
+  if (!target) {
+    throw new Error('TARGET_TEMPLATE_NOT_FOUND');
+  }
+
+  // Step 2: load source template_exercise + template_set rows (deep-copy
+  // sources). Mirror cloneTemplateWithSubTag's column set.
+  type SrcExRow = {
+    id: string;
+    exercise_id: string;
+    ordering: number;
+    default_sets: number;
+    default_reps: number | null;
+    default_weight_kg: number | null;
+    is_evergreen: 0 | 1;
+    parent_id: string | null;
+    rest_seconds: number | null;
+    reusable_superset_id: string | null;
+  };
+  const exRows = await db.getAllAsync<SrcExRow>(
+    `SELECT id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, is_evergreen, parent_id, rest_seconds,
+            reusable_superset_id
+       FROM template_exercise
+      WHERE template_id = ?
+      ORDER BY ordering ASC`,
+    args.source_template_id,
+  );
+
+  type SrcSetRow = {
+    id: string;
+    template_exercise_id: string;
+    position: number;
+    set_kind: 'warmup' | 'working' | 'dropset';
+    reps: number;
+    weight: number;
+    parent_set_id: string | null;
+    notes: string | null;
+  };
+  const setRows =
+    exRows.length === 0
+      ? []
+      : await db.getAllAsync<SrcSetRow>(
+          `SELECT ts.id, ts.template_exercise_id, ts.position, ts.set_kind,
+                  ts.reps, ts.weight, ts.parent_set_id, ts.notes
+             FROM template_set ts
+             JOIN template_exercise te ON te.id = ts.template_exercise_id
+            WHERE te.template_id = ?
+            ORDER BY ts.template_exercise_id, ts.position ASC`,
+          args.source_template_id,
+        );
+
+  // Step 3: pre-compute id remaps (old → new). New ids so the copied rows
+  // never collide with the source's (the source stays alive untouched).
+  const exIdRemap = new Map<string, string>();
+  for (const r of exRows) {
+    exIdRemap.set(r.id, args.uuid());
+  }
+  const setIdRemap = new Map<string, string>();
+  for (const r of setRows) {
+    setIdRemap.set(r.id, args.uuid());
+  }
+
+  // Step 4: wipe target body + copy source body in one transaction.
+  await db.withTransactionAsync(async () => {
+    // Wipe the target's body child-first (sets before exercises) — FK-safe,
+    // does NOT rely on CASCADE.
+    await db.runAsync(
+      `DELETE FROM template_set
+        WHERE template_exercise_id IN (
+          SELECT id FROM template_exercise WHERE template_id = ?
+        )`,
+      args.target_template_id,
+    );
+    await db.runAsync(
+      `DELETE FROM template_exercise WHERE template_id = ?`,
+      args.target_template_id,
+    );
+
+    // Copy source template_exercise rows into the target — remap id +
+    // parent_id. Identity columns (name/program_id/sub_tag/color_hex) on the
+    // target row are left untouched per the amendment.
+    for (const r of exRows) {
+      const newExId = exIdRemap.get(r.id)!;
+      const remappedParentId =
+        r.parent_id != null ? exIdRemap.get(r.parent_id) ?? null : null;
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets,
+            default_reps, default_weight_kg, is_evergreen,
+            parent_id, rest_seconds, reusable_superset_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        newExId,
+        args.target_template_id,
+        r.exercise_id,
+        r.ordering,
+        r.default_sets,
+        r.default_reps,
+        r.default_weight_kg,
+        r.is_evergreen,
+        remappedParentId,
+        r.rest_seconds,
+        r.reusable_superset_id,
+        ts,
+      );
+    }
+
+    // Copy template_set rows — two-pass to satisfy the FK on parent_set_id
+    // (a dropset follower may point to a set inserted later in the loop).
+    // Pass 1: insert with parent_set_id = NULL.
+    for (const r of setRows) {
+      const newSetId = setIdRemap.get(r.id)!;
+      const newExId = exIdRemap.get(r.template_exercise_id);
+      if (!newExId) continue; // dangling — shouldn't happen, defensive.
+      await db.runAsync(
+        `INSERT INTO template_set
+           (id, template_exercise_id, position, set_kind, reps, weight,
+            parent_set_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+        newSetId,
+        newExId,
+        r.position,
+        r.set_kind,
+        r.reps,
+        r.weight,
+        r.notes,
+      );
+    }
+    // Pass 2: rewrite parent_set_id for dropset followers.
+    for (const r of setRows) {
+      if (r.parent_set_id == null) continue;
+      const newSetId = setIdRemap.get(r.id);
+      const newParentId = setIdRemap.get(r.parent_set_id);
+      if (!newSetId || !newParentId) continue;
+      await db.runAsync(
+        `UPDATE template_set SET parent_set_id = ? WHERE id = ?`,
+        newParentId,
+        newSetId,
+      );
+    }
+
+    // Bump target updated_at. Identity columns untouched.
+    await db.runAsync(
+      `UPDATE template SET updated_at = ? WHERE id = ?`,
+      ts,
+      args.target_template_id,
+    );
+  });
+}
+
+/**
  * Reusable-superset 動作記憶 (ADR-0017 L154 amendment / slice 9.8b grill Q4).
  *
  * Looks up the most-recently-edited cluster where both rows are stamped
