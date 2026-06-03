@@ -87,6 +87,7 @@ import {
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
 import {
   convertSessionToTemplate,
+  findTemplateByTriple,
   getSessionLinkedTemplateTriple,
 } from '@/src/adapters/sqlite/templateRepository';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
@@ -1594,25 +1595,67 @@ export default function SessionDetailScreen() {
         dateLabel,
       });
       const finalName = args.name.trim() || defaultName;
-      setTemplateMetaBusy(true);
-      try {
-        await convertSessionToTemplate(db, {
+      // #3 ①: convert (optionally overwriting the colliding template Y).
+      const runConvert = (overwriteTemplateId?: string) =>
+        convertSessionToTemplate(db, {
           session_id: id!,
           template_name: finalName,
           mode: 'create',
           program_id: args.program_id,
           sub_tag: args.sub_tag,
           uuid: randomUUID,
+          ...(overwriteTemplateId ? { overwriteTemplateId } : {}),
         });
+      // #3 ①「覆蓋」: replace the colliding template Y's body with this
+      // session, keeping Y's identity. Y resolved via findTemplateByTriple.
+      const overwriteExisting = (targetId: string) => {
+        setTemplateMetaBusy(true);
+        void (async () => {
+          try {
+            await runConvert(targetId);
+            setTemplateMetaSheetOpen(false);
+            toastRef.current?.show(tTemplateUpdated(finalName), {
+              icon: 'success',
+            });
+          } catch (e2) {
+            Alert.alert(
+              t('alert', 'failed'),
+              e2 instanceof Error ? e2.message : String(e2),
+            );
+          } finally {
+            setTemplateMetaBusy(false);
+          }
+        })();
+      };
+      setTemplateMetaBusy(true);
+      try {
+        await runConvert();
         setTemplateMetaSheetOpen(false);
         Alert.alert(t('status', 'savedAsNew'), tTemplateCreated(finalName));
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          Alert.alert(
-            t('alert', 'variantExists'),
-            tDuplicateTemplateTriple(finalName),
-          );
+          const existing = await findTemplateByTriple(db, {
+            name: finalName,
+            program_id: args.program_id,
+            sub_tag: args.sub_tag,
+          });
+          if (existing) {
+            Alert.alert(
+              t('alert', 'variantExists'),
+              t('alert', 'overwriteTemplateConfirm'),
+              [
+                { text: t('common', 'cancel'), style: 'cancel' },
+                {
+                  text: t('button', 'overwrite'),
+                  style: 'destructive',
+                  onPress: () => overwriteExisting(existing.id),
+                },
+              ],
+            );
+          } else {
+            Alert.alert(t('alert', 'variantExists'), tDuplicateTemplateTriple(finalName));
+          }
         } else {
           Alert.alert(t('alert', 'failed'), message);
         }
