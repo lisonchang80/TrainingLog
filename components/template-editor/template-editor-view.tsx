@@ -31,9 +31,17 @@ import { randomUUID } from 'expo-crypto';
 import {
   useFocusEffect,
   useLocalSearchParams,
+  useNavigation,
   useRouter,
 } from 'expo-router';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -245,9 +253,16 @@ export default function TemplateEditorView() {
   const importFromDay = fromDay != null ? Number(fromDay) : null;
   const db = useDatabase();
   const router = useRouter();
+  const navigation = useNavigation();
   const { tokens } = useTheme();
   const styles = useEditorStyles();
   const insets = useSafeAreaInsets();
+  // Program-wizard「新建模板」pre-creates the template row on entry
+  // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
+  // saving (取消 / swipe-back / discard), that row is an orphan — the
+  // beforeRemove listener below deletes it. savedRef guards the save path,
+  // which intentionally keeps the row (the wizard attaches it on final commit).
+  const savedRef = useRef(false);
 
   /** Display override resolver — undefined = no override; null = 通用 / no
    *  intensity; string = explicit value. */
@@ -456,6 +471,9 @@ export default function TemplateEditorView() {
           await incrementUseCount(db, row.reusable_superset_id as string, now);
         }
       }
+      // Mark saved BEFORE navigating so the beforeRemove orphan-cleanup
+      // listener leaves this (now-persisted) wizard template alone.
+      savedRef.current = true;
       router.back();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -479,6 +497,24 @@ export default function TemplateEditorView() {
     }
     setSaveSheetMode('save');
   }, [dirty, draft, busy, isFromWizard, onSaveFromWizard]);
+
+  // Orphan cleanup for the program-wizard「新建模板」flow. The wizard
+  // pre-creates the template row on entry; if the user leaves this editor
+  // WITHOUT saving (取消 button, iOS swipe-back, or discard-confirm), the
+  // row would persist as an empty 通用 orphan and pile up (新模板 / 新模板 2…).
+  // beforeRemove fires on every navigation-removal path, so it catches all
+  // exit affordances uniformly. The save path sets savedRef → skipped here.
+  // Fire-and-forget delete: the transaction commits well before the wizard's
+  // useFocusEffect re-lists templates, and any rare race self-heals on the
+  // next refresh. Non-wizard edits never register this listener.
+  useEffect(() => {
+    if (!isFromWizard) return;
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (savedRef.current) return;
+      void executeTemplateDeletion(db, id).catch(() => {});
+    });
+    return unsubscribe;
+  }, [navigation, isFromWizard, db, id]);
 
   const onCreateAndImport = useCallback(() => {
     if (!draft || busy || !importMode) return;
