@@ -135,7 +135,10 @@ export default function ProgramWizardScreen() {
         t('domain', 'newTemplate'),
       );
       await createTemplate(db, { id, name: uniqueName });
-      router.push(`/template/${id}`);
+      // fromWizard=1 → editor's save skips the TemplateMetaSheet program/強度
+      // picker (the new program isn't in the DB until the wizard's final
+      // commit; the wizard attaches the template itself). See onSaveFromWizard.
+      router.push(`/template/${id}?fromWizard=1`);
     } catch (e) {
       Alert.alert(
         t('alert', 'cannotCreateTemplate'),
@@ -708,7 +711,7 @@ function DayPatternPanel({
                   pressed && styles.btnPressed,
                 ]}>
                 <Text style={[styles.pillText, styles.pillCreateText]}>
-                  {t('button', 'newTemplate')}
+                  {t('button', 'newTemplateFull')}
                 </Text>
               </Pressable>
               {templates.map((tpl) => {

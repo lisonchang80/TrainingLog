@@ -212,6 +212,7 @@ export default function TemplateEditorView() {
     fromCycle,
     fromDay,
     fromSubTag,
+    fromWizard,
   } = useLocalSearchParams<{
     id: string;
     dpid?: string;
@@ -225,9 +226,15 @@ export default function TemplateEditorView() {
     fromCycle?: string;
     fromDay?: string;
     fromSubTag?: string;
+    // Program-wizard Step 3「新建模板」context. When '1', tap-save skips the
+    // TemplateMetaSheet (program / sub_tag picker) and returns to the wizard —
+    // the wizard owns program attachment, and the in-progress new program
+    // isn't in the DB yet so the sheet couldn't list it anyway.
+    fromWizard?: string;
   }>();
   const importMode =
     fromProgram != null && fromKind != null && fromDay != null;
+  const isFromWizard = fromWizard === '1';
   const importFromProgramId = fromProgram
     ? decodeURIComponent(fromProgram)
     : null;
@@ -403,10 +410,75 @@ export default function TemplateEditorView() {
   // Open TemplateMetaSheet — both 儲存 and 建立並導入 routes go through it
   // so the user can confirm / change (program, sub_tag) before commit.
   // saveSheetMode determines the post-confirm behaviour.
+  // Program-wizard「新建模板」save path (fromWizard=1): skip the
+  // TemplateMetaSheet program/sub_tag picker entirely. The wizard owns program
+  // attachment (Step 3 day-assign + Step 4 cycle 強度 → onConfirm
+  // attachTemplateToProgram), and the brand-new program doesn't exist in the
+  // DB until the wizard's final commit, so the sheet's program/強度 list could
+  // never surface it. Persist the template plain (program_id / sub_tag stay
+  // null = free template) and return to the wizard, whose useFocusEffect
+  // re-lists it as a selectable pill. Mirrors onSaveSheetConfirm's commit
+  // (rename-siblings + dup-triple guard + commitTemplateDraft + use_count bump)
+  // minus the program attach — intentionally not touching that callback so
+  // normal saves carry zero regression risk.
+  const onSaveFromWizard = useCallback(async () => {
+    if (!dirty || !draft || busy) return;
+    setBusy(true);
+    try {
+      const now = () => Date.now();
+      if (!committed || draft.name !== committed.name) {
+        const existing = await findTemplateByTriple(db, {
+          name: draft.name,
+          program_id: null,
+          sub_tag: null,
+        });
+        if (existing && existing.id !== draft.id) {
+          throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+        }
+      }
+      if (committed && draft.name !== committed.name) {
+        await applyRenameSiblings(db, {
+          oldName: committed.name,
+          newName: draft.name,
+          now,
+        });
+      }
+      if (committed) {
+        await commitTemplateDraft(db, { committed, draft, now });
+        const committedIds = new Set(committed.exercises.map((e) => e.id));
+        const bumps = draft.exercises.filter(
+          (e) =>
+            !committedIds.has(e.id) &&
+            e.parent_id === null &&
+            e.reusable_superset_id !== null,
+        );
+        for (const row of bumps) {
+          await incrementUseCount(db, row.reusable_superset_id as string, now);
+        }
+      }
+      router.back();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
+        Alert.alert(
+          tt('alert', 'variantExists'),
+          tt('alert', 'duplicateTemplateTripleEditorBody'),
+        );
+      } else {
+        Alert.alert(tt('alert', 'saveFailed'), msg);
+      }
+      setBusy(false);
+    }
+  }, [dirty, draft, busy, committed, db, router]);
+
   const onSave = useCallback(() => {
     if (!dirty || !draft || busy) return;
+    if (isFromWizard) {
+      void onSaveFromWizard();
+      return;
+    }
     setSaveSheetMode('save');
-  }, [dirty, draft, busy]);
+  }, [dirty, draft, busy, isFromWizard, onSaveFromWizard]);
 
   const onCreateAndImport = useCallback(() => {
     if (!draft || busy || !importMode) return;
