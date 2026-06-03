@@ -508,6 +508,16 @@ export function tUseTemplate(name: string): string {
 }
 
 /**
+ * i18n leak sweep (2026-06-04) — stats-panel duration-histogram footnote.
+ * `6 期共 12 次已完成 Session` / `12 completed sessions across 6 buckets`.
+ */
+export function tDurationBucketFootnote(totalSessions: number): string {
+  return isEn()
+    ? `${totalSessions} completed sessions across 6 buckets`
+    : `6 期共 ${totalSessions} 次已完成 Session`;
+}
+
+/**
  * i18n leak sweep (2026-06-04) — template-list-section row subtitle.
  * `3 個動作 · 編輯於 …` / `3 exercises · Edited …`. Reuses tExerciseCount.
  */

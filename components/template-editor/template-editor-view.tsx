@@ -2470,7 +2470,7 @@ export default function TemplateEditorView() {
                     selectTextOnFocus
                     style={styles.restValueInput}
                   />
-                  <Text style={styles.restValueUnit}>秒</Text>
+                  <Text style={styles.restValueUnit}>{tt('status', 'secondsUnit')}</Text>
                 </View>
                 <Pressable
                   onPress={() =>

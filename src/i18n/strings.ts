@@ -590,6 +590,8 @@ export const strings = {
       appleHealthIntro: 'TrainingLog 會讀取 Apple Watch 訓練期間的心率與消耗熱量；無 Apple Watch 紀錄時、會寫入訓練紀錄讓 Fitness App 顯示。',
       appleHealthConnected: '已連結 Apple Health',
       managePermissionHint: '權限管理請至「設定 → 隱私 → 健康 → TrainingLog」。',
+      // i18n leak sweep (2026-06-04) — template editor rest-time unit suffix.
+      secondsUnit: '秒',
     },
 
     /**
@@ -1299,6 +1301,8 @@ export const strings = {
       appleHealthIntro: 'TrainingLog reads heart rate and active energy from Apple Watch workouts; it writes a workout entry to the Fitness app for sessions without Apple Watch tracking.',
       appleHealthConnected: 'Connected to Apple Health',
       managePermissionHint: 'Manage permissions at Settings → Privacy → Health → TrainingLog.',
+      // i18n leak sweep (2026-06-04) — template editor rest-time unit suffix.
+      secondsUnit: 'sec',
     },
 
     equipment: {

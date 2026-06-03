@@ -36,7 +36,7 @@ import type {
   StatsSetRecord,
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
-import { t, tMuscleGroup } from '@/src/i18n';
+import { t, tDurationBucketFootnote, tMuscleGroup } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -360,7 +360,7 @@ export function StatsPanel() {
           showBarValues
         />
         <Text style={styles.durationFootnote}>
-          6 期共 {durationTotalSessions} 次已完成 Session
+          {tDurationBucketFootnote(durationTotalSessions)}
         </Text>
       </View>
     </ScrollView>
