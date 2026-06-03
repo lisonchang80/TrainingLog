@@ -49,3 +49,55 @@ Schema 層欄位名 (`program_id`, `program_subtag`) 不動 — rename 是 UI / 
 - **程式碼 / 變數 / UI label** — 後續 slice ship 時逐步 propagate（不在本 ADR 範圍，也不卡 ADR-0019 ship）
 
 詳細決策邏輯見 ADR-0019 § Q9.2。
+
+---
+
+## Amendment 2026-06-03 — Template overwrite on triple collision
+
+Saving a template at a `(name, program_id, sub_tag)` that already exists used
+to dead-end with `DUPLICATE_TEMPLATE_TRIPLE` → an OK-only Alert telling the
+user to "change the intensity or program". This amendment adds an explicit
+**OVERWRITE** path so the user can replace the colliding template instead.
+
+### Decision
+
+When a save collides with an existing template **Y** sharing the triple, the
+UI offers `[取消] [覆蓋]` (覆蓋 = destructive). **覆蓋 (overwrite)** =
+
+> Replace **Y**'s body (exercises + sets) with the source content, **keeping
+> Y's identity** (`id` / `name` / `program_id` / `sub_tag`). Any throwaway
+> source-side row **X** is cleaned up.
+
+This is destructive and irreversible (Y's prior body is gone) — hence the
+explicit confirm. Identity is preserved so anything pointing at Y (program
+cells, history) keeps resolving.
+
+### Four collision sites (source → target → cleanup)
+
+| # | Flow | Source (overwrite content) | Cleanup of source X |
+|---|---|---|---|
+| ① | session「另存模板」(`convertSessionToTemplate` create) | the session's tree | session untouched |
+| ② | 精靈「新建模板」存 | wizard pre-created draft X | delete X; wizard pill → Y |
+| ③ | 模板編輯器一般存 (re-classify collides) | the editing draft X | **merge X→Y, delete X** (拍板 A) |
+| ④ | start-template-sheet「新增強度」clone | the clone-source template | source untouched |
+
+**③ chose "merge X→Y + delete X"** (option A) over "overwrite Y, leave X at
+its old classification" (option B) — A matches the user intent "move X into
+this slot"; B leaves a confusing duplicate.
+
+### Mechanism
+
+- The UI re-resolves **Y** via `findTemplateByTriple(name, program_id, sub_tag)`
+  after catching `DUPLICATE_TEMPLATE_TRIPLE`, then calls the overwrite path
+  with Y's id.
+- `convertSessionToTemplate` gains `overwriteTemplateId?: string` — when set,
+  it writes the session body into that row in place (reusing the existing
+  `isUpdatingExisting` wipe-and-rewrite branch), skips the dup-triple guard,
+  and does **not** touch `program_id` / `sub_tag` (identity preserved). ①.
+- ②③④ wire in subsequent phases (clone overwrite + editor merge-delete).
+
+### Phasing
+
+Shipped incrementally: **Phase 1 = ① + the repo `overwriteTemplateId` arg**
+(the screenshot case); ④ then ②③ follow. Each phase device-smoked before merge.
+

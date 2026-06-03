@@ -1,6 +1,7 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
 import {
+  attachTemplateToProgram,
   createTemplate,
   convertSessionToTemplate,
   getTemplateFull,
@@ -777,6 +778,111 @@ describe('convertSessionToTemplate', () => {
           now: () => NOW + 5000,
         })
       ).resolves.toBe('tpl-target');
+    });
+  });
+
+  describe('overwriteTemplateId (#3 ① triple-collision overwrite)', () => {
+    async function countTemplates(): Promise<number> {
+      const row = await db.getFirstAsync<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM template`,
+      );
+      return row?.c ?? 0;
+    }
+
+    it('writes the session body into the target row in place, keeps its id', async () => {
+      await seedProgram('prog-1');
+      await createTemplate(db, { id: 'tpl-Y', name: 'Chest', now });
+      await attachTemplateToProgram(db, {
+        template_id: 'tpl-Y',
+        program_id: 'prog-1',
+        sub_tag: 'A',
+        now,
+      });
+      await setupSession({ session_id: 'sess-ow' });
+      const before = await countTemplates();
+
+      const ret = await convertSessionToTemplate(db, {
+        session_id: 'sess-ow',
+        template_name: 'Chest',
+        mode: 'create',
+        program_id: 'prog-1',
+        sub_tag: 'A',
+        overwriteTemplateId: 'tpl-Y',
+        uuid,
+        now: () => NOW + 5000,
+      });
+
+      expect(ret).toBe('tpl-Y'); // same row, not a new uuid
+      expect(await countTemplates()).toBe(before); // no new template created
+      const full = await getTemplateFull(db, 'tpl-Y');
+      expect(full?.exercises.length).toBe(2); // session's bench + squat
+    });
+
+    it('bypasses the dup-triple guard that would otherwise throw', async () => {
+      await seedProgram('prog-1');
+      await createTemplate(db, { id: 'tpl-Y', name: 'Chest', now });
+      await attachTemplateToProgram(db, {
+        template_id: 'tpl-Y',
+        program_id: 'prog-1',
+        sub_tag: 'A',
+        now,
+      });
+      await setupSession({ session_id: 'sess-ow' });
+
+      // Same (name, program, sub_tag) WITHOUT overwrite → dup guard throws.
+      await expect(
+        convertSessionToTemplate(db, {
+          session_id: 'sess-ow',
+          template_name: 'Chest',
+          mode: 'create',
+          program_id: 'prog-1',
+          sub_tag: 'A',
+          uuid,
+          now,
+        }),
+      ).rejects.toThrow('DUPLICATE_TEMPLATE_TRIPLE');
+
+      // With overwriteTemplateId → succeeds against the same row.
+      await expect(
+        convertSessionToTemplate(db, {
+          session_id: 'sess-ow',
+          template_name: 'Chest',
+          mode: 'create',
+          program_id: 'prog-1',
+          sub_tag: 'A',
+          overwriteTemplateId: 'tpl-Y',
+          uuid,
+          now,
+        }),
+      ).resolves.toBe('tpl-Y');
+    });
+
+    it('preserves the target identity (program_id / sub_tag) even if args differ', async () => {
+      await seedProgram('prog-1');
+      await seedProgram('prog-2');
+      await createTemplate(db, { id: 'tpl-Y', name: 'Chest', now });
+      await attachTemplateToProgram(db, {
+        template_id: 'tpl-Y',
+        program_id: 'prog-1',
+        sub_tag: 'A',
+        now,
+      });
+      await setupSession({ session_id: 'sess-ow' });
+
+      await convertSessionToTemplate(db, {
+        session_id: 'sess-ow',
+        template_name: 'Chest',
+        mode: 'create',
+        program_id: 'prog-2', // different — must be ignored on overwrite
+        sub_tag: 'B',
+        overwriteTemplateId: 'tpl-Y',
+        uuid,
+        now: () => NOW + 5000,
+      });
+
+      const full = await getTemplateFull(db, 'tpl-Y');
+      expect(full?.program_id).toBe('prog-1'); // kept its own identity
+      expect(full?.sub_tag).toBe('A');
     });
   });
 });

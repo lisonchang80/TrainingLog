@@ -1329,6 +1329,15 @@ export async function convertSessionToTemplate(
     sub_tag?: string | null;
     uuid: () => string;
     now?: () => number;
+    /**
+     * Triple-collision OVERWRITE (ADR-0003 amendment, 2026-06-03). When set,
+     * the session content replaces THIS template's body in place — the dup
+     * check is skipped and the row keeps its identity (id / name / program_id
+     * / sub_tag). Used by 另存模板's「覆蓋」path after the UI resolves the
+     * colliding template via findTemplateByTriple. Takes precedence over the
+     * `mode='update'` linked-template resolution.
+     */
+    overwriteTemplateId?: string;
   },
 ): Promise<string> {
   const ts = (args.now ?? Date.now)();
@@ -1401,10 +1410,17 @@ export async function convertSessionToTemplate(
     }
   }
 
-  const isUpdatingExisting = args.mode === 'update' && linkedTemplateId != null;
-  const newTemplateId = isUpdatingExisting
-    ? (linkedTemplateId as string)
-    : args.uuid();
+  // Explicit overwrite target (另存模板「覆蓋」) wins over linked-template
+  // resolution. When set we write the session body into THIS row in place
+  // and skip the dup-triple guard (we intentionally collide with it).
+  const overwriteId = args.overwriteTemplateId ?? null;
+  const isUpdatingExisting =
+    overwriteId != null || (args.mode === 'update' && linkedTemplateId != null);
+  const newTemplateId = overwriteId
+    ? overwriteId
+    : isUpdatingExisting
+      ? (linkedTemplateId as string)
+      : args.uuid();
 
   // 2026-05-20 overnight #55 (slice 10c 另存模板): dup-triple guard for the
   // create path (and update-fallback-to-create when no linked template
