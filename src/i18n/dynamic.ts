@@ -498,3 +498,21 @@ export function tYearMonthTitle(year: number, month1To12: number): string {
   }
   return `${year}年${month1To12}月`;
 }
+
+/**
+ * i18n leak sweep (2026-06-04) — template-list-section row accessibilityLabel.
+ * `使用模板 PPL Push` / `Use template PPL Push`.
+ */
+export function tUseTemplate(name: string): string {
+  return isEn() ? `Use template ${name}` : `使用模板 ${name}`;
+}
+
+/**
+ * i18n leak sweep (2026-06-04) — template-list-section row subtitle.
+ * `3 個動作 · 編輯於 …` / `3 exercises · Edited …`. Reuses tExerciseCount.
+ */
+export function tTemplateRowSubtitle(exerciseCount: number, editedAt: string): string {
+  return isEn()
+    ? `${tExerciseCount(exerciseCount)} · Edited ${editedAt}`
+    : `${tExerciseCount(exerciseCount)} · 編輯於 ${editedAt}`;
+}

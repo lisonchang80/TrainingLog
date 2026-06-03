@@ -374,6 +374,8 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: '新計畫',
       newExerciseNavTitle: '新動作',
+      // i18n leak sweep (2026-06-04) — template-list-section empty state.
+      noTemplatesEmpty: '沒有模板，點 [+ 新建模板] 開始建立。',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -1087,6 +1089,8 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: 'New Program',
       newExerciseNavTitle: 'New Exercise',
+      // i18n leak sweep (2026-06-04) — template-list-section empty state.
+      noTemplatesEmpty: 'No templates. Tap [+ New Template] to create one.',
     },
 
     alert: {

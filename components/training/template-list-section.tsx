@@ -49,7 +49,7 @@ import {
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { listTemplateGroupsByName } from '@/src/domain/training/templateListGroups';
-import { getLocale, t as tt } from '@/src/i18n';
+import { getLocale, t as tt, tTemplateRowSubtitle, tUseTemplate } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface Props {
@@ -170,7 +170,7 @@ export function TemplateListSection({
         <Text style={styles.heading}>{heading}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="新建模板"
+          accessibilityLabel={tt('button', 'newTemplateFull')}
           onPress={onCreate}
           disabled={busy}
           style={({ pressed }) => [
@@ -184,7 +184,7 @@ export function TemplateListSection({
       {rows.length === 0 ? (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>
-            沒有模板，點 [+ 新建模板] 開始建立。
+            {tt('page', 'noTemplatesEmpty')}
           </Text>
         </View>
       ) : (
@@ -203,12 +203,12 @@ export function TemplateListSection({
               >
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`使用模板 ${row.name}`}
+                  accessibilityLabel={tUseTemplate(row.name)}
                   onPress={() => onRowPress(row)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
                   <Text style={styles.rowName}>{row.name}</Text>
                   <Text style={styles.rowDetails}>
-                    {row.exerciseCount} 個動作 · 編輯於 {formatTimestamp(row.updated_at)}
+                    {tTemplateRowSubtitle(row.exerciseCount, formatTimestamp(row.updated_at))}
                   </Text>
                 </Pressable>
               </SwipeableSetRow>
