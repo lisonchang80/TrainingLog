@@ -371,6 +371,9 @@ export const strings = {
       bodyweightSection: '體重',
       recordBodyweight: '紀錄體重',
       recordBodyweightRow: '＋ 紀錄體重',
+      // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
+      newProgramNavTitle: '新計畫',
+      newExerciseNavTitle: '新動作',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -1081,6 +1084,9 @@ export const strings = {
       bodyweightSection: 'Bodyweight',
       recordBodyweight: 'Record bodyweight',
       recordBodyweightRow: '＋ Record bodyweight',
+      // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
+      newProgramNavTitle: 'New Program',
+      newExerciseNavTitle: 'New Exercise',
     },
 
     alert: {
