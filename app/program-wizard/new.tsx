@@ -1459,7 +1459,10 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '700',
     },
     headerBtnSecondary: {
-      color: tokens.text.secondary,
+      // 取消 / 上一步 — use the active tint (not text.secondary grey, which
+      // read as disabled/虛化). Right action (下一步/建立) stays bolder (w700)
+      // via headerBtnPrimary, preserving the primary-action hierarchy.
+      color: tokens.action.primary,
       fontSize: 16,
       fontWeight: '500',
     },
