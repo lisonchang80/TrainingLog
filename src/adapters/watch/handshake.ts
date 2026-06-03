@@ -65,7 +65,7 @@ import {
   listPrograms,
 } from '../sqlite/programRepository';
 import { cellForDate } from '../../domain/program/programManager';
-import { utcMsToIsoDate } from '../../domain/program/programManager';
+import { localMsToIsoDate } from '../../domain/program/programManager';
 import { tExercise } from '../../i18n/strings';
 import type {
   HandshakePayload,
@@ -874,7 +874,9 @@ export async function loadTemplatesFullTree(
  * behaviour — never start a session against a phantom template).
  *
  * `today` parameter is injectable for unit tests; production callers
- * pass `Date.now()` and we convert to ISO via `utcMsToIsoDate`.
+ * pass `Date.now()` and we convert to the user's LOCAL ISO day via
+ * `localMsToIsoDate` (NOT the UTC variant — that would pick the wrong day
+ * near midnight for users east/west of UTC).
  *
  * The label string is human-readable e.g. "推日 W3D1（今日）" — wired
  * to the same naming convention as the iPhone Today banner.
@@ -885,7 +887,7 @@ export async function loadTodayPlanned(
 ): Promise<Stage1TodayPlanned> {
   const active = await getActiveProgram(db);
   if (!active) return { kind: 'noActiveProgram' };
-  const today = utcMsToIsoDate(nowMs);
+  const today = localMsToIsoDate(nowMs);
   const cell = cellForDate({
     program: active.program,
     cells: active.cells,

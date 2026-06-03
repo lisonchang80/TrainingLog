@@ -34,12 +34,34 @@ export function isoDateToUtcMs(d: IsoDate): number {
   return Date.UTC(y, m - 1, day);
 }
 
-/** Inverse of `isoDateToUtcMs` — emits `yyyy-mm-dd`. */
+/** Inverse of `isoDateToUtcMs` — emits `yyyy-mm-dd` from UTC calendar fields. */
 export function utcMsToIsoDate(ms: number): IsoDate {
   const d = new Date(ms);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Emits `yyyy-mm-dd` from the device's **LOCAL** calendar fields.
+ *
+ * Use this — NOT `utcMsToIsoDate` — whenever the ms comes from `Date.now()` and
+ * you need the user's *local* "today" (e.g. matching against a program
+ * `start_date`, which is itself written from local getters via
+ * `formatLocalDateToIso` in `app/(tabs)/programs.tsx`). Using the UTC variant on
+ * `Date.now()` shifts the day by ±1 near midnight for users east/west of UTC —
+ * e.g. UTC+8 at 00:00–07:59 local resolves to *yesterday*, so Today's planned
+ * workout, the Watch picker, and new-program `start_date` all pick the wrong day.
+ *
+ * `utcMsToIsoDate` stays correct for the DST-immune cell arithmetic
+ * (`cycleDayToDate`), which operates purely on UTC-midnight anchors.
+ */
+export function localMsToIsoDate(ms: number): IsoDate {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 

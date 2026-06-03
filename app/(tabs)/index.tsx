@@ -140,7 +140,7 @@ import type { Exercise } from '@/src/domain/exercise/types';
 import {
   resolveProgramLabel,
   todayCell,
-  utcMsToIsoDate,
+  localMsToIsoDate,
 } from '@/src/domain/program/programManager';
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
 import { resolveTodayPlan, type TodayPlan } from '@/src/domain/training/todayPlan';
@@ -345,7 +345,7 @@ export default function TodayScreen() {
     const tplMap: Record<string, TemplateSummary> = {};
     for (const t of tpls) tplMap[t.id] = t;
     setTemplatesById(tplMap);
-    const cell = todayCell({ active: prog, today: utcMsToIsoDate(Date.now()) });
+    const cell = todayCell({ active: prog, today: localMsToIsoDate(Date.now()) });
     setProgramCellToday(cell);
     if (active) {
       const [sets, planned] = await Promise.all([
@@ -900,7 +900,7 @@ export default function TodayScreen() {
     name: string,
   ): Promise<{ id: string; name: string }> => {
     const id = randomUUID();
-    const today = utcMsToIsoDate(Date.now());
+    const today = localMsToIsoDate(Date.now());
     await createProgram(db, {
       program: {
         id,
@@ -2355,7 +2355,7 @@ export default function TodayScreen() {
     // ADR-0024 § 2 三區塊：計劃訓練 / 空白訓練 / 模板訓練
     const todayPlan: TodayPlan = resolveTodayPlan({
       active: activeProgram,
-      today: utcMsToIsoDate(Date.now()),
+      today: localMsToIsoDate(Date.now()),
       templatesById,
     });
     return (

@@ -34,7 +34,7 @@ import {
 } from '@/src/adapters/sqlite/templateRepository';
 import {
   expandWizardDraft,
-  utcMsToIsoDate,
+  localMsToIsoDate,
 } from '@/src/domain/program/programManager';
 import {
   WIZARD_STEPS,
@@ -85,7 +85,7 @@ export default function ProgramWizardScreen() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useWizStyles();
-  const today = utcMsToIsoDate(Date.now());
+  const today = localMsToIsoDate(Date.now());
   const [state, setState] = useState<WizardState>(() => initialWizardState(today));
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
