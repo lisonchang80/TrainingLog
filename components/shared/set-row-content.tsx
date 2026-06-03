@@ -197,7 +197,7 @@ export function SetRowContent<S extends SetRowItem>({
         </Pressable>
       ) : (
         <TextInput
-          style={[styles.setInput, compact && styles.setInputCompact]}
+          style={[styles.setInput, styles.setInputTextInline, compact && styles.setInputCompact]}
           value={repsText}
           onChangeText={handleRepsChange}
           keyboardType="number-pad"
