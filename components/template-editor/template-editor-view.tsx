@@ -31,7 +31,6 @@ import { randomUUID } from 'expo-crypto';
 import {
   useFocusEffect,
   useLocalSearchParams,
-  useNavigation,
   useRouter,
 } from 'expo-router';
 import {
@@ -253,14 +252,13 @@ export default function TemplateEditorView() {
   const importFromDay = fromDay != null ? Number(fromDay) : null;
   const db = useDatabase();
   const router = useRouter();
-  const navigation = useNavigation();
   const { tokens } = useTheme();
   const styles = useEditorStyles();
   const insets = useSafeAreaInsets();
   // Program-wizard「新建模板」pre-creates the template row on entry
   // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
   // saving (取消 / swipe-back / discard), that row is an orphan — the
-  // beforeRemove listener below deletes it. savedRef guards the save path,
+  // unmount-cleanup effect below deletes it. savedRef guards the save path,
   // which intentionally keeps the row (the wizard attaches it on final commit).
   const savedRef = useRef(false);
 
@@ -502,19 +500,26 @@ export default function TemplateEditorView() {
   // pre-creates the template row on entry; if the user leaves this editor
   // WITHOUT saving (取消 button, iOS swipe-back, or discard-confirm), the
   // row would persist as an empty 通用 orphan and pile up (新模板 / 新模板 2…).
-  // beforeRemove fires on every navigation-removal path, so it catches all
-  // exit affordances uniformly. The save path sets savedRef → skipped here.
-  // Fire-and-forget delete: the transaction commits well before the wizard's
-  // useFocusEffect re-lists templates, and any rare race self-heals on the
-  // next refresh. Non-wizard edits never register this listener.
+  //
+  // Implemented as an UNMOUNT cleanup (not navigation `beforeRemove`):
+  // expo-router uses react-native-screens native-stack, where `beforeRemove`
+  // is unreliable / often never fires. Popping a native-stack screen always
+  // unmounts its React tree, so the cleanup below runs on every exit path
+  // uniformly. The save path sets savedRef → skipped here.
+  //
+  // `[]` deps → cleanup runs only on unmount; it closes over the initial
+  // (stable) id/db/isFromWizard. Fire-and-forget delete: the transaction
+  // commits before the wizard's useFocusEffect re-lists templates, and any
+  // rare race self-heals on the next refresh. Non-wizard edits no-op.
+  // Known gap: a hard force-kill while in the editor leaves the orphan (no
+  // unmount fires) — rare; a startup sweep could cover it later if needed.
   useEffect(() => {
-    if (!isFromWizard) return;
-    const unsubscribe = navigation.addListener('beforeRemove', () => {
-      if (savedRef.current) return;
+    return () => {
+      if (!isFromWizard || savedRef.current) return;
       void executeTemplateDeletion(db, id).catch(() => {});
-    });
-    return unsubscribe;
-  }, [navigation, isFromWizard, db, id]);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onCreateAndImport = useCallback(() => {
     if (!draft || busy || !importMode) return;
