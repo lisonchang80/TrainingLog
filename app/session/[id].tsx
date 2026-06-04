@@ -154,7 +154,13 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+  useTheme,
+  type ThemeTokens,
+} from '@/src/theme';
 
 /**
  * Phase A placeholder HRmax (220 - 30). Used to position HR zone band
@@ -2874,6 +2880,7 @@ function EditableExerciseCard({
                 // avoids a render-time throw (mirrors history's `if (!headSet)`).
                 const head = setsById.get(g.head.id);
                 if (!head) return null;
+                const swipeColors = swipeActionColors(tokens);
                 const isDropsetCluster =
                   head.set_kind === 'dropset' && g.followers.length > 0;
                 const clusterSize = 1 + g.followers.length;
@@ -2892,7 +2899,7 @@ function EditableExerciseCard({
                       {
                         key: 'delete',
                         label: t('common', 'delete'),
-                        color: tokens.action.destructive,
+                        color: swipeColors.remove,
                         onPress: () => onDeleteSet(head.id),
                       },
                     ]}
@@ -2900,13 +2907,13 @@ function EditableExerciseCard({
                       {
                         key: 'add',
                         label: '+1',
-                        color: tokens.action.success,
+                        color: swipeColors.add,
                         onPress: () => onAddSetAfter(head.id),
                       },
                       {
                         key: 'note',
                         label: t('domain', 'note'),
-                        color: tokens.action.primary,
+                        color: swipeColors.note,
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
                     ]}
@@ -3332,15 +3339,11 @@ function makeStyles(tokens: ThemeTokens) {
 
     // ── Edit-mode solo card (mirrors Today's exerciseCard styles) ────────
     exerciseCard: {
-      backgroundColor: tokens.bg.surface,
+      backgroundColor: interactiveCardBg(tokens),
       borderRadius: 10,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: tokens.border.default,
       overflow: 'hidden',
     },
-    exerciseCardExpanded: {
-      borderColor: tokens.action.primary,
-    },
+    exerciseCardExpanded: {},
     exerciseCardHeader: {
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -3441,15 +3444,7 @@ function makeStyles(tokens: ThemeTokens) {
     exerciseCardDropsetClusterStack: {
       flexDirection: 'column',
     },
-    exerciseCardSetRowDragActive: {
-      backgroundColor: tokens.bg.elevated,
-      elevation: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.18,
-      shadowRadius: 6,
-      borderRadius: 8,
-    },
+    exerciseCardSetRowDragActive: dragActiveRowStyle(tokens),
     exerciseCardFooter: {
       flexDirection: 'row',
       gap: 8,
@@ -3465,7 +3460,7 @@ function makeStyles(tokens: ThemeTokens) {
       backgroundColor: tokens.action.primary,
     },
     exerciseCardFooterBtnSecondary: {
-      backgroundColor: tokens.bg.elevated,
+      backgroundColor: tokens.bg.surface,
     },
     exerciseCardFooterBtnTextPrimary: {
       color: tokens.action.onPrimary,
@@ -3483,7 +3478,7 @@ function makeStyles(tokens: ThemeTokens) {
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: tokens.bg.elevated,
+      backgroundColor: tokens.bg.surface,
     },
     completeBtnDone: { backgroundColor: tokens.action.success },
     completeBtnText: {

@@ -181,7 +181,13 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  useTheme,
+  type ThemeTokens,
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+} from '@/src/theme';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -3141,6 +3147,7 @@ function ExerciseCard({
   // source via Context; ExerciseCard re-renders when parent does).
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const swipeColors = swipeActionColors(tokens);
   // Slice 10c overnight #61 — labels + groups via single helper. Replaces
   // the prior `displaySetLabel`-based path (which collapsed dropset → 'D').
   // Now dropset HEAD renders `D{N}` and follower renders '' (mirror
@@ -3336,7 +3343,7 @@ function ExerciseCard({
                       {
                         key: 'delete',
                         label: t('common', 'delete'),
-                        color: '#dc3545',
+                        color: swipeColors.remove,
                         // overnight #46 第 2 點 — solo set 級別 swipe-delete
                         // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
                         // exercise card 級 / cluster 整 row 級 confirm 不動。
@@ -3359,13 +3366,13 @@ function ExerciseCard({
                       {
                         key: 'add',
                         label: '+1',
-                        color: '#28a745',
+                        color: swipeColors.add,
                         onPress: () => onAddSetAfter(head.id),
                       },
                       {
                         key: 'note',
                         label: t('domain', 'note'),
-                        color: '#007AFF',
+                        color: swipeColors.note,
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
                     ]}
@@ -3727,12 +3734,12 @@ function makeStyles(tokens: ThemeTokens) {
   },
   // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
   exerciseCard: {
-    backgroundColor: tokens.bg.elevated,
+    backgroundColor: interactiveCardBg(tokens),
     borderRadius: 10,
     overflow: 'hidden',
   },
   exerciseCardExpanded: {
-    backgroundColor: tokens.bg.surface,
+    backgroundColor: interactiveCardBg(tokens),
   },
   exerciseCardHeader: {
     flexDirection: 'row',
@@ -3840,23 +3847,13 @@ function makeStyles(tokens: ThemeTokens) {
     // Transparent — let the card's translucent gray (exerciseCard backgroundColor)
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
-  exerciseCardSetRowDragActive: {
-    // Bug #309 — an EXPANDED card's background is already `tokens.bg.surface`,
-    // so the old `backgroundColor: tokens.bg.surface` here made the dragged row
-    // identical to the card → no visible「拖曳中」feedback (ADR-0025 theme
-    // migration regressed this from a distinct gray). Use `bg.elevated` so the
-    // grabbed row visibly shifts off the card in both light + dark, matching the
-    // template editor's drag-active lift (用戶要求「拖曳時變色如模板一樣」).
-    backgroundColor: tokens.bg.elevated,
-    borderWidth: 1,
-    borderColor: tokens.action.primary,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
+  // Bug #309 — an EXPANDED card's background is already `tokens.bg.surface`,
+  // so the old `backgroundColor: tokens.bg.surface` here made the dragged row
+  // identical to the card → no visible「拖曳中」feedback (ADR-0025 theme
+  // migration regressed this from a distinct gray). Use `bg.elevated` so the
+  // grabbed row visibly shifts off the card in both light + dark, matching the
+  // template editor's drag-active lift (用戶要求「拖曳時變色如模板一樣」).
+  exerciseCardSetRowDragActive: dragActiveRowStyle(tokens),
   exerciseCardSetRowContent: {
     flex: 1,
   },

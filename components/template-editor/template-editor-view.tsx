@@ -117,7 +117,13 @@ import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 import { getLocale, t as tt, tExercise } from '@/src/i18n';
 import { tTemplateCreated, tTemplateUpdated } from '@/src/i18n/dynamic';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  useTheme,
+  type ThemeTokens,
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+} from '@/src/theme';
 
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that all read
@@ -2268,13 +2274,14 @@ export default function TemplateEditorView() {
                         const rowHasNote = !!(
                           parentSet?.notes && parentSet.notes.trim().length > 0
                         );
+                        const swipeColors = swipeActionColors(tokens);
                         return (
                           <SwipeableSetRow
                             swipeLeftActions={[
                               {
                                 key: 'del-superset-row',
                                 label: tt('button', 'swipeDelete'),
-                                color: tokens.action.destructive,
+                                color: swipeColors.remove,
                                 onPress: () =>
                                   deleteSupersetRowAt(parent.id, childIds, i),
                               },
@@ -2283,14 +2290,14 @@ export default function TemplateEditorView() {
                               {
                                 key: 'clone-superset-row',
                                 label: tt('button', 'swipeAdd'),
-                                color: tokens.action.success,
+                                color: swipeColors.add,
                                 onPress: () =>
                                   cloneSupersetRowAt(parent.id, childIds, i),
                               },
                               {
                                 key: 'note-superset-row',
                                 label: tt('button', 'swipeNote'),
-                                color: tokens.action.primary,
+                                color: swipeColors.note,
                                 onPress: () => {
                                   if (parentSet)
                                     openSetNoteEditor(parent.id, parentSet);
@@ -3117,6 +3124,7 @@ function ExerciseBody({
                 isActive,
               }: RenderItemParams<SetGroup>) => {
                 const head = g.head;
+                const swipeColors = swipeActionColors(tokens);
                 const isCluster =
                   head.kind === 'dropset' && head.parent_set_id === null;
                 if (isCluster) {
@@ -3125,7 +3133,7 @@ function ExerciseBody({
                     {
                       key: 'delete-cluster',
                       label: tt('button', 'swipeDelete'),
-                      color: tokens.action.destructive,
+                      color: swipeColors.remove,
                       onPress: () => onDeleteCluster(head.id),
                     },
                   ];
@@ -3133,13 +3141,13 @@ function ExerciseBody({
                     {
                       key: 'add-cluster',
                       label: tt('button', 'swipeAdd'),
-                      color: tokens.action.success,
+                      color: swipeColors.add,
                       onPress: () => onAddClusterAfter(head.id),
                     },
                     {
                       key: 'note-cluster',
                       label: tt('button', 'swipeNote'),
-                      color: tokens.action.primary,
+                      color: swipeColors.note,
                       onPress: () => onShowSetNote(head),
                     },
                   ];
@@ -3190,7 +3198,7 @@ function ExerciseBody({
                   {
                     key: 'delete-set',
                     label: tt('button', 'swipeDelete'),
-                    color: tokens.action.destructive,
+                    color: swipeColors.remove,
                     onPress: () => onDeleteSet(head.id),
                   },
                 ];
@@ -3198,13 +3206,13 @@ function ExerciseBody({
                   {
                     key: 'clone-set',
                     label: tt('button', 'swipeAdd'),
-                    color: tokens.action.success,
+                    color: swipeColors.add,
                     onPress: () => onCloneSetAfter(head.id),
                   },
                   {
                     key: 'note',
                     label: tt('button', 'swipeNote'),
-                    color: tokens.action.primary,
+                    color: swipeColors.note,
                     onPress: () => onShowSetNote(head),
                   },
                 ];
@@ -3344,16 +3352,16 @@ function makeStyles(tokens: ThemeTokens) {
     height: StyleSheet.hairlineWidth,
     backgroundColor: tokens.border.default,
   },
-  sectionLabel: { fontSize: 12, color: tokens.text.secondary, fontWeight: '600' },
+  sectionLabel: { fontSize: 14, color: tokens.text.secondary, fontWeight: '600' },
   emptySection: {
-    fontSize: 12,
+    fontSize: 13,
     color: tokens.text.tertiary,
     fontStyle: 'italic',
     paddingHorizontal: 12,
   },
   exCard: {
     borderRadius: 10,
-    backgroundColor: tokens.bg.elevated,
+    backgroundColor: interactiveCardBg(tokens),
     overflow: 'hidden',
   },
   supersetTag: {
@@ -3468,9 +3476,9 @@ function makeStyles(tokens: ThemeTokens) {
   exName: { flexShrink: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   exNameCompact: { fontSize: 13 },
   exSummary: { fontSize: 12, color: tokens.text.secondary },
-  exChevron: { fontSize: 11, color: tokens.text.tertiary },
+  exChevron: { fontSize: 14, color: tokens.text.tertiary },
   exGearBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  exGear: { fontSize: 16, color: tokens.text.tertiary },
+  exGear: { fontSize: 18, color: tokens.text.tertiary },
   setsBox: {
     paddingHorizontal: 12,
     paddingBottom: 10,
@@ -3501,15 +3509,7 @@ function makeStyles(tokens: ThemeTokens) {
   // session 一樣，長按可拖曳時變白色」。Background `#ffffff` 比 session 的
   // `#f3f4f6` 更白，因為 template editor cluster card 內已是淡彩色 tinted 底，
   // pure white 對比更明顯。
-  dragActiveRow: {
-    backgroundColor: '#ffffff',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
+  dragActiveRow: dragActiveRowStyle(tokens),
   supersetRowNoteSlot: {
     width: 28,
     alignItems: 'center',
@@ -3549,12 +3549,12 @@ function makeStyles(tokens: ThemeTokens) {
     flex: 1,
     paddingVertical: 6,
     paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: tokens.bg.elevated,
+    borderRadius: 8,
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
   },
   exFooterBtnCompact: { paddingVertical: 4, paddingHorizontal: 4 },
-  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: tokens.action.primary },
+  exFooterBtnText: { fontSize: 14, fontWeight: '600', color: tokens.action.onPrimary },
   exFooterBtnTextCompact: { fontSize: 10 },
   actionBar: {
     position: 'absolute',

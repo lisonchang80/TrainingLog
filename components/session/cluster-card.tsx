@@ -64,7 +64,13 @@ import {
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
 import { t, tExercise } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  useTheme,
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+  type ThemeTokens,
+} from '@/src/theme';
 
 type ClusterCardGroup = ClusterGroup<
   SessionExerciseRowWithName,
@@ -157,6 +163,7 @@ export function ClusterCard({
 }: ClusterCardProps): React.ReactElement {
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const swipeColors = swipeActionColors(tokens);
   const cycles = computeClusterCycles(group);
   const volume = computeClusterVolume(group);
   // Working-set ordinal per side (slice 10c overnight #7 第 1 點).
@@ -347,7 +354,7 @@ export function ClusterCard({
                             {
                               key: 'del-cluster-cycle',
                               label: t('button', 'swipeDelete'),
-                              color: tokens.action.destructive,
+                              color: swipeColors.remove,
                               onPress: () =>
                                 onDeleteCycle({
                                   a_set_id: c.a_set?.id ?? null,
@@ -363,7 +370,7 @@ export function ClusterCard({
                             {
                               key: 'clone-cluster-cycle',
                               label: '+1',
-                              color: tokens.action.success,
+                              color: swipeColors.add,
                               onPress: () =>
                                 onCloneCycle({
                                   a_set_id: c.a_set?.id ?? null,
@@ -377,7 +384,7 @@ export function ClusterCard({
                             {
                               key: 'note-cluster-cycle',
                               label: t('domain', 'note'),
-                              color: tokens.action.primary,
+                              color: swipeColors.note,
                               onPress: () => onShowCycleNote(noteTarget),
                             },
                           ]
@@ -627,7 +634,7 @@ function toSetRowItem(s: SessionSetWithExercise): SetRowItem {
 function makeStyles(tokens: ThemeTokens) {
   return StyleSheet.create({
     clusterCard: {
-      backgroundColor: tokens.bg.elevated,
+      backgroundColor: interactiveCardBg(tokens),
       borderRadius: 10,
       overflow: 'hidden',
       // Slice 10c overnight #6 + 2026-05-25 G3 walk-back: 砍掉左側 RS 彩色
@@ -635,7 +642,7 @@ function makeStyles(tokens: ThemeTokens) {
       // 移除，不再保留 placeholder（G3 amendment in ADR-0019 § Q8 c）。
     },
     clusterCardExpanded: {
-      backgroundColor: tokens.bg.surface,
+      backgroundColor: interactiveCardBg(tokens),
     },
     clusterCardHeader: {
       flexDirection: 'row',
@@ -798,17 +805,7 @@ function makeStyles(tokens: ThemeTokens) {
     // Bug #309 — `bg.surface` == the expanded card background → invisible drag
     // feedback; use `bg.elevated` + accent border so the grabbed cycle visibly
     // lifts in both light + dark (用戶要求「拖曳時變色如模板一樣」).
-    cycleRowDragActive: {
-      backgroundColor: tokens.bg.elevated,
-      borderWidth: 1,
-      borderColor: tokens.action.primary,
-      elevation: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.18,
-      shadowRadius: 6,
-      borderRadius: 8,
-    },
+    cycleRowDragActive: dragActiveRowStyle(tokens),
     // Shared `#` button at row start — replaces per-side label buttons.
     // Visual style matches `setLabelBtnCompact` in set-row-content so the
     // affordance reads as "cluster row's set_kind toggle".
@@ -880,7 +877,7 @@ function makeStyles(tokens: ThemeTokens) {
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: tokens.bg.elevated,
+      backgroundColor: tokens.bg.surface,
     },
     completeBtnDone: {
       backgroundColor: tokens.action.success,
@@ -889,7 +886,7 @@ function makeStyles(tokens: ThemeTokens) {
       opacity: 0.4,
     },
     completeBtnText: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: '700',
       color: tokens.text.secondary,
     },
