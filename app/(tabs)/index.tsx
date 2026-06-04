@@ -22,7 +22,7 @@ import {
   updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
-import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
+import { getActiveProgram, listPrograms } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
   countSessionExercises,
@@ -54,6 +54,7 @@ import {
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
 import {
+  deleteSetting,
   getAutoPopupRestTimer,
   getSetting,
   getUnitPreference,
@@ -112,20 +113,11 @@ import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRe
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
-  cloneTemplateWithSubTag,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
   listTemplates,
-  overwriteTemplateBody,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
-import {
-  createProgram,
-  listPrograms,
-  // Aliased — local useState exposes `setActiveProgram` setter (line ~209)
-  // that shadows this name. The repo fn is the row-flipping DB helper.
-  setActiveProgram as setActiveProgramRow,
-} from '@/src/adapters/sqlite/programRepository';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
 import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
@@ -871,16 +863,25 @@ export default function TodayScreen() {
   const onPickTemplate = async (item: TemplateSummary) => {
     setBusy(true);
     try {
+      // 2026-06-04 — sticky last-used (program + intensity) is now PER-TEMPLATE
+      // (key suffixed with the template id) so each template remembers its own
+      // last selection instead of all templates sharing one global default.
       const [programSummaries, lastProgram, lastTag] = await Promise.all([
         listPrograms(db),
-        getSetting<string>(db, LAST_PROGRAM_KEY),
-        getSetting<string>(db, LAST_SUB_TAG_KEY),
+        getSetting<string>(db, `${LAST_PROGRAM_KEY}:${item.id}`),
+        getSetting<string>(db, `${LAST_SUB_TAG_KEY}:${item.id}`),
       ]);
       setSheetPrograms(
         programSummaries.map((p) => ({ id: p.id, name: p.name })),
       );
-      setSheetLastProgramId(lastProgram);
-      setSheetLastSubTag(lastTag);
+      // Default the sheet selection to the template's OWN (program, sub_tag)
+      // when it has no per-template sticky yet (e.g. a template just created via
+      // 模板訓練「＋」 + classified in the editor — its sticky is only written by
+      // start/edit-via-sheet, never by editor-save). Without this the sheet
+      // defaulted to 通用, which mismatches the template's real triple →
+      // planResolveTarget fires the「尚未建立模板」fallback alert on re-edit.
+      setSheetLastProgramId(lastProgram ?? item.program_id ?? null);
+      setSheetLastSubTag(lastTag ?? item.sub_tag ?? null);
       setSheetTemplate(item);
     } catch (e) {
       Alert.alert(
@@ -894,114 +895,20 @@ export default function TodayScreen() {
 
   const closeSheet = () => setSheetTemplate(null);
 
-  /**
-   * Inline「新增計畫」handler — creates a minimal Program (ADR-0004 defaults),
-   * refreshes the sheet's picker, returns {id, name} so the sheet auto-selects
-   * the new option. Mirrors the deleted Templates tab handler verbatim.
-   */
-  const handleCreateProgram = async (
-    name: string,
-  ): Promise<{ id: string; name: string }> => {
-    const id = randomUUID();
-    const today = localMsToIsoDate(Date.now());
-    await createProgram(db, {
-      program: {
-        id,
-        name,
-        main_tag: null,
-        cycle_length: 3,
-        cycle_count: 1,
-        start_date: today,
-        is_active: 0,
-      },
-    });
-    // Match wizard-path UX (app/program-wizard/new.tsx) — inline-created
-    // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
-    // picker pick it up immediately. Atomic per setActiveProgram impl.
-    await setActiveProgramRow(db, { id });
-    setSheetPrograms((prev) => [...prev, { id, name }]);
-    return { id, name };
-  };
-
-  /**
-   * Inline「新增強度」handler — clone the sheet template under
-   * (program_id, new sub_tag) so the new chip is immediately backed by a real
-   * row. Returns void; the sheet narrows scope to「user explicitly created a
-   * brand-new sub_tag」per round 38.
-   */
-  const handleCloneTemplateWithNewSubTag = async (
-    sub_tag: string,
-    program_id: string,
-  ): Promise<void> => {
-    if (!sheetTemplate) {
-      throw new Error('NO_SHEET_TEMPLATE');
-    }
-    try {
-      await cloneTemplateWithSubTag(db, {
-        source_template_id: sheetTemplate.id,
-        new_program_id: program_id,
-        new_sub_tag: sub_tag,
-        uuid: randomUUID,
-      });
-    } catch (e) {
-      // #3 ④「覆蓋」: the clone's (name, program_id, sub_tag) triple collides
-      // with an existing template Y. Offer [取消][覆蓋] mirroring ①. On 覆蓋,
-      // replace Y's body with the source template's content (Y keeps its
-      // identity) and proceed exactly as the happy clone path would — the
-      // sheet adds the sub_tag chip + activates it, and onSheetStart's
-      // lookup-or-spawn finds Y via findTemplateByTriple. Source untouched.
-      const message = e instanceof Error ? e.message : String(e);
-      if (message !== 'DUPLICATE_TEMPLATE_TRIPLE') throw e;
-      const existing = await findTemplateByTriple(db, {
-        name: sheetTemplate.name,
-        program_id,
-        sub_tag,
-      });
-      if (!existing) throw e; // no Y to resolve — let the sheet alert.
-      // Resolve the user's [取消]/[覆蓋] choice, then act on it.
-      const overwrite = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          t('alert', 'variantExists'),
-          t('alert', 'overwriteTemplateConfirm'),
-          [
-            {
-              text: t('common', 'cancel'),
-              style: 'cancel',
-              onPress: () => resolve(false),
-            },
-            {
-              text: t('button', 'overwrite'),
-              style: 'destructive',
-              onPress: () => resolve(true),
-            },
-          ],
-          { onDismiss: () => resolve(false) },
-        );
-      });
-      if (!overwrite) {
-        // User cancelled — keep the inline state open without surfacing the
-        // sheet's own dup alert. Sentinel swallowed by the sheet's catch.
-        throw new Error('OVERWRITE_CANCELLED');
-      }
-      await overwriteTemplateBody(db, {
-        source_template_id: sheetTemplate.id,
-        target_template_id: existing.id,
-        uuid: randomUUID,
-      });
-    }
-    // Refresh so the new clone (or overwritten Y) shows up in the 模板訓練
-    // list. No need to touch sheet visibility — sheet keeps `sheetTemplate`
-    // as its source.
-    await refresh();
-  };
-
   const persistSticky = async (
+    template_id: string,
     program_id: string,
     sub_tag: string | null,
   ): Promise<void> => {
-    await setSetting<string>(db, LAST_PROGRAM_KEY, program_id);
+    // Per-template sticky (2026-06-04) — keyed by template id so each template
+    // remembers its own last (program, intensity) selection.
+    await setSetting<string>(db, `${LAST_PROGRAM_KEY}:${template_id}`, program_id);
     if (sub_tag != null) {
-      await setSetting<string>(db, LAST_SUB_TAG_KEY, sub_tag);
+      await setSetting<string>(db, `${LAST_SUB_TAG_KEY}:${template_id}`, sub_tag);
+    } else {
+      // 通用 (no intensity) — clear any stored value so the next open defaults
+      // back to 通用 rather than resurfacing a stale intensity.
+      await deleteSetting(db, `${LAST_SUB_TAG_KEY}:${template_id}`);
     }
   };
 
@@ -1071,7 +978,11 @@ export default function TodayScreen() {
     if (!sheetTemplate) return;
     setBusy(true);
     try {
-      await persistSticky(selection.period_id, selection.intensity_id);
+      await persistSticky(
+        sheetTemplate.id,
+        selection.period_id,
+        selection.intensity_id,
+      );
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       closeSheet();
       if (resolved.alert) {
@@ -1119,7 +1030,11 @@ export default function TodayScreen() {
         );
         return;
       }
-      await persistSticky(selection.period_id, selection.intensity_id);
+      await persistSticky(
+        sheetTemplate.id,
+        selection.period_id,
+        selection.intensity_id,
+      );
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       const { session_id } = await startSessionFromTemplate(db, {
         template_id: resolved.template_id,
@@ -2516,8 +2431,6 @@ export default function TodayScreen() {
           lastUsedSubTag={sheetLastSubTag}
           onEdit={onSheetEdit}
           onStart={onSheetStart}
-          onCreateProgram={handleCreateProgram}
-          onCloneTemplateWithNewSubTag={handleCloneTemplateWithNewSubTag}
           onCancel={closeSheet}
         />
       </SafeAreaView>
