@@ -753,19 +753,18 @@ export default function TemplateEditorView() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          // #3 ③「覆蓋」= merge X→Y + delete X (ADR-0003 amendment, 拍板 A).
-          // The re-classification the user just confirmed collides with an
-          // existing template Y. Offer [取消][覆蓋] mirroring ①. On 覆蓋:
+          // #3 ③「覆蓋」= copy X→Y, KEEP X (ADR-0003 2026-06-04 翻盤 拍板 B：
+          // 原拍板 A 會 delete X，user 改為不刪＝複製語意，避免破壞性刪除).
+          // The re-classification collides with an existing template Y. On 覆蓋:
           //   1. commitTemplateDraft writes X's body at its OLD classification
-          //      (we did NOT attachTemplateToProgram in this throwing path, so
-          //      X still carries committed's program_id/sub_tag → no
-          //      re-collision on the body commit).
+          //      (X keeps committed's program_id/sub_tag → no re-collision; the
+          //      editor's classification change is intentionally NOT applied).
           //   2. overwriteTemplateBody copies X's body into Y (Y keeps id /
           //      name / program_id / sub_tag).
-          //   3. executeTemplateDeletion removes X.
-          // Then navigate away — the editor is showing X which is now deleted;
-          // we do NOT re-open Y in the editor (see report's nav note). 取消
-          // just clears busy and keeps the editor on X.
+          // X is NOT deleted — it stays at its old (program, sub_tag) slot, so
+          // X and Y differ in triple (both valid). Net: Y holds a COPY of X's
+          // content; X unchanged. (Name never lost — Y shares X's name, which
+          // is exactly why it collided.) Then navigate away. 取消 keeps editor on X.
           const now = () => Date.now();
           const existing = await findTemplateByTriple(db, {
             name: args.name || draft.name,
@@ -803,7 +802,8 @@ export default function TemplateEditorView() {
                         uuid: randomUUID,
                         now,
                       });
-                      await executeTemplateDeletion(db, draft.id);
+                      // 拍板 B：不刪 X（複製語意）。X 留在舊 (program, sub_tag)
+                      // 槽，與 Y 三元組不同故兩者皆合法。
                       savedRef.current = true;
                       Alert.alert(tt('status', 'saved'), '', [
                         {

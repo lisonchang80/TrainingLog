@@ -78,12 +78,25 @@ cells, history) keeps resolving.
 |---|---|---|---|
 | ① | session「另存模板」(`convertSessionToTemplate` create) | the session's tree | session untouched |
 | ② | 精靈「新建模板」存 | wizard pre-created draft X | delete X; wizard pill → Y |
-| ③ | 模板編輯器一般存 (re-classify collides) | the editing draft X | **merge X→Y, delete X** (拍板 A) |
+| ③ | 模板編輯器一般存 (re-classify collides) | the editing draft X | **copy X→Y, KEEP X** (拍板 B；2026-06-04 翻盤 A→B，見下) |
 | ④ | start-template-sheet「新增強度」clone | the clone-source template | source untouched |
 
-**③ chose "merge X→Y + delete X"** (option A) over "overwrite Y, leave X at
-its old classification" (option B) — A matches the user intent "move X into
-this slot"; B leaves a confusing duplicate.
+~~**③ chose "merge X→Y + delete X"** (option A) over option B — A matches "move
+X into this slot"; B leaves a confusing duplicate.~~ **（2026-06-04 翻盤 → B，見下）**
+
+> **2026-06-04 翻盤 拍板 A → B（device smoke 回報）**：③ 改為
+> **copy X→Y, KEEP X**（option B）。On 覆蓋，X 的 body commit 在**舊**
+> (program, sub_tag)（編輯器的改分類**不套用**），`overwriteTemplateBody`
+> 把 body 複製進 Y，**X 不刪**。X 與 Y 三元組不同（X 留舊槽、Y 在撞到的槽）→
+> 兩者皆合法、無唯一性違反。
+>
+> **理由**：user 不接受破壞性刪除既有模板。原 A 的「confusing duplicate」疑慮
+> 在此可接受——名稱在任一選項下都不會遺失（Y 與 X 同名，正是它會撞的原因），
+> 改成 B 只是多留一份 X 的舊分類變體，由 user 自行決定是否再清。
+>
+> **僅限 ③**：②（精靈新建）與 ④（clone）的 X 是「建立在 Y 同一三元組上的
+> 暫時 row」，保留會違反唯一性 → **結構上仍必須 delete X**，維持原行為不變。
+> 關聯 commit：見 slice/template-overwrite tip。
 
 ### Mechanism
 
