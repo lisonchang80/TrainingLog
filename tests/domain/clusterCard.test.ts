@@ -444,6 +444,28 @@ describe('computeClusterVolume', () => {
     expect(vol.denominator).toBe(expected);
   });
 
+  it('orphan dropset follower (head id missing) defers to is_logged 0 — excluded from numerator', () => {
+    // Defensive: a follower whose parent_set_id points at a head not present
+    // in the side's set list resolves effective is_logged to 0 (the `?? 0`
+    // fallback) — it must never count toward the numerator, but still counts
+    // toward the denominator as a non-warmup row.
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      mkSet('p2', 'p', 2, {
+        set_kind: 'dropset',
+        is_logged: 0,
+        weight_kg: 40,
+        reps: 8,
+        parent_set_id: 'ghost-head', // head row absent from this side
+      }),
+      mkSet('f1', 'f', 1, { weight_kg: 50, reps: 8, is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const vol = computeClusterVolume(group);
+    expect(vol.numerator).toBe(50 * 8); // only B; orphan follower → effLogged 0
+    expect(vol.denominator).toBe(40 * 8 + 50 * 8); // orphan still non-warmup
+  });
+
   it('dropset chain with head NOT logged: chain entirely excluded from numerator', () => {
     const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
     const sets = [
@@ -602,6 +624,24 @@ describe('computeClusterCycleProgress', () => {
     expect(computeClusterCycleProgress(cycles)).toEqual({ done: 1, total: 2 });
   });
 
+  it('asymmetric A=null, B=working: counted via B (a_set null hits the null guard)', () => {
+    // Mirror of the A=working/B=null case but with the SHORT side on A, so
+    // isUnitSide(c.a_set) evaluates the `s === null` guard before falling
+    // through to isUnitSide(c.b_set).
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      // A side only 1 row → cycle 2 a_set = null
+      mkSet('p1', 'p', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f1', 'f', 1, { set_kind: 'working', is_logged: 1 }),
+      mkSet('f2', 'f', 2, { set_kind: 'working', is_logged: 1 }),
+    ];
+    const group = groupClusterSides(exs, sets)[0];
+    const cycles = computeClusterCycleProgress(computeClusterCycles(group));
+    // cycle 1: both working logged → done+total; cycle 2: A=null, B=working
+    // logged → total only (both_logged false because A absent).
+    expect(cycles).toEqual({ done: 1, total: 2 });
+  });
+
   it('empty cluster: 0/0', () => {
     expect(computeClusterCycleProgress([])).toEqual({ done: 0, total: 0 });
   });
@@ -657,6 +697,20 @@ describe('groupClusterSides — display_rank ordering (superset sync)', () => {
   it('absent display_rank falls back to ordering (legacy unchanged)', () => {
     const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
     const sets = [mkSet('s2', 'p', 2), mkSet('s1', 'p', 1), mkSet('b1', 'f', 1)];
+    const group = groupClusterSides(exs, sets)[0];
+    expect(group.a.sets.map((s) => s.id)).toEqual(['s1', 's2']);
+  });
+
+  it('mixed display_rank / ordering: each side independently uses rank-or-ordering', () => {
+    // s1 has an explicit (low) display_rank; s2 has none and falls back to its
+    // ordering. The ranked row must sort ahead of the fallback row, exercising
+    // both the present and absent arms of the `display_rank ?? ordering` pair.
+    const exs = [mkEx('p', 1, null), mkEx('f', 2, 'p')];
+    const sets = [
+      { ...mkSet('s2', 'p', 5) }, // no display_rank → ordering 5
+      { ...mkSet('s1', 'p', 9), display_rank: 0 }, // ranked ahead despite higher ordering
+      mkSet('b1', 'f', 1),
+    ];
     const group = groupClusterSides(exs, sets)[0];
     expect(group.a.sets.map((s) => s.id)).toEqual(['s1', 's2']);
   });
