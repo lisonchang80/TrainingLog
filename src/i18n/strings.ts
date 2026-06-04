@@ -61,6 +61,10 @@ export const strings = {
       inProgress: '· 進行中',
       // Phase 4.5 batch 1 — plain "自訂" (no dot prefix) for wizard intensity chip.
       customPlain: '自訂',
+      // App-wide ErrorBoundary fallback (components/error-boundary.tsx).
+      errorTitle: '發生未預期的錯誤',
+      errorBody: '畫面載入時出了點問題。請點下方按鈕重試；若仍無法恢復，請重新開啟 App。',
+      retry: '重新嘗試',
     },
 
     /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
@@ -773,6 +777,11 @@ export const strings = {
       inProgress: '· In progress',
       // Phase 4.5 batch 1 — plain "Custom" (no dot prefix) for wizard intensity chip.
       customPlain: 'Custom',
+      // App-wide ErrorBoundary fallback (components/error-boundary.tsx).
+      errorTitle: 'Something went wrong',
+      errorBody:
+        'A problem occurred while loading the screen. Tap below to try again; if it keeps happening, please reopen the app.',
+      retry: 'Try again',
     },
 
     domain: {

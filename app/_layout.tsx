@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { DatabaseProvider } from '@/components/database-provider';
+import { ErrorBoundary } from '@/components/error-boundary';
 import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
@@ -113,6 +114,14 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <DatabaseProvider>
       <ThemeProvider>
+        {/* Recovery-robustness audit (HIGH) — app-wide ErrorBoundary lives
+            INSIDE <ThemeProvider> so its fallback can call useTheme() (which
+            throws outside the provider). It still wraps the whole screen tree
+            (NavThemeBridge → Stack → every route), so a render-time throw in
+            any screen shows a recoverable「重新嘗試」fallback instead of
+            white-screening the app. Placed here at the provider-render root,
+            well clear of the <Stack.Screen> nav-title block below. */}
+        <ErrorBoundary>
         <NavThemeBridge>
           <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -203,6 +212,7 @@ export default function RootLayout() {
           />
           </Stack>
         </NavThemeBridge>
+        </ErrorBoundary>
       </ThemeProvider>
     </DatabaseProvider>
     </GestureHandlerRootView>
