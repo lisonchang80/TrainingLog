@@ -57,7 +57,6 @@ import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
   createProgram,
   listPrograms,
-  setActiveProgram,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
@@ -354,13 +353,16 @@ export function TemplateMetaSheet({
           is_active: 0,
         },
       });
-      // Match wizard-path UX (app/program-wizard/new.tsx) — newly-created
-      // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
-      // picker pick it up without an extra user step. Atomic per
-      // setActiveProgram impl (single transaction clears every other row).
-      await setActiveProgram(db, { id: newId });
+      // 2026-06-04 fix — do NOT setActiveProgram here. Unlike the program
+      // wizard (app/program-wizard/new.tsx), a program created inside this
+      // sheet is just a CLASSIFICATION bucket for the template being saved.
+      // Activating it would hijack the global active program (which drives the
+      // 計劃 tab + 訓練 tab「計劃訓練」row), making those views jump to this
+      // throwaway program — the bug the user reported. The user can still
+      // activate it explicitly from the 計劃 tab if they actually want to.
       // Append to local chip list (parent will re-fetch next open).
       // Match the ProgramSummary shape — cellCount = 0 since we didn't seed cells.
+      // is_active stays 0 (see note above) and other programs are left untouched.
       const newSummary: ProgramSummary = {
         id: newId,
         name: trimmedName,
@@ -368,13 +370,10 @@ export function TemplateMetaSheet({
         cycle_length: seedLength,
         cycle_count: seedCount,
         start_date: seedStart,
-        is_active: 1,
+        is_active: 0,
         cellCount: 0,
       };
-      setProgramList((prev) => [
-        ...prev.map((p) => (p.is_active ? { ...p, is_active: 0 as const } : p)),
-        newSummary,
-      ]);
+      setProgramList((prev) => [...prev, newSummary]);
       setProgramId(newId);
       // New program has no intensities yet — clear any prior selection so it
       // doesn't ghost (2026-06-04 fix).
