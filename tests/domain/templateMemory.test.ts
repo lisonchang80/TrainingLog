@@ -139,6 +139,36 @@ describe('templateMemory — deriveLatestSetsForExercise', () => {
     expect(out![1]).toMatchObject({ id: 'u-2', parent_set_id: 'u-1' });
   });
 
+  it('drops a dangling parent_set_id to null when the head is absent from the candidate', () => {
+    // Defensive: a follower whose parent_set_id references a set that is not in
+    // the same candidate's set list cannot be remapped — the `?? null` fallback
+    // (line 68) severs the dangling link rather than carrying a stale id.
+    const candidates: MemoryCandidate[] = [
+      {
+        template_exercise_id: 'te-1',
+        exercise_id: 'bench',
+        updated_at: 1,
+        sets: [
+          {
+            id: 'foll-orig',
+            position: 0,
+            kind: 'dropset',
+            reps: 6,
+            weight: 70,
+            parent_set_id: 'missing-head', // head not present in this set list
+            notes: null,
+          },
+        ],
+      },
+    ];
+    const out = deriveLatestSetsForExercise({
+      exercise_id: 'bench',
+      candidates,
+      uuid: deterministicUuid('u'),
+    });
+    expect(out![0]).toMatchObject({ id: 'u-1', parent_set_id: null });
+  });
+
   it('strips notes (memory is structural — notes are per-template)', () => {
     const candidates: MemoryCandidate[] = [
       {
