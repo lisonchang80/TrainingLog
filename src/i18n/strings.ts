@@ -236,6 +236,15 @@ export const strings = {
       // Slice 13b (2026-05-25) — Settings 「Apple Health 整合」CTA.
       connectAppleHealth: '連結 Apple Health',
       openSystemSettings: '開啟系統設定',
+      // 2026-06-04 a11y sweep — set-row-content (SetRowContent) interactive cells.
+      // {label} = 目前組別 (熱 / 工作組序號 / D{N})。
+      a11yCycleSetKind: '切換組別',
+      a11yEditWeight: '編輯重量',
+      a11yEditReps: '編輯次數',
+      a11yAddDropset: '新增遞減組',
+      a11yRemoveDropset: '移除遞減組',
+      // 2026-06-04 a11y sweep — numeric-keypad (NumericKeypad) ⌫ key.
+      a11yKeypadBackspace: '刪除',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -943,6 +952,14 @@ export const strings = {
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 CTA.
       connectAppleHealth: 'Connect Apple Health',
       openSystemSettings: 'Open System Settings',
+      // 2026-06-04 a11y sweep — set-row-content (SetRowContent) interactive cells.
+      a11yCycleSetKind: 'Cycle set kind',
+      a11yEditWeight: 'Edit weight',
+      a11yEditReps: 'Edit reps',
+      a11yAddDropset: 'Add drop set',
+      a11yRemoveDropset: 'Remove drop set',
+      // 2026-06-04 a11y sweep — numeric-keypad (NumericKeypad) ⌫ key.
+      a11yKeypadBackspace: 'Delete',
     },
 
     page: {
