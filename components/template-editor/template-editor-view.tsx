@@ -920,19 +920,18 @@ export default function TemplateEditorView() {
   );
 
   /**
-   * 2026-06-04 redesign #4/#5/#6 — ⋯選單「另存模板」/「另存強度」確認。
+   * 2026-06-04 redesign #4/#5/#6（含異常1 翻盤）— ⋯選單「另存模板」/「另存強度」確認。
    * 兩個 mode 共用此 handler（差異純在 sheet 的 lockName/lockProgram 外觀）。
    *
-   * 流程（reuse 既有已測 primitive，不新增 repo helper）：
-   *   1. 若 dirty → persistDraft 先把當前 body 存回 X（名稱+分類在編輯器已唯讀
-   *      → 三元組不變 → 不會撞 X 自己）。「另存」= 以當前 body 建新模板。
-   *   2. findTemplateByTriple(目標三元組)：
-   *      - 撞到 X 自己（同三元組）→ 視為單純存檔（步驟 1 已存），toast 完成儲存。
-   *      - 撞到別的 Y → 跳覆蓋確認（overwriteTemplateBody source=X→target=Y、
-   *        Y 身分保留、**X 不刪**＝複製語意，比照 ADR-0003 ①）。
-   *      - 無撞 → createTemplate(Y) + attachTemplateToProgram(Y, 三元組) +
-   *        overwriteTemplateBody(source=X→target=Y)＝從 X body 複製出新模板 Y。
-   *   3. 成功皆 toast + 留在編輯器（編輯器仍停在 X、re-hydrate 讓 dirty 歸零）。
+   * 機制（**完全不碰正在編輯的 X**；以當前記憶體 draft body 建/覆蓋一個「不同的」目標）：
+   *   findTemplateByTriple(目標三元組)：
+   *     - 撞到 X 自己（同三元組）→ 擋下並提示「另存需用不同名稱/計劃/強度，改用儲存更新 X」。
+   *     - 撞到別的 Y → 跳覆蓋確認 → writeBodyTo(Y)：draft 經 remapDraftBody fresh-id 重映後
+   *       commitTemplateDraft 到 Y → Y body 換成當前 body、**Y 身分(id/name/program/sub_tag/
+   *       color)保留、X 不刪**（複製語意，比照 ADR-0003 ①）。
+   *     - 無撞 → createTemplate(Y) + attachTemplateToProgram(Y, 三元組) + writeBodyTo(Y)
+   *       ＝從當前 body 建出新模板 Y。
+   *   成功皆 toast + 編輯器續停在 X（X 的 committed 狀態未動，故不需 persistDraft / 不動 dirty）。
    */
   const onSaveAsConfirm = useCallback(
     async (args: {
