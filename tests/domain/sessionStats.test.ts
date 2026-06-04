@@ -275,4 +275,19 @@ describe('formatTrainingDuration (overnight #47)', () => {
   it('7325 seconds (2hr 2:05) → 2 hr 2\' 05"', () => {
     expect(formatTrainingDuration(7325)).toBe(`2 hr 2' 05"`);
   });
+
+  it('negative seconds clamp to 0\' 00"', () => {
+    expect(formatTrainingDuration(-1)).toBe(`0' 00"`);
+    expect(formatTrainingDuration(-3600)).toBe(`0' 00"`);
+  });
+
+  it('non-finite seconds clamp to 0\' 00"', () => {
+    expect(formatTrainingDuration(NaN)).toBe(`0' 00"`);
+    expect(formatTrainingDuration(Infinity)).toBe(`0' 00"`);
+    expect(formatTrainingDuration(-Infinity)).toBe(`0' 00"`);
+  });
+
+  it('floors fractional seconds before formatting', () => {
+    expect(formatTrainingDuration(65.9)).toBe(`1' 05"`);
+  });
 });

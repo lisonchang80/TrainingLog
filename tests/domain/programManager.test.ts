@@ -222,6 +222,40 @@ describe('programManager — cellForDate / todayCell', () => {
   it('todayCell returns null for null active program', () => {
     expect(todayCell({ active: null, today: '2026-05-08' })).toBeNull();
   });
+
+  it('todayCell delegates to cellForDate for a non-null active program', () => {
+    let n = 0;
+    const cells = expandWizardDraft({
+      program: PROGRAM,
+      dayPlans: [{ day_index: 0, template_id: 't1', sub_tag: '10RM' }],
+      uuid: () => `u${n++}`,
+    });
+    const cell = todayCell({
+      active: { program: PROGRAM, cells },
+      today: '2026-05-08', // cycle 2, day 0
+    });
+    expect(cell).not.toBeNull();
+    expect(cell?.cycle_index).toBe(1);
+    expect(cell?.day_index).toBe(0);
+    expect(cell?.template_id).toBe('t1');
+  });
+
+  it('todayCell returns the rest-day cell (template_id null) for an unplanned day', () => {
+    let n = 0;
+    const cells = expandWizardDraft({
+      program: PROGRAM,
+      dayPlans: [{ day_index: 0, template_id: 't1', sub_tag: '10RM' }],
+      uuid: () => `u${n++}`,
+    });
+    // expandWizardDraft materialises a cell for every day in the cycle; an
+    // unplanned day is a rest cell with template_id === null.
+    const cell = todayCell({
+      active: { program: PROGRAM, cells },
+      today: '2026-05-09', // cycle 2, day 1 — no template planned
+    });
+    expect(cell?.day_index).toBe(1);
+    expect(cell?.template_id).toBeNull();
+  });
 });
 
 // Slice 10b — RESERVED_NONE_PROGRAM_ID seed label resolution
