@@ -114,3 +114,72 @@ X into this slot"; B leaves a confusing duplicate.~~ **（2026-06-04 翻盤 → 
 Shipped incrementally: **Phase 1 = ① + the repo `overwriteTemplateId` arg**
 (the screenshot case); ④ then ②③ follow. Each phase device-smoked before merge.
 
+---
+
+## Amendment 2026-06-04 — Saved-template editor 儲存 / 另存 UX redesign
+
+The "已儲存模板編輯器" (訓練 tab → 模板訓練 → tap a saved template =
+`app/template/[id].tsx`) reworked its save / save-as UX after a full grill.
+7 拍板:
+
+1. **儲存 = pure body commit.** The editor's top-right「儲存」now commits only
+   the body (exercises / sets) at the template's **existing** (name,
+   program_id, sub_tag), shows a「完成儲存」toast, and **stays on the editor**.
+   No `TemplateMetaSheet`, no re-classification, no navigation. (`onSaveBodyOnly`.)
+2. **Name + classification are read-only in the editor.** The header name is a
+   static `Text` (was an editable `TextInput`); program / sub_tag are display-
+   only. Changing any of them now goes through 另存模板 / 另存強度 (#5/#6 below).
+3. (folded into #1 — toast + stay; the earlier「回首頁」idea was withdrawn.)
+4. **另存模板** (⋯ menu, was a stub Alert) — opens `TemplateMetaSheet` with the
+   name pre-filled + editable and program / 強度 selectable + creatable. Builds
+   a **new** template from the current body.
+5. **另存強度** (⋯ menu, new; shown only when the template has a specific
+   program — 通用 templates have no intensity dimension) — same sheet but with
+   `lockName` + `lockProgram` (both read-only); only 強度 is selectable /
+   creatable. Builds a new variant from the current body.
+6. **覆蓋 on 另存 collision** — when 另存模板 / 另存強度 hits an existing triple
+   **Y**, confirm → replace Y's body with the current body, **keep Y's
+   identity**, and **do NOT delete the editing template X** (copy semantics,
+   mirrors ①). When the chosen triple equals X's own, it's a plain save.
+7. **開始訓練** button is now a filled primary CTA (action.primary background +
+   white bold text) to stand out from the secondary actions.
+
+### ③ superseded for the normal editor
+
+The 2026-06-03 amendment's collision site **③ (模板編輯器一般存 — re-classify
+collides)** is now **moot for the saved-template editor**: since 儲存 no longer
+re-classifies (#1) and name/classification are read-only (#2), the editor's
+save can never produce a `DUPLICATE_TEMPLATE_TRIPLE`. The ③ A→B「copy X→Y, keep
+X」logic + its `DUPLICATE_TEMPLATE_TRIPLE` catch now live **only** in
+`onSaveSheetConfirm`, which serves **only the programs-tab「+ 建立並導入」
+import path**. Sites ① ② ④ are unchanged.
+
+### Mechanism — 另存 builds Y from the in-memory draft; X is never written
+
+> **2026-06-04 fix — 另存 must NOT modify the original X.** The first cut
+> committed the editor draft back to X before cloning (so X got saved on every
+> 另存). User reported this as a bug. The fix: 另存 materializes the **current
+> in-memory editor body** straight into the target, never touching X's DB row.
+
+`onSaveAsConfirm` (shared by 另存模板 + 另存強度; the lock difference is purely
+sheet display) composes pure + tested primitives, **no `persistDraft`, no write
+to X**:
+
+- `remapDraftBody(draft.exercises, targetId, uuid)` (pure, in
+  `src/domain/template/templateDraft.ts`) — deep-copies the current editor body
+  with **fresh ids**, remapping `parent_id` (superset) + `parent_set_id`
+  (dropset) so linkage survives.
+- resolve the target triple via `findTemplateByTriple`:
+  - **= X itself** → blocked with an alert (that would modify X; use 儲存
+    instead). 另存 requires a distinct triple.
+  - **= existing Y** → #6 覆蓋: `commitTemplateDraft(committed=getTemplateFull(Y),
+    draft=remapped→Y)` — diff wipes Y's old body + inserts the current body; Y's
+    identity (name/program/sub_tag/color) sourced from Y, never the draft.
+  - **none** → `createTemplate(Y)` + `attachTemplateToProgram(Y, triple)` +
+    `commitTemplateDraft(committed=emptyY, draft=remapped→Y)`.
+
+X is never read-modified-written by 另存 → unsaved editor edits flow into Y while
+X stays exactly as last saved (copy semantics). The editor stays on X (no
+re-hydrate). Coverage: `tests/repository/templateSaveAsFromTemplate.test.ts`
+(remapDraftBody fresh-id/remap + Y-gets-edits + X-untouched + 覆蓋).
+
