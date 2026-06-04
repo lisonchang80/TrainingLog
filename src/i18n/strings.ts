@@ -394,7 +394,7 @@ export const strings = {
       cannotStartSession: '無法開始訓練',
       cannotCreateTemplate: '無法建立模板',
       failed: '失敗',
-      noActiveSession: '找不到進行中的訓練 session。請先回 Today 頁開始一次訓練後再試。',
+      noActiveSession: '找不到進行中的訓練。請先回 Today 頁開始一次訓練後再試。',
       sessionAlreadyInProgress: '已有進行中的訓練',
       endActiveSessionFirst: '請先在「今日」分頁結束目前的訓練再開始新的。',
       exerciseNotFound: '找不到此動作。',
@@ -441,7 +441,7 @@ export const strings = {
       addCycleFailed: '新增週期失敗',
       endSessionFailed: '無法結束訓練',
       variantExists: '變體已存在',
-      notEnoughDataPoints: '此時段資料點不足，至少需 2 次 Session。',
+      notEnoughDataPoints: '此時段資料點不足，至少需 2 次訓練。',
       defaultVariantUndeletable:
         '此模板有「通用」變體（計畫或強度未指定），是歷史 prefill 的兜底層、不可刪。\n\n若需刪除個別非通用變體，請點該 row 進入編輯器、從 ⋯ 選單刪除。',
       // Phase 4.5 batch 1 — SessionTimeEditorSheet end-must-be-after-start warning.
@@ -495,9 +495,9 @@ export const strings = {
       alreadyASide: '已是 A 側',
       alreadyBSide: '已是 B 側',
       // exercise-chart axis hints
-      highestVolumePerSession: '（每次 Session 容量最大一組）',
-      heaviestSetPerSession: '（每次 Session 最重一組）',
-      maxEstimated1rmPerSession: '（每次 Session 預估 1RM 最大值）',
+      highestVolumePerSession: '（每次訓練 容量最大一組）',
+      heaviestSetPerSession: '（每次訓練 最重一組）',
+      maxEstimated1rmPerSession: '（每次訓練 預估 1RM 最大值）',
       firstTime: '（第一次）',
       // misc badges
       allTimeWeightPr: '★ 全紀錄重量 PR',
@@ -535,9 +535,9 @@ export const strings = {
       colorPickerFootnote: '選色後會 group-wide 連動所有同 name sibling templates。',
       exercisePickerFootnote: '點選動作即加入「一般動作區」；用 ⚙「設為常設」改類別。',
       noteEditorFootnote: '備註用於記錄動作 cue / 注意事項。',
-      restTimeFootnote: 'Session 對此動作 set ✓ 後自動跳此秒數倒數。',
-      noHistoryYet: '還沒有此動作的歷史紀錄。完成第 1 次 Session 後就會出現。',
-      noTrainingThisPeriod: '本期間尚無 Session',
+      restTimeFootnote: '訓練中對此動作 set ✓ 後自動跳此秒數倒數。',
+      noHistoryYet: '還沒有此動作的歷史紀錄。完成第 1 次訓練後就會出現。',
+      noTrainingThisPeriod: '本期間尚無訓練',
       noCapacityRecent: '近 6 期尚無訓練容量',
       achievementLocked: '未解鎖',
       defaultVariantHint: '(固定項)',
@@ -553,7 +553,7 @@ export const strings = {
       filterTrainingGoal: '訓練目的',
       filterMilestone: '里程碑',
       editTrainingTimeA11y: '編輯訓練時間',
-      heatmapSubtitle: '顏色 = per-Session 次數分位',
+      heatmapSubtitle: '顏色 = 每次訓練 次數分位',
       capacityMgSubtitle: '顯示有訓練的部位 · 紅虛線 = 6 期平均',
       durationSubtitle: '每根長條 = 該期累計時長 · 紅虛線 = 6 期平均',
       // Phase 4.5 final sweep — chart / sheet / modal inline literals.
@@ -563,10 +563,10 @@ export const strings = {
       restingHeader: '休息中',
       restFinished: '時間到 — 再來一組 💪',
       restRunning: '把握短暫的休息',
-      bwSnapshotFrozenHint: '此 Session 的 bw_snapshot 不會被改寫。',
+      bwSnapshotFrozenHint: '此次訓練的 bw_snapshot 不會被改寫。',
       muscleRolePrimary: '主要',
       muscleRoleSecondary: '次要',
-      noSessionsYetHint: '尚無 Session — 到 Today 分頁開始第一次訓練。',
+      noSessionsYetHint: '尚無訓練 — 到 Today 分頁開始第一次訓練。',
       // Slice 13 Phase A (2026-05-25) — HR chart + kcal placeholder hints
       // shown when HealthKit / Apple Watch data is unavailable (pre-Phase B).
       hrChartEmptyHint: '需 Apple Watch 同步心率資料',

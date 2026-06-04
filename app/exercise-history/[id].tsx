@@ -65,7 +65,7 @@ function useHistoryStyles() {
 function tTotalSessionsLast7d(total: number, last7: number): string {
   return getLocale() === 'en'
     ? `${total} sessions · ${last7} in the last 7 days`
-    : `共 ${total} 次 Session · 最近 7 天 ${last7} 次`;
+    : `共 ${total} 次訓練 · 最近 7 天 ${last7} 次`;
 }
 
 function tSessionSetCountAndVolume(setCount: number, volumeFormatted: string): string {
