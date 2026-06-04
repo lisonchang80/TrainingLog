@@ -1,0 +1,244 @@
+# Consolidated Merge-Backlog Runbook (2026-06-04)
+
+> One coherent end-to-end merge plan for **all unmerged branches** awaiting
+> a device-smoke + merge session, generated on the docs-only branch
+> `docs/merge-backlog-2026-06-04`, based on main **`ecef29e`**.
+>
+> **Supersedes / folds in** [`submission-readiness-2026-06-03.md`](./submission-readiness-2026-06-03.md)
+> (the "device-marathon" runbook). Read that doc for the per-branch *change
+> detail + golden-constraint derivation*; this doc is the **current truth** of
+> what is still unmerged after main advanced `58bce04 → ecef29e`, plus the 4
+> new overnight branches and 1 error-boundary branch produced since.
+>
+> Cross-links (do not duplicate): [`app-store-metadata-draft.md`](./app-store-metadata-draft.md),
+> [`build-bump.md`](./build-bump.md), [`icon-spec.md`](./icon-spec.md),
+> `submission-questionnaire.md` (arrives on `chore/appstore-watch-readiness`).
+
+---
+
+## 0. What changed since the 2026-06-03 runbook (read this first)
+
+The 2026-06-03 runbook listed **8 mergeable** branches off main `58bce04`.
+Since then **main advanced 25 commits to `ecef29e`**, and **2 of those 8
+already landed and were deleted from remote**:
+
+- ✅ `chore/skills-2026-06-03` — landed (commit `93bb416`, the
+  `add-accessibility-props` SKILL.md). **Branch gone from origin.** Done.
+- ✅ `overnight/coverage-fill-r2-2026-06-03` — landed (the 7 test commits
+  `83c0a94`…`8973dae`; verified `7d6681c` and `83c0a94` are ancestors of
+  `ecef29e`). **Branch gone from origin.** The non-r2 `overnight/coverage-fill-2026-06-03`
+  is also gone — superseded as planned. Done.
+
+Also landed in that 25-commit window: **template-overwrite `#3 ①`** (`df3ef7d`
+"另存模板「覆蓋」" + repo `da338f3`) and a batch of template-editor / program-wizard
+fixes. So the new `slice/template-overwrite` branch (below) holds only `#3 ②③④`.
+
+**Net result: 6 device-marathon branches still pending, + 5 new branches
+(one of which is not yet pushed) = up to 11 unmerged branches.**
+
+---
+
+## 1. Situation summary
+
+Eleven branches are queued for a single device-smoke + merge session, all
+forked off various points behind main `ecef29e`, all `tsc`-0 / jest-green
+**at their own tip** but **all device-smoke-gated** (none merged). The merge
+is dominated by **three contention files** — `src/i18n/strings.ts` (appended
+by up to four branches), `app/(tabs)/index.tsx` (edited by template-overwrite
++ three device-marathon branches), and `components/template-editor/template-editor-view.tsx`
+(edited by template-overwrite + i18n) — plus the **golden patch-id-dedup
+constraint** governing the device-marathon stack. The plan below merges
+**one branch at a time**, advancing main and re-basing the rest after each,
+ordered to (a) preserve the device-marathon golden constraint and (b) drain
+the low-risk independent overnight branches in a sequence that minimises the
+three-file contention.
+
+### All unmerged branches
+
+| # | Branch | Class | What it does | Jest | Device-smoke surface | Merge risk |
+|---|---|---|---|---|---|---|
+| D1 | `refactor/bigfile-pure-extract` | device-gated | Pure-logic extraction (PR snapshot, set filters, session-detail items, localYmd, delete-warning) out of 3 big screens; 5 new domain modules + 5 test files | (base) | History list + Session-detail read mode + Exercise-history; Today regression | **Low.** Clean ff off `58bce04`; behavior-preserving. **MERGE FIRST** (golden constraint). |
+| D2 | `overnight/crash-hardening-2026-06-02` | device-gated | 4 unique crash/unmount fixes (cancel refresh on blur; guard drag `get()`; reduce-min/max in TrendChart; hoist `!id` guard) **on top of** the 5 D1 extracts | (base) | Exercise chart 0/1/N pts; nav-away mid-load; drag-reorder sets; bad `[id]` route | **Med.** Stacked: rebase after D1 drops 5 dup extracts (patch-id). Touches `index.tsx`. |
+| D3 | `overnight/resolve-set-defaults-2026-06-02` | device-gated | `resolveSetDefaults.ts` + routes `onAddSet` defaults through it; stacks on D2's 4 fixes too | (base) | Add Set defaults from Today **and** Session-detail; dropset/cluster add | **Med.** Stacked on D1+D2; rebase drops 5+4 dup commits, leaves 3. Touches `index.tsx`. |
+| D4 | `overnight/programs-formatter-2026-06-02` | device-gated | 1 commit: rewire `programs.tsx` formatter to shared `localYmd` | (base) | Programs tab dates / "edited at" (TZ boundary); create/activate flow | **Low.** Stacked on D1; rebase drops 5 extracts, leaves 1. Own file `programs.tsx` mostly isolated. |
+| D5 | `chore/a11y-sheets-charts` | device-gated | a11y focus-trap + role/label on 6 sheets; label 5 charts to VoiceOver; **+14 keys to `strings.ts`** | (base) | VoiceOver ON: 6 sheets trap focus; 5 charts announce; both locales; non-VO regression | **Med.** Clean off `58bce04` but **`strings.ts` append-region** clashes with O-i18n / O-a11y-setrow / (O-eb). |
+| D6 | `chore/appstore-watch-readiness` | device-gated (archive) | Watch AppIcon + iOS project version/category bump + ASC `submission-questionnaire.md` | (base) | **Archive gate**: Watch icon no-warning + on-wrist; `agvtool` version/category; Release archive dry-run | **High base hazard.** Merge-base `89fbbed` is **27 behind `ecef29e`** — **MUST `git rebase main`**; expect `project.pbxproj`/`Info.plist` conflicts. |
+| O1 | `slice/template-overwrite` @ `af444de` | overnight-code | #3 「覆蓋」②③④: `overwriteTemplateBody` repo primitive; wizard-save ②; editor re-classify merge X→Y+delete X ③; clone overwrite ④ + parent wiring | 207/2323 | ④ clone / ② wizard-save / ③ editor re-classify — verify Y body replaced, X removed, Y identity (id/name/program/sub_tag) intact, history + program-cells resolve | **High contention.** Edits `index.tsx` (vs D2/D3) **and** `template-editor-view.tsx` (vs O2). |
+| O2 | `chore/i18n-single-locale-leaks` @ `c23d198` | overnight-code | Fixes 16 single-locale i18n leaks across 8 files; **appends `strings.ts`** | 206/2317 | Toggle locale: Settings 體重 block / wizard alert / root nav titles / template-list empty+rows / stats footnote all switch | **Med.** `strings.ts` append clash; `template-editor-view.tsx` clash (vs O1). Do-not-touch deferred: 7 en-only in `app/session/[id].tsx`. |
+| O3 | `perf/history-list-aggregate` @ `375210d` | overnight-code | History N+1 (1+3N → 3 aggregate reads) + **migration v026** (`session.started_at` index, head 25→26) | 207/2321 | History with many sessions: list renders identically + faster; pull-to-refresh; no missing/wrong rows | **Low.** Migration v026 is **unique + additive** (no other branch adds a migration). Isolated files. |
+| O4 | `chore/a11y-setrow-keypad` @ `17fa6d1` | overnight-code | VoiceOver labels for shared set-row + numeric keypad; focus-trap keypad; **appends `strings.ts`** | 206/2317 | VoiceOver ON: set-row controls + keypad keys announce role+label; keypad traps focus | **Low–Med.** Only `strings.ts` is contended; the 2 component files are isolated. |
+| O5 | `fix/app-error-boundary` | overnight-code | Top-level React ErrorBoundary: new `components/error-boundary.tsx`, wires `_layout.tsx` **or** `database-provider.tsx`, **appends `strings.ts`**, 1 test | n/a | Force a render throw → fallback + Retry recovers (hard to trigger; mostly code-review + a deliberate dev throw) | **N/A — NOT PUSHED** as of this writing. `strings.ts` + `_layout.tsx`/`database-provider.tsx` clash (vs O2) **if it lands**. |
+
+> **⚠️ `fix/app-error-boundary` (O5) was NOT on origin** when this doc was
+> written (`git ls-remote --heads origin fix/app-error-boundary` → empty).
+> Re-check at merge time; if absent, **drop O5 from the plan** and its
+> `strings.ts`/`_layout.tsx` rows below become moot.
+
+---
+
+## 2. Recommended end-to-end merge order
+
+The order below is **one list**, not two. It honours the device-marathon
+golden constraint verbatim, then drains the independent overnight branches in
+a sequence chosen to defuse the three contention files **before** they pile up.
+
+```
+ 1. refactor/bigfile-pure-extract        (D1, clean ff)   → smoke: History/Session-detail/Exercise-history read mode
+ 2. overnight/crash-hardening-2026-06-02  (D2, rebase)     → smoke: chart 0/1/N pts, nav-away mid-load, drag sets, bad [id]
+ 3. overnight/resolve-set-defaults-...    (D3, rebase)     → smoke: Add Set defaults from Today + Session-detail
+ 4. overnight/programs-formatter-...      (D4, rebase)     → smoke: Programs tab dates (TZ boundary)
+ 5. slice/template-overwrite              (O1, rebase)     → smoke: ④ clone / ② wizard / ③ re-classify (Y body swap, X gone, Y identity intact)
+ 6. perf/history-list-aggregate           (O3, rebase)     → smoke: History many-sessions render + pull-to-refresh; verify v026 head=26
+ 7. chore/a11y-setrow-keypad              (O4, rebase)     → smoke: VoiceOver set-row + keypad
+ 8. chore/a11y-sheets-charts              (D5, rebase)     → smoke: VoiceOver 6 sheets + 5 charts, both locales
+ 9. chore/i18n-single-locale-leaks        (O2, rebase)     → smoke: toggle locale across the 5 surfaces
+10. fix/app-error-boundary               (O5, rebase)     → smoke: dev throw → fallback + Retry  [SKIP if not pushed]
+11. chore/appstore-watch-readiness        (D6, REBASE+resolve) → archive gate: Watch icon, version/category, Release archive
+```
+
+### Rationale (why this order, not just "list")
+
+1. **Steps 1–4 are the device-marathon stack, unchanged from the 06-03
+   runbook — and the golden constraint is unchanged.** D1
+   (`bigfile-pure-extract`) goes **first** so that when D2/D3/D4 are later
+   `git rebase main`'d, git **drops the 5 duplicate extract commits** via
+   `patch-id` dedup (verified content-identical in the prior runbook),
+   shrinking the 9/12/6-commit rebases to 4/7/1 with near-zero conflict.
+   D2 before D3 because **D3 stacks on D2's 4 crash fixes** (its
+   `369ffc0..` log contains them); D4 is independent-of-D2 but also a
+   D1-stacked single commit. Keep this quartet contiguous and in this order.
+
+2. **`template-overwrite` (O1) goes at step 5 — right after the device-marathon
+   stack drains `index.tsx`.** This is the central sequencing tension:
+   O1 edits `app/(tabs)/index.tsx` (④ parent wiring) **and** D2/D3 edit the
+   same file (crash guards + add-set defaults). Merging the device-marathon
+   `index.tsx` churn **first** means O1's rebase faces a *stable, finalised*
+   `index.tsx` — one rebase, one conflict resolution, instead of O1's edits
+   being re-litigated on every subsequent device-marathon merge. O1 also owns
+   `template-editor-view.tsx`, which only clashes with O2 (i18n) — handled by
+   ordering O1 **before** O2 (step 9), so the i18n `t()`-wrap rebase lands on
+   O1's already-merged logic.
+
+3. **`history-list-aggregate` (O3) at step 6 is fully independent** (own
+   repo/ListView/migrate files; migration **v026** is unique — no other
+   branch adds a migration). Slot it early-ish so its **migration head 25→26**
+   is locked in before later branches rebase; nothing else touches `migrate.ts`,
+   so it never conflicts, but doing it before the late branches keeps the
+   migration head monotonic and obvious during the session.
+
+4. **The three `strings.ts` appenders are clustered at steps 7–9 (O4 → D5 → O2)**
+   and merged **last among the code branches** so the append-region conflict is
+   resolved **once**, against an otherwise-final `strings.ts`. Order within the
+   cluster is least-contended first: O4 (keypad/set-row, 2 isolated component
+   files + strings) → D5 (a11y sheets/charts, +14 keys, otherwise-isolated
+   component files) → O2 (i18n, also touches `template-editor-view.tsx` +
+   `_layout.tsx`/`database-provider.tsx`, so it benefits most from going last).
+   Each rebase will conflict in the `strings.ts` **append region**; resolve
+   "keep both", then **`npx tsc --noEmit`** to catch a TS1117 duplicate key
+   (see §3). Verified: the three branches' appended keys are **disjoint**
+   (`cannotContinue`/`secondsUnit`; `a11y…Dropset`/`a11yKeypadBackspace`;
+   `a11yBarChart`/`a11yBodyTrendChart`/…), so "keep both" is safe — but tsc is
+   still the gate.
+
+5. **`error-boundary` (O5) at step 10, if it exists.** It appends `strings.ts`
+   (so it belongs near the cluster) and edits one of `_layout.tsx` /
+   `database-provider.tsx` (clashing only with O2). Putting it **after** O2
+   means its small `_layout.tsx`/`database-provider.tsx` edit rebases onto
+   O2's already-merged i18n wraps. If not pushed, skip entirely.
+
+6. **`appstore-watch-readiness` (D6) stays dead last** — it's the **archive
+   gate**, its mandatory rebase should run against a **nearly-final main**, and
+   it's the only branch expected to need real conflict resolution
+   (`project.pbxproj` / `Info.plist`). Bump the build number
+   ([`build-bump.md`](./build-bump.md)) **once**, just before the final archive,
+   after D6 lands the version/category changes.
+
+---
+
+## 3. Per-conflict-file resolution playbook
+
+| File | Branches that touch it | Resolution |
+|---|---|---|
+| **`src/i18n/strings.ts`** | O4 (a11y-setrow), D5 (a11y-sheets-charts), O2 (i18n), **O5 (error-boundary, if pushed)** | All **append** to the same key-table region → append-region conflicts when ≥2 are merged. **Resolve "keep both" for every conflicting append**, then run **`npx tsc --noEmit`** — a TS1117 *"An object literal cannot have multiple properties with the same name"* means a duplicate key slipped in; **dedupe, keep the first**. Verified the four appenders' keys are currently disjoint, so keep-both is safe, but **tsc is the mandatory gate** because any future re-touch could collide. |
+| **`components/template-editor/template-editor-view.tsx`** | O1 (template-overwrite ②③, logic at lines ~74–753), O2 (i18n, many small `t()`-wraps at lines ~112–2704) | Different regions (logic-add vs scattered `t()` wraps) → conflicts should be **small**. Merge **O1 before O2** (per §2): then O2's `git rebase main` re-applies the `t()` wraps onto O1's already-merged logic. Resolve by keeping O1's structural lines **and** O2's `t()` wraps; re-run `tsc` + jest. |
+| **`app/(tabs)/index.tsx`** | O1 (template-overwrite ④ wiring), D2 (crash guards), D3 (add-set defaults). *(D1 also rewires it but lands first, ff.)* | **Highest-contention file.** Sequence is the defence: D2 → D3 land their `index.tsx` churn first (steps 2–3), then O1 (step 5) rebases onto the finalised file — **one** conflict resolution. When resolving O1's rebase here, keep the device-marathon guards/defaults **and** O1's ④ clone-overwrite parent wiring. |
+| **`app/_layout.tsx`** / **`components/database-provider.tsx`** | O2 (i18n nav-title wraps in `_layout.tsx`; DB-init error wrap in `database-provider.tsx`), **O5 (error-boundary wraps one of these, if pushed)** | Small, different regions (i18n `t()` wraps vs ErrorBoundary mount). Merge **O2 before O5** (per §2); resolve keep-both. |
+| **migration `v026`** (`src/db/schema/v026_session_started_at_index.ts` + `src/db/migrate.ts`) | **O3 only** | **No conflict** — unique + additive, no other branch adds a migration. Just confirm post-merge that the migrate head is **26** and `migrateChain.test.ts` is green (the branch updated it). |
+| `project.pbxproj` / `Info.plist` | **D6 only** (but base is 27 behind) | The conflict is **base-staleness**, not co-edit: a plain merge looks like a multi-thousand-line deletion. **`git rebase main` is mandatory.** Resolve toward **main's current build/version baseline** + D6's category/icon additions. Then archive-check. |
+
+---
+
+## 4. Re-verify gate — every branch, after every prior merge
+
+**Every branch is jest-green at its own tip off its own base — but that base
+is now behind `ecef29e`, and each `--ff-only` merge advances main further.**
+So before merging any branch N, after branch N−1 has advanced main:
+
+```
+git checkout <branch-N>
+git rebase main          # stacked device-marathon branches: dup commits drop via patch-id
+# ...resolve conflicts per §3...
+npx tsc --noEmit         # catches TS1117 strings.ts dupes + any rebase breakage
+npm test                 # full jest must be green on the REBASED tip, not the old tip
+# build to device → run branch-N's device-smoke surface below → only then merge
+git checkout main
+git merge --ff-only <branch-N>
+```
+
+The pre-commit hook runs `tsc + jest` on `.ts/.tsx` commits, but **do not rely
+on it for the rebase** — run `tsc`+`jest` manually on the rebased tip first.
+If a rebase applies 0 commits for a stacked device-marathon branch, that is the
+expected patch-id dedup.
+
+### Device-smoke surface per branch (all gated — do not merge without)
+
+- **D1 bigfile-pure-extract** — History list + Session-detail (read mode) clusters/ordered-items render identically, PR badges correct, hide-unchecked toggle filters, delete-warning count correct; Exercise-history PR list + date labels; Today regression.
+- **D2 crash-hardening** — Exercise chart 0/1/many points (no crash, axes correct); background history/chart mid-refresh (no "setState on unmounted"); drag-reorder sets in-session; deep-link a bad `[id]` (graceful, no hook-order crash).
+- **D3 resolve-set-defaults** — Add Set from **both** Today in-session and Session-detail editor; verify default weight/reps/kind prefill (last-set carryover, warmup vs working); dropset / cluster add-set.
+- **D4 programs-formatter** — Programs tab cell dates / "edited at" in correct local `YYYY-MM-DD` (test a late-night TZ boundary); create/activate unaffected.
+- **D5 a11y-sheets-charts** — VoiceOver ON: each of 6 sheets traps focus + speaks role/label; each of 5 charts announces a meaningful image label; both locales speak the right language; non-VO sheets open/close + charts draw normally.
+- **D6 appstore-watch-readiness** — **archive gate**: Watch `AppIcon` set no warning badge + shows on-wrist; `agvtool what-version` / `what-marketing-version` + category match the intended release; Release **archive** dry-run.
+- **O1 template-overwrite** — ④ clone overwrite / ② wizard-save / ③ editor re-classify: verify **Y body replaced**, **X removed**, **Y identity (id / name / program / sub_tag) intact**, and history + program-cells still resolve to Y.
+- **O2 i18n-single-locale-leaks** — toggle locale; confirm Settings 體重 block, program-wizard alert, root nav titles, template-list empty + rows, and stats footnote **all switch language**. (Deferred / do-not-touch: 7 en-only strings in `app/session/[id].tsx`.)
+- **O3 history-list-aggregate** — open History with many sessions: list renders **identically** + faster, pull-to-refresh works, **no missing/wrong rows**; confirm migration head = 26 on a fresh DB.
+- **O4 a11y-setrow-keypad** — VoiceOver ON: set-row controls + keypad keys announce role + label; keypad **traps focus**.
+- **O5 app-error-boundary** *(if pushed)* — force a render throw → fallback screen shows + **Retry recovers**. Hard to trigger; lean on code-review + a deliberate dev throw.
+
+---
+
+## 5. Discrepancies found vs the brief (git-verified)
+
+1. **O5 `fix/app-error-boundary` is NOT pushed** as of doc-write time
+   (`git ls-remote --heads origin fix/app-error-boundary` → empty). The brief
+   anticipated this ("may or may not be pushed"). Treat O5 as **conditional**:
+   re-check at merge time; if absent, skip steps relating to it.
+2. **`chore/skills-2026-06-03` and `overnight/coverage-fill-r2-2026-06-03`
+   from the 06-03 runbook are already merged + deleted from origin** — they
+   landed in main's `58bce04 → ecef29e` advance (`93bb416` skills;
+   `83c0a94`…`8973dae` the 7 coverage suites, both confirmed ancestors of
+   `ecef29e`). The 06-03 runbook's "8 mergeable" is therefore **6** today.
+   The non-r2 `overnight/coverage-fill-2026-06-03` is also gone (superseded as
+   planned). This doc omits all three.
+3. **Template-overwrite `#3 ①` already landed in main** (`df3ef7d` 另存模板
+   「覆蓋」 + repo `da338f3`). The new `slice/template-overwrite` branch
+   correctly holds only **②③④** (4 commits) — matches the brief.
+4. The **6 device-marathon branches still exist on origin with unchanged
+   merge-bases** (`refactor/bigfile-pure-extract` @ `58bce04`; the 3 stacked
+   @ `369ffc0`; `chore/a11y-sheets-charts` @ `58bce04`;
+   `chore/appstore-watch-readiness` @ `89fbbed`). Note **D6's base is now 27
+   commits behind `ecef29e`** (was "25 behind `58bce04`" in the old runbook) —
+   the rebase is even more mandatory.
+5. **All 4 named new branches' file lists + commit counts + jest counts match
+   the brief exactly** (verified via `git log --oneline main..origin/<b>` and
+   `git diff --name-only main...origin/<b>`). `slice/template-overwrite` 4
+   commits / 5 files; `chore/i18n-single-locale-leaks` 6 commits / 9 files;
+   `perf/history-list-aggregate` 2 commits / 6 files incl. v026;
+   `chore/a11y-setrow-keypad` 2 commits / 3 files. **No discrepancies.**
+6. **D6 still touches exactly 5 files** (Watch icon PNG + Contents.json,
+   `project.pbxproj`, `Info.plist`, `submission-questionnaire.md`) — matches
+   the 06-03 runbook.
+
+---
+
+_Generated 2026-06-04 on `docs/merge-backlog-2026-06-04`, base main `ecef29e`._
+_Branch facts git-verified in worktree `docs-merge-backlog`._
