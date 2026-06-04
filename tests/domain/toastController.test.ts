@@ -69,6 +69,26 @@ describe('ToastController', () => {
     expect(states).toEqual([]);
   });
 
+  it('hide() while already hidden is a no-op (no notify, id unchanged)', () => {
+    const c = new ToastController();
+    const events: (string | null)[] = [];
+    c.subscribe(() => events.push(c.getState().message));
+    // Controller starts hidden; hide() must short-circuit before notifying.
+    c.hide();
+    expect(c.getState()).toEqual({ message: null, icon: null, id: 0 });
+    expect(events).toEqual([]);
+  });
+
+  it('a second hide() after a real hide() does not notify again', () => {
+    const c = new ToastController();
+    c.show('hi', { durationMs: 5000 });
+    c.hide(); // real dismiss
+    const events: (string | null)[] = [];
+    c.subscribe(() => events.push(c.getState().message));
+    c.hide(); // already hidden → no-op
+    expect(events).toEqual([]);
+  });
+
   it('subscribe() fires on show + on auto-dismiss; unsubscribe stops further notifications', () => {
     const c = new ToastController();
     const events: (string | null)[] = [];
