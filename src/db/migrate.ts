@@ -24,6 +24,7 @@ import { v022_program_sub_tag } from './schema/v022_program_sub_tag';
 import { v023_session_title } from './schema/v023_session_title';
 import { v024_session_is_watch_tracked } from './schema/v024_session_is_watch_tracked';
 import { v025_set_display_rank } from './schema/v025_set_display_rank';
+import { v026_session_started_at_index } from './schema/v026_session_started_at_index';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -63,6 +64,7 @@ const migrations: Record<number, MigrationFn> = {
   23: v023_session_title,
   24: v024_session_is_watch_tracked,
   25: v025_set_display_rank,
+  26: v026_session_started_at_index,
 };
 
 export async function migrate(db: Database): Promise<void> {
