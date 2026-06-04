@@ -250,10 +250,13 @@ export interface HistoryListTriple {
  *                   `is_skipped` is NOT filtered, matching the old path which
  *                   fed every row from `listSetsBySession` into the volume fn).
  *   - exerciseCount = COUNT(DISTINCT exercise_id) over the session's `set`
- *                   rows (mirrors `countUniqueExercises(sets)`, which keyed off
- *                   the SAME unfiltered set list — so an empty session = 0 and
- *                   a session whose sets span 3 exercises = 3, regardless of
- *                   how many session_exercise cards exist).
+ *                   rows WHERE is_logged=1 — i.e. only exercises the user
+ *                   actually performed (≥1 checked set). Exercises that were
+ *                   added but never checked off do NOT count. Mirrors the
+ *                   `countPerformedExercises(sets)` domain helper used by the
+ *                   session detail page so list ↔ detail agree. (warmup is NOT
+ *                   excluded here — any checked set, warmup included, marks the
+ *                   exercise as "done"; matches the user's "排除沒打勾的" spec.)
  */
 export interface HistoryListRow {
   session: Session;
@@ -293,10 +296,12 @@ export async function loadHistoryListRows(db: Database): Promise<HistoryListRow[
       ORDER BY started_at DESC`
   );
 
-  // 2. Per-session volume + distinct-exercise count. SUM over a CASE that
-  //    mirrors computeSessionVolume's filter; COUNT(DISTINCT) mirrors
-  //    countUniqueExercises. GROUP BY session_id → one row per session that
-  //    has ≥1 set (sessions with no sets fall through to defaults below).
+  // 2. Per-session volume + performed-exercise count. SUM over a CASE that
+  //    mirrors computeSessionVolume's filter; COUNT(DISTINCT … is_logged=1)
+  //    mirrors countPerformedExercises — only exercises with ≥1 checked set
+  //    count toward 動作數 (added-but-never-checked exercises are excluded).
+  //    GROUP BY session_id → one row per session that has ≥1 set (sessions
+  //    with no sets fall through to defaults below).
   const aggRows = await db.getAllAsync<{
     session_id: string;
     volume: number;
@@ -308,7 +313,7 @@ export async function loadHistoryListRows(db: Database): Promise<HistoryListRow[
                    THEN COALESCE(weight_kg, 0) * COALESCE(reps, 0)
                    ELSE 0 END
             ), 0) AS volume,
-            COUNT(DISTINCT exercise_id) AS exercise_count
+            COUNT(DISTINCT CASE WHEN is_logged = 1 THEN exercise_id END) AS exercise_count
        FROM "set"
       GROUP BY session_id`
   );

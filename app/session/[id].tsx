@@ -136,7 +136,7 @@ import {
   siblingId,
 } from '@/src/domain/session/sameDayNav';
 import { computeDetailPageStats } from '@/src/domain/session/sessionStats';
-import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
+import { countPerformedExercises } from '@/src/domain/session/countPerformedExercises';
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import {
   t,
@@ -781,9 +781,10 @@ export default function SessionDetailScreen() {
         ended_at: session.ended_at,
         kcal: session.kcal,
       },
-      // overnight #47 第 5 點: dedup by exercise_id（兩個 cluster + 1 solo 共 5
-      // session_exercise row 但只算 unique 集合大小）。
-      exerciseCount: countUniqueExercises(sessionExercises),
+      // 動作數 = 該訓練「做過」(有打勾) 的 distinct 動作數：只算有 ≥1 個
+      // is_logged=1 set 的 exercise，排除加進來但沒打勾的。與歷史列表的
+      // loadHistoryListRows SQL 同義 (countPerformedExercises)。
+      exerciseCount: countPerformedExercises(sets),
       sets: sets.map((s) => ({
         set_kind: s.set_kind,
         is_logged: s.is_logged,
@@ -2058,7 +2059,7 @@ export default function SessionDetailScreen() {
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                   }))}
-                  exercise_count={countUniqueExercises(sessionExercises)}
+                  exercise_count={countPerformedExercises(sets)}
                   started_at_ms={session.started_at}
                   ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={
@@ -2130,7 +2131,7 @@ export default function SessionDetailScreen() {
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                   }))}
-                  exercise_count={countUniqueExercises(sessionExercises)}
+                  exercise_count={countPerformedExercises(sets)}
                   started_at_ms={session.started_at}
                   ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={

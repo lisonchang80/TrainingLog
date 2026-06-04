@@ -15,7 +15,7 @@ import {
   getTemplateFull,
 } from '../../src/adapters/sqlite/templateRepository';
 import { createProgram } from '../../src/adapters/sqlite/programRepository';
-import { countUniqueExercises } from '../../src/domain/session/countUniqueExercises';
+import { countPerformedExercises } from '../../src/domain/session/countPerformedExercises';
 import { computeSessionVolume } from '../../src/domain/session/sessionStats';
 
 /**
@@ -88,7 +88,10 @@ async function computeOldPath(db: BetterSqliteDatabase): Promise<OldPathRow[]> {
     out.push({
       session_id: session.id,
       volume,
-      exerciseCount: countUniqueExercises(sets),
+      // 動作數 = distinct exercise_id among CHECKED (is_logged=1) sets only —
+      // mirrors the new SQL `COUNT(DISTINCT CASE WHEN is_logged=1 …)`. Exercises
+      // with sets but none checked are excluded ("排除沒打勾的").
+      exerciseCount: countPerformedExercises(sets),
       triple,
       tplColor,
     });
@@ -313,5 +316,28 @@ describe('loadHistoryListRows — equivalence with the old per-session path', ()
     expect(aggregate).toEqual(await computeOldPath(db));
     expect(aggregate[0].triple?.template_id).toBe('tpl-early');
     expect(aggregate[0].tplColor).toBe('#111111');
+  });
+
+  it('動作數 counts only exercises with ≥1 checked set (排除沒打勾的)', async () => {
+    // One session, three exercises:
+    //   BENCH — 1 CHECKED working       → counts
+    //   SQUAT — 1 UNCHECKED working only → excluded (加進來但一組都沒打勾)
+    //   DEAD  — 1 CHECKED warmup only    → counts (任何打勾的 set = 做過)
+    await createSession(db, { id: 'sess-X', started_at: 7000, title: 'X' });
+    const seX1 = await addExercise({ session_id: 'sess-X', exercise_id: BENCH, ordering: 1 });
+    const seX2 = await addExercise({ session_id: 'sess-X', exercise_id: SQUAT, ordering: 2 });
+    const seX3 = await addExercise({ session_id: 'sess-X', exercise_id: DEAD, ordering: 3 });
+    await addSet({ session_id: 'sess-X', exercise_id: BENCH, session_exercise_id: seX1, ordering: 1, weight_kg: 60, reps: 8, set_kind: 'working', is_logged: true });
+    await addSet({ session_id: 'sess-X', exercise_id: SQUAT, session_exercise_id: seX2, ordering: 2, weight_kg: 100, reps: 5, set_kind: 'working', is_logged: false });
+    await addSet({ session_id: 'sess-X', exercise_id: DEAD, session_exercise_id: seX3, ordering: 3, weight_kg: 40, reps: 10, set_kind: 'warmup', is_logged: true });
+
+    const rows = await loadHistoryListRows(db);
+    const x = rows.find((r) => r.session.id === 'sess-X')!;
+    // BENCH (checked working) + DEAD (checked warmup) = 2; SQUAT excluded.
+    expect(x.exerciseCount).toBe(2);
+    // volume excludes warmup + unchecked → only BENCH working 60*8 = 480.
+    expect(x.volume).toBe(480);
+    // oracle (now logged-only) agrees field-by-field.
+    expect(projectAggregate(rows)).toEqual(await computeOldPath(db));
   });
 });
