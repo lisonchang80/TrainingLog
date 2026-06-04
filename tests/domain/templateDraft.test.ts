@@ -119,6 +119,31 @@ describe('templateDraft — templatesEqual', () => {
     expect(templatesEqual(a, c)).toBe(false);
   });
 
+  it('catches exercise count mismatch (added exercise)', () => {
+    const a = buildTemplate();
+    const b = cloneTemplate(a);
+    b.exercises.push({
+      id: 'ex-2',
+      template_id: 'tpl-1',
+      exercise_id: 'row',
+      ordering: 1,
+      section: 'general',
+      parent_id: null,
+      notes: null,
+      rest_seconds: null,
+      reusable_superset_id: null,
+      sets: [],
+    });
+    expect(templatesEqual(a, b)).toBe(false);
+  });
+
+  it('catches an exercise-level rest_seconds change via templatesEqual', () => {
+    const a = buildTemplate();
+    const b = cloneTemplate(a);
+    b.exercises[0].rest_seconds = 999;
+    expect(templatesEqual(a, b)).toBe(false);
+  });
+
   it('treats null and missing-equivalent fields as equal', () => {
     const a = buildTemplate();
     const b = cloneTemplate(a);
@@ -194,6 +219,95 @@ describe('templateDraft — computeTemplateDiff', () => {
     const diff = computeTemplateDiff({ committed: c, draft: d });
     expect(diff.exerciseDeletes).toEqual(['ex-1']);
     expect(diff.setDeletes).toEqual([]); // CASCADE in DB handles them
+  });
+
+  it('emits per-field exercise updates for each mutable field', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].ordering = 5;
+    d.exercises[0].section = 'evergreen';
+    d.exercises[0].parent_id = 'parent-ex';
+    d.exercises[0].notes = 'cue';
+    d.exercises[0].rest_seconds = 120;
+    d.exercises[0].reusable_superset_id = 'rs-1';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([
+      {
+        id: 'ex-1',
+        ordering: 5,
+        section: 'evergreen',
+        parent_id: 'parent-ex',
+        notes: 'cue',
+        rest_seconds: 120,
+        reusable_superset_id: 'rs-1',
+      },
+    ]);
+    // No structural inserts/deletes for an in-place field edit.
+    expect(diff.exerciseInserts).toEqual([]);
+    expect(diff.exerciseDeletes).toEqual([]);
+    expect(diff.setUpdates).toEqual([]);
+  });
+
+  it('emits a minimal exerciseUpdate when only one field changes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].rest_seconds = 60;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    // Only the changed field (plus id) appears — no spurious keys.
+    expect(diff.exerciseUpdates).toEqual([{ id: 'ex-1', rest_seconds: 60 }]);
+  });
+
+  it('treats nullable exercise fields going null→null as no change', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    // parent_id / notes are already null on both; reassign explicitly.
+    d.exercises[0].parent_id = null;
+    d.exercises[0].notes = null;
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.exerciseUpdates).toEqual([]);
+    expect(diff.templatePatch).toBeNull();
+  });
+
+  it('emits per-field set updates for kind / position / parent_set_id / notes', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.exercises[0].sets[0].position = 9;
+    d.exercises[0].sets[0].kind = 'dropset';
+    d.exercises[0].sets[0].parent_set_id = 's2';
+    d.exercises[0].sets[0].notes = 'failure';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.setUpdates).toEqual([
+      {
+        id: 's1',
+        position: 9,
+        kind: 'dropset',
+        parent_set_id: 's2',
+        notes: 'failure',
+      },
+    ]);
+  });
+
+  it('produces an empty diff (null patch, empty lists) for an unchanged clone', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff).toEqual({
+      templatePatch: null,
+      exerciseInserts: [],
+      exerciseUpdates: [],
+      exerciseDeletes: [],
+      setInserts: [],
+      setUpdates: [],
+      setDeletes: [],
+    });
+  });
+
+  it('captures only color_hex when name is unchanged', () => {
+    const c = buildTemplate();
+    const d = cloneTemplate(c);
+    d.color_hex = '#123456';
+    const diff = computeTemplateDiff({ committed: c, draft: d });
+    expect(diff.templatePatch).toEqual({ color_hex: '#123456' });
   });
 
   it('emits an exerciseInsert for a brand-new exercise', () => {
