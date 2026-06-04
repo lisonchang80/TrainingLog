@@ -421,7 +421,7 @@ export const strings = {
       noOptionsToSelect: '沒有可選項目。',
       noProgramsAvailable: '沒有可用的 Program。',
       noProgramsToLoad: '尚無計劃可載入',
-      programHasNoSubTag: '此 Program 無 sub_tag 紀錄。',
+      programHasNoSubTag: '此計畫沒有強度紀錄。',
       // Wave 18g (Phase 6) — same-name overwrite UX consequence banner.
       overwriteSheetBodyConsequence:
         '建立後將完全取代既有計劃設定（循環天數、週期數、起始日、每日內容、強度）。已結束的訓練紀錄會保留。',
@@ -1124,7 +1124,7 @@ export const strings = {
       noOptionsToSelect: 'No options to select.',
       noProgramsAvailable: 'No available Programs.',
       noProgramsToLoad: 'No programs available to load',
-      programHasNoSubTag: 'This Program has no intensity history.',
+      programHasNoSubTag: 'This program has no intensity records.',
       // Wave 18g (Phase 6) — same-name overwrite UX consequence banner.
       overwriteSheetBodyConsequence:
         'Creating this will completely replace the existing program settings (cycle length, cycle count, start date, daily content, intensities). Finished session records are preserved.',
