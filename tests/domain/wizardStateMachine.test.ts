@@ -113,6 +113,13 @@ describe('wizardStateMachine — validateStep', () => {
     expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_length/);
   });
 
+  it('CycleConfig fails on cycle_count below 1', () => {
+    let s = updateDraft(initialWizardState(TODAY), { cycle_count: 0 });
+    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_count/);
+    s = updateDraft(initialWizardState(TODAY), { cycle_count: 1.5 });
+    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_count/);
+  });
+
   it('CycleConfig fails on bad start_date', () => {
     const s = updateDraft(initialWizardState(TODAY), { start_date: '2026-5-1' });
     expect(validateStep(s.draft, 'CycleConfig')).toMatch(/start_date/);
@@ -154,6 +161,24 @@ describe('wizardStateMachine — validateStep', () => {
       overrides: [{ cycle_index: 9, day_index: 0, sub_tag: 'x' }],
     });
     expect(validateStep(s.draft, 'CycleSubTags')).toMatch(/cycle/);
+  });
+
+  it('CycleSubTags fails on override day_index out of range (valid cycle_index)', () => {
+    const s = updateDraft(initialWizardState(TODAY), {
+      cycle_count: 4,
+      cycle_length: 7,
+      overrides: [{ cycle_index: 0, day_index: 7, sub_tag: 'x' }],
+    });
+    expect(validateStep(s.draft, 'CycleSubTags')).toMatch(/day/);
+  });
+
+  it('CycleSubTags accepts an override that is fully in range', () => {
+    const s = updateDraft(initialWizardState(TODAY), {
+      cycle_count: 4,
+      cycle_length: 7,
+      overrides: [{ cycle_index: 3, day_index: 6, sub_tag: '8RM' }],
+    });
+    expect(validateStep(s.draft, 'CycleSubTags')).toBeNull();
   });
 
   it('Confirm rolls up validation of all earlier steps', () => {
