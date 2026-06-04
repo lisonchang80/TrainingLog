@@ -905,7 +905,7 @@ function HistoryPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
+                  <Text style={styles.advancedLabel}>{t('domain', 'program')}</Text>
                   <Pressable
                     style={styles.dropdown}
                     onPress={() => setProgramPickerOpen(true)}>
@@ -1111,7 +1111,7 @@ function HeaderCard({
         <View style={styles.prList}>
           <Pressable onPress={togglePrSection} style={styles.prHeadingRow}>
             <Text style={styles.prHeading}>
-              PR {prSectionOpen ? '▼' : '▶'}
+              {t('page', 'personalRecords')} (PR) {prSectionOpen ? '▼' : '▶'}
             </Text>
           </Pressable>
           {visiblePRs.map((pr) => (
@@ -1525,11 +1525,17 @@ function makeStyles(tokens: ThemeTokens) {
       marginBottom: 4,
     },
     prList: { marginTop: 8, gap: 6 },
-    prHeadingRow: { paddingVertical: 4 },
+    prHeadingRow: {
+      alignSelf: 'flex-start',
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      backgroundColor: tokens.bg.elevated,
+      borderRadius: 8,
+    },
     prHeading: {
-      fontSize: 12,
+      fontSize: 16,
       fontWeight: '700',
-      color: tokens.text.secondary,
+      color: tokens.text.primary,
     },
     prRow: {
       gap: 2,
