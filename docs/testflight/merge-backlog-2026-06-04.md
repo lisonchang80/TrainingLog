@@ -242,3 +242,55 @@ expected patch-id dedup.
 
 _Generated 2026-06-04 on `docs/merge-backlog-2026-06-04`, base main `ecef29e`._
 _Branch facts git-verified in worktree `docs-merge-backlog`._
+
+---
+
+## ⚠️ 2026-06-04 w5 CORRECTION — this runbook above is STALE
+
+> The plan above was authored against main **`ecef29e`**. Main has since advanced
+> **19 commits** and the entire **D1 "bigfile-pure-extract" stack + the 4 D2
+> crash-hardening fixes already landed in main**. That collapses the two big
+> stacked overnight branches and changes the merge order. Source: overnight w5
+> merge-dossier (`/tmp/overnight-reports-2026-06-04-w5/01-merge-dossier.md`).
+> **Follow the order in THIS section, not the one above.** Main is now `7cc805c`
+> (after the two test-only merges in this section landed).
+
+### Already merged in this w5 pass (test-only, no device smoke, jest green 212/2415)
+- ✅ `slice/13d-history-layout-fix` → `52121e7` (appends `sessionSetLayout` namespaced-id fold cases)
+- ✅ `overnight/domain-tests-w5-2026-06-04` → `7cc805c` (asymmetric/guard edge branches, +13 cases)
+
+### Branch shrinkage after rebase onto current main (git cherry verified)
+- `overnight/programs-formatter-2026-06-02`: 6 commits → **only 1 survives** (`programs.tsx` localYmd rewire); rest are D1 extracts already in main.
+- `overnight/resolve-set-defaults-2026-06-02`: 12 commits → **only 3 survive** (`resolveSetDefaults` module + 2 wire sites).
+- `slice/13d-release-wc-fix-c`: 2 commits → **only 1 survives**; the core #287 Fix C (eager-mount WC listener) **already in main** → ⚠️ re-confirm this branch is still needed before merging.
+
+### Branch cleanup
+- 🗑️ **`slice/13d-sync-bc-plan` — DROP, do not merge.** Its single commit `b0e0335` is a strict subset of `overnight/syncplan-refresh-2026-06-01` (identical SHA = syncplan's first commit). Merge `syncplan-refresh` instead; merging both double-applies the ADR-0019 三車道 edit.
+
+### Corrected merge order (11 remaining branches)
+```
+1. perf/history-list-aggregate       v026 migration, isolated → lock migration head 25→26 early
+2. overnight/programs-formatter       only programs.tsx survives → drains index.tsx footprint cheap
+3. overnight/resolve-set-defaults     3 surviving commits, index.tsx churn
+4. slice/template-overwrite           lands on stabilised index.tsx, before i18n touches tev
+5. chore/a11y-setrow-keypad           least-contended strings.ts appender → first
+6. chore/a11y-sheets-charts           strings.ts appender
+7. fix/app-error-boundary             strings.ts + _layout (before i18n/wc)
+8. chore/i18n-single-locale-leaks     most-entangled strings appender → last; + tev + _layout
+9. slice/13d-release-wc-fix-c         ⚠️ NATIVE/WC, device-gated; re-confirm still needed; onto final _layout
+10. chore/appstore-watch-readiness    NATIVE archive gate, dead last; bump build once; includes Watch AppIcon (P1)
+11. overnight/syncplan-refresh        docs-only; resolve ADR-0019 conflict keep-both (supersedes dropped sync-bc-plan)
+```
+
+### Conflict status: 11 CLEAN / 2 CONFLICT (both only `docs/adr/0019.md`)
+Three contention clusters (each branch CLEAN vs current main, but merging one forces a rebase-resolve on the next in its cluster — order above lands each resolution once on a stabilised file):
+- **Cluster A — `app/(tabs)/index.tsx`:** template-overwrite + resolve-set-defaults + programs-formatter
+- **Cluster B — `src/i18n/strings.ts` (4-way):** i18n + a11y-setrow + a11y-sheets + error-boundary (keys git-verified disjoint → keep-both then `tsc --noEmit` for TS1117)
+- **Cluster C — `app/_layout.tsx` (3-way):** i18n + error-boundary + release-wc-fix-c
+
+### 🔴 2 NEW P0 Watch blockers (from w5 submission-delta, tasks #311/#312)
+- `ios/TrainingLog Watch Watch App/ExerciseHistoryView.swift:124-145` — renders `ExerciseHistoryMock.fetch()` fake data in live session (📊 dots-menu).
+- `ios/TrainingLog Watch Watch App/FinishPageView.swift:246-256` — hardcoded `142 bpm` / `285 kcal` finish tiles (SessionSnapshot has no HR/kcal field).
+Both are non-`#if DEBUG`, reachable in Release Watch UI → App Review placeholder-content rejection class. Device-gated Swift fixes; do before archive.
+
+_w5 correction appended 2026-06-04, base main `7cc805c` (post test-only merges)._
