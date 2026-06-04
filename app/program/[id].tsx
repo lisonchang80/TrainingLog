@@ -134,6 +134,10 @@ function makeStyles(tokens: ThemeTokens) {
       padding: 6,
       borderRadius: 6,
       backgroundColor: tokens.bg.elevated,
+      // 計劃表格子加框 — 淺色下 bg.elevated(#F2F2F7) 與頁面 bg.base(#FFF) 太接近、
+      // 看不到格子邊界；border.default(#C6C6C8 淺 / #38383A 深) 明確劃出每格。
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.default,
       justifyContent: 'center',
       alignItems: 'center',
     },
