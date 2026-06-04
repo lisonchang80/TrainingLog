@@ -669,12 +669,13 @@ export default function ProgramsScreen() {
           <View style={styles.headerButtons}>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={t('button', 'newCta')}
               onPress={onNew}
               style={({ pressed }) => [
                 styles.newBtn,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={styles.newBtnText}>{t('button', 'newCta')}</Text>
+              <Text style={styles.newBtnText}>＋</Text>
             </Pressable>
           </View>
         </View>
@@ -736,31 +737,56 @@ export default function ProgramsScreen() {
       <View style={styles.headerRow}>
         <Text style={styles.heading}>{t('page', 'programs')}</Text>
         <View style={styles.headerButtons}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onToggleEdit}
-            style={({ pressed }) => [
-              styles.editBtn,
-              editing && styles.editBtnActive,
-              pressed && styles.btnPressed,
-            ]}>
-            <Text
-              style={[
-                styles.editBtnText,
-                editing && styles.editBtnTextActive,
-              ]}>
-              {editing ? t('common', 'done') : t('common', 'edit')}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onNew}
-            style={({ pressed }) => [
-              styles.newBtn,
-              pressed && styles.btnPressed,
-            ]}>
-            <Text style={styles.newBtnText}>{t('button', 'newCta')}</Text>
-          </Pressable>
+          {editing ? (
+            // 編輯模式：只有 [取消][完成]，不顯示 ＋ 新建。
+            // 計劃編輯為即時存檔（每個 picker 直接寫 DB），無草稿可還原，
+            // 故 取消 與 完成 都只是退出編輯模式（取消=次要樣式、完成=主要）。
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('common', 'cancel')}
+                onPress={onToggleEdit}
+                style={({ pressed }) => [
+                  styles.cancelBtn,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.cancelBtnText}>{t('common', 'cancel')}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('common', 'done')}
+                onPress={onToggleEdit}
+                style={({ pressed }) => [
+                  styles.editBtn,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.editBtnText}>{t('common', 'done')}</Text>
+              </Pressable>
+            </>
+          ) : (
+            // 閒置模式：[編輯][＋新建]
+            <>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onToggleEdit}
+                style={({ pressed }) => [
+                  styles.editBtn,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.editBtnText}>{t('common', 'edit')}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('button', 'newCta')}
+                onPress={onNew}
+                style={({ pressed }) => [
+                  styles.newBtn,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.newBtnText}>＋</Text>
+              </Pressable>
+            </>
+          )}
         </View>
       </View>
       <ScrollView
@@ -1761,21 +1787,35 @@ function makeStyles(tokens: ThemeTokens) {
     },
     headerButtons: { flexDirection: 'row', gap: 8 },
     newBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 999,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    newBtnText: {
+      color: tokens.action.onPrimary,
+      fontWeight: '600',
+      fontSize: 22,
+      lineHeight: 24,
+    },
+    // 編輯 按鈕與 新建 同色（實心藍 + 白字）。編輯/完成 的切換靠標籤文字區分。
+    editBtn: {
       paddingVertical: 8,
       paddingHorizontal: 14,
       borderRadius: 999,
       backgroundColor: tokens.action.primary,
     },
-    newBtnText: { color: tokens.action.onPrimary, fontWeight: '600' },
-    editBtn: {
+    editBtnText: { color: tokens.action.onPrimary, fontWeight: '600' },
+    // 編輯模式「取消」次要樣式（灰底 + 藍字）
+    cancelBtn: {
       paddingVertical: 8,
       paddingHorizontal: 14,
       borderRadius: 999,
       backgroundColor: tokens.bg.elevated,
     },
-    editBtnActive: { backgroundColor: tokens.action.primary },
-    editBtnText: { color: tokens.action.primary, fontWeight: '600' },
-    editBtnTextActive: { color: tokens.action.onPrimary },
+    cancelBtnText: { color: tokens.action.primary, fontWeight: '600' },
     empty: {
       fontSize: 14,
       color: tokens.text.secondary,
