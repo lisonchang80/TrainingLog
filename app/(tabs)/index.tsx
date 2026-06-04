@@ -3883,13 +3883,20 @@ function makeStyles(tokens: ThemeTokens) {
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
   exerciseCardSetRowDragActive: {
-    backgroundColor: tokens.bg.surface,
-    elevation: 6,
+    // Drag-active highlight — must read clearly in BOTH light & dark. bg.surface
+    // alone was near-invisible (light: white-on-#F2F2F7, dark: subtle gray), so
+    // overlay an accent-blue tint + a solid accent border + a stronger lift
+    // shadow. The 16% accent fill is visible on both themes; the border is the
+    // unambiguous "picked up" signal.
+    backgroundColor: 'rgba(10,132,255,0.16)',
+    borderWidth: 2,
+    borderColor: tokens.action.primary,
+    elevation: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    borderRadius: 10,
   },
   exerciseCardSetRowContent: {
     flex: 1,
