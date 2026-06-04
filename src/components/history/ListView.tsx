@@ -38,17 +38,8 @@ import {
 
 import { useDatabase } from '@/components/database-provider';
 import { useTheme, type ThemeTokens } from '@/src/theme';
-import { listSessions } from '@/src/adapters/sqlite/sessionRepository';
-import { listSetsBySession } from '@/src/adapters/sqlite/setRepository';
-import {
-  getSessionLinkedTemplateTriple,
-  getTemplateFull,
-} from '@/src/adapters/sqlite/templateRepository';
-import { countUniqueExercises } from '@/src/domain/session/countUniqueExercises';
-import {
-  computeSessionVolume,
-  formatTrainingDuration,
-} from '@/src/domain/session/sessionStats';
+import { loadHistoryListRows } from '@/src/adapters/sqlite/sessionRepository';
+import { formatTrainingDuration } from '@/src/domain/session/sessionStats';
 import type { Session } from '@/src/domain/session/types';
 
 import {
@@ -83,7 +74,10 @@ interface SessionLinkedTriple {
 
 interface RowVM {
   session: Session;
-  sets: Awaited<ReturnType<typeof listSetsBySession>>;
+  /** Σ weight×reps over logged non-warmup sets (kg, un-rounded). */
+  volume: number;
+  /** Distinct exercise_id across the session's set rows. */
+  exerciseCount: number;
   triple: SessionLinkedTriple | null;
   tplColor: string;
   sameDayIds: string[];
@@ -184,32 +178,46 @@ export default function ListView() {
 
 // Extracted as a free fn so both useFocusEffect (with cancel-flag) and
 // pull-to-refresh share the same query path without closure-identity churn.
+//
+// Perf (perf/history-list-aggregate): previously this fired 1 + 3N queries
+// (listSessions, then per session: listSetsBySession +
+// getSessionLinkedTemplateTriple + getTemplateFull). `loadHistoryListRows`
+// collapses that to a fixed 3 set-based queries, computing volume +
+// exercise count + linked-template triple/color server-side. Behaviour is
+// identical — the FREESTYLE_COLOR fallback (empty/missing color_hex →
+// neutral grey) still lives here, matching the old per-row resolution.
 async function loadInto(
   db: ReturnType<typeof useDatabase>
 ): Promise<RowVM[]> {
-  const sessions = await listSessions(db);
-  const enriched = await Promise.all(
-    sessions.map(async (session) => {
-      const sets = await listSetsBySession(db, session.id);
-      const triple = await getSessionLinkedTemplateTriple(db, session.id);
-      let tplColor = FREESTYLE_COLOR;
-      if (triple) {
-        const tpl = await getTemplateFull(db, triple.template_id);
-        if (tpl && tpl.color_hex && tpl.color_hex.length > 0) {
-          tplColor = tpl.color_hex;
-        }
-      }
-      return { session, sets, triple, tplColor };
-    })
-  );
+  const aggRows = await loadHistoryListRows(db);
 
-  const grouped = groupSessionsByDate(sessions);
+  const grouped = groupSessionsByDate(aggRows.map((r) => r.session));
   const sameDayMap = buildSameDayIdMap(grouped);
 
-  return enriched.map((e) => {
-    const sameDayIds = sameDayMap.get(e.session.id) ?? [e.session.id];
+  return aggRows.map((r) => {
+    const triple: SessionLinkedTriple | null = r.triple
+      ? {
+          template_id: r.triple.template_id,
+          template_name: r.triple.template_name,
+          program_id: r.triple.program_id,
+          program_name: r.triple.program_name,
+          sub_tag: r.triple.sub_tag,
+        }
+      : null;
+    // Color fallback (unchanged): a linked template with a non-empty
+    // color_hex wins; freestyle sessions or pre-v020 blank colors fall
+    // back to the neutral grey side bar.
+    const tplColor =
+      r.triple && r.triple.color_hex && r.triple.color_hex.length > 0
+        ? r.triple.color_hex
+        : FREESTYLE_COLOR;
+    const sameDayIds = sameDayMap.get(r.session.id) ?? [r.session.id];
     return {
-      ...e,
+      session: r.session,
+      volume: r.volume,
+      exerciseCount: r.exerciseCount,
+      triple,
+      tplColor,
       sameDayIds,
       extraSameDay: Math.max(0, sameDayIds.length - 1),
     };
@@ -223,7 +231,7 @@ interface RowProps {
 
 function Row({ vm, onPress }: RowProps) {
   const styles = useListStyles();
-  const { session, sets, triple, tplColor, extraSameDay } = vm;
+  const { session, volume, exerciseCount, triple, tplColor, extraSameDay } = vm;
   const { primary: dateMD, year: dateYear } = formatDateParts(session.started_at);
 
   const titleParts = deriveTitleParts(session, triple);
@@ -232,10 +240,9 @@ function Row({ vm, onPress }: RowProps) {
   const program = triple?.program_name ?? t('common', 'default');
   const subTag = triple?.sub_tag ?? t('common', 'default');
 
-  // For 動作數: prefer unique exercise_id over raw set count (mirrors detail
-  // page #47 fix). When sets is empty (in-progress / discarded plan), still
-  // shows 0 — that's the correct semantic.
-  const exerciseCount = countUniqueExercises(sets);
+  // 動作數 + 容量 are pre-computed server-side by `loadHistoryListRows`
+  // (volume = Σ weight×reps over logged non-warmup sets; exerciseCount =
+  // distinct exercise_id across the session's set rows). Empty session = 0.
 
   // 訓練時間: ended sessions use the recorded duration; in-progress falls
   // back to "now - started_at" so the row stays meaningful while the user is
@@ -245,15 +252,7 @@ function Row({ vm, onPress }: RowProps) {
   const durationSec = Math.max(0, Math.floor((endTs - session.started_at) / 1000));
   const durationLabel = formatDurationMinuteOnly(durationSec);
 
-  const volumeKg = computeSessionVolume(
-    sets.map((s) => ({
-      set_kind: s.set_kind,
-      is_logged: s.is_logged,
-      weight_kg: s.weight_kg,
-      reps: s.reps,
-    }))
-  );
-  const volumeRounded = Math.round(volumeKg);
+  const volumeRounded = Math.round(volume);
 
   const titleStyles = [
     styles.title,

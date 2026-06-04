@@ -217,6 +217,171 @@ export async function listSessions(db: Database): Promise<Session[]> {
   return rows.map(mapSessionRow);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// History tab — aggregate list read (perf: collapse N+1 fan-out)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The per-session triple of the session's "linked template" — identical
+ * shape to `getSessionLinkedTemplateTriple`'s return, plus `color_hex` so the
+ * History row can render the side bar without a second `getTemplateFull` call.
+ * NULL on `HistoryListRow.triple` when the session is freestyle (no
+ * session_exercise row carries a non-null template_id).
+ */
+export interface HistoryListTriple {
+  template_id: string;
+  template_name: string;
+  program_id: string | null;
+  program_name: string | null;
+  sub_tag: string | null;
+  /** Linked template's `template.color_hex` — '' when unset (pre-v020 backfill). */
+  color_hex: string;
+}
+
+/**
+ * One History-tab list row, pre-shaped so the UI's `loadInto` can map it
+ * straight into a view-model with zero per-session DB round-trips.
+ *
+ * `volume` and `exerciseCount` are computed in SQL with the EXACT same
+ * filtering the old per-session JS path applied:
+ *   - volume      = Σ weight_kg × reps over rows WHERE is_logged=1 AND
+ *                   set_kind != 'warmup' (mirrors `computeSessionVolume` over
+ *                   `listSetsBySession`'s output — NULL weight/reps → 0; note
+ *                   `is_skipped` is NOT filtered, matching the old path which
+ *                   fed every row from `listSetsBySession` into the volume fn).
+ *   - exerciseCount = COUNT(DISTINCT exercise_id) over the session's `set`
+ *                   rows (mirrors `countUniqueExercises(sets)`, which keyed off
+ *                   the SAME unfiltered set list — so an empty session = 0 and
+ *                   a session whose sets span 3 exercises = 3, regardless of
+ *                   how many session_exercise cards exist).
+ */
+export interface HistoryListRow {
+  session: Session;
+  /** Σ weight_kg × reps over logged non-warmup sets (kg, un-rounded). */
+  volume: number;
+  /** Distinct exercise_id across the session's set rows. */
+  exerciseCount: number;
+  /** Linked-template triple + color, or null for a freestyle session. */
+  triple: HistoryListTriple | null;
+}
+
+/**
+ * Load every History-tab row in a FIXED number of queries (independent of
+ * session count), replacing the old 1 + 3N fan-out (`listSessions` then,
+ * per session, `listSetsBySession` + `getSessionLinkedTemplateTriple` +
+ * `getTemplateFull`).
+ *
+ * Three set-based reads, joined in JS by session_id:
+ *   1. all sessions, newest first (same `ORDER BY started_at DESC` as
+ *      `listSessions`).
+ *   2. per-session volume + distinct-exercise count via `GROUP BY session_id`
+ *      over the `set` table (filters match the old JS path exactly — see
+ *      `HistoryListRow`).
+ *   3. per-session linked template (most-common non-null
+ *      `session_exercise.template_id`, tie-break MIN(ordering) — identical to
+ *      `getSessionLinkedTemplateTriple`) LEFT-joined to `template` + `program`
+ *      so the triple AND color_hex come back in one pass. Sessions with no
+ *      linked template simply have no entry → `triple: null`.
+ *
+ * Behaviour-preserving: the returned rows are equivalent to what the old
+ * per-session loop produced (proven by `tests/repository/loadHistoryListRows`).
+ */
+export async function loadHistoryListRows(db: Database): Promise<HistoryListRow[]> {
+  const sessionRows = await db.getAllAsync<SessionRow>(
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title, is_watch_tracked
+       FROM session
+      ORDER BY started_at DESC`
+  );
+
+  // 2. Per-session volume + distinct-exercise count. SUM over a CASE that
+  //    mirrors computeSessionVolume's filter; COUNT(DISTINCT) mirrors
+  //    countUniqueExercises. GROUP BY session_id → one row per session that
+  //    has ≥1 set (sessions with no sets fall through to defaults below).
+  const aggRows = await db.getAllAsync<{
+    session_id: string;
+    volume: number;
+    exercise_count: number;
+  }>(
+    `SELECT session_id,
+            COALESCE(SUM(
+              CASE WHEN is_logged = 1 AND set_kind != 'warmup'
+                   THEN COALESCE(weight_kg, 0) * COALESCE(reps, 0)
+                   ELSE 0 END
+            ), 0) AS volume,
+            COUNT(DISTINCT exercise_id) AS exercise_count
+       FROM "set"
+      GROUP BY session_id`
+  );
+  const aggBySession = new Map<string, { volume: number; exerciseCount: number }>();
+  for (const r of aggRows) {
+    aggBySession.set(r.session_id, {
+      volume: r.volume,
+      exerciseCount: r.exercise_count,
+    });
+  }
+
+  // 3. Per-session winning linked template (+ color, + program). ROW_NUMBER
+  //    over (COUNT(*) DESC, MIN(ordering) ASC) reproduces
+  //    getSessionLinkedTemplateTriple's "most common, tie-break earliest
+  //    ordering" pick for ALL sessions at once. LEFT JOIN program so a
+  //    program-less template still yields program_name = NULL.
+  const tplRows = await db.getAllAsync<{
+    session_id: string;
+    template_id: string;
+    template_name: string;
+    program_id: string | null;
+    program_name: string | null;
+    sub_tag: string | null;
+    color_hex: string | null;
+  }>(
+    `WITH ranked AS (
+       SELECT se.session_id AS session_id,
+              se.template_id AS template_id,
+              COUNT(*) AS cnt,
+              MIN(se.ordering) AS min_ord,
+              ROW_NUMBER() OVER (
+                PARTITION BY se.session_id
+                ORDER BY COUNT(*) DESC, MIN(se.ordering) ASC
+              ) AS rn
+         FROM session_exercise se
+        WHERE se.template_id IS NOT NULL
+        GROUP BY se.session_id, se.template_id
+     )
+     SELECT r.session_id AS session_id,
+            r.template_id AS template_id,
+            t.name        AS template_name,
+            t.program_id  AS program_id,
+            p.name        AS program_name,
+            t.sub_tag     AS sub_tag,
+            t.color_hex   AS color_hex
+       FROM ranked r
+       JOIN template t ON t.id = r.template_id
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE r.rn = 1`
+  );
+  const tripleBySession = new Map<string, HistoryListTriple>();
+  for (const r of tplRows) {
+    tripleBySession.set(r.session_id, {
+      template_id: r.template_id,
+      template_name: r.template_name,
+      program_id: r.program_id ?? null,
+      program_name: r.program_name ?? null,
+      sub_tag: r.sub_tag ?? null,
+      color_hex: r.color_hex ?? '',
+    });
+  }
+
+  return sessionRows.map((row) => {
+    const agg = aggBySession.get(row.id);
+    return {
+      session: mapSessionRow(row),
+      volume: agg?.volume ?? 0,
+      exerciseCount: agg?.exerciseCount ?? 0,
+      triple: tripleBySession.get(row.id) ?? null,
+    };
+  });
+}
+
 /**
  * One row per planned exercise inside a Session. Snapshot of a Template
  * captured at Session start (slice 3). `template_id` is nullable so a
