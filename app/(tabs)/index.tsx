@@ -3841,7 +3841,15 @@ function makeStyles(tokens: ThemeTokens) {
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
   exerciseCardSetRowDragActive: {
-    backgroundColor: tokens.bg.surface,
+    // Bug #309 — an EXPANDED card's background is already `tokens.bg.surface`,
+    // so the old `backgroundColor: tokens.bg.surface` here made the dragged row
+    // identical to the card → no visible「拖曳中」feedback (ADR-0025 theme
+    // migration regressed this from a distinct gray). Use `bg.elevated` so the
+    // grabbed row visibly shifts off the card in both light + dark, matching the
+    // template editor's drag-active lift (用戶要求「拖曳時變色如模板一樣」).
+    backgroundColor: tokens.bg.elevated,
+    borderWidth: 1,
+    borderColor: tokens.action.primary,
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },

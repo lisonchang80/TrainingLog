@@ -794,10 +794,14 @@ function makeStyles(tokens: ThemeTokens) {
     cycleNoteBtnPlaceholder: {
       width: 20,
     },
-    // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive
-    // (overnight 第 5 點, inline drag reorder).
+    // Drag-active state — mirrors solo card's exerciseCardSetRowDragActive.
+    // Bug #309 — `bg.surface` == the expanded card background → invisible drag
+    // feedback; use `bg.elevated` + accent border so the grabbed cycle visibly
+    // lifts in both light + dark (用戶要求「拖曳時變色如模板一樣」).
     cycleRowDragActive: {
-      backgroundColor: tokens.bg.surface,
+      backgroundColor: tokens.bg.elevated,
+      borderWidth: 1,
+      borderColor: tokens.action.primary,
       elevation: 6,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 4 },
