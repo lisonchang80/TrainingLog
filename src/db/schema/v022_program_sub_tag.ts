@@ -54,11 +54,23 @@ export async function v022_program_sub_tag(db: Database): Promise<void> {
 
   // Backfill from `template.sub_tag` — every distinct (program_id, sub_tag)
   // currently classified on templates becomes a known label for that program.
+  //
+  // ⚠️ `template.program_id` (v005 ALTER) has NO DB-level FK, so it can hold a
+  // dangling program id if a program was ever deleted via a path that didn't
+  // null it. `program_sub_tag.program_id` DOES carry a real FK (line 45), and
+  // `INSERT OR IGNORE` only swallows PK/UNIQUE conflicts — NOT FK violations.
+  // With `PRAGMA foreign_keys = ON` (prod migrate), a dangling source id would
+  // throw `SQLite error 19`, rolling back the whole migration → openDatabase()
+  // reject → app bricked at boot (unrecoverable: a later migration can't run
+  // past the failed v022). The `program_id IN (SELECT id FROM program)` guard
+  // skips orphaned rows so the backfill never trips the FK. See migration-new
+  // skill "no-FK-source backfill brick" anti-pattern.
   await db.runAsync(
     `INSERT OR IGNORE INTO program_sub_tag (program_id, sub_tag, created_at)
        SELECT DISTINCT program_id, sub_tag, ?
          FROM template
         WHERE program_id IS NOT NULL
+          AND program_id IN (SELECT id FROM program)
           AND sub_tag IS NOT NULL
           AND sub_tag != ''`,
     now,

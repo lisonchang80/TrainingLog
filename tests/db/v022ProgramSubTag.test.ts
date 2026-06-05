@@ -253,6 +253,70 @@ describe('v022 program_sub_tag dictionary migration', () => {
     expect(cnt?.n).toBe(0);
   });
 
+  it('skips a dangling template.program_id without tripping the FK (M1 brick guard)', async () => {
+    // Regression for the "no-FK-source backfill brick": `template.program_id`
+    // (v005 ALTER) has no DB-level FK, so it can hold a ghost program id. The
+    // backfill INSERTs into `program_sub_tag` which DOES carry a real FK, and
+    // `INSERT OR IGNORE` does NOT swallow FK violations. With foreign_keys=ON
+    // (prod migrate condition) an orphaned source row would throw SQLite 19 and
+    // brick boot. The `program_id IN (SELECT id FROM program)` guard must skip
+    // it instead. Reverting the guard makes this test throw.
+    await migrate(db);
+    const validPid = 'prog-valid';
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      validPid,
+      'P-valid',
+      null,
+      5,
+      3,
+      '2026-05-01',
+      1_000,
+      1_000,
+    );
+    // Template under a real program → should backfill.
+    await db.runAsync(
+      `INSERT INTO template
+         (id, name, color_hex, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, '', ?, ?, ?, ?)`,
+      'tpl-valid',
+      'Push',
+      1_000,
+      1_000,
+      validPid,
+      'GOOD',
+    );
+    // Template pointing at a program that does NOT exist (dangling). Allowed
+    // because template.program_id has no FK. This is the brick trigger.
+    await db.runAsync(
+      `INSERT INTO template
+         (id, name, color_hex, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, '', ?, ?, ?, ?)`,
+      'tpl-orphan',
+      'Ghost',
+      1_000,
+      1_000,
+      'prog-ghost-does-not-exist',
+      'ORPHAN',
+    );
+    // Clear what migrate already backfilled, then reproduce the prod condition
+    // (FK enforcement ON) before exercising the backfill in isolation.
+    await db.runAsync(`DELETE FROM program_sub_tag`);
+    await db.execAsync(`PRAGMA foreign_keys = ON`);
+
+    // Must NOT throw — guard filters the orphan out.
+    await expect(v022_program_sub_tag(db)).resolves.toBeUndefined();
+
+    const rows = await db.getAllAsync<{ program_id: string; sub_tag: string }>(
+      `SELECT program_id, sub_tag FROM program_sub_tag ORDER BY sub_tag ASC`,
+    );
+    expect(rows.map((r) => r.sub_tag)).toEqual(['GOOD']);
+    expect(rows.some((r) => r.sub_tag === 'ORPHAN')).toBe(false);
+  });
+
   it('runs automatically as part of the full migration runner (user_version >= 22)', async () => {
     await migrate(db);
     const row = await db.getFirstAsync<{ user_version: number }>(
