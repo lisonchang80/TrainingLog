@@ -72,6 +72,33 @@ describe('bucketBoundaries', () => {
     expect(out[5].start_ms).toBe(new Date(2026, 4, 4).getTime());
   });
 
+  it('week buckets stay calendar-flush across a DST transition (no ±1h gap/overlap)', () => {
+    // 2026-03-11 (Wed). In US DST zones spring-forward is Sun 2026-03-08, inside
+    // the bucket Mon Mar 2 → Mon Mar 9. A hardcoded `start + 168h` would set that
+    // bucket's end to Mar 9 01:00 (1h overlap) because the real week was only
+    // 167h; the calendar-derived end must land exactly on Mar 9 00:00. Asserting
+    // every boundary is a Monday local-midnight and each bucket is flush with the
+    // next catches the drift in any DST-observing timezone (and never false-fails
+    // in a non-DST zone, where 168h happened to coincide).
+    const now = new Date(2026, 2, 11);
+    const out = bucketBoundaries('week', now);
+    expect(out).toHaveLength(6);
+    for (let i = 0; i < out.length - 1; i++) {
+      expect(out[i].end_ms).toBe(out[i + 1].start_ms); // contiguous, no gap/overlap
+    }
+    for (const b of out) {
+      const s = new Date(b.start_ms);
+      const e = new Date(b.end_ms);
+      expect(s.getDay()).toBe(1); // Monday
+      expect([s.getHours(), s.getMinutes(), s.getSeconds()]).toEqual([0, 0, 0]);
+      expect(e.getDay()).toBe(1); // Monday
+      expect([e.getHours(), e.getMinutes(), e.getSeconds()]).toEqual([0, 0, 0]);
+    }
+    // Current week = Mon Mar 9 → Mon Mar 16.
+    expect(out[5].start_ms).toBe(new Date(2026, 2, 9).getTime());
+    expect(out[5].end_ms).toBe(new Date(2026, 2, 16).getTime());
+  });
+
   it('defaults `now` to the real clock when omitted (line 99 default branch)', () => {
     // Don't assert on wall-clock-dependent values — just the invariant shape:
     // 6 monotonically-increasing buckets, offsets -5..0, current period last.

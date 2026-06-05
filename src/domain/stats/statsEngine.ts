@@ -88,8 +88,6 @@ export function mFrequencyOverPeriod(
 // them. All pure logic — caller (UI / repo) loads a wide range of records and
 // hands them in.
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * Returns the 6 period boundaries oldest first.
  * offset -5 → 5 periods ago; offset 0 → current period containing `now`.
@@ -125,7 +123,16 @@ export function bucketBoundaries(
       const diffToMon = dow === 0 ? -6 : 1 - dow;
       d.setDate(d.getDate() + diffToMon + offset * 7);
       const start = d.getTime();
-      const end = start + 7 * DAY_MS;
+      // Derive `end` via calendar arithmetic (next Monday local-midnight), NOT
+      // `start + 7*24h`. A hardcoded 168h drifts by ±1h across the two annual
+      // DST transitions — spring-forward week is 167h real (→ 1h overlap into
+      // the next bucket) and fall-back week is 169h (→ 1h gap) — mis-bucketing
+      // sessions logged in that hour. setDate(+7) keeps the boundary on local
+      // midnight through the shift, so every bucket stays flush with the next.
+      const endDate = new Date(d);
+      endDate.setDate(endDate.getDate() + 7);
+      endDate.setHours(0, 0, 0, 0);
+      const end = endDate.getTime();
       out.push({
         offset,
         label: `${d.getMonth() + 1}/${d.getDate()}`,
