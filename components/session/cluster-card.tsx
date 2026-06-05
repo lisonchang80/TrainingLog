@@ -63,6 +63,7 @@ import {
 } from '@/src/domain/set/workingSetOrdinal';
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
+import type { UnitPreference } from '@/src/domain/body/types';
 import { t, tExercise } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -135,6 +136,8 @@ type ClusterCardProps = {
   }) => void;
   /** Right-swipe 備註 also offered inline as 📝 indicator. */
   onShowClusterSetNote?: (set_id: string, current: string | null) => void;
+  /** Display / entry unit for set weight (F4). Defaults to 'kg'. */
+  unit?: UnitPreference;
 };
 
 export function ClusterCard({
@@ -154,6 +157,7 @@ export function ClusterCard({
   onCycleClusterCycleSetKind,
   onShowClusterSetNote,
   onConfirmReorderCycles,
+  unit = 'kg',
 }: ClusterCardProps): React.ReactElement {
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
@@ -441,6 +445,7 @@ export function ClusterCard({
                           showAddDrop={false}
                           minusDisabled={true}
                           hideNoteIndicator={true}
+                          unit={unit}
                           onUpdateSet={(set_id, patch) =>
                             onUpdateClusterSet?.(set_id, patch)
                           }
@@ -473,6 +478,7 @@ export function ClusterCard({
                           showAddDrop={false}
                           minusDisabled={true}
                           hideNoteIndicator={true}
+                          unit={unit}
                           onUpdateSet={(set_id, patch) =>
                             onUpdateClusterSet?.(set_id, patch)
                           }

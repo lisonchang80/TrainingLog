@@ -15,6 +15,7 @@ import {
   lbToKg,
   kgToDisplay,
   displayToKg,
+  displayWeight,
   formatWeight,
   parseWeightInput,
 } from '../../src/domain/body/unitConversion';
@@ -93,6 +94,28 @@ describe('kgToDisplay / displayToKg', () => {
   it('display ↔ kg round-trips in lb mode', () => {
     const kg = 64.2;
     expect(displayToKg(kgToDisplay(kg, 'lb'), 'lb')).toBeCloseTo(kg, 9);
+  });
+});
+
+describe('displayWeight (F4 — editable cell / keypad value)', () => {
+  it('kg unit is exact identity (zero-regression, no rounding applied)', () => {
+    expect(displayWeight(60, 'kg')).toBe(60);
+    expect(displayWeight(62.55, 'kg')).toBe(62.55); // NOT rounded for kg
+    expect(displayWeight(0, 'kg')).toBe(0);
+    expect(displayWeight(-5, 'kg')).toBe(-5);
+  });
+
+  it('lb unit converts and rounds to 1 decimal', () => {
+    expect(displayWeight(100, 'lb')).toBe(220.5); // 220.462262 → 220.5
+    expect(displayWeight(60, 'lb')).toBe(132.3); // 132.277... → 132.3
+    expect(displayWeight(0, 'lb')).toBe(0);
+  });
+
+  it('lb round-trips cleanly for whole-lb entries (no field clobber)', () => {
+    // A user enters 225 lb → stored kg = lbToKg(225); displayWeight back must
+    // reproduce 225.0 so the inline field/useEffect guard does not overwrite it.
+    const kg = lbToKg(225);
+    expect(displayWeight(kg, 'lb')).toBe(225);
   });
 });
 

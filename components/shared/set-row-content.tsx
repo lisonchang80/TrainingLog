@@ -26,6 +26,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useTheme, type ThemeTokens } from '@/src/theme';
+import { displayToKg, displayWeight } from '@/src/domain/body/unitConversion';
+import type { UnitPreference } from '@/src/domain/body/types';
 
 /**
  * Structural minimum a set object must expose for SetRowContent to
@@ -82,6 +84,13 @@ type SetRowContentProps<S extends SetRowItem> = {
   onRemoveDropsetRow: (set_id: string) => void;
   onAddDropsetRow: (set_id: string) => void;
   onCycleLabel: (set: S) => void;
+  /**
+   * Display / entry unit (F4, grill 2026-06-05). Defaults to 'kg' (the
+   * canonical storage unit) so omitting it is the exact prior behavior — zero
+   * regression. When 'lb', the weight cell shows the converted value and entry
+   * is converted back to kg before `onUpdateSet`; stored `set.weight` stays kg.
+   */
+  unit?: UnitPreference;
 };
 
 export function SetRowContent<S extends SetRowItem>({
@@ -93,6 +102,7 @@ export function SetRowContent<S extends SetRowItem>({
   minusDisabled,
   hideNoteIndicator,
   hideLabel,
+  unit = 'kg',
   onTapNumber,
   onUpdateSet,
   onShowSetNote,
@@ -105,8 +115,12 @@ export function SetRowContent<S extends SetRowItem>({
   const hasNote =
     !hideNoteIndicator && !!(set.notes && set.notes.trim().length > 0);
 
+  // F4 — render/enter the weight in `unit`; storage is always kg. `displayWeight`
+  // is identity for 'kg' (zero regression) and rounds 'lb' to 1 decimal.
   const [repsText, setRepsText] = useState(() => String(set.reps));
-  const [weightText, setWeightText] = useState(() => String(set.weight));
+  const [weightText, setWeightText] = useState(() =>
+    String(displayWeight(set.weight, unit)),
+  );
   useEffect(() => {
     const local = Number(repsText);
     if (Number.isFinite(local) && local === set.reps) return;
@@ -115,10 +129,13 @@ export function SetRowContent<S extends SetRowItem>({
   }, [set.reps]);
   useEffect(() => {
     const local = Number(weightText);
-    if (Number.isFinite(local) && local === set.weight) return;
-    setWeightText(String(set.weight));
+    // Compare in kg space so a mid-typed value isn't clobbered. For unit==='kg'
+    // displayToKg is identity → exact prior behavior. The `unit` dep re-syncs
+    // the field when the user toggles kg⇄lb while the row is on screen.
+    if (Number.isFinite(local) && displayToKg(local, unit) === set.weight) return;
+    setWeightText(String(displayWeight(set.weight, unit)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set.weight]);
+  }, [set.weight, unit]);
 
   const handleRepsChange = (t: string) => {
     const cleaned = t.replace(/[^0-9]/g, '');
@@ -141,7 +158,8 @@ export function SetRowContent<S extends SetRowItem>({
     }
     const parsed = Number(cleaned);
     if (Number.isFinite(parsed)) {
-      onUpdateSet(set.id, { weight: parsed });
+      // Convert the entered display value back to kg for storage (identity for kg).
+      onUpdateSet(set.id, { weight: displayToKg(parsed, unit) });
     }
   };
 
@@ -175,7 +193,7 @@ export function SetRowContent<S extends SetRowItem>({
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
         >
-          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(set.weight)}</Text>
+          <Text style={[styles.setInputText, compact && styles.setInputTextCompact]}>{String(displayWeight(set.weight, unit))}</Text>
         </Pressable>
       ) : (
         <TextInput
@@ -185,7 +203,7 @@ export function SetRowContent<S extends SetRowItem>({
           keyboardType="decimal-pad"
         />
       )}
-      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>kg</Text>
+      <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>{unit}</Text>
       <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>×</Text>
       {onTapNumber ? (
         <Pressable

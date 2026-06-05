@@ -116,8 +116,14 @@ import {
 import {
   deleteSetting,
   getSetting,
+  getUnitPreference,
   setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
+import {
+  displayToKg,
+  displayWeight,
+} from '@/src/domain/body/unitConversion';
+import type { UnitPreference } from '@/src/domain/body/types';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { filterUncheckedSolo, filterUncheckedClusterPair } from '@/src/domain/set/hideUncheckedFilter';
@@ -303,6 +309,7 @@ export default function SessionDetailScreen() {
     Map<string, ReusableSupersetWithExercises>
   >(new Map());
   const [loading, setLoading] = useState(true);
+  const [unit, setUnit] = useState<UnitPreference>('kg'); // F4 — set weight display/entry unit
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
 
@@ -390,11 +397,12 @@ export default function SessionDetailScreen() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, ss, ses, hk] = await Promise.all([
+      const [s, ss, ses, hk, u] = await Promise.all([
         getSession(db, id),
         listSetsBySession(db, id),
         listSessionExercisesWithName(db, id),
         loadHealthkitColumns(db, id),
+        getUnitPreference(db),
       ]);
       if (!s) {
         setError('Session not found.');
@@ -404,6 +412,7 @@ export default function SessionDetailScreen() {
       setSession({ ...s, kcal: hk.kcal, avg_hr_bpm: hk.avg_hr_bpm });
       setSets(ss);
       setSessionExercises(ses);
+      setUnit(u);
 
       // Hydrate RS rows for any cluster that carries an rs_id (I6).
       const rsIds = new Set<string>();
@@ -1750,6 +1759,7 @@ export default function SessionDetailScreen() {
           <ClusterCard
             key={p.id}
             group={renderGroup}
+            unit={unit}
             isExpanded={isExpanded}
             onToggleExpand={() =>
               setExpandedExerciseId(isExpanded ? null : p.id)
@@ -1857,6 +1867,7 @@ export default function SessionDetailScreen() {
         <EditableExerciseCard
           key={p.id}
           planRow={p}
+          unit={unit}
           isExpanded={isExpanded}
           sets={setsForExercise}
           busy={busy}
@@ -2187,6 +2198,7 @@ export default function SessionDetailScreen() {
                           <ClusterBlock
                             key={item.cluster.parent.id}
                             cluster={renderCluster}
+                            unit={unit}
                             rs={
                               item.cluster.parent.reusable_superset_id
                                 ? rsById.get(
@@ -2208,6 +2220,7 @@ export default function SessionDetailScreen() {
                           key={item.exercise.id}
                           exercise={item.exercise}
                           sets={renderSets}
+                          unit={unit}
                         />
                       );
                     })
@@ -2295,14 +2308,18 @@ export default function SessionDetailScreen() {
       />
       <NumericKeypad
         visible={keypadTarget !== null}
-        initialValue={keypadTarget?.current ?? 0}
+        initialValue={
+          keypadTarget?.field === 'weight'
+            ? displayWeight(keypadTarget?.current ?? 0, unit) // kg → display unit
+            : keypadTarget?.current ?? 0
+        }
         label={keypadTarget?.field === 'weight' ? t('domain', 'weightKg') : t('domain', 'reps')}
         mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
         onConfirm={(value) => {
           if (keypadTarget) {
             const patch =
               keypadTarget.field === 'weight'
-                ? { weight: value }
+                ? { weight: displayToKg(value, unit) } // entered display unit → kg
                 : { reps: value };
             onUpdateSet(keypadTarget.set_id, patch);
           }
@@ -2464,9 +2481,11 @@ function formatDateLabel(ms: number): string {
 function SoloExerciseBlock({
   exercise,
   sets,
+  unit,
 }: {
   exercise: SessionExerciseRowWithName;
   sets: SessionSetWithExercise[];
+  unit: UnitPreference;
 }) {
   const styles = useSessionStyles();
   // Session 詳情頁 read mode：用 computeSessionSetLayout，dropset chain
@@ -2500,6 +2519,7 @@ function SoloExerciseBlock({
               label={labelMap.get(s.id) ?? ''}
               setRow={s}
               loadType={exercise.exercise_load_type}
+              unit={unit}
             />
           ))}
         </View>
@@ -2512,16 +2532,18 @@ function ReadOnlySetRow({
   label,
   setRow,
   loadType,
+  unit,
 }: {
   label: string;
   setRow: SessionSetWithExercise;
   loadType: 'loaded' | 'bodyweight' | 'assisted';
+  unit: UnitPreference;
 }) {
   const styles = useSessionStyles();
   return (
     <View style={styles.setRow}>
       <Text style={styles.setOrdering}>{label}</Text>
-      <Text style={styles.setText}>{formatSetCell(setRow, loadType)}</Text>
+      <Text style={styles.setText}>{formatSetCell(setRow, loadType, unit)}</Text>
       {setRow.is_logged === 1 && <Text style={styles.setCheck}>✓</Text>}
     </View>
   );
@@ -2539,9 +2561,11 @@ function ReadOnlySetRow({
 function ClusterBlock({
   cluster,
   rs,
+  unit,
 }: {
   cluster: ClusterRow;
   rs: ReusableSupersetWithExercises | null;
+  unit: UnitPreference;
 }) {
   const styles = useSessionStyles();
   const { tokens } = useTheme();
@@ -2629,7 +2653,7 @@ function ClusterBlock({
               <View style={styles.clusterCell}>
                 {r.a ? (
                   <Text style={styles.clusterCellText}>
-                    {formatSetCell(r.a, cluster.parent.exercise_load_type)}
+                    {formatSetCell(r.a, cluster.parent.exercise_load_type, unit)}
                   </Text>
                 ) : (
                   <Text style={styles.clusterCellEmpty}>—</Text>
@@ -2638,7 +2662,7 @@ function ClusterBlock({
               <View style={styles.clusterCell}>
                 {r.b ? (
                   <Text style={styles.clusterCellText}>
-                    {formatSetCell(r.b, cluster.child.exercise_load_type)}
+                    {formatSetCell(r.b, cluster.child.exercise_load_type, unit)}
                   </Text>
                 ) : (
                   <Text style={styles.clusterCellEmpty}>—</Text>
@@ -2659,11 +2683,14 @@ function ClusterBlock({
 
 function formatSetCell(
   s: SessionSetWithExercise,
-  load_type: 'loaded' | 'bodyweight' | 'assisted'
+  load_type: 'loaded' | 'bodyweight' | 'assisted',
+  unit: UnitPreference
 ): string {
   if (load_type === 'bodyweight') return `BW × ${s.reps}`;
-  if (load_type === 'assisted') return `-${s.weight_kg} kg × ${s.reps}`;
-  return `${s.weight_kg} kg × ${s.reps}`;
+  // F4 — show weight in `unit` (identity for kg, converted+rounded for lb).
+  const w = displayWeight(s.weight_kg ?? 0, unit);
+  if (load_type === 'assisted') return `-${w} ${unit} × ${s.reps}`;
+  return `${w} ${unit} × ${s.reps}`;
 }
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -2680,6 +2707,8 @@ function hexAlpha(hex: string, alpha: number): string {
 
 type EditableExerciseCardProps = {
   planRow: SessionExerciseRowWithName;
+  /** Display / entry unit for set weight (F4). */
+  unit: UnitPreference;
   isExpanded: boolean;
   sets: SessionSetWithExercise[];
   busy: boolean;
@@ -2709,6 +2738,7 @@ type EditableExerciseCardProps = {
 
 function EditableExerciseCard({
   planRow,
+  unit,
   isExpanded,
   sets,
   busy,
@@ -2924,6 +2954,7 @@ function EditableExerciseCard({
                         <View style={styles.exerciseCardSetRowContent}>
                           <SetRowContent
                             set={headRow}
+                            unit={unit}
                             setLabel={labels.get(head.id) ?? ''}
                             isDropsetFollower={false}
                             showAddDrop={false}
@@ -2994,6 +3025,7 @@ function EditableExerciseCard({
                             <View style={styles.exerciseCardSetRowContent}>
                               <SetRowContent
                                 set={fRow}
+                                unit={unit}
                                 setLabel=""
                                 isDropsetFollower
                                 showAddDrop={true}

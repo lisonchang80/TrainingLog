@@ -37,6 +37,17 @@ export function displayToKg(value: number, unit: UnitPreference): number {
 }
 
 /**
+ * Weight value for an editable cell / numeric keypad (F4, grill 2026-06-05).
+ * kg passes through UNCHANGED (canonical storage, zero-regression for kg users);
+ * lb is converted and rounded to 1 decimal (matches formatWeight precision and
+ * keeps the lb→kg→lb round-trip stable so the field isn't clobbered mid-edit).
+ * Returns a number — caller String()s it for the TextInput / keypad.
+ */
+export function displayWeight(kg: number, unit: UnitPreference): number {
+  return unit === 'lb' ? Math.round(kgToLb(kg) * 10) / 10 : kg;
+}
+
+/**
  * Format a kg value for display: rounds to 1 decimal and appends the unit
  * label. Used by chart axes, set rows, body data summaries.
  *

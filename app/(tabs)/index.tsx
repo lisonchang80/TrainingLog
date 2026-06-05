@@ -133,6 +133,8 @@ import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
 import type { UnitPreference } from '@/src/domain/body/types';
 import {
+  displayToKg,
+  displayWeight,
   formatWeight,
   kgToDisplay,
   parseWeightInput,
@@ -2631,6 +2633,7 @@ export default function TodayScreen() {
                         <ClusterCard
                           key={p.id}
                           group={group}
+                          unit={unit}
                           isExpanded={isExpanded}
                           onToggleExpand={() =>
                             setExpandedExerciseId(isExpanded ? null : p.id)
@@ -2797,6 +2800,7 @@ export default function TodayScreen() {
                       <ExerciseCard
                         key={p.id}
                         planRow={p}
+                        unit={unit}
                         isExpanded={isExpanded}
                         sets={setsForExercise}
                         busy={busy}
@@ -2958,14 +2962,18 @@ export default function TodayScreen() {
       />
       <NumericKeypad
         visible={keypadTarget !== null}
-        initialValue={keypadTarget?.current ?? 0}
+        initialValue={
+          keypadTarget?.field === 'weight'
+            ? displayWeight(keypadTarget?.current ?? 0, unit) // kg → display unit
+            : keypadTarget?.current ?? 0
+        }
         label={keypadTarget?.field === 'weight' ? t('domain', 'weightKg') : t('domain', 'reps')}
         mode={keypadTarget?.field === 'weight' ? 'decimal' : 'integer'}
         onConfirm={(value) => {
           if (keypadTarget) {
             const patch =
               keypadTarget.field === 'weight'
-                ? { weight: value }
+                ? { weight: displayToKg(value, unit) } // entered display unit → kg
                 : { reps: value };
             onUpdateSet(keypadTarget.set_id, patch);
           }
@@ -3132,6 +3140,7 @@ function formatPRDeltaValue(
  */
 function ExerciseCard({
   planRow,
+  unit,
   isExpanded,
   sets,
   busy,
@@ -3153,6 +3162,8 @@ function ExerciseCard({
   onConfirmReorderSets,
 }: {
   planRow: SessionExerciseRowWithName;
+  /** Display / entry unit for set weight (F4). */
+  unit: UnitPreference;
   isExpanded: boolean;
   sets: SessionSetWithExercise[];
   busy: boolean;
@@ -3432,6 +3443,7 @@ function ExerciseCard({
                         <View style={styles.exerciseCardSetRowContent}>
                           <SetRowContent
                             set={headRow}
+                            unit={unit}
                             setLabel={labels.get(head.id) ?? ''}
                             isDropsetFollower={false}
                             showAddDrop={false}
@@ -3507,6 +3519,7 @@ function ExerciseCard({
                             <View style={styles.exerciseCardSetRowContent}>
                               <SetRowContent
                                 set={fRow}
+                                unit={unit}
                                 setLabel=""
                                 isDropsetFollower
                                 showAddDrop={true}
