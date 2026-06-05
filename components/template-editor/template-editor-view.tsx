@@ -409,6 +409,22 @@ export default function TemplateEditorView() {
   const persistDraft = useCallback(async () => {
     if (!committed || !draft) return false;
     const now = () => Date.now();
+    // Dup-triple guard (C1): persistDraft is the 開始訓練 (onStartSession) commit
+    // path. The name is inline-editable, so a rename here could collide with an
+    // existing sibling (name, program_id, sub_tag). There is no DB UNIQUE on the
+    // triple — identity is app-enforced via findTemplateByTriple's lookup-or-spawn
+    // — so an unguarded collision SILENTLY creates a duplicate triple, breaking
+    // that invariant. Mirror the 儲存/另存 sheet paths: block + DUPLICATE_TEMPLATE_TRIPLE.
+    if (draft.name !== committed.name) {
+      const existing = await findTemplateByTriple(db, {
+        name: draft.name,
+        program_id: draft.program_id ?? null,
+        sub_tag: draft.sub_tag ?? null,
+      });
+      if (existing && existing.id !== draft.id) {
+        throw new Error('DUPLICATE_TEMPLATE_TRIPLE');
+      }
+    }
     // If color changed, cascade to all same-name siblings (group-wide).
     // commitTemplateDraft also updates this template's color, but
     // applyRecolorSiblings catches sibling templates that share the name.
@@ -780,7 +796,18 @@ export default function TemplateEditorView() {
       await startSessionFromTemplate(db, { template_id: id, uuid: randomUUID });
       router.replace('/');
     } catch (e) {
-      Alert.alert(tt('alert', 'cannotStartSession'), e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
+        // persistDraft blocked an inline rename-to-collide — clean variant alert
+        // instead of the generic "cannot start session" so the user can fix the
+        // name before retrying.
+        Alert.alert(
+          tt('alert', 'variantExists'),
+          tt('alert', 'duplicateTemplateTripleEditorBody'),
+        );
+      } else {
+        Alert.alert(tt('alert', 'cannotStartSession'), msg);
+      }
     } finally {
       setBusy(false);
     }
