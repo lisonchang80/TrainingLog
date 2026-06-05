@@ -75,9 +75,17 @@ describe('Module #4 — E1RM Engine (Epley)', () => {
       expect(estimateE1RM({ weight_kg: 100, reps: NaN, load_type: 'loaded' })).toBeNull();
     });
 
-    it('high reps still computes (no upper clamp in v1)', () => {
-      const e = estimateE1RM({ weight_kg: 50, reps: 30, load_type: 'loaded' });
-      expect(e).toBeCloseTo(50 * 2, 5);
+    it('reps at the 12 ceiling still estimates', () => {
+      // Grill 2026-06-05 Q2 — 12 is inclusive (last reliable Epley rep).
+      const e = estimateE1RM({ weight_kg: 50, reps: 12, load_type: 'loaded' });
+      expect(e).toBeCloseTo(50 * (1 + 12 / 30), 5);
+    });
+
+    it('reps above 12 → null (Epley validity ceiling, no over-estimate)', () => {
+      // Grill 2026-06-05 Q2 — a 50×30 burnout set must NOT out-rank a real
+      // heavy single on the e1RM trend, so we refuse to estimate it.
+      expect(estimateE1RM({ weight_kg: 50, reps: 13, load_type: 'loaded' })).toBeNull();
+      expect(estimateE1RM({ weight_kg: 50, reps: 30, load_type: 'loaded' })).toBeNull();
     });
   });
 

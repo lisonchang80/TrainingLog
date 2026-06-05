@@ -42,6 +42,7 @@ import type { UnitPreference } from '@/src/domain/body/types';
 import { bucketLabel, classifyBucket } from '@/src/domain/pr/buckets';
 import { computePRs, type PRKey, type PRSnapshotWithDate } from '@/src/domain/pr/historyPrSnapshot';
 import { effectiveLoad } from '@/src/domain/pr/e1rmEngine';
+import { pickTopSet } from '@/src/domain/pr/topSet';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
@@ -1298,16 +1299,11 @@ function SessionRow({
   onReplay: () => void;
 }) {
   const styles = useHistoryStyles();
-  const topSet = session.sets
-    .map((s) => ({
-      set: s,
-      eff:
-        s.weight_kg == null
-          ? null
-          : effectiveLoad(s.weight_kg, loadType, s.bw_snapshot_kg),
-    }))
-    .filter((x) => x.eff != null)
-    .sort((a, b) => (b.eff ?? 0) - (a.eff ?? 0))[0];
+  // Grill 2026-06-05 Q1 — 頂組 (本次最佳組). Pure picker excludes warmup +
+  // dropset followers (only working + dropset head are candidates), matching
+  // the app-wide「真訓練組」rule the same card's `totalVolume` uses. Extracted
+  // to `pickTopSet` for unit-test coverage; see src/domain/pr/topSet.ts.
+  const topSet = pickTopSet(session.sets, loadType);
 
   // ADR-0012 line 174: volumeEngine 排 warmup（working + dropset 算容量）。
   const totalVolume = session.sets.reduce((sum, s) => {
