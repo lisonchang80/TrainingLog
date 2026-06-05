@@ -215,6 +215,19 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
       });
     }
 
+    // Grill 2026-06-05 Q8 (WC #3) — fail closed on duplicate ordinals within an
+    // exercise. The reconcile matches sets by (session_exercise_id, ordinal),
+    // so two sets sharing an ordinal would silently overwrite each other (the
+    // second clobbers the first → a logged set vanishes without a trace). The
+    // producer emits dense-unique ordinals, so a collision is corruption:
+    // reject the whole snapshot (live tick skipped → recovers next clean tick;
+    // end-session → bad-payload → no purge) rather than lose data.
+    const seenOrdinals = new Set<number>();
+    for (const s of parsedSets) {
+      if (seenOrdinals.has(s.ordinal)) return null;
+      seenOrdinals.add(s.ordinal);
+    }
+
     parsedExercises.push({
       sessionExerciseId,
       exerciseId,

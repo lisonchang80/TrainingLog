@@ -450,6 +450,62 @@ describe('Slice 13d D32 — parseLiveMirrorSnapshot validator', () => {
     expect(parsed).toBeNull();
   });
 
+  // ---- Q8 (grill 2026-06-05, WC #3): duplicate-ordinal fail-closed ----
+  const dupOrdinalSnapshot = (ordinals: [number, number]) => ({
+    sessionId: 's',
+    title: '',
+    startedAt: 1,
+    exercises: [
+      {
+        sessionExerciseId: 'se',
+        exerciseId: 'ex',
+        exerciseName: 'X',
+        ordering: 0,
+        plannedSets: 2,
+        sets: [
+          { setId: 'a', ordinal: ordinals[0], set_kind: 'working', is_logged: true },
+          { setId: 'b', ordinal: ordinals[1], set_kind: 'working', is_logged: true },
+        ],
+      },
+    ],
+  });
+
+  it('Q8 — rejects duplicate ordinals within an exercise (would silently drop a set)', () => {
+    // Two sets at ordinal 0 → reconcile (se, ordinal) match would clobber one.
+    expect(parseLiveMirrorSnapshot(dupOrdinalSnapshot([0, 0]))).toBeNull();
+  });
+
+  it('Q8 — accepts distinct ordinals within an exercise', () => {
+    expect(parseLiveMirrorSnapshot(dupOrdinalSnapshot([0, 1]))).not.toBeNull();
+  });
+
+  it('Q8 — the same ordinal is fine in DIFFERENT exercises', () => {
+    const parsed = parseLiveMirrorSnapshot({
+      sessionId: 's',
+      title: '',
+      startedAt: 1,
+      exercises: [
+        {
+          sessionExerciseId: 'se-1',
+          exerciseId: 'ex-1',
+          exerciseName: 'A',
+          ordering: 0,
+          plannedSets: 1,
+          sets: [{ setId: 'a', ordinal: 0, set_kind: 'working', is_logged: true }],
+        },
+        {
+          sessionExerciseId: 'se-2',
+          exerciseId: 'ex-2',
+          exerciseName: 'B',
+          ordering: 1,
+          plannedSets: 1,
+          sets: [{ setId: 'b', ordinal: 0, set_kind: 'working', is_logged: true }],
+        },
+      ],
+    });
+    expect(parsed).not.toBeNull();
+  });
+
   it('accepts nullable numeric set fields (weight/reps/rpe/rest_sec null)', () => {
     const parsed = parseLiveMirrorSnapshot({
       sessionId: 's',
