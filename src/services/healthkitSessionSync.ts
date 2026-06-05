@@ -46,8 +46,16 @@
  */
 
 import type { Database } from '../db/types';
-import { getSession, setSessionHealthKitData } from '../adapters/sqlite/sessionRepository';
-import { aggregateActiveEnergyBurned, saveTrainingLogWorkout } from '../adapters/healthkit';
+import {
+  getSession,
+  setSessionHealthKitData,
+  getSessionHealthKitWorkoutUuid,
+} from '../adapters/sqlite/sessionRepository';
+import {
+  aggregateActiveEnergyBurned,
+  saveTrainingLogWorkout,
+  deleteTrainingLogWorkout,
+} from '../adapters/healthkit';
 import type { Session } from '../domain/session/types';
 
 interface HealthKitSessionSyncDeps {
@@ -78,6 +86,10 @@ interface HealthKitSessionSyncDeps {
    * ignores → Fitness shows「傳統肌力訓練」(activityType localized name).
    */
   fallbackTitle?: string;
+  /** Defaults to {@link deleteTrainingLogWorkout}. Used by re-sync (Q3). */
+  deleteTrainingLogWorkout?: (sessionId: string) => Promise<number>;
+  /** Defaults to {@link getSessionHealthKitWorkoutUuid}. Re-sync no-backfill gate (Q3). */
+  getHealthKitWorkoutUuid?: (db: Database, id: string) => Promise<string | null>;
 }
 
 export async function syncSessionWithHealthKit(
@@ -122,4 +134,49 @@ export async function syncSessionWithHealthKit(
   } catch (e) {
     console.warn('[healthkit] finish sync failed:', e);
   }
+}
+
+/**
+ * Re-sync an ALREADY-finished session to HealthKit after its start/end time was
+ * edited (grill 2026-06-05 Q3, HK #4). HKWorkout samples are immutable, so a
+ * "time edit" is delete-then-rewrite:
+ *   1. delete the existing TrainingLog HKWorkout (reverse-lookup by sessionId),
+ *   2. re-run the normal sync (aggregate kcal over the NEW window + write a
+ *      fresh HKWorkout + persist the new uuid/kcal).
+ *
+ * No-backfill gate (ADR-0019 § Phase B Q11): only sessions that ALREADY carry a
+ * `healthkit_workout_uuid` are re-synced. A session edited before it ever synced
+ * to HK (or finished with HK permission off) is left untouched — we never
+ * retroactively create a Fitness entry just because the user nudged a time.
+ *
+ * NEVER throws (mirrors `syncSessionWithHealthKit`): a delete failure only logs;
+ * the rewrite still runs (worst case a stale duplicate, never a crash).
+ */
+export async function resyncSessionWithHealthKit(
+  db: Database,
+  sessionId: string,
+  deps: HealthKitSessionSyncDeps = {}
+): Promise<void> {
+  const getSessionFn = deps.getSession ?? getSession;
+  const deleteFn = deps.deleteTrainingLogWorkout ?? deleteTrainingLogWorkout;
+  const getUuidFn = deps.getHealthKitWorkoutUuid ?? getSessionHealthKitWorkoutUuid;
+  try {
+    const session = await getSessionFn(db, sessionId);
+    if (!session || session.ended_at == null) {
+      // Not a finished session → nothing to re-sync.
+      return;
+    }
+    const existingUuid = await getUuidFn(db, sessionId);
+    if (existingUuid == null) {
+      // Never mirrored to HK → no-backfill (ADR Q11): don't create an entry.
+      return;
+    }
+    await deleteFn(sessionId);
+  } catch (e) {
+    console.warn('[healthkit] resync delete failed:', e);
+    // Fall through — still attempt the rewrite below.
+  }
+  // Rewrite for the new [started_at, ended_at] window. Reuses the exact
+  // best-effort aggregate + write + persist contract above.
+  await syncSessionWithHealthKit(db, sessionId, deps);
 }

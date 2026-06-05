@@ -38,7 +38,10 @@ jest.mock('@kingstinct/react-native-healthkit', () => ({
   WorkoutActivityType: { traditionalStrengthTraining: 20 },
 }));
 
-import { syncSessionWithHealthKit } from '../../src/services/healthkitSessionSync';
+import {
+  syncSessionWithHealthKit,
+  resyncSessionWithHealthKit,
+} from '../../src/services/healthkitSessionSync';
 import type { Session } from '../../src/domain/session/types';
 import type { Database } from '../../src/db/types';
 
@@ -215,5 +218,111 @@ describe('Slice 13c — syncSessionWithHealthKit', () => {
       '[healthkit] finish sync failed:',
       expect.any(Error)
     );
+  });
+});
+
+describe('Grill 2026-06-05 Q3 — resyncSessionWithHealthKit (time-edit re-sync)', () => {
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => warnSpy.mockRestore());
+
+  it('delete-then-rewrites when the session already has an HKWorkout', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession());
+    const getHealthKitWorkoutUuid = jest.fn().mockResolvedValue('hk-old');
+    const deleteTrainingLogWorkout = jest.fn().mockResolvedValue(1);
+    const aggregateActiveEnergyBurned = jest.fn().mockResolvedValue(123);
+    const saveTrainingLogWorkout = jest.fn().mockResolvedValue('hk-new');
+    const setSessionHealthKitData = jest.fn().mockResolvedValue(undefined);
+
+    await resyncSessionWithHealthKit(dbStub, SESSION_ID, {
+      getSession,
+      getHealthKitWorkoutUuid,
+      deleteTrainingLogWorkout,
+      aggregateActiveEnergyBurned,
+      saveTrainingLogWorkout,
+      setSessionHealthKitData,
+    });
+
+    // Old workout deleted by sessionId, then a fresh one written + persisted.
+    expect(deleteTrainingLogWorkout).toHaveBeenCalledWith(SESSION_ID);
+    expect(saveTrainingLogWorkout).toHaveBeenCalledWith(
+      expect.objectContaining({ startMs: STARTED_AT, endMs: ENDED_AT, kcal: 123 })
+    );
+    expect(setSessionHealthKitData).toHaveBeenCalledWith(dbStub, {
+      id: SESSION_ID,
+      kcal: 123,
+      healthkit_workout_uuid: 'hk-new',
+    });
+  });
+
+  it('no-backfill: a session never synced to HK is left untouched', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession());
+    const getHealthKitWorkoutUuid = jest.fn().mockResolvedValue(null);
+    const deleteTrainingLogWorkout = jest.fn();
+    const saveTrainingLogWorkout = jest.fn();
+    const setSessionHealthKitData = jest.fn();
+
+    await resyncSessionWithHealthKit(dbStub, SESSION_ID, {
+      getSession,
+      getHealthKitWorkoutUuid,
+      deleteTrainingLogWorkout,
+      saveTrainingLogWorkout,
+      setSessionHealthKitData,
+    });
+
+    expect(deleteTrainingLogWorkout).not.toHaveBeenCalled();
+    expect(saveTrainingLogWorkout).not.toHaveBeenCalled();
+    expect(setSessionHealthKitData).not.toHaveBeenCalled();
+  });
+
+  it('not-finished session (ended_at null) → no-op', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ ended_at: null }));
+    const getHealthKitWorkoutUuid = jest.fn();
+    const deleteTrainingLogWorkout = jest.fn();
+    const saveTrainingLogWorkout = jest.fn();
+
+    await resyncSessionWithHealthKit(dbStub, SESSION_ID, {
+      getSession,
+      getHealthKitWorkoutUuid,
+      deleteTrainingLogWorkout,
+      saveTrainingLogWorkout,
+    });
+
+    expect(getHealthKitWorkoutUuid).not.toHaveBeenCalled();
+    expect(deleteTrainingLogWorkout).not.toHaveBeenCalled();
+    expect(saveTrainingLogWorkout).not.toHaveBeenCalled();
+  });
+
+  it('delete failure still rewrites (best-effort, never throws)', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession());
+    const getHealthKitWorkoutUuid = jest.fn().mockResolvedValue('hk-old');
+    const deleteTrainingLogWorkout = jest
+      .fn()
+      .mockRejectedValue(new Error('HK delete denied'));
+    const aggregateActiveEnergyBurned = jest.fn().mockResolvedValue(50);
+    const saveTrainingLogWorkout = jest.fn().mockResolvedValue('hk-new');
+    const setSessionHealthKitData = jest.fn().mockResolvedValue(undefined);
+
+    await expect(
+      resyncSessionWithHealthKit(dbStub, SESSION_ID, {
+        getSession,
+        getHealthKitWorkoutUuid,
+        deleteTrainingLogWorkout,
+        aggregateActiveEnergyBurned,
+        saveTrainingLogWorkout,
+        setSessionHealthKitData,
+      })
+    ).resolves.toBeUndefined();
+
+    // Rewrite proceeded despite the delete throwing.
+    expect(saveTrainingLogWorkout).toHaveBeenCalled();
+    expect(setSessionHealthKitData).toHaveBeenCalledWith(dbStub, {
+      id: SESSION_ID,
+      kcal: 50,
+      healthkit_workout_uuid: 'hk-new',
+    });
   });
 });

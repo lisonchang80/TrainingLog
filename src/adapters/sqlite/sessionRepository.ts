@@ -165,6 +165,23 @@ export async function setSessionHealthKitData(
 }
 
 /**
+ * Read just the `healthkit_workout_uuid` column (grill 2026-06-05 Q3). Used by
+ * the time-edit re-sync's no-backfill gate — kept off the domain `Session` type
+ * (which has no HK fields) to avoid widening it app-wide. Returns null when the
+ * row is missing or was never synced to HealthKit.
+ */
+export async function getSessionHealthKitWorkoutUuid(
+  db: Database,
+  id: string
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ healthkit_workout_uuid: string | null }>(
+    `SELECT healthkit_workout_uuid FROM session WHERE id = ?`,
+    id
+  );
+  return row?.healthkit_workout_uuid ?? null;
+}
+
+/**
  * SQLite row shape for the `session` table SELECTs in this repository —
  * mirrors the column types exactly (`is_watch_tracked INTEGER NOT NULL`
  * arrives as 0/1, not a JS boolean). Mapped to the domain `Session` type

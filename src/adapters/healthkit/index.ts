@@ -33,3 +33,7 @@ export { queryHeartRateSamples, aggregateActiveEnergyBurned } from './reader';
 // Slice 13c — writer (HKWorkout save)
 export { saveTrainingLogWorkout } from './writer';
 export type { WorkoutWriteInput } from './writer';
+
+// Grill 2026-06-05 Q3 — deleter (HKWorkout delete by HKExternalUUID), used by
+// the delete-and-rewrite re-sync after a session time edit.
+export { deleteTrainingLogWorkout } from './deleter';

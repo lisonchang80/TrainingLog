@@ -65,6 +65,7 @@ import {
   type SessionSnapshot,
 } from '@/src/adapters/sqlite/sessionRepository';
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
+import { resyncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
 import { sessionSnapshotDirty } from '@/src/domain/session/sessionSnapshotDirty';
 import {
@@ -1706,11 +1707,19 @@ export default function SessionDetailScreen() {
         );
         setTimeEditorOpen(false);
         await load();
+        // Grill 2026-06-05 Q3 (HK #4) — keep Apple Health in sync after a time
+        // edit. HKWorkout samples are immutable, so this delete-then-rewrites
+        // the workout for the new [started_at, ended_at] window. No-ops unless
+        // this session already has an HKWorkout (gate lives in the service), so
+        // it's safe to call unconditionally. Best-effort — never throws.
+        await resyncSessionWithHealthKit(db, id, {
+          fallbackTitle: t('page', 'sessionTitlePlaceholder'),
+        });
       } catch (e) {
         Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       }
     },
-    [db, id, load],
+    [db, id, load, t],
   );
 
   // Edit mode body — full active session UI parity.
