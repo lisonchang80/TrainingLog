@@ -338,7 +338,20 @@ export async function reconcileSessionTree(
       // Set ids touched for THIS exercise — drives the live per-exercise purge.
       const exSetIds: string[] = [];
 
-      // ----- set rows (reconcile by (session_exercise_id, ordering)) -----
+      // ----- Pass 1 (Q6 grill 2026-06-05): resolve every wire set's on-device
+      // id up-front -----
+      // The reconcile must NOT depend on `ex.sets` arriving head-before-
+      // follower. The Watch sorts the wire array by display_rank, so a
+      // long-press reorder can place a dropset follower BEFORE its head;
+      // resolving the follower's parent in array order would then miss the head
+      // (`setIdMap` not yet populated) and persist an orphan
+      // `parent_set_id = null` (broken dropset chain). This write-free pass
+      // pre-populates the wire-id → on-device-id map so the parent translation
+      // in pass 2 is order-independent.
+      const resolvedIds = new Map<
+        string,
+        { existingId: string | null; onDeviceId: string }
+      >();
       for (const s of ex.sets) {
         const existingSet = await db.getFirstAsync<{ id: string }>(
           `SELECT id FROM "set"
@@ -346,11 +359,39 @@ export async function reconcileSessionTree(
           seId,
           s.ordinal,
         );
+        let onDeviceId: string;
+        if (existingSet) {
+          onDeviceId = existingSet.id;
+        } else {
+          // Cross-session id-collision guard (full rationale at the INSERT
+          // branch below): a Watch-minted freestyle id ("ADD-<n>") can already
+          // belong to an EARLIER session, so divert to a namespaced id.
+          const foreign = await db.getFirstAsync<{ session_id: string }>(
+            `SELECT session_id FROM "set" WHERE id = ?`,
+            s.setId,
+          );
+          onDeviceId =
+            foreign && foreign.session_id !== snapshot.sessionId
+              ? localizeSetId(snapshot.sessionId, s.setId)
+              : s.setId;
+        }
+        resolvedIds.set(s.setId, {
+          existingId: existingSet ? existingSet.id : null,
+          onDeviceId,
+        });
+        setIdMap.set(s.setId, onDeviceId);
+      }
 
-        // Translate a follower's wire parent into the on-device head id (the
-        // head was resolved earlier this pass — lower ordinal). A head row has
-        // `parent_set_id = null` and skips this. A dangling parent (head not
-        // seen / dropped) collapses to null rather than a broken FK.
+      // ----- Pass 2: upsert set rows (parents now fully resolvable) -----
+      for (const s of ex.sets) {
+        const resolved = resolvedIds.get(s.setId)!;
+        const existingSet =
+          resolved.existingId != null ? { id: resolved.existingId } : null;
+
+        // Translate a follower's wire parent into the on-device head id. With
+        // pass 1 above this no longer depends on the head appearing earlier in
+        // `ex.sets`. A head row has `parent_set_id = null` and skips this. A
+        // genuinely dangling parent (head deleted) collapses to null.
         const resolvedParentId =
           s.parent_set_id != null
             ? setIdMap.get(s.parent_set_id) ?? null
@@ -428,28 +469,17 @@ export async function reconcileSessionTree(
           // Watch-authored set with no canonical counterpart — INSERT. A
           // dropset follower carries the resolved on-device head id.
           //
-          // Cross-session id-collision guard (2026-06-01, device-DB-proven):
-          // the Watch mints freestyle set ids ("ADD-<n>") from an in-memory
-          // counter that resets on app relaunch, so a LATER session can mint a
-          // wire id that ALREADY exists on-device under an EARLIER session.
-          // `set.id` is the PRIMARY KEY, so a raw INSERT … ON CONFLICT(id) DO
-          // UPDATE would clobber the prior session's row in place (moving its
-          // session_exercise_id + parent_set_id to THIS session while leaving
-          // session_id stale → the old session's follower becomes a
-          // cross-session orphan and this session can't find its own). When the
-          // wire id already belongs to a DIFFERENT session, divert to a
-          // session-namespaced on-device id so the rows stay distinct. A
-          // same-session hit (or no hit) keeps the raw id — the normal
-          // idempotent live-tick path (re-match is by (se, ordinal) above, so
-          // within-session ticks never reach this branch a 2nd time anyway).
-          const foreign = await db.getFirstAsync<{ session_id: string }>(
-            `SELECT session_id FROM "set" WHERE id = ?`,
-            s.setId,
-          );
-          const localSetId =
-            foreign && foreign.session_id !== snapshot.sessionId
-              ? localizeSetId(snapshot.sessionId, s.setId)
-              : s.setId;
+          // On-device id resolved in pass 1 above. It is either the raw wire
+          // id or — under the cross-session id-collision guard (2026-06-01,
+          // device-DB-proven) — a session-namespaced divert: the Watch mints
+          // freestyle ids ("ADD-<n>") from an in-memory counter that resets on
+          // relaunch, so a LATER session can mint a wire id that ALREADY exists
+          // on-device under an EARLIER session. `set.id` is the PRIMARY KEY, so
+          // a raw INSERT … ON CONFLICT(id) DO UPDATE would clobber the prior
+          // session's row (moving its session_exercise_id + parent_set_id to
+          // THIS session, session_id left stale → cross-session orphan). The
+          // namespaced id keeps the rows distinct.
+          const localSetId = resolved.onDeviceId;
           await db.runAsync(
             `INSERT INTO "set"
                (id, session_id, exercise_id, session_exercise_id,
