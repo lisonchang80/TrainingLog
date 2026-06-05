@@ -1408,6 +1408,19 @@ export async function convertSessionToTemplate(
       }
       linkedTemplateId = bestId;
     }
+    // C2: the picked template_id may dangle if that template was deleted while
+    // `session_exercise.template_id` was left pointing at it (no FK CASCADE nulls
+    // it). Overwriting a ghost id would either trip the `template_exercise` FK
+    // (FK=ON → throw → rollback) or strand orphan rows (FK=OFF). If it no longer
+    // exists, drop to null so the create-mode fallback below INSERTs a fresh
+    // template and relinks the session's rows (UPDATE session_exercise.template_id).
+    if (linkedTemplateId != null) {
+      const exists = await db.getFirstAsync<{ id: string }>(
+        `SELECT id FROM template WHERE id = ?`,
+        linkedTemplateId,
+      );
+      if (!exists) linkedTemplateId = null;
+    }
   }
 
   // Explicit overwrite target (另存模板「覆蓋」) wins over linked-template

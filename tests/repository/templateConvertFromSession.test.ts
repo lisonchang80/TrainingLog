@@ -262,6 +262,54 @@ describe('convertSessionToTemplate', () => {
     expect(rows.map((r) => r.template_id)).toEqual([newTplId, newTplId]);
   });
 
+  it('update mode with a DANGLING linked template_id (template deleted): falls back to create + relinks, no orphan (C2)', async () => {
+    // Simulate the linked template having been deleted while
+    // session_exercise.template_id was left pointing at it (no FK CASCADE nulls
+    // it). Without the existence guard, update mode would treat the ghost id as
+    // the overwrite target → strand orphan template_exercise rows (FK off) or
+    // trip the FK (FK on). The guard must drop to create-mode + relink instead.
+    await setupSession({ session_id: 'sess-ghost', template_id: null });
+    await db.runAsync(
+      `UPDATE session_exercise SET template_id = ? WHERE session_id = ?`,
+      'tpl-ghost-deleted',
+      'sess-ghost',
+    );
+    const ghost = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM template WHERE id = ?`,
+      'tpl-ghost-deleted',
+    );
+    expect(ghost).toBeNull(); // sanity — the linked template really is gone
+
+    const newTplId = await convertSessionToTemplate(db, {
+      session_id: 'sess-ghost',
+      template_name: 'Recovered',
+      mode: 'update',
+      uuid,
+      now,
+    });
+
+    // A brand-new template row was created (NOT the ghost id).
+    expect(newTplId).not.toBe('tpl-ghost-deleted');
+    const tpl = await getTemplateFull(db, newTplId);
+    expect(tpl?.name).toBe('Recovered');
+    expect(tpl!.exercises).toHaveLength(2);
+
+    // session_exercise rows relinked to the new template.
+    const rows = await db.getAllAsync<{ template_id: string | null }>(
+      `SELECT template_id FROM session_exercise
+        WHERE session_id = ? ORDER BY ordering ASC`,
+      'sess-ghost',
+    );
+    expect(rows.map((r) => r.template_id)).toEqual([newTplId, newTplId]);
+
+    // No orphan template_exercise rows reference the ghost id.
+    const orphans = await db.getFirstAsync<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM template_exercise WHERE template_id = ?`,
+      'tpl-ghost-deleted',
+    );
+    expect(orphans?.c).toBe(0);
+  });
+
   it('rest_sec passthrough: session_exercise.rest_sec maps to template_exercise.rest_seconds', async () => {
     await setupSession({ session_id: 'sess-5', template_id: null });
     const newTplId = await convertSessionToTemplate(db, {
