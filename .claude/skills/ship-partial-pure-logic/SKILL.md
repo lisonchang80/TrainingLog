@@ -96,9 +96,28 @@ Eight landings under this pattern in one session, zero conflicts on cherry-pick,
 - **Anything touching `app/(tabs)/index.tsx` or other `.tsx`** → that's UI wire-in, not pure logic. Defer to the runtime caller's commit.
 - **Cross-cutting refactors that change multiple existing modules** — pure-logic partial is for *adding* a self-contained pure module. If you're refactoring, you're outside this skill's scope.
 
+## Batch variant — grill/audit batch with mixed JS-only + device-gated fixes (validated 2026-06-05)
+
+When a whole grill/audit batch (not one D-commit) yields N fixes where some are pure-JS/jest-verifiable and some are **device-gated** (need real HealthKit / Watch / on-device confirmation before they can be trusted on main), ship them as a **prefix-ordered stack** instead of N separate branches:
+
+1. **Branch once** off `origin/main`: `git checkout -b slice/<batch-name>-YYYY-MM-DD origin/main`.
+2. **Classify each fix JS-only vs device-gated up-front** (the classification IS the commit-order plan). For device-gated HK/Watch fixes, write the JS + adapter with jest mocks now and commit them too — only the real native call (HK delete / kcal magnitude / productType strings) is deferred to device.
+3. **Commit JS-only fixes FIRST (contiguous prefix), device-gated LAST (suffix)** — one commit per logical fix, each with its own jest. Because the JS-only commits form a contiguous prefix, their tip is a clean fast-forward target.
+4. **Land the verified prefix to main by fast-forward, hold the gated suffix on the branch**:
+   ```bash
+   git checkout main && git merge --ff-only <js-only-prefix-tip-sha> && git push origin main
+   git checkout slice/<batch-name>-YYYY-MM-DD   # working tree back to full code (incl. device-gated)
+   ```
+   `--ff-only` (not cherry-pick) keeps history linear + the branch's first commits become literally identical to main's; the device-gated suffix stays ahead of main on the branch awaiting smoke. The branch can stay **local-only** as an unverified-work holding pen (push only if you want off-machine backup — it's NOT for merging yet).
+5. **Memory**: record `main @ <tip>` for the shipped prefix + `branch @ <suffix-tip> 待實機` for the held commits, with the exact device-smoke checklist that unblocks the merge.
+
+Why ff-merge a prefix beats cherry-picking each JS-only commit: zero conflict risk (linear), no duplicate SHAs, and the device-gated commits literally stay where they are (no re-pick needed when they later land). Why hold device-gated on a branch instead of also merging: the JS code is live-but-unverified on real HK/Watch — e.g. a kcal-source-filter change ships a behaviour change to the finish flow that only a device can confirm, so it must NOT reach main until smoked.
+
+**2026-06-05 instance**: 8 overnight-audit bugs (stats/HK/WC) grilled → 7 commits on `slice/grill-8-bugfixes-2026-06-05`. 5 JS-only (stats 頂組/e1RM, endedAt clamp, WC order-independent reconcile, WC cascade-delete chain, WC dup-ordinal) ordered first → `git merge --ff-only 47b8c6c` → main (pushed); 2 HK device-gated (kcal Watch-source filter, delete-and-rewrite re-sync) held on the branch (local-only) awaiting device smoke. jest 2466/2466, tsc 0, zero conflicts.
+
 ## Pairing with other skills
 
 - **ship-slice**: full vertical slice with worktree + simulator + PR. Use that when shipping >1 commit or anything that touches UI/native.
-- **extract-pure-logic**: lifting *existing* inline closures from `.tsx` to testable modules. Use that for retrofitting; use this skill for greenfield pure modules.
+- **extract-pure-logic**: lifting *existing* inline closures from `.tsx` to testable modules. Use that for retrofitting (e.g. 2026-06-05 `pickTopSet` lifted out of `app/exercise-history/[id].tsx` to `src/domain/pr/topSet.ts` for the Q1 頂組 fix); use this skill for greenfield pure modules.
 - **overnight-parallel-agents skill #13**: cherry-pick integration pattern — this skill applies it to single-commit code-writer flows.
 - **overnight-parallel-agents skill #18**: cold-cache flake tolerance — relevant for step 7 pre-commit hook behavior.
