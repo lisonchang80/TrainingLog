@@ -92,9 +92,23 @@ export async function endSession(
   db: Database,
   args: { id: string; ended_at: number }
 ): Promise<void> {
+  // Grill 2026-06-05 Q5 — defensive floor: never persist ended_at <=
+  // started_at (a backwards interval → inverted HKWorkout / kcal window). The
+  // primary clamp lives at the caller (`finalizeEndAndRoute`, which has
+  // receive-time context to substitute); this is belt-and-suspenders for any
+  // other caller. A missing row → no-op (matches the rest of this repo's
+  // setters); a present row with a bad ended_at is floored to started_at + 1ms.
+  const row = await db.getFirstAsync<{ started_at: number }>(
+    `SELECT started_at FROM session WHERE id = ?`,
+    args.id
+  );
+  const safeEnd =
+    row != null && args.ended_at <= row.started_at
+      ? row.started_at + 1
+      : args.ended_at;
   await db.runAsync(
     `UPDATE session SET ended_at = ? WHERE id = ?`,
-    args.ended_at,
+    safeEnd,
     args.id
   );
 }

@@ -2209,7 +2209,18 @@ export default function TodayScreen() {
     // was unreachable at end) still records the TRUE ended_at + the correct
     // HK [started_at, ended_at] kcal/HR window. iPhone-led passes no opts
     // → falls back to receive-time Date.now() (unchanged behaviour).
-    const ended_at = opts?.endedAt ?? Date.now();
+    //
+    // Grill 2026-06-05 Q5 — clamp the finish time forward. The Watch's
+    // clock-stamped endedAt can be ≤ started_at under clock skew, which would
+    // persist a backwards interval (and an inverted HK kcal/HR window). Trust
+    // the stamp only when it's a real forward time; otherwise fall back to
+    // receive-time (now), and as a last resort started_at + 1ms (covers the
+    // pathological case where started_at itself is in the future).
+    const rawEnd = opts?.endedAt ?? Date.now();
+    const ended_at =
+      rawEnd > existing.started_at
+        ? rawEnd
+        : Math.max(Date.now(), existing.started_at + 1);
 
     // Q1/Q2/Q3 (E2): reconcile-by-membership against the Watch's final
     // snapshot — purge the rows the Watch deleted mid-session that the
