@@ -656,6 +656,26 @@ export async function reconcileSessionTree(
         tombstonedExercises += re.changes ?? 0;
       }
     }
+
+    // ----- Q7 (grill 2026-06-05): cascade-delete orphaned dropset followers --
+    // Decision「連 head 刪整鏈」: when a dropset HEAD is removed (end-session
+    // purgeTail, the live per-exercise / absent-exercise purge, OR a
+    // tombstone), a surviving follower still pointing at the now-deleted head
+    // is a dangling FK (broken chain → unnumbered orphan in history). Rather
+    // than re-home it as a standalone working set, delete the rest of the chain
+    // too. Runs after every delete path so the「no follower without a head」
+    // invariant holds session-wide; a follower whose head still exists is
+    // untouched (the subquery lists surviving ids). Idempotent — 0 rows when
+    // the tree is already clean (e.g. a pure upsert tick).
+    const orphanDel = await db.runAsync(
+      `DELETE FROM "set"
+        WHERE session_id = ?
+          AND parent_set_id IS NOT NULL
+          AND parent_set_id NOT IN (SELECT id FROM "set" WHERE session_id = ?)`,
+      snapshot.sessionId,
+      snapshot.sessionId,
+    );
+    purgedSets += orphanDel.changes ?? 0;
   });
 
   // H1 liveness gate fired — the transaction wrote nothing. Report a clean
