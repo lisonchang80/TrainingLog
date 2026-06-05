@@ -39,10 +39,33 @@ function getNativeQueryQuantitySamples(): (
     readonly ascending?: boolean;
     readonly unit?: string;
   }
-) => Promise<readonly { quantity: number; startDate: Date; endDate: Date }[]> {
+) => Promise<
+  readonly {
+    quantity: number;
+    startDate: Date;
+    endDate: Date;
+    // Kingstinct attaches the writing device's revision to every sample
+    // (Shared.d.ts QuantitySample). `productType` is the device model code
+    // ("Watch6,1" / "iPhone14,2"); used to attribute active energy to the
+    // Apple Watch only (kcal source filter, grill 2026-06-05 Q4).
+    sourceRevision?: { productType?: string | null } | null;
+  }[]
+> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require('@kingstinct/react-native-healthkit');
   return mod.queryQuantitySamples;
+}
+
+/**
+ * True when a sample's `sourceRevision.productType` identifies an Apple Watch
+ * (device model codes start with "Watch", e.g. "Watch6,1"). Grill 2026-06-05
+ * Q4 — only Watch-written ActiveEnergyBurned is attributed to a strength
+ * workout; iPhone motion estimates + third-party apps in the same wall-clock
+ * window are excluded to stop kcal over-counting. Exact productType strings to
+ * be confirmed on device.
+ */
+function isAppleWatchSource(productType: string | null | undefined): boolean {
+  return typeof productType === 'string' && productType.startsWith('Watch');
 }
 
 /**
@@ -101,14 +124,22 @@ export async function queryHeartRateSamples(
 }
 
 /**
- * Sum `HKQuantityTypeIdentifierActiveEnergyBurned` (kcal) in [startMs, endMs].
+ * Sum `HKQuantityTypeIdentifierActiveEnergyBurned` (kcal) in [startMs, endMs],
+ * counting ONLY Apple Watch-written samples (grill 2026-06-05 Q4).
+ *
+ * Before this, the aggregate summed EVERY source in the wall-clock window —
+ * iPhone motion estimates, third-party fitness apps, and Watch all double-
+ * counted into the workout's totalEnergyBurned (灌水 into Apple Health's Move
+ * ring). For strength training the only trustworthy active-energy figure is the
+ * Watch's, so we attribute Watch-sourced samples only.
  *
  * Returns:
- *   - `number` (possibly 0) when the query succeeded — 0 means "no samples in
- *     window," distinct from null.
- *   - `null` on permission denied / HK unavailable / native error / any throw.
- *     Callers should treat null as "unknown" (e.g. render a dash instead of
- *     "0 kcal" which would mislead the user into thinking they burned nothing).
+ *   - `number` — sum of Watch-sourced active energy when ≥1 Watch sample is in
+ *     the window.
+ *   - `null` — no Watch samples (iPhone-only session: the Watch measured
+ *     nothing, so kcal is genuinely "unknown" → detail page shows "—" rather
+ *     than a misleading "0"), OR permission denied / HK unavailable / any
+ *     throw.
  *
  * NEVER throws.
  */
@@ -124,10 +155,14 @@ export async function aggregateActiveEnergyBurned(
     );
 
     let sum = 0;
+    let watchSamples = 0;
     for (const s of samples) {
+      if (!isAppleWatchSource(s.sourceRevision?.productType)) continue;
       if (Number.isFinite(s.quantity)) sum += s.quantity;
+      watchSamples += 1;
     }
-    return sum;
+    // No Watch-attributed energy → unknown, not zero (see contract above).
+    return watchSamples === 0 ? null : sum;
   } catch (err) {
     console.warn('[healthkit.reader] aggregateActiveEnergyBurned failed:', err);
     return null;

@@ -136,12 +136,18 @@ describe('Slice 13c — HealthKit reader adapter', () => {
     });
   });
 
+  // Grill 2026-06-05 Q4 — kcal aggregation now counts Apple Watch-sourced
+  // samples only. `WATCH`/`PHONE` stamp the writing-device productType the
+  // adapter inspects.
+  const WATCH = { productType: 'Watch6,1' };
+  const PHONE = { productType: 'iPhone14,2' };
+
   describe('aggregateActiveEnergyBurned', () => {
-    it('sums quantity across 3 samples', async () => {
+    it('sums quantity across 3 Watch samples', async () => {
       queryQuantitySamplesMock.mockResolvedValue([
-        { quantity: 12.5, startDate: new Date(1000), endDate: new Date(1100) },
-        { quantity: 7.25, startDate: new Date(1200), endDate: new Date(1300) },
-        { quantity: 3.0, startDate: new Date(1400), endDate: new Date(1500) },
+        { quantity: 12.5, startDate: new Date(1000), endDate: new Date(1100), sourceRevision: WATCH },
+        { quantity: 7.25, startDate: new Date(1200), endDate: new Date(1300), sourceRevision: WATCH },
+        { quantity: 3.0, startDate: new Date(1400), endDate: new Date(1500), sourceRevision: WATCH },
       ]);
 
       const result = await aggregateActiveEnergyBurned(1000, 2000);
@@ -152,14 +158,30 @@ describe('Slice 13c — HealthKit reader adapter', () => {
       expect(options.unit).toBe('kcal');
     });
 
-    it('returns 0 (not null) when HK reports empty array', async () => {
-      // Successful query, no samples in window. Caller distinguishes 0 from
-      // null: 0 = "definitively burned nothing tracked"; null = "we don't know".
+    it('counts ONLY Watch samples, ignoring iPhone/third-party in the window (Q4)', async () => {
+      queryQuantitySamplesMock.mockResolvedValue([
+        { quantity: 10, startDate: new Date(1000), endDate: new Date(1100), sourceRevision: WATCH },
+        // iPhone motion estimate overlapping the same window — must NOT add.
+        { quantity: 99, startDate: new Date(1100), endDate: new Date(1200), sourceRevision: PHONE },
+        { quantity: 5, startDate: new Date(1300), endDate: new Date(1400), sourceRevision: WATCH },
+      ]);
+
+      expect(await aggregateActiveEnergyBurned(1000, 2000)).toBe(15);
+    });
+
+    it('returns null when there are no Watch samples (iPhone-only session)', async () => {
+      // No Watch-measured energy → "unknown" (detail page shows "—"), not 0.
+      queryQuantitySamplesMock.mockResolvedValue([
+        { quantity: 42, startDate: new Date(1000), endDate: new Date(1100), sourceRevision: PHONE },
+      ]);
+
+      expect(await aggregateActiveEnergyBurned(1000, 2000)).toBeNull();
+    });
+
+    it('returns null when HK reports empty array (no Watch energy)', async () => {
       queryQuantitySamplesMock.mockResolvedValue([]);
 
-      const result = await aggregateActiveEnergyBurned(1000, 2000);
-
-      expect(result).toBe(0);
+      expect(await aggregateActiveEnergyBurned(1000, 2000)).toBeNull();
     });
 
     it('returns null and console.warns when native call rejects', async () => {
@@ -178,18 +200,20 @@ describe('Slice 13c — HealthKit reader adapter', () => {
       // Defensive: HK shouldn't produce these, but if a third-party app wrote
       // garbage we don't want NaN to poison the whole session's kcal column.
       queryQuantitySamplesMock.mockResolvedValue([
-        { quantity: 5, startDate: new Date(1000), endDate: new Date(1100) },
+        { quantity: 5, startDate: new Date(1000), endDate: new Date(1100), sourceRevision: WATCH },
         {
           quantity: Number.NaN,
           startDate: new Date(1200),
           endDate: new Date(1300),
+          sourceRevision: WATCH,
         },
         {
           quantity: Number.POSITIVE_INFINITY,
           startDate: new Date(1400),
           endDate: new Date(1500),
+          sourceRevision: WATCH,
         },
-        { quantity: 10, startDate: new Date(1600), endDate: new Date(1700) },
+        { quantity: 10, startDate: new Date(1600), endDate: new Date(1700), sourceRevision: WATCH },
       ]);
 
       const result = await aggregateActiveEnergyBurned(1000, 2000);
