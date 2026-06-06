@@ -294,3 +294,93 @@ Three contention clusters (each branch CLEAN vs current main, but merging one fo
 Both are non-`#if DEBUG`, reachable in Release Watch UI → App Review placeholder-content rejection class. Device-gated Swift fixes; do before archive.
 
 _w5 correction appended 2026-06-04, base main `7cc805c` (post test-only merges)._
+
+---
+
+## ✅✅ 2026-06-06 REFRESH — device-marathon stack DONE; re-verified vs main `876ee0e`
+
+> The w5 order above is **stale**: main advanced `7cc805c → 876ee0e` and the
+> **entire D1/D2/D3/D4 device-marathon stack + O3 perf landed**. Every fact
+> below is git-verified (`git cherry` patch-id + `git merge-tree --write-tree`)
+> against main **`876ee0e`** on 2026-06-06. **Follow THIS section.**
+
+### Landed since w5 (now in main — branches deleted from origin)
+- **D1** `refactor/bigfile-pure-extract`, **D2** `crash-hardening`, **D3** `resolve-set-defaults`
+  (`2661960`/`06d52df`/`1fc6499`), **D4** `programs-formatter` (`7dddfe3`+`2f9adbe`)
+  — all merged, all gone from origin. The whole stacked quartet + bigfile is **DONE**.
+- **O3** `perf/history-list-aggregate` — `86dee26` N+1→3-reads + `a72d821` **v026** index.
+  **Migration head is now 26.** Branch gone from origin.
+- 3 WC-reconcile prod fixes: `47b8c6c` dup-ordinal fail-closed, `32996ca` cascade-delete
+  dropset, `3c0df38` order-independent reconcile. Plus `189cf42` HK ended_at clamp,
+  `c5711c4` 頂組 warmup/dropset exclusion.
+- This session's 5 grill fixes (`2f28756` v022 brick-guard, `228db18` DST week,
+  `e62513a` C1 dup-triple, `7265757` C2 dangling-link, `a8d899d` F4 lb units).
+
+### Remaining unmerged — git-verified table (main `876ee0e`)
+
+> ⚠️ **None is `--ff-only`-able** (all bases are behind main). Each needs
+> `git rebase main` (or a true merge) first. `merge-tree` = 3-way **content**
+> cleanliness only — **still run `tsc --noEmit` + `npm test` on the rebased tip**.
+
+| # | Branch | Unique commits | merge-tree vs main | Class | Gate |
+|---|---|---|---|---|---|
+| 1 | `slice/template-overwrite` **(remote `af444de`)** | 4 (#3 ②③④) | ✅ CLEAN | JS | device-smoke ④②③ |
+| 2 | `fix/set-drag-gesture-highlight` | 1 | ✅ CLEAN | UI | device-smoke drag highlight |
+| 3 | `chore/a11y-setrow-keypad` | 2 | ✅ CLEAN | a11y | VoiceOver |
+| 4 | `chore/a11y-sheets-charts` | 2 | ✅ CLEAN | a11y | VoiceOver |
+| 5 | `fix/app-error-boundary` | 2 | ✅ CLEAN | JS | dev-throw |
+| 6 | `chore/i18n-single-locale-leaks` | 6 | ✅ CLEAN | i18n | locale toggle |
+| 7 | `overnight/wc-reconcile-tests-2026-06-05` | 1 | ✅ CLEAN | **test-only** | none (tsc/jest) |
+| 8 | `overnight/nonwc-coverage-r2-2026-05-31` | 5 | ⚠️ CONFLICT `tests/db/achievementRepositoryDefaults.test.ts` (add/add) | **test-only** | none (tsc/jest) |
+| 9 | `overnight/nonwc-test-coverage-2026-05-31` | 4 | ⚠️ CONFLICT `tests/repository/templateConvertFromSession.test.ts` (content — collides w/ this session's **C2** test) | **test-only** | none (tsc/jest) |
+| 10 | `overnight/syncplan-refresh-2026-06-01` | 2 | ⚠️ CONFLICT `docs/adr/0019…md` (keep-both) | **docs-only** | none |
+| 11 | `slice/13d-release-wc-fix-c` | 1 | ✅ CLEAN | NATIVE/WC | ⚠️ **re-confirm needed** (core #287 Fix C already in main; survivor = `442cc1e` native fallback + diagnostics) |
+| 12 | `slice/grill-8-bugfixes-2026-06-05` **(LOCAL `ec11674`, NOT pushed)** | 2 HK | n/a | NATIVE/HK | device-smoke; push before merge |
+| 13 | `chore/appstore-watch-readiness` | 2 | ✅ CLEAN (3-way auto; not ff-only) | NATIVE archive | **archive gate, dead last** |
+
+### DROP
+- 🗑️ **`slice/13d-sync-bc-plan`** — its only commit `b0e0335` is **byte-identical**
+  to `overnight/syncplan-refresh-2026-06-01~1` (same SHA). Strict subset → delete,
+  merge syncplan-refresh (#10) instead. `git branch -D slice/13d-sync-bc-plan && git push origin --delete slice/13d-sync-bc-plan`.
+
+### DO NOT TOUCH
+- **`slice/template-overwrite` LOCAL tip `3986f3b`** is **47 commits ahead** of its
+  remote — un-pushable mid-slice WIP. Merge the **REMOTE `af444de`** only
+  (the clean 4 #3②③④). **Never push/force-push the local branch.**
+
+### Recommended order — split into two tracks
+
+**Track A — keyboard-only, NO device (can drain anytime):** the 3 test branches
++ 1 docs branch. Each merge advances main → rebase the next.
+```
+A1. overnight/wc-reconcile-tests-2026-06-05   (clean test-only)
+A2. overnight/nonwc-test-coverage-2026-05-31  (resolve templateConvertFromSession.test.ts — keep both describe blocks)
+A3. overnight/nonwc-coverage-r2-2026-05-31    (resolve achievementRepositoryDefaults add/add — keep both)
+A4. overnight/syncplan-refresh-2026-06-01     (resolve docs/adr/0019 keep-both); then DROP sync-bc-plan
+```
+**Track B — device session (smoke each per its gate):**
+```
+B1. slice/template-overwrite (remote af444de)  → ④ clone / ② wizard / ③ re-classify: Y body swapped, X gone, Y identity intact
+B2. fix/set-drag-gesture-highlight             → drag-active set highlight clear in light+dark
+B3. chore/a11y-setrow-keypad   ┐ strings.ts appenders — merge consecutively;
+B4. chore/a11y-sheets-charts   │ each rebase re-conflicts strings.ts APPEND region →
+B5. fix/app-error-boundary     │ "keep both" then `tsc --noEmit` (TS1117 = dup key, keep first).
+B6. chore/i18n-single-locale-leaks ┘ i18n LAST (also touches _layout + template-editor-view).
+B7. slice/13d-release-wc-fix-c    → ⚠️ FIRST re-confirm still needed; if yes, WC regression smoke
+B8. slice/grill-8-bugfixes-2026-06-05 (push first) → HK kcal-attribution + re-sync-after-time-edit smoke
+B9. chore/appstore-watch-readiness → archive gate; bump build once (build-bump.md); Watch AppIcon on-wrist
+```
+
+> **Before B9 archive: fix the 2 P0 Watch blockers (#311/#312)** — they're in
+> main's Watch Swift now (`ExerciseHistoryView.swift` mock data, `FinishPageView.swift`
+> hardcoded 142bpm/285kcal), reachable in Release → placeholder-rejection class.
+
+### Conflict playbook (only 3 conflicts now, all trivial)
+| File | Branch | Resolution |
+|---|---|---|
+| `tests/repository/templateConvertFromSession.test.ts` | #9 | Keep both `describe`/`it` blocks (this session's C2 test + branch's dropset-chain cases); `tsc`+`jest`. |
+| `tests/db/achievementRepositoryDefaults.test.ts` | #8 | add/add — keep both; dedupe any same-name `it()` if jest complains. |
+| `docs/adr/0019-…md` | #10 | keep-both narrative (三車道 段 vs live-mirror fast-lane refresh). |
+| `src/i18n/strings.ts` | #3/#4/#5/#6 (sequential) | Clean vs main individually, but the 4 appenders collide in the **append region** as each lands → keep-both then `tsc` (TS1117 → dedupe keep-first). |
+
+_2026-06-06 refresh appended, base main `876ee0e`. Branch facts git-verified (`git cherry` + `git merge-tree --write-tree`) in the main worktree._
