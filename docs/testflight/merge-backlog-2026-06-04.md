@@ -384,3 +384,16 @@ B9. chore/appstore-watch-readiness → archive gate; bump build once (build-bump
 | `src/i18n/strings.ts` | #3/#4/#5/#6 (sequential) | Clean vs main individually, but the 4 appenders collide in the **append region** as each lands → keep-both then `tsc` (TS1117 → dedupe keep-first). |
 
 _2026-06-06 refresh appended, base main `876ee0e`. Branch facts git-verified (`git cherry` + `git merge-tree --write-tree`) in the main worktree._
+
+---
+
+## ✅ 2026-06-06 — Track A DRAINED (main `cbfa953 → 698b6d7`, pushed)
+
+All 4 keyboard-only branches rebased → resolved → `tsc`+`jest` green → ff-merged → pushed; branches deleted (local+remote); `slice/13d-sync-bc-plan` dropped.
+
+- **A1** `wc-reconcile-tests` → `f4129e6` (clean).
+- **A2** `nonwc-test-coverage` (templateDraft/templateOps/setRepository/convertSessionToTemplate) → resolved `templateConvertFromSession.test.ts` keep-both (my C2 `overwriteTemplateId` block + branch dropset-chain block).
+- **A3** `nonwc-coverage-r2` (settings/exerciseLib/superset/sessionRepo edge coverage) → **skipped** the redundant `achievementRepositoryDefaults.test.ts` commit (main `9ecedf2` already a strict superset).
+- **A4** `syncplan-refresh` (2 docs) → resolved `docs/adr/0019` keep-both (Live-mirror fast-lane § + 三車道 §, `---` separated).
+
+Gate: **tsc 0 · jest 224 suites / 2533 tests** (was 2463, +70). **Remaining backlog = the 9 Track-B device-gated branches** (table above, rows 1–6 + 11–13).
