@@ -79,9 +79,14 @@ describe('onHistoryRequest (#311-A)', () => {
     expect(reply!.records[0].id).toBe('2026-05-26');
     expect(reply!.records[0].workingSetCount).toBe(2);
     expect(reply!.records[0].setLines).toEqual(['80kg×8', '75kg×6']);
-    expect(reply!.records[0].dateLabel).toMatch(/^05-26 \(.+\)$/);
+    expect(reply!.records[0].dateLabel).toMatch(/^2026-05-26 \(.+\)$/);
+    // 頂組 = heaviest working set (80kg×8); locale-robust contains-check
+    // (topSetLabel + bucket label vary by locale, the weight×reps does not).
+    expect(reply!.records[0].topSetLine).toBeTruthy();
+    expect(reply!.records[0].topSetLine).toContain('80kg×8');
     expect(reply!.records[1].id).toBe('2026-05-22');
     expect(reply!.records[1].setLines).toEqual(['70kg×10']);
+    expect(reply!.records[1].topSetLine).toContain('70kg×10');
   });
 
   it('replies ok:true with empty records for an exercise with no history', async () => {

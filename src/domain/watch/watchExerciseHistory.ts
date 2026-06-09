@@ -10,25 +10,43 @@
  * set rows (already sorted session-DESC) into the last-N per-session records
  * the Swift `ExerciseHistoryView` renders. Kept clock-free + DB-free so it
  * unit-tests under `testEnvironment: node`; the impure half
- * (`src/adapters/watch/watchHistory.ts`) resolves `unit` / `weekdayLabels`
- * and runs the DB read.
+ * (`src/adapters/watch/watchHistory.ts`) resolves `unit` / `weekdayLabels` /
+ * `topSetLabel` / `bucketLabelFor` and runs the DB read.
  *
  * Record shape mirrors the Swift `ExerciseHistoryRecord` 1:1
- * (id / dateLabel / workingSetCount / setLines).
+ * (id / dateLabel / topSetLine / workingSetCount / setLines).
+ *
+ * 2026-06-09 layout 對齊手機 (grill ① = 頂組行＋逐組編號): the card now mirrors
+ * the iPhone exercise-history card — full `yyyy-MM-dd (週次)` date header, a
+ * `頂組：<w>×<r>（<bucket>）` highlight line (the heaviest effective-load
+ * working set + its rep-bucket label — same `pickTopSet` rule the iPhone uses,
+ * minus the dropset-follower exclusion which is a no-op because a follower's
+ * load is always ≤ its head), and per-working-set lines the Swift view numbers
+ * 1/2/3. Warmup still excluded (D15 spec Q5=A).
  *
  * ADR-0019 § Slice 13d D15 (frozen 2026-05-28; 2026-06-09 grill replaced the
- * Phase-A `ExerciseHistoryMock` with this real pull-on-tap path).
+ * Phase-A `ExerciseHistoryMock` with this real pull-on-tap path + 手機-aligned
+ * layout).
  */
 
 import { displayWeight } from '../body/unitConversion';
 import type { UnitPreference } from '../body/types';
+import { effectiveLoad } from '../pr/e1rmEngine';
+import type { LoadType } from '../exercise/types';
 
 /** One past session's summary row, mirrors Swift `ExerciseHistoryRecord`. */
 export interface WatchHistoryRecord {
   /** Stable row id — `YYYY-MM-DD` (local) of the session start. */
   id: string;
-  /** Pre-formatted short date label, e.g. `05-26 (二)` (weekday localised). */
+  /** Pre-formatted date header, e.g. `2026-05-26 (二)` (weekday localised). */
   dateLabel: string;
+  /**
+   * Pre-formatted top-set highlight, e.g. `頂組：80kg×8（增肌）` — the heaviest
+   * effective-load working set + its rep-bucket label. null when the session
+   * has no eligible weighted working set (e.g. pure-bodyweight with no logged
+   * load — mirrors the iPhone card hiding the line).
+   */
+  topSetLine: string | null;
   /** Working-set count (warmup excluded). */
   workingSetCount: number;
   /** Per-working-set display strings, e.g. `["80kg×8", "80kg×8"]`. */
@@ -50,12 +68,24 @@ export interface WatchHistorySetRow {
   /** Stored weight in kg (canonical); null/0 for pure bodyweight. */
   weight_kg: number | null;
   set_kind: string;
+  /** Per-exercise load type (joined from exercise row) — for the top-set effective-load rank. */
+  load_type: LoadType;
+  /** Session bodyweight snapshot (kg) — for assisted/bodyweight effective load. null when unset. */
+  bw_snapshot_kg: number | null;
 }
 
 export interface BuildWatchHistoryOptions {
   unit: UnitPreference;
   /** 7 localised weekday labels, index = `Date.getDay()` (0=Sun..6=Sat). */
   weekdayLabels: readonly string[];
+  /** Localised top-set prefix, e.g. `頂組：` (`t('status','topSetLabel')`). */
+  topSetLabel: string;
+  /**
+   * Maps a set's reps to a localised rep-bucket label (e.g. 8 → `增肌`), or ''
+   * for null/invalid reps. Injected so the pure builder stays i18n-free
+   * (mirrors the iPhone's `tPrBucketLabel(bucketLabel(classifyBucket(reps)))`).
+   */
+  bucketLabelFor: (reps: number | null) => string;
   /** Max distinct sessions to return (default 3 — ADR-0019 D15 Q5=A). */
   limitSessions?: number;
 }
@@ -80,6 +110,39 @@ function formatSetLine(
     return `${displayWeight(weightKg, unit)}${unit}×${r}`;
   }
   return `BW×${r}`;
+}
+
+/**
+ * Build the `頂組：…` line for one session's rows. Top set = the heaviest
+ * effective-load NON-warmup set (mirrors `src/domain/pr/topSet.ts::pickTopSet`;
+ * the iPhone also drops dropset FOLLOWERS, but that's a no-op for a MAX since a
+ * follower's load is always ≤ its head, so we don't need `parent_set_id` on the
+ * wire). A null-weight set is not a candidate (matches pickTopSet's
+ * `weight_kg == null ? null`). Returns null when no eligible set exists.
+ */
+function buildTopSetLine(
+  sessionRows: ReadonlyArray<WatchHistorySetRow>,
+  opts: BuildWatchHistoryOptions,
+): string | null {
+  let best: { row: WatchHistorySetRow; eff: number } | null = null;
+  for (const s of sessionRows) {
+    if (s.set_kind === 'warmup') continue;
+    // Only WEIGHTED / assisted sets (a positive load entry) are 頂組
+    // candidates. Pure bodyweight (weight_kg 0/null) has no meaningful
+    // "heaviest set" — the iPhone's pickTopSet would pick an arbitrary eff=0
+    // row, so we suppress the line instead (per-set rows still show every BW
+    // set). `assisted` carries the assist amount (> 0) → still a candidate.
+    if (s.weight_kg == null || s.weight_kg <= 0) continue;
+    const eff = effectiveLoad(s.weight_kg, s.load_type, s.bw_snapshot_kg);
+    if (eff == null) continue;
+    if (best == null || eff > best.eff) best = { row: s, eff };
+  }
+  if (best == null) return null;
+  const top = best.row;
+  const body = formatSetLine(top.weight_kg, top.reps, opts.unit);
+  const bucket = opts.bucketLabelFor(top.reps);
+  const suffix = bucket ? `（${bucket}）` : '';
+  return `${opts.topSetLabel}${body}${suffix}`;
 }
 
 /**
@@ -115,11 +178,13 @@ export function buildWatchHistoryRecords(
     const working = bucket.filter((s) => s.set_kind !== 'warmup');
     if (working.length === 0) continue; // warmup-only session — skip
     const d = new Date(bucket[0].session_started_at);
-    const mm = d.getMonth() + 1;
-    const dd = d.getDate();
+    const id = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     out.push({
-      id: `${d.getFullYear()}-${pad2(mm)}-${pad2(dd)}`,
-      dateLabel: `${pad2(mm)}-${pad2(dd)} (${opts.weekdayLabels[d.getDay()] ?? ''})`,
+      id,
+      dateLabel: `${id} (${opts.weekdayLabels[d.getDay()] ?? ''})`,
+      // Top set is picked across ALL non-warmup rows of the session (incl.
+      // dropset rows), not just `working` — see buildTopSetLine.
+      topSetLine: buildTopSetLine(bucket, opts),
       workingSetCount: working.length,
       setLines: working.map((s) => formatSetLine(s.weight_kg, s.reps, opts.unit)),
     });

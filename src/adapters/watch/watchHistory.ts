@@ -23,12 +23,40 @@ import type { Database } from '../../db/types';
 import { queryExerciseHistory } from '../sqlite/exerciseHistoryRepository';
 import { getUnitPreference } from '../sqlite/settingsRepository';
 import { t } from '../../i18n/strings';
+import { classifyBucket, bucketLabel } from '../../domain/pr/buckets';
 import {
   buildWatchHistoryRecords,
   type WatchHistoryRecord,
 } from '../../domain/watch/watchExerciseHistory';
 import type { HistoryRequestPayload, WCMessage } from './payloadSchema';
 import { toWireRecord } from './connectivity';
+
+/**
+ * Localise a rep-bucket label for the 頂組 line. `bucketLabel` returns the raw
+ * zh literal locked in ADR-0007 (`buckets.ts`); round-trip it through the
+ * `domain.*` i18n keys (same map the iPhone exercise-history page uses in its
+ * local `tPrBucketLabel`) so the Watch wire string honours the phone locale.
+ */
+const PR_BUCKET_ZH_TO_DOMAIN_KEY: Record<
+  string,
+  'maxStrength' | 'strength' | 'hypertrophy' | 'muscularEndurance' | 'endurance'
+> = {
+  最大力量: 'maxStrength',
+  力量: 'strength',
+  增肌: 'hypertrophy',
+  肌耐力: 'muscularEndurance',
+  耐力: 'endurance',
+};
+
+/** reps → localised rep-bucket label (e.g. 8 → 增肌), '' for null/invalid reps. */
+function bucketLabelFor(reps: number | null): string {
+  if (reps == null) return '';
+  const key = classifyBucket(reps);
+  if (key == null) return '';
+  const zh = bucketLabel(key);
+  const domainKey = PR_BUCKET_ZH_TO_DOMAIN_KEY[zh];
+  return domainKey ? t('domain', domainKey) : zh;
+}
 
 /** Reply payload (rides replyHandler; not a modelled WC kind). */
 export interface WatchHistoryReplyPayload {
@@ -81,7 +109,12 @@ export async function onHistoryRequest(
       queryExerciseHistory(db, exerciseId, { limit: HISTORY_SET_ROW_CAP }),
     ]);
     const weekdayLabels = WEEKDAY_KEYS.map((k) => t('domain', k));
-    const records = buildWatchHistoryRecords(rows, { unit, weekdayLabels });
+    const records = buildWatchHistoryRecords(rows, {
+      unit,
+      weekdayLabels,
+      topSetLabel: t('status', 'topSetLabel'),
+      bucketLabelFor,
+    });
     const reply: WatchHistoryReplyPayload = {
       requestId,
       exerciseId,
