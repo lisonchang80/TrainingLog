@@ -42,11 +42,14 @@ export interface WatchHistoryRecord {
   dateLabel: string;
   /**
    * Pre-formatted top-set highlight, e.g. `頂組：80kg×8（增肌）` — the heaviest
-   * effective-load working set + its rep-bucket label. null when the session
-   * has no eligible weighted working set (e.g. pure-bodyweight with no logged
-   * load — mirrors the iPhone card hiding the line).
+   * effective-load working set + its rep-bucket label. EMPTY STRING when the
+   * session has no eligible weighted working set (e.g. pure-bodyweight with no
+   * logged load — the Swift view hides the line on ''). NOT null: this rides
+   * the WC reply via `toWireRecord` (a no-op cast), and a JS `null` would
+   * bridge to `NSNull`, which WCSession rejects (`payloadUnsupportedTypes`),
+   * breaking the whole reply. '' is plist-safe.
    */
-  topSetLine: string | null;
+  topSetLine: string;
   /** Working-set count (warmup excluded). */
   workingSetCount: number;
   /** Per-working-set display strings, e.g. `["80kg×8", "80kg×8"]`. */
@@ -118,12 +121,13 @@ function formatSetLine(
  * the iPhone also drops dropset FOLLOWERS, but that's a no-op for a MAX since a
  * follower's load is always ≤ its head, so we don't need `parent_set_id` on the
  * wire). A null-weight set is not a candidate (matches pickTopSet's
- * `weight_kg == null ? null`). Returns null when no eligible set exists.
+ * `weight_kg == null ? null`). Returns '' (not null — wire-safe, see
+ * WatchHistoryRecord.topSetLine) when no eligible set exists.
  */
 function buildTopSetLine(
   sessionRows: ReadonlyArray<WatchHistorySetRow>,
   opts: BuildWatchHistoryOptions,
-): string | null {
+): string {
   let best: { row: WatchHistorySetRow; eff: number } | null = null;
   for (const s of sessionRows) {
     if (s.set_kind === 'warmup') continue;
@@ -137,7 +141,7 @@ function buildTopSetLine(
     if (eff == null) continue;
     if (best == null || eff > best.eff) best = { row: s, eff };
   }
-  if (best == null) return null;
+  if (best == null) return '';
   const top = best.row;
   const body = formatSetLine(top.weight_kg, top.reps, opts.unit);
   const bucket = opts.bucketLabelFor(top.reps);

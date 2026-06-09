@@ -132,8 +132,9 @@ describe('buildWatchHistoryRecords', () => {
       mkOpts(),
     );
     expect(out[0].setLines).toEqual(['BW×12', 'BW×15']);
-    // No eligible weighted set (null/0) → 頂組 hidden, mirrors iPhone pickTopSet.
-    expect(out[0].topSetLine).toBeNull();
+    // No eligible weighted set (null/0) → 頂組 hidden. '' (wire-safe sentinel,
+    // NOT null — a JS null would bridge to NSNull and WCSession would reject).
+    expect(out[0].topSetLine).toBe('');
   });
 
   it('caps at limitSessions (default 3) most-recent sessions', () => {
