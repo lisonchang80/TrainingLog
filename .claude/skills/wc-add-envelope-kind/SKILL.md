@@ -28,6 +28,18 @@ The default 8 steps assume a **durable** kind (TUI / `transferUserInfo` + `addUs
 - **No new `watchSession<Verb>.ts` orchestrator** if a receiver already exists (live-mirror reused `onLiveMirror`).
 - **`env.payload` IS the raw payload dict** (the snapshot), same shape both channels deliver, so one receiver serves both. Validated 2026-06-01 (`live-mirror`, 17th kind) — the reverse iPhone→Watch live channel (Phase C) will follow this same variant.
 
+## Variant — request-reply PULL (e.g. `handshake`, `history-request` 18th kind 2026-06-09)
+
+A **pull**: Watch asks iPhone for data on demand (📊 tap, picker cold-load) and awaits a typed answer. The REQUEST is a modelled kind; the REPLY is **NOT** — it rides the `sendMessage` `replyHandler` ack. Deviations from the default 8 steps:
+
+- **Only the REQUEST payload goes in `payloadSchema.ts`** (Step 1). The reply shape lives in the handler file (`watchHistory.ts` / the handshake reply in `handshake.ts`) because it pulls in SQLite/domain types — keep `payloadSchema.ts` WC-import-free. Don't add a second kind for the reply.
+- **Step 5 uses `addMessageListener('kind', async (env, reply) => …)`** (request-reply needs the 2nd `reply` arg), NOT `addUserInfoListener`. Mirror `addMessageListener('handshake', …)`.
+- **Step 4 handler = `onXxxRequest(db, env, replyHandler?)`** mirroring `onHandshakeRequest`: `if (!replyHandler) return;` (non-realtime channel → drop); query; `replyHandler(toWireRecord(reply))`. Never throws.
+- **Reply carries an `ok` flag** so the Watch tells apart iPhone-side query error (`ok:false` → Watch error state) from a genuine empty result (`ok:true, records:[]` → "no data yet"). On `catch`, reply `ok:false` — do NOT hang and do NOT lie "empty".
+- **display-ready over the wire** (Bug Y + `set-weight-unit-surfaces`): the iPhone resolves unit (`getUnitPreference`) + locale (`t('domain',…)`) and sends formatted strings; the Watch has neither table. Only raw FK ids (e.g. `exerciseId`) travel un-formatted.
+- **Watch caller (Step 7) needs loading + error + empty + data states** (a pull can time out / be unreachable — give it a ~4s timeout → error state, distinct from genuine-empty). The pure record builder belongs in `src/domain/watch/` (unit-testable); the handler resolves unit/locale + DB read.
+- Validated 2026-06-09 (`history-request`, #311-A): TS landed on `slice/13d-watch-history-pull` (pure builder + handler + mount + 11 tests); Swift `ExerciseHistoryView` 4-state + coordinator `requestExerciseHistory` device-gated.
+
 ## The 8 steps
 
 ### Step 1 — TS protocol schema
