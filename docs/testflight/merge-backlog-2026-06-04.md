@@ -396,4 +396,17 @@ All 4 keyboard-only branches rebased → resolved → `tsc`+`jest` green → ff-
 - **A3** `nonwc-coverage-r2` (settings/exerciseLib/superset/sessionRepo edge coverage) → **skipped** the redundant `achievementRepositoryDefaults.test.ts` commit (main `9ecedf2` already a strict superset).
 - **A4** `syncplan-refresh` (2 docs) → resolved `docs/adr/0019` keep-both (Live-mirror fast-lane § + 三車道 §, `---` separated).
 
-Gate: **tsc 0 · jest 224 suites / 2533 tests** (was 2463, +70). **Remaining backlog = the 9 Track-B device-gated branches** (table above, rows 1–6 + 11–13).
+Gate: **tsc 0 · jest 224 suites / 2533 tests** (was 2463, +70).
+
+### Then `slice/13d-release-wc-fix-c` DROPPED (row 11 — not device-gated, obsolete)
+Re-confirm verdict: its only surviving commit `442cc1e` was the **`release-wc-patches/`
+staging kit** (README + diagnostic NSLog patch + `fixA-remove-hasObservers-gate.patch`)
+— a "morning device-fallback IF Fix C fails" contingency for #287. But that premise
+is moot: **both fixes already shipped to main** — Fix C `c651a04` (eager-mount, `app/_layout.tsx:87`)
+AND Fix A `5778775` (`patches/react-native-watch-connectivity+2.0.0.patch` via patch-package).
+#287 closed. The kit is superseded + version-brittle (rnwc@2.0.0 line-locked) → branch
+deleted (worktree + local + remote, 2026-06-06). Diagnostic patch recoverable from
+reflog if WC ever regresses.
+
+**Remaining backlog = 8 Track-B device-gated branches** (table rows 1–6 + 12–13;
+row 11 dropped).
