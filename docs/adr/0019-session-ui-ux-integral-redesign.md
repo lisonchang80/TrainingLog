@@ -3342,6 +3342,12 @@ Swift（device-gated、停在此邊界等使用者）：
 - pull closure **注入式**（`load:`）由 `SetLoggerView`（持 coordinator）→`SessionCardListPage`→cards 往下傳——因歷史 sub-page 在 ⋯ `.sheet` 內、SwiftUI sheet 不繼承 `@EnvironmentObject`；superset 按側（A/B `exerciseId`）pivot。
 - **timeout 實作備註**：Q2 的「~4s timeout」收斂為 WC framework 原生 reply timeout（~5s，errorHandler→nil→error 態）。未加獨立 watchdog——共享 resume-once flag 跨 WC closure 會踩 `Sendable`-captured-var 雙 resume 風險，且 framework 單 handler 契約已保證 exactly-once 不卡死。功能等價（spinner 自動轉 error、不無限轉）；若實機覺 5s 過長，加顯式 race 為一行 follow-up。
 
-**剩 device-gated（smoke, pending）**：實機 build + smoke — reachable→list／飛航或關 iPhone app→error（重試可恢復）／第一次做該動作→空態；superset A/B 各自獨立歷史。
+**2026-06-10 實機回饋 3 點（①②③；smoke path 1+3 已綠）**：
+- **① 版面對齊手機**（拍板 = 頂組行＋工作組逐行；branch `f44c98e`+`9b3d840`）：`WatchHistoryRecord` 加 `topSetLine`（display-ready `頂組：80kg×8（增肌）`）；`頂組` = 最重 **effectiveLoad** 非熱身組（=`pickTopSet`，但 follower 必 ≤ head 故 MAX 不變、**不需 parent_set_id**）；`（增肌）`=`classifyBucket(reps)`**次數分類**（非計劃強度）；`dateLabel` 改全 `yyyy-MM-dd (週次)`；Swift card = 動作名 header＋bold 日期＋頂組行（'' 隱藏）＋逐組編號 1/2/3。**翻盤**：原渲染 `setLines.joined(' / ')` 單行 → 改逐組。**保留** D15 Q5=A 熱身排除（純徒手 weight 0/null → topSetLine ''、無頂組行，比 iPhone eff=0 任選更乾淨）。
+- **② 關 app 也有資料**（拍板 = **維持線上、只改文案**，option C）：PULL 設計本需 iPhone 可達；關 app → `isReachable=false` → ~5s 內 error 態（非無限轉）。**不**做快取/預推（不翻 grill Q1 pull-on-tap）。error 文案改「請開啟 iPhone 的 TrainingLog App 並確認在附近後重試」講清需線上。
+- **③ 返回箭頭偶爾不見**（bug，已修）：長動作名的 inline nav title 擠掉左上 back chevron（截圖②短名有、③長名無）。修法 = nav title 縮成「歷史」、動作名移內容首行。
+- **wire-safety 坑**：`topSetLine` 用 `''` sentinel 不可用 `null` —— `toWireRecord` 是 no-op cast、JS `null`→`NSNull`→WCSession reject 整包（純徒手歷史會壞）。`''` plist-safe。
 
-**Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）。
+**剩 device-gated（smoke, pending）**：① 頂組行＋逐組編號渲染／長名 back chevron 在／② error 文案；②③ + ① 一次 build 驗。
+
+**Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）；`src/domain/pr/topSet.ts` + `buckets.ts`（頂組 + 次數分類來源）。
