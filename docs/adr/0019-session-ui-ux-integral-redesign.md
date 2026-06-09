@@ -3336,6 +3336,12 @@ Swift（device-gated、停在此邊界等使用者）：
 - `src/adapters/watch/watchHistory.ts` `onHistoryRequest`（reuse `queryExerciseHistory`、`getUnitPreference`、`t('domain',weekday)`；ok-flag 後備；4 test）+ barrel export + `app/(tabs)/index.tsx` `addMessageListener('history-request')` mount。
 - tsc 0 + jest 全綠（+11 case）。
 
-**剩 device-gated（Swift, pending）**：Watch 📊 tap → `WatchConnectivityCoordinator` 送 `history-request` + await reply；`ExerciseHistoryView` 接四態（loading/list/空/error）、砍 `ExerciseHistoryMock`；實機 smoke（reachable→list／飛航→error／第一次做→空）。
+**已落地（Swift, branch `slice/13d-watch-history-pull` @ `70e856d`）**：
+- `WatchConnectivityCoordinator.requestExerciseHistory(exerciseId:)`（鏡像 `requestHandshake`：`sendMessage`+replyHandler+`withCheckedContinuation`；reply 由 `ExerciseHistoryReply.parse` 解析、requestId echo 檢查擋 stale）。
+- `ExerciseHistoryView` 改四態容器（`HistoryLoadState` loading/loaded/empty/error）；pivot 在 `exerciseId`、`.task(id:)` pull-on-tap；error 態獨立於空態 + 帶「重試」鈕；`ExerciseHistoryReply` + `ExerciseHistoryLoad` typealias；`ExerciseHistoryMock` 移除。
+- pull closure **注入式**（`load:`）由 `SetLoggerView`（持 coordinator）→`SessionCardListPage`→cards 往下傳——因歷史 sub-page 在 ⋯ `.sheet` 內、SwiftUI sheet 不繼承 `@EnvironmentObject`；superset 按側（A/B `exerciseId`）pivot。
+- **timeout 實作備註**：Q2 的「~4s timeout」收斂為 WC framework 原生 reply timeout（~5s，errorHandler→nil→error 態）。未加獨立 watchdog——共享 resume-once flag 跨 WC closure 會踩 `Sendable`-captured-var 雙 resume 風險，且 framework 單 handler 契約已保證 exactly-once 不卡死。功能等價（spinner 自動轉 error、不無限轉）；若實機覺 5s 過長，加顯式 race 為一行 follow-up。
+
+**剩 device-gated（smoke, pending）**：實機 build + smoke — reachable→list／飛航或關 iPhone app→error（重試可恢復）／第一次做該動作→空態；superset A/B 各自獨立歷史。
 
 **Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）。
