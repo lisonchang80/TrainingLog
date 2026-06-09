@@ -49,6 +49,7 @@ import {
   addUserInfoListener,
   makeEnvelope,
   onHandshakeRequest,
+  onHistoryRequest,
   onStartFromWatch,
   sendUserInfo,
 } from '@/src/adapters/watch';
@@ -527,6 +528,14 @@ export default function TodayScreen() {
     const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
       await onHandshakeRequest(db, env, reply);
     });
+    // #311-A (2026-06-09 grill) — Watch 📊 查看歷史 pull-on-tap. Same
+    // request-reply shape as handshake: the Watch sends
+    // `history-request { exerciseId }`, we query + format display-ready
+    // records (unit + locale resolved here) and ack via the replyHandler.
+    // Reply shape lives in watchHistory.ts (not a modelled WC kind).
+    const unsubHistory = addMessageListener('history-request', async (env, reply) => {
+      await onHistoryRequest(db, env, reply);
+    });
     // NEW-Q50 D9 Wave 2 wire-in (2026-05-29) — `start-from-watch` swapped
     // from sendMessage path (v1) to TUI transport (v2). The Watch
     // initiator side sends via `transferUserInfo` so the envelope queues
@@ -667,6 +676,7 @@ export default function TodayScreen() {
     });
     return () => {
       unsubHandshake();
+      unsubHistory();
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();

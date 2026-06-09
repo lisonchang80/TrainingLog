@@ -41,7 +41,7 @@
 // ---------------------------------------------------------------------
 
 /**
- * The 17 message kinds. Order here mirrors the table in
+ * The 18 message kinds. Order here mirrors the table in
  * ADR-0019 § Slice 13d Amendment for grep-ability. New kinds are
  * forbidden without an ADR amendment — the kind set is the cross-end
  * API contract.
@@ -63,10 +63,11 @@ export type WCMessageKind =
   | 'live-mirror'
   | 'end-session'
   | 'discard-session'
-  | 'settings-sync';
+  | 'settings-sync'
+  | 'history-request';
 
 /**
- * All 17 kinds as a frozen tuple — used by the type guard, jest
+ * All 18 kinds as a frozen tuple — used by the type guard, jest
  * `it.each` tables, and the Swift mirror generator (D4/D5). Keep in
  * sync with `WCMessageKind` literal union above.
  *
@@ -108,6 +109,7 @@ export const WC_MESSAGE_KINDS = [
   'end-session',
   'discard-session',
   'settings-sync',
+  'history-request',
 ] as const satisfies readonly WCMessageKind[];
 
 // ---------------------------------------------------------------------
@@ -128,6 +130,23 @@ export interface HandshakePayload {
   requestId: string;
   /** Watch app build identifier (e.g. `'13d.0'`); iPhone may reject older clients. */
   clientVersion: string;
+}
+
+/**
+ * `history-request` — Watch → iPhone, request-reply (#311-A, 2026-06-09
+ * grill). User tapped 📊 查看歷史 on an in-session exercise card; the Watch
+ * (no SQLite) asks the iPhone for the last-3-session history of a single
+ * exercise. The REPLY (the formatted records) is NOT a modelled kind — it
+ * rides the `sendMessage` replyHandler ack, same as `handshake`'s Stage 1
+ * reply (its shape lives in `src/adapters/watch/watchHistory.ts`, which
+ * pulls in SQLite types). `exerciseId` is the raw `exercise.id` FK (pivot);
+ * `requestId` is a caller nonce so the Watch can discard a stale late ack.
+ */
+export interface HistoryRequestPayload {
+  /** Caller-generated nonce; echoed back by iPhone in its reply. */
+  requestId: string;
+  /** The `exercise.id` (solo) / per-side `exercise.id` (cluster A/B) to fetch history for. */
+  exerciseId: string;
 }
 
 /**
@@ -535,7 +554,8 @@ export type WCMessage =
   | WCEnvelope<'live-mirror', LiveMirrorPayload>
   | WCEnvelope<'end-session', EndSessionPayload>
   | WCEnvelope<'discard-session', DiscardSessionPayload>
-  | WCEnvelope<'settings-sync', SettingsSyncPayload>;
+  | WCEnvelope<'settings-sync', SettingsSyncPayload>
+  | WCEnvelope<'history-request', HistoryRequestPayload>;
 
 // ---------------------------------------------------------------------
 // Section 5 — Per-kind payload lookup (compile-time, used by factory)
@@ -563,6 +583,7 @@ export interface WCPayloadMap {
   'end-session': EndSessionPayload;
   'discard-session': DiscardSessionPayload;
   'settings-sync': SettingsSyncPayload;
+  'history-request': HistoryRequestPayload;
 }
 
 // ---------------------------------------------------------------------

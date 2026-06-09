@@ -112,3 +112,10 @@ export {
   DEFAULT_STUCK_THRESHOLD_MS,
 } from './syncStatus';
 export type { SyncState, SyncStatusInput } from './syncStatus';
+
+// #311-A (2026-06-09 grill) — Watch 📊 exercise-history pull-on-tap handler.
+// Request-reply mirror of onHandshakeRequest; reply is formatted display-ready
+// (unit + locale resolved iPhone-side) via the pure builder in
+// src/domain/watch/watchExerciseHistory.ts. ADR-0019 § Slice 13d D15.
+export { onHistoryRequest } from './watchHistory';
+export type { WatchHistoryReplyPayload } from './watchHistory';
