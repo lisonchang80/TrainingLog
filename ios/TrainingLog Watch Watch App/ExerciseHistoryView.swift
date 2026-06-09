@@ -45,8 +45,13 @@ import SwiftUI
 struct ExerciseHistoryRecord: Identifiable, Hashable {
     /// Stable id per row — `yyyy-MM-dd` of the session start.
     let id: String
-    /// Pre-formatted short date label, e.g. `05-26 (二)`.
+    /// Pre-formatted date header, e.g. `2026-05-26 (二)` (weekday localised).
     let dateLabel: String
+    /// Pre-formatted top-set highlight, e.g. `頂組：80kg×8（增肌）`. EMPTY string
+    /// when the session has no eligible weighted working set — the view hides
+    /// the line. (Wire uses '' not null: NSNull would make WCSession reject the
+    /// reply; see the TS `WatchHistoryRecord.topSetLine`.)
+    let topSetLine: String
     /// Working-set count (warmup excluded).
     let workingSetCount: Int
     /// Per-working-set display strings, e.g. ["80kg×8", "80kg×8"].
@@ -99,9 +104,12 @@ struct ExerciseHistoryReply {
                 count = 0
             }
             let setLines = (dict["setLines"] as? [String]) ?? []
+            // '' when absent (wire never sends null — see topSetLine doc).
+            let topSetLine = (dict["topSetLine"] as? String) ?? ""
             return ExerciseHistoryRecord(
                 id: id,
                 dateLabel: dateLabel,
+                topSetLine: topSetLine,
                 workingSetCount: count,
                 setLines: setLines
             )
@@ -152,7 +160,11 @@ struct ExerciseHistoryView: View {
 
     var body: some View {
         content
-            .navigationTitle("\(exerciseName) 歷史")
+            // SHORT nav title (was `\(exerciseName) 歷史`). A long exercise name
+            // in an inline title crowds out / hides the leading back chevron on
+            // watchOS (user 2026-06-09 ③「返回箭頭偶爾不見」, long names only).
+            // The exercise name now lives in the content header (recordsList).
+            .navigationTitle("歷史")
             .navigationBarTitleDisplayMode(.inline)
             // Q1 pull-on-tap — fetch when the sub-page appears. `id: exerciseId`
             // re-pulls if this view instance is reused for another exercise.
@@ -207,6 +219,13 @@ struct ExerciseHistoryView: View {
     private func recordsList(_ records: [ExerciseHistoryRecord]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                // Exercise-name header — the nav title is the short "歷史", so the
+                // name lives here (also serves the long-name back-chevron fix).
+                Text(exerciseName)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .padding(.bottom, 6)
                 ForEach(Array(records.enumerated()), id: \.element.id) { idx, rec in
                     if idx > 0 {
                         Rectangle()
@@ -214,7 +233,7 @@ struct ExerciseHistoryView: View {
                             .frame(height: 0.5)
                             .padding(.vertical, 4)
                     }
-                    recordRow(rec)
+                    recordCard(rec)
                 }
             }
             .padding(.horizontal, 4)
@@ -222,22 +241,42 @@ struct ExerciseHistoryView: View {
         }
     }
 
-    private func recordRow(_ rec: ExerciseHistoryRecord) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    /// One past session, laid out to mirror the iPhone exercise-history card:
+    /// bold `yyyy-MM-dd (週次)` date header (+ working-set count), the optional
+    /// `頂組：…` highlight, then per-working-set rows numbered 1 / 2 / 3 …
+    private func recordCard(_ rec: ExerciseHistoryRecord) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(rec.dateLabel)
                     .font(.caption)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.primary)
                 Spacer(minLength: 0)
                 Text("\(rec.workingSetCount) 工作組")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Text(rec.setLines.joined(separator: " / "))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .minimumScaleFactor(0.8)
+            // 頂組 highlight — hidden when '' (no eligible weighted set).
+            if !rec.topSetLine.isEmpty {
+                Text(rec.topSetLine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            // Per-working-set rows, numbered 1..N (warmup already excluded).
+            ForEach(Array(rec.setLines.enumerated()), id: \.offset) { idx, line in
+                HStack(spacing: 6) {
+                    Text("\(idx + 1)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, alignment: .trailing)
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                }
+            }
         }
         .padding(.vertical, 2)
     }
@@ -276,7 +315,10 @@ struct ExerciseHistoryView: View {
                 .font(.body)
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
-            Text("請確認 iPhone 在附近且 App 已開啟")
+            // #2 (2026-06-09, option C「維持線上才有、只改文案」): history is
+            // pulled live from iPhone, so spell out the requirement — the most
+            // common cause is the iPhone app not being open / in range.
+            Text("請開啟 iPhone 的 TrainingLog App\n並確認在附近後重試")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -310,15 +352,18 @@ struct ExerciseHistoryView: View {
                     ok: true,
                     records: [
                         ExerciseHistoryRecord(
-                            id: "2026-05-26", dateLabel: "05-26 (二)",
+                            id: "2026-05-26", dateLabel: "2026-05-26 (二)",
+                            topSetLine: "頂組：80kg×8（增肌）",
                             workingSetCount: 3, setLines: ["80kg×8", "80kg×8", "75kg×6"]
                         ),
                         ExerciseHistoryRecord(
-                            id: "2026-05-22", dateLabel: "05-22 (五)",
+                            id: "2026-05-22", dateLabel: "2026-05-22 (五)",
+                            topSetLine: "頂組：75kg×10（增肌）",
                             workingSetCount: 4, setLines: ["75kg×10", "75kg×8", "70kg×8", "70kg×6"]
                         ),
                         ExerciseHistoryRecord(
-                            id: "2026-05-19", dateLabel: "05-19 (二)",
+                            id: "2026-05-19", dateLabel: "2026-05-19 (二)",
+                            topSetLine: "頂組：75kg×8（增肌）",
                             workingSetCount: 3, setLines: ["75kg×8", "70kg×8", "70kg×8"]
                         ),
                     ]
