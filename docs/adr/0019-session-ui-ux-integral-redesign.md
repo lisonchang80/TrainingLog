@@ -3314,3 +3314,28 @@ Swift（device-gated、停在此邊界等使用者）：
 - 上一段 WC Ship-Blocker（E1/E2/E3）— Q3 的 end 雙車道 + 守門 purge 已在該段落地。
 - `replaceLiveMirror.ts` / `reconcileSessionTree` — Phase D 墓碑模式所在。
 - ADR-0008 § multi-device — Watch 優先（情境 2-4）符合 v1 scope。
+
+---
+
+## 2026-06-09 — D15 📊 動作歷史「真實 pull-on-tap」（取代 Phase-A mock，#311-A grill）
+
+**Trigger / 翻盤**：D15 📊 查看歷史 sub-page 自 Phase A 起一直渲染 `ExerciseHistoryMock.fetch()`（3 筆硬編、任何動作名都回同 3 筆），在 Release Watch UI 可達 → App Review placeholder-content 退件類（P0 task #311）。2026-06-09 grill 拍板**做真實功能**（選項 A，非砍頁/空狀態）。
+
+**翻盤的既有拍板**：
+- ⚠️ **D15 spec line 18 `TODO: D9 wire real DB query`** 落地 —— mock 移除，改 Watch→iPhone pull-on-tap。
+
+**Decisions（Q1/Q2 + wire 慣例）**：
+1. **Q1 = A1 pull-on-tap**（不選 push-at-start / hybrid）：📊 tap 才發 request；鏡像現役 `onHandshakeRequest` request-reply（`sendMessage` + replyHandler ack）；start payload 維持精簡、歷史資料新鮮。
+2. **新 WC kind `history-request`（第 18 種；WC kind 總數 17→18）**：Watch→iPhone，payload `{ requestId, exerciseId }`。**reply 不是獨立 kind**（同 handshake Stage 1 reply）——走 replyHandler、shape `WatchHistoryReplyPayload { requestId, exerciseId, ok, records[] }` 定義在 `src/adapters/watch/watchHistory.ts`。
+3. **wire shape = iPhone 送 display-ready**（Bug Y #271 + `set-weight-unit-surfaces` 鐵律）：`dateLabel`（含在地化週次 `t('domain','weekday*')`）、`setLines`（含 kg/lb 換算 `displayWeight`）、`workingSetCount`；Watch 只送 raw `exerciseId`（pivot；cluster A/B 各送自己側 id）。warmup 排除、最近 3 場（D15 Q5=A）。
+4. **Q2 = 獨立 error 態**：Watch 狀態機 loading →（reply 3 筆→list／reply `[]`→真·空狀態「第一次做這個動作？」／`ok:false` 或 timeout~4s/unreachable→「無法取得·稍後再試」）。三態分明、不把連線問題謊報成「沒歷史」。reply 帶 `ok` flag 讓 Watch 區分 iPhone 查詢錯誤 vs 真空。
+
+**已落地（TS, branch `slice/13d-watch-history-pull`）**：
+- `src/domain/watch/watchExerciseHistory.ts`（純 builder：flat rows→last-N per-session records、warmup-excluded、kg/lb、`BW×` for bodyweight；7 test）。
+- `payloadSchema.ts` 第 18 kind `history-request` + `HistoryRequestPayload`。
+- `src/adapters/watch/watchHistory.ts` `onHistoryRequest`（reuse `queryExerciseHistory`、`getUnitPreference`、`t('domain',weekday)`；ok-flag 後備；4 test）+ barrel export + `app/(tabs)/index.tsx` `addMessageListener('history-request')` mount。
+- tsc 0 + jest 全綠（+11 case）。
+
+**剩 device-gated（Swift, pending）**：Watch 📊 tap → `WatchConnectivityCoordinator` 送 `history-request` + await reply；`ExerciseHistoryView` 接四態（loading/list/空/error）、砍 `ExerciseHistoryMock`；實機 smoke（reachable→list／飛航→error／第一次做→空）。
+
+**Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）。
