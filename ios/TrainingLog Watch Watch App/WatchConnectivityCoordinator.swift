@@ -836,6 +836,91 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             )
         }
     }
+
+    // MARK: - Outbound: history-request (#311-A, D15 📊 pull-on-tap)
+    //
+    // Request one exercise's training history from iPhone and await the reply.
+    // Mirrors `requestHandshake`: a `history-request` envelope (WC kind #18,
+    // per `src/adapters/watch/payloadSchema.ts` `HistoryRequestPayload
+    // {requestId, exerciseId}`) sent via `sendMessage(_:replyHandler:
+    // errorHandler:)`. The REPLY is NOT a modelled WC kind — it rides the
+    // replyHandler ack (request-reply PULL pattern), shape per TS
+    // `WatchHistoryReplyPayload` (`src/adapters/watch/watchHistory.ts`), parsed
+    // by `ExerciseHistoryReply.parse`.
+    //
+    // The iPhone side is `onHistoryRequest(db, env, reply)` registered via
+    // `addMessageListener('history-request', …)` in `app/(tabs)/index.tsx`; it
+    // pulls SQLite, formats DISPLAY-READY records (date label localised +
+    // kg/lb converted) and replies `toWireRecord({...ok, records})`.
+    //
+    // Race-resistance: a fresh `requestId` is minted per call and the reply's
+    // `requestId` is checked before resolving (late replies for a previous
+    // request drop → nil → error state).
+    //
+    // Returns nil on:
+    //   - WC not activated / not reachable / not supported / empty exerciseId
+    //   - framework reply timeout (~5s, errorHandler path). This native
+    //     timeout IS the "spinner auto-resolves to error" backstop the D15
+    //     amendment Q2 calls for — the view never hangs indefinitely. (We do
+    //     NOT add a separate explicit watchdog: a shared resume-once flag
+    //     captured across the WC closures would be a `Sendable`-captured-var
+    //     hazard, and the framework's single-handler contract already
+    //     guarantees exactly-once resolution.)
+    //   - Reply shape undecodable / requestId mismatch
+    func requestExerciseHistory(exerciseId: String) async -> ExerciseHistoryReply? {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "history skip: not activated"
+            return nil
+        }
+        guard session.isReachable else {
+            lastOutbound = "history skip: iPhone unreachable"
+            return nil
+        }
+        guard !exerciseId.isEmpty else {
+            lastOutbound = "history skip: empty exerciseId"
+            return nil
+        }
+
+        let requestId = UUID().uuidString
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "history-request",
+            "payload": [
+                "requestId": requestId,
+                "exerciseId": exerciseId,
+            ],
+        ]
+
+        lastOutbound = "history req=\(prefix8(requestId))… ex=\(prefix8(exerciseId))"
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<ExerciseHistoryReply?, Never>) in
+            session.sendMessage(
+                envelope,
+                replyHandler: { [weak self] reply in
+                    Task { @MainActor [weak self] in
+                        let parsed = ExerciseHistoryReply.parse(
+                            from: reply, expectedRequestId: requestId
+                        )
+                        if let parsed {
+                            self?.lastInbound =
+                                "history reply ok=\(parsed.ok) records=\(parsed.records.count)"
+                        } else {
+                            self?.lastInbound = "history reply: malformed or stale"
+                        }
+                        cont.resume(returning: parsed)
+                    }
+                },
+                errorHandler: { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        self?.lastOutbound =
+                            "history err: \(error.localizedDescription)"
+                        cont.resume(returning: nil)
+                    }
+                }
+            )
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate

@@ -28,6 +28,13 @@ struct ExerciseCard: View {
 
     @ObservedObject var state: SessionInteractionState
 
+    /// #311-A — pull this exercise's history over WC for the 📊 sub-page.
+    /// Threaded from `SetLoggerView` (real `coordinator.requestExerciseHistory`)
+    /// because the history view lives inside the ⋯ `.sheet` (no environment
+    /// inheritance). Defaults to a no-op so previews + non-WC contexts compile;
+    /// the default surfaces the view's `.error` state if ever opened.
+    var historyLoad: ExerciseHistoryLoad = { _ in nil }
+
     // MARK: - D15 ⋯ menu state
     //
     // `dotsMenuOpen` drives the sheet that mounts DotsMenuView.
@@ -48,7 +55,8 @@ struct ExerciseCard: View {
     // `SessionInteractionState` (overlay) → the live-mirror projection
     // drops it → the iPhone END-session reconcile purges the row (E2). No
     // direct DB write from the Watch — deletion propagates via the mirror.
-    // TODO: D9 wire ExerciseHistory real DB query (replace mock).
+    // 2026-06-09 (#311-A): ExerciseHistory now pulls REAL data over WC
+    // (`historyLoad` → coordinator.requestExerciseHistory), mock removed.
     // TODO: D15 wire superset card variant (3-row header [超] + A ＋ B)
     //       when D11 frozen spec sweep lands the cluster card type.
     //       Currently every ExerciseCard renders as a solo card; the
@@ -185,9 +193,8 @@ struct ExerciseCard: View {
                 )) {
                     ExerciseHistoryView(
                         exerciseName: exercise.exerciseName,
-                        records: ExerciseHistoryMock.fetch(
-                            exerciseName: exercise.exerciseName
-                        )
+                        exerciseId: exercise.exerciseId,
+                        load: historyLoad
                     )
                 }
                 // Confirm dialog stacked as another sheet so dismissing

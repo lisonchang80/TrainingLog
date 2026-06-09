@@ -69,6 +69,13 @@ struct SupersetCard: View {
     /// B side — the child / higher-`ordering` exercise of the pair.
     let exerciseB: SessionSnapshotExercise
 
+    /// #311-A — pull a side's history over WC for the 📊 sub-page (per-side:
+    /// the A or B exercise depending on which 📊 the user tapped). Threaded
+    /// from `SetLoggerView` (real `coordinator.requestExerciseHistory`) because
+    /// the history view lives inside the ⋯ `.sheet`. Defaults to a no-op so
+    /// previews compile.
+    var historyLoad: ExerciseHistoryLoad = { _ in nil }
+
     // D15 ⋯ menu state (chained sheets so swiping the inner confirm/history
     // returns to the menu).
     @State private var dotsMenuOpen: Bool = false
@@ -318,7 +325,8 @@ struct SupersetCard: View {
             )) {
                 ExerciseHistoryView(
                     exerciseName: historyName,
-                    records: ExerciseHistoryMock.fetch(exerciseName: historyName)
+                    exerciseId: historySideId,
+                    load: historyLoad
                 )
             }
             .sheet(isPresented: $pendingConfirm) {
@@ -345,6 +353,12 @@ struct SupersetCard: View {
 
     private var historyName: String {
         (pendingHistorySide == 1) ? exerciseB.exerciseName : exerciseA.exerciseName
+    }
+
+    /// The FK the per-side history query pivots on — B's exerciseId when the
+    /// user tapped 📊 on the B side (`pendingHistorySide == 1`), else A's.
+    private var historySideId: String {
+        (pendingHistorySide == 1) ? exerciseB.exerciseId : exerciseA.exerciseId
     }
 
     // MARK: - In-memory side effects (mirror ExerciseCard; D9 wires to repo)

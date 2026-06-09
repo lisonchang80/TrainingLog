@@ -232,7 +232,15 @@ struct SetLoggerView: View {
                     // Page 1 — Session card list (D11 main, default landing).
                     SessionCardListPage(
                         snapshot: snapshotForRender,
-                        state: interactionState
+                        state: interactionState,
+                        // #311-A — build the 📊 history pull closure HERE (where
+                        // the coordinator lives) and thread it down: the history
+                        // sub-page opens inside a card's ⋯ `.sheet`, which does
+                        // NOT inherit `@EnvironmentObject`, so capturing the
+                        // coordinator in a closure is the way it reaches the view.
+                        historyLoad: { exerciseId in
+                            await coordinator.requestExerciseHistory(exerciseId: exerciseId)
+                        }
                     )
                     .tag(1)
 
@@ -502,6 +510,10 @@ private struct SessionCardListPage: View {
     let snapshot: SessionSnapshot
     @ObservedObject var state: SessionInteractionState
 
+    /// #311-A — 📊 history pull closure, threaded down to each card (see the
+    /// instantiation in `SetLoggerView`). Cards forward it to `ExerciseHistoryView`.
+    let historyLoad: ExerciseHistoryLoad
+
     /// 2026-06-01 — the Digital Crown now drives VERTICAL SCROLL of this
     /// ScrollView (its native behaviour) instead of editing numbers: weight/
     /// reps are keypad-only, which frees the crown to scroll the card list —
@@ -608,9 +620,9 @@ private struct SessionCardListPage: View {
                     ForEach(cardUnits) { unit in
                         switch unit {
                         case .solo(let ex):
-                            ExerciseCard(exercise: ex, state: state)
+                            ExerciseCard(exercise: ex, state: state, historyLoad: historyLoad)
                         case .superset(let a, let b):
-                            SupersetCard(state: state, exerciseA: a, exerciseB: b)
+                            SupersetCard(state: state, exerciseA: a, exerciseB: b, historyLoad: historyLoad)
                         }
                     }
                 }
