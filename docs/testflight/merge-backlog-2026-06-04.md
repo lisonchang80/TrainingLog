@@ -288,7 +288,13 @@ Three contention clusters (each branch CLEAN vs current main, but merging one fo
 - **Cluster B — `src/i18n/strings.ts` (4-way):** i18n + a11y-setrow + a11y-sheets + error-boundary (keys git-verified disjoint → keep-both then `tsc --noEmit` for TS1117)
 - **Cluster C — `app/_layout.tsx` (3-way):** i18n + error-boundary + release-wc-fix-c
 
-### 🔴 2 NEW P0 Watch blockers (from w5 submission-delta, tasks #311/#312)
+### 🔴 2 NEW P0 Watch blockers (from w5 submission-delta, tasks #311/#312) — ✅ 已解除 2026-06-11
+
+> ✅ **2026-06-12 修訂：兩條皆已 device-verified ship main** — #311 真實
+> pull-on-tap（`ExerciseHistoryView` 接 `requestExerciseHistory` WC envelope）
+> merge `6ed3d8f`；#312 FinishPage 接真 `HKLiveWorkoutBuilder` 數據 merge
+> `cba8925`。placeholder-rejection 風險消除。以下保留為歷史紀錄。
+
 - `ios/TrainingLog Watch Watch App/ExerciseHistoryView.swift:124-145` — renders `ExerciseHistoryMock.fetch()` fake data in live session (📊 dots-menu).
 - `ios/TrainingLog Watch Watch App/FinishPageView.swift:246-256` — hardcoded `142 bpm` / `285 kcal` finish tiles (SessionSnapshot has no HR/kcal field).
 Both are non-`#if DEBUG`, reachable in Release Watch UI → App Review placeholder-content rejection class. Device-gated Swift fixes; do before archive.
@@ -324,7 +330,7 @@ _w5 correction appended 2026-06-04, base main `7cc805c` (post test-only merges).
 
 | # | Branch | Unique commits | merge-tree vs main | Class | Gate |
 |---|---|---|---|---|---|
-| 1 | `slice/template-overwrite` **(remote `af444de`)** | 4 (#3 ②③④) | ✅ CLEAN | JS | device-smoke ④②③ |
+| 1 | ✅ `slice/template-overwrite` **(remote `af444de`)** — **2026-06-11 已 drain 進 main**（JS-only 免 rebuild、branch 已刪） | 4 (#3 ②③④) | ✅ CLEAN | JS | ~~device-smoke ④②③~~ ✅ done |
 | 2 | `fix/set-drag-gesture-highlight` | 1 | ✅ CLEAN | UI | device-smoke drag highlight |
 | 3 | `chore/a11y-setrow-keypad` | 2 | ✅ CLEAN | a11y | VoiceOver |
 | 4 | `chore/a11y-sheets-charts` | 2 | ✅ CLEAN | a11y | VoiceOver |
@@ -344,6 +350,11 @@ _w5 correction appended 2026-06-04, base main `7cc805c` (post test-only merges).
   merge syncplan-refresh (#10) instead. `git branch -D slice/13d-sync-bc-plan && git push origin --delete slice/13d-sync-bc-plan`.
 
 ### DO NOT TOUCH
+
+> ✅ **2026-06-12 修訂：本段已失效** — `slice/template-overwrite` 已於 2026-06-11
+> drain 進 main（#3 ②③④ 全 ship、device-verified），local WIP 與 remote branch
+> 皆已刪除，下述警告不再適用。保留為歷史紀錄。
+
 - **`slice/template-overwrite` LOCAL tip `3986f3b`** is **47 commits ahead** of its
   remote — un-pushable mid-slice WIP. Merge the **REMOTE `af444de`** only
   (the clean 4 #3②③④). **Never push/force-push the local branch.**
@@ -360,7 +371,7 @@ A4. overnight/syncplan-refresh-2026-06-01     (resolve docs/adr/0019 keep-both);
 ```
 **Track B — device session (smoke each per its gate):**
 ```
-B1. slice/template-overwrite (remote af444de)  → ④ clone / ② wizard / ③ re-classify: Y body swapped, X gone, Y identity intact
+B1. ✅ DONE 2026-06-11 — slice/template-overwrite drained 進 main (JS-only, branch 已刪)
 B2. fix/set-drag-gesture-highlight             → drag-active set highlight clear in light+dark
 B3. chore/a11y-setrow-keypad   ┐ strings.ts appenders — merge consecutively;
 B4. chore/a11y-sheets-charts   │ each rebase re-conflicts strings.ts APPEND region →
@@ -374,6 +385,9 @@ B9. chore/appstore-watch-readiness → archive gate; bump build once (build-bump
 > **Before B9 archive: fix the 2 P0 Watch blockers (#311/#312)** — they're in
 > main's Watch Swift now (`ExerciseHistoryView.swift` mock data, `FinishPageView.swift`
 > hardcoded 142bpm/285kcal), reachable in Release → placeholder-rejection class.
+>
+> ✅ **2026-06-12 修訂：#311/#312 已解除**（#311 `6ed3d8f`、#312 `cba8925`，
+> 皆 device-verified ship main 2026-06-11）— B9 archive 前置條件不再卡這兩條。
 
 ### Conflict playbook (only 3 conflicts now, all trivial)
 | File | Branch | Resolution |
@@ -397,6 +411,7 @@ All 4 keyboard-only branches rebased → resolved → `tsc`+`jest` green → ff-
 - **A4** `syncplan-refresh` (2 docs) → resolved `docs/adr/0019` keep-both (Live-mirror fast-lane § + 三車道 §, `---` separated).
 
 Gate: **tsc 0 · jest 224 suites / 2533 tests** (was 2463, +70).
+（2026-06-12 註：現行 main 基準已為 **2561** tests — 2026-06-11 #311/#312 + 模板編輯器重做批落地後。）
 
 ### Then `slice/13d-release-wc-fix-c` DROPPED (row 11 — not device-gated, obsolete)
 Re-confirm verdict: its only surviving commit `442cc1e` was the **`release-wc-patches/`
@@ -408,5 +423,41 @@ AND Fix A `5778775` (`patches/react-native-watch-connectivity+2.0.0.patch` via p
 deleted (worktree + local + remote, 2026-06-06). Diagnostic patch recoverable from
 reflog if WC ever regresses.
 
-**Remaining backlog = 8 Track-B device-gated branches** (table rows 1–6 + 12–13;
-row 11 dropped).
+**Remaining backlog = ~~8~~ 7 Track-B device-gated branches** (table rows 2–6 + 12–13;
+row 11 dropped; row 1 `template-overwrite` ✅ 2026-06-11 drained — 見 2026-06-12 REFRESH).
+
+---
+
+## ✅ 2026-06-12 REFRESH — 殘枝 triage 完成（刪除待人工執行）；re-verified vs main `cba8925`
+
+> 夜跑殘枝 triage（依 `merge-backlog-triage` skill、`git cherry` patch-id +
+> 逐 commit 抽驗）對 **21 條指名 remote + 2 條 local + 15 條 unlisted remote**
+> 完成全量盤點。完整報告 + 證據 + 刪除 script 在
+> `/tmp/overnight-reports-2026-06-12/03-branch-triage.md`
+> （持久副本 `~/code/TrainingLog-overnight-reports/2026-06-12/03-branch-triage.md`）。
+
+### Triage 結論摘要
+
+- **21/21 指名 remote 殘枝全數可刪**（17 DELETE-landed + 4 DELETE-obsolete）、
+  **零 SALVAGE** — 每條 unique commit 皆驗出內容已在 main（byte-identical /
+  超集 / 演化版）或前提已消失（檔案被刪、pattern 被否決、spike 結論已入 ADR）。
+  無需 cherry-pick 計畫。
+- **Bonus：15 條 unlisted remote 殘枝 `git cherry` 全為 unique=0**（patch-id
+  全等已落地），一併列入刪除清單。
+- **⚠️ 刪除 script 尚未執行 — 待日間人工確認後跑**（script 本體只在報告 03，
+  本 runbook 刻意不收錄以免誤跑）。spike 枝（`slice/13d-d0-spike-a`/`-c`）
+  刪前先打 archive tag（`archive/13d-d0-spike-a`、`archive/13d-d0-spike-c`）
+  — ADR-0019 保留條件到期 amend 已補（見同日 ADR-0019 翻盤 ledger 附近 amend）。
+- **`dryrun-strings`（local）**：非 i18n 實驗 — 是 3 條 Track-B 分支的
+  dry-run merge 枝（2026-06-05）、零獨有內容 → **Track-B drain 完成後再刪**。
+- **`slice/grill-8-bugfixes-2026-06-05`（local `ec11674`、NOT pushed）**：
+  **KEEP** — 2 個 HK device-gated fix 等實機驗，維持上表 row 12 結論。
+
+### 全部刪完後 remote 應只剩
+
+`main` + 6 條 Track-B 勿碰枝（`chore/a11y-setrow-keypad`、`chore/a11y-sheets-charts`、
+`chore/appstore-watch-readiness`、`chore/i18n-single-locale-leaks`、
+`fix/app-error-boundary`、`fix/set-drag-gesture-highlight`）；
+加 local `grill-8-bugfixes` = 7 條 Track-B device-gated backlog 不變。
+
+_2026-06-12 refresh appended on `docs/runbook-drift-2026-06-12`, base main `cba8925`（jest 基準 2561）。_
