@@ -67,12 +67,13 @@ struct FinishPageView: View {
     var onCommit: () -> Void = {}
 
     /// #312 — live HK stats provider. Wired by SetLoggerView to
-    /// `sessionController.liveWorkoutStats()`: avg HR (bpm) + active
-    /// kcal read off the in-flight HKLiveWorkoutBuilder, which is still
-    /// collecting while this page is visible (the HK session only ends
-    /// after [完成]/[放棄]). Re-queried on every page appear. Defaults
-    /// to (nil, nil) for #Preview / mock callers → tiles render "--".
-    var liveStats: () -> (avgHR: Double?, kcal: Double?) = { (nil, nil) }
+    /// `sessionController.liveWorkoutStats()`: HR min/max/latest + 動態
+    /// (active) / 靜態 (basal) kcal read off the in-flight
+    /// HKLiveWorkoutBuilder, which is still collecting while this page
+    /// is visible (the HK session only ends after [完成]/[放棄]).
+    /// Re-queried on every page appear. Defaults to empty stats for
+    /// #Preview / mock callers → tiles render "--".
+    var liveStats: () -> WorkoutLiveStats = { WorkoutLiveStats() }
 
     /// Called when sync succeeds (after the 0.5s ✓ display) — caller
     /// should dismiss the finish page. 2026-05-29 deep-night smoke fix:
@@ -91,8 +92,7 @@ struct FinishPageView: View {
     /// #312 — live builder readings, refreshed on every appear (the
     /// TabView re-fires onAppear each time this page swipes into view,
     /// so the values reflect "now", not session start).
-    @State private var avgHR: Double?
-    @State private var totalKcal: Double?
+    @State private var stats = WorkoutLiveStats()
 
     /// Buttons are interactive only during `.idle` or `.fail`. The
     /// spec is explicit: while ⟳ syncing or ✓ success-flash, both
@@ -132,9 +132,7 @@ struct FinishPageView: View {
         .navigationBarHidden(true)
         .animation(.easeInOut(duration: 0.18), value: phase)
         .onAppear {
-            let stats = liveStats()
-            avgHR = stats.avgHR
-            totalKcal = stats.kcal
+            stats = liveStats()
         }
     }
 
@@ -213,11 +211,14 @@ struct FinishPageView: View {
     // MARK: - 5 Tiles (fixed order, vertical)
 
     private var tilesBlock: some View {
+        // 2026-06-11 user 拍板（#312 v2）：🔥 拆動態/靜態兩行 → 6-tile
+        // （5-tile 凍結 spec amend 見 ADR-0019 D14 § 2026-06-11）。
         VStack(alignment: .leading, spacing: 4) {
             tileRow(icon: "checkmark", text: setsTileText)
             tileRow(icon: "clock", text: durationTileText)
             tileRow(icon: "heart.fill", text: hrTileText, iconColor: .red)
-            tileRow(icon: "flame.fill", text: kcalTileText, iconColor: .orange)
+            tileRow(icon: "flame.fill", text: activeKcalTileText, iconColor: .orange)
+            tileRow(icon: "flame", text: basalKcalTileText, iconColor: .secondary)
             tileRow(icon: "figure.strengthtraining.traditional", text: exerciseTileText)
         }
     }
@@ -265,24 +266,45 @@ struct FinishPageView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
-    /// 平均 HR — live off the HKLiveWorkoutBuilder via `liveStats`
-    /// (#312; was hardcoded spec placeholder 142). "--" until the first
-    /// HR sample lands (Simulator / auth denied / very short session).
+    /// HR 範圍 min–max — live off the HKLiveWorkoutBuilder via
+    /// `liveStats`（#312 v2 user 拍板：平均改範圍）。單一樣本（min==max
+    /// 取整後相同）收斂單值；無樣本顯 "--"（Simulator / 未授權 / session
+    /// 太短）。
     private var hrTileText: String {
-        guard let avgHR else { return "-- bpm（平均）" }
-        return "\(Int(avgHR.rounded())) bpm（平均）"
+        switch (stats.hrMin, stats.hrMax) {
+        case let (lo?, hi?) where Int(lo.rounded()) != Int(hi.rounded()):
+            return "\(Int(lo.rounded()))–\(Int(hi.rounded())) bpm"
+        case let (lo?, _):
+            return "\(Int(lo.rounded())) bpm"
+        case let (nil, hi?):
+            return "\(Int(hi.rounded())) bpm"
+        default:
+            return "-- bpm"
+        }
     }
 
-    /// kcal 總和 — live activeEnergyBurned sum via `liveStats`
-    /// (#312; was hardcoded 285). "--" until the first energy sample.
-    private var kcalTileText: String {
-        guard let totalKcal else { return "-- kcal" }
-        return "\(Int(totalKcal.rounded())) kcal"
+    /// 動態 kcal — activeEnergyBurned 累計（#312；原硬編 285）。
+    private var activeKcalTileText: String {
+        guard let v = stats.activeKcal else { return "-- kcal（動態）" }
+        return "\(Int(v.rounded())) kcal（動態）"
     }
 
-    /// session 動作數 — per spec line 1943.
+    /// 靜態 kcal — basalEnergyBurned 累計（#312 v2 user 拍板拆兩行；
+    /// 型別 2026-06-11 才進 typesToRead，授權前永遠 "--"）。
+    private var basalKcalTileText: String {
+        guard let v = stats.basalKcal else { return "-- kcal（靜態）" }
+        return "\(Int(v.rounded())) kcal（靜態）"
+    }
+
+    /// session 動作數 — #312 v2 user 拍板：有 ✓ 才算 1，N/M 格式對齊
+    /// 組數 tile；完成定義＝該動作至少一個非熱身 ✓（與組數 tile 一致
+    /// 排除熱身）。
     private var exerciseTileText: String {
-        return "\(snapshot.exercises.count) 動作"
+        let total = snapshot.exercises.count
+        let completed = snapshot.exercises.filter { ex in
+            ex.sets.contains { $0.isLogged && $0.setKind != "warmup" }
+        }.count
+        return "\(completed)/\(total) 動作"
     }
 
     // MARK: - Buttons

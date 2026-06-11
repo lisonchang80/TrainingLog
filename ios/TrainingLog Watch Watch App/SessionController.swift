@@ -34,6 +34,18 @@ import Foundation
 import HealthKit
 import Combine
 
+/// Aggregate live readings off the in-flight HKLiveWorkoutBuilder
+/// (#312). Per-field nil = no sample collected yet. Consumed by the
+/// D14 FinishPage tiles (HR range + 動/靜 kcal) and the session-page
+/// HRFrozenPane top bar (latest HR + active kcal, 5s poll).
+struct WorkoutLiveStats {
+    var hrMin: Double? = nil
+    var hrMax: Double? = nil
+    var hrLatest: Double? = nil
+    var activeKcal: Double? = nil
+    var basalKcal: Double? = nil
+}
+
 @MainActor
 final class SessionController: NSObject, ObservableObject {
 
@@ -59,23 +71,34 @@ final class SessionController: NSObject, ObservableObject {
         super.init()
     }
 
-    // MARK: - Live workout stats (#312 — D14 FinishPage real tiles)
+    // MARK: - Live workout stats (#312 — D14 FinishPage real tiles +
+    //         HRFrozenPane top-bar wire)
 
     /// Aggregate stats read straight off the in-flight live builder
     /// (collecting since `start()`'s beginCollection). Per-field nil when
     /// no sample has landed yet — Simulator runs, HK auth denied, or a
     /// session too short for the first HR sample. Synchronous + cheap;
-    /// safe to call on every FinishPage appear. Only meaningful while the
-    /// session is active (builder is discarded by `end()`/`cancel()`).
-    func liveWorkoutStats() -> (avgHR: Double?, kcal: Double?) {
-        guard let builder else { return (nil, nil) }
-        let avgHR = HKObjectType.quantityType(forIdentifier: .heartRate)
-            .flatMap { builder.statistics(for: $0)?.averageQuantity() }?
-            .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-        let kcal = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)
-            .flatMap { builder.statistics(for: $0)?.sumQuantity() }?
-            .doubleValue(for: .kilocalorie())
-        return (avgHR, kcal)
+    /// safe to poll every few seconds. Only meaningful while the session
+    /// is active (builder is discarded by `end()`/`cancel()`).
+    func liveWorkoutStats() -> WorkoutLiveStats {
+        guard let builder else { return WorkoutLiveStats() }
+        var stats = WorkoutLiveStats()
+        if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate),
+           let hr = builder.statistics(for: hrType) {
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            stats.hrMin = hr.minimumQuantity()?.doubleValue(for: bpm)
+            stats.hrMax = hr.maximumQuantity()?.doubleValue(for: bpm)
+            stats.hrLatest = hr.mostRecentQuantity()?.doubleValue(for: bpm)
+        }
+        if let activeType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
+            stats.activeKcal = builder.statistics(for: activeType)?
+                .sumQuantity()?.doubleValue(for: .kilocalorie())
+        }
+        if let basalType = HKObjectType.quantityType(forIdentifier: .basalEnergyBurned) {
+            stats.basalKcal = builder.statistics(for: basalType)?
+                .sumQuantity()?.doubleValue(for: .kilocalorie())
+        }
+        return stats
     }
 
     // MARK: - Lifecycle API

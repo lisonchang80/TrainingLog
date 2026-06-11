@@ -69,6 +69,10 @@ final class HealthKitController: ObservableObject {
     static let typesToRead: Set<HKObjectType> = [
         HKObjectType.quantityType(forIdentifier: .heartRate)!,
         HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+        // #312 — 靜態卡路里 tile (FinishPage 動/靜 split)。新增型別會在
+        // 下次 ensureAuthorized() 時於 Watch 跳一次增量授權畫面，既有
+        // HR / active 授權不受影響。
+        HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)!,
         HKObjectType.workoutType(),
     ]
 
