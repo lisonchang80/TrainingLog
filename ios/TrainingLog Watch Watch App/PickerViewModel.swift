@@ -120,8 +120,12 @@ final class PickerViewModel: ObservableObject {
     /// `.task` cancels on view disappear, so the in-flight handshake
     /// will be cancelled if the user dismisses the picker mid-trip.
     /// The coordinator's `withCheckedContinuation` doesn't observe
-    /// cancellation by itself; we rely on the 5s framework timeout
-    /// to resume + the deinit guard on coordinator weak ref.
+    /// cancellation by itself; the never-hang guarantee is the
+    /// coordinator's explicit 6s watchdog + `WCReplyOnce` resume-once
+    /// box (NOT a WC framework timeout — device-falsified 2026-06-11:
+    /// `errorHandler` only covers delivery failure, so against a
+    /// killed-but-still-"reachable" iPhone app NEITHER closure fires;
+    /// see `requestHandshake` and skill `wc-add-envelope-kind`).
     func bootstrap() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
