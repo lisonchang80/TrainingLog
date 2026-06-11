@@ -436,10 +436,21 @@ export default function TodayScreen() {
   const finalizeEndAndRouteRef = useRef<
     | ((
         sessionId: string,
-        opts?: { endedAt?: number; snapshot?: unknown },
+        opts?: {
+          endedAt?: number;
+          snapshot?: unknown;
+          fromWatchInbound?: boolean;
+        },
       ) => Promise<void>)
     | null
   >(null);
+
+  // 2026-06-11 — dual-fire 同時到的 TOCTOU 擋板：sendMessage 與 TUI 兩發
+  // 幾乎同時抵達時，第二發會在第一發的 await 空檔讀到 ended_at=null →
+  // 雙跑 finalize（雙 HK sync / 雙成就 eval / 雙 router.push）。in-flight
+  // set 讓重疊的第二發直接 return（ended_at 閘門只擋「先後」、擋不了
+  // 「同時」）。
+  const endInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     // Slice 13d WC ship-blocker E1/E2 (grill 2026-05-30, Q1/Q2/Q4) —
@@ -453,6 +464,9 @@ export default function TodayScreen() {
     // Both route to the same finalize; the ended_at idempotent gate inside
     // finalizeEndAndRoute makes the second (dual-fire) delivery a no-op, so
     // the two channels can't diverge (end is terminal — unlike start, E4).
+    // `fromWatchInbound: true` tells the gate a duplicate delivery must
+    // NOT router.push（2026-06-11 fix — 雙發都到時完成頁跳兩次）；只有
+    // iPhone-led（按鈕）在 already-ended 時才需要補跳頁。
     // The envelope now carries `endedAt` (Q4 — real finish time) + the
     // final `snapshot` (Q1/Q2 — reconcile-by-membership purge); both are
     // forwarded to finalize.
@@ -464,7 +478,7 @@ export default function TodayScreen() {
       const fn = finalizeEndAndRouteRef.current;
       if (!fn) return;
       try {
-        await fn(sessionId, { endedAt, snapshot });
+        await fn(sessionId, { endedAt, snapshot, fromWatchInbound: true });
       } catch (e) {
         console.warn('[watch] end-session handler failed:', e);
       }
@@ -2153,7 +2167,33 @@ export default function TodayScreen() {
    */
   const finalizeEndAndRoute = async (
     session_id: string,
-    opts?: { endedAt?: number; snapshot?: unknown },
+    opts?: {
+      endedAt?: number;
+      snapshot?: unknown;
+      /** Watch-led inbound (end-session listener)。duplicate delivery
+       *  （dual-fire 第二發 / TUI 晚到）在 already-ended 閘門不准再
+       *  router.push（2026-06-11 fix — 完成頁跳兩次）。 */
+      fromWatchInbound?: boolean;
+    },
+  ) => {
+    // 2026-06-11 — dual-fire 同時抵達擋板（見 endInFlightRef 宣告處）。
+    // 重疊的第二發直接 return：第一發會完成 finalize + 路由。
+    if (endInFlightRef.current.has(session_id)) return;
+    endInFlightRef.current.add(session_id);
+    try {
+      await finalizeEndAndRouteInner(session_id, opts);
+    } finally {
+      endInFlightRef.current.delete(session_id);
+    }
+  };
+
+  const finalizeEndAndRouteInner = async (
+    session_id: string,
+    opts?: {
+      endedAt?: number;
+      snapshot?: unknown;
+      fromWatchInbound?: boolean;
+    },
   ) => {
     // Slice 13d D7 — idempotent gate (ADR-0019 § Q23 + NEW-Q45).
     //
@@ -2181,8 +2221,13 @@ export default function TodayScreen() {
     }
     if (existing.ended_at != null) {
       // Already finalized (iPhone-led path beat us, or duplicate
-      // Watch msg). Just route — skip side effects.
-      router.push(`/session/${session_id}`);
+      // Watch msg). 2026-06-11 fix：Watch-led duplicate（dual-fire
+      // 第二發 / TUI 晚到）絕不再 router.push — E1 雙發後這裡每場
+      // Watch 完成都會疊出第二張完成頁。只有 iPhone-led（user 真的
+      // 按了結束按鈕）才補跳頁、skip side effects。
+      if (!opts?.fromWatchInbound) {
+        router.push(`/session/${session_id}`);
+      }
       return;
     }
 
