@@ -3340,14 +3340,14 @@ Swift（device-gated、停在此邊界等使用者）：
 - `WatchConnectivityCoordinator.requestExerciseHistory(exerciseId:)`（鏡像 `requestHandshake`：`sendMessage`+replyHandler+`withCheckedContinuation`；reply 由 `ExerciseHistoryReply.parse` 解析、requestId echo 檢查擋 stale）。
 - `ExerciseHistoryView` 改四態容器（`HistoryLoadState` loading/loaded/empty/error）；pivot 在 `exerciseId`、`.task(id:)` pull-on-tap；error 態獨立於空態 + 帶「重試」鈕；`ExerciseHistoryReply` + `ExerciseHistoryLoad` typealias；`ExerciseHistoryMock` 移除。
 - pull closure **注入式**（`load:`）由 `SetLoggerView`（持 coordinator）→`SessionCardListPage`→cards 往下傳——因歷史 sub-page 在 ⋯ `.sheet` 內、SwiftUI sheet 不繼承 `@EnvironmentObject`；superset 按側（A/B `exerciseId`）pivot。
-- **timeout 實作備註**：Q2 的「~4s timeout」收斂為 WC framework 原生 reply timeout（~5s，errorHandler→nil→error 態）。未加獨立 watchdog——共享 resume-once flag 跨 WC closure 會踩 `Sendable`-captured-var 雙 resume 風險，且 framework 單 handler 契約已保證 exactly-once 不卡死。功能等價（spinner 自動轉 error、不無限轉）；若實機覺 5s 過長，加顯式 race 為一行 follow-up。
+- **timeout 實作備註**（**2026-06-11 實機翻盤**，見下方 ② 修訂）：~~Q2 的「~4s timeout」收斂為 WC framework 原生 reply timeout（~5s，errorHandler→nil→error 態）、未加獨立 watchdog~~ —— 實機證偽：`errorHandler` **只管投遞失敗**，被殺掉的 iPhone app 仍 `isReachable=true`（iOS 背景喚醒投遞），投遞成功但 JS 層未就緒不回覆 → 兩 closure 都不觸發 → continuation 永不 resume → 無限轉圈。改顯式 **6s watchdog**（`c026107`）：`@MainActor` resume-once box（`HistoryReplyOnce`）+ watchdog Task，三路徑（reply/error/timeout）全跳 `Task { @MainActor }` 序列化——無鎖、無原慮的 `Sendable`-captured-var 雙 resume 風險（該風險僅在裸 var 直接在 WC concurrent closure 內變動時成立）。
 
 **2026-06-10 實機回饋 3 點（①②③；smoke path 1+3 已綠）**：
 - **① 版面對齊手機**（拍板 = 頂組行＋工作組逐行；branch `f44c98e`+`9b3d840`）：`WatchHistoryRecord` 加 `topSetLine`（display-ready `頂組：80kg×8（增肌）`）；`頂組` = 最重 **effectiveLoad** 非熱身組（=`pickTopSet`，但 follower 必 ≤ head 故 MAX 不變、**不需 parent_set_id**）；`（增肌）`=`classifyBucket(reps)`**次數分類**（非計劃強度）；`dateLabel` 改全 `yyyy-MM-dd (週次)`；Swift card = 動作名 header＋bold 日期＋頂組行（'' 隱藏）＋逐組編號 1/2/3。**翻盤**：原渲染 `setLines.joined(' / ')` 單行 → 改逐組。**保留** D15 Q5=A 熱身排除（純徒手 weight 0/null → topSetLine ''、無頂組行，比 iPhone eff=0 任選更乾淨）。
-- **② 關 app 也有資料**（拍板 = **維持線上、只改文案**，option C）：PULL 設計本需 iPhone 可達；關 app → `isReachable=false` → ~5s 內 error 態（非無限轉）。**不**做快取/預推（不翻 grill Q1 pull-on-tap）。error 文案改「請開啟 iPhone 的 TrainingLog App 並確認在附近後重試」講清需線上。
+- **② 關 app 也有資料**（拍板 = **維持線上、只改文案**，option C；**2026-06-11 實機修訂機制與文案**）：PULL 設計本需 iPhone 可達。~~關 app → `isReachable=false` → ~5s 內 error 態~~ —— 實機真相：killed app 仍 `isReachable=true`、首次請求即**背景喚醒** iPhone app（WC sendMessage 對 force-quit 的 relaunch 例外），但 RN JS 冷啟動 >6s → watchdog 轉 error 態（`c026107`）；此時 app 已在背景活著，按「重試」即秒回資料（device-verified，連手動開 app 都不用）。**不**做快取/預推（不翻 grill Q1 pull-on-tap）。error 文案最終版「**iPhone 未回應／請確認 iPhone 在附近後重試**」（原「請開啟 iPhone 的 TrainingLog App…」過度要求，多數情況光重試就會好）。
 - **③ 返回箭頭偶爾不見**（bug，已修）：長動作名的 inline nav title 擠掉左上 back chevron（截圖②短名有、③長名無）。修法 = nav title 縮成「歷史」、動作名移內容首行。
 - **wire-safety 坑**：`topSetLine` 用 `''` sentinel 不可用 `null` —— `toWireRecord` 是 no-op cast、JS `null`→`NSNull`→WCSession reject 整包（純徒手歷史會壞）。`''` plist-safe。
 
-**剩 device-gated（smoke, pending）**：① 頂組行＋逐組編號渲染／長名 back chevron 在／② error 文案；②③ + ① 一次 build 驗。
+**device smoke 全綠（2026-06-11）**：① 頂組行＋逐組編號渲染 ✅／③ 長名 back chevron 在 ✅／② watchdog→error 態→重試秒回 ✅（含背景喚醒行為驗證）。#311-A 收口。
 
 **Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）；`src/domain/pr/topSet.ts` + `buckets.ts`（頂組 + 次數分類來源）。
