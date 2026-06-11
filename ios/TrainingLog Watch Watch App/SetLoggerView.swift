@@ -244,7 +244,10 @@ struct SetLoggerView: View {
                         // coordinator in a closure is the way it reaches the view.
                         historyLoad: { exerciseId in
                             await coordinator.requestExerciseHistory(exerciseId: exerciseId)
-                        }
+                        },
+                        // #312 v2 — HRFrozenPane 接真值（即時 HR + 動態
+                        // kcal）。同 historyLoad 的理由用 closure 下傳。
+                        liveStats: { sessionController.liveWorkoutStats() }
                     )
                     .tag(1)
 
@@ -518,6 +521,11 @@ private struct SessionCardListPage: View {
     /// instantiation in `SetLoggerView`). Cards forward it to `ExerciseHistoryView`.
     let historyLoad: ExerciseHistoryLoad
 
+    /// #312 v2 — live builder stats for the HRFrozenPane top bar
+    /// (即時 HR + 動態 kcal)。Closure-threaded from SetLoggerView where
+    /// the SessionController environment object lives.
+    let liveStats: () -> WorkoutLiveStats
+
     /// 2026-06-01 — the Digital Crown now drives VERTICAL SCROLL of this
     /// ScrollView (its native behaviour) instead of editing numbers: weight/
     /// reps are keypad-only, which frees the crown to scroll the card list —
@@ -584,7 +592,7 @@ private struct SessionCardListPage: View {
         // set. With the pane outside the ScrollView, scrollTo .top aligns the
         // active set to the ScrollView's top = just under the pane.
         VStack(spacing: 0) {
-            HRFrozenPane()
+            HRFrozenPane(stats: liveStats)
             ScrollViewReader { proxy in
             ScrollView {
             VStack(alignment: .leading, spacing: 8) {
@@ -668,38 +676,53 @@ private struct SessionCardListPage: View {
     }
 }
 
-// MARK: - Frozen HR pane (reserved placeholder)
+// MARK: - Frozen HR pane (live since #312 v2)
 
-/// Pinned top strip on the session card page reserving space for the live
-/// heart-rate readout (user 2026-06-01「HR 凍結窗格保留區」). Sits ABOVE the
-/// ScrollView in a VStack so it stays put while the card list scrolls beneath
-/// it, and a freshly-activated set auto-scrolls to just below it (build7 moved
-/// it off `.safeAreaInset`, which had broken `proxy.scrollTo`).
+/// Pinned top strip on the session card page showing the live heart-rate
+/// readout + 動態 kcal 累計 (user 2026-06-11 拍板：❤️ 最近一筆 HR 樣本 +
+/// 🔥 active kcal，動/靜明細看完成頁). Sits ABOVE the ScrollView in a
+/// VStack so it stays put while the card list scrolls beneath it, and a
+/// freshly-activated set auto-scrolls to just below it (build7 moved it
+/// off `.safeAreaInset`, which had broken `proxy.scrollTo`).
 ///
-/// Placeholder for now — HealthKitController doesn't publish a live HR value
-/// yet (only auth status); the real value wires in with the D10 in-session
-/// top bar (NEW-Q32 ♥/🔥 Row 2). Kept deliberately compact (~one row).
+/// Refresh: TimelineView 5s 輪詢 `stats()`（builder.statistics 是本地
+/// 便宜同步讀取）。無樣本顯 "--"（Simulator / 未授權 / 剛開始）。
 private struct HRFrozenPane: View {
+    let stats: () -> WorkoutLiveStats
+
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "heart.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
-            Text("--")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-            Text("bpm")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Divider()
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
+            let s = stats()
+            HStack(spacing: 4) {
+                Image(systemName: "heart.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Text(s.hrLatest.map { "\(Int($0.rounded()))" } ?? "--")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                Text("bpm")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Image(systemName: "flame.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text(s.activeKcal.map { "\(Int($0.rounded()))" } ?? "--")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                Text("kcal")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
         }
     }
 }
