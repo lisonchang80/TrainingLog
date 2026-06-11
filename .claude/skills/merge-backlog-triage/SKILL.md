@@ -97,6 +97,18 @@ non-`.ts`), push (pre-authorized).
 
 Batch the verify: ff-merge all locally, ONE tsc+jest gate, ONE push.
 
+**A "device-gated" branch that turns out to be JS/TS-only is drainable TODAY**
+(validated 2026-06-11, `slice/template-overwrite` 17 commits): check
+`git diff --name-only main...<b> | grep -c "^ios/"` — if 0, no Xcode rebuild is
+needed; merge into LOCAL main (don't push), have the user **Reload JS** to smoke
+the merged working tree against the original拍板 checklist, push only after
+green. Honors a smoke-before-merge gate without a device build slot. Two
+gotchas: (1) if the branch adds `patches/*.patch`, run **`npx patch-package`**
+right after the merge or Metro serves the unpatched lib; (2) `git branch -d`
+refuses post-merge-commit deletion ("not fully merged" vs the remote ref) even
+though content IS in main — verify with the merge commit then `-D` + delete
+remote.
+
 ```bash
 git checkout -B <b> origin/<b>     # reset local to remote canonical
 git rebase main                     # resolve per below

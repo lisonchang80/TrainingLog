@@ -193,6 +193,33 @@ Validated 2026-05-29 ~14:00 during D29+D30 NEW-Q50 ship. The `.debug.dylib` is a
 
 This is a Release-vs-Debug build difference; Release builds may still produce a single combined binary.
 
+### Trap 5 — DDI not mounted → xcodebuild exit 70 before compiling anything (validated 2× 2026-06-11)
+
+`xcodebuild ... install` dies in seconds with exit **70** and:
+
+```
+xcodebuild: error: Timed out waiting for all destinations matching the provided destination specifier to become available
+  { platform:iOS, ..., error:The developer disk image could not be mounted on this device. }
+```
+
+(or the device vanishes from the destination list entirely, only Simulators shown). Nothing compiled — this is a CONNECTION failure, not a build failure. Diagnose with:
+
+```bash
+xcrun devicectl device info details --device <iphone-udid> 2>/dev/null | grep -iE "ddiServicesAvailable|transportType|tunnelState|developerModeStatus"
+```
+
+- `ddiServicesAvailable: false` + `transportType: localNetwork` → **iPhone on Wi-Fi; DDI mount over wireless is flaky. Fix = plug in the USB cable + unlock the phone.** Validated: DDI flipped `true` on the FIRST poll after cabling.
+- `tunnelState: unavailable` → device fully disconnected (cable pulled / out of range).
+- `developerModeStatus: enabled` rules out the Developer-Mode-off cause; locked screen is the other usual suspect.
+
+**Don't sit and retry manually** — hand the user the physical action (插線+解鎖) and park a poll loop that auto-builds the moment DDI recovers:
+
+```bash
+for i in $(seq 1 60); do STATE=$(xcrun devicectl device info details --device <iphone-udid> 2>/dev/null | grep -i "ddiServicesAvailable" | grep -o "true\|false"); echo "[$i] ddi=$STATE $(date +%H:%M:%S)"; if [ "$STATE" = "true" ]; then cd <repo>/ios && xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog -configuration Debug -destination 'id=<iphone-udid>' -destination-timeout 120 -allowProvisioningUpdates install > /tmp/watch-build.log 2>&1; echo "BUILD_EXIT=$?"; exit 0; fi; sleep 10; done; echo TIMEOUT
+```
+
+Run it `run_in_background`; also add `-destination-timeout 120` to every device build so a freshly-cabled phone has time to mount. Note exit 70 here ≠ the Trap-in-`3373fca` stale-UDID exit 70 — that one runs silent with 0 SwiftCompile; this one names the destination error explicitly.
+
 ## End-to-end recipe
 
 ```bash
