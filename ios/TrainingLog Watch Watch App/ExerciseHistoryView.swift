@@ -316,9 +316,11 @@ struct ExerciseHistoryView: View {
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
             // #2 (2026-06-09, option C「維持線上才有、只改文案」): history is
-            // pulled live from iPhone, so spell out the requirement — the most
-            // common cause is the iPhone app not being open / in range.
-            Text("請開啟 iPhone 的 TrainingLog App\n並確認在附近後重試")
+            // pulled live from iPhone. Neutral wording — the first request
+            // itself background-wakes a killed iPhone app (WC sendMessage
+            // relaunch), so a plain retry usually succeeds without the user
+            // opening anything (device-verified 2026-06-11).
+            Text("iPhone 未回應\n請確認 iPhone 在附近後重試")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
