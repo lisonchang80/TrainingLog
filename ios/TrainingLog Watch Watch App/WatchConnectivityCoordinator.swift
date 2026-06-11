@@ -742,6 +742,11 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
+                // Guard on isResolved: after a SUCCESSFUL reply this task
+                // still wakes 6s later — resume() is a no-op then, but the
+                // diagnostic write must not overwrite lastOutbound with a
+                // fake timeout (F2, 2026-06-12 audit).
+                guard !once.isResolved else { return }
                 self?.lastOutbound = "handshake timeout: no reply in 6s"
                 once.resume(nil)
             }
@@ -842,6 +847,11 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             // forever (device-verified 2026-06-11).
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
+                // Guard on isResolved: after a SUCCESSFUL reply this task
+                // still wakes 6s later — resume() is a no-op then, but the
+                // diagnostic write must not overwrite lastOutbound with a
+                // fake timeout (F2, 2026-06-12 audit).
+                guard !once.isResolved else { return }
                 self?.lastOutbound = "history timeout: no reply in 6s"
                 once.resume(nil)
             }
@@ -883,6 +893,15 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 @MainActor
 private final class WCReplyOnce<Reply> {
     private var cont: CheckedContinuation<Reply?, Never>?
+
+    /// `true` once any path (reply / error / watchdog) has resumed.
+    /// The watchdog branch MUST check this before writing its timeout
+    /// diagnostic string: `resume` itself is a safe no-op after the
+    /// reply landed, but an unconditional `lastOutbound = "… timeout"`
+    /// 6s after a SUCCESSFUL pull would overwrite the truth and leave
+    /// the Settings debug readout lying (audit 2026-06-12 F2 — that
+    /// readout is a primary device-debug tool, e.g. the B1 7010 hunt).
+    var isResolved: Bool { cont == nil }
 
     init(_ cont: CheckedContinuation<Reply?, Never>) {
         self.cont = cont
