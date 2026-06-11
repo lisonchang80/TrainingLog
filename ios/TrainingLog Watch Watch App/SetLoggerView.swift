@@ -159,8 +159,15 @@ struct SetLoggerView: View {
                     //     preserves the row in history, discard-session
                     //     deletes it. User explicit intent: "this session
                     //     never happened".
+                    // 2026-06-11 fix — 完成頁 ✓ 組數/動作數不累計：raw
+                    // snapshot 的 isLogged 永遠是開場值（✓ 活在
+                    // interactionState overlay、要靠 LiveMirror.project
+                    // 蓋入 isLogged）。改吃投影後 snapshot —— 與
+                    // end-session 推給 iPhone 的最終樹同源，tile 數的
+                    // 就是 iPhone 會記錄的內容（含 Watch 端 +1/刪除）。
+                    // liveMirror 尚未 configure（.task 前）fallback raw。
                     FinishPageView(
-                        snapshot: snapshotForRender,
+                        snapshot: liveMirror.currentSnapshot() ?? snapshotForRender,
                         onCommit: {
                             let sid = snapshotForRender.sessionId
                             guard !sid.isEmpty else { return }
