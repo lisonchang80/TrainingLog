@@ -40,7 +40,10 @@
  *   - `addMessageListener(kind, handler)` — inbound delegate via 'message' event
  *   - `updateApplicationContext(env)` — legacy alias (envelope-shaped) for
  *     `updateAppContext` — kept until Wave 2 swap completes
- *   - `seenMsgId(id)` + msgId ring buffer for inbound dedupe
+ *   - `seenMsgId(id)` + msgId ring buffer for inbound dedupe — NOT legacy:
+ *     since 2026-06-12 (audit F4) the ring is SHARED by the v2 'user-info'
+ *     intake too, so a dual-fire envelope (same msgId on both channels)
+ *     dispatches exactly once
  *
  * Q7 channel timeouts (ADR-0019 § Slice 13d Amendment table — legacy v1 only):
  *   - send timeout = 2s (channel #2 start-from-iphone)
@@ -129,8 +132,22 @@ export function toWireRecord(value: object): Record<string, unknown> {
  * use a `Map` for ordered insertion + O(1) `has`; eviction removes the
  * oldest entry once size exceeds the cap.
  *
- * Used by `addMessageListener` (D7) to short-circuit duplicate deliveries
- * from the OS-level WC retry layer.
+ * SHARED across both inbound channels (2026-06-12, audit F4):
+ *   - 'message' intake (`ensureBridgeListenerMounted`, D7) — dedupes
+ *     OS-level WC retry duplicates.
+ *   - 'user-info' / TUI intake (`ensureUserInfoBridgeListenerMounted`)
+ *     — dedupes (a) TUI at-least-once redelivery and, because the ring
+ *     is shared, (b) the SECOND leg of a dual-fire envelope (Swift
+ *     sends the SAME envelope/msgId via sendMessage + transferUserInfo;
+ *     in foreground both arrive → the late channel is dropped at
+ *     intake). This was the systemic root of the 2026-06-11 "Watch 完成
+ *     → iPhone 雙跳完成頁" class of bugs (fixed downstream in 1bb4d96).
+ *
+ * ⚠️ In-memory only — does NOT survive an app restart, and TUI is an
+ * OS-durable queue that CAN redeliver after relaunch. The downstream
+ * durable gates (ended_at gate / INSERT OR IGNORE / idempotent
+ * DELETE-WHERE / in-flight set / fromWatchInbound origin mark) remain
+ * REQUIRED. This ring is the first line, never the only line.
  */
 const MSG_ID_RING_CAP = 256;
 const msgIdRing = new Map<string, true>();
@@ -636,6 +653,22 @@ function ensureUserInfoBridgeListenerMounted(): void {
         const msg = raw as Record<string, unknown>;
         const kind = msg.kind as WCMessageKind | undefined;
         if (!kind) continue;
+        // Intake-level msgId dedupe, SHARED ring with the 'message'
+        // channel (2026-06-12, audit F4). A dual-fire envelope (same
+        // msgId via sendMessage + TUI) used to double-dispatch when
+        // both legs arrived in foreground — the systemic root of the
+        // duplicate-delivery bug class (e.g. 雙跳完成頁, fixed downstream
+        // in 1bb4d96). Whichever channel arrives first wins; the
+        // duplicate is dropped HERE, before buffering, so it can't be
+        // parked + replayed either. Envelopes without a msgId (legacy /
+        // defensive) pass through un-deduped rather than crash or drop.
+        // NOTE: ring is in-memory — post-restart TUI redelivery passes
+        // (ring empty) by design; durable DB gates downstream still own
+        // that case and MUST stay.
+        const msgId = msg.msgId;
+        if (typeof msgId === 'string' && msgId && seenMsgId(msgId)) {
+          continue;
+        }
         const set = userInfoListeners.get(kind);
         if (!set || set.size === 0) {
           // No handler yet (cold-boot race) — park + replay on register.

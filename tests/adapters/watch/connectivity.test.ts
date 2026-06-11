@@ -394,7 +394,14 @@ describe('Slice 13d D6 — connectivity.ts', () => {
     expect(handler).toHaveBeenCalledTimes(1);
 
     unsubscribe();
-    capturedCallback!([env]);
+    // Fresh envelope (new msgId) — re-firing `env` would be dropped by the
+    // intake dedupe ring (F4) and pass for the wrong reason. A NEW msgId
+    // reaches dispatch and proves the handler set no longer contains us.
+    const envAfterUnsub = makeEnvelope('start-from-iphone', {
+      sessionId: 'sess-r3b',
+      snapshot: {},
+    });
+    capturedCallback!([envAfterUnsub]);
     expect(handler).toHaveBeenCalledTimes(1); // still 1 — no new fire after unsub
   });
 
@@ -750,5 +757,212 @@ describe('Slice 13d D6 — connectivity.ts', () => {
     capturedCallback!('string-not-object');
 
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// F4 (2026-06-12 audit) — TUI ('user-info') intake msgId dedupe,
+// SHARED ring with the 'message' channel.
+//
+// A dual-fire kind (end-session / discard-session / start-* …) sends the
+// SAME envelope (same msgId) via sendMessage + transferUserInfo. In
+// foreground BOTH legs arrive; pre-F4 the TUI intake had no dedupe so
+// every dual-fire envelope double-dispatched — the systemic root of the
+// 2026-06-11 雙跳完成頁 class (fixed downstream in 1bb4d96; the durable
+// DB gates there remain REQUIRED — this ring is in-memory only and does
+// not survive relaunch, see the restart-replay case below).
+// ─────────────────────────────────────────────────────────────────────
+describe('connectivity.ts — F4 TUI intake msgId dedupe (shared ring)', () => {
+  afterEach(() => {
+    jest.dontMock('react-native-watch-connectivity');
+  });
+
+  /** Bridge mock capturing BOTH 'message' and 'user-info' callbacks so a
+   *  test can drive the two inbound channels independently. */
+  function makeDualChannelBridge() {
+    const captured: Record<string, (...args: unknown[]) => void> = {};
+    const bridge = makeBridge({
+      watchEvents: {
+        addListener: jest.fn(
+          (event: string, cb: (...args: unknown[]) => void) => {
+            captured[event] = cb;
+            return () => {};
+          },
+        ),
+      },
+    });
+    return {
+      bridge,
+      fireMessage: (env: unknown, reply?: unknown) => {
+        const cb = captured['message'];
+        if (!cb) throw new Error('message listener not mounted');
+        cb(env, reply);
+      },
+      fireUserInfo: (batch: unknown) => {
+        const cb = captured['user-info'];
+        if (!cb) throw new Error('user-info listener not mounted');
+        cb(batch);
+      },
+    };
+  }
+
+  function endEnv() {
+    return makeEnvelope('end-session', {
+      sessionId: 'sess-f4',
+      side: 'watch',
+    });
+  }
+
+  it('dual-fire foreground: sendMessage leg arrives first → the TUI duplicate (same msgId) is dropped', () => {
+    const { bridge, fireMessage, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const msgHandler = jest.fn();
+    const tuiHandler = jest.fn();
+    mod.addMessageListener('end-session', msgHandler);
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const env = endEnv();
+    fireMessage(env, undefined); // instant foreground leg wins
+    fireUserInfo([env]); // durable backstop leg → dedupe drop
+
+    expect(msgHandler).toHaveBeenCalledTimes(1);
+    expect(tuiHandler).not.toHaveBeenCalled();
+  });
+
+  it('dual-fire reversed: TUI leg arrives first → the sendMessage duplicate is dropped (ring is shared, symmetric)', () => {
+    const { bridge, fireMessage, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const msgHandler = jest.fn();
+    const tuiHandler = jest.fn();
+    mod.addMessageListener('end-session', msgHandler);
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const env = endEnv();
+    fireUserInfo([env]);
+    fireMessage(env, undefined);
+
+    expect(tuiHandler).toHaveBeenCalledTimes(1);
+    expect(msgHandler).not.toHaveBeenCalled();
+  });
+
+  it('TUI-only delivery (background — sendMessage leg never fired) passes through', () => {
+    const { bridge, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const env = endEnv();
+    fireUserInfo([env]);
+
+    expect(tuiHandler).toHaveBeenCalledTimes(1);
+    expect(tuiHandler).toHaveBeenCalledWith(env);
+  });
+
+  it('TUI at-least-once redelivery within one app run (same msgId twice on the SAME channel) is dropped', () => {
+    const { bridge, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const env = endEnv();
+    fireUserInfo([env]);
+    fireUserInfo([env]); // OS redelivery
+
+    expect(tuiHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('post-restart TUI replay passes through (ring is in-memory) — downstream durable gates own that case', () => {
+    const { bridge, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const env = endEnv();
+    fireUserInfo([env]);
+    expect(tuiHandler).toHaveBeenCalledTimes(1);
+
+    // Simulate app relaunch: registries + msgId ring wiped (in-memory),
+    // but TUI is an OS-durable queue that CAN redeliver the same envelope.
+    mod.__resetBridgeForTests();
+    const tuiHandler2 = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler2);
+    fireUserInfo([env]);
+
+    // The intake MUST let it through — dedupe here would be a lie (the
+    // first dispatch's effects may not have committed pre-crash). The
+    // durable DB gates (ended_at / INSERT OR IGNORE / idempotent DELETE)
+    // are the post-restart idempotency layer.
+    expect(tuiHandler2).toHaveBeenCalledTimes(1);
+  });
+
+  it('an envelope without msgId (legacy/defensive) passes through un-deduped, no crash', () => {
+    const { bridge, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    const bare = {
+      kind: 'end-session',
+      payload: { sessionId: 'sess-legacy', side: 'watch' },
+    };
+    expect(() => fireUserInfo([bare, bare])).not.toThrow();
+
+    // No msgId → nothing to dedupe on → both deliveries dispatch.
+    expect(tuiHandler).toHaveBeenCalledTimes(2);
+  });
+
+  it('dedupe runs BEFORE the pre-handler buffer: a TUI duplicate is not parked + replayed on later register', () => {
+    const { bridge, fireMessage, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    // Production cold-boot shape (#287 Fix C): the bridge channels mount
+    // eagerly at app entry; per-kind handlers register later from the
+    // home screen. Mount all channels first, then register ONLY the
+    // 'message' handler.
+    mod.initWatchBridge();
+    const msgHandler = jest.fn();
+    mod.addMessageListener('end-session', msgHandler);
+
+    const env = endEnv();
+    fireMessage(env, undefined); // processed by the message handler
+    fireUserInfo([env]); // duplicate, NO user-info handler yet
+
+    // Register the user-info handler AFTER the duplicate landed — the
+    // Fix C replay buffer must NOT hand it the deduped envelope.
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    expect(msgHandler).toHaveBeenCalledTimes(1);
+    expect(tuiHandler).not.toHaveBeenCalled();
+  });
+
+  it('distinct msgIds on the TUI channel are NOT deduped (resend mints a new msgId by design)', () => {
+    const { bridge, fireUserInfo } = makeDualChannelBridge();
+    installBridge(bridge);
+    const mod = loadModule();
+
+    const tuiHandler = jest.fn();
+    mod.addUserInfoListener('end-session', tuiHandler);
+
+    // Two semantically-identical payloads but separate envelopes — e.g.
+    // resendStartFromWatch re-keys msgId+ts precisely so the dedupe ring
+    // treats it as new. Both must dispatch.
+    fireUserInfo([endEnv()]);
+    fireUserInfo([endEnv()]);
+
+    expect(tuiHandler).toHaveBeenCalledTimes(2);
   });
 });
