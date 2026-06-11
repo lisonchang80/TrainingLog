@@ -622,6 +622,7 @@ function CycleConfigPanel({
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
+        selectTextOnFocus
         value={String(state.draft.cycle_length)}
         onChangeText={(v) => update({ cycle_length: Number(v) || 0 })}
       />
@@ -629,6 +630,7 @@ function CycleConfigPanel({
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
+        selectTextOnFocus
         value={String(state.draft.cycle_count)}
         onChangeText={(v) => update({ cycle_count: Number(v) || 0 })}
       />

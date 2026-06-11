@@ -296,6 +296,7 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor={tokens.text.tertiary}
         keyboardType="decimal-pad"
+        selectTextOnFocus
         style={styles.input}
       />
     </View>

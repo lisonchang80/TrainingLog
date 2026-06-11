@@ -201,6 +201,7 @@ export function SetRowContent<S extends SetRowItem>({
           value={weightText}
           onChangeText={handleWeightChange}
           keyboardType="decimal-pad"
+          selectTextOnFocus
         />
       )}
       <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>{unit}</Text>
@@ -219,6 +220,7 @@ export function SetRowContent<S extends SetRowItem>({
           value={repsText}
           onChangeText={handleRepsChange}
           keyboardType="number-pad"
+          selectTextOnFocus
         />
       )}
       {/* Dropset follower −/+ — directly after reps, before note slot

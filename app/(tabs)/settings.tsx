@@ -387,6 +387,7 @@ export default function SettingsScreen() {
             <TextInput
               style={styles.modalInput}
               keyboardType="decimal-pad"
+              selectTextOnFocus
               value={bwInput}
               onChangeText={setBwInput}
               placeholder={unit === 'kg' ? '70.0' : '154.0'}

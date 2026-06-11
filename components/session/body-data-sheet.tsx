@@ -176,6 +176,7 @@ function Field({
       <TextInput
         style={styles.input}
         keyboardType="decimal-pad"
+        selectTextOnFocus
         value={value}
         onChangeText={onChange}
         placeholder="—"
