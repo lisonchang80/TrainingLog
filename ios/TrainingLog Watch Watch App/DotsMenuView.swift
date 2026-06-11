@@ -25,12 +25,17 @@
 
 import SwiftUI
 
-/// Destination push values for the menu's NavigationLink chain.
-/// Solo card has 1 history sub-page; superset has 2 (one per side).
-enum DotsMenuDestination: Hashable {
-    /// Show history for an exercise. `sideLabel` is the locale name
-    /// shown in the back chevron / title (e.g. "深蹲" or "臥推").
-    case history(exerciseName: String)
+/// Value pushed by the menu's 📊 NavigationLink; the card registers a
+/// matching `.navigationDestination(for:)` on the stack root. Value-based
+/// navigation keeps push state INSIDE the NavigationStack — the previous
+/// `navigationDestination(isPresented:)` bridged card-level @State through
+/// a computed Binding, and a card re-render (live-mirror tick / set log)
+/// racing the push made watchOS occasionally mount the history page as
+/// stack ROOT (centered title, no back chevron; bug ③ 2026-06-11).
+/// Solo card has 1 history target; superset has 2 (one per side).
+struct DotsMenuHistoryTarget: Hashable {
+    let exerciseId: String
+    let exerciseName: String
 }
 
 struct DotsMenuView: View {
@@ -47,10 +52,10 @@ struct DotsMenuView: View {
     /// menu item 2 label: false → ⏭ 跳過、true → ↩ 取消跳過.
     let isSkipped: Bool
 
-    /// Superset only: the two child exercise names for split A/B
-    /// history. Ignored when `isCluster == false`. Expected order:
-    /// `[A, B]`.
-    let clusterChildren: [String]?
+    /// History push targets — solo: `[self]`, superset: `[A, B]`. The
+    /// 📊 rows render as `NavigationLink(value:)`; the card's stack root
+    /// resolves them via `.navigationDestination(for:)`.
+    let historyTargets: [DotsMenuHistoryTarget]
 
     // MARK: - Callbacks
     //
@@ -69,10 +74,6 @@ struct DotsMenuView: View {
     /// before calling this. See `DotsMenuConfirmView`.
     let onDelete: () -> Void
 
-    /// 📊 查看歷史 — `side` is 0 for solo / A, 1 for B. Caller usually
-    /// pushes `ExerciseHistoryView`.
-    let onShowHistory: (_ side: Int) -> Void
-
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -90,11 +91,11 @@ struct DotsMenuView: View {
                 resetButton
                 skipButton
 
-                if isCluster, let kids = clusterChildren, kids.count >= 2 {
-                    historyButton(label: "查看\(kids[0])歷史", side: 0)
-                    historyButton(label: "查看\(kids[1])歷史", side: 1)
-                } else {
-                    historyButton(label: "查看歷史", side: 0)
+                if isCluster && historyTargets.count >= 2 {
+                    historyLink(label: "查看\(historyTargets[0].exerciseName)歷史", value: historyTargets[0])
+                    historyLink(label: "查看\(historyTargets[1].exerciseName)歷史", value: historyTargets[1])
+                } else if let target = historyTargets.first {
+                    historyLink(label: "查看歷史", value: target)
                 }
 
                 // Destructive last (per spec Q6=A).
@@ -136,13 +137,14 @@ struct DotsMenuView: View {
         }
     }
 
-    private func historyButton(label: String, side: Int) -> some View {
-        menuButton(systemImage: "chart.bar.doc.horizontal", label: label) {
-            onShowHistory(side)
-            // Do NOT dismiss — caller pushes a NavigationLink and we
-            // want the menu underneath so back-chevron returns here
-            // per spec line 2148 「‹ 退出回 D15 menu」.
+    /// 📊 row as a declarative NavigationLink — the push is owned by the
+    /// NavigationStack (back-chevron guaranteed), menu stays underneath so
+    /// `‹` returns here per spec line 2148 「‹ 退出回 D15 menu」.
+    private func historyLink(label: String, value: DotsMenuHistoryTarget) -> some View {
+        NavigationLink(value: value) {
+            menuRowLabel(systemImage: "chart.bar.doc.horizontal", label: label)
         }
+        .buttonStyle(.plain)
     }
 
     private var deleteButton: some View {
@@ -179,64 +181,79 @@ struct DotsMenuView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.primary)
-                Text(label)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-            )
+            menuRowLabel(systemImage: systemImage, label: label)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Shared row chrome for Button + NavigationLink variants.
+    private func menuRowLabel(systemImage: String, label: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.primary)
+            Text(label)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+        )
     }
 }
 
 // MARK: - Previews
 
 #Preview("Solo — normal") {
-    DotsMenuView(
-        exerciseName: "深蹲",
-        isCluster: false,
-        isSkipped: false,
-        clusterChildren: nil,
-        onReset: {},
-        onSkip: {},
-        onDelete: {},
-        onShowHistory: { _ in }
-    )
+    NavigationStack {
+        DotsMenuView(
+            exerciseName: "深蹲",
+            isCluster: false,
+            isSkipped: false,
+            historyTargets: [
+                DotsMenuHistoryTarget(exerciseId: "ex-1", exerciseName: "深蹲")
+            ],
+            onReset: {},
+            onSkip: {},
+            onDelete: {}
+        )
+    }
 }
 
 #Preview("Solo — skipped") {
-    DotsMenuView(
-        exerciseName: "深蹲",
-        isCluster: false,
-        isSkipped: true,
-        clusterChildren: nil,
-        onReset: {},
-        onSkip: {},
-        onDelete: {},
-        onShowHistory: { _ in }
-    )
+    NavigationStack {
+        DotsMenuView(
+            exerciseName: "深蹲",
+            isCluster: false,
+            isSkipped: true,
+            historyTargets: [
+                DotsMenuHistoryTarget(exerciseId: "ex-1", exerciseName: "深蹲")
+            ],
+            onReset: {},
+            onSkip: {},
+            onDelete: {}
+        )
+    }
 }
 
 #Preview("Superset") {
-    DotsMenuView(
-        exerciseName: "臥推 ＋ 划船",
-        isCluster: true,
-        isSkipped: false,
-        clusterChildren: ["臥推", "划船"],
-        onReset: {},
-        onSkip: {},
-        onDelete: {},
-        onShowHistory: { _ in }
-    )
+    NavigationStack {
+        DotsMenuView(
+            exerciseName: "臥推 ＋ 划船",
+            isCluster: true,
+            isSkipped: false,
+            historyTargets: [
+                DotsMenuHistoryTarget(exerciseId: "ex-a", exerciseName: "臥推"),
+                DotsMenuHistoryTarget(exerciseId: "ex-b", exerciseName: "划船"),
+            ],
+            onReset: {},
+            onSkip: {},
+            onDelete: {}
+        )
+    }
 }

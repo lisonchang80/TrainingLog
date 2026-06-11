@@ -81,8 +81,6 @@ struct SupersetCard: View {
     @State private var dotsMenuOpen: Bool = false
     @State private var isSkipped: Bool = false
     @State private var pendingConfirm: Bool = false
-    /// 0 = A side history, 1 = B side history, nil = no sub-page.
-    @State private var pendingHistorySide: Int? = nil
 
     /// Cached per-pair midY (in the "supersetReorder" space) for the long-press
     /// reorder drop-target math — same plumbing as ExerciseCard.
@@ -313,19 +311,25 @@ struct SupersetCard: View {
                 exerciseName: clusterName,
                 isCluster: true,
                 isSkipped: isSkipped,
-                clusterChildren: [exerciseA.exerciseName, exerciseB.exerciseName],
+                historyTargets: [
+                    DotsMenuHistoryTarget(
+                        exerciseId: exerciseA.exerciseId,
+                        exerciseName: exerciseA.exerciseName
+                    ),
+                    DotsMenuHistoryTarget(
+                        exerciseId: exerciseB.exerciseId,
+                        exerciseName: exerciseB.exerciseName
+                    ),
+                ],
                 onReset: { resetSupersetInMemory() },
                 onSkip: { isSkipped.toggle() },
-                onDelete: { pendingConfirm = true },
-                onShowHistory: { side in pendingHistorySide = side }
+                onDelete: { pendingConfirm = true }
             )
-            .navigationDestination(isPresented: Binding(
-                get: { pendingHistorySide != nil },
-                set: { if !$0 { pendingHistorySide = nil } }
-            )) {
+            // 📊 history push — value-based (see DotsMenuHistoryTarget).
+            .navigationDestination(for: DotsMenuHistoryTarget.self) { target in
                 ExerciseHistoryView(
-                    exerciseName: historyName,
-                    exerciseId: historySideId,
+                    exerciseName: target.exerciseName,
+                    exerciseId: target.exerciseId,
                     load: historyLoad
                 )
             }
@@ -349,16 +353,6 @@ struct SupersetCard: View {
                 )
             }
         }
-    }
-
-    private var historyName: String {
-        (pendingHistorySide == 1) ? exerciseB.exerciseName : exerciseA.exerciseName
-    }
-
-    /// The FK the per-side history query pivots on — B's exerciseId when the
-    /// user tapped 📊 on the B side (`pendingHistorySide == 1`), else A's.
-    private var historySideId: String {
-        (pendingHistorySide == 1) ? exerciseB.exerciseId : exerciseA.exerciseId
     }
 
     // MARK: - In-memory side effects (mirror ExerciseCard; D9 wires to repo)

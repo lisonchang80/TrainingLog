@@ -47,8 +47,12 @@ struct ExerciseCard: View {
     // sheets rather than nesting so swiping the inner one returns
     // to the menu (per spec line 2176 框外 tap / 左滑 = [取消]).
     //
-    // `pendingHistorySide` is non-nil when the user picked 📊;
-    // drives the history sub-page push.
+    // 📊 history pushes via NavigationLink(value:) declared inside
+    // DotsMenuView + `.navigationDestination(for:)` on the stack root —
+    // value-based so the push state lives inside the NavigationStack
+    // (bug ③ 2026-06-11: the old isPresented Binding bridged card-level
+    // @State; a card re-render racing the push occasionally mounted the
+    // history page as stack ROOT → centered title, no back chevron).
     //
     // TODO: D9 wire `skipped` flag to repo (currently in-memory only).
     // Phase F (2026-05-31): delete-confirm now removes the exercise from
@@ -64,7 +68,6 @@ struct ExerciseCard: View {
     @State private var dotsMenuOpen: Bool = false
     @State private var isSkipped: Bool = false
     @State private var pendingConfirm: Bool = false
-    @State private var pendingHistorySide: Int? = nil
 
     // MARK: - Reorder (Phase F long-press drag) state
     //
@@ -169,7 +172,12 @@ struct ExerciseCard: View {
                     exerciseName: exercise.exerciseName,
                     isCluster: false,
                     isSkipped: isSkipped,
-                    clusterChildren: nil,
+                    historyTargets: [
+                        DotsMenuHistoryTarget(
+                            exerciseId: exercise.exerciseId,
+                            exerciseName: exercise.exerciseName
+                        )
+                    ],
                     onReset: {
                         resetExerciseInMemory()
                     },
@@ -181,19 +189,13 @@ struct ExerciseCard: View {
                         // Show confirm dialog — gate the destructive
                         // action behind View 4 per spec line 2166.
                         pendingConfirm = true
-                    },
-                    onShowHistory: { side in
-                        pendingHistorySide = side
                     }
                 )
-                // Push history sub-page when user taps 📊.
-                .navigationDestination(isPresented: Binding(
-                    get: { pendingHistorySide != nil },
-                    set: { if !$0 { pendingHistorySide = nil } }
-                )) {
+                // 📊 history push — value-based (see DotsMenuHistoryTarget).
+                .navigationDestination(for: DotsMenuHistoryTarget.self) { target in
                     ExerciseHistoryView(
-                        exerciseName: exercise.exerciseName,
-                        exerciseId: exercise.exerciseId,
+                        exerciseName: target.exerciseName,
+                        exerciseId: target.exerciseId,
                         load: historyLoad
                     )
                 }
