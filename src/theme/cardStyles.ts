@@ -71,3 +71,50 @@ export function swipeActionColors(tokens: ThemeTokens): {
     note: tokens.action.primary,
   };
 }
+
+/**
+ * J — shared `#` set-kind button on superset/cluster rows (28×22, 3D bevel).
+ * Rendered by BOTH the session cluster card and the template editor's
+ * superset rows; the template copy had drifted to hardcoded light-palette hex
+ * (#fafafa / #e5e7eb …) and showed as a white brick in dark mode
+ * (2026-06-11 device screenshot). Single source here — geometry + colours.
+ */
+export function sharedLabelBtnStyle(tokens: ThemeTokens): ViewStyle {
+  return {
+    width: 28,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: tokens.bg.surface,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: tokens.border.subtle,
+    borderLeftColor: tokens.border.default,
+    borderRightColor: tokens.border.default,
+    borderBottomColor: tokens.text.tertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 1.5,
+    elevation: 2,
+  };
+}
+
+/** J — pressed state of the shared `#` button (bevel inverts, sinks 1px). */
+export function sharedLabelBtnPressedStyle(tokens: ThemeTokens): ViewStyle {
+  return {
+    backgroundColor: tokens.bg.elevated,
+    borderTopWidth: 2,
+    borderBottomWidth: 1,
+    borderTopColor: tokens.text.tertiary,
+    borderLeftColor: tokens.border.default,
+    borderRightColor: tokens.border.default,
+    borderBottomColor: tokens.border.subtle,
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 1 }],
+  };
+}

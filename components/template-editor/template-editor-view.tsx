@@ -123,6 +123,8 @@ import {
   dragActiveRowStyle,
   interactiveCardBg,
   swipeActionColors,
+  sharedLabelBtnStyle,
+  sharedLabelBtnPressedStyle,
 } from '@/src/theme';
 
 /**
@@ -3426,42 +3428,12 @@ function makeStyles(tokens: ThemeTokens) {
     gap: 6,
     alignItems: 'center',
   },
-  // Shared `#` button — mirror session cluster-card.tsx::sharedLabelBtn (28×22 fs:11).
-  // A+B 共用一個 label，tap 觸發 atomic A+B set_kind cycle (cycleSetKindAcrossExercises
-  // 自動 mirror). 視覺對齊 set-row-content.tsx `setLabelBtnCompact`.
-  exClusterSharedLabel: {
-    width: 28,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#f3f4f6',
-    borderLeftColor: '#d1d5db',
-    borderRightColor: '#9ca3af',
-    borderBottomColor: '#6b7280',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  exClusterSharedLabelPressed: {
-    backgroundColor: '#e5e7eb',
-    borderTopWidth: 2,
-    borderBottomWidth: 1,
-    borderTopColor: '#6b7280',
-    borderLeftColor: '#9ca3af',
-    borderRightColor: '#d1d5db',
-    borderBottomColor: '#f3f4f6',
-    shadowOpacity: 0,
-    elevation: 0,
-    transform: [{ translateY: 1 }],
-  },
+  // Shared `#` button — A+B 共用一個 label，tap 觸發 atomic A+B set_kind cycle
+  // (cycleSetKindAcrossExercises 自動 mirror)。樣式單一來源 cardStyles.ts (J)，
+  // 與 session cluster-card.tsx::sharedLabelBtn 同源（先前此處 hardcoded 淺色
+  // hex → dark mode 白磚，2026-06-11 實機截圖）。
+  exClusterSharedLabel: sharedLabelBtnStyle(tokens),
+  exClusterSharedLabelPressed: sharedLabelBtnPressedStyle(tokens),
   exClusterSharedLabelDisabled: {
     backgroundColor: 'transparent',
     borderTopColor: 'transparent',

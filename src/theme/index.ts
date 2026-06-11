@@ -20,4 +20,6 @@ export {
   interactiveCardBg,
   dragActiveRowStyle,
   swipeActionColors,
+  sharedLabelBtnStyle,
+  sharedLabelBtnPressedStyle,
 } from './cardStyles';

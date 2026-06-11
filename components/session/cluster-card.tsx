@@ -70,6 +70,8 @@ import {
   dragActiveRowStyle,
   interactiveCardBg,
   swipeActionColors,
+  sharedLabelBtnStyle,
+  sharedLabelBtnPressedStyle,
   type ThemeTokens,
 } from '@/src/theme';
 
@@ -816,39 +818,8 @@ function makeStyles(tokens: ThemeTokens) {
     // Visual style matches `setLabelBtnCompact` in set-row-content so the
     // affordance reads as "cluster row's set_kind toggle".
     // overnight #52 follow-up — 規格 B: 28×22 fs:11 (cluster row 撐爆 fine-tune)
-    sharedLabelBtn: {
-      width: 28,
-      height: 22,
-      borderRadius: 4,
-      backgroundColor: tokens.bg.surface,
-      borderTopWidth: 1,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderBottomWidth: 2,
-      borderTopColor: tokens.border.subtle,
-      borderLeftColor: tokens.border.default,
-      borderRightColor: tokens.border.default,
-      borderBottomColor: tokens.text.tertiary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.18,
-      shadowRadius: 1.5,
-      elevation: 2,
-    },
-    sharedLabelBtnPressed: {
-      backgroundColor: tokens.bg.elevated,
-      borderTopWidth: 2,
-      borderBottomWidth: 1,
-      borderTopColor: tokens.text.tertiary,
-      borderLeftColor: tokens.border.default,
-      borderRightColor: tokens.border.default,
-      borderBottomColor: tokens.border.subtle,
-      shadowOpacity: 0,
-      elevation: 0,
-      transform: [{ translateY: 1 }],
-    },
+    sharedLabelBtn: sharedLabelBtnStyle(tokens),
+    sharedLabelBtnPressed: sharedLabelBtnPressedStyle(tokens),
     sharedLabelBtnDisabled: {
       opacity: 0.35,
     },
