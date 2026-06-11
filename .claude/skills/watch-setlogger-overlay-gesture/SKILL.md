@@ -171,6 +171,7 @@ Active 列的橫滑 reveal（highPriority）會跟「垂直捲動」+「TabView 
 ## Anti-patterns
 
 - ❌ 只在 render filter、忘了 projection 也要 filter → 手錶看起來刪了、iPhone 沒收到變更。
+- ❌ **新 view 拿 raw snapshot 做顯示/統計（✓ 數、組數、動作數）** → raw 的 `isLogged` 永遠是開場值（✓/編輯/刪除/+1 全活在 `SessionInteractionState` overlay、要 `LiveMirror.project` 才蓋入）。要嘛吃 `liveMirror.currentSnapshot() ?? raw`（與 end-session 推 iPhone 同源、2026-06-11 完成頁修法 `38dbae2`）、要嘛像 ExerciseCard 直接讀 `state` overlay。完成頁組數 tile 從 D14 起壞到被抓＝這坑的代價。
 - ❌ 加了 overlay `@Published` 但沒在 `LiveMirrorProducer.configure()` 訂閱 → 變更永不推出。
 - ❌ `ForEach(..., id: \.offset)` + per-row `@State` → 刪一筆牽連鄰列。
 - ❌ swipe-past-threshold 直接刪/加 → 一滑就動 + 誤觸換頁。

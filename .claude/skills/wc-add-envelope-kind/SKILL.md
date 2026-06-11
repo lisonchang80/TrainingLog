@@ -230,6 +230,26 @@ Task {
 
 **Why not iPhone-side serialization**: would require global lock on handlers, breaks the independence of unrelated kinds (e.g. concurrent `set-completed` + `hr-tick` shouldn't queue behind each other).
 
+## Dual-fire kind 的 handler 必須對「重複投遞」全鏈 dedup — 含 UI 副作用（2026-06-11 learning）
+
+一個 kind 走 dual-fire（`sendMessage` + `transferUserInfo` 後備、如
+`end-session`）時，iPhone 在前景**兩發都會到**。「DB 閘門 idempotent」
+不等於「handler idempotent」：
+
+- **坑 1 — 閘門路徑的 UI 副作用照跑**：`end-session` 的 `ended_at` 閘門
+  擋住了二次 HK sync / 成就 eval，但閘門分支裡的 `router.push`（原為
+  iPhone-led already-ended 補跳頁設計）每發都執行 → **每場 Watch 完成
+  iPhone 疊兩張完成頁**（修在 `1bb4d96`）。修法＝inbound listener 標記
+  來源（`fromWatchInbound: true`），閘門對 Watch-led duplicate **不准
+  導航**、只有 iPhone-led（user 真按了按鈕）才補跳。
+- **坑 2 — 兩發毫秒級同時到的 TOCTOU**：第二發在第一發的 await 空檔讀到
+  閘門欄位還沒寫 → 雙跑全部副作用。JS 單線程擋不住 async 交錯——加
+  **in-flight `Set<sessionId>`（useRef）**：進場已在 set → 直接 return；
+  `try/finally` 清除。
+- **通則**：設計 dual-fire kind 時，把「同一 envelope 到兩次、且可能
+  同時到」當 happy path 寫 handler——DB 閘門（耐久、跨重啟）+ in-flight
+  set（同時抵達）+ 來源標記（UI 副作用只屬於對的 caller）三件套。
+
 ## Validation history
 
 - 2026-05-29 evening — `start-resolve` (D31 wave 1). 6 new files / files touched. Compile + jest + xcodebuild green first try. Shipped @ 4b34bfd.
