@@ -801,12 +801,22 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 
         lastOutbound = "handshake req=\(prefix8(requestId))…"
 
-        // withCheckedContinuation: the WC framework calls EITHER
-        // replyHandler OR errorHandler, never both — Apple's contract.
-        // Resuming twice would crash via the runtime's resumed-once
-        // check; we rely on framework correctness here rather than
-        // adding a redundant guard.
+        // Resume-once box + watchdog: WC's errorHandler only covers
+        // DELIVERY failure. A force-quit iPhone app is still "reachable"
+        // (iOS background-wakes it for sendMessage), but its dead JS layer
+        // never calls the reply — so NEITHER replyHandler nor errorHandler
+        // fires and a bare continuation would await forever (same failure
+        // class as history-request, device-verified 2026-06-11 on #311-A
+        // smoke ②). The 6s watchdog resolves nil → picker error state.
         return await withCheckedContinuation { (cont: CheckedContinuation<Stage1Reply?, Never>) in
+            let once = WCReplyOnce(cont)
+
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                self?.lastOutbound = "handshake timeout: no reply in 6s"
+                once.resume(nil)
+            }
+
             session.sendMessage(
                 envelope,
                 replyHandler: { [weak self] reply in
@@ -817,20 +827,20 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
                         // previous launch's nonce).
                         guard let stage1, stage1.requestId == requestId else {
                             self?.lastInbound = "handshake reply: malformed or stale"
-                            cont.resume(returning: nil)
+                            once.resume(nil)
                             return
                         }
                         self?.lastInbound =
                             "stage1 reply templates=\(stage1.prefetch.templates.count)"
                         + (stage1.hasActiveSession ? " (active)" : "")
-                        cont.resume(returning: stage1)
+                        once.resume(stage1)
                     }
                 },
                 errorHandler: { [weak self] error in
                     Task { @MainActor [weak self] in
                         self?.lastOutbound =
                             "handshake err: \(error.localizedDescription)"
-                        cont.resume(returning: nil)
+                        once.resume(nil)
                     }
                 }
             )
@@ -859,13 +869,12 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     //
     // Returns nil on:
     //   - WC not activated / not reachable / not supported / empty exerciseId
-    //   - framework reply timeout (~5s, errorHandler path). This native
-    //     timeout IS the "spinner auto-resolves to error" backstop the D15
-    //     amendment Q2 calls for — the view never hangs indefinitely. (We do
-    //     NOT add a separate explicit watchdog: a shared resume-once flag
-    //     captured across the WC closures would be a `Sendable`-captured-var
-    //     hazard, and the framework's single-handler contract already
-    //     guarantees exactly-once resolution.)
+    //   - no reply within 6s (explicit watchdog below). WC's errorHandler is
+    //     delivery-only: a force-quit iPhone app stays "reachable" and gets
+    //     background-woken, but its dead JS layer never replies, so NEITHER
+    //     closure fires (device-verified 2026-06-11; falsified the earlier
+    //     "framework ~5s timeout is the backstop" assumption). The watchdog
+    //     + MainActor `WCReplyOnce` box is the real never-hang guarantee.
     //   - Reply shape undecodable / requestId mismatch
     func requestExerciseHistory(exerciseId: String) async -> ExerciseHistoryReply? {
         guard let session, session.activationState == .activated else {
@@ -895,7 +904,7 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         lastOutbound = "history req=\(prefix8(requestId))… ex=\(prefix8(exerciseId))"
 
         return await withCheckedContinuation { (cont: CheckedContinuation<ExerciseHistoryReply?, Never>) in
-            let once = HistoryReplyOnce(cont)
+            let once = WCReplyOnce(cont)
 
             // Watchdog: WC's errorHandler only covers DELIVERY failure. A
             // killed iPhone app is still "reachable" (iOS wakes it in the
@@ -938,16 +947,19 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
 
 /// Resume-once box for a continuation with three competing resume paths
 /// (reply / error / watchdog). MainActor-isolated, so the nil-out
-/// check-and-set is serialized — no lock, no double-resume.
+/// check-and-set is serialized — no lock, no double-resume. Shared by
+/// every request-reply PULL on this coordinator (handshake / history);
+/// any new PULL kind must use this + a watchdog (see skill
+/// `wc-add-envelope-kind` gotcha 2).
 @MainActor
-private final class HistoryReplyOnce {
-    private var cont: CheckedContinuation<ExerciseHistoryReply?, Never>?
+private final class WCReplyOnce<Reply> {
+    private var cont: CheckedContinuation<Reply?, Never>?
 
-    init(_ cont: CheckedContinuation<ExerciseHistoryReply?, Never>) {
+    init(_ cont: CheckedContinuation<Reply?, Never>) {
         self.cont = cont
     }
 
-    func resume(_ value: ExerciseHistoryReply?) {
+    func resume(_ value: Reply?) {
         cont?.resume(returning: value)
         cont = nil
     }
