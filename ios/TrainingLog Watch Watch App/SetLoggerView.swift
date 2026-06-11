@@ -183,6 +183,10 @@ struct SetLoggerView: View {
                                 )
                             }
                         },
+                        // #312 — real HR/kcal tiles: read the live HK
+                        // builder (still collecting while the finish
+                        // page is visible; ends only after [完成]/[放棄]).
+                        liveStats: { sessionController.liveWorkoutStats() },
                         onFinishComplete: {
                             // Issue 1 fix (Watch [完成] success path):
                             // prefer the parent-provided onSessionEnd

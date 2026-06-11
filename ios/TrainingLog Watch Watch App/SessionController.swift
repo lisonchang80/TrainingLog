@@ -59,6 +59,25 @@ final class SessionController: NSObject, ObservableObject {
         super.init()
     }
 
+    // MARK: - Live workout stats (#312 — D14 FinishPage real tiles)
+
+    /// Aggregate stats read straight off the in-flight live builder
+    /// (collecting since `start()`'s beginCollection). Per-field nil when
+    /// no sample has landed yet — Simulator runs, HK auth denied, or a
+    /// session too short for the first HR sample. Synchronous + cheap;
+    /// safe to call on every FinishPage appear. Only meaningful while the
+    /// session is active (builder is discarded by `end()`/`cancel()`).
+    func liveWorkoutStats() -> (avgHR: Double?, kcal: Double?) {
+        guard let builder else { return (nil, nil) }
+        let avgHR = HKObjectType.quantityType(forIdentifier: .heartRate)
+            .flatMap { builder.statistics(for: $0)?.averageQuantity() }?
+            .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+        let kcal = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)
+            .flatMap { builder.statistics(for: $0)?.sumQuantity() }?
+            .doubleValue(for: .kilocalorie())
+        return (avgHR, kcal)
+    }
+
     // MARK: - Lifecycle API
 
     /// Start a Watch-side workout session (HR sampling only, no

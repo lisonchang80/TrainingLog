@@ -20,6 +20,9 @@
 //    - Real abort path (session delete + dismiss back to D8 picker)
 //    - Live HR / kcal from HealthKitController (snapshot schema does
 //      not yet carry HR / kcal; spec values 142 / 285 are placeholders)
+//      → DONE 2026-06-11 (#312): tiles now read the live
+//        HKLiveWorkoutBuilder via the `liveStats` closure (avg HR +
+//        active kcal), with "--" fallback when no sample landed.
 //
 //  State machine (per spec line 1897-1914):
 //
@@ -63,6 +66,14 @@ struct FinishPageView: View {
     /// a TODO inside `handleFinish`.
     var onCommit: () -> Void = {}
 
+    /// #312 — live HK stats provider. Wired by SetLoggerView to
+    /// `sessionController.liveWorkoutStats()`: avg HR (bpm) + active
+    /// kcal read off the in-flight HKLiveWorkoutBuilder, which is still
+    /// collecting while this page is visible (the HK session only ends
+    /// after [完成]/[放棄]). Re-queried on every page appear. Defaults
+    /// to (nil, nil) for #Preview / mock callers → tiles render "--".
+    var liveStats: () -> (avgHR: Double?, kcal: Double?) = { (nil, nil) }
+
     /// Called when sync succeeds (after the 0.5s ✓ display) — caller
     /// should dismiss the finish page. 2026-05-29 deep-night smoke fix:
     /// SetLoggerView now wires this to `\.dismiss` (pops the
@@ -76,6 +87,12 @@ struct FinishPageView: View {
     let onAbort: () -> Void
 
     @State private var phase: FinishPhase = .idle
+
+    /// #312 — live builder readings, refreshed on every appear (the
+    /// TabView re-fires onAppear each time this page swipes into view,
+    /// so the values reflect "now", not session start).
+    @State private var avgHR: Double?
+    @State private var totalKcal: Double?
 
     /// Buttons are interactive only during `.idle` or `.fail`. The
     /// spec is explicit: while ⟳ syncing or ✓ success-flash, both
@@ -114,6 +131,11 @@ struct FinishPageView: View {
         }
         .navigationBarHidden(true)
         .animation(.easeInOut(duration: 0.18), value: phase)
+        .onAppear {
+            let stats = liveStats()
+            avgHR = stats.avgHR
+            totalKcal = stats.kcal
+        }
     }
 
     // MARK: - Header
@@ -243,16 +265,19 @@ struct FinishPageView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
-    /// 平均 HR — placeholder until HK stream lands (D7/D9 wire-in).
-    /// TODO: replace with snapshot.averageHR or live HealthKitController query.
+    /// 平均 HR — live off the HKLiveWorkoutBuilder via `liveStats`
+    /// (#312; was hardcoded spec placeholder 142). "--" until the first
+    /// HR sample lands (Simulator / auth denied / very short session).
     private var hrTileText: String {
-        return "142 bpm（平均）"
+        guard let avgHR else { return "-- bpm（平均）" }
+        return "\(Int(avgHR.rounded())) bpm（平均）"
     }
 
-    /// kcal 總和 — placeholder until HK kcal sample sum lands.
-    /// TODO: replace with snapshot.totalKcal or live HealthKitController query.
+    /// kcal 總和 — live activeEnergyBurned sum via `liveStats`
+    /// (#312; was hardcoded 285). "--" until the first energy sample.
     private var kcalTileText: String {
-        return "285 kcal"
+        guard let totalKcal else { return "-- kcal" }
+        return "\(Int(totalKcal.rounded())) kcal"
     }
 
     /// session 動作數 — per spec line 1943.
