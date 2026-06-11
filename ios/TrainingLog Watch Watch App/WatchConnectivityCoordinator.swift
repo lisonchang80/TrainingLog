@@ -895,6 +895,19 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         lastOutbound = "history req=\(prefix8(requestId))… ex=\(prefix8(exerciseId))"
 
         return await withCheckedContinuation { (cont: CheckedContinuation<ExerciseHistoryReply?, Never>) in
+            let once = HistoryReplyOnce(cont)
+
+            // Watchdog: WC's errorHandler only covers DELIVERY failure. A
+            // killed iPhone app is still "reachable" (iOS wakes it in the
+            // background), so a dead JS layer means neither replyHandler nor
+            // errorHandler ever fires — without this the history view spins
+            // forever (device-verified 2026-06-11).
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                self?.lastOutbound = "history timeout: no reply in 6s"
+                once.resume(nil)
+            }
+
             session.sendMessage(
                 envelope,
                 replyHandler: { [weak self] reply in
@@ -908,18 +921,35 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
                         } else {
                             self?.lastInbound = "history reply: malformed or stale"
                         }
-                        cont.resume(returning: parsed)
+                        once.resume(parsed)
                     }
                 },
                 errorHandler: { [weak self] error in
                     Task { @MainActor [weak self] in
                         self?.lastOutbound =
                             "history err: \(error.localizedDescription)"
-                        cont.resume(returning: nil)
+                        once.resume(nil)
                     }
                 }
             )
         }
+    }
+}
+
+/// Resume-once box for a continuation with three competing resume paths
+/// (reply / error / watchdog). MainActor-isolated, so the nil-out
+/// check-and-set is serialized — no lock, no double-resume.
+@MainActor
+private final class HistoryReplyOnce {
+    private var cont: CheckedContinuation<ExerciseHistoryReply?, Never>?
+
+    init(_ cont: CheckedContinuation<ExerciseHistoryReply?, Never>) {
+        self.cont = cont
+    }
+
+    func resume(_ value: ExerciseHistoryReply?) {
+        cont?.resume(returning: value)
+        cont = nil
     }
 }
 
