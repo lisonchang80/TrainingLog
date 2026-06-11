@@ -22,7 +22,7 @@ import {
   updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
-import { getActiveProgram } from '@/src/adapters/sqlite/programRepository';
+import { getActiveProgram, listPrograms } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
   countSessionExercises,
@@ -55,6 +55,7 @@ import {
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
 import {
+  deleteSetting,
   getAutoPopupRestTimer,
   getSetting,
   getUnitPreference,
@@ -113,19 +114,11 @@ import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRe
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
-  cloneTemplateWithSubTag,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
   listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
-import {
-  createProgram,
-  listPrograms,
-  // Aliased — local useState exposes `setActiveProgram` setter (line ~209)
-  // that shadows this name. The repo fn is the row-flipping DB helper.
-  setActiveProgram as setActiveProgramRow,
-} from '@/src/adapters/sqlite/programRepository';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
 import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
@@ -191,7 +184,13 @@ import {
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
 } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  useTheme,
+  type ThemeTokens,
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+} from '@/src/theme';
 
 /**
  * Today tab — proper Session lifecycle (slice 2).
@@ -882,16 +881,25 @@ export default function TodayScreen() {
   const onPickTemplate = async (item: TemplateSummary) => {
     setBusy(true);
     try {
+      // 2026-06-04 — sticky last-used (program + intensity) is now PER-TEMPLATE
+      // (key suffixed with the template id) so each template remembers its own
+      // last selection instead of all templates sharing one global default.
       const [programSummaries, lastProgram, lastTag] = await Promise.all([
         listPrograms(db),
-        getSetting<string>(db, LAST_PROGRAM_KEY),
-        getSetting<string>(db, LAST_SUB_TAG_KEY),
+        getSetting<string>(db, `${LAST_PROGRAM_KEY}:${item.id}`),
+        getSetting<string>(db, `${LAST_SUB_TAG_KEY}:${item.id}`),
       ]);
       setSheetPrograms(
         programSummaries.map((p) => ({ id: p.id, name: p.name })),
       );
-      setSheetLastProgramId(lastProgram);
-      setSheetLastSubTag(lastTag);
+      // Default the sheet selection to the template's OWN (program, sub_tag)
+      // when it has no per-template sticky yet (e.g. a template just created via
+      // 模板訓練「＋」 + classified in the editor — its sticky is only written by
+      // start/edit-via-sheet, never by editor-save). Without this the sheet
+      // defaulted to 通用, which mismatches the template's real triple →
+      // planResolveTarget fires the「尚未建立模板」fallback alert on re-edit.
+      setSheetLastProgramId(lastProgram ?? item.program_id ?? null);
+      setSheetLastSubTag(lastTag ?? item.sub_tag ?? null);
       setSheetTemplate(item);
     } catch (e) {
       Alert.alert(
@@ -905,66 +913,20 @@ export default function TodayScreen() {
 
   const closeSheet = () => setSheetTemplate(null);
 
-  /**
-   * Inline「新增計畫」handler — creates a minimal Program (ADR-0004 defaults),
-   * refreshes the sheet's picker, returns {id, name} so the sheet auto-selects
-   * the new option. Mirrors the deleted Templates tab handler verbatim.
-   */
-  const handleCreateProgram = async (
-    name: string,
-  ): Promise<{ id: string; name: string }> => {
-    const id = randomUUID();
-    const today = localMsToIsoDate(Date.now());
-    await createProgram(db, {
-      program: {
-        id,
-        name,
-        main_tag: null,
-        cycle_length: 3,
-        cycle_count: 1,
-        start_date: today,
-        is_active: 0,
-      },
-    });
-    // Match wizard-path UX (app/program-wizard/new.tsx) — inline-created
-    // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
-    // picker pick it up immediately. Atomic per setActiveProgram impl.
-    await setActiveProgramRow(db, { id });
-    setSheetPrograms((prev) => [...prev, { id, name }]);
-    return { id, name };
-  };
-
-  /**
-   * Inline「新增強度」handler — clone the sheet template under
-   * (program_id, new sub_tag) so the new chip is immediately backed by a real
-   * row. Returns void; the sheet narrows scope to「user explicitly created a
-   * brand-new sub_tag」per round 38.
-   */
-  const handleCloneTemplateWithNewSubTag = async (
-    sub_tag: string,
-    program_id: string,
-  ): Promise<void> => {
-    if (!sheetTemplate) {
-      throw new Error('NO_SHEET_TEMPLATE');
-    }
-    await cloneTemplateWithSubTag(db, {
-      source_template_id: sheetTemplate.id,
-      new_program_id: program_id,
-      new_sub_tag: sub_tag,
-      uuid: randomUUID,
-    });
-    // Refresh so the new clone shows up in the 模板訓練 list. No need to
-    // touch sheet visibility — sheet keeps `sheetTemplate` as its source.
-    await refresh();
-  };
-
   const persistSticky = async (
+    template_id: string,
     program_id: string,
     sub_tag: string | null,
   ): Promise<void> => {
-    await setSetting<string>(db, LAST_PROGRAM_KEY, program_id);
+    // Per-template sticky (2026-06-04) — keyed by template id so each template
+    // remembers its own last (program, intensity) selection.
+    await setSetting<string>(db, `${LAST_PROGRAM_KEY}:${template_id}`, program_id);
     if (sub_tag != null) {
-      await setSetting<string>(db, LAST_SUB_TAG_KEY, sub_tag);
+      await setSetting<string>(db, `${LAST_SUB_TAG_KEY}:${template_id}`, sub_tag);
+    } else {
+      // 通用 (no intensity) — clear any stored value so the next open defaults
+      // back to 通用 rather than resurfacing a stale intensity.
+      await deleteSetting(db, `${LAST_SUB_TAG_KEY}:${template_id}`);
     }
   };
 
@@ -1034,7 +996,11 @@ export default function TodayScreen() {
     if (!sheetTemplate) return;
     setBusy(true);
     try {
-      await persistSticky(selection.period_id, selection.intensity_id);
+      await persistSticky(
+        sheetTemplate.id,
+        selection.period_id,
+        selection.intensity_id,
+      );
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       closeSheet();
       if (resolved.alert) {
@@ -1082,7 +1048,11 @@ export default function TodayScreen() {
         );
         return;
       }
-      await persistSticky(selection.period_id, selection.intensity_id);
+      await persistSticky(
+        sheetTemplate.id,
+        selection.period_id,
+        selection.intensity_id,
+      );
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       const { session_id } = await startSessionFromTemplate(db, {
         template_id: resolved.template_id,
@@ -2490,8 +2460,6 @@ export default function TodayScreen() {
           lastUsedSubTag={sheetLastSubTag}
           onEdit={onSheetEdit}
           onStart={onSheetStart}
-          onCreateProgram={handleCreateProgram}
-          onCloneTemplateWithNewSubTag={handleCloneTemplateWithNewSubTag}
           onCancel={closeSheet}
         />
       </SafeAreaView>
@@ -3211,6 +3179,7 @@ function ExerciseCard({
   // source via Context; ExerciseCard re-renders when parent does).
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const swipeColors = swipeActionColors(tokens);
   // Slice 10c overnight #61 — labels + groups via single helper. Replaces
   // the prior `displaySetLabel`-based path (which collapsed dropset → 'D').
   // Now dropset HEAD renders `D{N}` and follower renders '' (mirror
@@ -3406,7 +3375,7 @@ function ExerciseCard({
                       {
                         key: 'delete',
                         label: t('common', 'delete'),
-                        color: '#dc3545',
+                        color: swipeColors.remove,
                         // overnight #46 第 2 點 — solo set 級別 swipe-delete
                         // 直接執行、不跳 confirm Alert。Cluster 內 set 刪除 /
                         // exercise card 級 / cluster 整 row 級 confirm 不動。
@@ -3429,13 +3398,13 @@ function ExerciseCard({
                       {
                         key: 'add',
                         label: '+1',
-                        color: '#28a745',
+                        color: swipeColors.add,
                         onPress: () => onAddSetAfter(head.id),
                       },
                       {
                         key: 'note',
                         label: t('domain', 'note'),
-                        color: '#007AFF',
+                        color: swipeColors.note,
                         onPress: () => onShowSetNote(head.id, head.notes),
                       },
                     ]}
@@ -3799,12 +3768,12 @@ function makeStyles(tokens: ThemeTokens) {
   },
   // ADR-0019 Q3 動作卡 collapsed/expanded model — slice 10b
   exerciseCard: {
-    backgroundColor: tokens.bg.elevated,
+    backgroundColor: interactiveCardBg(tokens),
     borderRadius: 10,
     overflow: 'hidden',
   },
   exerciseCardExpanded: {
-    backgroundColor: tokens.bg.surface,
+    backgroundColor: interactiveCardBg(tokens),
   },
   exerciseCardHeader: {
     flexDirection: 'row',
@@ -3912,15 +3881,13 @@ function makeStyles(tokens: ThemeTokens) {
     // Transparent — let the card's translucent gray (exerciseCard backgroundColor)
     // show through. Drag-active state overrides via exerciseCardSetRowDragActive.
   },
-  exerciseCardSetRowDragActive: {
-    backgroundColor: tokens.bg.surface,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
+  // Bug #309 — an EXPANDED card's background is already `tokens.bg.surface`,
+  // so the old `backgroundColor: tokens.bg.surface` here made the dragged row
+  // identical to the card → no visible「拖曳中」feedback (ADR-0025 theme
+  // migration regressed this from a distinct gray). Use `bg.elevated` so the
+  // grabbed row visibly shifts off the card in both light + dark, matching the
+  // template editor's drag-active lift (用戶要求「拖曳時變色如模板一樣」).
+  exerciseCardSetRowDragActive: dragActiveRowStyle(tokens),
   exerciseCardSetRowContent: {
     flex: 1,
   },

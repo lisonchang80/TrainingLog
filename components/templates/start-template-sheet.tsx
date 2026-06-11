@@ -48,7 +48,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -56,7 +55,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -101,33 +99,6 @@ type StartTemplateSheetProps = {
     period_id: string;
     intensity_id: string | null;
   }) => void;
-  /**
-   * Create a brand-new Program from the inline「新增計畫」CTA. Caller persists
-   * the row + refreshes its own `programs` state, then returns the new
-   * `{ id, name }` so the sheet auto-selects it. Throws → silent retry (we
-   * keep the inline input visible so user can edit + retry).
-   */
-  onCreateProgram: (name: string) => Promise<{ id: string; name: string }>;
-  /**
-   * Spawn a deep clone of the source template under (programId, new sub_tag)
-   * — round 37 inline-add polish (round 38 narrowed scope: only fires when
-   * the user creates a brand-new sub_tag via「+ 新增強度」, so the templates
-   * list reflects the new row immediately). Picking an EXISTING sub_tag chip
-   * does NOT trigger this — that path is now covered by the caller's
-   * `onStart` lookup-or-spawn (round 38). The helper returns the new
-   * template id; the sheet ignores it (since session-start uses caller-side
-   * lookup) but the parent's templates list is refreshed so the user sees
-   * the new chip immediately.
-   *
-   * On throw, the sheet inspects `err.message`:
-   *   - `'DUPLICATE_TEMPLATE_TRIPLE'` → user-facing Alert + keep inline open
-   *     so user can rename + retry.
-   *   - other → silent console.warn.
-   */
-  onCloneTemplateWithNewSubTag: (
-    sub_tag: string,
-    program_id: string
-  ) => Promise<void>;
   onCancel: () => void;
 };
 
@@ -156,8 +127,6 @@ export function StartTemplateSheet({
   lastUsedSubTag,
   onEdit,
   onStart,
-  onCreateProgram,
-  onCloneTemplateWithNewSubTag,
   onCancel,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
@@ -173,40 +142,6 @@ export function StartTemplateSheet({
 
   const [periodId, setPeriodId] = useState<string>(RESERVED_NONE_PROGRAM_ID);
   const [intensityId, setIntensityId] = useState<string | null>(null);
-
-  /**
-   * In-flight flag for the「+ 新增強度」inline confirm — disables the 建立
-   * button while the parent's `onCloneTemplateWithNewSubTag` resolves so the
-   * user can't double-tap. Round 38 polish: sheet no longer maintains an
-   * `activeTemplateId` — the parent's `onStart` handles lookup-or-spawn so
-   * picking an EXISTING sub_tag also lands on the right row.
-   */
-  const [cloningSubTag, setCloningSubTag] = useState(false);
-
-  /**
-   * Inline「新增計畫」TextInput state — mirror template-meta-sheet's
-   * customProgramMode pattern (round 32 ledger). When `customProgramMode` is
-   * true we render an inline TextInput + 建立 button under the period radio
-   * list. On success the new program's id is auto-selected and the parent
-   * re-fetches `programs` so it shows up in the radio list next render.
-   */
-  const [customProgramMode, setCustomProgramMode] = useState(false);
-  const [customProgramName, setCustomProgramName] = useState('');
-  const [creatingProgram, setCreatingProgram] = useState(false);
-
-  /**
-   * Inline「新增強度」TextInput state — mirror the new-program pattern. New
-   * sub_tag values land in `localSubTags` (in-session only, not persisted —
-   * sub_tag is a free-form string column, the new value will reach db when
-   * the parent persists sticky in `onStart` / `onEdit`).
-   *
-   * Dedupe: if user types a name that already exists in `programSubTags`
-   * (the per-program union fetched on open) or `localSubTags` (in-session),
-   * we don't append a duplicate radio row — just activate the existing one.
-   */
-  const [customSubTagMode, setCustomSubTagMode] = useState(false);
-  const [customSubTag, setCustomSubTag] = useState('');
-  const [localSubTags, setLocalSubTags] = useState<string[]>([]);
 
   /**
    * Per-program distinct sub_tags (round 35 polish — mirror of
@@ -239,15 +174,7 @@ export function StartTemplateSheet({
     });
     setPeriodId(defaults.period_id);
     setIntensityId(null);
-    // Reset inline-add state so they don't persist across opens.
-    setCustomProgramMode(false);
-    setCustomProgramName('');
-    setCreatingProgram(false);
-    setCustomSubTagMode(false);
-    setCustomSubTag('');
-    setLocalSubTags([]);
     setProgramSubTags([]);
-    setCloningSubTag(false);
     // periodOptions is recomputed on every render; we intentionally omit it
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + the programs identity.
@@ -258,19 +185,15 @@ export function StartTemplateSheet({
    * Re-fetch per-program sub_tags whenever the user changes period selection
    * (round 35 polish — mirror template-meta-sheet pattern). When 通用 (=
    * RESERVED_NONE_PROGRAM_ID) is selected we don't fetch — the intensity
-   * section is hidden in that case anyway. Switching periods also clears the
-   * in-session `localSubTags` so user-added tags from a previous program
-   * don't bleed across.
+   * section is hidden in that case anyway.
    */
   useEffect(() => {
     let cancelled = false;
     if (!visible) return;
     if (periodId === RESERVED_NONE_PROGRAM_ID) {
       setProgramSubTags([]);
-      setLocalSubTags([]);
       return;
     }
-    setLocalSubTags([]);
     // Round 15 polish — union of (templates classified under this program)
     // + (program_sub_tag persistent dictionary, v022). The latter remembers
     // any sub_tag the user ever introduced for this program, even if no
@@ -314,90 +237,6 @@ export function StartTemplateSheet({
   // When 無 is selected, force intensity to null on confirm (hidden picker).
   const effectiveIntensity = isNoneSelected ? null : intensityId;
 
-  /**
-   * Confirm an in-session new sub_tag from the inline TextInput.
-   *
-   * Spawns a clone via `onCloneTemplateWithNewSubTag` so the new sub_tag chip
-   * is backed by a real template row immediately (the parent refreshes its
-   * templates list, so the row appears under the Templates tab without
-   * waiting for session-start). Round 38 polish: the sheet no longer tracks
-   * a local `activeTemplateId` — picking this new chip and tapping「開始訓練」
-   * triggers the parent's `onStart` lookup-or-spawn, which finds the clone
-   * we just spawned via `findTemplateByTriple` and uses its id.
-   *
-   * Local dup guard (case-insensitive in `[programSubTags, localSubTags]`)
-   * runs first — if the user types a tag that's already a radio option we
-   * just activate it (no clone needed, no db write). Past the local dup
-   * guard we await the parent's clone helper; the helper's own dup-triple
-   * guard surfaces as `Error('DUPLICATE_TEMPLATE_TRIPLE')` → user-facing
-   * Alert + inline state preserved for rename + retry.
-   */
-  const handleConfirmNewSubTag = async () => {
-    const trimmed = customSubTag.trim();
-    if (!trimmed) return;
-    const lower = trimmed.toLowerCase();
-    const isDuplicate = [...programSubTags, ...localSubTags].some(
-      (t) => t.toLowerCase() === lower
-    );
-    if (isDuplicate) {
-      Alert.alert(t('alert', 'variantExists'), t('alert', 'intensityNameExists'));
-      return;
-    }
-    if (isNoneSelected) {
-      // Defensive — 通用 (RESERVED_NONE_PROGRAM_ID) hides the intensity
-      // section so this code path should be unreachable. If it ever fires,
-      // surface a hint rather than spawning a clone under the reserved
-      // program.
-      Alert.alert(t('alert', 'variantExists'), t('alert', 'pickProgramFirst'));
-      return;
-    }
-    setCloningSubTag(true);
-    try {
-      await onCloneTemplateWithNewSubTag(trimmed, periodId);
-      setLocalSubTags((prev) => [...prev, trimmed]);
-      setIntensityId(trimmed);
-      setCustomSubTagMode(false);
-      setCustomSubTag('');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-        Alert.alert(
-          t('alert', 'cannotCreateTemplate'),
-          t('alert', 'duplicateTemplateTripleBody')
-        );
-      } else {
-        console.warn('[StartTemplateSheet] cloneTemplate failed:', err);
-      }
-    } finally {
-      setCloningSubTag(false);
-    }
-  };
-
-  const handleConfirmNewProgram = async () => {
-    const trimmed = customProgramName.trim();
-    if (!trimmed || trimmed.length > 60) return;
-    setCreatingProgram(true);
-    try {
-      const created = await onCreateProgram(trimmed);
-      // Auto-select the new program and exit inline mode.
-      setPeriodId(created.id);
-      setCustomProgramMode(false);
-      setCustomProgramName('');
-    } catch (err) {
-      // Dup name (parent's handleCreateProgram → createProgram throws
-      // 'DUPLICATE_PROGRAM_NAME') → Alert + keep inline state intact so the
-      // user can edit + retry. Other errors → quiet console.warn fallback.
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === 'DUPLICATE_PROGRAM_NAME') {
-        Alert.alert(t('alert', 'programNameExists'), t('alert', 'programNameExistsMsg'));
-      } else {
-        console.warn('[StartTemplateSheet] createProgram failed:', err);
-      }
-    } finally {
-      setCreatingProgram(false);
-    }
-  };
-
   return (
     <Modal
       visible={visible}
@@ -425,183 +264,55 @@ export function StartTemplateSheet({
             contentContainerStyle={styles.body}
             keyboardShouldPersistTaps="handled"
           >
+            {/* 2026-06-04 redesign — 開啟已儲存模板 = 純選擇（不能新增），
+                外觀比照 session 詳情頁另存模板的 chip 樣式（grill #1）。新變體
+                改由編輯器「另存模板 / 另存強度」建立。sticky last-used 仍會被
+                預選（resolveProgramDefaults + per-program union effect），只是
+                拿掉了 hint label 以對齊外觀。 */}
             <Text style={styles.sectionLabel}>{t('page', 'selectProgramAlt')}</Text>
             <View style={styles.divider} />
-            {periodOptions.map((opt) => {
-              const isSelected = opt.id === periodId;
-              const isFixedNone = opt.id === RESERVED_NONE_PROGRAM_ID;
-              const isLastUsed = !isFixedNone && opt.id === lastUsedProgramId;
-              // Defensive local rename: even if `opt.name` somehow arrived as
-              // the legacy「無」 (e.g. listPrograms ever surfaced the reserved
-              // row), display「通用」 in this sheet. The DB seed remains 「無」
-              // — changing it would ripple through other sheets reading the
-              // program's name directly.
-              const displayName = isFixedNone ? t('common', 'default') : opt.name;
-              return (
-                <Pressable
-                  key={opt.id}
-                  onPress={() => setPeriodId(opt.id)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && styles.rowPressed,
-                  ]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected }}
-                >
-                  <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
-                  <Text style={styles.rowName}>{displayName}</Text>
-                  {isFixedNone && <Text style={styles.rowHint}>{t('status', 'defaultVariantHint')}</Text>}
-                  {isLastUsed && <Text style={styles.rowHint}>{t('status', 'lastUsedHint')}</Text>}
-                </Pressable>
-              );
-            })}
-
-            {/*
-             * 「新增計畫」inline CTA — mirror template-meta-sheet pattern (round
-             * 30 + 32). Tap shows an inline TextInput + 建立 button; on success
-             * the parent creates the Program row + refreshes its `programs`
-             * state, returning {id, name} so we auto-select the new option.
-             */}
-            <Pressable
-              onPress={() => {
-                setCustomProgramMode(true);
-                setCustomProgramName('');
-              }}
-              style={[styles.addCta, customProgramMode && styles.addCtaActive]}
-            >
-              <Text style={styles.addCtaText}>{t('button', 'addProgram')}</Text>
-            </Pressable>
-            {customProgramMode ? (
-              <View style={styles.inlineRow}>
-                <TextInput
-                  style={[styles.input, styles.inlineInput]}
-                  value={customProgramName}
-                  onChangeText={setCustomProgramName}
-                  placeholder={t('page', 'newProgramNamePlaceholder')}
-                  placeholderTextColor={tokens.text.tertiary}
-                  maxLength={60}
-                  editable={!creatingProgram}
-                />
-                <Pressable
-                  onPress={handleConfirmNewProgram}
-                  hitSlop={8}
-                  disabled={
-                    creatingProgram ||
-                    customProgramName.trim().length === 0
-                  }
-                  style={[
-                    styles.inlineConfirm,
-                    (creatingProgram ||
-                      customProgramName.trim().length === 0) &&
-                      styles.inlineConfirmDisabled,
-                  ]}
-                >
-                  <Text style={styles.inlineConfirmText}>
-                    {creatingProgram ? t('button', 'creating') : t('common', 'create')}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
+            <View style={styles.chipRow}>
+              {periodOptions.map((opt) => {
+                const isFixedNone = opt.id === RESERVED_NONE_PROGRAM_ID;
+                // Defensive local rename: display「通用」for the reserved row
+                // even if listPrograms ever surfaced the legacy「無」name.
+                const displayName = isFixedNone
+                  ? t('common', 'default')
+                  : opt.name;
+                return (
+                  <Chip
+                    key={opt.id}
+                    label={displayName}
+                    active={opt.id === periodId}
+                    onPress={() => setPeriodId(opt.id)}
+                    styles={styles}
+                  />
+                );
+              })}
+            </View>
 
             {!isNoneSelected && (
               <>
                 <View style={{ height: 16 }} />
                 <Text style={styles.sectionLabel}>{t('page', 'selectIntensity')}</Text>
                 <View style={styles.divider} />
-                {/*
-                 * Fixed 通用 row (round 35 polish) — represents `sub_tag = null`
-                 * within the picked program, aligning with template-meta-sheet
-                 * which uses「通用」label for the null sub_tag chip. Selected
-                 * state hinges on `intensityId === null && !customSubTagMode`
-                 * to avoid showing 通用 as selected while the user is typing a
-                 * brand-new sub_tag name.
-                 */}
-                {(() => {
-                  const isSelected =
-                    intensityId === null && !customSubTagMode;
-                  return (
-                    <Pressable
-                      onPress={() => {
-                        setIntensityId(null);
-                        setCustomSubTagMode(false);
-                      }}
-                      style={({ pressed }) => [
-                        styles.row,
-                        pressed && styles.rowPressed,
-                      ]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: isSelected }}
-                    >
-                      <Text style={styles.radio}>
-                        {isSelected ? '◉' : '○'}
-                      </Text>
-                      <Text style={styles.rowName}>{t('common', 'default')}</Text>
-                      <Text style={styles.rowHint}>{t('status', 'defaultVariantHint')}</Text>
-                    </Pressable>
-                  );
-                })()}
-                {[...programSubTags, ...localSubTags].map((tag) => {
-                  const isSelected = tag === intensityId;
-                  const isLastUsed = tag === lastUsedSubTag;
-                  return (
-                    <Pressable
+                <View style={styles.chipRow}>
+                  <Chip
+                    label={t('common', 'default')}
+                    active={intensityId === null}
+                    onPress={() => setIntensityId(null)}
+                    styles={styles}
+                  />
+                  {programSubTags.map((tag) => (
+                    <Chip
                       key={tag}
+                      label={tag}
+                      active={tag === intensityId}
                       onPress={() => setIntensityId(tag)}
-                      style={({ pressed }) => [
-                        styles.row,
-                        pressed && styles.rowPressed,
-                      ]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: isSelected }}
-                    >
-                      <Text style={styles.radio}>{isSelected ? '◉' : '○'}</Text>
-                      <Text style={styles.rowName}>{tag}</Text>
-                      {isLastUsed && (
-                        <Text style={styles.rowHint}>{t('status', 'lastUsedHint')}</Text>
-                      )}
-                    </Pressable>
-                  );
-                })}
-                <Pressable
-                  onPress={() => {
-                    setCustomSubTagMode(true);
-                    setCustomSubTag('');
-                  }}
-                  style={[
-                    styles.addCta,
-                    customSubTagMode && styles.addCtaActive,
-                  ]}
-                >
-                  <Text style={styles.addCtaText}>{t('button', 'addIntensityPlain')}</Text>
-                </Pressable>
-                {customSubTagMode ? (
-                  <View style={styles.inlineRow}>
-                    <TextInput
-                      style={[styles.input, styles.inlineInput]}
-                      value={customSubTag}
-                      onChangeText={setCustomSubTag}
-                      placeholder={t('page', 'newIntensityWithExamplePlaceholder')}
-                      placeholderTextColor={tokens.text.tertiary}
-                      editable={!cloningSubTag}
+                      styles={styles}
                     />
-                    <Pressable
-                      onPress={handleConfirmNewSubTag}
-                      hitSlop={8}
-                      disabled={
-                        cloningSubTag || customSubTag.trim().length === 0
-                      }
-                      style={[
-                        styles.inlineConfirm,
-                        (cloningSubTag || customSubTag.trim().length === 0) &&
-                          styles.inlineConfirmDisabled,
-                      ]}
-                    >
-                      <Text style={styles.inlineConfirmText}>
-                        {cloningSubTag ? t('button', 'creating') : t('common', 'create')}
-                      </Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+                  ))}
+                </View>
               </>
             )}
           </ScrollView>
@@ -644,6 +355,36 @@ export function StartTemplateSheet({
       </Pressable>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+type Styles = ReturnType<typeof makeStyles>;
+
+/**
+ * Selectable chip — mirrors components/session/template-meta-sheet.tsx's Chip
+ * so the StartTemplateSheet picker matches the session-detail 另存模板 look
+ * (2026-06-04 redesign).
+ */
+function Chip({
+  label,
+  active,
+  onPress,
+  styles,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  styles: Styles;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, active && styles.chipActive]}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -702,84 +443,35 @@ function makeStyles(tokens: ThemeTokens) {
       backgroundColor: tokens.border.subtle,
       marginBottom: 4,
     },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 4,
-      gap: 10,
-    },
-    rowPressed: { opacity: 0.6 },
-    radio: {
-      fontSize: 18,
-      color: tokens.text.primary,
-      width: 22,
-      textAlign: 'center',
-    },
-    rowName: {
-      fontSize: 15,
-      color: tokens.text.primary,
-      flexShrink: 1,
-    },
-    rowHint: {
-      fontSize: 13,
-      color: tokens.text.secondary,
-      marginLeft: 'auto',
-    },
     /**
-     * Primary CTA「新增計畫 / 強度」— solid blue / white text so the entry
-     * point visually stands out from the radio rows above. Active state
-     * uses bg.surface darken to signal「inline-add mode is open」.
+     * 2026-06-04 redesign — chip picker (mirror of
+     * components/session/template-meta-sheet.tsx) so 開啟已儲存模板 looks the
+     * same as session-detail 另存模板. Select-only — no inline-add CTA.
      */
-    addCta: {
-      alignSelf: 'flex-start',
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 8,
-      backgroundColor: tokens.action.primary,
-      marginTop: 6,
-    },
-    addCtaActive: {
-      // Darker fill for active state — kept literal so the contrast vs the
-      // base action.primary stays consistent across modes.
-      backgroundColor: '#0050B3',
-    },
-    addCtaText: {
-      fontSize: 13,
-      color: tokens.action.onPrimary,
-      fontWeight: '600',
-    },
-    inlineRow: {
+    chipRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      flexWrap: 'wrap',
       gap: 8,
-      marginTop: 8,
+      marginBottom: 4,
     },
-    input: {
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: tokens.border.default,
-      borderRadius: 8,
-      paddingVertical: 10,
+    chip: {
+      paddingVertical: 6,
       paddingHorizontal: 12,
-      fontSize: 15,
-      color: tokens.text.primary,
+      borderRadius: 999,
       backgroundColor: tokens.bg.elevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.subtle,
     },
-    inlineInput: {
-      flex: 1,
-    },
-    inlineConfirm: {
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 8,
+    chipActive: {
       backgroundColor: tokens.action.primary,
+      borderColor: tokens.action.primary,
     },
-    inlineConfirmDisabled: {
-      opacity: 0.4,
+    chipText: {
+      fontSize: 13,
+      color: tokens.action.primary,
     },
-    inlineConfirmText: {
+    chipTextActive: {
       color: tokens.action.onPrimary,
-      fontSize: 14,
       fontWeight: '600',
     },
     actionRow: {

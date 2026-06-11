@@ -1,0 +1,19 @@
+diff --git a/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx b/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
+index 1559352..63f6e33 100644
+--- a/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
+@@ -45,6 +45,14 @@ function NestableDraggableFlatListInner<T>(
+   useNestedAutoScroll({
+     ...animVals,
+     hoverOffset,
++    // TrainingLog patch (Bug #309) — disable drag-time autoscroll for nested
++    // lists. The nested edge-distance measurement is unreliable in a multi-card
++    // session (the dragged cell reads as "always at the top edge / never at the
++    // bottom"), so autoscroll fires UP spuriously and never DOWN. Set lists are
++    // short and fit on screen, so drag-time autoscroll isn't needed. speed 0 →
++    // the autoscroll loop computes a zero offset → the page never moves on drag.
++    // Re-applied on install via the repo's existing patch-package postinstall.
++    autoscrollSpeed: 0,
+   });
+ 
+   const onListContainerLayout = useStableCallback(async ({ containerRef }) => {

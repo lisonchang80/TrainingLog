@@ -35,6 +35,42 @@ export function cloneTemplate(t: Template): Template {
   };
 }
 
+/**
+ * Deep-copy an exercise/set tree with FRESH ids, re-pointed at `templateId`.
+ *
+ * Used by the template editor's 另存模板 / 另存強度 (2026-06-04 redesign) to
+ * materialize the CURRENT in-memory body into a DIFFERENT template (a new one,
+ * or an overwrite target) WITHOUT touching the template being edited — so 另存
+ * never writes back to the original. `parent_id` (superset cluster) +
+ * `parent_set_id` (dropset chain) are remapped through the same id maps so the
+ * linkage survives the copy. The result is fed to `commitTemplateDraft` against
+ * the target's current state (empty → all inserts; existing → diff replaces).
+ */
+export function remapDraftBody(
+  exercises: TemplateExercise[],
+  templateId: string,
+  uuid: () => string,
+): TemplateExercise[] {
+  const exIdMap = new Map<string, string>();
+  const setIdMap = new Map<string, string>();
+  for (const ex of exercises) {
+    exIdMap.set(ex.id, uuid());
+    for (const s of ex.sets) setIdMap.set(s.id, uuid());
+  }
+  return exercises.map((ex) => ({
+    ...ex,
+    id: exIdMap.get(ex.id)!,
+    template_id: templateId,
+    parent_id: ex.parent_id != null ? exIdMap.get(ex.parent_id) ?? null : null,
+    sets: ex.sets.map((s) => ({
+      ...s,
+      id: setIdMap.get(s.id)!,
+      parent_set_id:
+        s.parent_set_id != null ? setIdMap.get(s.parent_set_id) ?? null : null,
+    })),
+  }));
+}
+
 function setsEqual(a: TemplateSet[], b: TemplateSet[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {

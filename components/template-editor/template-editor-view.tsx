@@ -62,6 +62,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useDatabase } from '@/components/database-provider';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
+import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
@@ -71,9 +72,11 @@ import {
   applyRenameSiblings,
   attachTemplateToProgram,
   commitTemplateDraft,
+  createTemplate,
   executeTemplateDeletion,
   findTemplateByTriple,
   getTemplateFull,
+  overwriteTemplateBody,
   previewTemplateDeletion,
   type AffectedProgramCell,
   queryMemoryCandidates,
@@ -85,7 +88,7 @@ import {
 } from '@/src/adapters/sqlite/supersetRepository';
 import { explodeSupersetForTemplate } from '@/src/domain/superset/supersetManager';
 import { computeTemplateClusterStat } from '@/src/domain/template/clusterStat';
-import { cloneTemplate, templatesEqual } from '@/src/domain/template/templateDraft';
+import { cloneTemplate, remapDraftBody, templatesEqual } from '@/src/domain/template/templateDraft';
 import { formatTemplateTriple } from '@/src/domain/template/templateManager';
 import { deriveLatestSetsForExercise } from '@/src/domain/template/templateMemory';
 import {
@@ -113,7 +116,14 @@ import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 import { getLocale, t as tt, tExercise } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import { tTemplateCreated, tTemplateUpdated } from '@/src/i18n/dynamic';
+import {
+  useTheme,
+  type ThemeTokens,
+  dragActiveRowStyle,
+  interactiveCardBg,
+  swipeActionColors,
+} from '@/src/theme';
 
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that all read
@@ -274,6 +284,14 @@ export default function TemplateEditorView() {
   // which intentionally keeps the row (the wizard attaches it on final commit).
   const savedRef = useRef(false);
 
+  // Toast controller — 儲存「完成儲存」/ 另存 success feedback (2026-06-04
+  // redesign #1/#3/#4/#5). Created once, kept alive for the page lifecycle;
+  // ToastHost subscribes. Mirrors app/session/[id].tsx's pattern.
+  const toastRef = useRef<ToastController | null>(null);
+  if (toastRef.current == null) {
+    toastRef.current = new ToastController();
+  }
+
   /** Display override resolver — undefined = no override; null = 通用 / no
    *  intensity; string = explicit value. */
   const displayProgramOverride: string | null | undefined = dpid === undefined
@@ -314,11 +332,23 @@ export default function TemplateEditorView() {
   // overnight #45 第 3 點 — 排序動作 modal 開關（mirror app/(tabs)/index.tsx
   // 的 reorderSheetOpen pattern；長按卡片 header + ⚙️「移動動作」共用入口）。
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
-  // Round 15 polish — 儲存 / 建立並導入 都先跳 TemplateMetaSheet 讓使用者選
-  // (program, sub_tag)。`saveSheetMode` 為 null = 不跳；'save' = 跑完
-  // persistDraft + Alert 留在編輯器；'import' = 跑完 persistDraft + router.replace
-  // 回 programs tab 帶 apply context。
+  // `saveSheetMode` 為 null = 不跳：
+  //   'import' = programs tab「+ 建立新模板」import 路徑（persistDraft + replace）。
+  //   'save'   = 模板訓練「＋」新建（fresh）模板的「另存新檔」首存 — 在 sheet 內
+  //              選 (program, sub_tag)、名稱已可在編輯器內改，confirm 後建立。
+  // 已儲存模板的「儲存」是純 body commit（onSaveBodyOnly），不走這個 sheet。
   const [saveSheetMode, setSaveSheetMode] = useState<'save' | 'import' | null>(
+    null,
+  );
+  // 模板訓練「＋」新建的 fresh 模板尚未分類（沒設過 program/sub_tag）。此狀態為
+  // true 時：名稱可改、「儲存」走「另存新檔」sheet、⋯選單不出現「另存模板/另存
+  // 強度」（儲存本身就是另存新檔）。首次存檔成功後翻 false → 變成一般「已儲存
+  // 模板編輯器」（名稱唯讀、儲存純 body commit、⋯有另存模板/另存強度）。
+  const [needsClassify, setNeedsClassify] = useState(isFreshTemplate);
+  // 2026-06-04 redesign #4/#5 — ⋯選單「另存模板」/「另存強度」開的 TemplateMetaSheet。
+  // 'template' = 名稱可改 + 計劃/強度 可選可新增；'intensity' = 鎖名稱 + 鎖計劃、
+  // 只選強度。兩者共用 onSaveAsConfirm（差異純在 sheet 外觀的 lock）。
+  const [saveAsMode, setSaveAsMode] = useState<'template' | 'intensity' | null>(
     null,
   );
 
@@ -520,16 +550,101 @@ export default function TemplateEditorView() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
-        Alert.alert(
-          tt('alert', 'variantExists'),
-          tt('alert', 'duplicateTemplateTripleEditorBody'),
-        );
+        // #3 ②「覆蓋」: the wizard draft X's triple collides with an existing
+        // template Y. Offer [取消][覆蓋] mirroring ①. On 覆蓋, merge X→Y +
+        // delete X: commit X's body (commitTemplateDraft does NOT write
+        // program_id/sub_tag, so X keeps its 通用 classification → no
+        // re-collision), overwriteTemplateBody into Y (Y keeps its identity),
+        // then delete X. The wizard's useFocusEffect re-lists templates so Y
+        // becomes the selectable pill.
+        const now = () => Date.now();
+        const existing = draft
+          ? await findTemplateByTriple(db, {
+              name: draft.name,
+              program_id: null,
+              sub_tag: null,
+            })
+          : null;
+        if (draft && committed && existing && existing.id !== draft.id) {
+          Alert.alert(
+            tt('alert', 'variantExists'),
+            tt('alert', 'overwriteTemplateConfirm'),
+            [
+              {
+                text: tt('common', 'cancel'),
+                style: 'cancel',
+                onPress: () => setBusy(false),
+              },
+              {
+                text: tt('button', 'overwrite'),
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await commitTemplateDraft(db, { committed, draft, now });
+                    await overwriteTemplateBody(db, {
+                      source_template_id: draft.id,
+                      target_template_id: existing.id,
+                      uuid: randomUUID,
+                      now,
+                    });
+                    await executeTemplateDeletion(db, draft.id);
+                    savedRef.current = true;
+                    Alert.alert(tt('status', 'saved'), '', [
+                      {
+                        text: tt('common', 'ok'),
+                        onPress: () => router.back(),
+                      },
+                    ]);
+                  } catch (e2) {
+                    Alert.alert(
+                      tt('alert', 'saveFailed'),
+                      e2 instanceof Error ? e2.message : String(e2),
+                    );
+                    setBusy(false);
+                  }
+                },
+              },
+            ],
+            { onDismiss: () => setBusy(false) },
+          );
+        } else {
+          Alert.alert(
+            tt('alert', 'variantExists'),
+            tt('alert', 'duplicateTemplateTripleEditorBody'),
+          );
+          setBusy(false);
+        }
       } else {
         Alert.alert(tt('alert', 'saveFailed'), msg);
+        setBusy(false);
       }
-      setBusy(false);
     }
   }, [dirty, draft, busy, committed, db, router]);
+
+  // 2026-06-04 redesign #1/#3 — 正常編輯器「儲存」= 純 body commit（沿用既有
+  // (program, sub_tag)；名稱在編輯器內已唯讀 → persistDraft 不會改三元組 →
+  // 不可能撞 triple，原 ③ DUPLICATE_TEMPLATE_TRIPLE 路徑對正常編輯器失效）。
+  // commit 後 re-hydrate committed 讓 dirty 歸零、toast「完成儲存」、留在編輯頁。
+  const onSaveBodyOnly = useCallback(async () => {
+    if (!committed || !draft || busy) return;
+    setBusy(true);
+    try {
+      await persistDraft();
+      savedRef.current = true;
+      // Re-hydrate so committed === draft (dirty resets to false) and any
+      // DB-side cascade (recolor/rename siblings) lands locally.
+      const refreshed = id ? await getTemplateFull(db, id) : null;
+      if (refreshed) {
+        setCommitted(refreshed);
+        setDraft(cloneTemplate(refreshed));
+      }
+      toastRef.current?.show(tt('status', 'saveComplete'), { icon: 'success' });
+    } catch (e) {
+      Alert.alert(tt('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [committed, draft, busy, persistDraft, id, db]);
 
   const onSave = useCallback(() => {
     if (!dirty || !draft || busy) return;
@@ -537,8 +652,15 @@ export default function TemplateEditorView() {
       void onSaveFromWizard();
       return;
     }
-    setSaveSheetMode('save');
-  }, [dirty, draft, busy, isFromWizard, onSaveFromWizard]);
+    // 模板訓練「＋」新建、尚未分類的 fresh 模板：儲存＝「另存新檔」，跳
+    // TemplateMetaSheet 讓使用者選 (program, sub_tag)（名稱已可在編輯器內改）。
+    if (needsClassify) {
+      setSaveSheetMode('save');
+      return;
+    }
+    // 已儲存模板：純 body commit + toast + 留頁。
+    void onSaveBodyOnly();
+  }, [dirty, draft, busy, isFromWizard, needsClassify, onSaveFromWizard, onSaveBodyOnly]);
 
   // Orphan cleanup for the program-wizard「新建模板」flow. The wizard
   // pre-creates the template row on entry; if the user leaves this editor
@@ -672,10 +794,17 @@ export default function TemplateEditorView() {
           setDraft(cloneTemplate(refreshed));
         }
         if (mode === 'save') {
+          // 模板訓練「＋」fresh 模板的「另存新檔」首存 — 已建立並分類完成，翻
+          // needsClassify=false（接下來變成一般已儲存模板編輯器：名稱唯讀、儲存
+          // 純 body commit、⋯出現另存模板/另存強度），toast + 留在編輯頁。
+          setNeedsClassify(false);
           setSaveSheetMode(null);
-          Alert.alert(tt('status', 'saved'), '', [{ text: tt('common', 'ok') }]);
+          toastRef.current?.show(tt('status', 'saveComplete'), {
+            icon: 'success',
+          });
         } else {
-          // import mode — redirect with apply params.
+          // import mode — redirect with apply params (programs-tab「+ 建立並
+          // 導入」path).
           const finalProgramId =
             refreshed?.program_id ?? patchedDraft.program_id ?? null;
           const finalSubTag =
@@ -708,10 +837,82 @@ export default function TemplateEditorView() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          Alert.alert(
-            tt('alert', 'variantExists'),
-            tt('alert', 'duplicateTemplateTripleEditorBody'),
-          );
+          // #3 ③「覆蓋」= copy X→Y, KEEP X (ADR-0003 2026-06-04 翻盤 拍板 B：
+          // 原拍板 A 會 delete X，user 改為不刪＝複製語意，避免破壞性刪除).
+          // The re-classification collides with an existing template Y. On 覆蓋:
+          //   1. commitTemplateDraft writes X's body at its OLD classification
+          //      (X keeps committed's program_id/sub_tag → no re-collision; the
+          //      editor's classification change is intentionally NOT applied).
+          //   2. overwriteTemplateBody copies X's body into Y (Y keeps id /
+          //      name / program_id / sub_tag).
+          // X is NOT deleted — it stays at its old (program, sub_tag) slot, so
+          // X and Y differ in triple (both valid). Net: Y holds a COPY of X's
+          // content; X unchanged. (Name never lost — Y shares X's name, which
+          // is exactly why it collided.) Then navigate away. 取消 keeps editor on X.
+          const now = () => Date.now();
+          const existing = await findTemplateByTriple(db, {
+            name: args.name || draft.name,
+            program_id: args.program_id ?? null,
+            sub_tag: args.sub_tag ?? null,
+          });
+          if (committed && existing && existing.id !== draft.id) {
+            Alert.alert(
+              tt('alert', 'variantExists'),
+              tt('alert', 'overwriteTemplateConfirm'),
+              [
+                { text: tt('common', 'cancel'), style: 'cancel' },
+                {
+                  text: tt('button', 'overwrite'),
+                  style: 'destructive',
+                  onPress: async () => {
+                    setBusy(true);
+                    try {
+                      // Commit X's body at its OLD classification — pass the
+                      // un-reclassified draft (keep committed's program_id /
+                      // sub_tag) so the body commit can't re-collide.
+                      const bodyDraft: Template = {
+                        ...draft,
+                        program_id: committed.program_id,
+                        sub_tag: committed.sub_tag,
+                      };
+                      await commitTemplateDraft(db, {
+                        committed,
+                        draft: bodyDraft,
+                        now,
+                      });
+                      await overwriteTemplateBody(db, {
+                        source_template_id: draft.id,
+                        target_template_id: existing.id,
+                        uuid: randomUUID,
+                        now,
+                      });
+                      // 拍板 B：不刪 X（複製語意）。X 留在舊 (program, sub_tag)
+                      // 槽，與 Y 三元組不同故兩者皆合法。
+                      savedRef.current = true;
+                      Alert.alert(tt('status', 'saved'), '', [
+                        {
+                          text: tt('common', 'ok'),
+                          onPress: () => router.back(),
+                        },
+                      ]);
+                    } catch (e2) {
+                      Alert.alert(
+                        tt('alert', 'saveFailed'),
+                        e2 instanceof Error ? e2.message : String(e2),
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  },
+                },
+              ],
+            );
+          } else {
+            Alert.alert(
+              tt('alert', 'variantExists'),
+              tt('alert', 'duplicateTemplateTripleEditorBody'),
+            );
+          }
         } else {
           Alert.alert(tt('alert', 'saveFailed'), msg);
         }
@@ -732,6 +933,129 @@ export default function TemplateEditorView() {
       importFromSubTag,
       router,
     ],
+  );
+
+  /**
+   * 2026-06-04 redesign #4/#5/#6（含異常1 翻盤）— ⋯選單「另存模板」/「另存強度」確認。
+   * 兩個 mode 共用此 handler（差異純在 sheet 的 lockName/lockProgram 外觀）。
+   *
+   * 機制（**完全不碰正在編輯的 X**；以當前記憶體 draft body 建/覆蓋一個「不同的」目標）：
+   *   findTemplateByTriple(目標三元組)：
+   *     - 撞到 X 自己（同三元組）→ 擋下並提示「另存需用不同名稱/計劃/強度，改用儲存更新 X」。
+   *     - 撞到別的 Y → 跳覆蓋確認 → writeBodyTo(Y)：draft 經 remapDraftBody fresh-id 重映後
+   *       commitTemplateDraft 到 Y → Y body 換成當前 body、**Y 身分(id/name/program/sub_tag/
+   *       color)保留、X 不刪**（複製語意，比照 ADR-0003 ①）。
+   *     - 無撞 → createTemplate(Y) + attachTemplateToProgram(Y, 三元組) + writeBodyTo(Y)
+   *       ＝從當前 body 建出新模板 Y。
+   *   成功皆 toast + 編輯器續停在 X（X 的 committed 狀態未動，故不需 persistDraft / 不動 dirty）。
+   */
+  const onSaveAsConfirm = useCallback(
+    async (args: {
+      name: string;
+      program_id: string | null;
+      sub_tag: string | null;
+    }) => {
+      if (!draft || busy) return;
+      setBusy(true);
+      try {
+        const now = () => Date.now();
+        const finalName = (args.name || draft.name).trim() || draft.name;
+        const existing = await findTemplateByTriple(db, {
+          name: finalName,
+          program_id: args.program_id,
+          sub_tag: args.sub_tag,
+        });
+        // Materialize the CURRENT editor body into `targetId` WITHOUT touching
+        // the template being edited (X). Build a fresh-id copy of the draft
+        // pointed at the target, then commit it against the target's current
+        // state (empty for a freshly-created Y → all inserts; the target's
+        // existing body for 覆蓋 → diff wipes old + inserts new). The target's
+        // identity (name / program_id / sub_tag / color) is preserved by
+        // sourcing it from the target row, never from the draft.
+        const writeBodyTo = async (targetId: string) => {
+          const target = await getTemplateFull(db, targetId);
+          if (!target) throw new Error('TARGET_TEMPLATE_NOT_FOUND');
+          const targetDraft: Template = {
+            id: targetId,
+            name: target.name,
+            color_hex: target.color_hex,
+            program_id: target.program_id ?? null,
+            sub_tag: target.sub_tag ?? null,
+            exercises: remapDraftBody(draft.exercises, targetId, randomUUID),
+          };
+          await commitTemplateDraft(db, {
+            committed: target,
+            draft: targetDraft,
+            now,
+          });
+        };
+        if (existing && existing.id === draft.id) {
+          // The chosen triple IS the template being edited — that would modify
+          // X, not create a copy. 另存 requires a distinct name / program /
+          // intensity. (Use 儲存 to update the current template instead.)
+          Alert.alert(
+            tt('alert', 'variantExists'),
+            tt('alert', 'duplicateTemplateTripleEditorBody'),
+          );
+          return;
+        }
+        if (existing) {
+          // #6 覆蓋 Y — replace Y's body with the current body, keep Y's
+          // identity, X NOT touched (copy semantics; the editor stays on X).
+          Alert.alert(
+            tt('alert', 'variantExists'),
+            tt('alert', 'overwriteTemplateConfirm'),
+            [
+              { text: tt('common', 'cancel'), style: 'cancel' },
+              {
+                text: tt('button', 'overwrite'),
+                style: 'destructive',
+                onPress: async () => {
+                  setBusy(true);
+                  try {
+                    await writeBodyTo(existing.id);
+                    setSaveAsMode(null);
+                    toastRef.current?.show(tTemplateUpdated(finalName), {
+                      icon: 'success',
+                    });
+                  } catch (e2) {
+                    Alert.alert(
+                      tt('alert', 'saveFailed'),
+                      e2 instanceof Error ? e2.message : String(e2),
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                },
+              },
+            ],
+          );
+          // Outer finally releases busy while the alert is shown; the 覆蓋
+          // onPress re-acquires it. (Mirrors onSaveSheetConfirm's pattern.)
+          return;
+        }
+        // No collision → create a new template Y from the current body.
+        const newId = randomUUID();
+        await createTemplate(db, { id: newId, name: finalName, now });
+        await attachTemplateToProgram(db, {
+          template_id: newId,
+          program_id: args.program_id,
+          sub_tag: args.sub_tag,
+          now,
+        });
+        await writeBodyTo(newId);
+        setSaveAsMode(null);
+        toastRef.current?.show(tTemplateCreated(finalName), { icon: 'success' });
+      } catch (e) {
+        Alert.alert(
+          tt('alert', 'saveFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [draft, busy, db],
   );
 
   const onDeleteTemplate = useCallback(async () => {
@@ -820,6 +1144,12 @@ export default function TemplateEditorView() {
   // only swap field names where production differs).
   // -----------------------------------------------------------------------
 
+  // 2026-06-04 redesign #2 — name editing stays for entry points that are
+  // naming a brand-new template: the 模板訓練「＋」/ wizard fresh template
+  // (`needsClassify`, true until its first save) + the programs-tab import.
+  // The normal saved-template editor renders the name read-only and routes
+  // renames through 另存模板. `nameEditable` gates which UI shows.
+  const nameEditable = needsClassify || importMode;
   const updateName = (name: string) => draft && setDraft({ ...draft, name });
 
   const updateColor = (color_hex: string) => {
@@ -1970,13 +2300,14 @@ export default function TemplateEditorView() {
                         const rowHasNote = !!(
                           parentSet?.notes && parentSet.notes.trim().length > 0
                         );
+                        const swipeColors = swipeActionColors(tokens);
                         return (
                           <SwipeableSetRow
                             swipeLeftActions={[
                               {
                                 key: 'del-superset-row',
                                 label: tt('button', 'swipeDelete'),
-                                color: tokens.action.destructive,
+                                color: swipeColors.remove,
                                 onPress: () =>
                                   deleteSupersetRowAt(parent.id, childIds, i),
                               },
@@ -1985,14 +2316,14 @@ export default function TemplateEditorView() {
                               {
                                 key: 'clone-superset-row',
                                 label: tt('button', 'swipeAdd'),
-                                color: tokens.action.success,
+                                color: swipeColors.add,
                                 onPress: () =>
                                   cloneSupersetRowAt(parent.id, childIds, i),
                               },
                               {
                                 key: 'note-superset-row',
                                 label: tt('button', 'swipeNote'),
-                                color: tokens.action.primary,
+                                color: swipeColors.note,
                                 onPress: () => {
                                   if (parentSet)
                                     openSetNoteEditor(parent.id, parentSet);
@@ -2141,16 +2472,22 @@ export default function TemplateEditorView() {
                 ]}
                 hitSlop={6}
               />
-              {/* #5 (2026-05-30) — ✏ 標示模板名可改。 */}
-              <Text style={{ fontSize: 16, color: tokens.text.tertiary, marginRight: 6 }}>
-                ✏
-              </Text>
-              <TextInput
-                value={draft.name}
-                onChangeText={updateName}
-                style={styles.nameInput}
-                placeholder={tt('page', 'templateNamePlaceholder')}
-              />
+              {/* 2026-06-04 redesign #2 — 一般「已儲存模板編輯器」名稱唯讀
+                  （顯示用 Text）；改名走 ⋯選單「另存模板」。wizard / programs-tab
+                  import 仍需替新模板命名 → 保留可編輯 TextInput（nameEditable）。 */}
+              {nameEditable ? (
+                <TextInput
+                  value={draft.name}
+                  onChangeText={updateName}
+                  style={[styles.nameInput, styles.nameInputEditable]}
+                  placeholder={tt('page', 'templateNamePlaceholder')}
+                  placeholderTextColor={tokens.text.tertiary}
+                />
+              ) : (
+                <Text style={styles.nameInput} numberOfLines={1}>
+                  {draft.name || tt('page', 'templateNamePlaceholder')}
+                </Text>
+              )}
             </View>
             <Text style={styles.tripleText}>
               {/* #50 C1 — display override prefers URL query (user's pick in
@@ -2249,10 +2586,12 @@ export default function TemplateEditorView() {
             <Text style={styles.actionBtnText}>{tt('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable
-            style={styles.actionBtn}
+            style={[styles.actionBtn, styles.actionBtnPrimary]}
             onPress={onStartSession}
             disabled={busy}>
-            <Text style={styles.actionBtnText}>{tt('button', 'startSession')}</Text>
+            <Text style={[styles.actionBtnText, styles.actionBtnPrimaryText]}>
+              {tt('button', 'startSession')}
+            </Text>
           </Pressable>
           <Pressable
             style={styles.actionBtn}
@@ -2264,30 +2603,47 @@ export default function TemplateEditorView() {
             onPress={() => {
               // overnight #46 第 1 點 — 「通用」變體（program_id IS NULL OR
               // sub_tag IS NULL）是 3-tier prefill resolver 的 base fallback、
-              // 不可刪。disabledButtonIndices = [1] 讓「刪除模板」灰字 + 點到 noop.
+              // 不可刪。disabledButtonIndices 讓「刪除模板」灰字 + 點到 noop.
               const canDelete = isTemplateDeletable({
                 program_id: draft.program_id ?? null,
                 sub_tag: draft.sub_tag ?? null,
               });
+              // 2026-06-04 — 「另存模板」/「另存強度」只在「已儲存模板編輯器」
+              // 出現（!needsClassify）。模板訓練「＋」新建、尚未分類的 fresh
+              // 模板，其「儲存」本身就是另存新檔，⋯選單不重複放（user 拍板：
+              // 「存檔就是跳另存新檔，不需要額外再一個另存新檔」），只留刪除。
+              // 「另存強度」再多一個條件：模板要有具體計劃（通用無強度維度）。
+              const showSaveAs = !needsClassify;
+              const hasProgram = (draft.program_id ?? null) != null;
+              const opts: string[] = [];
+              let saveAsTemplateIdx = -1;
+              let saveAsIntensityIdx = -1;
+              if (showSaveAs) {
+                saveAsTemplateIdx = opts.length;
+                opts.push(tt('button', 'saveAsTemplate'));
+                if (hasProgram) {
+                  saveAsIntensityIdx = opts.length;
+                  opts.push(tt('button', 'saveAsIntensity'));
+                }
+              }
+              const deleteIdx = opts.length;
+              opts.push(tt('button', 'deleteTemplate'));
+              const cancelIdx = opts.length;
+              opts.push(tt('common', 'cancel'));
               ActionSheetIOS.showActionSheetWithOptions(
                 {
                   title: draft.name,
-                  options: [
-                    tt('button', 'saveAsTemplate'),
-                    tt('button', 'deleteTemplate'),
-                    tt('common', 'cancel'),
-                  ],
-                  destructiveButtonIndex: 1,
-                  cancelButtonIndex: 2,
-                  disabledButtonIndices: canDelete ? [] : [1],
+                  options: opts,
+                  destructiveButtonIndex: deleteIdx,
+                  cancelButtonIndex: cancelIdx,
+                  disabledButtonIndices: canDelete ? [] : [deleteIdx],
                 },
                 (idx) => {
-                  if (idx === 0)
-                    Alert.alert(
-                      tt('button', 'saveAsTemplate'),
-                      tt('alert', 'saveAsTemplateStubBody'),
-                    );
-                  else if (idx === 1 && canDelete) onDeleteTemplate();
+                  if (showSaveAs && idx === saveAsTemplateIdx)
+                    setSaveAsMode('template');
+                  else if (showSaveAs && idx === saveAsIntensityIdx)
+                    setSaveAsMode('intensity');
+                  else if (idx === deleteIdx && canDelete) onDeleteTemplate();
                 },
               );
             }}>
@@ -2423,10 +2779,18 @@ export default function TemplateEditorView() {
           避免新建 program 落回 1×3 預設值（round 15 bug fix）。session-detail
           caller 不受影響（沒傳 = 保留既有最小預設）。
         */}
+        {/* 兩條路徑共用：'import' = programs-tab「+ 建立並導入」；'save' =
+            模板訓練「＋」fresh 模板的「另存新檔」首存（選 program+sub_tag）。
+            omitName（名稱已可在編輯器 body 內改）。已儲存模板的「儲存」是純
+            body commit，不走這個 sheet。 */}
         <TemplateMetaSheet
           visible={saveSheetMode != null}
-          title={saveSheetMode === 'import' ? tt('page', 'createAndImportSheet') : tt('page', 'saveTemplateSheet')}
-          omitName
+          title={
+            saveSheetMode === 'import'
+              ? tt('page', 'createAndImportSheet')
+              : tt('page', 'saveTemplateSheet')
+          }
+          omitName={saveSheetMode === 'import'}
           defaultName={draft?.name ?? ''}
           defaultProgramId={draft?.program_id ?? null}
           defaultSubTag={draft?.sub_tag ?? null}
@@ -2448,6 +2812,31 @@ export default function TemplateEditorView() {
           busy={busy}
           onCancel={() => setSaveSheetMode(null)}
           onConfirm={onSaveSheetConfirm}
+        />
+
+        {/* 2026-06-04 redesign #4/#5 — ⋯選單「另存模板」/「另存強度」sheet。
+            名稱顯示（非 omitName）；'template' = 全可選；'intensity' = 鎖
+            名稱+鎖計劃、只選強度。共用 onSaveAsConfirm。 */}
+        <TemplateMetaSheet
+          visible={saveAsMode != null}
+          title={
+            saveAsMode === 'intensity'
+              ? tt('button', 'saveAsIntensity')
+              : tt('button', 'saveAsTemplate')
+          }
+          lockName={saveAsMode === 'intensity'}
+          lockProgram={saveAsMode === 'intensity'}
+          defaultName={draft?.name ?? ''}
+          defaultProgramId={draft?.program_id ?? null}
+          defaultSubTag={
+            // 另存強度：不預選當前強度（要選「新的」強度，預選會立刻撞 X 自己）。
+            // 另存模板：預帶當前三元組（user 改名/改分類即建新變體）。
+            saveAsMode === 'intensity' ? null : draft?.sub_tag ?? null
+          }
+          programs={programs}
+          busy={busy}
+          onCancel={() => setSaveAsMode(null)}
+          onConfirm={onSaveAsConfirm}
         />
 
         <Modal
@@ -2517,6 +2906,9 @@ export default function TemplateEditorView() {
             </Pressable>
           </Pressable>
         </Modal>
+
+        {/* 2026-06-04 redesign — 儲存「完成儲存」/ 另存成功 toast host. */}
+        <ToastHost controller={toastRef.current!} />
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -2758,6 +3150,7 @@ function ExerciseBody({
                 isActive,
               }: RenderItemParams<SetGroup>) => {
                 const head = g.head;
+                const swipeColors = swipeActionColors(tokens);
                 const isCluster =
                   head.kind === 'dropset' && head.parent_set_id === null;
                 if (isCluster) {
@@ -2766,7 +3159,7 @@ function ExerciseBody({
                     {
                       key: 'delete-cluster',
                       label: tt('button', 'swipeDelete'),
-                      color: tokens.action.destructive,
+                      color: swipeColors.remove,
                       onPress: () => onDeleteCluster(head.id),
                     },
                   ];
@@ -2774,13 +3167,13 @@ function ExerciseBody({
                     {
                       key: 'add-cluster',
                       label: tt('button', 'swipeAdd'),
-                      color: tokens.action.success,
+                      color: swipeColors.add,
                       onPress: () => onAddClusterAfter(head.id),
                     },
                     {
                       key: 'note-cluster',
                       label: tt('button', 'swipeNote'),
-                      color: tokens.action.primary,
+                      color: swipeColors.note,
                       onPress: () => onShowSetNote(head),
                     },
                   ];
@@ -2831,7 +3224,7 @@ function ExerciseBody({
                   {
                     key: 'delete-set',
                     label: tt('button', 'swipeDelete'),
-                    color: tokens.action.destructive,
+                    color: swipeColors.remove,
                     onPress: () => onDeleteSet(head.id),
                   },
                 ];
@@ -2839,13 +3232,13 @@ function ExerciseBody({
                   {
                     key: 'clone-set',
                     label: tt('button', 'swipeAdd'),
-                    color: tokens.action.success,
+                    color: swipeColors.add,
                     onPress: () => onCloneSetAfter(head.id),
                   },
                   {
                     key: 'note',
                     label: tt('button', 'swipeNote'),
-                    color: tokens.action.primary,
+                    color: swipeColors.note,
                     onPress: () => onShowSetNote(head),
                   },
                 ];
@@ -2960,6 +3353,16 @@ function makeStyles(tokens: ThemeTokens) {
     paddingVertical: 2,
     color: tokens.text.primary,
   },
+  // 2026-06-04 — 可編輯名稱（模板訓練「＋」新建 / wizard / import）給一個明顯
+  // 方框，讓使用者一眼知道可改；唯讀的已儲存模板維持純文字（無框）。
+  nameInputEditable: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: tokens.border.default,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: tokens.bg.surface,
+  },
   colorSwatch: { width: 14, height: 14, borderRadius: 7 },
   tripleText: { fontSize: 12, color: tokens.text.secondary },
   body: { padding: 12, gap: 8, paddingBottom: 80 },
@@ -2975,16 +3378,16 @@ function makeStyles(tokens: ThemeTokens) {
     height: StyleSheet.hairlineWidth,
     backgroundColor: tokens.border.default,
   },
-  sectionLabel: { fontSize: 12, color: tokens.text.secondary, fontWeight: '600' },
+  sectionLabel: { fontSize: 14, color: tokens.text.secondary, fontWeight: '600' },
   emptySection: {
-    fontSize: 12,
+    fontSize: 13,
     color: tokens.text.tertiary,
     fontStyle: 'italic',
     paddingHorizontal: 12,
   },
   exCard: {
     borderRadius: 10,
-    backgroundColor: tokens.bg.elevated,
+    backgroundColor: interactiveCardBg(tokens),
     overflow: 'hidden',
   },
   supersetTag: {
@@ -3099,9 +3502,9 @@ function makeStyles(tokens: ThemeTokens) {
   exName: { flexShrink: 1, fontSize: 15, fontWeight: '600', color: tokens.text.primary },
   exNameCompact: { fontSize: 13 },
   exSummary: { fontSize: 12, color: tokens.text.secondary },
-  exChevron: { fontSize: 11, color: tokens.text.tertiary },
+  exChevron: { fontSize: 14, color: tokens.text.tertiary },
   exGearBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  exGear: { fontSize: 16, color: tokens.text.tertiary },
+  exGear: { fontSize: 18, color: tokens.text.tertiary },
   setsBox: {
     paddingHorizontal: 12,
     paddingBottom: 10,
@@ -3132,15 +3535,7 @@ function makeStyles(tokens: ThemeTokens) {
   // session 一樣，長按可拖曳時變白色」。Background `#ffffff` 比 session 的
   // `#f3f4f6` 更白，因為 template editor cluster card 內已是淡彩色 tinted 底，
   // pure white 對比更明顯。
-  dragActiveRow: {
-    backgroundColor: '#ffffff',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    borderRadius: 8,
-  },
+  dragActiveRow: dragActiveRowStyle(tokens),
   supersetRowNoteSlot: {
     width: 28,
     alignItems: 'center',
@@ -3180,12 +3575,12 @@ function makeStyles(tokens: ThemeTokens) {
     flex: 1,
     paddingVertical: 6,
     paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: tokens.bg.elevated,
+    borderRadius: 8,
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
   },
   exFooterBtnCompact: { paddingVertical: 4, paddingHorizontal: 4 },
-  exFooterBtnText: { fontSize: 12, fontWeight: '600', color: tokens.action.primary },
+  exFooterBtnText: { fontSize: 14, fontWeight: '600', color: tokens.action.onPrimary },
   exFooterBtnTextCompact: { fontSize: 10 },
   actionBar: {
     position: 'absolute',
@@ -3208,6 +3603,15 @@ function makeStyles(tokens: ThemeTokens) {
     alignItems: 'center',
   },
   actionBtnText: { fontSize: 13, fontWeight: '600', color: tokens.action.primary },
+  // 2026-06-04 redesign #7 — 「開始訓練」primary CTA：實心底色 + 白字 + 加重，
+  // 與其他次要動作（新增動作 / 選顏色 / ⋯）的淺底藍字拉開層級。
+  actionBtnPrimary: {
+    backgroundColor: tokens.action.primary,
+  },
+  actionBtnPrimaryText: {
+    color: tokens.action.onPrimary,
+    fontWeight: '700',
+  },
   sheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',

@@ -57,7 +57,6 @@ import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
   createProgram,
   listPrograms,
-  setActiveProgram,
   type ProgramSummary,
 } from '@/src/adapters/sqlite/programRepository';
 import { utcMsToIsoDate } from '@/src/domain/program/programManager';
@@ -104,6 +103,22 @@ interface TemplateMetaSheetProps {
    * onConfirm.name unchanged.
    */
   omitName?: boolean;
+  /**
+   * Render the 名稱 input read-only (value fixed = defaultName, not editable,
+   * visually dimmed). Used by the template editor「另存強度」flow where the new
+   * variant must keep the current template's name (2026-06-04 redesign #5).
+   * Ignored when `omitName` is set. `onConfirm.name` still receives defaultName.
+   */
+  lockName?: boolean;
+  /**
+   * Lock the 歸屬計畫 selection to `defaultProgramId` — render it as a single
+   * read-only chip, hiding the 通用 chip, the other program chips, and the
+   * 「+ 新增計畫」CTA. The 強度 section still renders (driven by the locked
+   * program). Used by the template editor「另存強度」flow (2026-06-04 redesign
+   * #5) so only the intensity dimension is user-selectable. Requires a non-null
+   * `defaultProgramId`.
+   */
+  lockProgram?: boolean;
   /** Default fallback used when user leaves name blank. */
   defaultName: string;
   /**
@@ -147,6 +162,8 @@ export function TemplateMetaSheet({
   visible,
   title,
   omitName = false,
+  lockName = false,
+  lockProgram = false,
   defaultName,
   defaultProgramId,
   defaultSubTag,
@@ -336,13 +353,16 @@ export function TemplateMetaSheet({
           is_active: 0,
         },
       });
-      // Match wizard-path UX (app/program-wizard/new.tsx) — newly-created
-      // program becomes the active one so 訓練 tab「計劃訓練」row + Watch
-      // picker pick it up without an extra user step. Atomic per
-      // setActiveProgram impl (single transaction clears every other row).
-      await setActiveProgram(db, { id: newId });
+      // 2026-06-04 fix — do NOT setActiveProgram here. Unlike the program
+      // wizard (app/program-wizard/new.tsx), a program created inside this
+      // sheet is just a CLASSIFICATION bucket for the template being saved.
+      // Activating it would hijack the global active program (which drives the
+      // 計劃 tab + 訓練 tab「計劃訓練」row), making those views jump to this
+      // throwaway program — the bug the user reported. The user can still
+      // activate it explicitly from the 計劃 tab if they actually want to.
       // Append to local chip list (parent will re-fetch next open).
       // Match the ProgramSummary shape — cellCount = 0 since we didn't seed cells.
+      // is_active stays 0 (see note above) and other programs are left untouched.
       const newSummary: ProgramSummary = {
         id: newId,
         name: trimmedName,
@@ -350,14 +370,17 @@ export function TemplateMetaSheet({
         cycle_length: seedLength,
         cycle_count: seedCount,
         start_date: seedStart,
-        is_active: 1,
+        is_active: 0,
         cellCount: 0,
       };
-      setProgramList((prev) => [
-        ...prev.map((p) => (p.is_active ? { ...p, is_active: 0 as const } : p)),
-        newSummary,
-      ]);
+      setProgramList((prev) => [...prev, newSummary]);
       setProgramId(newId);
+      // New program has no intensities yet — clear any prior selection so it
+      // doesn't ghost (2026-06-04 fix).
+      setSubTag(null);
+      setCustomMode(false);
+      setCustomSubTag('');
+      setLocalSubTags([]);
       setCustomProgramMode(false);
       setCustomProgramName('');
     } catch (err) {
@@ -468,18 +491,31 @@ export function TemplateMetaSheet({
               <View style={styles.field}>
                 <Text style={styles.fieldLabel}>{t('page', 'templateNameFieldLabel')}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, lockName && styles.inputLocked]}
                   value={name}
                   onChangeText={setName}
+                  editable={!lockName}
                   placeholder={defaultName}
                   placeholderTextColor={tokens.text.tertiary}
                 />
               </View>
             )}
 
-            {/* 歸屬計畫 */}
+            {/* 歸屬計畫 — locked (另存強度) renders a single read-only chip;
+                otherwise the full selectable chip row + 「+ 新增計畫」CTA. */}
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>{t('page', 'templateProgramLabel')}</Text>
+              {lockProgram ? (
+                <View style={styles.chipRow}>
+                  <View style={[styles.chip, styles.chipActive, styles.chipLocked]}>
+                    <Text style={[styles.chipText, styles.chipTextActive]}>
+                      {programList.find((p) => p.id === programId)?.name ??
+                        t('common', 'default')}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+              <>
               <View style={styles.chipRow}>
                 <Chip
                   label={t('common', 'default')}
@@ -497,6 +533,15 @@ export function TemplateMetaSheet({
                     active={programId === p.id && !customProgramMode}
                     onPress={() => {
                       setCustomProgramMode(false);
+                      // 2026-06-04 fix — switching program clears the prior
+                      // program's intensity selection so it doesn't linger as a
+                      // ghost chip under a program that doesn't have it.
+                      if (p.id !== programId) {
+                        setSubTag(null);
+                        setCustomMode(false);
+                        setCustomSubTag('');
+                        setLocalSubTags([]);
+                      }
                       setProgramId(p.id);
                     }}
                     styles={styles}
@@ -546,6 +591,8 @@ export function TemplateMetaSheet({
                   </Pressable>
                 </View>
               ) : null}
+              </>
+              )}
             </View>
 
             {/* 強度標籤 — only when a specific program is selected. */}
@@ -719,6 +766,11 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.text.primary,
       backgroundColor: tokens.bg.surface,
     },
+    /** Read-only name input (另存強度 — name locked to current template). */
+    inputLocked: {
+      color: tokens.text.secondary,
+      backgroundColor: tokens.bg.elevated,
+    },
     inlineRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -758,6 +810,10 @@ function makeStyles(tokens: ThemeTokens) {
     chipActive: {
       backgroundColor: tokens.action.primary,
       borderColor: tokens.action.primary,
+    },
+    /** Locked program chip (另存強度 — program fixed, read-only display). */
+    chipLocked: {
+      opacity: 0.7,
     },
     chipText: {
       fontSize: 13,
