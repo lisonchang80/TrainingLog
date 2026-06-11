@@ -24,10 +24,11 @@
 //    low-battery auto-stop) — without delegate the controller would
 //    drift from OS truth.
 //
-//    NOT adopted in D5: HKLiveWorkoutBuilderDelegate (live HR
-//    streaming) — that ships in D17 'Watch in-session live HR
-//    display'. Builder reference is exposed via `builder` (internal)
-//    for D17 to attach its delegate then.
+//    D17 (2026-06-12): HKLiveWorkoutBuilderDelegate adopted — live
+//    sample-cadence (~1Hz HR) streaming into `streamedStats`
+//    (@Published), consumed by the SetLoggerView HRFrozenPane.
+//    Replaces the #312 interim 5s TimelineView poll (ADR-0019 D14
+//    § 2026-06-11 amendment point 5, reversal logged 2026-06-12).
 //
 
 import Foundation
@@ -36,9 +37,10 @@ import Combine
 
 /// Aggregate live readings off the in-flight HKLiveWorkoutBuilder
 /// (#312). Per-field nil = no sample collected yet. Consumed by the
-/// D14 FinishPage tiles (HR range + 動/靜 kcal) and the session-page
-/// HRFrozenPane top bar (latest HR + active kcal, 5s poll).
-struct WorkoutLiveStats {
+/// D14 FinishPage tiles (HR range + 動/靜 kcal, pull on appear) and
+/// the session-page HRFrozenPane top bar (latest HR + active kcal,
+/// D17 delegate-streamed via `streamedStats`).
+struct WorkoutLiveStats: Equatable {
     var hrMin: Double? = nil
     var hrMax: Double? = nil
     var hrLatest: Double? = nil
@@ -62,6 +64,19 @@ final class SessionController: NSObject, ObservableObject {
     @Published private(set) var sessionStartedAt: Date?
     @Published private(set) var sessionEndedAt: Date?
 
+    /// D17 (2026-06-12) — push-based live stats. Recomputed inside
+    /// `workoutBuilder(_:didCollectDataOf:)` whenever HK delivers a
+    /// relevant sample batch (~1Hz for HR), assigned only when the
+    /// values actually changed (a `@Published` struct assign fires
+    /// `objectWillChange` even for an identical value — the equality
+    /// gate IS the throttle: UI re-renders exactly at the data's
+    /// change rate). HRFrozenPane consumes this as a plain value
+    /// threaded down from SetLoggerView, replacing the retired 5s
+    /// TimelineView poll. Reset on `start()` so a new session shows
+    /// "--" until its own first sample lands (10-60s, see skill
+    /// watch-live-workout-stats 坑 2).
+    @Published private(set) var streamedStats = WorkoutLiveStats()
+
     private let healthKit: HealthKitController
     private(set) var session: HKWorkoutSession?
     private(set) var builder: HKLiveWorkoutBuilder?
@@ -77,11 +92,22 @@ final class SessionController: NSObject, ObservableObject {
     /// Aggregate stats read straight off the in-flight live builder
     /// (collecting since `start()`'s beginCollection). Per-field nil when
     /// no sample has landed yet — Simulator runs, HK auth denied, or a
-    /// session too short for the first HR sample. Synchronous + cheap;
-    /// safe to poll every few seconds. Only meaningful while the session
-    /// is active (builder is discarded by `end()`/`cancel()`).
+    /// session too short for the first HR sample. Synchronous + cheap.
+    /// Pull-style API kept for on-appear readers (FinishPage); live
+    /// views should observe `streamedStats` instead (D17). Only
+    /// meaningful while the session is active (builder is discarded by
+    /// `end()`/`cancel()`).
     func liveWorkoutStats() -> WorkoutLiveStats {
         guard let builder else { return WorkoutLiveStats() }
+        return Self.computeStats(from: builder)
+    }
+
+    /// Single source for aggregating live readings off a builder —
+    /// shared by the pull path (`liveWorkoutStats()`, FinishPage
+    /// onAppear) and the D17 push path (builder delegate →
+    /// `streamedStats`). `builder.statistics(for:)` is a cheap local
+    /// synchronous read; per-callback recompute is fine.
+    private static func computeStats(from builder: HKLiveWorkoutBuilder) -> WorkoutLiveStats {
         var stats = WorkoutLiveStats()
         if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate),
            let hr = builder.statistics(for: hrType) {
@@ -117,6 +143,10 @@ final class SessionController: NSObject, ObservableObject {
         state = .starting
         sessionStartedAt = nil
         sessionEndedAt = nil
+        // D17 — wipe the previous session's streamed readings BEFORE
+        // the new builder collects: a restarted session must show "--"
+        // until its own first sample lands, not stale numbers.
+        streamedStats = WorkoutLiveStats()
 
         // Phase 1: HK authorization (Watch-side request — Q22 fallback)
         do {
@@ -144,6 +174,9 @@ final class SessionController: NSObject, ObservableObject {
 
         newSession.delegate = self
         let newBuilder = newSession.associatedWorkoutBuilder()
+        // D17 — live stats streaming: builder delegate feeds
+        // `streamedStats` at sample cadence (see extension below).
+        newBuilder.delegate = self
         newBuilder.dataSource = HKLiveWorkoutDataSource(
             healthStore: healthKit.store,
             workoutConfiguration: config
@@ -237,6 +270,10 @@ final class SessionController: NSObject, ObservableObject {
 
         session = nil
         builder = nil
+        // D17 — parity with the retired poll (which read "--" once the
+        // builder was nil): clear streamed readings so no stale frozen
+        // numbers outlive the session.
+        streamedStats = WorkoutLiveStats()
         sessionEndedAt = endDate
         state = .ended
     }
@@ -267,6 +304,7 @@ extension SessionController: HKWorkoutSessionDelegate {
                     sessionEndedAt = date
                     session = nil
                     builder = nil
+                    streamedStats = WorkoutLiveStats()  // D17 — no stale freeze
                     state = .ended
                 }
             default:
@@ -283,6 +321,57 @@ extension SessionController: HKWorkoutSessionDelegate {
             state = .failed("session failed: \(error.localizedDescription)")
             session = nil
             builder = nil
+            streamedStats = WorkoutLiveStats()  // D17 — no stale freeze
         }
     }
+}
+
+// MARK: - HKLiveWorkoutBuilderDelegate (D17 — live stats streaming)
+
+extension SessionController: HKLiveWorkoutBuilderDelegate {
+
+    /// Called on an HK-internal queue every time the live builder
+    /// collects a sample batch (~1Hz for HR once samples start
+    /// landing). Filter for the three stat-feeding quantity types
+    /// BEFORE the MainActor hop, then recompute `streamedStats` from
+    /// the builder's statistics (same read as `liveWorkoutStats()`).
+    nonisolated func workoutBuilder(
+        _ workoutBuilder: HKLiveWorkoutBuilder,
+        didCollectDataOf collectedTypes: Set<HKSampleType>
+    ) {
+        let relevant = collectedTypes.contains { type in
+            guard let qt = type as? HKQuantityType else { return false }
+            switch HKQuantityTypeIdentifier(rawValue: qt.identifier) {
+            case .heartRate, .activeEnergyBurned, .basalEnergyBurned:
+                return true
+            default:
+                return false
+            }
+        }
+        guard relevant else { return }
+
+        // Hop to main (SessionController is @MainActor). [weak self] —
+        // an in-flight hop must not extend the controller's life
+        // during teardown.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Late callback from a discarded builder — end()/cancel()
+            // already nil'd `builder`, or a restart swapped it. Drop;
+            // `start()` owns the reset-to-empty.
+            guard self.builder === workoutBuilder else { return }
+            let fresh = Self.computeStats(from: workoutBuilder)
+            // Equality gate (see `streamedStats` doc) — assign only on
+            // real change so @Published doesn't re-render SwiftUI for
+            // identical values on every sample batch.
+            if fresh != self.streamedStats {
+                self.streamedStats = fresh
+            }
+        }
+    }
+
+    /// Workout events (pause/resume/segment markers) are out of D17
+    /// scope — protocol requires the method, body intentionally empty.
+    nonisolated func workoutBuilderDidCollectEvent(
+        _ workoutBuilder: HKLiveWorkoutBuilder
+    ) {}
 }
