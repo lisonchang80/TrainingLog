@@ -252,9 +252,12 @@ struct SetLoggerView: View {
                         historyLoad: { exerciseId in
                             await coordinator.requestExerciseHistory(exerciseId: exerciseId)
                         },
-                        // #312 v2 — HRFrozenPane 接真值（即時 HR + 動態
-                        // kcal）。同 historyLoad 的理由用 closure 下傳。
-                        liveStats: { sessionController.liveWorkoutStats() }
+                        // #312 v2 → D17 (2026-06-12) — HRFrozenPane 改吃
+                        // delegate 串流：streamedStats 是 @Published、一變
+                        // 就觸發本 view（@EnvironmentObject 持有處）
+                        // re-render，新「值」直接下傳（取代 closure +
+                        // TimelineView 5s 輪詢）。
+                        liveStats: sessionController.streamedStats
                     )
                     .tag(1)
 
@@ -528,10 +531,13 @@ private struct SessionCardListPage: View {
     /// instantiation in `SetLoggerView`). Cards forward it to `ExerciseHistoryView`.
     let historyLoad: ExerciseHistoryLoad
 
-    /// #312 v2 — live builder stats for the HRFrozenPane top bar
-    /// (即時 HR + 動態 kcal)。Closure-threaded from SetLoggerView where
-    /// the SessionController environment object lives.
-    let liveStats: () -> WorkoutLiveStats
+    /// #312 v2 → D17 (2026-06-12) — live builder stats for the
+    /// HRFrozenPane top bar (即時 HR + 動態 kcal)。D17 起傳「值」不傳
+    /// closure：SetLoggerView（SessionController environment object 持有
+    /// 處）在 `streamedStats` @Published 變動時 re-render、把新值傳下來
+    /// （HKLiveWorkoutBuilderDelegate ~1Hz 串流取代 5s TimelineView
+    /// 輪詢；assign 端有等值閘門、re-render 率＝資料變動率）。
+    let liveStats: WorkoutLiveStats
 
     /// 2026-06-01 — the Digital Crown now drives VERTICAL SCROLL of this
     /// ScrollView (its native behaviour) instead of editing numbers: weight/
@@ -692,44 +698,44 @@ private struct SessionCardListPage: View {
 /// freshly-activated set auto-scrolls to just below it (build7 moved it
 /// off `.safeAreaInset`, which had broken `proxy.scrollTo`).
 ///
-/// Refresh: TimelineView 5s 輪詢 `stats()`（builder.statistics 是本地
-/// 便宜同步讀取）。無樣本顯 "--"（Simulator / 未授權 / 剛開始）。
+/// Refresh: D17 (2026-06-12) — pure display struct。值由 SessionController
+/// `streamedStats`（`HKLiveWorkoutBuilderDelegate` 串流、樣本級 ~1Hz）經
+/// SetLoggerView re-render 下傳，取代原 TimelineView 5s 輪詢（ADR-0019
+/// D14 § 2026-06-11 amendment point 5 降階拍板、2026-06-12 翻盤回正）。
+/// 無樣本顯 "--"（Simulator / 未授權 / 首樣本 10-60s 延遲）。
 private struct HRFrozenPane: View {
-    let stats: () -> WorkoutLiveStats
+    let stats: WorkoutLiveStats
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { _ in
-            let s = stats()
-            HStack(spacing: 4) {
-                Image(systemName: "heart.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                Text(s.hrLatest.map { "\(Int($0.rounded()))" } ?? "--")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
-                Text("bpm")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Image(systemName: "flame.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                Text(s.activeKcal.map { "\(Int($0.rounded()))" } ?? "--")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
-                Text("kcal")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .bottom) {
-                Divider()
-            }
+        HStack(spacing: 4) {
+            Image(systemName: "heart.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+            Text(stats.hrLatest.map { "\(Int($0.rounded()))" } ?? "--")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text("bpm")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Image(systemName: "flame.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Text(stats.activeKcal.map { "\(Int($0.rounded()))" } ?? "--")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text("kcal")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 }
