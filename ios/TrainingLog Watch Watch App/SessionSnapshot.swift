@@ -234,9 +234,15 @@ struct SessionSnapshot: Codable, Equatable {
     }
 }
 
-/// Reply payload for the `start-from-watch` outbound. Top-level
-/// `sessionId` mirrors the snapshot's own sessionId on success; on
-/// failure both `sessionId == ""` and `snapshot == nil`.
+/// Local start-attempt result consumed by `PickerRootView` routing.
+/// Top-level `sessionId` mirrors the snapshot's own sessionId on
+/// success; on failure both `sessionId == ""` and `snapshot == nil`.
+///
+/// Historical note: this used to also be the WIRE reply shape for the
+/// legacy `sendStartFromWatch` sendMessage+replyHandler path (its
+/// `parse(from:)` decoder was deleted 2026-06-12 along with that dead
+/// path). Today the only producer is `PickerViewModel.startFromWatch`'s
+/// locally-built reply (NEW-Q50 D29 offline-first start).
 struct StartFromWatchReply: Equatable {
     let sessionId: String
     let snapshot: SessionSnapshot?
@@ -245,43 +251,5 @@ struct StartFromWatchReply: Equatable {
     /// the session?
     var isOK: Bool {
         return !sessionId.isEmpty && snapshot != nil
-    }
-
-    /// Decode from the raw `[String: Any]` dict that WC delivers via
-    /// `WCSession.sendMessage`'s reply handler. Returns nil if the
-    /// dict is not a well-formed start-from-watch reply (missing
-    /// `sessionId` field entirely, etc.). Empty-sessionId / empty-
-    /// snapshot cases decode to a value with `isOK == false`.
-    static func parse(from dict: [String: Any]) -> StartFromWatchReply? {
-        guard JSONSerialization.isValidJSONObject(dict) else { return nil }
-        guard let sessionId = dict["sessionId"] as? String else { return nil }
-
-        // Empty sessionId ⇒ iPhone-reported failure.
-        if sessionId.isEmpty {
-            return StartFromWatchReply(sessionId: "", snapshot: nil)
-        }
-
-        // Snapshot may be present-but-empty defensively.
-        guard
-            let snapshotDict = dict["snapshot"] as? [String: Any],
-            !snapshotDict.isEmpty
-        else {
-            return StartFromWatchReply(sessionId: sessionId, snapshot: nil)
-        }
-
-        guard
-            let data = try? JSONSerialization.data(
-                withJSONObject: snapshotDict,
-                options: []
-            ),
-            let snapshot = try? JSONDecoder().decode(
-                SessionSnapshot.self,
-                from: data
-            )
-        else {
-            return StartFromWatchReply(sessionId: sessionId, snapshot: nil)
-        }
-
-        return StartFromWatchReply(sessionId: sessionId, snapshot: snapshot)
     }
 }

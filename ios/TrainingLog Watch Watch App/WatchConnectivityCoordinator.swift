@@ -358,8 +358,11 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     // HK lifecycle (SessionController.start()) is intentionally NOT
     // triggered here — D11 set logger owns HK timing.
 
-    /// NEW-Q50 D29 — Watch standalone offline-first send. Replaces the
-    /// legacy `sendStartFromWatch` (sendMessage + replyHandler) path.
+    /// NEW-Q50 D29 — Watch standalone offline-first send. Replaced the
+    /// legacy sendMessage + replyHandler start path (`sendStartFromWatch`,
+    /// deleted 2026-06-12 — it was dead code with two latent mines:
+    /// NSNull payload fields → WCError 7010 reject, and a bare
+    /// continuation with no watchdog → forever-await on a killed iPhone).
     ///
     /// Differences vs legacy:
     ///   - Uses `WCSession.transferUserInfo` → queued by iOS, delivers
@@ -698,80 +701,6 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             status = "tui+msg"
         }
         lastOutbound = "discard-session \(status) sent sess=\(prefix8(sessionId))"
-    }
-
-    /// LEGACY (pre-NEW-Q50) — Send `start-from-watch` to iPhone with
-    /// the user's 3-tuple + await reply. Uses sendMessage + replyHandler
-    /// which requires `isReachable=true` (i.e., iPhone app foregrounded).
-    /// PickerViewModel no longer calls this — kept around as a fallback
-    /// reference until D31 conflict UI ships + Wave 2 cleanup retires it.
-    @available(*, deprecated, message: "Use sendStartFromWatchTUI (NEW-Q50 D29) — TUI path works in background.")
-    func sendStartFromWatch(
-        templateId: String?,
-        programCycleId: String?,
-        intensityId: String?
-    ) async -> StartFromWatchReply? {
-        guard let session, session.activationState == .activated else {
-            lastOutbound = "start-from-watch skip: not activated"
-            return nil
-        }
-        guard session.isReachable else {
-            lastOutbound = "start-from-watch skip: iPhone unreachable"
-            return nil
-        }
-
-        // Per StartFromWatchPayload (payloadSchema.ts): all 3 fields
-        // present, null for absent. NSNull bridges to JSON null on
-        // the WC wire; plain `nil` in a Swift `[String: Any]` drops
-        // the key entirely which makes TS-side optional-chain checks
-        // pass with `undefined` (then JSON.stringify drops it).
-        // Stick with NSNull to match the protocol shape verbatim.
-        let envelope: [String: Any] = [
-            "msgId": UUID().uuidString,
-            "ts": Int64(Date().timeIntervalSince1970 * 1000),
-            "kind": "start-from-watch",
-            "payload": [
-                "templateId": (templateId as Any?) ?? NSNull(),
-                "programCycleId": (programCycleId as Any?) ?? NSNull(),
-                "intensityId": (intensityId as Any?) ?? NSNull(),
-            ],
-        ]
-
-        lastOutbound = "start-from-watch sent"
-            + " template=\(templateId.map(prefix8) ?? "—")"
-            + " program=\(programCycleId.map(prefix8) ?? "—")"
-            + " intensity=\(intensityId.map(prefix8) ?? "—")"
-
-        return await withCheckedContinuation { (cont: CheckedContinuation<StartFromWatchReply?, Never>) in
-            session.sendMessage(
-                envelope,
-                replyHandler: { [weak self] reply in
-                    Task { @MainActor [weak self] in
-                        guard let parsed = StartFromWatchReply.parse(from: reply) else {
-                            self?.lastInbound = "start-from-watch reply: unparseable"
-                            cont.resume(returning: nil)
-                            return
-                        }
-                        if parsed.isOK, let snapshot = parsed.snapshot {
-                            self?.lastInbound =
-                                "session sess=\(self?.prefix8(parsed.sessionId) ?? "?") "
-                            + "ex=\(snapshot.exercises.count)"
-                        } else {
-                            self?.lastInbound =
-                                "start-from-watch reply: iPhone failed"
-                        }
-                        cont.resume(returning: parsed)
-                    }
-                },
-                errorHandler: { [weak self] error in
-                    Task { @MainActor [weak self] in
-                        self?.lastOutbound =
-                            "start-from-watch err: \(error.localizedDescription)"
-                        cont.resume(returning: nil)
-                    }
-                }
-            )
-        }
     }
 
     /// Send the `handshake` envelope to iPhone and await the Stage 1
