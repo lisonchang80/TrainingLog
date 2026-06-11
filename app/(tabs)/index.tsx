@@ -1075,6 +1075,11 @@ export default function TodayScreen() {
         sub_tag: selection.intensity_id,
       });
       closeSheet();
+      // #308 根因 1（A1 alert-and-proceed）— mirror onSheetEdit：fallback 不再
+      // 靜默。Alert 在 startSessionFromTemplate 之後 = 告知型、不阻斷開始。
+      if (resolved.alert) {
+        Alert.alert(resolved.alert.title, resolved.alert.body);
+      }
       await refresh();
       // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
       // See sibling call site in `onStartPlanned` for rationale.

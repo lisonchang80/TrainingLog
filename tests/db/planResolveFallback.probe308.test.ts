@@ -11,7 +11,10 @@
  *   3. `planResolveTarget` → `fallback_with_alert`，template_id 落回
  *      representative（= B·B 變體），並附 alert「尚未建立模板/啟用最新模板」。
  *      → onSheetEdit 會顯示這個 alert；onSheetStart（app/(tabs)/index.tsx
- *      ~L1050）**丟棄 resolved.alert** —— 根因 1（靜默 fallback）。
+ *      ~L1050）pre-A1 **丟棄 resolved.alert** —— 根因 1（靜默 fallback）。
+ *      ✅ A1 已修（slice/308-a1-fallback-alert）：onSheetStart 現在 mirror
+ *      onSheetEdit 顯示 alert（alert-and-proceed）；驗收測試見
+ *      tests/db/sheetStartFallbackAlert.test.ts。
  *   4. `startSessionFromTemplate` 收到 caller 傳的 (program_id=E,
  *      sub_tag=強度E) 但（doc 自述 decorative）**不寫進任何表**；
  *      session 表 schema 也根本沒有 program_id / sub_tag 欄位
@@ -129,7 +132,8 @@ describe('bug #308 probe — fallback alert dropped + subtitle reads linked temp
       wanted_sub_tag: '強度E',
     });
 
-    // fallback 確實帶 alert —— onSheetEdit 顯示它、onSheetStart 丟棄它（根因 1）。
+    // fallback 確實帶 alert —— onSheetEdit 顯示它、onSheetStart pre-A1 丟棄它
+    //（根因 1；A1 後兩者皆顯示）。
     expect(plan).toEqual({
       kind: 'fallback_with_alert',
       template_id: 'tpl-bb',
