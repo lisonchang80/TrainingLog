@@ -81,6 +81,16 @@ final class SessionController: NSObject, ObservableObject {
     private(set) var session: HKWorkoutSession?
     private(set) var builder: HKLiveWorkoutBuilder?
 
+    /// F-1 (稽核 07 2026-06-12) — start-run generation token. `start()`
+    /// suspends at two awaits (ensureAuthorized — first launch parks on
+    /// the system permission dialog for tens of seconds — and
+    /// beginCollection). During a suspension an iPhone-led end can run
+    /// (`stopAndDiscard` admits `.starting`), or even an end + fresh
+    /// `start()`. Each resume point re-checks token + state so a stale
+    /// resume can't resurrect a zombie HK session nothing will ever end
+    /// (the 2026-05-29 green-runner symptom via another door).
+    private var startGeneration = 0
+
     init(healthKit: HealthKitController) {
         self.healthKit = healthKit
         super.init()
@@ -141,6 +151,8 @@ final class SessionController: NSObject, ObservableObject {
         }
 
         state = .starting
+        startGeneration += 1
+        let gen = startGeneration
         sessionStartedAt = nil
         sessionEndedAt = nil
         // D17 — wipe the previous session's streamed readings BEFORE
@@ -152,9 +164,23 @@ final class SessionController: NSObject, ObservableObject {
         do {
             try await healthKit.ensureAuthorized()
         } catch {
-            state = .failed("HK auth failed: \(error.localizedDescription)")
+            // F-1 — only the run that still owns the state machine may
+            // write the terminal state (an interleaved end set .ending /
+            // .ended; a newer start() bumped the generation).
+            if gen == startGeneration, case .starting = state {
+                state = .failed("HK auth failed: \(error.localizedDescription)")
+            }
             return
         }
+
+        // F-1 — re-check after the auth suspension: if an end-during-start
+        // interleave moved us off .starting (or a newer start() took over),
+        // bail BEFORE creating an OS session no UI path would ever end.
+        // Deliberately NOT also gating on Task.isCancelled: a SwiftUI
+        // re-mount cancels the old `.task` while its replacement start()
+        // has already no-op'd on `.starting` — bailing here would leave no
+        // session and no retry (see SetLoggerView re-mount comment).
+        guard gen == startGeneration, case .starting = state else { return }
 
         // Phase 2: configure session + builder + data source
         let config = HKWorkoutConfiguration()
@@ -192,6 +218,16 @@ final class SessionController: NSObject, ObservableObject {
             try await newBuilder.beginCollection(at: startDate)
         } catch {
             state = .failed("beginCollection failed: \(error.localizedDescription)")
+            return
+        }
+
+        // F-1 — same interleave window across the beginCollection await:
+        // only the run that still owns the state machine may declare
+        // .active. When it doesn't, the interleaved stopAndDiscard already
+        // ended the OS session (refs were assigned before the await) — the
+        // extra end() is a terminal-state no-op kept as belt-and-suspenders.
+        guard gen == startGeneration, case .starting = state else {
+            newSession.end()
             return
         }
 
