@@ -10,6 +10,7 @@ import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { BackupTriggers } from '@/components/backup-triggers';
 import { DatabaseProvider } from '@/components/database-provider';
 import { RestoreGate } from '@/components/restore-gate';
 import { t } from '@/src/i18n';
@@ -130,6 +131,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <RestoreGate>
     <DatabaseProvider>
+      {/* Slice 15 C3 — automatic backup triggers (AppState background +
+          cold-start sweep). Inside DatabaseProvider so it only mounts once
+          the DB is open+migrated, and below RestoreGate so a fresh-install
+          sweep can never pre-create the DB file. */}
+      <BackupTriggers />
       <ThemeProvider>
         <NavThemeBridge>
           <Stack>

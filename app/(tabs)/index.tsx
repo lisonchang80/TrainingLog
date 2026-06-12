@@ -38,6 +38,7 @@ import {
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
+import { runBackup } from '@/src/services/backupService';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
 import { reconcileEndSnapshot } from '@/src/services/endSnapshotReconcile';
@@ -2351,7 +2352,16 @@ export default function TodayScreen() {
     // `pushEndToWatch` awaits sendMessage with 5000ms timeout and reconciles
     // `is_watch_tracked` to false if Watch never acks; flag stays true on ack.
     // Never throws — fire-and-forget at the call site. UI has already routed.
-    void pushEndToWatch(db, session_id);
+    //
+    // Slice 15 C3 — session-finalize backup trigger, chained AFTER the watch
+    // reconcile settles (ADR-0011 2026-06-12 grill Q7-B ordering guarantee:
+    // HK sync was awaited above; pushEndToWatch resolves only after the
+    // Watch acked or the 5s timeout reconciled). `runBackup` never throws
+    // and self-gates (mode/debounce), so the whole chain stays
+    // fire-and-forget — finalize UX is never blocked on backup.
+    void pushEndToWatch(db, session_id).then(() => {
+      void runBackup(db, 'session-finalize');
+    });
   };
 
   // Slice 13d D7-TS — keep ref pointed at the latest finalize closure
