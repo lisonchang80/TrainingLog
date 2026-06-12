@@ -67,12 +67,23 @@ const migrations: Record<number, MigrationFn> = {
   26: v026_session_started_at_index,
 };
 
+/**
+ * Highest migration version this app build knows about — the restore
+ * version gate (ADR-0011 amendment, grill Q10-A) compares a backup
+ * candidate's `PRAGMA user_version` against this. Derived from the
+ * `migrations` map so it can NEVER drift from what `migrate()` actually
+ * runs; deliberately not a hardcoded constant.
+ */
+export function migrationsMaxVersion(): number {
+  return Math.max(...Object.keys(migrations).map(Number));
+}
+
 export async function migrate(db: Database): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>(
     'PRAGMA user_version'
   );
   const current = row?.user_version ?? 0;
-  const target = Math.max(...Object.keys(migrations).map(Number));
+  const target = migrationsMaxVersion();
 
   for (let v = current + 1; v <= target; v++) {
     const fn = migrations[v];
