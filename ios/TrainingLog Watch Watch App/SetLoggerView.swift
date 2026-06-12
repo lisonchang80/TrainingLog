@@ -62,6 +62,17 @@ struct SetLoggerView: View {
     /// [完成] keep-path (NOT on discard/abort). See LiveMirrorProducer.swift.
     @StateObject private var liveMirror = LiveMirrorProducer()
 
+    /// point2 live-sync (2026-06-12) — hr/kcal tick producer. Observes
+    /// `sessionController.$streamedStats` (D17 delegate stream) via its
+    /// own Combine sink, throttles to one emit per 4s (spec 3-5s) and
+    /// pushes `hr-tick` / `kcal-tick` envelopes through
+    /// `coordinator.sendHrTick/sendKcalTick` (sendMessage-when-reachable
+    /// only) so the iPhone in-session 5-tile ❤️/🔥 follow the Watch.
+    /// Configured + driven in a `.task` below (same lifetime pattern as
+    /// `liveMirror`); display-only on the iPhone side, so no
+    /// emitFinal()/abort distinction is needed. See LiveTicksProducer.swift.
+    @StateObject private var liveTicks = LiveTicksProducer()
+
     /// D16 ⚙ settings sheet visibility.
     ///
     /// TODO: D10 in-session shell impl 時、搬到 top bar Row 2 最右
@@ -365,6 +376,21 @@ struct SetLoggerView: View {
                     coordinator: coordinator
                 )
                 await liveMirror.run()
+            }
+            // point2 live-sync (2026-06-12) — start the hr/kcal tick
+            // producer. Separate .task (parallel to the live-mirror loop
+            // above); auto-cancels on unmount, which is the producer's
+            // entire teardown story (ticks are display-only ephemera on
+            // the iPhone — nothing to flush or roll back). The Combine
+            // sink inside configure() is what observes streamedStats; no
+            // view-layer .onChange needed.
+            .task {
+                liveTicks.configure(
+                    sessionId: snapshotForRender.sessionId,
+                    controller: sessionController,
+                    coordinator: coordinator
+                )
+                await liveTicks.run()
             }
             // D31 (2026-05-29 late) — conflict alert wire.
             //

@@ -328,6 +328,103 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             + "ex=\(snapshot.exercises.count) rev=\(revStr)"
     }
 
+    // MARK: - Outbound: hr-tick / kcal-tick (point2 live-sync, 2026-06-12)
+    //
+    // Q4 channels #9/#10 — the Watch's 3-5s-throttled live readings for
+    // the iPhone in-session 5-tile panel's ❤️/🔥 tiles. Producer side is
+    // `LiveTicksProducer` (observes SessionController.streamedStats, D17);
+    // iPhone receiver is `watchLiveTicksReceiver.ts` (display-only React
+    // state, per-metric envelope-ts high-water mark).
+    //
+    // Transport: `sendMessage`-when-reachable ONLY — deliberately NOT the
+    // live-mirror dual-fire:
+    //   - NO `updateApplicationContext`: that single latest-state slot is
+    //     owned by the live-mirror raw SessionSnapshot backstop (2026-06-01
+    //     sync fast lane); an envelope-shaped tick pushed there would
+    //     clobber the structural backstop AND land in `onLiveMirror` as a
+    //     bad payload.
+    //   - NO `transferUserInfo`: per the live-kind rule (skill
+    //     wc-add-envelope-kind) a durable FIFO queue replaying stale HR
+    //     ticks minutes later is strictly worse than dropping them — a
+    //     missed tick self-heals on the next 3-5s emit.
+    //
+    // Returns whether the envelope was actually handed to sendMessage so
+    // the producer can keep its per-metric dirty flag on a drop (and
+    // re-send the latest value once the iPhone is reachable again).
+
+    /// Send the latest HR reading. `bpm` travels as Double; the iPhone
+    /// tile formatter rounds for display.
+    @discardableResult
+    func sendHrTick(sessionId: String, bpm: Double, sampleTs: Int64) -> Bool {
+        return sendLiveTick(
+            kind: "hr-tick",
+            sessionId: sessionId,
+            payload: [
+                "sessionId": sessionId,
+                "bpm": bpm,
+                "sampleTs": sampleTs,
+            ]
+        )
+    }
+
+    /// Send the cumulative ACTIVE kcal since session start (latest-wins;
+    /// the iPhone replaces, never sums).
+    @discardableResult
+    func sendKcalTick(sessionId: String, kcal: Double, sampleTs: Int64) -> Bool {
+        return sendLiveTick(
+            kind: "kcal-tick",
+            sessionId: sessionId,
+            payload: [
+                "sessionId": sessionId,
+                "kcal": kcal,
+                "sampleTs": sampleTs,
+            ]
+        )
+    }
+
+    /// Shared tick send. All payload values are non-nil plist types by
+    /// construction (String / Double / Int64) — no NSNull hazard. The
+    /// envelope `ts` is the receiver's per-metric ordering key.
+    private func sendLiveTick(
+        kind: String,
+        sessionId: String,
+        payload: [String: Any]
+    ) -> Bool {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "\(kind) skip: not activated"
+            return false
+        }
+        guard !sessionId.isEmpty else {
+            lastOutbound = "\(kind) skip: empty sessionId"
+            return false
+        }
+        // sendMessage-only transport — unreachable means DROP (producer
+        // keeps the metric dirty and retries next window).
+        guard session.isReachable else {
+            lastOutbound = "\(kind) skip: unreachable"
+            return false
+        }
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": kind,
+            "payload": payload,
+        ]
+        session.sendMessage(
+            envelope,
+            replyHandler: nil,
+            errorHandler: { [weak self] err in
+                Task { @MainActor [weak self] in
+                    let ns = err as NSError
+                    self?.lastOutbound =
+                        "\(kind) msg ERR code=\(ns.code) \(err.localizedDescription)"
+                }
+            }
+        )
+        lastOutbound = "\(kind) sent sess=\(prefix8(sessionId))"
+        return true
+    }
+
     // MARK: - Outbound: handshake (Stage 1, D8 Phase 2)
     //
     // Sends the WC channel #0 `handshake` envelope (per ADR-0019
