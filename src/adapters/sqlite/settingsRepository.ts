@@ -1,4 +1,5 @@
 import type { Database } from '../../db/types';
+import type { BackupErrorKind } from '../../domain/backup/backupErrors';
 import type { UnitPreference } from '../../domain/body/types';
 
 /**
@@ -172,6 +173,12 @@ export interface BackupLastError {
   message: string;
   /** When the failure happened, epoch ms. */
   atMs: number;
+  /**
+   * C5 classified family (`classifyBackupError`) — drives the Settings 紅
+   * error line's i18n copy. Optional for backward compatibility with rows
+   * written before C5 (JSON without the field parses fine → 'unknown' copy).
+   */
+  kind?: BackupErrorKind;
 }
 
 /** Aggregated backup metadata snapshot for policy decisions + Settings readout. */
@@ -244,12 +251,13 @@ export async function recordBackupSuccess(
  */
 export async function recordBackupFailure(
   db: Database,
-  args: { atMs: number; message: string }
+  args: { atMs: number; message: string; kind?: BackupErrorKind }
 ): Promise<void> {
   await setSetting<number>(db, BACKUP_LAST_ATTEMPT_AT_KEY, args.atMs);
   await setSetting<BackupLastError>(db, BACKUP_LAST_ERROR_KEY, {
     message: args.message,
     atMs: args.atMs,
+    ...(args.kind ? { kind: args.kind } : {}),
   });
   const existingAnchor = await getSetting<number>(db, BACKUP_FIRST_ERROR_AT_KEY);
   if (existingAnchor == null) {
