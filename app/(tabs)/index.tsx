@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BackupFailureBanner } from '@/components/backup-failure-banner';
 import { useDatabase } from '@/components/database-provider';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
@@ -2454,6 +2455,10 @@ export default function TodayScreen() {
           contentContainerStyle={styles.idleScroll}
           keyboardShouldPersistTaps="handled">
           <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+          {/* Slice 15 C5 — backup failure escalation banner (Q14-B in-app
+              only). Self-contained: renders null until the 3/7-day streak
+              threshold, idle home screen only (in-session UI stays clean). */}
+          <BackupFailureBanner />
           {/*
             2026-05-29 polish: programBanner removed from idle scroll
             (above 計劃訓練). Rationale per user: visually redundant —
