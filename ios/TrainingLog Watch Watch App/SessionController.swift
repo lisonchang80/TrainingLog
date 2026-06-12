@@ -217,7 +217,24 @@ final class SessionController: NSObject, ObservableObject {
         do {
             try await newBuilder.beginCollection(at: startDate)
         } catch {
-            state = .failed("beginCollection failed: \(error.localizedDescription)")
+            // F-2 (稽核 07) — startActivity already ran, so the OS-side
+            // session is LIVE here. Parking in .failed without a
+            // compensating end() strands it: stopAndDiscard's entry
+            // switch rejects .failed, so [完成]/[放棄] could never
+            // terminate it (green-runner forever), and a retried start()
+            // would overwrite refs while the orphan keeps running.
+            // end() on an already-terminal session (interleaved
+            // stopAndDiscard got there first) is a harmless no-op.
+            newSession.end()
+            // Same ownership rule as the F-1 resume checks: only the run
+            // that still owns the state machine clears refs + writes the
+            // terminal state (an interleaved .ending/.ended owns its own
+            // cleanup; a newer start() owns the refs).
+            if gen == startGeneration, case .starting = state {
+                self.session = nil
+                self.builder = nil
+                state = .failed("beginCollection failed: \(error.localizedDescription)")
+            }
             return
         }
 
