@@ -15,13 +15,29 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useDatabase } from '@/components/database-provider';
+import { useDatabase, useSuspendForRestore } from '@/components/database-provider';
+import {
+  primaryRejectReason,
+  tRestoreBackupDateLine,
+  tRestorePreviewLine,
+  tRestoreRejectReason,
+} from '@/components/restore-gate.behavior';
 import {
   getAuthorizationState,
   requestHKAuthorization,
   type HKPermissionState,
 } from '@/src/adapters/healthkit';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
+import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
+import {
+  discoverBackupCandidates,
+  executeRestore,
+  getRestoreDeps,
+  pickRestorableCandidate,
+  type RestoreOutcome,
+  type RestorePreview,
+  type RestoreServiceDeps,
+} from '@/src/services/restoreService';
 import {
   getAutoPopupRestTimer,
   getUnitPreference,
@@ -85,18 +101,30 @@ export default function SettingsScreen() {
   const [bwSheetOpen, setBwSheetOpen] = useState(false);
   const [bwInput, setBwInput] = useState('');
   const [bwBusy, setBwBusy] = useState(false);
+  /**
+   * Slice 15 C4 — minimal restore entry (grill Q8-C entry B; the full
+   * backup section — auto-backup toggle / 立即備份 / status readout — is
+   * C3's scope). `hasActiveSession` gates the entry per the locked spec:
+   * restoring mid-session would close the DB under the session's feet.
+   * `restoreBusy` guards double-taps through the multi-Alert flow.
+   */
+  const [hasActiveSession, setHasActiveSession] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const suspendForRestore = useSuspendForRestore();
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc, hkState] = await Promise.all([
+    const [u, popup, loc, hkState, activeSession] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
       getAuthorizationState(db),
+      getActiveSession(db),
     ]);
     setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
     setHkAuthState(hkState);
+    setHasActiveSession(activeSession != null);
   }, [db]);
 
   useFocusEffect(
@@ -210,6 +238,86 @@ export default function SettingsScreen() {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBwBusy(false);
+    }
+  };
+
+  /**
+   * Slice 15 C4 — run the swap inside the provider's suspend-runner
+   * (Q12-A): the consumer tree (this screen included) unmounts while the
+   * file is swapped, so no mounted component can touch the closed/old DB
+   * instance (R9). The async continuation here still runs after reopen;
+   * Alert.alert is imperative and survives the unmount.
+   */
+  const performRestore = async (deps: RestoreServiceDeps, preview: RestorePreview) => {
+    // TOCTOU re-check — the row disable is render-time only; a session
+    // could have started (e.g. from the Watch) since the last focus.
+    const active = await getActiveSession(db);
+    if (active) {
+      Alert.alert(t('button', 'restoreBackup'), t('status', 'restoreActiveSessionBlocked'));
+      return;
+    }
+    let outcome: RestoreOutcome | null = null;
+    await suspendForRestore(async () => {
+      outcome = await executeRestore(deps, preview);
+    });
+    const result: RestoreOutcome = outcome ?? {
+      ok: false,
+      step: 'reopen',
+      message: 'unknown',
+      rolledBack: false,
+    };
+    if (result.ok) {
+      Alert.alert(t('alert', 'restoreDone'), t('alert', 'restoreDoneBody'));
+    } else {
+      Alert.alert(
+        t('alert', 'restoreFailed'),
+        result.rolledBack
+          ? `${result.message}\n${t('status', 'restoreRolledBackNote')}`
+          : result.message
+      );
+    }
+  };
+
+  /** Discovery → pick → confirm Alert. Re-entrant via the 重新檢查 button
+   * in the not-found Alert (Q18-A's manual escape hatch). */
+  const onRestorePress = async () => {
+    const deps = getRestoreDeps();
+    if (!deps || restoreBusy) return;
+    setRestoreBusy(true);
+    try {
+      const discovery = await discoverBackupCandidates(deps);
+      if (discovery.status !== 'found') {
+        Alert.alert(t('alert', 'noBackupFound'), t('alert', 'noBackupFoundBody'), [
+          { text: t('common', 'cancel'), style: 'cancel' },
+          { text: t('button', 'recheckBackups'), onPress: () => void onRestorePress() },
+        ]);
+        return;
+      }
+      const pick = await pickRestorableCandidate(deps, discovery.items);
+      if (!pick.ok) {
+        Alert.alert(
+          t('button', 'restoreBackup'),
+          tRestoreRejectReason(primaryRejectReason(pick.rejected.map((r) => r.reason)))
+        );
+        return;
+      }
+      const { preview } = pick;
+      Alert.alert(
+        t('page', 'restoreGateTitle'),
+        `${tRestorePreviewLine(preview.sessionCount, preview.lastSessionAt)}\n` +
+          `${tRestoreBackupDateLine(preview.item.modifiedAt)}\n\n` +
+          t('alert', 'restoreConfirmQ'),
+        [
+          { text: t('common', 'cancel'), style: 'cancel' },
+          {
+            text: t('button', 'restoreBackup'),
+            style: 'destructive',
+            onPress: () => void performRestore(deps, preview),
+          },
+        ]
+      );
+    } finally {
+      setRestoreBusy(false);
     }
   };
 
@@ -329,8 +437,36 @@ export default function SettingsScreen() {
         </Pressable>
         <Text style={styles.hint}>{t('page', 'bodyMetricsHint')}</Text>
 
+        {/* Slice 15 C4 — minimal restore entry (Q8-C entry B). Until the
+            morning integration wires setRestoreDeps(...) the registry is
+            null and the pre-slice-15 placeholder stays. The full backup
+            section (auto toggle / 立即備份 / status readout) lands in C3. */}
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
-        <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
+        {getRestoreDeps() === null ? (
+          <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
+        ) : (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void onRestorePress()}
+              disabled={hasActiveSession || restoreBusy}
+              style={({ pressed }) => [
+                styles.linkRow,
+                (hasActiveSession || restoreBusy) && styles.btnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.linkLabel}>
+                {restoreBusy
+                  ? t('status', 'restoreChecking')
+                  : t('button', 'restoreBackup')}
+              </Text>
+              <Text style={styles.linkChevron}>›</Text>
+            </Pressable>
+            {hasActiveSession ? (
+              <Text style={styles.hint}>{t('status', 'restoreActiveSessionBlocked')}</Text>
+            ) : null}
+          </>
+        )}
 
         {/* Slice 13b — Apple Health 整合 section. iOS one-shot dialog quirk
             means the UI flips state-permanently on first tap (per Q6 grill).
