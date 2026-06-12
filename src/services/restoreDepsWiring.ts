@@ -131,7 +131,18 @@ function buildFileOps(): RestoreFileOps {
   return {
     exists: async (path) => new File(toFileUri(path)).exists,
     copy: async (src, dst) => {
-      new File(toFileUri(src)).copy(new File(toFileUri(dst)));
+      const dstUri = toFileUri(dst);
+      // Audit R-01: on a true fresh install the live DB's parent directory
+      // (Documents/SQLite/) does not exist yet — expo-sqlite only creates it
+      // on first openDatabase(), which is exactly what RestoreGate blocks.
+      // FileManager.copyItem does NOT create intermediates, so copy-in would
+      // throw NSFileNoSuchFileError and the gate's restore could never
+      // succeed. Ensure the destination's parent exists first.
+      const slash = dstUri.lastIndexOf('/');
+      if (slash > 'file://'.length) {
+        new Directory(dstUri.slice(0, slash)).create({ intermediates: true, idempotent: true });
+      }
+      new File(toFileUri(src)).copy(new File(dstUri));
     },
     remove: async (path) => {
       const f = new File(toFileUri(path));
