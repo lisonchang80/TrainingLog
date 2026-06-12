@@ -132,9 +132,31 @@ git push origin main
   (2026-06-06 `achievementRepositoryDefaults.test.ts`: main `9ecedf2` ⊇ branch `8bdf79f`).
 - Sanity: `grep -c -E '^(<<<<<<<|=======|>>>>>>>)' <file>` must be 0 before continue.
 
+## Stale-branch deep-clean（unique>0 ≠ 有救；2026-06-12 驗證、36 條一輪刪光）
+
+The 2026-06-06 sweep deleted the unique=0 buckets and left "21 條 unique>0 需逐條審".
+The deep-clean round proved three things:
+
+- **`unique>0` branches can still be 100% deletable.** patch-id only catches *exact*
+  equivalence; **semantic supersession** needs per-commit `git show --stat` + grep of
+  main's CURRENT code (did a later rewrite/superset land the same behavior?). 2026-06-12:
+  all 21 unique>0 branches → 17 landed-equivalent + 4 premise-expired, **zero salvage**.
+  Default expectation for old overnight/agent branches: delete, not salvage.
+- **ADR-protected branches**: before deleting, grep `docs/adr/` for the branch name. If
+  an ADR says「不刪除、等 X 落地參考」, check whether X has landed (condition expired) —
+  if so: `git tag archive/<b> origin/<b>` + push the tag, add an inline ADR amend
+  （「保留條件已到期、可從 tag 回收」）, THEN delete. (13d-d0-spike-a/c case.)
+- **Sweep beyond the runbook's list**: also run `git cherry` over EVERY
+  `--no-merged` remote not in the runbook — found 15 bonus unique=0 leftovers. Output a
+  copy-paste deletion script in the report but **never execute it in the same read-only
+  pass** — user confirms, then a `for b in ...; do git push origin --delete "$b"; done`
+  loop drains it in one shot.
+
 ## Validated
 2026-06-06 — refreshed `merge-backlog-2026-06-04.md` vs main `876ee0e` (13 of the
 runbook's ~11+ branches re-verified; whole D-stack found already-landed), then
 drained Track A (4 branches: wc-reconcile-tests / nonwc-test-coverage / nonwc-coverage-r2
 [1 commit skipped as redundant] / syncplan-refresh) → main `698b6d7`, jest 2463→2533,
 zero leftover conflicts, 5 branches deleted.
+2026-06-12 — overnight read-only triage (21 listed + 15 bonus) → morning confirm →
+36 remote branches deleted + 2 archive tags; origin reduced to main + 6 Track-B.
