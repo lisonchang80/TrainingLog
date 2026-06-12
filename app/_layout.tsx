@@ -17,6 +17,13 @@ import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 import { ThemeProvider, useTheme } from '@/src/theme';
 import { initWatchBridge } from '@/src/adapters/watch';
+import { wireRestoreDeps } from '@/src/services/restoreDepsWiring';
+
+// Slice 15 morning integration — register the restore engine's production
+// deps (iCloud bridge + file ops + expoDatabase hooks) BEFORE RestoreGate's
+// first render kicks off discovery. Module scope (not an effect): the gate
+// mounts in this same file's first commit, and wireRestoreDeps never throws.
+wireRestoreDeps();
 
 // Suppress benign upstream warning from `react-native-draggable-flatlist@4.0.3`
 // `NestableDraggableFlatList` (file: node_modules/react-native-draggable-flatlist/
