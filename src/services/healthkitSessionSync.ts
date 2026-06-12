@@ -46,7 +46,12 @@
  */
 
 import type { Database } from '../db/types';
-import { getSession, setSessionHealthKitData } from '../adapters/sqlite/sessionRepository';
+import {
+  getSession,
+  getSessionKcal,
+  setSessionHealthKitData,
+  setSessionKcal,
+} from '../adapters/sqlite/sessionRepository';
 import { aggregateActiveEnergyBurned, saveTrainingLogWorkout } from '../adapters/healthkit';
 import type { Session } from '../domain/session/types';
 
@@ -121,5 +126,57 @@ export async function syncSessionWithHealthKit(
     }
   } catch (e) {
     console.warn('[healthkit] finish sync failed:', e);
+  }
+}
+
+interface SessionKcalRehealDeps {
+  /** Defaults to {@link getSession}. */
+  getSession?: (db: Database, id: string) => Promise<Session | null>;
+  /** Defaults to {@link getSessionKcal}. */
+  getSessionKcal?: (db: Database, id: string) => Promise<number | null>;
+  /** Defaults to {@link aggregateActiveEnergyBurned}. */
+  aggregateActiveEnergyBurned?: (startMs: number, endMs: number) => Promise<number | null>;
+  /** Defaults to {@link setSessionKcal}. */
+  setSessionKcal?: (db: Database, args: { id: string; kcal: number }) => Promise<void>;
+}
+
+/**
+ * Lazy kcal re-heal for watch-tracked sessions (2026-06-12).
+ *
+ * `syncSessionWithHealthKit` snapshots kcal AT finalize time, but the
+ * Watch's activeEnergyBurned samples reach the iPhone HK store 1-5 min
+ * later (cross-device HK sync lag) — so watch-tracked sessions freeze at
+ * 0/NULL forever. Detail page calls this on open: when the stored kcal is
+ * still empty, re-run the aggregate and persist once it yields a positive
+ * value. Returns the healed kcal, or `null` when nothing changed (already
+ * healed / not watch-tracked / HK still empty / error).
+ *
+ * Deliberately NEVER calls `saveTrainingLogWorkout` — re-running the
+ * writer would stack duplicate HKWorkout entries in Apple Fitness. The
+ * uuid from the original finish sync is preserved (`setSessionKcal` is
+ * kcal-only).
+ */
+export async function rehealSessionKcal(
+  db: Database,
+  sessionId: string,
+  deps: SessionKcalRehealDeps = {}
+): Promise<number | null> {
+  const getSessionFn = deps.getSession ?? getSession;
+  const getKcalFn = deps.getSessionKcal ?? getSessionKcal;
+  const aggregateFn = deps.aggregateActiveEnergyBurned ?? aggregateActiveEnergyBurned;
+  const setKcalFn = deps.setSessionKcal ?? setSessionKcal;
+
+  try {
+    const session = await getSessionFn(db, sessionId);
+    if (!session || session.ended_at == null || !session.is_watch_tracked) return null;
+    const current = await getKcalFn(db, sessionId);
+    if (current != null && current > 0) return null;
+    const kcal = await aggregateFn(session.started_at, session.ended_at);
+    if (kcal == null || kcal <= 0) return null;
+    await setKcalFn(db, { id: sessionId, kcal });
+    return kcal;
+  } catch (e) {
+    console.warn('[healthkit] kcal re-heal failed:', e);
+    return null;
   }
 }

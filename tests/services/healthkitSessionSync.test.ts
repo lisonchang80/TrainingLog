@@ -38,7 +38,10 @@ jest.mock('@kingstinct/react-native-healthkit', () => ({
   WorkoutActivityType: { traditionalStrengthTraining: 20 },
 }));
 
-import { syncSessionWithHealthKit } from '../../src/services/healthkitSessionSync';
+import {
+  rehealSessionKcal,
+  syncSessionWithHealthKit,
+} from '../../src/services/healthkitSessionSync';
 import type { Session } from '../../src/domain/session/types';
 import type { Database } from '../../src/db/types';
 
@@ -215,5 +218,161 @@ describe('Slice 13c — syncSessionWithHealthKit', () => {
       '[healthkit] finish sync failed:',
       expect.any(Error)
     );
+  });
+});
+
+/**
+ * 2026-06-12 — `rehealSessionKcal` lazy re-heal tests.
+ *
+ * Finalize-time sync runs before the Watch's activeEnergyBurned samples
+ * finish their 1-5 min cross-device HK sync → watch-tracked sessions
+ * freeze at 0/NULL kcal. The detail page re-runs the aggregate on open.
+ * Contract locked in here:
+ *
+ *   1. heals: watch-tracked + ended + empty kcal + aggregate>0 → persist
+ *   2. already healed (kcal>0) → no aggregate, no persist
+ *   3. not watch-tracked → full no-op
+ *   4. HK still empty (aggregate null/0) → no persist, returns null
+ *   5. NEVER touches the HKWorkout writer (dup Apple Fitness entries)
+ *      — guaranteed structurally: the deps surface has no writer slot.
+ */
+describe('2026-06-12 — rehealSessionKcal lazy re-heal', () => {
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('heals: watch-tracked ended session with NULL kcal and aggregate>0 → persists and returns kcal', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: true }));
+    const getSessionKcal = jest.fn().mockResolvedValue(null);
+    const aggregateActiveEnergyBurned = jest.fn().mockResolvedValue(187);
+    const setSessionKcal = jest.fn().mockResolvedValue(undefined);
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBe(187);
+    expect(aggregateActiveEnergyBurned).toHaveBeenCalledWith(STARTED_AT, ENDED_AT);
+    expect(setSessionKcal).toHaveBeenCalledWith(dbStub, { id: SESSION_ID, kcal: 187 });
+  });
+
+  it('heals from a stale 0 snapshot too (finalize aggregated before HK sync)', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: true }));
+    const getSessionKcal = jest.fn().mockResolvedValue(0);
+    const aggregateActiveEnergyBurned = jest.fn().mockResolvedValue(42);
+    const setSessionKcal = jest.fn().mockResolvedValue(undefined);
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBe(42);
+    expect(setSessionKcal).toHaveBeenCalledWith(dbStub, { id: SESSION_ID, kcal: 42 });
+  });
+
+  it('already healed (kcal>0) → skips the aggregate entirely', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: true }));
+    const getSessionKcal = jest.fn().mockResolvedValue(187);
+    const aggregateActiveEnergyBurned = jest.fn();
+    const setSessionKcal = jest.fn();
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBeNull();
+    expect(aggregateActiveEnergyBurned).not.toHaveBeenCalled();
+    expect(setSessionKcal).not.toHaveBeenCalled();
+  });
+
+  it('not watch-tracked → full no-op (no kcal read, no aggregate)', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: false }));
+    const getSessionKcal = jest.fn();
+    const aggregateActiveEnergyBurned = jest.fn();
+    const setSessionKcal = jest.fn();
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBeNull();
+    expect(getSessionKcal).not.toHaveBeenCalled();
+    expect(aggregateActiveEnergyBurned).not.toHaveBeenCalled();
+    expect(setSessionKcal).not.toHaveBeenCalled();
+  });
+
+  it('in-progress session (ended_at=null) → full no-op', async () => {
+    const getSession = jest
+      .fn()
+      .mockResolvedValue(makeSession({ is_watch_tracked: true, ended_at: null }));
+    const getSessionKcal = jest.fn();
+    const aggregateActiveEnergyBurned = jest.fn();
+    const setSessionKcal = jest.fn();
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBeNull();
+    expect(aggregateActiveEnergyBurned).not.toHaveBeenCalled();
+    expect(setSessionKcal).not.toHaveBeenCalled();
+  });
+
+  it('HK still empty (aggregate returns 0/null) → no persist, returns null, retries next open', async () => {
+    for (const empty of [0, null]) {
+      const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: true }));
+      const getSessionKcal = jest.fn().mockResolvedValue(null);
+      const aggregateActiveEnergyBurned = jest.fn().mockResolvedValue(empty);
+      const setSessionKcal = jest.fn();
+
+      const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+        getSession,
+        getSessionKcal,
+        aggregateActiveEnergyBurned,
+        setSessionKcal,
+      });
+
+      expect(healed).toBeNull();
+      expect(setSessionKcal).not.toHaveBeenCalled();
+    }
+  });
+
+  it('aggregate throws → swallowed best-effort, returns null', async () => {
+    const getSession = jest.fn().mockResolvedValue(makeSession({ is_watch_tracked: true }));
+    const getSessionKcal = jest.fn().mockResolvedValue(null);
+    const aggregateActiveEnergyBurned = jest.fn().mockRejectedValue(new Error('HK down'));
+    const setSessionKcal = jest.fn();
+
+    const healed = await rehealSessionKcal(dbStub, SESSION_ID, {
+      getSession,
+      getSessionKcal,
+      aggregateActiveEnergyBurned,
+      setSessionKcal,
+    });
+
+    expect(healed).toBeNull();
+    expect(setSessionKcal).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith('[healthkit] kcal re-heal failed:', expect.any(Error));
   });
 });

@@ -29,6 +29,7 @@ import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { HRZoneChart } from '@/components/session/hr-zone-chart';
 import type { HRSample } from '@/components/session/hr-zone-chart.behavior';
 import { queryHeartRateSamples } from '@/src/adapters/healthkit';
+import { rehealSessionKcal } from '@/src/services/healthkitSessionSync';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
 import { SessionTitleEditor } from '@/components/session/session-title-editor';
 import { ClusterCard } from '@/components/session/cluster-card';
@@ -487,6 +488,26 @@ export default function SessionDetailScreen() {
       cancelled = true;
     };
   }, [session]);
+
+  // kcal lazy re-heal (2026-06-12) — finalize snapshots kcal before the
+  // Watch's activeEnergyBurned samples finish their 1-5 min cross-device
+  // HK sync, so watch-tracked sessions freeze at 0/NULL. Re-run the
+  // aggregate on open until it yields; the service guards (not watch-
+  // tracked / already healed / HK still empty → no-op returning null).
+  useEffect(() => {
+    if (!session || session.ended_at == null) return;
+    let cancelled = false;
+    const sessionId = session.id;
+    (async () => {
+      const healed = await rehealSessionKcal(db, sessionId);
+      if (!cancelled && healed != null) {
+        setSession((prev) => (prev && prev.id === sessionId ? { ...prev, kcal: healed } : prev));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, db]);
 
   // ── Edit mode 進入 / 提交 / 捨棄 三條 path（2026-05-20 night transactional fix）──
   // 用戶反映「修改後按返回未按完成編輯仍然被記錄」。Snapshot/restore approach:

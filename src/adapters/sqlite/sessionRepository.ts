@@ -165,6 +165,32 @@ export async function setSessionHealthKitData(
 }
 
 /**
+ * Current kcal snapshot for one session (NULL when never synced / HK
+ * permission denied). Narrow read for the kcal re-heal path — the domain
+ * `Session` SELECTs deliberately exclude HealthKit columns.
+ */
+export async function getSessionKcal(db: Database, id: string): Promise<number | null> {
+  const row = await db.getFirstAsync<{ kcal: number | null }>(
+    `SELECT kcal FROM session WHERE id = ?`,
+    id
+  );
+  return row?.kcal ?? null;
+}
+
+/**
+ * kcal-only update for the lazy re-heal path (2026-06-12). Unlike
+ * `setSessionHealthKitData` this must NOT touch `healthkit_workout_uuid` —
+ * re-heal re-runs only the aggregate, never the HKWorkout writer, so the
+ * uuid from the original finish sync has to survive.
+ */
+export async function setSessionKcal(
+  db: Database,
+  args: { id: string; kcal: number }
+): Promise<void> {
+  await db.runAsync(`UPDATE session SET kcal = ? WHERE id = ?`, args.kcal, args.id);
+}
+
+/**
  * SQLite row shape for the `session` table SELECTs in this repository —
  * mirrors the column types exactly (`is_watch_tracked INTEGER NOT NULL`
  * arrives as 0/1, not a JS boolean). Mapped to the domain `Session` type
