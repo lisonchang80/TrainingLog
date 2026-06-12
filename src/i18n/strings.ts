@@ -242,6 +242,8 @@ export const strings = {
       startFresh: '全新開始',
       recheckBackups: '重新檢查',
       retryRestore: '重試',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      backupNow: '立即備份',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -305,6 +307,8 @@ export const strings = {
       unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
       autoPopupRestTimerHint:
         '打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      autoBackupHint: '訓練結束、App 進入背景時自動備份到 iCloud。',
       bodyMetricsHint: '體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。',
       // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
       wizardStep3Hint:
@@ -386,6 +390,7 @@ export const strings = {
       reorderFailed: '排序失敗',
       deleteFailed: '刪除失敗',
       saveFailed: '儲存失敗',
+      backupFailed: '備份失敗',
       readFailed: '讀取失敗',
       loadFailed: '載入失敗',
       restoreFailed: '還原失敗',
@@ -520,6 +525,9 @@ export const strings = {
       // settings placeholder
       autoShowRestCountdown: '自動跳出休息倒數',
       backupComingSlice15: '於 slice 15 加入。',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      autoBackupLabel: '自動備份',
+      backupRunning: '備份中…',
       // chart time-range chips
       thisYear: '今年',
       previousYear: '上一年',
@@ -971,6 +979,8 @@ export const strings = {
       startFresh: 'Start fresh',
       recheckBackups: 'Check again',
       retryRestore: 'Retry',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      backupNow: 'Back up now',
     },
 
     page: {
@@ -1029,6 +1039,8 @@ export const strings = {
         'Display unit toggle (data is stored in kg; this only affects display and input).',
       autoPopupRestTimerHint:
         'Auto-show a 60-second countdown after marking a set as complete (close manually or skip).',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      autoBackupHint: 'Backs up to iCloud when a session ends or the app goes to the background.',
       bodyMetricsHint:
         'Bodyweight / PBF / SMM trends and history. Quick input is still available from the Today tab.',
       // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
@@ -1108,6 +1120,7 @@ export const strings = {
       reorderFailed: 'Reorder failed',
       deleteFailed: 'Delete failed',
       saveFailed: 'Save failed',
+      backupFailed: 'Backup failed',
       readFailed: 'Read failed',
       loadFailed: 'Load failed',
       restoreFailed: 'Restore failed',
@@ -1239,6 +1252,9 @@ export const strings = {
       allTimeVolumePr: '★ All-time Volume PR',
       autoShowRestCountdown: 'Auto-show rest countdown',
       backupComingSlice15: 'Coming in slice 15.',
+      // Slice 15 C3 (2026-06-13) — Settings backup section.
+      autoBackupLabel: 'Automatic backup',
+      backupRunning: 'Backing up…',
       thisYear: 'This Year',
       previousYear: 'Previous Year',
       nextYear: 'Next Year',

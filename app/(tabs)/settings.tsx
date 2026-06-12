@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Linking,
   Modal,
@@ -16,6 +17,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase, useSuspendForRestore } from '@/components/database-provider';
+import {
+  tBackupErrorLine,
+  tBackupEscalationLine,
+  tBackupICloudUnavailableLine,
+  tBackupLastLine,
+  uploadStateFromItem,
+} from '@/components/backup-status.behavior';
 import {
   primaryRejectReason,
   tRestoreBackupDateLine,
@@ -42,8 +50,16 @@ import {
   getAutoPopupRestTimer,
   getUnitPreference,
   setAutoPopupRestTimer,
+  setBackupMode,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
+import {
+  getBackupHealth,
+  runBackup,
+  type BackupHealth,
+} from '@/src/services/backupService';
+import { getLatestCloudBackup } from '@/src/adapters/backup/icloudBackupAdapter';
+import type { ICloudBackupItem } from '@/modules/icloud-backup';
 import type { UnitPreference } from '@/src/domain/body/types';
 import { parseWeightInput } from '@/src/domain/body/unitConversion';
 import { t, tBodyweightWithUnit, tSaveOrSaving } from '@/src/i18n';
@@ -111,6 +127,18 @@ export default function SettingsScreen() {
   const [hasActiveSession, setHasActiveSession] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const suspendForRestore = useSuspendForRestore();
+  /**
+   * Slice 15 C3/C5 — backup half of the 備份 / 還原 section.
+   *   - `backupHealth`: metadata + escalation verdict + iCloud availability
+   *     (`getBackupHealth`); `null` while loading. The auto-backup Switch
+   *     reads `metadata.mode` straight from it (optimistic flip on toggle).
+   *   - `latestCloudItem`: newest cloud backup with NSMetadataQuery upload
+   *     state — feeds the R2「已上傳✓/上傳中…」readout suffix.
+   *   - `backupBusy`: 立即備份 in-flight guard (spinner + disable).
+   */
+  const [backupHealth, setBackupHealth] = useState<BackupHealth | null>(null);
+  const [latestCloudItem, setLatestCloudItem] = useState<ICloudBackupItem | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [u, popup, loc, hkState, activeSession] = await Promise.all([
@@ -133,6 +161,27 @@ export default function SettingsScreen() {
     }, [refresh])
   );
 
+  /**
+   * Slice 15 C3 — backup readout refresh, separate from `refresh` so the
+   * (potentially slow, NSMetadataQuery-backed) cloud listing never delays
+   * the rest of the screen. Re-runs on every focus: an automatic backup may
+   * have completed while the user was on another tab.
+   */
+  const refreshBackup = useCallback(async () => {
+    const [health, latest] = await Promise.all([
+      getBackupHealth(db),
+      getLatestCloudBackup(),
+    ]);
+    setBackupHealth(health);
+    setLatestCloudItem(latest);
+  }, [db]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshBackup();
+    }, [refreshBackup])
+  );
+
   const onSet = async (next: UnitPreference) => {
     if (next === unit) return;
     setUnit(next);
@@ -145,6 +194,34 @@ export default function SettingsScreen() {
     // same boolean twice = no-op).
     setAutoPopup(next);
     await setAutoPopupRestTimer(db, next);
+  };
+
+  /** Slice 15 C3 — 自動備份 toggle (ADR-0011 Q14.8: default ON; OFF = 純手動
+   * + escalation threshold 3→7 天, both enforced downstream by backupPolicy). */
+  const onToggleAutoBackup = async (next: boolean) => {
+    // Optimistic, same pattern as onToggleAutoPopup.
+    setBackupHealth((h) =>
+      h ? { ...h, metadata: { ...h.metadata, mode: next ? 'auto' : 'manual' } } : h
+    );
+    await setBackupMode(db, next ? 'auto' : 'manual');
+  };
+
+  /** Slice 15 C3 — 立即備份. `runBackup('manual')` bypasses mode + debounce
+   * (explicit user intent) and never throws; failures come back classified
+   * (C5) and are ALSO persisted to metadata, so the readout below stays in
+   * sync after `refreshBackup`. */
+  const onBackupNow = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    try {
+      const outcome = await runBackup(db, 'manual');
+      if (outcome.status === 'failed') {
+        Alert.alert(t('alert', 'backupFailed'), tBackupErrorLine(outcome.kind));
+      }
+      await refreshBackup();
+    } finally {
+      setBackupBusy(false);
+    }
   };
 
   /**
@@ -437,11 +514,67 @@ export default function SettingsScreen() {
         </Pressable>
         <Text style={styles.hint}>{t('page', 'bodyMetricsHint')}</Text>
 
+        <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
+
+        {/* Slice 15 C3/C5 — backup half of the section: Q15-A permanent red
+            when iCloud is off, auto-backup toggle (Q14.8), 立即備份 button,
+            last-backup readout (R2 upload state), and the C5 red error /
+            escalation lines. All copy comes from backup-status.behavior. */}
+        {backupHealth != null && !backupHealth.iCloudAvailable ? (
+          <Text style={styles.backupWarn}>{tBackupICloudUnavailableLine()}</Text>
+        ) : null}
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={styles.switchLabel}>{t('status', 'autoBackupLabel')}</Text>
+            <Text style={styles.hint}>{t('page', 'autoBackupHint')}</Text>
+          </View>
+          <Switch
+            value={(backupHealth?.metadata.mode ?? 'auto') === 'auto'}
+            onValueChange={onToggleAutoBackup}
+            disabled={backupHealth === null}
+          />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void onBackupNow()}
+          disabled={backupBusy}
+          style={({ pressed }) => [
+            styles.linkRow,
+            backupBusy && styles.btnDisabled,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.linkLabel}>
+            {backupBusy ? t('status', 'backupRunning') : t('button', 'backupNow')}
+          </Text>
+          {backupBusy ? (
+            <ActivityIndicator size="small" />
+          ) : (
+            <Text style={styles.linkChevron}>›</Text>
+          )}
+        </Pressable>
+        {backupHealth != null ? (
+          <Text style={styles.hint}>
+            {tBackupLastLine({
+              lastSuccessAtMs: backupHealth.metadata.lastSuccessAtMs,
+              sizeBytes: backupHealth.metadata.lastSizeBytes,
+              uploadState: uploadStateFromItem(latestCloudItem),
+            })}
+          </Text>
+        ) : null}
+        {backupHealth?.metadata.lastError ? (
+          <Text style={styles.backupWarn}>
+            {tBackupErrorLine(backupHealth.metadata.lastError.kind)}
+          </Text>
+        ) : null}
+        {backupHealth?.escalated ? (
+          <Text style={styles.backupWarn}>
+            {tBackupEscalationLine(backupHealth.escalatedDays)}
+          </Text>
+        ) : null}
+
         {/* Slice 15 C4 — minimal restore entry (Q8-C entry B). Until the
             morning integration wires setRestoreDeps(...) the registry is
-            null and the pre-slice-15 placeholder stays. The full backup
-            section (auto toggle / 立即備份 / status readout) lands in C3. */}
-        <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
+            null and the pre-slice-15 placeholder stays. */}
         {getRestoreDeps() === null ? (
           <Text style={styles.placeholder}>{t('status', 'backupComingSlice15')}</Text>
         ) : (
@@ -665,6 +798,9 @@ function makeStyles(tokens: ThemeTokens) {
     optionActive: { backgroundColor: tokens.action.primary },
     optionLabel: { fontSize: 18, fontWeight: '600' },
     hint: { fontSize: 12, color: tokens.text.secondary },
+    /** Slice 15 C3/C5 — red warning lines in the backup section (Q15-A
+     * iCloud-off / C5 last-error / escalation). */
+    backupWarn: { fontSize: 12, color: tokens.action.destructive },
     placeholder: { fontSize: 14, color: tokens.text.tertiary },
     btnPressed: { opacity: 0.85 },
     linkRow: {
