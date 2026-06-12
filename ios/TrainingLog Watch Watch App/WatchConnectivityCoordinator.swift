@@ -1171,7 +1171,13 @@ enum StartReconcileResult: Equatable {
     )
     case unparseable
 
-    static func parse(from payload: [String: Any]) -> StartReconcileResult {
+    /// point2 live-sync P3 (2026-06-12) — `nonisolated`: this is a pure
+    /// function (no shared state) called synchronously from the
+    /// `nonisolated` WCSessionDelegate `didReceiveUserInfo` callback;
+    /// without the annotation the file-scope MainActor inference makes
+    /// that call a concurrency warning (and a future Swift-6 error).
+    /// Same pattern as the coordinator's `nonisolated prefix8`.
+    nonisolated static func parse(from payload: [String: Any]) -> StartReconcileResult {
         guard let status = payload["status"] as? String else { return .unparseable }
         guard let sessionId = payload["sessionId"] as? String else { return .unparseable }
         switch status {
