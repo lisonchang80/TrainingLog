@@ -140,3 +140,119 @@ export async function setHKAuthorizationRequested(
 ): Promise<void> {
   await setSetting<number>(db, HK_AUTHORIZATION_REQUESTED_KEY, requested ? 1 : 0);
 }
+
+// ---------------------------------------------------------------------------
+// Slice 15 (Backup) — backup metadata keys (ADR-0011 + 2026-06-12 grill Q16-A:
+// `app_settings` keys, NO new migration / no backup_log table).
+//
+// Key inventory:
+//   backup_mode             'auto' | 'manual'  (Q14.8 toggle; default 'auto')
+//   backup_last_success_at  epoch ms of last successful upload
+//   backup_last_attempt_at  epoch ms of last attempt (success OR failure) —
+//                           the 5min debounce anchor (backupPolicy)
+//   backup_last_size        bytes of the last uploaded snapshot
+//   backup_last_error       { message, atMs } of the unhealed failure;
+//                           cleared on success
+//   backup_first_error_at   epoch ms of the FIRST failure since the last
+//                           success — anchors the 3/7-day escalation streak
+//                           for never-succeeded installs; cleared on success
+// ---------------------------------------------------------------------------
+
+const BACKUP_MODE_KEY = 'backup_mode';
+const BACKUP_LAST_SUCCESS_AT_KEY = 'backup_last_success_at';
+const BACKUP_LAST_ATTEMPT_AT_KEY = 'backup_last_attempt_at';
+const BACKUP_LAST_SIZE_KEY = 'backup_last_size';
+const BACKUP_LAST_ERROR_KEY = 'backup_last_error';
+const BACKUP_FIRST_ERROR_AT_KEY = 'backup_first_error_at';
+
+export type BackupModeSetting = 'auto' | 'manual';
+
+export interface BackupLastError {
+  /** Human-oriented failure description (English source; UI maps to i18n later — C5). */
+  message: string;
+  /** When the failure happened, epoch ms. */
+  atMs: number;
+}
+
+/** Aggregated backup metadata snapshot for policy decisions + Settings readout. */
+export interface BackupMetadata {
+  mode: BackupModeSetting;
+  lastSuccessAtMs: number | null;
+  lastAttemptAtMs: number | null;
+  lastSizeBytes: number | null;
+  lastError: BackupLastError | null;
+  firstErrorAtMs: number | null;
+}
+
+/** ADR-0011 Q14.8: 自動備份 toggle 預設 ON ('auto'). */
+export async function getBackupMode(db: Database): Promise<BackupModeSetting> {
+  const v = await getSetting<BackupModeSetting>(db, BACKUP_MODE_KEY);
+  return v === 'manual' ? 'manual' : 'auto';
+}
+
+export async function setBackupMode(
+  db: Database,
+  mode: BackupModeSetting
+): Promise<void> {
+  await setSetting<BackupModeSetting>(db, BACKUP_MODE_KEY, mode);
+}
+
+/** One read for everything the trigger gate / Settings readout needs. */
+export async function getBackupMetadata(db: Database): Promise<BackupMetadata> {
+  const [mode, lastSuccessAtMs, lastAttemptAtMs, lastSizeBytes, lastError, firstErrorAtMs] =
+    await Promise.all([
+      getBackupMode(db),
+      getSetting<number>(db, BACKUP_LAST_SUCCESS_AT_KEY),
+      getSetting<number>(db, BACKUP_LAST_ATTEMPT_AT_KEY),
+      getSetting<number>(db, BACKUP_LAST_SIZE_KEY),
+      getSetting<BackupLastError>(db, BACKUP_LAST_ERROR_KEY),
+      getSetting<number>(db, BACKUP_FIRST_ERROR_AT_KEY),
+    ]);
+  return {
+    mode,
+    lastSuccessAtMs: lastSuccessAtMs ?? null,
+    lastAttemptAtMs: lastAttemptAtMs ?? null,
+    lastSizeBytes: lastSizeBytes ?? null,
+    lastError: lastError ?? null,
+    firstErrorAtMs: firstErrorAtMs ?? null,
+  };
+}
+
+/**
+ * Record a successful backup upload: stamps success + attempt + size and
+ * HEALS the failure streak (clears last_error + first_error_at) so the
+ * escalation gate (`shouldEscalateBackupFailure`) goes quiet.
+ */
+export async function recordBackupSuccess(
+  db: Database,
+  args: { atMs: number; sizeBytes: number | null }
+): Promise<void> {
+  await setSetting<number>(db, BACKUP_LAST_SUCCESS_AT_KEY, args.atMs);
+  await setSetting<number>(db, BACKUP_LAST_ATTEMPT_AT_KEY, args.atMs);
+  if (args.sizeBytes != null) {
+    await setSetting<number>(db, BACKUP_LAST_SIZE_KEY, args.sizeBytes);
+  }
+  await deleteSetting(db, BACKUP_LAST_ERROR_KEY);
+  await deleteSetting(db, BACKUP_FIRST_ERROR_AT_KEY);
+}
+
+/**
+ * Record a failed backup attempt: stamps attempt + last_error, and anchors
+ * `backup_first_error_at` only when starting a NEW streak (key absent) —
+ * repeated failures keep the original anchor so the 3/7-day escalation
+ * window measures the streak, not the latest retry.
+ */
+export async function recordBackupFailure(
+  db: Database,
+  args: { atMs: number; message: string }
+): Promise<void> {
+  await setSetting<number>(db, BACKUP_LAST_ATTEMPT_AT_KEY, args.atMs);
+  await setSetting<BackupLastError>(db, BACKUP_LAST_ERROR_KEY, {
+    message: args.message,
+    atMs: args.atMs,
+  });
+  const existingAnchor = await getSetting<number>(db, BACKUP_FIRST_ERROR_AT_KEY);
+  if (existingAnchor == null) {
+    await setSetting<number>(db, BACKUP_FIRST_ERROR_AT_KEY, args.atMs);
+  }
+}
