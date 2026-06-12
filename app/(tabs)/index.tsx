@@ -55,6 +55,12 @@ import {
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
 import {
+  applyHrTick,
+  applyKcalTick,
+  liveTicksForSession,
+  type WatchLiveTicks,
+} from '@/src/services/watchLiveTicksReceiver';
+import {
   deleteSetting,
   getAutoPopupRestTimer,
   getSetting,
@@ -311,6 +317,19 @@ export default function TodayScreen() {
     program_name: string | null;
     sub_tag: string | null;
   } | null>(null);
+
+  /**
+   * point2 live-sync (2026-06-12) — latest Watch hr-tick / kcal-tick
+   * readings (Q4 channels #9/#10). Display-only ephemera feeding the
+   * in-session 5-tile panel's ❤️/🔥 tiles; never persisted (a live tick
+   * must not be able to resurrect a discarded session — live-mirror
+   * audit H1 class). Reducers + the per-session projection live in
+   * `watchLiveTicksReceiver.ts`; listeners mount in the WC useEffect
+   * below alongside live-mirror.
+   */
+  const [watchLiveTicks, setWatchLiveTicks] = useState<WatchLiveTicks | null>(
+    null,
+  );
 
   /**
    * StartTemplateSheet wire-up (ADR-0024 § 2.c). `sheetTemplate != null`
@@ -705,6 +724,22 @@ export default function TodayScreen() {
       await onLiveMirror(db, env.payload);
       refreshRef.current?.();
     });
+    // point2 live-sync (2026-06-12) — hr-tick / kcal-tick inbound (Q4
+    // channels #9/#10). The Watch's LiveTicksProducer throttles its D17
+    // `streamedStats` stream to one emit per 3-5s and sends each metric
+    // as its own `sendMessage` envelope (NO TUI — a durable queue
+    // replaying stale ticks is worse than dropping them; NO appContext —
+    // that slot is the live-mirror snapshot's backstop). Display-only:
+    // no DB, no refresh() — just the React state feeding the 5-tile
+    // panel's ❤️/🔥 tiles. The reducers runtime-validate + drop
+    // stale/out-of-order ticks and return the SAME reference on reject,
+    // so setState skips the re-render.
+    const unsubHrTick = addMessageListener('hr-tick', (env) => {
+      setWatchLiveTicks((prev) => applyHrTick(prev, env));
+    });
+    const unsubKcalTick = addMessageListener('kcal-tick', (env) => {
+      setWatchLiveTicks((prev) => applyKcalTick(prev, env));
+    });
     return () => {
       unsubHandshake();
       unsubHistory();
@@ -714,6 +749,8 @@ export default function TodayScreen() {
       unsubDiscardSession();
       unsubLiveMirror();
       unsubLiveMirrorMsg();
+      unsubHrTick();
+      unsubKcalTick();
     };
     // Intentional empty deps — db handle stable; refresh read via ref.
     // Listeners mount once on component mount.
@@ -2536,6 +2573,15 @@ export default function TodayScreen() {
 
   // sessionState.status === 'in_progress' (ended is unreachable: we navigate away)
 
+  // point2 live-sync (2026-06-12) — project the latest Watch hr/kcal
+  // ticks onto THIS session. Cross-session (or absent) ticks render as
+  // null → the panel's '—' fallback, so a stale tick from a just-ended
+  // session can never paint onto a new session's tiles.
+  const liveTicks = liveTicksForSession(
+    watchLiveTicks,
+    getSessionId(sessionState),
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView
@@ -2601,12 +2647,18 @@ export default function TodayScreen() {
               surfaced into SessionState by `fromRow`) is true — i.e. the
               session is being driven from the paired Apple Watch. Falls
               back to the legacy 3-tile layout otherwise.
-              HR / kcal still read '—' until Watch HK ingest lands. */}
+              point2 live-sync (2026-06-12): ❤️/🔥 now stream from the
+              Watch via hr-tick / kcal-tick (3-5s throttle) — `liveTicks`
+              is the session-gated projection computed above; '—' until
+              the first tick lands (HR's first HK sample can take
+              10-60s). avgHr carries the LATEST bpm (matches the Watch's
+              own HRFrozenPane semantics), kcal is cumulative active
+              energy since session start. */}
           {sessionState.status === 'in_progress' ? (
             <SessionStatsPanel
               variant={sessionState.is_watch_tracked ? '5tile-watch' : '3tile'}
-              kcal={null}
-              avgHr={null}
+              kcal={liveTicks.kcal}
+              avgHr={liveTicks.bpm}
               sets={setsInSession.map((s) => ({
                 set_kind: s.set_kind,
                 is_logged: s.is_logged,

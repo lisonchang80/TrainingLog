@@ -390,9 +390,18 @@ export interface ExerciseDeletedPayload {
 
 /**
  * `hr-tick` — Watch → iPhone (Q4 channel #9, Q14 (c), Q15). 3-5s
- * throttled via `applicationContext` (per ADR-0019 NEW design rule —
- * not `sendMessage`; this protocol-layer type doesn't care about the
- * transport). Latest-wins; envelope `ts` orders against prior tick.
+ * throttled on the Watch (`LiveTicksProducer.swift`). Latest-wins;
+ * envelope `ts` orders against prior tick.
+ *
+ * Transport (point2 live-sync, 2026-06-12 — supersedes the original
+ * D-planning note that said applicationContext): `sendMessage` when
+ * reachable ONLY. The Watch→iPhone applicationContext slot is owned by
+ * the live-mirror raw `SessionSnapshot` backstop (sync fast lane
+ * 2026-06-01) — a tick pushed there would clobber it; and TUI is out
+ * per the live-kind rule (a durable queue replaying stale HR minutes
+ * later is worse than dropping — a missed tick self-heals on the next
+ * 3-5s emit). Receiver: `watchLiveTicksReceiver.ts` (display-only
+ * React state, no DB).
  */
 export interface HrTickPayload {
   sessionId: string;
@@ -403,8 +412,8 @@ export interface HrTickPayload {
 
 /**
  * `kcal-tick` — Watch → iPhone (Q4 channel #10, Q14 (c)). Same
- * throttle + transport as `hr-tick`; cumulative kcal since session
- * start.
+ * throttle + transport as `hr-tick` (sendMessage-when-reachable only —
+ * see `HrTickPayload` doc); cumulative ACTIVE kcal since session start.
  */
 export interface KcalTickPayload {
   sessionId: string;
