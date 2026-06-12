@@ -625,20 +625,11 @@ export default function TodayScreen() {
     // So post-F4 this listener IS the live handling path whenever the
     // sendMessage leg wins intake; the TUI listener above owns the
     // TUI-leg-wins + background/queued-delivery cases. Removal
-    // precondition: Watch Swift single-fires (TUI only), or this leg's
-    // ack is unified with the reverse-TUI `start-reconcile` path first.
-    //
-    // Known residual (audit 01 F3): when THIS leg wins, the ack closure
-    // below no-ops (Watch sends `replyHandler:nil` → `reply` is
-    // undefined here), so no `start-reconcile` goes back — Watch would
-    // miss 'created' (no consumer today) and, intermittently,
-    // 'conflict'. Candidate fix: also `sendUserInfo(makeEnvelope(
-    // 'start-reconcile', response))` from this leg — JS-only but needs
-    // device smoke, deliberately NOT done in the 2026-06-12 overnight
-    // TS-cleanup pass.
+    // precondition: Watch Swift single-fires (TUI only) — ack is now
+    // unified (below), but this leg is still the msg-leg dispatch path.
     const unsubStartFromWatchV1 = addMessageListener(
       'start-from-watch',
-      async (env, reply) => {
+      async (env) => {
         // 2026-05-29 deep-night smoke fix (B2): same uuid injection as
         // the TUI path above — Watch templates need to materialise
         // template_name + exercise tree, not collapse to freestyle.
@@ -646,9 +637,14 @@ export default function TodayScreen() {
           db,
           env,
           (response) => {
-            if (reply) {
-              reply(response as unknown as Record<string, unknown>);
-            }
+            // 2026-06-12 (audit 01 F3 residual): the Watch sendMessage
+            // leg fires with `replyHandler:nil`, so a message-channel
+            // reply can never reach it — ack MUST go reverse-TUI like
+            // the TUI path above, or a msg-leg win drops the
+            // 'conflict' reconcile (alert intermittently missing).
+            // Watch dedupes start-reconcile via Equatable onChange, so
+            // an ack per winning leg is safe.
+            sendUserInfo(makeEnvelope('start-reconcile', response));
           },
           randomUUID,
         );
