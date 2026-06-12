@@ -581,24 +581,42 @@ export default function TodayScreen() {
         refreshRef.current?.();
       },
     );
-    // NEW-Q50 D9 Wave 2 wire-in (2026-05-29 night smoke) — TEMPORARY v1
-    // compat: Watch Swift `WatchConnectivityCoordinator.sendStartFromWatch`
-    // still uses `session.sendMessage(_:replyHandler:)` (D8 P3 path);
-    // until D29-D33 Swift lands the `transferUserInfo` + reverse-TUI
-    // listener, the TUI listener above never fires for real Watch
-    // sends. This adjacent `addMessageListener` bridges the gap by
-    // acking the StartFromWatchReconcile directly via the sendMessage
-    // replyHandler (no `start-reconcile` envelope wrap — Watch picks it
-    // up as the immediate sendMessage reply).
+    // NEW-Q50 D9 Wave 2 wire-in (2026-05-29) — `start-from-watch`
+    // message-channel listener (the Watch's sendMessage leg).
     //
-    // `onStartFromWatch` is idempotent (INSERT OR IGNORE per Q5
-    // first-write-wins keyed on sessionId), so dual-path coexistence
-    // is safe — if Watch ever fires both (e.g. mid-transition), the
-    // second hit becomes a no-op on the DB side.
+    // ⚠️ DO NOT REMOVE as "v1 compat debt" — verified 2026-06-12 (F3
+    // cleanup STOP). An older revision of this comment said "REMOVE
+    // THIS BLOCK once D30 active"; that became WRONG when audit-F4
+    // made the msgId dedupe ring SHARED across both intake channels:
     //
-    // REMOVE THIS BLOCK once Watch Swift `sendStartFromWatch` swaps to
-    // `session.transferUserInfo` + the reverse-TUI listener (D30) is
-    // active. Tracked in MEMORY backlog (D29-D33).
+    //   - Watch Swift `sendStartFromWatchTUI` + `resendStartFromWatch`
+    //     still DUAL-FIRE the same envelope (same msgId) via
+    //     transferUserInfo AND sendMessage (the sendMessage leg exists
+    //     because foreground TUI latency is unpredictable — minutes of
+    //     queueing observed 2026-05-29).
+    //   - The 'message' intake (connectivity.ts) claims the msgId in
+    //     the shared ring BEFORE the handler-existence check, and parks
+    //     handler-less envelopes in the pre-handler buffer (#287 Fix C).
+    //   - If this listener were removed: sendMessage leg arrives first
+    //     (the common foreground case) → claims the ring → no message-
+    //     channel handler → parked forever → the TUI leg is then
+    //     dropped as a ring dup → `onStartFromWatch` never runs →
+    //     Watch-initiated start silently lost on iPhone.
+    //
+    // So post-F4 this listener IS the live handling path whenever the
+    // sendMessage leg wins intake; the TUI listener above owns the
+    // TUI-leg-wins + background/queued-delivery cases. Removal
+    // precondition: Watch Swift single-fires (TUI only), or this leg's
+    // ack is unified with the reverse-TUI `start-reconcile` path first.
+    //
+    // Known residual (audit 01 F3): when THIS leg wins, the ack closure
+    // below no-ops (Watch sends `replyHandler:nil` → `reply` is
+    // undefined here), so no `start-reconcile` goes back — Watch would
+    // miss 'created' (no consumer today) and, intermittently,
+    // 'conflict'. Candidate fix: also `sendUserInfo(makeEnvelope(
+    // 'start-reconcile', response))` from this leg — JS-only but needs
+    // device smoke, deliberately NOT done in the 2026-06-12 overnight
+    // TS-cleanup pass.
     const unsubStartFromWatchV1 = addMessageListener(
       'start-from-watch',
       async (env, reply) => {
