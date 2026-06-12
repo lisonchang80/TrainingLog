@@ -66,7 +66,7 @@ describe('createBackupSnapshot — happy path', () => {
       path: `/sandbox/Documents/SQLite/${SNAPSHOT_NAME}`,
       name: SNAPSHOT_NAME,
     });
-    expect(openMock).toHaveBeenCalledWith('traininglog.db');
+    expect(openMock).toHaveBeenCalledWith('traininglog.db', { useNewConnection: true });
     expect(openMock).toHaveBeenCalledWith(SNAPSHOT_NAME);
     expect(backupMock).toHaveBeenCalledWith({
       sourceDatabase: srcDb,

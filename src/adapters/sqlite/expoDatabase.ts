@@ -126,6 +126,15 @@ export interface BackupSnapshotResult {
  * serializer is irrelevant here: it guards BEGIN overlap on ONE connection;
  * the backup never issues transactions on the live connection at all.
  *
+ * ⚠️ Audit R-04 (2026-06-13): a plain `openDatabaseAsync(DB_FILE)` would NOT
+ * give a dedicated connection — expo-sqlite's native layer keeps a same-path
+ * connection cache and would hand back the live singleton's NativeDatabase
+ * with a bumped refCount (SQLiteModule.swift findCachedDatabase/addRef). The
+ * refCount side effect would then make `closeAndResetForRestore`'s
+ * closeAsync a release-not-close if backup and restore ever overlapped.
+ * `useNewConnection: true` bypasses that cache so the premise above actually
+ * holds: src here is truly separate, and `src.closeAsync()` truly closes it.
+ *
  * ## Preconditions / caveats
  *   - Call only after boot has opened + migrated the live DB (all C3
  *     triggers run post-boot). Calling on a missing file would snapshot a
@@ -168,7 +177,8 @@ export async function createBackupSnapshot(
   try {
     let destPath: string;
     try {
-      src = await sqlite.openDatabaseAsync(DB_FILE);
+      // useNewConnection — see R-04 note in the docblock above.
+      src = await sqlite.openDatabaseAsync(DB_FILE, { useNewConnection: true });
       dest = await sqlite.openDatabaseAsync(name);
       destPath = dest.databasePath;
       await sqlite.backupDatabaseAsync({ sourceDatabase: src, destDatabase: dest });
