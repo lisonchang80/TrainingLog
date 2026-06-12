@@ -237,6 +237,11 @@ export const strings = {
       // Slice 13b (2026-05-25) — Settings 「Apple Health 整合」CTA.
       connectAppleHealth: '連結 Apple Health',
       openSystemSettings: '開啟系統設定',
+      // Slice 15 C4 (2026-06-13) — restore engine entry points.
+      restoreBackup: '還原備份',
+      startFresh: '全新開始',
+      recheckBackups: '重新檢查',
+      retryRestore: '重試',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -368,6 +373,8 @@ export const strings = {
       hrZoneSection: '心率區間',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health 整合',
+      // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
+      restoreGateTitle: '發現 iCloud 備份',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -466,6 +473,12 @@ export const strings = {
       deleteAllSameNameTemplatesQ: '刪除所有同名模板？',
       confirmDeleteQ: '確認刪除？',
       saveAsTemplateStubBody: 'production 補齊三元組 UI（ADR-0014）。slice 9.5 暫不實作。',
+      // Slice 15 C4 (2026-06-13) — restore flow.
+      restoreDone: '還原完成',
+      restoreDoneBody: '資料已還原。',
+      restoreConfirmQ: '要還原這份備份嗎？目前的資料會被取代。',
+      noBackupFound: '找不到 iCloud 備份',
+      noBackupFoundBody: 'iCloud 可能尚未同步完成，請稍後重新檢查。',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -578,6 +591,12 @@ export const strings = {
       appleHealthIntro: 'TrainingLog 會讀取 Apple Watch 訓練期間的心率與消耗熱量；無 Apple Watch 紀錄時、會寫入訓練紀錄讓 Fitness App 顯示。',
       appleHealthConnected: '已連結 Apple Health',
       managePermissionHint: '權限管理請至「設定 → 隱私 → 健康 → TrainingLog」。',
+      // Slice 15 C4 (2026-06-13) — RestoreGate + Settings restore entry.
+      restoreChecking: '正在檢查 iCloud 備份…',
+      restoreRestoring: '還原中…',
+      restoreActiveSessionBlocked: '訓練進行中，結束後才能還原',
+      restoreFreshLaterHint: '稍後可在「設定 → 備份 / 還原」還原備份。',
+      restoreRolledBackNote: '已復原原本的資料。',
     },
 
     /**
@@ -947,6 +966,11 @@ export const strings = {
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 CTA.
       connectAppleHealth: 'Connect Apple Health',
       openSystemSettings: 'Open System Settings',
+      // Slice 15 C4 (2026-06-13) — restore engine entry points.
+      restoreBackup: 'Restore backup',
+      startFresh: 'Start fresh',
+      recheckBackups: 'Check again',
+      retryRestore: 'Retry',
     },
 
     page: {
@@ -1072,6 +1096,8 @@ export const strings = {
       hrZoneSection: 'Heart rate zones',
       // Slice 13b (2026-05-25) — Settings Apple Health 整合 section header.
       appleHealthSection: 'Apple Health Integration',
+      // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
+      restoreGateTitle: 'iCloud Backup Found',
     },
 
     alert: {
@@ -1171,6 +1197,12 @@ export const strings = {
       deleteAllSameNameTemplatesQ: 'Delete all same-name templates?',
       confirmDeleteQ: 'Confirm delete?',
       saveAsTemplateStubBody: 'Triple UI to be completed in production (ADR-0014). Not implemented in slice 9.5.',
+      // Slice 15 C4 (2026-06-13) — restore flow.
+      restoreDone: 'Restore complete',
+      restoreDoneBody: 'Your data has been restored.',
+      restoreConfirmQ: 'Restore this backup? Current data will be replaced.',
+      noBackupFound: 'No iCloud backup found',
+      noBackupFoundBody: 'iCloud may still be syncing — check again in a moment.',
     },
 
     status: {
@@ -1276,6 +1308,12 @@ export const strings = {
       appleHealthIntro: 'TrainingLog reads heart rate and active energy from Apple Watch workouts; it writes a workout entry to the Fitness app for sessions without Apple Watch tracking.',
       appleHealthConnected: 'Connected to Apple Health',
       managePermissionHint: 'Manage permissions at Settings → Privacy → Health → TrainingLog.',
+      // Slice 15 C4 (2026-06-13) — RestoreGate + Settings restore entry.
+      restoreChecking: 'Checking iCloud for backups…',
+      restoreRestoring: 'Restoring…',
+      restoreActiveSessionBlocked: 'Finish the active session before restoring',
+      restoreFreshLaterHint: 'You can restore later in Settings → Backup / Restore.',
+      restoreRolledBackNote: 'Your previous data was put back.',
     },
 
     equipment: {

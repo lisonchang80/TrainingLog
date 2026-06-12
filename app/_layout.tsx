@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { DatabaseProvider } from '@/components/database-provider';
+import { RestoreGate } from '@/components/restore-gate';
 import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
@@ -109,8 +110,18 @@ export default function RootLayout() {
     initWatchBridge();
   }, []);
 
+  // Slice 15 C4 (ADR-0011 grill Q9-A) — RestoreGate MUST wrap
+  // DatabaseProvider: the fresh-install signal is the DB file's absence,
+  // and DatabaseProvider's openDatabase() would create the file on mount.
+  // While the gate is checking/prompting, nothing below renders, so SQLite
+  // stays untouched. Boot-order constraints are preserved: locale (above)
+  // and theme (inside <ThemeProvider/>) hydrate from AsyncStorage
+  // independently of the gate; the ADR-0023/0025 "theme hydrate before
+  // SQLite open" ordering is unchanged — the gate only ever DELAYS the
+  // SQLite open, never reorders it ahead of hydration.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <RestoreGate>
     <DatabaseProvider>
       <ThemeProvider>
         <NavThemeBridge>
@@ -205,6 +216,7 @@ export default function RootLayout() {
         </NavThemeBridge>
       </ThemeProvider>
     </DatabaseProvider>
+    </RestoreGate>
     </GestureHandlerRootView>
   );
 }

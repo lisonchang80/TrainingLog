@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -18,9 +19,22 @@ import { backfillAchievementsIfNeeded } from '@/src/adapters/sqlite/achievementR
  *
  * Repository functions are NOT exposed here — call them directly with the
  * Database returned by `useDatabase()`. Keeps UI layer dependency-light.
+ *
+ * Slice 15 C4 — also exposes `useSuspendForRestore()`: the in-place-swap
+ * runner (grill Q12-A) for the Settings restore entry. It unmounts the whole
+ * consumer tree (db → null) BEFORE the restore engine closes/swaps the DB
+ * file, then re-opens and re-publishes the new instance. Unmounting first is
+ * the R9 mitigation: long-lived closures that captured the old `Database`
+ * (home-screen WC handlers, focus effects) are torn down with their screens,
+ * and the watch bridge's pre-handler replay buffers park any envelope that
+ * arrives mid-restore until handlers re-register against the NEW instance.
  */
 
 const DatabaseContext = createContext<Database | null>(null);
+
+type SuspendForRestore = (fn: () => Promise<void>) => Promise<void>;
+
+const DatabaseRestoreContext = createContext<SuspendForRestore | null>(null);
 
 export function DatabaseProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<Database | null>(null);
@@ -45,6 +59,26 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Slice 15 C4 (Q12-A) — see module docblock. `fn` is expected to be the
+  // restore engine's executeRestore call; whatever it does, the finally
+  // block re-opens (the restore engine's reopenLive already re-ran
+  // migrations on success / rollback) and re-publishes. A reopen failure
+  // lands on the same error screen as a boot-open failure.
+  const suspendForRestore = useCallback<SuspendForRestore>(async (fn) => {
+    setDb(null);
+    try {
+      await fn();
+    } finally {
+      try {
+        const d = await openDatabase();
+        await backfillAchievementsIfNeeded(d);
+        setDb(d);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+  }, []);
+
   if (error) {
     return (
       <View style={styles.center}>
@@ -62,7 +96,11 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  return <DatabaseContext.Provider value={db}>{children}</DatabaseContext.Provider>;
+  return (
+    <DatabaseRestoreContext.Provider value={suspendForRestore}>
+      <DatabaseContext.Provider value={db}>{children}</DatabaseContext.Provider>
+    </DatabaseRestoreContext.Provider>
+  );
 }
 
 export function useDatabase(): Database {
@@ -74,6 +112,23 @@ export function useDatabase(): Database {
     );
   }
   return db;
+}
+
+/**
+ * Slice 15 C4 — the Q12-A in-place-swap runner for the Settings restore
+ * entry. The caller's screen UNMOUNTS while `fn` runs (provider shows the
+ * boot spinner); the async continuation after `await suspend(...)` still
+ * executes, so imperative follow-ups (Alert.alert) are fine.
+ */
+export function useSuspendForRestore(): SuspendForRestore {
+  const suspend = useContext(DatabaseRestoreContext);
+  if (!suspend) {
+    throw new Error(
+      'useSuspendForRestore() must be used inside <DatabaseProvider>. ' +
+        'Wrap your tree in app/_layout.tsx.'
+    );
+  }
+  return suspend;
 }
 
 const styles = StyleSheet.create({
