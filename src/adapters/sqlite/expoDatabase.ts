@@ -76,3 +76,132 @@ export function openDatabase(): Promise<Database> {
   }
   return cached;
 }
+
+// ---------------------------------------------------------------------------
+// Slice 15 (Backup) — APPEND-ONLY ZONE. Parallel slice-15 work (restore's
+// `closeAndResetForRestore`) also appends to this file; keep everything above
+// this line byte-identical so the merge face stays minimal.
+// ---------------------------------------------------------------------------
+
+/**
+ * Classified failure from {@link createBackupSnapshot}.
+ *
+ *   - 'snapshot-failed'        — open / sqlite3_backup error (transient: a
+ *                                concurrent write transaction can surface as
+ *                                SQLITE_BUSY; the next trigger retries)
+ *   - 'integrity-check-failed' — the produced file failed `PRAGMA
+ *                                quick_check` (never upload a bad snapshot)
+ */
+export class BackupSnapshotError extends Error {
+  constructor(
+    readonly kind: 'snapshot-failed' | 'integrity-check-failed',
+    message: string
+  ) {
+    super(message);
+    this.name = 'BackupSnapshotError';
+  }
+}
+
+export interface BackupSnapshotResult {
+  /** Absolute filesystem PATH of the verified snapshot file. */
+  path: string;
+  /** Snapshot file name inside expo-sqlite's default directory. */
+  name: string;
+}
+
+/**
+ * Produce a verified point-in-time snapshot of the live database as a
+ * sandbox temp file (slice 15 C2; grill Q2-A): `backupDatabaseAsync`
+ * (sqlite3_backup) → `backup-snapshot-<ts>.sqlite` next to the live DB →
+ * `PRAGMA quick_check` gate. Returns the snapshot path for the upload
+ * adapter (`icloudBackupAdapter`) to ship to the ubiquity container; the
+ * adapter owns deleting the temp file (and sweeping stale ones).
+ *
+ * ## Why a DEDICATED source connection (not the cached singleton)
+ * sqlite3_backup across two same-file connections is the canonical usage
+ * (SQLite docs' loadOrSaveDb example) and is journal-mode agnostic — a
+ * concurrent writer just restarts the (sub-millisecond, <5MB) copy. Reaching
+ * into the singleton's private `inner` from appended code would need an
+ * access hack, and this zone is append-only by contract. The transaction
+ * serializer is irrelevant here: it guards BEGIN overlap on ONE connection;
+ * the backup never issues transactions on the live connection at all.
+ *
+ * ## Preconditions / caveats
+ *   - Call only after boot has opened + migrated the live DB (all C3
+ *     triggers run post-boot). Calling on a missing file would snapshot a
+ *     freshly-created empty DB.
+ *   - DELETE journal mode (repo default, grill Q3-A): after `closeAsync`
+ *     the snapshot has no `-wal`/`-shm`; the upload adapter still clears
+ *     sidecars defensively at the copy site (R1).
+ *   - expo-sqlite is lazy-required so importing this module under jest
+ *     (node env) stays safe; tests `jest.mock('expo-sqlite', factory)`.
+ */
+export async function createBackupSnapshot(
+  nowMs: number = Date.now()
+): Promise<BackupSnapshotResult> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sqlite = require('expo-sqlite') as typeof import('expo-sqlite');
+  const name = `backup-snapshot-${nowMs}.sqlite`;
+
+  let src: SQLiteDatabase | null = null;
+  let dest: SQLiteDatabase | null = null;
+
+  const closeBestEffort = async () => {
+    if (dest) {
+      try {
+        await dest.closeAsync();
+      } catch {
+        // best-effort — never mask the original failure
+      }
+      dest = null;
+    }
+    if (src) {
+      try {
+        await src.closeAsync();
+      } catch {
+        // best-effort
+      }
+      src = null;
+    }
+  };
+
+  try {
+    let destPath: string;
+    try {
+      src = await sqlite.openDatabaseAsync(DB_FILE);
+      dest = await sqlite.openDatabaseAsync(name);
+      destPath = dest.databasePath;
+      await sqlite.backupDatabaseAsync({ sourceDatabase: src, destDatabase: dest });
+    } catch (e) {
+      throw new BackupSnapshotError('snapshot-failed', `sqlite3_backup failed: ${String(e)}`);
+    }
+
+    let verdict: string;
+    try {
+      const rows = await dest.getAllAsync<Record<string, unknown>>('PRAGMA quick_check');
+      const values = rows.map((r) => String(Object.values(r ?? {})[0] ?? ''));
+      verdict = values.length === 0 ? '(no rows)' : values.join('; ');
+    } catch (e) {
+      throw new BackupSnapshotError(
+        'integrity-check-failed',
+        `quick_check could not run: ${String(e)}`
+      );
+    }
+    if (verdict !== 'ok') {
+      throw new BackupSnapshotError('integrity-check-failed', `quick_check reported: ${verdict}`);
+    }
+
+    await closeBestEffort();
+    return { path: destPath, name };
+  } catch (e) {
+    await closeBestEffort();
+    try {
+      // Don't leave a broken half-snapshot for the adapter's stale sweep to
+      // mistake for anything; deletion failure is acceptable (sweep catches it).
+      await sqlite.deleteDatabaseAsync(name);
+    } catch {
+      // best-effort
+    }
+    throw e;
+  }
+}
