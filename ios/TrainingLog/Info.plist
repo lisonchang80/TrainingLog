@@ -49,6 +49,18 @@
     <string>TrainingLog 需要讀取 Apple Watch 訓練心率與消耗熱量、用於詳情頁統計。</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>TrainingLog 會在無 Apple Watch 紀錄時、把訓練 session 寫入健康資料，讓 Fitness App 顯示完整訓練紀錄。</string>
+    <key>NSUbiquitousContainers</key>
+    <dict>
+      <key>iCloud.com.lisonchang.TrainingLog</key>
+      <dict>
+        <key>NSUbiquitousContainerIsDocumentScopePublic</key>
+        <true/>
+        <key>NSUbiquitousContainerName</key>
+        <string>TrainingLog</string>
+        <key>NSUbiquitousContainerSupportedFolderLevels</key>
+        <string>None</string>
+      </dict>
+    </dict>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

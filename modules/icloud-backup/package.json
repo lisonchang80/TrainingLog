@@ -1,0 +1,7 @@
+{
+  "name": "icloud-backup",
+  "version": "1.0.0",
+  "description": "Local Expo module: thin iCloud Drive ubiquity-container bridge for TrainingLog backups (slice 15, ADR-0011)",
+  "main": "index.ts",
+  "private": true
+}
