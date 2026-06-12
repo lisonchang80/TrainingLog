@@ -346,7 +346,14 @@ extension SessionController: HKWorkoutSessionDelegate {
         from fromState: HKWorkoutSessionState,
         date: Date
     ) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // F-3 (稽核 07) — identity check symmetric with the D17
+            // builder-delegate guard: a late .ended/.stopped from a
+            // PREVIOUS session (HK queues callbacks; end() → quick
+            // restart makes the new one .active) must not tear down
+            // the current session's refs.
+            guard workoutSession === self.session else { return }
             switch toState {
             case .ended, .stopped:
                 // If we're still .active when the OS reports stopped,
@@ -370,7 +377,14 @@ extension SessionController: HKWorkoutSessionDelegate {
         _ workoutSession: HKWorkoutSession,
         didFailWithError error: Error
     ) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // F-3 — unlike didChangeTo there is NO state gate below, so
+            // without this identity check a late error from session A
+            // (no upper bound on HK error delivery) would unconditionally
+            // nil session B's refs and brand it .failed while B's OS
+            // session keeps running — the same orphan F-1 guards against.
+            guard workoutSession === self.session else { return }
             state = .failed("session failed: \(error.localizedDescription)")
             session = nil
             builder = nil
