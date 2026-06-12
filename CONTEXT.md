@@ -375,23 +375,23 @@ _Avoid_: 把 bodyweight 與 Set 的 weight 混為一談；用 lean body mass 取
 **Backup / Sync** (UI: 備份):
 TrainingLog 的資料保護策略。v1 scope = **(a) 換手機 + (b) 災難恢復 + (d) JSON export**；**(c) 多裝置即時 sync 排除**（自用 + 沒 iPad app + Watch 已透過 ADR-0008 處理）。
 
-**Mechanism**：iCloud Drive 自動備份整個 SQLite 檔（不採 CloudKit row-level — c 排除即 overkill）。App 在 iCloud ubiquity container 開「TrainingLog」folder，內含 `backup.sqlite`（最新）+ `backup.previous.sqlite`（上一份 rotate）。User 在 iCloud Drive 看得到該 folder + 兩個 .sqlite 檔，可手動下載 / share。
+**Mechanism**：iCloud Drive 自動備份整個 SQLite 檔（不採 CloudKit row-level — c 排除即 overkill）。App 在 iCloud ubiquity container 開「TrainingLog」folder，內含時間戳檔名備份（如 `TrainingLog-backup-<ts>.sqlite`）保留最新 2 份（2026-06-12 slice-15 grill Q4 修訂：原固定名改時間戳、2 份 rotate 語意不變）。User 在 iCloud Drive 看得到該 folder + .sqlite 檔，可手動下載 / share。
 
 **觸發 + 保留**：
-- 觸發點 = Session 結束 + App 進 background（兩者皆觸發，5min debounce 避免重複）
-- 保留策略 = 最新 + 上一份 = 2 份 atomic rotate（rename `backup.sqlite` → `backup.previous.sqlite` 後寫新 `backup.sqlite`）
+- 觸發點 = Session 結束 + App 進 background（兩者皆觸發，5min debounce 避免重複）+ 冷啟動補掃（上次成功 >24h 且 auto；2026-06-12 grill Q6）
+- 保留策略 = 最新 2 份、write-then-promote（先寫新檔驗證成功再刪最舊；2026-06-12 grill Q5 修訂，原「先降級再寫」任一步失敗會蒸發最新份）
 
 **Restore UX**：第一次啟動 detect 到 iCloud 有備份 → 跳確認框（含日期 + 內容預覽，例「142 個 Session、最後一筆 2026-04-30」）→ user 二選「還原 / 全新開始」。Restore 完成 = skip onboarding 直接進主畫面。沒登 iCloud → 警告但允許進 app + Settings 永久紅警示「未啟用 iCloud 備份」。
 
-**Settings 搬進 SQLite**：新增 `app_settings(key TEXT PK, value TEXT)` 表收所有偏好（unit_preference / dark mode / 預設休息時間 / `backup_mode` 等），跟 SQLite 一起被涵蓋。**AsyncStorage 不適合 user-facing 偏好**（restore 後跟 SQLite 反同步，user 慣 lb 變 kg 會炸）。
+**Settings 搬進 SQLite**：新增 `app_settings(key TEXT PK, value TEXT)` 表收所有偏好（unit_preference / 預設休息時間 / `backup_mode` 等），跟 SQLite 一起被涵蓋。例外（2026-06-12 grill Q13 修訂）：theme（ADR-0025）與 locale（ADR-0023）留 AsyncStorage — boot 順序要求 theme hydrate 先於 SQLite open；此二 device-local 偏好整檔備份不帶走＝接受。其餘 user-facing 偏好不放 AsyncStorage（restore 後跟 SQLite 反同步）。
 
-**Watch sync vs Backup 順序保證**：iPhone 維護 `pending_watch_sync: bool` 旗標。Backup callback 時若 flag clean → 立即執行（95% 場景）；若 dirty → 延遲到 sync 完，**最多等 5 分鐘**force backup（escape hatch；避免 Watch 出 BLE 範圍永遠等不到）。新增 `session.last_watch_sync_at TIMESTAMP NULL` 紀錄完整度。Force backup 缺漏時 Settings 顯示警告。
+**Watch sync vs Backup 順序保證**（2026-06-12 grill Q7 修訂 — 原 `pending_watch_sync` 旗標 + 5min timeout + `session.last_watch_sync_at` 整段砍除）：三車道 sync + live-mirror fast-lane + D17 串流 + finalize handshake 後，set 進行中即時落 iPhone SQLite — backup trigger 只需排在 finalize reconcile 完成之後（純順序保證、零 schema）。
 
 **Backup mode toggle**：Settings 提供「自動備份 ON / OFF」（預設 ON）。OFF = 純手動（只有「立即備份」按鈕觸發）。Manual 模式下 b1 escalation threshold 從 3 → 7 天（手動是 expected behavior）。
 
 **Failure escalation**：
-- iCloud 寫入失敗（容量滿 / 網路錯誤）：Settings 紅警示 + push notification
-- 連續 3 天（auto）/ 7 天（manual）沒成功：push + Settings + 主畫面 banner
+- iCloud 寫入失敗（容量滿 / 網路錯誤）：Settings 紅警示（2026-06-12 grill Q14 修訂：v1 in-app only、push notification 延後）
+- 連續 3 天（auto）/ 7 天（manual）沒成功：Settings 紅 + 主畫面 banner（in-app）
 - Restore 時 `backup.sqlite` 壞 → 自動 fallback `backup.previous.sqlite`（兩份都壞 → JSON export 手動 recovery）
 - iCloud Drive 不可用 / 換 Apple ID → 啟動 detect + Settings 永久紅警示 + 一次 alert
 

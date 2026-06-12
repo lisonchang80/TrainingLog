@@ -210,3 +210,26 @@ ADR-0008 規定 Watch transferUserInfo = best-effort。Session 結束時 backup 
 
 - 整合 [ADR-0008](./0008-multi-device-strategy-and-watch-v1-scope.md)（Path C + UUID PK + Watch transferUserInfo best-effort 邊界）
 - 補強 Q14 grill round 全部子問題（Q14.1 ~ Q14.8）
+
+## Amendment — 2026-06-12 slice 15 開工 grill（20 Q 全拍板）
+
+預研報告：`~/code/TrainingLog-overnight-reports/2026-06-12/12-slice15-backup-prep.md`（含 API survey、設計草案、C1-C5 micro-PRD）。兩個技術解鎖使原設計簡化：expo-sqlite 16 內建 `backupDatabaseAsync`（sqlite3_backup — 開著庫安全 snapshot、journal mode 無關）；expo-file-system 19 對 sandbox 外路徑放行讀寫（源碼證實）→ 原生只需薄 local Expo module（`modules/icloud-backup/`：isICloudAvailable / getUbiquityContainerUrl / listBackupItems / startDownload）。
+
+**實作拍板（新增）**：自寫薄橋（卡 NSMetadataQuery 則 fallback react-native-cloud-storage v3）；snapshot 走 `backupDatabaseAsync` → sandbox 暫存 → quick_check → 上雲；journal 維持 DELETE 不動；觸發＝session finalize + 進 background（debounce 5min）+ **冷啟動補掃**（上次成功 >24h 且 auto）；fresh install 判定＝DB 檔存在性（DatabaseProvider open 之前的 RestoreGate）+「全新開始」declined sentinel 記 AsyncStorage；版本守門＝候選 `user_version` > app migrations max（動態取）→ 拒、≤ → 收後 migrate 補跑、非 SQLite/quick_check fail → 拒 + fallback 舊份；restore 前現庫自保 copy 至 sandbox `pre-restore-<ts>.sqlite` 留 1 份；restore 換庫＝in-place swap（close + 清 cached 單例新 API + DatabaseProvider setDb；Settings 入口 active session 時 disable；換檔硬性防禦刪 -journal/-wal/-shm sidecar）；backup metadata 走 `app_settings` keys（不開 backup_log 表）；新機 discovery 限時等 ~5-10s + Settings「重新檢查」；不開 `UIFileSharingEnabled`（防活庫曝露）；備份格式＝裸 .sqlite；JSON export 拆 slice 15b。
+
+**本 amend 翻盤之既有拍板**：
+- ❌ 固定檔名 backup.sqlite/.previous → 時間戳檔名（保 2 份 rotate 語意不變；消跨裝置固定名 NSFileVersion conflict）
+- ❌ rotate「先 rename 降級再寫新」→ write-then-promote（新檔落地驗證成功才刪最舊；中途 kill 至少留一份完整舊備份）
+- ❌ § 6 Q14.6 `pending_watch_sync` 旗標 + 5min timeout + `session.last_watch_sync_at` → **整段砍除不實作**。原前提（transferUserInfo best-effort、set 滯留 Watch queue）已被三車道 sync + live-mirror fast-lane + D17 ~1Hz 串流 + finalize handshake（endSessionReconciler）推翻 — set 進行中即時落 iPhone SQLite，finalize 本身即同步完成訊號。改為「backup trigger 排在 finalize reconcile 完成之後」的順序保證，零 schema。
+- ❌「dark mode 等偏好全搬 app_settings」→ theme（ADR-0025）與 locale（ADR-0023）維持 AsyncStorage（boot 順序：theme hydrate 先於 SQLite open）；整檔備份不帶走此二 device-local 偏好＝接受。
+- ❌ § 7 push notification escalation → v1 降級 in-app only（Settings 紅 + 主畫面 banner、連續失敗 3/7 天門檻）；repo 無 notification 基建、push 延後另議。
+
+## 翻盤 ledger（greppable）
+
+| 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
+|---|---|---|---|---|---|
+| 2026-06-12 | 備份檔名 | 固定名 2 檔 | 時間戳檔名保 2 份 | grill Q4 | n/a (pre-impl) |
+| 2026-06-12 | rotate 順序 | 先降級再寫 | write-then-promote | grill Q5 | n/a (pre-impl) |
+| 2026-06-12 | Q14.6 旗標機制 | pending_watch_sync + 5min | 砍除、改順序保證 | grill Q7（前提被 D17/三車道推翻） | n/a (pre-impl) |
+| 2026-06-12 | 偏好全進 app_settings | 含 dark mode | theme/locale 留 AsyncStorage | grill Q13 | n/a (pre-impl) |
+| 2026-06-12 | 失敗升級 | push notification | v1 in-app only | grill Q14 | n/a (pre-impl) |
