@@ -326,41 +326,56 @@ export default function SettingsScreen() {
    * Alert.alert is imperative and survives the unmount.
    */
   const performRestore = async (deps: RestoreServiceDeps, preview: RestorePreview) => {
-    // TOCTOU re-check — the row disable is render-time only; a session
-    // could have started (e.g. from the Watch) since the last focus.
-    const active = await getActiveSession(db);
-    if (active) {
-      Alert.alert(t('button', 'restoreBackup'), t('status', 'restoreActiveSessionBlocked'));
-      return;
-    }
-    let outcome: RestoreOutcome | null = null;
-    await suspendForRestore(async () => {
-      outcome = await executeRestore(deps, preview);
-    });
-    const result: RestoreOutcome = outcome ?? {
-      ok: false,
-      step: 'reopen',
-      message: 'unknown',
-      rolledBack: false,
-    };
-    if (result.ok) {
-      Alert.alert(t('alert', 'restoreDone'), t('alert', 'restoreDoneBody'));
-    } else {
-      Alert.alert(
-        t('alert', 'restoreFailed'),
-        result.rolledBack
-          ? `${result.message}\n${t('status', 'restoreRolledBackNote')}`
-          : result.message
-      );
+    // Audit R-03: this owns releasing restoreBusy — onRestorePress hands the
+    // flag off to the confirm Alert's buttons instead of releasing in its
+    // finally (Alert.alert is non-blocking, so a finally there re-enables
+    // the row WHILE the dialog is still open → double-tap could run two
+    // executeRestore concurrently over the same files).
+    try {
+      // TOCTOU re-check — the row disable is render-time only; a session
+      // could have started (e.g. from the Watch) since the last focus.
+      const active = await getActiveSession(db);
+      if (active) {
+        Alert.alert(t('button', 'restoreBackup'), t('status', 'restoreActiveSessionBlocked'));
+        return;
+      }
+      let outcome: RestoreOutcome | null = null;
+      await suspendForRestore(async () => {
+        outcome = await executeRestore(deps, preview);
+      });
+      const result: RestoreOutcome = outcome ?? {
+        ok: false,
+        step: 'reopen',
+        message: 'unknown',
+        rolledBack: false,
+      };
+      if (result.ok) {
+        Alert.alert(t('alert', 'restoreDone'), t('alert', 'restoreDoneBody'));
+      } else {
+        Alert.alert(
+          t('alert', 'restoreFailed'),
+          result.rolledBack
+            ? `${result.message}\n${t('status', 'restoreRolledBackNote')}`
+            : result.message
+        );
+      }
+    } finally {
+      setRestoreBusy(false);
     }
   };
 
   /** Discovery → pick → confirm Alert. Re-entrant via the 重新檢查 button
-   * in the not-found Alert (Q18-A's manual escape hatch). */
+   * in the not-found Alert (Q18-A's manual escape hatch).
+   *
+   * Audit R-03 busy hand-off: on the confirm path the flag is NOT released
+   * here — ownership transfers to the Alert buttons (Cancel releases,
+   * 還原 → performRestore's finally releases). Terminal paths (not-found /
+   * rejected / throw) release via the local finally as before. */
   const onRestorePress = async () => {
     const deps = getRestoreDeps();
     if (!deps || restoreBusy) return;
     setRestoreBusy(true);
+    let handedOff = false;
     try {
       const discovery = await discoverBackupCandidates(deps);
       if (discovery.status !== 'found') {
@@ -379,13 +394,18 @@ export default function SettingsScreen() {
         return;
       }
       const { preview } = pick;
+      handedOff = true;
       Alert.alert(
         t('page', 'restoreGateTitle'),
         `${tRestorePreviewLine(preview.sessionCount, preview.lastSessionAt)}\n` +
           `${tRestoreBackupDateLine(preview.item.modifiedAt)}\n\n` +
           t('alert', 'restoreConfirmQ'),
         [
-          { text: t('common', 'cancel'), style: 'cancel' },
+          {
+            text: t('common', 'cancel'),
+            style: 'cancel',
+            onPress: () => setRestoreBusy(false),
+          },
           {
             text: t('button', 'restoreBackup'),
             style: 'destructive',
@@ -394,7 +414,7 @@ export default function SettingsScreen() {
         ]
       );
     } finally {
-      setRestoreBusy(false);
+      if (!handedOff) setRestoreBusy(false);
     }
   };
 
