@@ -218,6 +218,7 @@ export async function createBackupSnapshot(
 
 // Appended import (hoisted by the module system) — adding it to the existing
 // import line at the top would violate the append-only conflict-surface rule.
+// eslint-disable-next-line import/first
 import { defaultDatabaseDirectory } from 'expo-sqlite';
 
 /**
