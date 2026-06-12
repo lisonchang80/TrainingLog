@@ -205,3 +205,91 @@ export async function createBackupSnapshot(
     throw e;
   }
 }
+
+// ===========================================================================
+// Slice 15 C4 — restore engine hooks (ADR-0011 + 2026-06-12 amendment).
+//
+// APPEND-ONLY ZONE: agent A (C2 snapshot side) appends its own block to this
+// file in a parallel worktree. Nothing above this banner may be reordered or
+// edited; new C4/C2 additions go below it. That is also why the class body
+// above gains no new method — `inner` is reached via a structural cast here
+// instead.
+// ===========================================================================
+
+// Appended import (hoisted by the module system) — adding it to the existing
+// import line at the top would violate the append-only conflict-surface rule.
+import { defaultDatabaseDirectory } from 'expo-sqlite';
+
+/**
+ * Absolute path of the live production DB file
+ * (`<sandbox>/Documents/SQLite/traininglog.db` on iOS). Single source for
+ * the restore engine's swap/sidecar paths — derives from the same `DB_FILE`
+ * constant `openDatabase()` uses, so the two can never point at different
+ * files. (`defaultDatabaseDirectory` is typed `any` upstream; it is a string
+ * at runtime.)
+ */
+export function liveDatabasePath(): string {
+  return `${String(defaultDatabaseDirectory)}/${DB_FILE}`;
+}
+
+/**
+ * Close the live DB connection and drop the module-level singleton so the
+ * NEXT `openDatabase()` call re-opens (and re-migrates) whatever file is on
+ * disk — the in-place-swap primitive for restore (grill Q12-A; risk R10).
+ *
+ * Behaviour:
+ * - Never opened (or a previous open failed) → no-op. Safe on the
+ *   fresh-install RestoreGate path where no DB exists yet.
+ * - `closeAsync()` THROWS → the singleton is KEPT (still-working connection)
+ *   and the error propagates, so the restore engine aborts at its
+ *   'close-live' step BEFORE any file deletion. Swapping the file under a
+ *   connection we failed to close would risk corruption; keeping the cache
+ *   avoids a second connection (= second transaction serializer) on retry.
+ */
+export async function closeAndResetForRestore(): Promise<void> {
+  const pending = cached;
+  if (!pending) return;
+  let db: Database;
+  try {
+    db = await pending;
+  } catch {
+    // openDatabase()'s own .catch already cleared the cache for retry.
+    return;
+  }
+  // `inner` is TS-private on ExpoDatabase — compile-time only; reach it via
+  // a structural cast because the class body above is frozen (append-only).
+  const inner = (db as unknown as { inner?: SQLiteDatabase }).inner;
+  if (inner) {
+    await inner.closeAsync();
+  }
+  cached = null;
+}
+
+/**
+ * Minimal handle for INSPECTING a restore candidate file (quick_check /
+ * user_version / preview counts). Deliberately read-shaped — the restore
+ * engine must never write to a candidate.
+ */
+export interface CandidateDb {
+  getFirstAsync<T>(sql: string): Promise<T | null>;
+  closeAsync(): Promise<void>;
+}
+
+/**
+ * Open an arbitrary on-disk SQLite file (downloaded backup candidate /
+ * sandbox temp copy) WITHOUT touching the live singleton and WITHOUT
+ * running migrations. Throws when the path cannot be opened as SQLite —
+ * the restore rules layer maps that to the 'not-sqlite' verdict.
+ *
+ * expo-sqlite addresses files as (name, directory), so the absolute path is
+ * split on its last '/'.
+ */
+export async function openCandidateDatabase(absolutePath: string): Promise<CandidateDb> {
+  const slash = absolutePath.lastIndexOf('/');
+  if (slash <= 0 || slash === absolutePath.length - 1) {
+    throw new Error(`openCandidateDatabase: expected an absolute file path, got: ${absolutePath}`);
+  }
+  const directory = absolutePath.slice(0, slash);
+  const name = absolutePath.slice(slash + 1);
+  return openDatabaseAsync(name, undefined, directory);
+}
