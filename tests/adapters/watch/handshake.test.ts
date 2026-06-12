@@ -238,8 +238,9 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
             exerciseName: 'Bench Press',
             ordering: 1,
             defaultSets: 3,
-            defaultReps: null,
-            defaultWeightKg: null,
+            // F5 (2026-06-12) — open reps/weight are now ABSENT keys on
+            // the wire (never explicit null); the fixture mirrors what
+            // the loader emits.
             // 2026-05-29 SetLogger sets[] fix — seed one row so the
             // round-trip also exercises the per-set projection.
             sets: [
@@ -544,16 +545,17 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
         defaultSets: 3,
         defaultReps: 8,
         defaultWeightKg: 60,
-        parentId: null,
-        reusableSupersetId: null,
+        // F5 (2026-06-12) — solo row: parentId / reusableSupersetId are
+        // ABSENT keys (not explicit null) per the wire null rule.
         // 2026-05-29 SetLogger sets[] fix — no template_set rows
         // seeded, so the loader returns an empty array (consumer
         // falls back to default_* path).
         sets: [],
       });
-      // Second row exercises nullable defaults projection.
-      expect(list[0].exercises[1].defaultReps).toBeNull();
-      expect(list[0].exercises[1].defaultWeightKg).toBeNull();
+      // Second row exercises the omitted-defaults projection (F5: NULL
+      // columns → absent keys, surfaced as undefined on the TS side).
+      expect(list[0].exercises[1].defaultReps).toBeUndefined();
+      expect(list[0].exercises[1].defaultWeightKg).toBeUndefined();
       expect(list[0].exercises[1].ordering).toBe(2);
       expect(list[0].exercises[1].sets).toEqual([]);
     });
@@ -618,9 +620,9 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       expect(list).toHaveLength(1);
       expect(list[0].exercises).toHaveLength(2);
       const [a, b] = list[0].exercises;
-      // A side: RS id present, no parent.
+      // A side: RS id present, no parent (F5: absent key → undefined).
       expect(a.templateExerciseId).toBe('te-a');
-      expect(a.parentId).toBeNull();
+      expect(a.parentId).toBeUndefined();
       expect(a.reusableSupersetId).toBe('rs-1');
       // B side: RS id present (same as A → groups), parent points at A.
       expect(b.templateExerciseId).toBe('te-b');
@@ -700,10 +702,11 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
         r: 8,
         w: 80,
       });
-      // Defaults stay null in the wire (consumer prefers sets[]
-      // when non-empty; defaults kept only for back-compat fallback).
-      expect(ex.defaultReps).toBeNull();
-      expect(ex.defaultWeightKg).toBeNull();
+      // Defaults stay ABSENT on the wire (F5: omitted key, never null —
+      // consumer prefers sets[] when non-empty; defaults kept only for
+      // back-compat fallback).
+      expect(ex.defaultReps).toBeUndefined();
+      expect(ex.defaultWeightKg).toBeUndefined();
     });
 
     // 2026-05-29 SetLogger sets[] fix — defensive: unknown set_kind
@@ -1070,8 +1073,8 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
       defaultSets: 3,
       defaultReps: 8,
       defaultWeightKg: 60,
-      parentId: null,
-      reusableSupersetId: null,
+      // F5 (2026-06-12) — solo row: parentId / reusableSupersetId are
+      // absent keys (wire null rule).
       // 2026-05-29 SetLogger sets[] fix — loader returns empty
       // sets[] when no template_set rows exist for this exercise.
       sets: [],
@@ -1805,8 +1808,8 @@ describe('Phase 2.5 + NEW-Q50 D28 — loadTodayPlanned (impure, fat tree)', () =
         defaultSets: 4,
         defaultReps: 8,
         defaultWeightKg: 70,
-        parentId: null,
-        reusableSupersetId: null,
+        // F5 (2026-06-12) — solo row: parentId / reusableSupersetId are
+        // absent keys (wire null rule).
         // 2026-05-29 SetLogger sets[] fix — no template_set rows
         // seeded for this fixture, so loader returns sets: [].
         sets: [],
@@ -2038,5 +2041,227 @@ describe('WC handshake — Bug Y exercise-name localisation (task #271)', () => 
     });
     const snap = await fetchSessionSnapshot(db, 'sess-locale');
     expect(snap?.exercises[0].exerciseName).toBe('槓鈴臥推');
+  });
+});
+
+// =====================================================================
+// F5 (2026-06-12, audit F5 後半) — Stage1 reply wire null-safety.
+//
+// The wire null rule (`wc-add-envelope-kind` skill): reply builders must
+// never emit an explicit `null` — nullable fields use '' sentinels or
+// OMIT the key. Dict-field nulls only survive today because RN's JSI
+// dict conversion drops them (feature-flag dependent: a flipped default
+// would turn every explicit null into NSNull → WCSession 7010 reject —
+// and the handshake reply is the Watch picker's lifeline). These tests
+// pin the builder outputs so a reintroduced `null` fails CI instead of
+// waiting for an RN upgrade to detonate it.
+// =====================================================================
+
+describe('F5 — Stage1 reply wire null-safety (recursive no-null scan)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  /** Collect JSONPath-ish locations of every `null` value in a tree. */
+  const collectNullPaths = (
+    value: unknown,
+    path = '$',
+    out: string[] = [],
+  ): string[] => {
+    if (value === null) {
+      out.push(path);
+      return out;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((v, i) => collectNullPaths(v, `${path}[${i}]`, out));
+      return out;
+    }
+    if (typeof value === 'object') {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        collectNullPaths(v, `${path}.${k}`, out);
+      }
+    }
+    return out;
+  };
+
+  it('onHandshakeRequest reply contains NO null value anywhere under a maximal-null DB fixture', async () => {
+    const now = 1_700_000_000_000;
+    // --- Active session with empty title (schema declares title NOT
+    //     NULL, so the loader's `title ?? ''` is defensive-only; ''
+    //     is the realistic minimal value and stays plist-clean). ---
+    await db.runAsync(
+      `INSERT INTO session (id, started_at, ended_at, title)
+       VALUES (?, ?, NULL, '')`,
+      'sess-null',
+      now,
+    );
+    // --- Template whose exercise rows carry every nullable column as
+    //     NULL: default_reps / default_weight_kg / parent_id /
+    //     reusable_superset_id. ---
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, NULL, NULL)`,
+      'tpl-null',
+      'Nullable Tpl',
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets,
+          default_reps, default_weight_kg, parent_id, reusable_superset_id)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`,
+      'te-null',
+      'tpl-null',
+      BENCH,
+      1,
+      3,
+    );
+    // --- Active program whose today-cell points at the template with a
+    //     NULL sub_tag → planned variant must OMIT `intensity`. ---
+    const todayIso = '2025-06-15';
+    const todayMs = Date.UTC(2025, 5, 15);
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      'p-null',
+      'Null Program',
+      7,
+      1,
+      todayIso,
+      1,
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      'cell-null',
+      'p-null',
+      0,
+      0,
+      'tpl-null',
+    );
+
+    // loadTodayPlanned is wired with Date.now() inside onHandshakeRequest;
+    // pin "today" by spying so the seeded cell (cycle 0 / day 0 of a
+    // program starting 2025-06-15) is the resolved cell.
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(todayMs);
+    try {
+      const replies: Record<string, unknown>[] = [];
+      await onHandshakeRequest(
+        db,
+        makeEnvelope('handshake', {
+          requestId: 'req-null-scan',
+          clientVersion: '13d.0',
+        }),
+        (r) => replies.push(r),
+      );
+      expect(replies).toHaveLength(1);
+      const reply = replies[0] as unknown as Stage1ReplyPayload;
+
+      // The fixture actually exercised the nullable paths…
+      expect(reply.hasActiveSession).toBe(true);
+      expect(reply.prefetch.templates).toHaveLength(1);
+      expect(reply.prefetch.todayPlanned?.kind).toBe('planned');
+      // …and the wire shape carries ZERO null values, recursively.
+      expect(collectNullPaths(replies[0])).toEqual([]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('loadTemplatesFullTree OMITS the key (not explicit null/undefined) for NULL nullable columns', async () => {
+    const now = 1_700_000_000_000;
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, NULL, NULL)`,
+      'tpl-omit',
+      'Omit',
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template_exercise
+         (id, template_id, exercise_id, ordering, default_sets,
+          default_reps, default_weight_kg, parent_id, reusable_superset_id)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`,
+      'te-omit',
+      'tpl-omit',
+      BENCH,
+      1,
+      3,
+    );
+    const list = await loadTemplatesFullTree(db);
+    const ex = list[0].exercises[0] as unknown as Record<string, unknown>;
+    // Key-absence (stricter than `toBeUndefined()` — an explicit
+    // `{ defaultReps: undefined }` would also stringify clean, but the
+    // wire rule is "omit the key", so pin exactly that).
+    expect(Object.prototype.hasOwnProperty.call(ex, 'defaultReps')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(ex, 'defaultWeightKg')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(ex, 'parentId')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(ex, 'reusableSupersetId')).toBe(false);
+    // Non-null columns still present.
+    expect(ex.defaultSets).toBe(3);
+    expect(collectNullPaths(list)).toEqual([]);
+  });
+
+  it('loadTodayPlanned OMITS intensity when the cell sub_tag is NULL', async () => {
+    const now = 1_700_000_000_000;
+    const todayIso = '2025-06-15';
+    const todayMs = Date.UTC(2025, 5, 15);
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      'p-no-tag',
+      'NoTag',
+      7,
+      1,
+      todayIso,
+      1,
+      now,
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      'tpl-no-tag',
+      '腿日',
+      now,
+      now,
+      'p-no-tag',
+    );
+    await db.runAsync(
+      `INSERT INTO program_cell
+         (id, program_id, cycle_index, day_index, template_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      'cell-no-tag',
+      'p-no-tag',
+      0,
+      0,
+      'tpl-no-tag',
+    );
+    const today = await loadTodayPlanned(db, todayMs);
+    expect(today.kind).toBe('planned');
+    expect(
+      Object.prototype.hasOwnProperty.call(today, 'intensity'),
+    ).toBe(false);
+    // Label has no dangling「· null」suffix either.
+    if (today.kind === 'planned') {
+      expect(today.label).toBe('腿日 W1D1（今日）');
+    }
+    expect(collectNullPaths(today)).toEqual([]);
   });
 });

@@ -172,10 +172,18 @@ export interface Stage1TemplateExercise {
   exerciseName: string;
   ordering: number;
   defaultSets: number;
-  /** May be null when the source template_exercise leaves reps open. */
-  defaultReps: number | null;
-  /** May be null when the source template_exercise leaves weight open. */
-  defaultWeightKg: number | null;
+  /**
+   * Omitted when the source template_exercise leaves reps open.
+   * F5 (2026-06-12): was `number | null` — Stage1 builders now OMIT the
+   * key instead of sending an explicit `null` (wire null rule, see the
+   * `wc-add-envelope-kind` skill: dict-field null only survives today
+   * because RN's JSI dict conversion silently drops it; builders must
+   * not rely on that). Swift decode is `try? c.decode(...)` → absent
+   * key tolerated (nil).
+   */
+  defaultReps?: number;
+  /** Omitted when the source template_exercise leaves weight open (same F5 rule). */
+  defaultWeightKg?: number;
   /**
    * 2026-05-29 SetLogger sets[] fix — per-row `template_set` projection
    * ordered by `position ASC`. Empty array when the template_exercise
@@ -195,16 +203,18 @@ export interface Stage1TemplateExercise {
    *     superset; the Watch folds them into a single superset card. Copied
    *     verbatim (foreign id → no remap), so grouping by it needs no id rewrite
    *     when the Watch mints fresh sessionExerciseIds.
-   *   - `parentId` — template_exercise.parent_id (v009): null on the A side /
-   *     a solo row, the parent template_exercise's id on the B side. Carried
-   *     for forward-compat + A/B disambiguation; grouping uses reusableSupersetId
-   *     + `ordering` so no parent-id remap is required.
+   *   - `parentId` — template_exercise.parent_id (v009): OMITTED on the A
+   *     side / a solo row, the parent template_exercise's id on the B side.
+   *     Carried for forward-compat + A/B disambiguation; grouping uses
+   *     reusableSupersetId + `ordering` so no parent-id remap is required.
    *
    * Both OPTIONAL — older iPhone payloads omit them; Swift decode tolerates
-   * absence (defaults to nil → solo render).
+   * absence (defaults to nil → solo render). F5 (2026-06-12): narrowed from
+   * `?: string | null` — builders omit the key on NULL DB columns instead of
+   * sending explicit `null` (wire null rule, `wc-add-envelope-kind` skill).
    */
-  parentId?: string | null;
-  reusableSupersetId?: string | null;
+  parentId?: string;
+  reusableSupersetId?: string;
 }
 
 /**
@@ -303,12 +313,14 @@ export type Stage1TodayPlanned =
        * "計劃：<program> · 強度：<intensity>" on line 2. `label` is the
        * legacy flat form; these break it apart so the Watch picker shows
        * a clearer hierarchy. `programName` is the user's program name (not
-       * localised — user-authored). `intensity` is the sub_tag (null when
-       * the cell has no intensity tag).
+       * localised — user-authored). `intensity` is the sub_tag (OMITTED when
+       * the cell has no intensity tag — F5 2026-06-12, was `string | null`;
+       * wire null rule per the `wc-add-envelope-kind` skill. Swift decode is
+       * `try? c.decode(...)` → absent key tolerated).
        */
       templateName: string;
       programName: string;
-      intensity: string | null;
+      intensity?: string;
       programDayId: string;
       /** NEW-Q50 — fat tree so Watch can build offline. */
       templateId: string;
@@ -722,7 +734,9 @@ export async function loadProgramsPrefetchList(
  * Defaults projection:
  *   - `defaultSets` reads the NOT-NULL column verbatim.
  *   - `defaultReps` + `defaultWeightKg` are nullable in the schema
- *     (caller-side optional); null surfaces as `null` on the wire.
+ *     (caller-side optional); NULL surfaces as an ABSENT key on the wire
+ *     (F5 2026-06-12 — never an explicit `null`; see the wire null rule
+ *     in the `wc-add-envelope-kind` skill).
  *   - `exerciseName` falls back to `''` if the JOIN finds no matching
  *     exercise row (defensive — the v003 FK should prevent this,
  *     but the projection stays safe under historic backfill gaps).
@@ -779,7 +793,7 @@ async function loadTemplateExerciseTree(
         ORDER BY position ASC`,
       r.id,
     );
-    out.push({
+    const ex: Stage1TemplateExercise = {
       templateExerciseId: r.id,
       exerciseId: r.exercise_id,
       // Bug Y (task #271) — localise the exercise name at the iPhone wire
@@ -797,13 +811,6 @@ async function loadTemplateExerciseTree(
       exerciseName: r.exercise_name ? tExercise(r.exercise_name) : '',
       ordering: r.ordering,
       defaultSets: r.default_sets,
-      defaultReps: r.default_reps,
-      defaultWeightKg: r.default_weight_kg,
-      // D15 superset card — carry cluster linkage so the Watch can fold an
-      // adjacent same-RS pair into a superset card when it builds the local
-      // SessionSnapshot. Verbatim copy (foreign id → no remap).
-      parentId: r.parent_id ?? null,
-      reusableSupersetId: r.reusable_superset_id ?? null,
       // `position` is intentionally omitted from the projection —
       // the array index IS the position because we ORDER BY
       // position ASC above. Field names are single chars (k/r/w)
@@ -818,7 +825,25 @@ async function loadTemplateExerciseTree(
         r: s.reps,
         w: s.weight,
       })),
-    });
+    };
+    // F5 (2026-06-12, audit F5 後半) — nullable columns project as an
+    // ABSENT key, never an explicit `null`. Reply dicts cross the JS →
+    // native boundary where RN's JSI conversion happens to drop dict-null
+    // today (feature-flag dependent — a flipped default would turn every
+    // explicit null into an NSNull → WCSession 7010 reject, killing the
+    // handshake = picker lifeline). Swift `Stage1TemplateExercise` decode
+    // is `try? c.decode(...)` per field → absent key → nil. Guarded by
+    // the reply-null regression scan in handshake.test.ts.
+    if (r.default_reps != null) ex.defaultReps = r.default_reps;
+    if (r.default_weight_kg != null) ex.defaultWeightKg = r.default_weight_kg;
+    // D15 superset card — carry cluster linkage so the Watch can fold an
+    // adjacent same-RS pair into a superset card when it builds the local
+    // SessionSnapshot. Verbatim copy (foreign id → no remap).
+    if (r.parent_id != null) ex.parentId = r.parent_id;
+    if (r.reusable_superset_id != null) {
+      ex.reusableSupersetId = r.reusable_superset_id;
+    }
+    out.push(ex);
   }
   return out;
 }
@@ -916,17 +941,22 @@ export async function loadTodayPlanned(
   const d = cell.day_index + 1;
   const subTagSuffix = cell.sub_tag ? ` · ${cell.sub_tag}` : '';
   const label = `${tplRow.name} W${w}D${d}（今日）${subTagSuffix}`;
-  return {
+  const planned: Extract<Stage1TodayPlanned, { kind: 'planned' }> = {
     kind: 'planned',
     label,
     // #7 — structured fields for the Watch's 2-line planned-cell render.
     templateName: tplRow.name,
     programName: active.program.name,
-    intensity: cell.sub_tag ?? null,
     programDayId: cell.id,
     templateId: cell.template_id,
     exercises,
   };
+  // F5 (2026-06-12) — NULL sub_tag projects as an ABSENT key, never an
+  // explicit `null` (wire null rule, `wc-add-envelope-kind` skill). An
+  // empty-string sub_tag still passes through verbatim ('' is plist-clean
+  // and pre-F5 behaviour); only null/undefined omit the key.
+  if (cell.sub_tag != null) planned.intensity = cell.sub_tag;
+  return planned;
 }
 
 /**
