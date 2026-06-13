@@ -28,6 +28,7 @@ import {
   startDownload,
   type ICloudBackupItem,
 } from '../../modules/icloud-backup';
+import { parseBackupFileName } from '../domain/backup/backupPolicy';
 import type { BackupItem } from '../domain/backup/restoreRules';
 import {
   setRestoreDeps,
@@ -48,14 +49,20 @@ function hasLocalCopy(status: ICloudBackupItem['downloadingStatus']): boolean {
 /**
  * Wrapper items → engine `BackupItem`s. Nameless rows are already filtered
  * by the wrapper; nullable metadata degrades to conservative defaults
- * (0 size / epoch-0 mtime sort last via newest-first ordering, unknown
- * upload state counts as not-yet-uploaded).
+ * (0 size, unknown upload state counts as not-yet-uploaded).
+ *
+ * Audit Y-3: a null `modifiedAtMs` (cloud metadata not yet known) used to
+ * map to 0, which both displays as "1970-01-01" and sorts the item LAST in
+ * the newest-first candidate ordering — risking selecting an older backup
+ * over a newer one. Our backup file names embed a UTC timestamp, so fall
+ * back to `parseBackupFileName` for a faithful sort key; only a genuinely
+ * foreign name (parse → null) degrades to 0.
  */
 export function toRestoreBackupItems(items: ICloudBackupItem[]): BackupItem[] {
   return items.map((i) => ({
     name: i.name,
     sizeBytes: i.sizeBytes ?? 0,
-    modifiedAt: i.modifiedAtMs ?? 0,
+    modifiedAt: i.modifiedAtMs ?? parseBackupFileName(i.name) ?? 0,
     isUploaded: i.isUploaded ?? false,
     isDownloaded: hasLocalCopy(i.downloadingStatus),
   }));

@@ -3,6 +3,7 @@ import {
   gateSkipReason,
   nextGatePhase,
   primaryRejectReason,
+  tRestoreBackupDateLine,
   tRestorePreviewLine,
   tRestoreRejectReason,
   type GatePhase,
@@ -209,5 +210,16 @@ describe('dynamic i18n helpers', () => {
     expect(tRestoreRejectReason('version-too-new')).toContain('較新版本的 TrainingLog');
     setLocale('en');
     expect(tRestoreRejectReason('version-too-new')).toContain('newer version of TrainingLog');
+  });
+
+  it('Y-3: renders a known backup date, and "—" for a missing one (no 1970)', () => {
+    const known = Date.UTC(2026, 5, 12, 8, 30);
+    setLocale('zh');
+    expect(tRestoreBackupDateLine(known)).toMatch(/^備份時間：2026-06-\d{2}$/);
+    expect(tRestoreBackupDateLine(0)).toBe('備份時間：—');
+    setLocale('en');
+    expect(tRestoreBackupDateLine(known)).toMatch(/^Backed up on 2026-06-\d{2}$/);
+    expect(tRestoreBackupDateLine(0)).toBe('Backed up on —');
+    expect(tRestoreBackupDateLine(0)).not.toContain('1970');
   });
 });

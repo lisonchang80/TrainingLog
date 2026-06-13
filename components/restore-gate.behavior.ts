@@ -161,9 +161,14 @@ export function tRestorePreviewLine(sessionCount: number, lastSessionAt: number 
   return last ? `${sessions}，最後一筆 ${last}` : sessions;
 }
 
-/** Source-backup date line under the preview: «備份時間：2026-06-12». */
+/** Source-backup date line under the preview: «備份時間：2026-06-12».
+ *
+ * Audit Y-3: a missing/unknown date (`modifiedAt` ≤ 0 — the conservative
+ * fallback when neither cloud metadata nor the filename timestamp is known)
+ * renders as the literal em-dash "—" rather than a bogus "1970-01-01".
+ * The em-dash is locale-neutral on purpose (no new i18n key). */
 export function tRestoreBackupDateLine(modifiedAt: number): string {
-  const ymd = formatLocalYmdFromMs(modifiedAt);
+  const ymd = modifiedAt > 0 ? formatLocalYmdFromMs(modifiedAt) : '—';
   return isEn() ? `Backed up on ${ymd}` : `備份時間：${ymd}`;
 }
 

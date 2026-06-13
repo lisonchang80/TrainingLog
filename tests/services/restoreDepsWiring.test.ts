@@ -42,13 +42,31 @@ describe('toRestoreBackupItems', () => {
   });
 
   it('degrades nullable metadata to conservative defaults', () => {
+    // Foreign name → parseBackupFileName returns null → modifiedAt degrades
+    // to 0 (Y-3: only a genuinely unparseable name falls all the way to 0).
     const [mapped] = toRestoreBackupItems([
-      item({ sizeBytes: null, modifiedAtMs: null, isUploaded: null, downloadingStatus: null }),
+      item({
+        name: 'random-foreign.sqlite',
+        sizeBytes: null,
+        modifiedAtMs: null,
+        isUploaded: null,
+        downloadingStatus: null,
+      }),
     ]);
     expect(mapped.sizeBytes).toBe(0);
     expect(mapped.modifiedAt).toBe(0);
     expect(mapped.isUploaded).toBe(false);
     expect(mapped.isDownloaded).toBe(false);
+  });
+
+  it('Y-3: null modifiedAtMs falls back to the filename timestamp, not 0', () => {
+    // 2026-06-13T01:30:05Z embedded in a Q4-B backup name.
+    const name = 'TrainingLog-backup-2026-06-13T013005Z.sqlite';
+    const [mapped] = toRestoreBackupItems([item({ name, modifiedAtMs: null })]);
+    expect(mapped.modifiedAt).toBe(Date.UTC(2026, 5, 13, 1, 30, 5));
+    // Concrete cloud metadata still wins when present.
+    const [withMeta] = toRestoreBackupItems([item({ name, modifiedAtMs: 1_780_000_000_000 })]);
+    expect(withMeta.modifiedAt).toBe(1_780_000_000_000);
   });
 
   it('treats only current/downloaded as a local copy', () => {
