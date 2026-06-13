@@ -58,6 +58,7 @@ import { startSessionFromTemplate } from '../sqlite/sessionFromTemplate';
 import {
   listDistinctSubTagsByProgram,
   listTemplates,
+  type TemplateSummary,
 } from '../sqlite/templateRepository';
 import {
   getActiveProgram,
@@ -218,14 +219,52 @@ export interface Stage1TemplateExercise {
 }
 
 /**
+ * Stage1 prefetch v3 (2026-06-13 Y-dup grill) — one concrete template
+ * variant inside a name group. The ADR-0003 identity triple is
+ * `(name, program_id, sub_tag)`; the Watch resolves the user's
+ * (計劃, 強度) sheet picks against these via strict-NULL matching
+ * (mirror of `planResolveTarget` / `findTemplateByTriple`'s NULL idiom),
+ * falling back to the group representative on a miss (Q2/Q6/Q7).
+ *
+ * `programId` / `subTag` are OMITTED (not explicit null) when the DB
+ * column is NULL — wire null rule (`wc-add-envelope-kind` skill);
+ * Swift decodes absence as nil.
+ */
+export interface Stage1TemplateVariant {
+  templateId: string;
+  /** Program id of the variant triple; OMITTED when NULL (通用). */
+  programId?: string;
+  /** sub_tag of the variant triple; OMITTED when NULL (通用). */
+  subTag?: string;
+  /**
+   * Planned exercises, ordered by template_exercise.ordering ASC.
+   * OMITTED for the representative (`variants[0]`) — its tree IS the
+   * group's top-level `exercises`. Wire-level dedup only (Q5's
+   * "per-variant 全帶" semantics hold: every variant's tree is on the
+   * wire exactly once): without it the degenerate 20-singleton-name
+   * reply would carry every tree twice and blow past the 64 KB WC
+   * envelope ceiling. Swift: absence → use the group tree.
+   */
+  exercises?: ReadonlyArray<Stage1TemplateExercise>;
+}
+
+/**
  * NEW-Q50 D28 — replaces pre-Q50 `Stage1TemplateSummary`. Fat-tree
  * projection: each template carries its full planned exercise list so
  * the Watch can build a SessionSnapshot offline without a second
  * round-trip.
  *
- * Caps: enforced upstream in `loadTemplatesFullTree` (default 20
- * templates × ~10 exercises each ≈ 30 KB JSON, well under the 64 KB
- * WC envelope ceiling). See NEW-Q50 Q3=a for sizing rationale.
+ * Stage1 prefetch v3 (2026-06-13): one entry per template NAME (the
+ * Y-dup fix — the picker shows one row per name, Q1). The top-level
+ * `templateId`/`exercises` are the REPRESENTATIVE variant's (newest
+ * `updated_at` in the group) so an older Watch build that ignores
+ * `variants` keeps today's behaviour (Q12 tolerant-decode compat).
+ * New builds resolve the concrete variant from `variants` instead.
+ *
+ * Caps: enforced upstream in `loadTemplatesFullTree` — GLOBAL variant
+ * budget (default 20) spent group-first so a name group is never split
+ * (Q8). Sizing rationale unchanged: ≈20 trees stay well under the
+ * 64 KB WC envelope ceiling.
  */
 export interface Stage1TemplateFullSummary {
   templateId: string;
@@ -233,6 +272,13 @@ export interface Stage1TemplateFullSummary {
   name: string;
   /** Planned exercises, ordered by template_exercise.ordering ASC. */
   exercises: ReadonlyArray<Stage1TemplateExercise>;
+  /**
+   * All variants in this name group, newest-edited first (index 0 ==
+   * the representative). Always present from v3 builders; optional in
+   * the type so older fixture payloads / Swift decoders tolerate
+   * absence.
+   */
+  variants?: ReadonlyArray<Stage1TemplateVariant>;
 }
 
 /**
@@ -856,16 +902,29 @@ async function loadTemplateExerciseTree(
  * Replaces pre-Q50 `loadTemplatePrefetchList(db)` which projected only
  * `(templateId, name)` pairs.
  *
+ * Stage1 prefetch v3 (2026-06-13 Y-dup grill Q8) — grouped-by-name with
+ * a GLOBAL variant budget spent group-first:
+ *   - Groups ordered by their representative's `updated_at` DESC
+ *     (`listTemplates` is `ORDER BY updated_at DESC`; first occurrence
+ *     of a name == its newest variant, and Map preserves insertion
+ *     order).
+ *   - Each admitted group carries ALL of its variants — a name group is
+ *     never split (a split would re-create the silent-miss the Y-dup
+ *     fix exists to kill).
+ *   - The first group is admitted even if it alone exceeds the budget
+ *     (degenerate >20-variants-one-name case: an empty reply would be
+ *     strictly worse); after that, the first group that doesn't fit
+ *     ends the scan (no skip-ahead — keeps "most recent N" semantics
+ *     predictable).
+ *
  * Cap rationale (default 20):
  *   - WC envelope ceiling is 64 KB.
- *   - Estimated 20 templates × ~10 exercises × ~100 bytes per row ≈
+ *   - Estimated 20 variant trees × ~10 exercises × ~100 bytes per row ≈
  *     20 KB → well within the cap with headroom for the envelope
  *     wrap + i18n-localised exercise names.
- *   - Users with >20 templates get the 20 most-recently-edited
- *     (`listTemplates` orders by `updated_at DESC`).
  *
  * Performance note: this is N+1-ish — one SELECT for the template
- * list + one SELECT per template for the exercise tree. Acceptable
+ * list + one SELECT per variant for the exercise tree. Acceptable
  * at N≤20 with better-sqlite3 (sub-millisecond per query); a single
  * JOIN with bucket-on-receive would be marginally faster but
  * substantially less readable. Re-evaluate if N caps grow.
@@ -875,15 +934,41 @@ export async function loadTemplatesFullTree(
   limit = 20,
 ): Promise<Stage1TemplateFullSummary[]> {
   const templates = await listTemplates(db);
-  const capped = templates.slice(0, limit);
+  // Group by name, preserving newest-first group order (see docblock).
+  const groups = new Map<string, TemplateSummary[]>();
+  for (const t of templates) {
+    const g = groups.get(t.name);
+    if (g) g.push(t);
+    else groups.set(t.name, [t]);
+  }
   const out: Stage1TemplateFullSummary[] = [];
-  for (const t of capped) {
-    const exercises = await loadTemplateExerciseTree(db, t.id);
+  let budget = limit;
+  for (const [name, rows] of groups) {
+    if (out.length > 0 && rows.length > budget) break;
+    let representativeTree: ReadonlyArray<Stage1TemplateExercise> = [];
+    const variants: Stage1TemplateVariant[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const v = rows[i];
+      const exercises = await loadTemplateExerciseTree(db, v.id);
+      if (i === 0) representativeTree = exercises;
+      variants.push({
+        templateId: v.id,
+        // Wire null rule — omit the key entirely on NULL (通用) columns.
+        ...(v.program_id != null ? { programId: v.program_id } : {}),
+        ...(v.sub_tag != null ? { subTag: v.sub_tag } : {}),
+        // Representative's tree rides top-level only (see
+        // Stage1TemplateVariant.exercises docblock — 64 KB dedup).
+        ...(i === 0 ? {} : { exercises }),
+      });
+    }
     out.push({
-      templateId: t.id,
-      name: t.name,
-      exercises,
+      templateId: rows[0].id,
+      name,
+      exercises: representativeTree,
+      variants,
     });
+    budget -= rows.length;
+    if (budget <= 0) break;
   }
   return out;
 }

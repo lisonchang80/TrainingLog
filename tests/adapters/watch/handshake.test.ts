@@ -209,16 +209,34 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
             w: 60,
           })),
         })),
+        // Stage1 prefetch v3 (2026-06-13 Y-dup) worst case — every entry is
+        // ALSO a name group whose variants each carry a full triple
+        // (programId UUID + subTag). The dedup keeps the total exercise-tree
+        // count at the 20-variant budget (representative tree rides
+        // top-level `exercises`, so the variant entry here omits its tree),
+        // but the per-variant WRAPPER (templateId + triple) is a genuine new
+        // tax over the pre-v3 flat shape. Modelling it with a full triple on
+        // every variant is the largest the wrapper can get.
+        variants: [
+          {
+            templateId: `tpl-${i}-aaaa-bbbb-cccc-deadbeef${i}`,
+            programId: `prog-${i}-aaaa-bbbb-cccc-deadbeef${i}`,
+            subTag: '12RM',
+          },
+        ],
       }),
     );
     const reply = buildStage1Reply(sampleRequest, active, templates);
     const size = JSON.stringify(reply).length;
-    // Threshold raised from 40 KB → 60 KB on 2026-05-29 to absorb
-    // the new per-set tax (3 sets × 10 exercises × 20 templates =
-    // 600 sets × ~50 B = ~30 KB on top of the pre-fix ~30 KB
-    // template wrap). Still well under the 64 KB WC envelope cap.
-    expect(size).toBeLessThan(60_000);
-    // Also assert well under the WC envelope ceiling.
+    // 2026-06-13 — soft threshold raised 60 KB → 62 KB to absorb the v3
+    // variant-wrapper tax (20 variant entries × ~80 B of templateId +
+    // triple ≈ 1.6 KB on top of the 2026-05-29 ~60 KB sets[] baseline).
+    // Still leaves ~2 KB headroom under the hard ceiling — the dedup
+    // (representative tree NOT duplicated into variants[0]) is what keeps
+    // total exercise trees at the 20-variant budget rather than ~40.
+    expect(size).toBeLessThan(62_000);
+    // The real gate: stay under the 64 KB WC envelope ceiling. Q8 rejected
+    // raising the cap precisely because worst case crowds this line.
     expect(size).toBeLessThan(64_000);
   });
 
@@ -492,6 +510,9 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
         templateId: 'tpl-empty',
         name: 'Empty',
         exercises: [],
+        // v3 — representative stub (tree rides top-level, triple all-NULL
+        // so both keys are omitted per the wire null rule).
+        variants: [{ templateId: 'tpl-empty' }],
       });
     });
 
@@ -2263,5 +2284,150 @@ describe('F5 — Stage1 reply wire null-safety (recursive no-null scan)', () => 
       expect(today.label).toBe('腿日 W1D1（今日）');
     }
     expect(collectNullPaths(today)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stage1 prefetch v3 — grouped + variants[] (2026-06-13 Y-dup grill)
+// ---------------------------------------------------------------------------
+
+describe('loadTemplatesFullTree — Stage1 v3 grouped + variants (2026-06-13 Y-dup)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const seedProgram = async (id: string, now: number) => {
+    await db.runAsync(
+      `INSERT INTO program
+         (id, name, main_tag, cycle_length, cycle_count, start_date,
+          is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      `Prog ${id}`,
+      null,
+      7,
+      4,
+      '2025-01-01',
+      0,
+      now,
+      now,
+    );
+  };
+
+  const seedTemplate = async (args: {
+    id: string;
+    name: string;
+    updatedAt: number;
+    programId?: string;
+    subTag?: string;
+    withExercise?: boolean;
+  }) => {
+    await db.runAsync(
+      `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      args.id,
+      args.name,
+      args.updatedAt,
+      args.updatedAt,
+      args.programId ?? null,
+      args.subTag ?? null,
+    );
+    if (args.withExercise) {
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps, default_weight_kg)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `te-${args.id}`,
+        args.id,
+        BENCH,
+        1,
+        3,
+        8,
+        60,
+      );
+    }
+  };
+
+  it('groups same-name variants into ONE entry; representative = newest updated_at; variants newest-first', async () => {
+    const base = 1_700_000_000_000;
+    await seedProgram('p-1', base);
+    await seedTemplate({ id: 'tpl-old', name: 'Y', updatedAt: base + 1_000, subTag: '12RM' });
+    await seedTemplate({ id: 'tpl-new', name: 'Y', updatedAt: base + 9_000, programId: 'p-1', subTag: '5RM', withExercise: true });
+    await seedTemplate({ id: 'tpl-mid', name: 'Y', updatedAt: base + 5_000 });
+    await seedTemplate({ id: 'tpl-other', name: 'Z', updatedAt: base + 2_000 });
+
+    const list = await loadTemplatesFullTree(db);
+    expect(list.map((t) => t.name)).toEqual(['Y', 'Z']);
+    const y = list[0];
+    // Representative = tpl-new (largest updated_at) and its tree rides top-level.
+    expect(y.templateId).toBe('tpl-new');
+    expect(y.exercises).toHaveLength(1);
+    expect(y.variants?.map((v) => v.templateId)).toEqual(['tpl-new', 'tpl-mid', 'tpl-old']);
+  });
+
+  it('variants carry strict-NULL triple via key omission; representative omits exercises (top-level dedup); siblings carry their own tree', async () => {
+    const base = 1_700_000_000_000;
+    await seedProgram('p-1', base);
+    await seedTemplate({ id: 'tpl-rep', name: 'Y', updatedAt: base + 9_000, programId: 'p-1', subTag: '5RM', withExercise: true });
+    await seedTemplate({ id: 'tpl-nil', name: 'Y', updatedAt: base + 1_000, withExercise: true });
+
+    const [y] = await loadTemplatesFullTree(db);
+    const [rep, nil] = y.variants!;
+    // Representative: triple present, tree omitted (rides top-level).
+    expect(rep).toEqual({ templateId: 'tpl-rep', programId: 'p-1', subTag: '5RM' });
+    expect('exercises' in rep).toBe(false);
+    // 通用×通用 sibling: BOTH triple keys omitted (wire null rule), own tree present.
+    expect('programId' in nil).toBe(false);
+    expect('subTag' in nil).toBe(false);
+    expect(nil.exercises).toHaveLength(1);
+    expect(nil.templateId).toBe('tpl-nil');
+  });
+
+  it('spends the global variant budget group-first — a name group is never split, scan ends at the first non-fitting group', async () => {
+    const base = 1_700_000_000_000;
+    // Group A (newest, 2 variants), group B (3 variants), group C (1 variant).
+    await seedTemplate({ id: 'a-1', name: 'A', updatedAt: base + 9_000, subTag: 'x' });
+    await seedTemplate({ id: 'a-2', name: 'A', updatedAt: base + 8_000 });
+    await seedTemplate({ id: 'b-1', name: 'B', updatedAt: base + 7_000, subTag: 'x' });
+    await seedTemplate({ id: 'b-2', name: 'B', updatedAt: base + 6_000, subTag: 'y' });
+    await seedTemplate({ id: 'b-3', name: 'B', updatedAt: base + 5_000 });
+    await seedTemplate({ id: 'c-1', name: 'C', updatedAt: base + 4_000 });
+
+    // Budget 4: A (2) fits; B (3) does not fit the remaining 2 → scan ends.
+    // C is NOT skip-ahead-admitted even though it would fit.
+    const list = await loadTemplatesFullTree(db, 4);
+    expect(list.map((t) => t.name)).toEqual(['A']);
+    expect(list[0].variants).toHaveLength(2);
+  });
+
+  it('admits the first group even when it alone exceeds the budget (degenerate guard — empty reply is worse)', async () => {
+    const base = 1_700_000_000_000;
+    await seedTemplate({ id: 'y-1', name: 'Y', updatedAt: base + 3_000, subTag: 'a' });
+    await seedTemplate({ id: 'y-2', name: 'Y', updatedAt: base + 2_000, subTag: 'b' });
+    await seedTemplate({ id: 'y-3', name: 'Y', updatedAt: base + 1_000 });
+
+    const list = await loadTemplatesFullTree(db, 2);
+    expect(list).toHaveLength(1);
+    expect(list[0].variants).toHaveLength(3);
+  });
+
+  it('keeps the Q12 back-compat top-level shape (templateId/name/exercises) pointing at the representative', async () => {
+    const base = 1_700_000_000_000;
+    await seedTemplate({ id: 'tpl-rep', name: 'Y', updatedAt: base + 9_000, subTag: '5RM', withExercise: true });
+    await seedTemplate({ id: 'tpl-old', name: 'Y', updatedAt: base + 1_000 });
+
+    const [y] = await loadTemplatesFullTree(db);
+    // An older Watch build that ignores `variants` sees exactly the
+    // pre-v3 representative behaviour: newest variant's id + tree.
+    expect(y.templateId).toBe('tpl-rep');
+    expect(y.name).toBe('Y');
+    expect(y.exercises).toHaveLength(1);
   });
 });
