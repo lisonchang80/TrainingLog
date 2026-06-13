@@ -29,6 +29,7 @@ import {
   type ICloudBackupItem,
 } from '../../modules/icloud-backup';
 import { parseBackupFileName } from '../domain/backup/backupPolicy';
+import { toFileUri } from '../domain/backup/fileUri';
 import type { BackupItem } from '../domain/backup/restoreRules';
 import {
   setRestoreDeps,
@@ -124,11 +125,9 @@ export async function materializeBackup(
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** expo-file-system's File/Directory want `file://` URIs; expo-sqlite hands
- * out plain POSIX paths (`liveDatabasePath`, `databasePath`). Normalize. */
-function toFileUri(path: string): string {
-  return path.startsWith('file://') ? path : `file://${path}`;
-}
+// `toFileUri` (file:// normalization + space/percent encoding) is the shared
+// util in src/domain/backup/fileUri.ts — Y-5 consolidated the two divergent
+// copies that lived here and in icloudBackupAdapter.ts onto the encodeURI one.
 
 /** Lazy expo-file-system require — same jest-safe pattern as the backup
  * adapter's production fs (icloudBackupAdapter.ts). */

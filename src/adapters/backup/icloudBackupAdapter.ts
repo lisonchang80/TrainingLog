@@ -34,6 +34,7 @@ import {
   parseBackupFileName,
   planBackupRotation,
 } from '../../domain/backup/backupPolicy';
+import { toFileUri } from '../../domain/backup/fileUri';
 
 /** R1 sidecar suffixes — cleared defensively at every copy/delete site. */
 const SIDECAR_SUFFIXES = ['-journal', '-wal', '-shm'] as const;
@@ -135,14 +136,6 @@ export interface UploadBackupSnapshotDeps {
   listBackupItems?: () => Promise<ICloudBackupItem[]>;
   /** Defaults to {@link createExpoBackupFs}. */
   fs?: BackupFs;
-}
-
-/** file:// URI for a local filesystem path (idempotent for URIs). */
-function toFileUri(pathOrUri: string): string {
-  if (pathOrUri.startsWith('file://')) return pathOrUri;
-  // encodeURI keeps '/' but escapes spaces etc. (simulator paths can
-  // contain spaces; the container URL from native is already encoded).
-  return `file://${encodeURI(pathOrUri)}`;
 }
 
 function joinUri(baseUri: string, ...segments: string[]): string {
