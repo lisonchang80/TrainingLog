@@ -31,6 +31,23 @@ xcrun devicectl device install app \
   "<DerivedData>/Build/Intermediates.noindex/ArchiveIntermediates/TrainingLog/InstallationBuildProductsLocation/Applications/TrainingLog.app"
 ```
 
+**Product path differs by verb (validated 2026-06-13, Y-dup Swift smoke)**: the
+path above is the `install` verb's staging dir. If you ran plain `xcodebuild
+… build` (NO `install` — common for a Swift-only compile-verify), there is NO
+`InstallationBuildProductsLocation`; the product sits at:
+
+```
+<DerivedData>/Build/Products/Debug-iphoneos/TrainingLog.app
+```
+
+devicectl installs that one identically. Pick the path matching the verb you
+actually ran, else `ls` returns "No such file" and you'll think the build
+failed when it didn't. Embedded Watch app is at `<that .app>/Watch/TrainingLog
+Watch Watch App.app` either way; verify your new Swift landed via
+`strings "<…>.debug.dylib" | grep <YourNewSymbol>` (Trap 4 — a `@Published var`
+name like `lastResolveMissed` shows up as a symbol; `private func` names may be
+inlined away, so grep a property/type name, not a private method).
+
 Success output looks like:
 ```
 App installed:
