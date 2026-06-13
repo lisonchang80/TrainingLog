@@ -201,6 +201,14 @@ export function wireRestoreDeps(): void {
       },
       paths: {
         liveDbPath,
+        // Audit Y-7: the prep spec sketched a sandbox CACHE dir for the
+        // pre-restore self-backup, but we deliberately co-locate it with the
+        // live DB (Documents/SQLite/). This is correct and safe — the
+        // pre-restore sweep only ever matches `pre-restore-*.sqlite`
+        // (selectStalePreRestoreFiles) and the snapshot sweep only
+        // `backup-snapshot-*`, so neither can touch traininglog.db or each
+        // other. (A cache dir would only save iCloud system-backup space; not
+        // worth diverging the path derivation for v1.)
         preRestoreDir: liveDbPath.slice(0, liveDbPath.lastIndexOf('/')),
       },
     });
