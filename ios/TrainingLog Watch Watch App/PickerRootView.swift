@@ -397,9 +397,24 @@ struct PickerSetLoggerPlaceholderView: View {
         VStack(alignment: .center, spacing: 8) {
             Spacer()
             ProgressView().controlSize(.regular)
-            Text("與 iPhone 同步中…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Stage1 prefetch v3 (2026-06-13 Y-dup, grill Q2=A) — when the
+            // user's (計劃, 強度) combo matched no variant in this template
+            // name group, PickerViewModel fell back to the newest variant
+            // and set `lastResolveMissed`. startFromWatch holds this view
+            // ~1.5s on a miss so this notice is actually visible (mirrors
+            // iPhone's alert-and-proceed). On a match this branch is never
+            // taken and the view flashes for ~0ms.
+            if vm.lastResolveMissed {
+                Label("此組合無對應模板，已使用最新版", systemImage: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+            } else {
+                Text("與 iPhone 同步中…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Text(selectionSubtitle)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

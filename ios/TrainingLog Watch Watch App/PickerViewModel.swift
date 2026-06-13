@@ -63,6 +63,15 @@ final class PickerViewModel: ObservableObject {
     ///   - .some(reply) with isOK=false: iPhone replied, couldn't create
     @Published var startResult: StartFromWatchReply??
 
+    /// Stage1 prefetch v3 (2026-06-13 Y-dup) — true when the most recent
+    /// `startFromWatch` resolved a template selection whose (program,
+    /// intensity) combo matched NO variant in the name group, so it fell
+    /// back to the representative (newest) template. Mirrors iPhone's
+    /// `planResolveTarget` fallback_with_alert. False for an exact match
+    /// OR a back-compat payload with no variants at all (that's normal,
+    /// not a user-facing miss). Cleared in `resetSelection`.
+    @Published var lastResolveMissed: Bool = false
+
     // MARK: - 3-tuple navigation state
 
     @Published var selectedTemplate: TemplateOption?
@@ -173,7 +182,11 @@ final class PickerViewModel: ObservableObject {
             TemplateOption(
                 id: summary.templateId,
                 name: summary.name,
-                exercises: summary.exercises
+                exercises: summary.exercises,
+                // Stage1 prefetch v3 (2026-06-13 Y-dup) — carry the name
+                // group's variants so the tap path resolves the concrete
+                // (program, intensity) variant before building the snapshot.
+                variants: summary.variants
             )
         }
         // Phase 2.5 — programs with inline intensities.
@@ -264,7 +277,22 @@ final class PickerViewModel: ObservableObject {
         // Falls back to SetLoggerMockData.mockSnapshot() when neither
         // source has exercises (pre-Q50 iPhone payload OR genuinely
         // empty template) so SetLoggerView still mounts.
-        let (resolvedTitle, resolvedExercises, resolvedTemplateId) = resolveSelectionExercises(selection)
+        let (resolvedTitle, resolvedExercises, resolvedTemplateId, missed) = resolveSelectionExercises(selection)
+        // Stage1 prefetch v3 (2026-06-13 Y-dup) — surface a one-line
+        // 過場頁 notice when the (program, intensity) combo had no variant
+        // and we fell back to the representative (mirrors iPhone A1
+        // alert-and-proceed). Consumed by PickerSetLoggerPlaceholderView.
+        lastResolveMissed = missed
+        // Grill Q2=A — on a resolve MISS, hold the transitional 過場頁
+        // ~1.5s so the user actually SEES the "no matching variant, using
+        // newest" notice before we drop into the set logger. The
+        // offline-first happy path has no await below, so isStartingSession
+        // flips true→false synchronously and the 過場頁 normally renders
+        // for ~0ms; this await is the ONLY thing that lets syncingView
+        // paint. Skipped entirely on a match → match path stays instant.
+        if missed {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
         // 2026-05-29 late-evening real-device smoke fix —
         // Pre-fix: empty exercises (user picked a template with no
         // 動作 yet, OR a fat-tree wire that hadn't landed) fell back
@@ -304,9 +332,16 @@ final class PickerViewModel: ObservableObject {
         // For planned-row path: templateId comes from
         // todayPlanned.planned.templateId so iPhone-side reconcile can
         // build a matching session_exercise tree from the same source.
+        //
+        // Stage1 prefetch v3 (2026-06-13 Y-dup) — send `resolvedTemplateId`
+        // (the variant resolveVariant picked), NOT `selection.template?.id`
+        // (which is the name-group REPRESENTATIVE). This is the whole
+        // point of the fix: iPhone opens the session from the same variant
+        // the Watch built its snapshot from, so the in-session 副標題 +
+        // tree + live-mirror all line up.
         coordinator.sendStartFromWatchTUI(
             sessionId: localSessionId,
-            templateId: selection.template?.id ?? resolvedTemplateId,
+            templateId: resolvedTemplateId,
             programCycleId: selection.program?.id,
             intensityId: selection.intensity?.id
         )
@@ -318,9 +353,12 @@ final class PickerViewModel: ObservableObject {
     /// based on the selection state. Returns empty exercises when no
     /// source matches (pre-Q50 fallback path).
     ///
-    /// Tuple shape: (title, exercises, templateIdForWire).
+    /// Tuple shape: (title, exercises, templateIdForWire, missed).
+    /// `missed` is true only when a template selection's (program,
+    /// intensity) combo matched no variant in the name group and fell
+    /// back to the representative — surfaced to the user (Q2).
     private func resolveSelectionExercises(_ selection: PickerSelection)
-        -> (String, [Stage1TemplateExerciseDTO], String?)
+        -> (title: String, exercises: [Stage1TemplateExerciseDTO], templateId: String?, missed: Bool)
     {
         // Template-tap path — template was selected via the 模板訓練
         // section row, possibly drilled through 計劃 + 強度 sheets.
@@ -334,8 +372,22 @@ final class PickerViewModel: ObservableObject {
         if let template = selection.template {
             let programName = selection.program?.name ?? "通用"
             let intensityName = selection.intensity?.name ?? "通用"
+            // Q3=a — title always reflects the USER's selected (program,
+            // intensity), even on a fallback miss (it represents intent;
+            // the resolved variant's own triple may differ).
             let title = "\(template.name) · \(programName) · \(intensityName)"
-            return (title, template.exercises, template.id)
+            // Stage1 prefetch v3 (2026-06-13 Y-dup) — resolve the concrete
+            // variant from the user's (program, intensity) so the snapshot
+            // tree AND the wire templateId come from the SAME variant.
+            // Two-end same-source tree is the precondition for
+            // replaceLiveMirror's exercise_id+occurrence natural key
+            // (mismatched source → Bug X parallel-row corruption).
+            let resolved = resolveVariant(
+                template: template,
+                program: selection.program,
+                intensity: selection.intensity
+            )
+            return (title, resolved.exercises, resolved.templateId, resolved.missed)
         }
         // Planned-row path — selection is all-nil per PickerRootView's
         // planSection planned-case (the program-day already carries the
@@ -344,9 +396,58 @@ final class PickerViewModel: ObservableObject {
         // (e.g. "推日 W3D1（今日）") so we don't synthesize a 3-tuple.
         if case .planned(_, _, _, _, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
             let label = plannedLabel ?? "今日訓練"
-            return (label, exercises, templateId.isEmpty ? nil : templateId)
+            return (label, exercises, templateId.isEmpty ? nil : templateId, false)
         }
-        return ("自由訓練", [], nil)
+        return ("自由訓練", [], nil, false)
+    }
+
+    /// Stage1 prefetch v3 (2026-06-13 Y-dup) — resolve the concrete
+    /// template variant the user picked, mirroring iPhone's
+    /// `planResolveTarget` (src/domain/template/resolveTargetTemplate.ts).
+    ///
+    /// The picker row is now ONE entry per template NAME (Y-dup fix); the
+    /// user's (program, intensity) selection picks which variant in the
+    /// `template.variants` group to actually start.
+    ///
+    /// Matching is STRICT and id-based:
+    ///   • `program == nil` (通用) matches ONLY a variant whose
+    ///     `programId == nil` (NULL column) — NOT a wildcard, and NOT a
+    ///     "通用 → representative" short-circuit (that was iPhone bug #48,
+    ///     grill Q6). Same for `intensity == nil` ↔ `subTag == nil` (Q7).
+    ///   • id-based, never name-based → a rename between handshake and
+    ///     start can't break resolution (grill Q10).
+    ///
+    /// Returns (templateId, exercises, missed):
+    ///   • match → that variant's id + its tree (representative omits its
+    ///     tree on the wire for 64 KB dedup → nil ⇒ use the group tree).
+    ///   • no variants at all (pre-v3 payload, Q12) → representative,
+    ///     `missed = false` (normal back-compat, not a user-facing miss).
+    ///   • variants present but none match → representative fallback,
+    ///     `missed = true` (mirrors iPhone fallback_with_alert; caller
+    ///     surfaces a one-line 過場頁 notice).
+    private func resolveVariant(
+        template: TemplateOption,
+        program: ProgramOption?,
+        intensity: IntensityOption?
+    ) -> (templateId: String, exercises: [Stage1TemplateExerciseDTO], missed: Bool) {
+        // No variants on the wire (older iPhone build) → use the
+        // representative exactly as before. Not a user-facing miss.
+        guard !template.variants.isEmpty else {
+            return (template.id, template.exercises, false)
+        }
+        let wantedProgram = program?.id   // nil = 通用 → matches NULL programId
+        let wantedSubTag = intensity?.id  // nil = 通用 → matches NULL subTag
+        if let variant = template.variants.first(where: {
+            $0.programId == wantedProgram && $0.subTag == wantedSubTag
+        }) {
+            // Representative (variants[0]) omits its tree on the wire
+            // (dedup): nil exercises ⇒ use the group's top-level tree.
+            let tree = variant.exercises ?? template.exercises
+            return (variant.templateId, tree, false)
+        }
+        // Variants present but the user's (program, intensity) combo has
+        // none → representative fallback + user-facing miss notice.
+        return (template.id, template.exercises, true)
     }
 
     /// Convenience accessor for the planned label string (when
@@ -466,6 +567,7 @@ final class PickerViewModel: ObservableObject {
         selectedIntensity = nil
         startResult = nil
         isStartingSession = false
+        lastResolveMissed = false
     }
 
     /// Convenience for "user picked today's planned row".

@@ -29,14 +29,26 @@ struct TemplateOption: Identifiable, Hashable {
     let id: String
     let name: String
     let exercises: [Stage1TemplateExerciseDTO]
+    /// Stage1 prefetch v3 (2026-06-13 Y-dup) — all variants in this name
+    /// group (from `Stage1TemplateSummary.variants`). Empty when the
+    /// iPhone payload predates v3 (Q12 back-compat) or for mock /
+    /// {id,name}-only display rows; PickerViewModel.resolveVariant then
+    /// falls back to the representative (`id` + `exercises` above).
+    let variants: [Stage1TemplateVariantDTO]
 
-    // Two-arg convenience init for code paths / mocks that don't have
-    // exercise data (Phase 1 mock factories, sheets that only need
+    // Convenience init for code paths / mocks that don't have exercise
+    // or variant data (Phase 1 mock factories, sheets that only need
     // {id, name} for display).
-    init(id: String, name: String, exercises: [Stage1TemplateExerciseDTO] = []) {
+    init(
+        id: String,
+        name: String,
+        exercises: [Stage1TemplateExerciseDTO] = [],
+        variants: [Stage1TemplateVariantDTO] = []
+    ) {
         self.id = id
         self.name = name
         self.exercises = exercises
+        self.variants = variants
     }
 }
 

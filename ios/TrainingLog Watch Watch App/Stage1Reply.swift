@@ -167,10 +167,74 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
     }
 }
 
+/// Stage1 prefetch v3 (2026-06-13 Y-dup) — one variant inside a
+/// name-grouped template summary. Mirror of TS `Stage1TemplateVariant`
+/// (handshake.ts:233). A name group (e.g. two templates both called
+/// "Y") collapses to ONE `Stage1TemplateSummary` row in the picker; its
+/// `variants` list carries each concrete (program_id, sub_tag) triple so
+/// the Watch can resolve the variant the user actually picked
+/// (`PickerViewModel.resolveVariant` — mirrors iPhone `planResolveTarget`).
+///
+/// Wire shape (must match the TS builder's `...(cond ? {k} : {})` omits):
+///   • `programId` / `subTag` — OMITTED by the iPhone builder when the
+///     column is NULL (通用). Tolerant decode → nil. Watch matches with
+///     STRICT-NULL semantics: nil here means "matches the 通用
+///     selection", NOT a wildcard (grill Q6/Q7).
+///   • `exercises` — OMITTED for the representative (variants[0]); its
+///     tree IS the group's top-level `exercises` (64 KB wire dedup).
+///     Tolerant decode → nil → consumer falls back to the group tree.
+struct Stage1TemplateVariantDTO: Codable, Equatable, Hashable {
+    let templateId: String
+    /// nil ⇔ program_id NULL (通用) — key absent on the wire.
+    let programId: String?
+    /// nil ⇔ sub_tag NULL (通用) — key absent on the wire.
+    let subTag: String?
+    /// nil ⇔ representative (variants[0]); consumer uses the group tree.
+    let exercises: [Stage1TemplateExerciseDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case templateId
+        case programId
+        case subTag
+        case exercises
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.templateId = try c.decode(String.self, forKey: .templateId)
+        // Tolerant: absent key (NULL triple column) → nil = 通用.
+        self.programId = try? c.decode(String.self, forKey: .programId)
+        self.subTag = try? c.decode(String.self, forKey: .subTag)
+        // Tolerant: absent (representative dedup) → nil = use group tree.
+        self.exercises = try? c.decode(
+            [Stage1TemplateExerciseDTO].self,
+            forKey: .exercises
+        )
+    }
+
+    init(
+        templateId: String,
+        programId: String? = nil,
+        subTag: String? = nil,
+        exercises: [Stage1TemplateExerciseDTO]? = nil
+    ) {
+        self.templateId = templateId
+        self.programId = programId
+        self.subTag = subTag
+        self.exercises = exercises
+    }
+}
+
 /// NEW-Q50 D28/D29 — fat-tree template summary. Replaces the pre-Q50
 /// thin `{templateId, name}` shape: each template now carries its full
 /// planned exercise list so Watch can build a SessionSnapshot offline
 /// (without a second round-trip to iPhone).
+///
+/// Stage1 prefetch v3 (2026-06-13 Y-dup): one entry per template NAME.
+/// `templateId` / `exercises` are the REPRESENTATIVE variant's (newest
+/// `updated_at` in the group), so an older Watch build that ignores
+/// `variants` keeps today's behaviour (Q12 tolerant-decode compat). New
+/// builds resolve the concrete variant from `variants` instead.
 ///
 /// Caps per Q3=a sizing: default 20 templates × ~10 exercises ≈ 30 KB
 /// JSON, well under the 64 KB WC envelope ceiling.
@@ -182,11 +246,18 @@ struct Stage1TemplateSummary: Codable, Equatable {
     /// renders; tap path then has no exercises to build from and
     /// falls back to mockSnapshot in PickerViewModel).
     let exercises: [Stage1TemplateExerciseDTO]
+    /// Stage1 prefetch v3 (2026-06-13 Y-dup) — all variants in this name
+    /// group, newest-edited first (index 0 == the representative).
+    /// Decoded as `[]` on pre-v3 iPhone payloads (Q12 back-compat) →
+    /// PickerViewModel.resolveVariant then falls back to the
+    /// representative (templateId + exercises above).
+    let variants: [Stage1TemplateVariantDTO]
 
     enum CodingKeys: String, CodingKey {
         case templateId
         case name
         case exercises
+        case variants
     }
 
     init(from decoder: Decoder) throws {
@@ -198,16 +269,23 @@ struct Stage1TemplateSummary: Codable, Equatable {
             [Stage1TemplateExerciseDTO].self,
             forKey: .exercises
         )) ?? []
+        // Tolerant: missing key → [] (back-compat with pre-v3 wire).
+        self.variants = (try? c.decode(
+            [Stage1TemplateVariantDTO].self,
+            forKey: .variants
+        )) ?? []
     }
 
     init(
         templateId: String,
         name: String,
-        exercises: [Stage1TemplateExerciseDTO]
+        exercises: [Stage1TemplateExerciseDTO],
+        variants: [Stage1TemplateVariantDTO] = []
     ) {
         self.templateId = templateId
         self.name = name
         self.exercises = exercises
+        self.variants = variants
     }
 }
 
