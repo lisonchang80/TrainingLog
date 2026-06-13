@@ -190,6 +190,52 @@ describe('uploadBackupSnapshot — write-then-promote', () => {
     expect(files.has(`${DOCS}/${NEW_NAME}`)).toBe(true);
   });
 
+  it('cloud-only (not-downloaded) backup with no local placeholder is NOT reported deleted (R-02)', async () => {
+    // oldA is listed by the metadata query but has no local copy at all
+    // (downloadingStatus=not-downloaded → only a cloud item exists, no
+    // `.icloud` placeholder materialized). fileExists is false for both the
+    // logical name and the placeholder → JS cannot evict it.
+    const oldA = makeBackupFileName(T0 - 2000); // oldest → planned for deletion
+    const oldB = makeBackupFileName(T0 - 1000); // kept
+    const { fs, files } = makeMockFs({
+      [SNAPSHOT_URI]: 1000,
+      [`${DOCS}/${oldB}`]: 950,
+      // NB: oldA's file is absent locally (cloud-only); no `.icloud` either
+    });
+    const deps = baseDeps({ fs, items: [makeItem(oldA), makeItem(oldB)] });
+
+    const result = await uploadBackupSnapshot(
+      { snapshotPath: SNAPSHOT_PATH, nowMs: T0 },
+      deps
+    );
+
+    // The placeholder skip must NOT masquerade as a successful delete.
+    expect(result.deletedNames).toEqual([]);
+    expect(result.failedDeletes).toEqual([oldA]);
+    expect(files.has(`${DOCS}/${NEW_NAME}`)).toBe(true);
+  });
+
+  it('cloud-only backup with a local .icloud placeholder is evicted via the placeholder (R-02)', async () => {
+    const oldA = makeBackupFileName(T0 - 2000);
+    const oldB = makeBackupFileName(T0 - 1000);
+    const placeholder = `${DOCS}/.${oldA}.icloud`;
+    const { fs, files } = makeMockFs({
+      [SNAPSHOT_URI]: 1000,
+      [placeholder]: 1, // cloud-only placeholder present locally
+      [`${DOCS}/${oldB}`]: 950,
+    });
+    const deps = baseDeps({ fs, items: [makeItem(oldA), makeItem(oldB)] });
+
+    const result = await uploadBackupSnapshot(
+      { snapshotPath: SNAPSHOT_PATH, nowMs: T0 },
+      deps
+    );
+
+    expect(result.deletedNames).toEqual([oldA]);
+    expect(result.failedDeletes).toEqual([]);
+    expect(files.has(placeholder)).toBe(false); // placeholder evicted
+  });
+
   it('foreign files in the user-visible folder are never deleted; listing failure skips rotation', async () => {
     const { fs, files } = makeMockFs({
       [SNAPSHOT_URI]: 1000,

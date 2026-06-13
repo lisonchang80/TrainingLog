@@ -120,7 +120,11 @@ export interface BackupUploadResult {
   sizeBytes: number | null;
   /** Old backups removed by rotation (oldest first). */
   deletedNames: string[];
-  /** Rotation deletions that failed (non-fatal; retried next run). */
+  /**
+   * Rotation deletions that did NOT happen (non-fatal; re-planned next run).
+   * Includes both genuine delete throws AND cloud-only (not-downloaded)
+   * backups JS cannot evict — see audit R-02 in `uploadBackupSnapshot`.
+   */
   failedDeletes: string[];
 }
 
@@ -240,9 +244,30 @@ export async function uploadBackupSnapshot(
   for (const name of plan.toDelete) {
     const targetUri = joinUri(documentsUri, name);
     try {
-      if (fs.fileExists(targetUri)) fs.deleteFile(targetUri);
-      deleteSidecarsBestEffort(fs, targetUri);
-      deletedNames.push(name);
+      if (fs.fileExists(targetUri)) {
+        // Local copy present → real delete (touches the cloud item).
+        fs.deleteFile(targetUri);
+        deleteSidecarsBestEffort(fs, targetUri);
+        deletedNames.push(name);
+      } else {
+        // Audit R-02: the logical name doesn't exist locally — this is a
+        // cloud-only (not-downloaded) backup, materialized only as a
+        // `.<name>.icloud` placeholder. `fileExists` (FileManager
+        // fileExists(atPath:)) reports false for the logical path, so a
+        // bare `if (exists) delete` would SKIP the delete yet still report
+        // success → keep-2 never converges and old cloud backups accumulate
+        // forever across devices. Try deleting the placeholder instead; if
+        // even that is absent, we genuinely cannot evict the cloud item from
+        // JS (needs native removeUbiquitousItem) → report it honestly in
+        // failedDeletes, NOT deletedNames, so the next run re-plans it.
+        const placeholderUri = joinUri(documentsUri, `.${name}.icloud`);
+        if (fs.fileExists(placeholderUri)) {
+          fs.deleteFile(placeholderUri);
+          deletedNames.push(name);
+        } else {
+          failedDeletes.push(name);
+        }
+      }
     } catch {
       failedDeletes.push(name); // non-fatal (Q5-B); re-planned next run
     }
