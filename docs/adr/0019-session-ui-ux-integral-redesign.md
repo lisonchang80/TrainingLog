@@ -941,6 +941,7 @@ Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's 
 
 | 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
 |---|---|---|---|---|---|
+| 2026-06-13 | Stage1 prefetch shape v3（Watch 同名模板 Y-dup） | NEW-Q44/NEW-Q50 Q3：flat 全 variant rows（top-20）、Watch (計劃,強度) 選擇＝metadata theater 不影響 templateId | grouped-by-name + variants[] fat-tree；Watch 端 (programId, subTag) strict-NULL resolve 鏡像 planResolveTarget；20-cap 改 group-first 全局 variant 預算；miss → representative + 過場頁提示 | 預研報告 13 + grill 13Q 2026-06-13（詳見 § 2026-06-13 段） | n/a (pre-impl) |
 | 2026-06-12 | D17 串流落地 — HRFrozenPane 輪詢降階拍板翻盤 | （2026-06-11 #312 row 下）HRFrozenPane 接最近 HR + 動態 kcal 走 `TimelineView` 5s 輪詢、「D17 delegate 串流留 backlog」（D14 § 2026-06-11 amendment point 5 降階拍板）| **D17 落地**：`SessionController` adopt `HKLiveWorkoutBuilderDelegate`（`didCollectDataOf` HR/active/basal 三型別觸發、背景 queue → `Task { @MainActor [weak self] }` hop、`builder ===` 擋 teardown 遲到 callback）→ 新 `@Published streamedStats`（**等值閘門即節流**：比對相等不 assign、UI 更新率＝資料變動率 ~1Hz HR）；statistics 讀法抽 `computeStats(from:)` 與 `liveWorkoutStats()` 共用單一來源；HRFrozenPane 變純顯示 struct 吃下傳值、TimelineView 輪詢砍除；start() 清 streamedStats（新場顯 "--" 到首樣本）、三 teardown path 清（對齊舊輪詢 builder-nil 即 "--" 行為）。FinishPage onAppear pull path 不動。實作走 builder delegate 而非 D10 Q9 原文的 `activeWorkoutHeartRate` observer（builder delegate 同源 statistics、與 #312 讀法零複製）| overnight D17 backlog 收口 2026-06-12（#312 v2 降階先上、串流補回）| branch `slice/d17-hr-streaming`（SessionController delegate + SetLoggerView wire 兩 commit）|
 | 2026-06-11 | D14 完成頁 tiles 真資料化 + 改版（#312）| D14 凍結 spec：5-tile、❤ `142 bpm（平均）` / 🔥 `285 kcal` 硬編 placeholder、💪 `5 動作`＝全部動作數；D10 Q9 = HR/kcal 走 D17/D18 live observer ~1Hz | tiles 接 `HKLiveWorkoutBuilder` 真值（`liveWorkoutStats()`、無樣本 "--"）；❤ 平均→**範圍 min–max**；🔥 拆**動態/靜態兩行**（basal 型別新增進 typesToRead、5→6 tile）；💪 **`N/M 動作` 有非熱身 ✓ 才算 1**；HRFrozenPane 接最近 HR + 動態 kcal（TimelineView 5s 輪詢、D17 串流降階先上）| user 實機 smoke #312 v1 後 4 點反饋 + AskUserQuestion 3 拍板 2026-06-11 | `42b8f84`（v1 wire）+ 本批 v2 commits |
 | 2026-06-01 深夜 | live-mirror 加 session-liveness gate（H1 防殭屍 session 復活）| live-mirror reconcile 無條件 `INSERT INTO session … ON CONFLICT`（沿用 end 路徑 UPSERT）；E1 只 gate 了「完成」end-reconcile、沒 gate live 路徑（舊 15s + 不在 abort emit 被判安全）| **`replaceLiveMirror` 傳 `requireExistingLiveSession: true`**：reconcile **transaction 內**先 `SELECT ended_at`，row 不存在（放棄 hard-delete）或 `ended_at != NULL`（完成）→ 整筆 drop、回 `code:'session-gone'`、live tick **永不 INSERT** session row（start path 獨占建立）。理由：0.5s + emit-on-mutation 把「teardown 時在途 tick」變常態（非 corner），三 WC 通道（live=sendMessage/appContext vs discard/end=TUI）無跨通道排序 → 晚到 tick 會復活已刪 session（zombie `ended_at=NULL`）或重插 `purgeTail` 剛刪的 row（regress E2）。in-txn 檢查氣密（並行 discard 不論先後都收斂到 gone）。順帶 M1：rev-guard rollback 改 CAS（只在仍是最新 claimant 時還原）| grill-with-docs 2026-06-01（overnight Agent A 抓 HIGH H1、我獨立對碼驗證屬實 + 7 個 jest gate 測試）；Q=A（iPhone in-txn gate 為權威、Watch producer-stop 列可選 defence-in-depth、本趟 TS-only 不做）| `slice/13d-livemirror-fastlane`（本 commit、jest 192/2130 +7）|
@@ -3383,3 +3384,34 @@ Swift（device-gated、停在此邊界等使用者）：
 **device smoke 全綠（2026-06-11）**：① 頂組行＋逐組編號渲染 ✅／③ 長名 back chevron 在 ✅／② watchdog→error 態→重試秒回 ✅（含背景喚醒行為驗證）。#311-A 收口。
 
 **Cross-link**：`wc-add-envelope-kind` skill（8-step pipeline）；handshake.ts `onHandshakeRequest`（request-reply 範式）；`set-weight-unit-surfaces`（display-ready 鐵律）；`src/domain/pr/topSet.ts` + `buckets.ts`（頂組 + 次數分類來源）。
+
+## 2026-06-13 — Stage1 prefetch v3：grouped + variants[]（Watch 同名模板 dup，13Q grill 拍板）
+
+**問題**：Watch picker 模板列表同名重複列（Y、Y）— `loadTemplatesFullTree` 吃 `listTemplates`（全 variants、ADR-0003 三元組各一列），iPhone 訓練 tab 自 round-41 起已 group-by-name。深因（預研報告 13）：Watch 三 sheet 選 (計劃,強度) 是 **metadata theater** — 選擇不改變 start-from-watch payload 的 templateId（永遠 representative），三 surface（Watch snapshot tree／iPhone session tree／in-session 副標題）現在就可能錯配。
+
+**拍板＝方案 A**：Stage1 reply 改 grouped-by-name + 每組 `variants[]`（各帶 fat-tree），Watch 端以 (programId, subTag) strict-NULL 解析（鏡像 `planResolveTarget`），start-from-watch payload 零變動（baked resolved id）。方案 B（row 二行 disambiguation）否決＝不治 theater；方案 C（iPhone 端重 resolve）單獨做必造成兩端 tree 不同源（`replaceLiveMirror` 自然鍵 reconcile → Bug X 類腐壞）、A 落地後是 no-op → 不做（Q13）。
+
+**13Q 拍板 ledger**：
+
+| Q | 題 | 拍板 |
+|---|---|---|
+| Q1 | row 外觀 | 單行 name（badge 已在 iPhone round-41 Q2 否決，不復活） |
+| Q2 | 解析 miss 回饋 | proceed +「啟動訓練」過場頁加一行「該組合無模板，使用最新版」（鏡像 #308 A1 alert-and-proceed；視覺拍板＝過場頁行、非 SetLogger banner） |
+| Q3 | miss 時 title | 顯示使用者選的 (P,S)（意圖優先）；known-issue：fallback 時 iPhone in-session 副標題（linked-template 分類）≠ Watch title，真解＝#308 B1（session 落 (program_id, sub_tag) 欄）非本 slice |
+| Q4 | sheet 選項 | 不縮、顯示全集（與 iPhone start sheet 一致；「高亮有 variant 組合」記 backlog） |
+| Q5 | variants exercises | per-variant fat-tree 全帶（兩端同源 tree 是 replaceLiveMirror 自然鍵前提；預算不變＝全局 variant 數仍 cap 20） |
+| Q6 | (nil,nil) 解析 | strict match (program_id NULL, sub_tag NULL) variant、miss → representative（防 #48「通用 short-circuit」同型 bug） |
+| Q7 | (P, NULL) | strict（與 iPhone planResolveTarget 同語意） |
+| Q8 | 20-cap 語意 | group-first：names 依 representative updated_at 排序、逐組收全 variants、全局 20 滿即截斷（同名組不腰斬；cap 加大否決＝envelope 逼近 64KB） |
+| Q9 | 模板 handshake 後被刪 | 維持現狀（throw→靜默無 row、live-mirror liveness gate drop、end reconcile 自癒）；freestyle fallback 記 backlog |
+| Q10 | 改名 race | 接受 — 解析 id-based、name 只是 grouping display，改名不影響 start 正確性 |
+| Q11 | 另存強度後 stale map | 接受（🔄 refresh / cold-launch 自癒；miss 走 Q2 過場提示）；iPhone 主動 push 邀 re-handshake＝NEW-Q50 stretch 另案 |
+| Q12 | 舊 Watch build 相容 | 接受（tolerant decode 省 key 不 crash、只見 representative＝重複列消失比今天好）；clientVersion 分流否決 |
+| Q13 | 防線 C | 不做（A 落地後 no-op；舊 Watch 單獨生效場景反而兩端 tree 不同源）；吻合性 log warning 折衷也不做 |
+
+**翻盤的既有拍板**：
+- ❌ NEW-Q44／NEW-Q50 Q3 的 Stage1 templates shape（flat 全 variant rows）→ grouped-by-name + variants[]（v3）
+- ❌ 20-cap「top-20 variant rows」語意 → group-first 全局 variant 預算
+- ⚠️ Watch 三 sheet (計劃,強度) 從 metadata theater 升級為 resolve 輸入（D8 P1 sheet 流程不變、語意變）
+
+**實作**（預研報告 13 micro-PRD；報告副本 `~/code/TrainingLog-overnight-reports/2026-06-12/13-watch-template-dedup.md`）：commit 1 TS（handshake builder 複用 pure `templateListGroups` + jest）→ commit 2 Swift（Stage1Reply tolerant decode + PickerViewModel.resolveVariant + 過場頁行）→ device smoke 7 項 → docs。無新 WC kind；reply-shape 遵守 wire null rule（NULL 省 key）+ tolerant decode 慣例。

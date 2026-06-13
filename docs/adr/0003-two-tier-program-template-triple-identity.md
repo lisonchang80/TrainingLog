@@ -183,3 +183,7 @@ X stays exactly as last saved (copy semantics). The editor stays on X (no
 re-hydrate). Coverage: `tests/repository/templateSaveAsFromTemplate.test.ts`
 (remapDraftBody fresh-id/remap + Y-gets-edits + X-untouched + 覆蓋).
 
+
+## Amendment 2026-06-13 — 三元組 resolve 的第三個 surface（Watch picker）
+
+Watch picker 自本日起成為三元組解析的第三個 surface（前兩個：iPhone start sheet 的 `resolveTargetTemplate`、模板編輯器的 `findTemplateByTriple`）：Stage1 prefetch 改 grouped-by-name + `variants[]`，Watch 端以 (programId, subTag) strict-NULL 匹配（NULL idiom 同 `findTemplateByTriple`）、miss → representative fallback + 過場頁提示。詳見 ADR-0019 § 2026-06-13「Stage1 prefetch v3」段。
