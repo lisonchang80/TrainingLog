@@ -251,11 +251,22 @@ export function liveDatabasePath(): string {
  * Behaviour:
  * - Never opened (or a previous open failed) → no-op. Safe on the
  *   fresh-install RestoreGate path where no DB exists yet.
- * - `closeAsync()` THROWS → the singleton is KEPT (still-working connection)
- *   and the error propagates, so the restore engine aborts at its
- *   'close-live' step BEFORE any file deletion. Swapping the file under a
- *   connection we failed to close would risk corruption; keeping the cache
- *   avoids a second connection (= second transaction serializer) on retry.
+ * - `closeAsync()` THROWS → the error still propagates so the restore engine
+ *   aborts at its 'close-live' step BEFORE any file deletion. But whether we
+ *   KEEP or CLEAR the singleton now depends on whether the connection is
+ *   genuinely still alive (audit R-05):
+ *     - expo-sqlite's native `closeDatabase` sets `isClosed = true` and
+ *       removes the connection from its cache BEFORE the only `throw`
+ *       (`exsqlite3_close` returning non-OK); statement finalization there is
+ *       best-effort and does NOT throw. So a throw means the underlying
+ *       handle is already dead. Keeping the cache would hand the next
+ *       `openDatabase()` a dead wrapper → migrate/init fails → permanent
+ *       "Database initialization failed" until the user force-quits.
+ *     - We therefore PROBE the connection after a throw: a trivial read that
+ *       succeeds proves it is somehow still usable (keep the cache, avoid a
+ *       second connection + transaction serializer on retry); a read that
+ *       also throws confirms a dead handle → clear the cache so the next
+ *       call does a fresh open.
  */
 export async function closeAndResetForRestore(): Promise<void> {
   const pending = cached;
@@ -270,10 +281,27 @@ export async function closeAndResetForRestore(): Promise<void> {
   // `inner` is TS-private on ExpoDatabase — compile-time only; reach it via
   // a structural cast because the class body above is frozen (append-only).
   const inner = (db as unknown as { inner?: SQLiteDatabase }).inner;
-  if (inner) {
-    await inner.closeAsync();
+  if (!inner) {
+    cached = null;
+    return;
   }
-  cached = null;
+  try {
+    await inner.closeAsync();
+    cached = null;
+  } catch (closeErr) {
+    // R-05: decide keep-vs-clear by probing liveness rather than assuming the
+    // connection survived (it almost never does — native marks it closed +
+    // de-caches before throwing). A successful probe = genuinely alive.
+    let stillAlive = false;
+    try {
+      await db.getFirstAsync('SELECT 1');
+      stillAlive = true;
+    } catch {
+      stillAlive = false;
+    }
+    if (!stillAlive) cached = null; // dead wrapper → force a fresh open on retry
+    throw closeErr; // engine still aborts close-live before any file deletion
+  }
 }
 
 /**
