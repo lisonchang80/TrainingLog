@@ -244,6 +244,8 @@ export const strings = {
       retryRestore: '重試',
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       backupNow: '立即備份',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exportJson: '匯出資料 (JSON)',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -484,6 +486,10 @@ export const strings = {
       restoreConfirmQ: '要還原這份備份嗎？目前的資料會被取代。',
       noBackupFound: '找不到 iCloud 備份',
       noBackupFoundBody: 'iCloud 可能尚未同步完成，請稍後重新檢查。',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exportJsonDone: '已匯出 (JSON)',
+      exportJsonDoneBody: '檔案已儲存至：',
+      exportJsonFailed: '匯出失敗',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -528,6 +534,8 @@ export const strings = {
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       autoBackupLabel: '自動備份',
       backupRunning: '備份中…',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exporting: '匯出中…',
       // chart time-range chips
       thisYear: '今年',
       previousYear: '上一年',
@@ -981,6 +989,8 @@ export const strings = {
       retryRestore: 'Retry',
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       backupNow: 'Back up now',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exportJson: 'Export Data (JSON)',
     },
 
     page: {
@@ -1216,6 +1226,10 @@ export const strings = {
       restoreConfirmQ: 'Restore this backup? Current data will be replaced.',
       noBackupFound: 'No iCloud backup found',
       noBackupFoundBody: 'iCloud may still be syncing — check again in a moment.',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exportJsonDone: 'Exported (JSON)',
+      exportJsonDoneBody: 'File saved to:',
+      exportJsonFailed: 'Export failed',
     },
 
     status: {
@@ -1255,6 +1269,8 @@ export const strings = {
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       autoBackupLabel: 'Automatic backup',
       backupRunning: 'Backing up…',
+      // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
+      exporting: 'Exporting…',
       thisYear: 'This Year',
       previousYear: 'Previous Year',
       nextYear: 'Next Year',

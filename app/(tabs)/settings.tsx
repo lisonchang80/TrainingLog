@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -58,6 +59,7 @@ import {
   runBackup,
   type BackupHealth,
 } from '@/src/services/backupService';
+import { buildJsonExport, writeJsonExport } from '@/src/services/jsonExport';
 import { getLatestCloudBackup } from '@/src/adapters/backup/icloudBackupAdapter';
 import type { ICloudBackupItem } from '@/modules/icloud-backup';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -139,6 +141,8 @@ export default function SettingsScreen() {
   const [backupHealth, setBackupHealth] = useState<BackupHealth | null>(null);
   const [latestCloudItem, setLatestCloudItem] = useState<ICloudBackupItem | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  /** Slice 15b C6 — 匯出資料 (JSON) in-flight guard (spinner + disable). */
+  const [exportBusy, setExportBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [u, popup, loc, hkState, activeSession] = await Promise.all([
@@ -221,6 +225,33 @@ export default function SettingsScreen() {
       await refreshBackup();
     } finally {
       setBackupBusy(false);
+    }
+  };
+
+  /**
+   * Slice 15b C6 — 匯出資料 (JSON). Builds a full self-describing JSON dump of
+   * the whole DB (ADR-0011 §5; export-only v1) and writes it to a timestamped
+   * file in the document directory, then shows the resulting path. The iOS
+   * Share Sheet (AirDrop / Mail / Files) is DEFERRED — it needs `expo-sharing`
+   * (not installed; a native dep that requires a device build). For now the
+   * user gets a file on disk + its path. `buildJsonExport` is pure and takes
+   * the caller's clock/appVersion so the timestamp is stamped exactly once.
+   */
+  const onExportJson = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const nowMs = Date.now();
+      const json = await buildJsonExport(db, {
+        appVersion: Constants.expoConfig?.version ?? 'unknown',
+        exportedAt: new Date(nowMs).toISOString(),
+      });
+      const uri = writeJsonExport(json, nowMs);
+      Alert.alert(t('alert', 'exportJsonDone'), `${t('alert', 'exportJsonDoneBody')}\n${uri}`);
+    } catch (e) {
+      Alert.alert(t('alert', 'exportJsonFailed'), e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportBusy(false);
     }
   };
 
@@ -591,6 +622,27 @@ export default function SettingsScreen() {
             {tBackupEscalationLine(backupHealth.escalatedDays)}
           </Text>
         ) : null}
+
+        {/* Slice 15b C6 — 匯出資料 (JSON). Writes a full DB dump to a file +
+            shows the path. iOS Share Sheet deferred (needs expo-sharing). */}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void onExportJson()}
+          disabled={exportBusy}
+          style={({ pressed }) => [
+            styles.linkRow,
+            exportBusy && styles.btnDisabled,
+            pressed && styles.btnPressed,
+          ]}>
+          <Text style={styles.linkLabel}>
+            {exportBusy ? t('status', 'exporting') : t('button', 'exportJson')}
+          </Text>
+          {exportBusy ? (
+            <ActivityIndicator size="small" />
+          ) : (
+            <Text style={styles.linkChevron}>›</Text>
+          )}
+        </Pressable>
 
         {/* Slice 15 C4 — minimal restore entry (Q8-C entry B). Until the
             morning integration wires setRestoreDeps(...) the registry is
