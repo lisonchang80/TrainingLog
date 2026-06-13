@@ -50,7 +50,8 @@
           "NSHealthUpdateUsageDescription": "TrainingLog 會在無 Apple Watch 紀錄時、把訓練 session 寫入健康資料，讓 Fitness App 顯示完整訓練紀錄。",
           "background": false
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
