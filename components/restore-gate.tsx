@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
 import { t } from '@/src/i18n';
 import {
@@ -45,6 +45,12 @@ export function RestoreGate({ children }: { children: ReactNode }) {
 
   const dispatch = (event: GateEvent) =>
     setPhase((current) => nextGatePhase(current, event));
+
+  // The gate renders ABOVE ThemeProvider (see header doc), so it can't read
+  // app theme tokens. Follow the OS appearance directly — otherwise the
+  // default-black text on a transparent bg renders black-on-black on a
+  // dark-mode fresh install (slice 15 device smoke 2026-06-14).
+  const pal = useColorScheme() === 'dark' ? GATE_PALETTE.dark : GATE_PALETTE.light;
 
   // Mount probe: deps-wired → sentinel → DB-file existence → discovery.
   useEffect(() => {
@@ -129,9 +135,9 @@ export function RestoreGate({ children }: { children: ReactNode }) {
 
   if (phase.kind === 'checking' || phase.kind === 'restoring') {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.statusText}>
+      <View style={[styles.center, { backgroundColor: pal.bg }]}>
+        <ActivityIndicator size="large" color={pal.text} />
+        <Text style={[styles.statusText, { color: pal.text }]}>
           {phase.kind === 'checking'
             ? t('status', 'restoreChecking')
             : t('status', 'restoreRestoring')}
@@ -142,55 +148,69 @@ export function RestoreGate({ children }: { children: ReactNode }) {
 
   if (phase.kind === 'prompt') {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>{t('page', 'restoreGateTitle')}</Text>
-        <Text style={styles.body}>
+      <View style={[styles.center, { backgroundColor: pal.bg }]}>
+        <Text style={[styles.title, { color: pal.text }]}>{t('page', 'restoreGateTitle')}</Text>
+        <Text style={[styles.body, { color: pal.text }]}>
           {tRestorePreviewLine(phase.preview.sessionCount, phase.preview.lastSessionAt)}
         </Text>
-        <Text style={styles.hint}>{tRestoreBackupDateLine(phase.preview.item.modifiedAt)}</Text>
+        <Text style={[styles.hint, { color: pal.text }]}>
+          {tRestoreBackupDateLine(phase.preview.item.modifiedAt)}
+        </Text>
         <GateButton
           label={t('button', 'restoreBackup')}
           primary
+          pal={pal}
           onPress={() => dispatch({ type: 'PRESS_RESTORE' })}
         />
-        <GateButton label={t('button', 'startFresh')} onPress={onStartFresh} />
+        <GateButton label={t('button', 'startFresh')} pal={pal} onPress={onStartFresh} />
       </View>
     );
   }
 
   if (phase.kind === 'blocked') {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>{t('page', 'restoreGateTitle')}</Text>
-        <Text style={styles.body}>{tRestoreRejectReason(phase.reason)}</Text>
-        <Text style={styles.hint}>{t('status', 'restoreFreshLaterHint')}</Text>
-        <GateButton label={t('button', 'startFresh')} primary onPress={onStartFresh} />
+      <View style={[styles.center, { backgroundColor: pal.bg }]}>
+        <Text style={[styles.title, { color: pal.text }]}>{t('page', 'restoreGateTitle')}</Text>
+        <Text style={[styles.body, { color: pal.text }]}>{tRestoreRejectReason(phase.reason)}</Text>
+        <Text style={[styles.hint, { color: pal.text }]}>{t('status', 'restoreFreshLaterHint')}</Text>
+        <GateButton label={t('button', 'startFresh')} primary pal={pal} onPress={onStartFresh} />
       </View>
     );
   }
 
   // phase.kind === 'error'
   return (
-    <View style={styles.center}>
-      <Text style={styles.title}>{t('alert', 'restoreFailed')}</Text>
-      <Text style={styles.body}>{phase.message}</Text>
+    <View style={[styles.center, { backgroundColor: pal.bg }]}>
+      <Text style={[styles.title, { color: pal.text }]}>{t('alert', 'restoreFailed')}</Text>
+      <Text style={[styles.body, { color: pal.text }]}>{phase.message}</Text>
       <GateButton
         label={t('button', 'retryRestore')}
         primary
+        pal={pal}
         onPress={() => dispatch({ type: 'PRESS_RETRY' })}
       />
-      <GateButton label={t('button', 'startFresh')} onPress={onStartFresh} />
+      <GateButton label={t('button', 'startFresh')} pal={pal} onPress={onStartFresh} />
     </View>
   );
 }
 
+type GatePalette = { bg: string; text: string; border: string };
+
+// Outside ThemeProvider — mirror the OS appearance (see RestoreGate doc).
+const GATE_PALETTE: { light: GatePalette; dark: GatePalette } = {
+  light: { bg: '#ffffff', text: '#000000', border: '#c6c6c8' },
+  dark: { bg: '#000000', text: '#ffffff', border: '#48484a' },
+};
+
 function GateButton({
   label,
   primary,
+  pal,
   onPress,
 }: {
   label: string;
   primary?: boolean;
+  pal: GatePalette;
   onPress: () => void;
 }) {
   return (
@@ -199,10 +219,13 @@ function GateButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        primary && styles.buttonPrimary,
+        { borderColor: pal.border },
+        primary && [styles.buttonPrimary, { borderColor: pal.text }],
         pressed && styles.buttonPressed,
       ]}>
-      <Text style={[styles.buttonLabel, primary && styles.buttonLabelPrimary]}>{label}</Text>
+      <Text style={[styles.buttonLabel, { color: pal.text }, primary && styles.buttonLabelPrimary]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }

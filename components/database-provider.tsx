@@ -6,7 +6,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
 import type { Database } from '@/src/db/types';
 import { openDatabase } from '@/src/adapters/sqlite/expoDatabase';
@@ -39,6 +39,13 @@ const DatabaseRestoreContext = createContext<SuspendForRestore | null>(null);
 export function DatabaseProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<Database | null>(null);
   const [error, setError] = useState<Error | null>(null);
+
+  // Boot screens render ABOVE ThemeProvider — follow OS appearance so the
+  // spinner/error isn't black-on-black on a dark-mode launch (slice 15 device
+  // smoke 2026-06-14; mirrors RestoreGate).
+  const isDark = useColorScheme() === 'dark';
+  const bootBg = isDark ? '#000000' : '#ffffff';
+  const bootText = isDark ? '#ffffff' : '#000000';
 
   useEffect(() => {
     let cancelled = false;
@@ -92,17 +99,17 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>Database initialization failed</Text>
-        <Text style={styles.errorBody}>{error.message}</Text>
+      <View style={[styles.center, { backgroundColor: bootBg }]}>
+        <Text style={[styles.errorTitle, { color: bootText }]}>Database initialization failed</Text>
+        <Text style={[styles.errorBody, { color: bootText }]}>{error.message}</Text>
       </View>
     );
   }
 
   if (!db) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
+      <View style={[styles.center, { backgroundColor: bootBg }]}>
+        <ActivityIndicator size="large" color={bootText} />
       </View>
     );
   }
