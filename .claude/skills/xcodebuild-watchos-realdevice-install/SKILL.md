@@ -63,6 +63,13 @@ warning is **non-fatal** — the `App installed:` / `installationURL:` line
 right after is the truth. Don't chase it; grep for
 `App installed|installationURL|Launched` to detect real success.
 
+**Locked-screen launch failure (validated 2026-06-14)**: `device process
+launch` can fail with `FBSOpenApplicationErrorDomain error 7` / `…because the
+device was not, or could not be, unlocked` while `install` still succeeded.
+This is NOT a build/sign problem — the iPhone was just locked. Either unlock
+first, or ignore it and have the user tap the app icon manually. (Install
+doesn't need an unlocked device; launch does.)
+
 Confirm via `xcrun devicectl device info apps --device <iphone-udid> | grep -i training`.
 
 ### Trap 2 — incremental build SKIPS Watch target
