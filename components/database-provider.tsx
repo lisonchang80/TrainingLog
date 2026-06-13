@@ -64,6 +64,17 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   // block re-opens (the restore engine's reopenLive already re-ran
   // migrations on success / rollback) and re-publishes. A reopen failure
   // lands on the same error screen as a boot-open failure.
+  //
+  // Audit Y-6 (ACCEPTED, not a bug): `setDb(null)` schedules a re-render that
+  // unmounts the consumer tree (stopping in-flight queries), but React's
+  // commit is NOT guaranteed to flush before `fn()`'s first synchronous file
+  // ops. The window is benign by construction: executeRestore's FIRST step is
+  // close-live (closeAndResetForRestore), so any query still racing here was
+  // already doomed by the close — it surfaces as console noise, never touches
+  // a new file (the new connection only exists after reopen). No data
+  // ordering hazard, so we deliberately do NOT insert a macrotask yield
+  // (which would only shrink the noise window, at the cost of slowing every
+  // restore start).
   const suspendForRestore = useCallback<SuspendForRestore>(async (fn) => {
     setDb(null);
     try {
