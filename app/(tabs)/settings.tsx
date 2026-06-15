@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase, useSuspendForRestore } from '@/components/database-provider';
+import { useAppMode, type AppMode } from '@/src/app-mode';
 import {
   tBackupErrorLine,
   tBackupEscalationLine,
@@ -85,6 +86,7 @@ export default function SettingsScreen() {
   const db = useDatabase();
   const router = useRouter();
   const { tokens, stored: themePref, setStored: setThemePref } = useTheme();
+  const { mode: appMode, setMode: setAppModePref } = useAppMode();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
 
   const [unit, setUnit] = useState<UnitPreference>('kg');
@@ -316,6 +318,16 @@ export default function SettingsScreen() {
     await setThemePref(next);
   };
 
+  /**
+   * ADR-0026 (slice 16) — apply app mode change. `setAppModePref` persists to
+   * SQLite + re-renders subscribers via AppModeProvider; this screen and every
+   * program-concept surface react automatically. No-op handled in the hook.
+   */
+  const onPickAppMode = async (next: AppMode) => {
+    if (next === appMode) return;
+    await setAppModePref(next);
+  };
+
   // ADR-0024 § 5 — 體重 mini sheet handlers.
   const onOpenBwSheet = () => {
     setBwInput('');
@@ -501,6 +513,27 @@ export default function SettingsScreen() {
             disabled={autoPopup === null}
           />
         </View>
+
+        {/* ADR-0026 (slice 16) — App Mode (計劃模式 / 極簡模式). Same 2-radio
+            pattern as 語言 / 色彩主題. 極簡模式 hides the entire 計劃 concept
+            app-wide (Programs tab, today's planned, pickers) and always starts
+            templates as 通用. */}
+        <Text style={styles.section}>{t('page', 'appModeSection')}</Text>
+        <View style={styles.langGroup}>
+          <RadioRow
+            label={t('status', 'appModePlan')}
+            active={appMode === 'plan'}
+            onPress={() => onPickAppMode('plan')}
+            styles={styles}
+          />
+          <RadioRow
+            label={t('status', 'appModeMinimal')}
+            active={appMode === 'minimal'}
+            onPress={() => onPickAppMode('minimal')}
+            styles={styles}
+          />
+        </View>
+        <Text style={styles.hint}>{t('page', 'appModeHint')}</Text>
 
         {/* ADR-0025 — Color theme section. Placed above 語言 because visual
             preference is more impactful than text language. Same 3-radio

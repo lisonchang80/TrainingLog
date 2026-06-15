@@ -14,6 +14,20 @@ const UNIT_KEY = 'unit_preference';
 const AUTO_POPUP_REST_TIMER_KEY = 'auto_popup_rest_timer';
 
 /**
+ * Slice 16 (App Mode) — ADR-0026. App-wide presentation mode:
+ *   'plan'    — the full app (programs, intensities, planned-training). Default.
+ *   'minimal' — 「極簡模式」: the entire 計劃 (program) concept is hidden;
+ *               starting a template always resolves to 通用 (program=NULL,
+ *               sub_tag=NULL → existing variant resolver, alert silenced).
+ *
+ * Stored as a plain string enum in `app_settings` (no migration — getAppMode
+ * defaults to 'plan' when the key is absent, so fresh installs keep today's
+ * behaviour). Surfaced reactively to the whole tree via AppModeProvider /
+ * useAppMode (SQLite-backed; mirrors ThemeProvider but inside DatabaseProvider).
+ */
+const APP_MODE_KEY = 'app_mode';
+
+/**
  * Slice 13b — local-only flag tracking whether the HealthKit permission
  * dialog has been shown to the user at least once. iOS's HK API is
  * one-shot: once the system dialog has been displayed for an app the
@@ -116,6 +130,26 @@ export async function setAutoPopupRestTimer(
   // round-trip stay consistent. JSON.stringify(1) = "1" — same wire form
   // as the seed, so a Settings toggle never produces a divergent shape.
   await setSetting<number>(db, AUTO_POPUP_REST_TIMER_KEY, enabled ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// Slice 16 — App Mode (計劃模式 / 極簡模式), ADR-0026.
+// ---------------------------------------------------------------------------
+
+/** App-wide presentation mode. See APP_MODE_KEY docblock. */
+export type AppMode = 'plan' | 'minimal';
+
+/**
+ * Read the app mode, defaulting to 'plan' (full app) when unset — fresh
+ * installs and every pre-slice-16 DB keep today's behaviour with no migration.
+ */
+export async function getAppMode(db: Database): Promise<AppMode> {
+  const v = await getSetting<AppMode>(db, APP_MODE_KEY);
+  return v === 'minimal' ? 'minimal' : 'plan';
+}
+
+export async function setAppMode(db: Database, mode: AppMode): Promise<void> {
+  await setSetting<AppMode>(db, APP_MODE_KEY, mode);
 }
 
 /**

@@ -304,6 +304,9 @@ export const strings = {
       languageSection: '語言',
       // ADR-0025 — settings Color Theme section header (placed above languageSection).
       colorThemeSection: '色彩主題',
+      // ADR-0026 (slice 16) — App Mode section header + hint (計劃 / 極簡).
+      appModeSection: '訓練模式',
+      appModeHint: '極簡模式：只看模板名稱，隱藏計劃與強度，一律以「通用」開始訓練（iPhone 與 Apple Watch 皆同步）。',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: '顯示單位',
       unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
@@ -550,6 +553,9 @@ export const strings = {
       themeSystem: '自動（跟隨系統）',
       themeLight: '淺色',
       themeDark: '深色',
+      // ADR-0026 (slice 16) — App Mode radio labels.
+      appModePlan: '計劃模式',
+      appModeMinimal: '極簡模式',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: '還沒有計畫。按「新建」啟動 6 步建立精靈。',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
@@ -1043,6 +1049,10 @@ export const strings = {
       languageSection: 'Language',
       // ADR-0025 — settings Color Theme section header (placed above languageSection).
       colorThemeSection: 'Color Theme',
+      // ADR-0026 (slice 16) — App Mode section header + hint (plan / minimal).
+      appModeSection: 'Training Mode',
+      appModeHint:
+        'Minimal mode: see only template names — programs and intensities are hidden, and every workout starts as 通用 (default). Applies to iPhone and Apple Watch.',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: 'Unit Preference',
       unitPreferenceHint:
@@ -1283,6 +1293,9 @@ export const strings = {
       themeSystem: 'Auto (follow system)',
       themeLight: 'Light',
       themeDark: 'Dark',
+      // ADR-0026 (slice 16) — App Mode radio labels.
+      appModePlan: 'Plan Mode',
+      appModeMinimal: 'Minimal Mode',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: 'No programs yet. Tap "New" to launch the 6-step wizard.',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
