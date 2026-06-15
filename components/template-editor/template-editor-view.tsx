@@ -126,6 +126,7 @@ import {
   sharedLabelBtnStyle,
   sharedLabelBtnPressedStyle,
 } from '@/src/theme';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that all read
@@ -279,6 +280,9 @@ export default function TemplateEditorView() {
   const { tokens } = useTheme();
   const styles = useEditorStyles();
   const insets = useSafeAreaInsets();
+  // ADR-0026 D1 — 極簡模式：⋯選單藏「另存強度」（無計劃就無強度可言）。
+  // 「儲存」/「另存模板」走 TemplateMetaSheet（已 minimal-aware），不動。
+  const { isMinimal } = useAppMode();
   // Program-wizard「新建模板」pre-creates the template row on entry
   // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
   // saving (取消 / swipe-back / discard), that row is an orphan — the
@@ -2623,7 +2627,8 @@ export default function TemplateEditorView() {
               if (showSaveAs) {
                 saveAsTemplateIdx = opts.length;
                 opts.push(tt('button', 'saveAsTemplate'));
-                if (hasProgram) {
+                // ADR-0026 D1 — 極簡模式藏「另存強度」（強度概念隨計劃消失）。
+                if (hasProgram && !isMinimal) {
                   saveAsIntensityIdx = opts.length;
                   opts.push(tt('button', 'saveAsIntensity'));
                 }
