@@ -365,3 +365,26 @@ final class SpikeAHarness: ObservableObject {
 16. **watchOS 是 arm64_32、Swift `Int` 是 32-bit、epoch ms 強轉必 crash**：watchOS 跑 arm64_32 架構（不是 arm64！是給 Apple Watch 設計的 32-bit 指標 + 64-bit 暫存器）。Swift `Int` 在 watchOS 等於 `Int32`、`Int.max = 2,147,483,647`（2.1e9）。但 epoch ms = `Date().timeIntervalSince1970 * 1000` 在 2026 是 1.78e12、整整大 3 個量級。`Int(epochMs)` 強轉就是 runtime fatal：`Fatal error: Double value cannot be converted to Int because the result would be greater than Int.max`、stack trace 落在 `Swift/arm64_32-apple-watchos.swiftinterface`。**xcodebuild 不會抓到**（runtime overflow、compile-time 看不出來）、要實機跑才會炸。**修法**：所有 epoch ms / 大整數 cast 一律用 `Int64`（永遠 64-bit、跨 iPhone/Watch 都安全）。`"ts": Int64(Date().timeIntervalSince1970 * 1000)`。**檢查**：寫 Watch Swift 之前先 `grep -rn 'Int(' "ios/TrainingLog Watch Watch App/" | grep -iE "time|date|epoch|ms|interval"` 看有沒有 `Int()` 包 Double / TimeInterval 的地方、有就改 `Int64`。**驗證**：在 D7-Swift `2026-05-27 night` 真機 smoke 第一次 tap outbound button 立刻炸出來、debugger pause 在 `Int(...)` 那行；改 `Int64` 後 build + relaunch、smoke PASS。
 
 17. **`react-native-watch-connectivity` 的 reply-variant delegate 永遠贏、3-arg sendMessage 從 Watch 出永遠 timeout**：library iPhone 側（`node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm`）**同時實作** `session:didReceiveMessage:` 跟 `session:didReceiveMessage:replyHandler:` 兩個 delegate method。Apple WC framework 永遠優先 dispatch 到 reply-variant、即使 sender（Watch）給的 replyHandler 是 nil。Library 把 framework 給的 reply block 存進 `replyHandlers` NSCache + 在 message 注入 `id` field、然後 JS 必須 call `replyToMessageWithId(id, reply)` 才會 invoke 那個 block。**如果 JS 沒 expose 那個 API**（D7-TS 的 `addMessageListener` 就沒）、reply 永遠不送、Watch 端 3-arg sendMessage 卡 `withCheckedContinuation` 永遠不 resume；改 2-arg `replyHandler: nil` 也救不了 — Apple framework 在 ~5s 後吐 `WCError code 7016 WCErrorCodeMessageReplyTimedOut` 從 errorHandler 進來、但**訊息其實已經送到 iPhone 並執行**（receiver delegate 跑了）。**修法兩條**：(a) **快**：Watch Coordinator errorHandler 偵測 `nsError.domain == WCErrorDomain && nsError.code == WCError.Code.messageReplyTimedOut.rawValue`、treat 為「sent, no ack expected」顯示 `sent sess=… (no-ack)` 不顯示 err；(b) **慢但正確**：extend `src/adapters/watch/connectivity.ts` 加 `replyToMessageWithId` 暴露 + `addMessageListener` 簽名讓 handler 拿到 message id + 一個 reply callback、D7-TS handler 真的 reply。**Trade-off**：(a) 改 1 個 Swift 檔 10 行、(b) 改 3 個 TS 檔 + 重寫 jest mock + 寫新 case。**Default 走 (a)**，因為 D7 Watch→iPhone 方向本來就是 notification-shaped（iPhone reconcile via idempotent gate、不需要 ack）；只有 iPhone→Watch 那個方向真的用 ack（D7-TS `pushEndToWatch` 拿 ack flip `is_watch_tracked`、Watch Coordinator 的 inbound handler 明確 call `replyHandler(["ok": true])`）。**驗證 case**：D7-Swift 真機 smoke `2026-05-27 night`、改 2-arg 還是 stuck err、加 7016 swallow 之後 Outbound 立刻 `sent sess=Test-3` 不再卡。**Long-term**：寫新 WC channel 之前先決定方向是 notification 還是 RPC、notification 走 (a)、RPC 走 (b)、別兩邊都用 3-arg 寫然後撞 timeout。
+
+## Simulator build variant (bare) — 把 app 弄上 iOS Simulator 跑 JS smoke (2026-06-15 validated)
+
+`sim-db-seed-smoke` Step 0「sandbox not found → 來這裡」的補完。Bare app（非 Expo Go）要在 **iOS Simulator** 上跑（iPhone 端純 JS feature 的 sim smoke、不想動實機）的最快路徑：
+
+1. **不要重用 DerivedData 的舊 sim build**：`~/Library/Developer/Xcode/DerivedData/TrainingLog-*/Build/Products/Debug-iphonesimulator/TrainingLog.app` 常常 **缺 executable**（`TrainingLog.app/TrainingLog` missing → `simctl install` 報「missing its bundle executable」），DerivedData 被清過就這樣。而且舊 shell 若早於某個原生模組（如 slice 15 `modules/icloud-backup`）也對不上。→ **直接 fresh build**。
+
+2. **fresh build 指令**（重用既有 Metro、build 完即收工不卡前景 bundler）：
+   ```bash
+   xcrun simctl boot <SIM-UDID>; open -a Simulator
+   cd /Users/hao800922/code/TrainingLog
+   LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
+     npx expo run:ios --no-bundler --device "<SIM-UDID>"   # run_in_background:true（~10-15min 含 sim 架構 pod install）
+   ```
+   - `--no-bundler` 是關鍵：不啟新 Metro（重用 8081 上已在跑的 dev server、同 project root 即可），build→install→launch 完就 return → 適合背景任務（否則 attached bundler 永不結束）。
+   - `LANG` 解 CocoaPods `Encoding::CompatibilityError`（同 device 那條坑）。
+   - sim 與 device build **不同產物**（Debug-iphonesimulator vs iphoneos），互不干擾；做完 sim smoke 不影響 device 的 Pods。
+
+3. **dev-client 開啟確認框**：launch 後 sim 會跳「要在『TrainingLog』中打開嗎？」alert（`com.lisonchang.TrainingLog://expo-development-client/?url=http://<mac-ip>:8081`）。用 MCP `ui_find_element(["打開"])` → tap。之後等 JS bundle 下載+mount 再 `screenshot`。重啟用 `simctl launch`（dev-client 記得上次 URL）；若只見 launcher 就 `simctl openurl <udid> "com.lisonchang.TrainingLog://expo-development-client/?url=http://<mac-ip>:8081"`。
+
+4. **bare app 能 boot 較舊 shell 的較新 JS** 的前提：原生模組的 JS wrapper 要有 **lazy require + degradation contract**（缺原生模組 → catch → false/null/[]，import 不 throw）。`modules/icloud-backup` 就是這樣寫，所以 06-01 shell 跑 slice 16 JS 時 RestoreGate 偵測 iCloud 不可用→SKIP→照進 app。寫新原生 wrapper 時沿用此 pattern，sim smoke 才不會因缺模組崩。
+
+5. 之後 seed/相機驅動 smoke 走 `sim-db-seed-smoke`（terminate→sqlite3 寫→relaunch）+ `ios-simulator-smoke`（accessibility-tree tap）。**注意 `ios-simulator-smoke` skill 本體是 Expo-Go 時代寫的、它的 reload 路徑（press `r` / 重啟 `host.exp.Exponent`）對 bare app 不適用 —— bare 走本節 #2/#3。**
