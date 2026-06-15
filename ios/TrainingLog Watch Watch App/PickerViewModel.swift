@@ -72,6 +72,18 @@ final class PickerViewModel: ObservableObject {
     /// not a user-facing miss). Cleared in `resetSelection`.
     @Published var lastResolveMissed: Bool = false
 
+    // MARK: - App mode (slice 16 / ADR-0026 D2)
+
+    /// True when the iPhone is in 極簡模式（`appMode == "minimal"`). Set
+    /// from `reply.prefetch.appMode` in `applyStage1Reply`. When true,
+    /// `PickerRootView` hides the 「計劃訓練」section and a template-row
+    /// tap goes STRAIGHT into the set logger as 通用 (program=nil,
+    /// intensity=nil) — skipping both ProgramPickerSheet and
+    /// IntensityPickerSheet. Defaults to `false` (計劃模式 = today's full
+    /// behaviour) so a pre-slice-16 iPhone payload (appMode key absent →
+    /// nil) keeps the plan flow.
+    @Published var isMinimal: Bool = false
+
     // MARK: - 3-tuple navigation state
 
     @Published var selectedTemplate: TemplateOption?
@@ -221,6 +233,11 @@ final class PickerViewModel: ObservableObject {
                 todayPlanned = .noActiveProgram
             }
         }
+        // Slice 16 / ADR-0026 D2 — app-wide mode. Tolerant: the field is
+        // optional on the wire; a pre-slice-16 iPhone omits it (nil) →
+        // treat as "plan" (isMinimal = false = today's full behaviour).
+        // Only the exact string "minimal" flips us into 極簡模式.
+        isMinimal = reply.prefetch.appMode == "minimal"
         // NB: reply.hasActiveSession is intentionally ignored in
         // Phase 2. Phase 3 will branch here to auto-adopt the
         // iPhone-initiated session (skip picker → jump to set logger).

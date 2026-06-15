@@ -80,7 +80,11 @@ struct PickerRootView: View {
             // List; the scroll-to-top cosmetic is dropped until it can be
             // re-added with a loop-safe mechanism.
             List {
-                planSection
+                // Slice 16 / ADR-0026 D2 — 極簡模式 hides the entire
+                // 「計劃訓練」section; only the 模板訓練 list remains.
+                if !vm.isMinimal {
+                    planSection
+                }
                 templateSection
             }
             .listStyle(.carousel)
@@ -191,7 +195,25 @@ struct PickerRootView: View {
                 ForEach(vm.templates) { template in
                     Button {
                         vm.selectedTemplate = template
-                        path.append(.programSheet(template: template))
+                        if vm.isMinimal {
+                            // Slice 16 / ADR-0026 D2 — 極簡模式: a template
+                            // tap goes STRAIGHT into the set logger as 通用
+                            // (program=nil, intensity=nil), skipping BOTH
+                            // ProgramPickerSheet and IntensityPickerSheet.
+                            // Mirrors the existing 「通用」bypass in
+                            // handleProgramPick — the (nil, nil) selection
+                            // flows into the same resolveVariant path
+                            // (prefer 通用 variant, else representative).
+                            vm.selectedProgram = nil
+                            vm.selectedIntensity = nil
+                            path.append(.setLogger(selection: PickerSelection(
+                                template: template,
+                                program: nil,
+                                intensity: nil
+                            )))
+                        } else {
+                            path.append(.programSheet(template: template))
+                        }
                     } label: {
                         PlanRowLabel(marker: "•", text: template.name)
                     }
