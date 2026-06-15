@@ -38,6 +38,7 @@ import {
   getSession,
 } from '../../../src/adapters/sqlite/sessionRepository';
 import { insertSessionSet } from '../../../src/adapters/sqlite/setRepository';
+import { setAppMode } from '../../../src/adapters/sqlite/settingsRepository';
 import { makeEnvelope } from '../../../src/adapters/watch';
 import type {
   HandshakePayload,
@@ -1571,6 +1572,106 @@ describe('Phase 2.5 — buildStage1Reply with programs + todayPlanned (pure)', (
     expect(noProgram.prefetch.todayPlanned).toEqual({
       kind: 'noActiveProgram',
     });
+  });
+});
+
+describe('Slice 16 / ADR-0026 D2 — buildStage1Reply appMode flag (pure)', () => {
+  const sampleRequest: HandshakePayload = {
+    requestId: 'req-16',
+    clientVersion: '16.0',
+  };
+
+  it('omits appMode from prefetch when the param is absent (forward-compat → Watch defaults to plan)', () => {
+    const reply = buildStage1Reply(sampleRequest, null, []);
+    expect(reply.prefetch.appMode).toBeUndefined();
+  });
+
+  it("carries appMode: 'minimal' into the prefetch verbatim", () => {
+    const reply = buildStage1Reply(
+      sampleRequest,
+      null,
+      [],
+      undefined,
+      undefined,
+      'minimal',
+    );
+    expect(reply.prefetch.appMode).toBe('minimal');
+  });
+
+  it("carries appMode: 'plan' into the prefetch verbatim", () => {
+    const reply = buildStage1Reply(
+      sampleRequest,
+      null,
+      [],
+      undefined,
+      undefined,
+      'plan',
+    );
+    expect(reply.prefetch.appMode).toBe('plan');
+  });
+
+  it('preserves appMode alongside an active session (hasActiveSession branch)', () => {
+    const active: Stage1SessionSummary = {
+      sessionId: 's-1',
+      startedAt: 1_700_000_000_000,
+      title: 'Push Day',
+      exerciseCount: 0,
+    };
+    const reply = buildStage1Reply(
+      sampleRequest,
+      active,
+      [],
+      undefined,
+      undefined,
+      'minimal',
+    );
+    expect(reply.hasActiveSession).toBe(true);
+    expect(reply.prefetch.appMode).toBe('minimal');
+  });
+});
+
+describe('Slice 16 / ADR-0026 D2 — onHandshakeRequest wires appMode (orchestrator)', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const buildEnv = (requestId = 'req-1'): WCMessage & {
+    kind: 'handshake';
+    payload: HandshakePayload;
+  } =>
+    makeEnvelope('handshake', {
+      requestId,
+      clientVersion: '16.0',
+    } satisfies HandshakePayload);
+
+  it("defaults reply prefetch appMode to 'plan' on an unset (fresh) DB", async () => {
+    const replies: Record<string, unknown>[] = [];
+    await onHandshakeRequest(db, buildEnv(), (r) => replies.push(r));
+    const reply = replies[0] as unknown as Stage1ReplyPayload;
+    expect(reply.prefetch.appMode).toBe('plan');
+  });
+
+  it("reply prefetch carries appMode: 'minimal' when the DB is in minimal mode", async () => {
+    await setAppMode(db, 'minimal');
+    const replies: Record<string, unknown>[] = [];
+    await onHandshakeRequest(db, buildEnv(), (r) => replies.push(r));
+    const reply = replies[0] as unknown as Stage1ReplyPayload;
+    expect(reply.prefetch.appMode).toBe('minimal');
+  });
+
+  it("reply prefetch carries appMode: 'plan' when the DB is explicitly in plan mode", async () => {
+    await setAppMode(db, 'plan');
+    const replies: Record<string, unknown>[] = [];
+    await onHandshakeRequest(db, buildEnv(), (r) => replies.push(r));
+    const reply = replies[0] as unknown as Stage1ReplyPayload;
+    expect(reply.prefetch.appMode).toBe('plan');
   });
 });
 

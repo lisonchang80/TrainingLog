@@ -67,6 +67,7 @@ import {
 } from '../sqlite/programRepository';
 import { cellForDate } from '../../domain/program/programManager';
 import { localMsToIsoDate } from '../../domain/program/programManager';
+import { getAppMode, type AppMode } from '../sqlite/settingsRepository';
 import { tExercise } from '../../i18n/strings';
 import type {
   HandshakePayload,
@@ -394,6 +395,16 @@ export interface Stage1ReplyPrefetch {
   templates: ReadonlyArray<Stage1TemplateFullSummary>;
   programs?: ReadonlyArray<Stage1ProgramSummary>;
   todayPlanned?: Stage1TodayPlanned;
+  /**
+   * Slice 16 / ADR-0026 D2 — app-wide mode flag. `'minimal'` tells the
+   * Watch to hide the 「計劃訓練」section and skip both picker sheets
+   * (ProgramPicker + IntensityPicker) on template tap. Optional at the
+   * type level for forward-compat with pre-slice-16 callers; absent on
+   * the wire = Watch defaults to `'plan'` (today's full behaviour). This
+   * is an explicit flag, NOT an empty-data signal (ADR-0026 D2 rejects
+   * implicit degradation as ambiguous/fragile).
+   */
+  appMode?: AppMode;
 }
 
 export type Stage1ReplyPayload =
@@ -583,6 +594,8 @@ export interface SessionSnapshotSet {
  *   - `todayPlanned` (Phase 2.5, optional) — today's planned-day state.
  *     Omitted = absent on the wire; Watch defaults to `noActiveProgram`
  *     when missing.
+ *   - `appMode` (slice 16 / ADR-0026 D2, optional) — `'plan' | 'minimal'`.
+ *     Omitted = absent on the wire; Watch defaults to `'plan'`.
  */
 export function buildStage1Reply(
   request: HandshakePayload,
@@ -590,10 +603,12 @@ export function buildStage1Reply(
   templates: ReadonlyArray<Stage1TemplateFullSummary>,
   programs?: ReadonlyArray<Stage1ProgramSummary>,
   todayPlanned?: Stage1TodayPlanned,
+  appMode?: AppMode,
 ): Stage1ReplyPayload {
   const prefetch: Stage1ReplyPrefetch = { templates };
   if (programs !== undefined) prefetch.programs = programs;
   if (todayPlanned !== undefined) prefetch.todayPlanned = todayPlanned;
+  if (appMode !== undefined) prefetch.appMode = appMode;
   if (activeSession === null) {
     return {
       requestId: request.requestId,
@@ -1194,20 +1209,26 @@ export async function onHandshakeRequest(
   try {
     // Phase 2.5 + NEW-Q50 D28 — fan out programs + todayPlanned in
     // parallel with the active-session + fat-tree templates reads. All
-    // four are cheap independent queries; Promise.all keeps the
-    // round-trip latency at the slowest individual query.
-    const [activeSession, templates, programs, todayPlanned] = await Promise.all([
-      loadActiveSessionSummary(db),
-      loadTemplatesFullTree(db),
-      loadProgramsPrefetchList(db),
-      loadTodayPlanned(db),
-    ]);
+    // are cheap independent queries; Promise.all keeps the round-trip
+    // latency at the slowest individual query.
+    //
+    // Slice 16 / ADR-0026 D2 — `getAppMode` joins the fan-out so the
+    // Watch learns 計劃/極簡 mode via the explicit prefetch flag.
+    const [activeSession, templates, programs, todayPlanned, appMode] =
+      await Promise.all([
+        loadActiveSessionSummary(db),
+        loadTemplatesFullTree(db),
+        loadProgramsPrefetchList(db),
+        loadTodayPlanned(db),
+        getAppMode(db),
+      ]);
     const reply = buildStage1Reply(
       env.payload,
       activeSession,
       templates,
       programs,
       todayPlanned,
+      appMode,
     );
     replyHandler(toWireRecord(reply));
   } catch (e) {
