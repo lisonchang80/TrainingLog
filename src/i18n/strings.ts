@@ -381,6 +381,10 @@ export const strings = {
       appleHealthSection: 'Apple Health 整合',
       // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
       restoreGateTitle: '發現 iCloud 備份',
+      // i18n regression recovery (2026-06-17, orig c23d198) — fatal DB-init
+      // error boot screen (components/database-provider.tsx). Re-introduced as
+      // a hardcoded literal by the slice-15 dark-mode boot rewrite.
+      dbInitFailed: '資料庫初始化失敗',
     },
 
     /** Alert / 錯誤訊息 / 確認 dialog。多為 modal title + body 對。 */
@@ -1120,6 +1124,10 @@ export const strings = {
       appleHealthSection: 'Apple Health Integration',
       // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
       restoreGateTitle: 'iCloud Backup Found',
+      // i18n regression recovery (2026-06-17, orig c23d198) — fatal DB-init
+      // error boot screen (components/database-provider.tsx). Re-introduced as
+      // a hardcoded literal by the slice-15 dark-mode boot rewrite.
+      dbInitFailed: 'Database initialization failed',
     },
 
     alert: {
