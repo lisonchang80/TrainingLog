@@ -1,6 +1,6 @@
 ---
 name: sim-db-seed-smoke
-description: Inject SQLite seed data directly into the iOS Simulator's TrainingLog DB to skip multi-step UI setup before running an MCP-driven smoke test. Use when smoke would otherwise need to walk through 10+ taps to build state (e.g. 3 same-name template variants + 2 program_cell bindings) for a single feature verification. Trigger words "sim seed inject", "smoke 走 UI 太冗", "inject seed", "DB-driven smoke", "跑 swipe 但不想手建資料". Validated 3× on slice 13d 2026-05-29 batch-delete-same-name smoke (Case A/B/C). Pairs with `simulator-db-query` (read-only diagnostics) and `ios-simulator-smoke` (tap/swipe workflow).
+description: Inject SQLite seed data directly into the iOS Simulator's TrainingLog DB to skip multi-step UI setup before running an MCP-driven smoke test. Use when smoke would otherwise need to walk through 10+ taps to build state (e.g. 3 same-name template variants + 2 program_cell bindings, OR a completed session with PR-breaking working sets to light up the achievements/PR/history surfaces) for a single feature verification. Trigger words "sim seed inject", "smoke 走 UI 太冗", "inject seed", "DB-driven smoke", "跑 swipe 但不想手建資料", "seed 一個 session", "獎章/PR 要真資料". Also covers verifying a Switch/toggle-gated UI when simctl can't flip the RN Switch — seed the `app_settings` key instead (see §Seeding a setting). Validated 3× on slice 13d 2026-05-29 batch-delete smoke + slice 17 2026-06-16 achievements-panel smoke. Pairs with `simulator-db-query` (read-only diagnostics) and `ios-simulator-smoke` (tap/swipe workflow).
 ---
 
 # Sim DB Seed Smoke — TrainingLog
@@ -149,6 +149,69 @@ Don't `simctl uninstall` between cases — that wipes the DB *and* triggers a fr
 If the smoke leaves residue you don't want to carry into next dev session, either:
 - `xcrun simctl uninstall <UDID> com.lisonchang.TrainingLog && xcrun simctl install <UDID> <derived/.app>` — clean reinstall, fresh DB
 - Or leave it; the residue is bounded (a few extra `program_cell` with NULL `template_id`) and unlikely to affect future smokes
+
+## Recipe — seed a COMPLETED session (PR / achievement / history smoke)
+
+Validated slice 17 2026-06-16 (achievements-panel tier cards). To make the
+獎章 panel / PR banner / 歷史 calendar show **real** data without logging sets
+through the UI, seed a `session` + `session_exercise` + `set` graph. Built-in
+exercises already exist (`SELECT id,name,muscle_group_id,load_type FROM exercise`)
+— reference their IDs (e.g. `00000000-0000-4000-8000-000000000001` = Bench Press
+`mg-chest`).
+
+```bash
+TS=$(($(date -v-2d +%s)*1000))   # macOS; epoch MS
+BENCH=00000000-0000-4000-8000-000000000001
+sqlite3 "$DB" <<SQL
+-- ended_at SET = a COMPLETED session (null = still in-progress).
+INSERT INTO session (id,started_at,ended_at,bodyweight_snapshot_kg,title,is_watch_tracked)
+  VALUES ('s1',$TS,$TS+3600000,70,'',0);
+INSERT INTO session_exercise (id,session_id,exercise_id,ordering,planned_sets)
+  VALUES ('se1','s1','$BENCH',0,1);          -- planned_sets is NOT NULL
+INSERT INTO "set" (id,session_id,exercise_id,weight_kg,reps,is_skipped,ordering,created_at,set_kind,is_logged,session_exercise_id)
+  VALUES ('set1','s1','$BENCH',60,5,0,0,$TS+60000,'working',1,'se1');
+SQL
+```
+
+**Required-or-it-won't-count gotchas** (a set silently ignored by PR replay /
+achievement panel if any is wrong):
+- `set_kind='working'` (not 'warmup'/'dropset') — only working sets count for PR.
+- `is_logged=1` — replay + history only read logged sets.
+- `session_exercise_id` must point at a real `session_exercise` row.
+- table name is quoted `"set"` (reserved word).
+- `weight_kg` + `reps` both non-null for a weight/volume PR.
+
+**To break PRs across sessions**: seed session A (e.g. bench 60×5), then session B
+later (`started_at` larger) with a heavier set (65×5) → that's a weight-PR break.
+N breaks in one (muscle-group × type) → the panel card shows count N (`N / 10`).
+
+**Key insight**: the 獎章 panel computes cumulative PR counts via `prReplay`
+over the set history at render time — it does NOT read `achievement_unlock`
+rows. So seeding working sets is **enough** to light up the tier cards; you do
+NOT need to run the achievement engine. `碰過` (touched mg/bucket) is likewise
+derived from the working sets. Bucket classification uses the **live**
+`bucket_ranges` cache, so a prior range edit changes which bucket a set lands in
+(slice 17 saw 5-rep sets jump to 最大力量 after 1–5 was set, and the 力量 card
+vanished — proof of the ③→② end-to-end path).
+
+## Seeding a setting (§ verify a toggle-gated UI when simctl can't flip the Switch)
+
+`mcp__ios-simulator__ui_tap` on an **RN `<Switch>`** often does NOT fire its
+`onValueChange` on the sim (point-tap ≠ the toggle gesture; the AXValue stays
+unchanged after the tap). Don't conclude the toggle is broken. Instead verify
+the **gating logic** by seeding the backing `app_settings` key + relaunch:
+
+```bash
+xcrun simctl terminate <UDID> com.lisonchang.TrainingLog
+sqlite3 "$DB" "INSERT OR REPLACE INTO app_settings (key,value) VALUES ('achievements_enabled','0');"
+xcrun simctl launch <UDID> com.lisonchang.TrainingLog
+# → observe the gated surface is hidden (e.g. 獎章 sub-tab gone, segmented control collapses).
+sqlite3 "$DB" "DELETE FROM app_settings WHERE key='achievements_enabled';"   # reset when done
+```
+
+(Boolean app_settings are stored numeric `1`/`0` per `settingsRepository`.) The
+real on-device build with a finger tap flips the Switch fine — flag it as the
+one device-gate item, not a bug.
 
 ## Anti-patterns
 

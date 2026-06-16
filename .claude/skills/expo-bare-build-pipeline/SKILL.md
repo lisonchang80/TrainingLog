@@ -370,6 +370,15 @@ final class SpikeAHarness: ObservableObject {
 
 `sim-db-seed-smoke` Step 0「sandbox not found → 來這裡」的補完。Bare app（非 Expo Go）要在 **iOS Simulator** 上跑（iPhone 端純 JS feature 的 sim smoke、不想動實機）的最快路徑：
 
+0. **⚡ JS-only slice → 完全免 build（2026-06-16 slice 17 validated）**：若這個 slice **零原生改動**（純 TS/TSX/JS：context、settings UI、純邏輯、handshake payload…，沒新 native module、沒動 `ios/`/`modules/`），而且 sim 上**已裝**過任一近期 dev-client build（`simctl get_app_container … app` 有值）→ **不用 `expo run:ios`**。只要在 branch root 起 Metro 再重啟 app 即可載入新 JS：
+   ```bash
+   lsof -ti :8081 | xargs kill 2>/dev/null            # 殺舊 Metro（避免 stale slice cache）
+   nohup npx expo start --dev-client --clear > /tmp/metro.log 2>&1 &
+   # 等 curl -s localhost:8081/status 回 packager-status:running
+   mcp__ios-simulator__launch_app(bundle_id=…, terminate_running=true)   # dev-client 記得 URL、自動拉新 bundle
+   ```
+   省下 10-15 min build。前提同第 4 點（degradation contract）；舊 shell 的原生面 = 你裝那次 build 的版本，只要新 JS 不需要更新的原生模組就 OK。下面 1-2 點是「**真有原生改動或沒裝過**」才走的 fresh build。
+
 1. **不要重用 DerivedData 的舊 sim build**：`~/Library/Developer/Xcode/DerivedData/TrainingLog-*/Build/Products/Debug-iphonesimulator/TrainingLog.app` 常常 **缺 executable**（`TrainingLog.app/TrainingLog` missing → `simctl install` 報「missing its bundle executable」），DerivedData 被清過就這樣。而且舊 shell 若早於某個原生模組（如 slice 15 `modules/icloud-backup`）也對不上。→ **直接 fresh build**。
 
 2. **fresh build 指令**（重用既有 Metro、build 完即收工不卡前景 bundler）：
