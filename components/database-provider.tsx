@@ -99,7 +99,9 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   if (error) {
     return (
-      <View style={[styles.center, { backgroundColor: bootBg }]}>
+      <View
+        accessibilityRole="alert"
+        style={[styles.center, { backgroundColor: bootBg }]}>
         <Text style={[styles.errorTitle, { color: bootText }]}>Database initialization failed</Text>
         <Text style={[styles.errorBody, { color: bootText }]}>{error.message}</Text>
       </View>
