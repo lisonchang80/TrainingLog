@@ -246,6 +246,8 @@ export const strings = {
       backupNow: '立即備份',
       // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
       exportJson: '匯出資料 (JSON)',
+      // Slice 17 / ADR-0027 — reset rep-bucket ranges to v1 defaults.
+      resetBucketRanges: '恢復預設次數範圍',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -304,6 +306,13 @@ export const strings = {
       languageSection: '語言',
       // ADR-0025 — settings Color Theme section header (placed above languageSection).
       colorThemeSection: '色彩主題',
+      // Slice 17 — 獎章系統 toggle + 訓練目的次數範圍 editor headers/hints.
+      achievementsSection: '獎章系統',
+      achievementsHint:
+        '關閉後隱藏「獎章」分頁與練習中的 PR 提示；紀錄照常累積，開啟即還原。',
+      bucketRangesSection: '訓練目的次數範圍',
+      bucketRangesHint:
+        '調整每個訓練目的對應的次數區間，套用到全 App 的 PR 判定與分類，並同步至 Apple Watch。',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: '顯示單位',
       unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
@@ -550,6 +559,9 @@ export const strings = {
       themeSystem: '自動（跟隨系統）',
       themeLight: '淺色',
       themeDark: '深色',
+      // Slice 17 — 獎章 toggle label + reps unit for the rep-range editor.
+      achievementsEnabledLabel: '顯示獎章與 PR',
+      repsShort: '下',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: '還沒有計畫。按「新建」啟動 6 步建立精靈。',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
@@ -991,6 +1003,8 @@ export const strings = {
       backupNow: 'Back up now',
       // Slice 15b C6 (2026-06-13) — JSON export (ADR-0011 §5).
       exportJson: 'Export Data (JSON)',
+      // Slice 17 / ADR-0027 — reset rep-bucket ranges to v1 defaults.
+      resetBucketRanges: 'Reset rep ranges',
     },
 
     page: {
@@ -1043,6 +1057,13 @@ export const strings = {
       languageSection: 'Language',
       // ADR-0025 — settings Color Theme section header (placed above languageSection).
       colorThemeSection: 'Color Theme',
+      // Slice 17 — Achievements toggle + rep-range editor headers/hints.
+      achievementsSection: 'Achievements',
+      achievementsHint:
+        'When off, hides the Achievements tab and the in-session PR banner. Records keep accruing; turning it back on restores everything.',
+      bucketRangesSection: 'Rep Ranges',
+      bucketRangesHint:
+        'Adjust the rep range for each training purpose. Applies app-wide to PR detection and classification, and syncs to Apple Watch.',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: 'Unit Preference',
       unitPreferenceHint:
@@ -1283,6 +1304,9 @@ export const strings = {
       themeSystem: 'Auto (follow system)',
       themeLight: 'Light',
       themeDark: 'Dark',
+      // Slice 17 — Achievements toggle label + reps unit.
+      achievementsEnabledLabel: 'Show achievements & PRs',
+      repsShort: 'reps',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: 'No programs yet. Tap "New" to launch the 6-step wizard.',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.

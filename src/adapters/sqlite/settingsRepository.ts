@@ -1,6 +1,8 @@
 import type { Database } from '../../db/types';
 import type { BackupErrorKind } from '../../domain/backup/backupErrors';
 import type { UnitPreference } from '../../domain/body/types';
+import type { BucketBoundary } from '../../domain/pr/types';
+import { validateBucketBoundaries } from '../../domain/pr/buckets';
 
 /**
  * Generic key/value store backed by `app_settings(key, value)`.
@@ -263,4 +265,61 @@ export async function recordBackupFailure(
   if (existingAnchor == null) {
     await setSetting<number>(db, BACKUP_FIRST_ERROR_AT_KEY, args.atMs);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Slice 17 (ADR-0009 amend + ADR-0027) — achievement system toggle + editable
+// rep-bucket ranges. Both are plain `app_settings` keys, NO new migration.
+//
+//   achievements_enabled   boolean (default true). false → hide the 獎章
+//                           sub-tab + the in-session 🏆 PR banner. Background
+//                           evaluation keeps running so flipping it back on
+//                           shows the correct state with no backfill.
+//   bucket_ranges           BucketBoundary[] — user-edited rep ranges for the
+//                           5 training-purpose buckets. Absent / invalid →
+//                           caller falls back to DEFAULT_BUCKETS.
+// ---------------------------------------------------------------------------
+
+const ACHIEVEMENTS_ENABLED_KEY = 'achievements_enabled';
+const BUCKET_RANGES_KEY = 'bucket_ranges';
+
+/** Achievement/PR surfaces enabled? Default true (system on for fresh installs). */
+export async function getAchievementsEnabled(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, ACHIEVEMENTS_ENABLED_KEY);
+  // null/undefined → ON (default). Stored as numeric 1/0.
+  if (v == null) return true;
+  return v === 1 || v === true;
+}
+
+export async function setAchievementsEnabled(
+  db: Database,
+  enabled: boolean
+): Promise<void> {
+  await setSetting<number>(db, ACHIEVEMENTS_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+/**
+ * Read the user's edited rep-bucket boundaries.
+ * Returns `null` when unset OR when the stored value fails validation
+ * (`validateBucketBoundaries`) — callers (boot hydrator) then keep the
+ * in-memory DEFAULT_BUCKETS. Never throws on a malformed row.
+ */
+export async function getBucketRanges(db: Database): Promise<BucketBoundary[] | null> {
+  const v = await getSetting<BucketBoundary[]>(db, BUCKET_RANGES_KEY);
+  return validateBucketBoundaries(v) ? v : null;
+}
+
+/**
+ * Persist edited rep-bucket boundaries. Validates first — an invalid list is
+ * a programmer error (the Settings editor only ever produces contiguous
+ * boundaries), so we throw rather than silently storing garbage.
+ */
+export async function setBucketRanges(
+  db: Database,
+  boundaries: BucketBoundary[]
+): Promise<void> {
+  if (!validateBucketBoundaries(boundaries)) {
+    throw new Error('setBucketRanges: non-contiguous / invalid bucket boundaries');
+  }
+  await setSetting<BucketBoundary[]>(db, BUCKET_RANGES_KEY, boundaries);
 }

@@ -11,8 +11,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { BackupTriggers } from '@/components/backup-triggers';
+import { BucketRangesHydrator } from '@/components/bucket-ranges-hydrator';
 import { DatabaseProvider } from '@/components/database-provider';
 import { RestoreGate } from '@/components/restore-gate';
+import { AchievementsEnabledProvider } from '@/src/achievements-enabled';
 import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
@@ -136,6 +138,12 @@ export default function RootLayout() {
           the DB is open+migrated, and below RestoreGate so a fresh-install
           sweep can never pre-create the DB file. */}
       <BackupTriggers />
+      {/* Slice 17 / ADR-0027 — hydrate user-edited rep-bucket ranges into the
+          in-memory cache once the DB is open, before any screen reads it. */}
+      <BucketRangesHydrator />
+      {/* Slice 17 — achievement system on/off toggle (ADR-0009 amend). Inside
+          DatabaseProvider (SQLite-backed); default `true` covers pre-hydration. */}
+      <AchievementsEnabledProvider>
       <ThemeProvider>
         <NavThemeBridge>
           <Stack>
@@ -228,6 +236,7 @@ export default function RootLayout() {
           </Stack>
         </NavThemeBridge>
       </ThemeProvider>
+      </AchievementsEnabledProvider>
     </DatabaseProvider>
     </RestoreGate>
     </GestureHandlerRootView>

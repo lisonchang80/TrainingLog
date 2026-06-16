@@ -290,3 +290,30 @@ ADR-0017 Q14 grill 期間發現本 ADR 既訂「動作歷史頁 Filter chip 列 
 - 動作歷史頁實作（若已 ship）chip query 邏輯改 reps-based filter
 - ADR-0017 圖表頁 inherit 本規則
 
+
+---
+
+## Amendment — Slice 17 (2026-06-16): 獎章系統開關 + 獎章面板 tier/進度條重做
+
+兩項變更，皆**不動 schema**（`achievement_definition` / `achievement_unlock` / `tier` 欄位 v1 既有）。
+
+### A. 獎章系統 on/off（`app_settings.achievements_enabled`，預設 ON）
+
+- **UI-only 開關**：關閉＝藏 History 的「獎章」sub-tab ＋ 練習中 session 的 🏆 PR banner。**背景評估照跑**（session 結束仍 `evaluateAndPersistAchievements`），所以開回去立刻是正確解鎖狀態、**免回補**。
+- 反應式：`src/achievements-enabled/AchievementsEnabledContext`（SQLite-backed，掛 `DatabaseProvider` 內，鏡像 ADR-0026 AppMode / ADR-0025 Theme）。`useAchievementsEnabled() → { enabled, setEnabled }`。預設 `true` 覆蓋 hydration 前的空窗。
+- 拍板理由：選 UI-only 而非「連評估一起停」＝可逆、零回補；代價只是關閉時仍跑評估（成本極低，session 結束才跑一次）。
+
+### B. 獎章面板重做：tier 收合 + 進度條 + 只顯示碰過的（ADR-0009 原「255 張平鋪」廢止）
+
+原 UI＝255 張定義卡平鋪、locked/unlocked 兩態。新 UI：
+
+- **只顯示「碰過的」**：部位/桶卡僅在該部位/桶有 ≥1 筆**正式組（非熱身）**時出現；`session_count`（里程碑）全域、一律顯示。
+- **tier 收合**：每個 (桶 × type) 與 (部位 × type) 收成**一張卡**，顯示目前第 N 級（門檻梯 1/10/20/30/40/50 PR 數）、外框色隨 tier、進度條「已達 X PR / 下一級 Y」（分子/分母）。`session_count` 走門檻梯 [1,5,10,25,50,100,250,500]。
+- **`first_combo`（55 筆 mg×桶）→ 桶卡的 level-0「入門」徽章**：桶內任一部位首次解鎖即點亮桶卡入門級；DB 55 筆 unlock 不刪（歷史保留），僅顯示收斂。
+- **配色**：預設 tier 銅→銀→金→白金→鑽 對應六級，達頂顯滿級（之後依視覺參考微調）。
+- **進度數值來源**：累計 PR 次數沿用 `src/domain/achievement/prReplay` replay（即引擎判定門檻用的同一邏輯），面板於 focus 時計算。
+
+### 翻盤的既有拍板
+
+- ❌ 原「獎章面板 = 255 張定義卡平鋪、locked/unlocked 兩態」 → ✅ tier 收合 + 進度條 + 只顯示碰過的
+- ❌ 原「獎章系統永遠開、無開關」 → ✅ `achievements_enabled` UI 開關（預設 ON）
