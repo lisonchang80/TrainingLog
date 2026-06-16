@@ -37,7 +37,11 @@
 
 ### D5 — Watch 同步
 
-Stage1 handshake reply 夾帶 `bucketRanges`（鏡像 ADR-0026 app-mode 的 `appMode` flag 做法），Watch 端解析後套用到自己的分類，使頂組桶標籤與 iPhone 一致。
+**真因：Watch 不在本機分類 rep bucket。** 頂組桶標籤（如「頂組：80kg×8（增肌）」）是 iPhone 用**當前（已編輯）的 `BUCKETS` 快取**算好、以**display-ready 字串**經 wire（`topSetLine` / snapshot / history records）送到 Watch 顯示的；Watch 端沒有任何 `classifyBucket` 等價邏輯（grep `ios/TrainingLog Watch Watch App/` 零命中）。**因此使用者改範圍後，Watch 的桶標籤已透過「iPhone 算字串」這條路徑自動跟上 → slice 17 零 Swift 變更即達成 parity。**
+
+Stage1 handshake reply 仍夾帶 `bucketRanges`（`Stage1BucketRange` DTO + `bucketRangesToWire()`，鏡像 ADR-0026 app-mode 的 `appMode` flag 做法），但**目前 Watch 端未消費此欄位**——它是**保留的 future-proofing**，供「未來 Watch 真的要在本機分類 rep bucket（例：本機即時顯示剛輸入 set 的桶）」時才解析套用。在那之前，wire 上的 `bucketRanges` 是無害的冗餘資料（每次 handshake ~5 個小物件）。
+
+> **2026-06-16 修訂（overnight 整合稽核翻盤）**：本段原文寫「Watch 端解析後套用到自己的分類」，與實際架構不符（Watch 無本機分類可套用）。已對齊真相：parity 走 iPhone-computed label string、`bucketRanges` 欄位為未消費的 future-proofing，**非 bug、非 device-gate 阻塞**。
 
 ## 影響
 
