@@ -304,3 +304,217 @@ describe('card ordering', () => {
     ]);
   });
 });
+
+// =====================================================================
+// Slice 17 hardening (2026-06-16) — exhaustive tier-threshold boundary
+// table + 4-category + volume/weight coverage.
+// PR ladder = 1/10/20/30/40/50 (6 rungs). Tier thresholds per spec.
+// =====================================================================
+
+describe('tier-threshold boundary table — PR ladder 1/10/20/30/40/50', () => {
+  /**
+   * For a given cumulative PR count, return the weight card built off a
+   * single touched mg ladder. Centralises the fixture so every boundary
+   * row reads as one assertion.
+   */
+  const weightCardAt = (count: number) => {
+    const defs = mgLadder('mg-chest');
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set(['mg-chest']),
+      perMg: new Map([['mg-chest', { weight: count, volume: 0 }]]),
+    });
+    return buildAchievementPanelCards(input, 'mg').find((c) => c.prType === 'weight')!;
+  };
+
+  // [count, expectedTier (第N級), expectedNextThreshold, expectedReached]
+  const table: ReadonlyArray<[number, number, number | null, number]> = [
+    [0, 0, 1, 0], // below first rung
+    [1, 1, 10, 1], // exactly first rung
+    [9, 1, 10, 1], // just below second rung
+    [10, 2, 20, 10], // exactly second rung
+    [11, 2, 20, 10], // just above second rung
+    [19, 2, 20, 10], // just below third rung
+    [20, 3, 30, 20], // exactly third rung
+    [49, 5, 50, 40], // just below top rung
+    [50, 6, null, 50], // exactly top rung → maxed
+    [51, 6, null, 50], // above top rung → still maxed
+  ];
+
+  it.each(table)(
+    'count %d → 第%d級, next=%s, reached=%d',
+    (count, tier, next, reached) => {
+      const card = weightCardAt(count);
+      expect(card.currentCount).toBe(count);
+      expect(card.currentTier).toBe(tier);
+      expect(card.reachedThreshold).toBe(reached);
+      expect(card.nextThreshold).toBe(next);
+      expect(card.totalTiers).toBe(6);
+    },
+  );
+
+  it('numerator/denominator (currentCount / nextThreshold) — mid-ladder progress bar', () => {
+    const card = weightCardAt(23);
+    // Progress toward the next rung: 23 cleared toward the 30 rung.
+    expect(card.currentCount).toBe(23);
+    expect(card.nextThreshold).toBe(30);
+    expect(card.maxed).toBe(false);
+  });
+});
+
+describe('maxed state at count ≥ top rung', () => {
+  const cardAt = (count: number) =>
+    buildAchievementPanelCards(
+      baseInput({
+        defs: mgLadder('mg-chest'),
+        touchedMgs: new Set(['mg-chest']),
+        perMg: new Map([['mg-chest', { weight: count, volume: 0 }]]),
+      }),
+      'mg',
+    ).find((c) => c.prType === 'weight')!;
+
+  it('count === 50 (top rung) → maxed, nextThreshold null, tier 6, tierIndex 6', () => {
+    const c = cardAt(50);
+    expect(c.maxed).toBe(true);
+    expect(c.nextThreshold).toBeNull();
+    expect(c.currentTier).toBe(6);
+    expect(c.tierIndex).toBe(6);
+    expect(c.reachedThreshold).toBe(50);
+  });
+
+  it('count far above top rung keeps the same maxed view-model (no over-count tier inflation)', () => {
+    const c = cardAt(1_000);
+    expect(c.maxed).toBe(true);
+    expect(c.nextThreshold).toBeNull();
+    expect(c.currentTier).toBe(6); // clamped to ladder length, never 7+
+    expect(c.tierIndex).toBe(6);
+    // currentCount still reflects the raw achieved count (denominator side
+    // is null when maxed, so the bar renders full).
+    expect(c.currentCount).toBe(1_000);
+  });
+});
+
+describe('「碰過」filter — only touched groups produce cards', () => {
+  it('an untouched mg with a full ladder yields NO card even with PR counts present', () => {
+    // Counts exist (e.g. a stale replay) but the mg is not in touchedMgs —
+    // mirrors a warmup-only / never-worked muscle group being excluded.
+    const defs = mgLadder('mg-legs');
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set<string>(), // NOT touched
+      perMg: new Map([['mg-legs', { weight: 30, volume: 30 }]]),
+    });
+    expect(buildAchievementPanelCards(input, 'mg')).toHaveLength(0);
+  });
+
+  it('touched mg surfaces both weight + volume cards; untouched sibling is excluded', () => {
+    const defs = [...mgLadder('mg-chest'), ...mgLadder('mg-legs')];
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set(['mg-chest']), // only chest "碰過"
+      perMg: new Map([
+        ['mg-chest', { weight: 5, volume: 2 }],
+        ['mg-legs', { weight: 9, volume: 9 }],
+      ]),
+    });
+    const cards = buildAchievementPanelCards(input, 'mg');
+    expect(cards).toHaveLength(2);
+    expect(new Set(cards.map((c) => c.groupId))).toEqual(new Set(['mg-chest']));
+    expect(cards.map((c) => c.prType).sort()).toEqual(['volume', 'weight']);
+  });
+
+  it('an untouched bucket with no first_combo unlock is excluded (warmup-only bucket case)', () => {
+    const defs = bucketLadder('max_strength');
+    const input = baseInput({
+      defs,
+      touchedBuckets: new Set<string>(),
+      perBucket: new Map([['max_strength', { weight: 12, volume: 0 }]]),
+    });
+    expect(buildAchievementPanelCards(input, 'bucket')).toHaveLength(0);
+  });
+});
+
+describe('first_combo → bucket level-0「入門」badge (entryBadge)', () => {
+  it('first_combo unlock alone (no working set) still shows the card + lights entryBadge at tier 0', () => {
+    const fc = firstCombo('mg-chest', 'strength');
+    const defs = [fc, ...bucketLadder('strength')];
+    const input = baseInput({
+      defs,
+      touchedBuckets: new Set<string>(), // no working set
+      unlockedIds: new Set([fc.id]),
+      perBucket: new Map(), // zero PRs → tier 0
+    });
+    const cards = buildAchievementPanelCards(input, 'bucket');
+    expect(cards).toHaveLength(2);
+    for (const c of cards) {
+      expect(c.entryBadge).toBe(true);
+      expect(c.currentTier).toBe(0); // level-0 入門, no rung cleared yet
+      expect(c.tierIndex).toBe(0);
+      expect(c.kind).toBe('bucket');
+    }
+  });
+
+  it('mg cards never carry an entryBadge (bucket-only concept)', () => {
+    const defs = mgLadder('mg-chest');
+    const input = baseInput({ defs, touchedMgs: new Set(['mg-chest']) });
+    const cards = buildAchievementPanelCards(input, 'mg');
+    expect(cards.every((c) => c.entryBadge === false)).toBe(true);
+  });
+});
+
+describe('all 4 categories represented in the panel', () => {
+  it("'all' filter yields mg + bucket + first_combo-driven bucket + milestone cards", () => {
+    const fc = firstCombo('mg-back', 'hypertrophy');
+    const defs = [
+      ...mgLadder('mg-chest'),
+      fc,
+      ...bucketLadder('hypertrophy'),
+      ...sessionLadder(),
+    ];
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set(['mg-chest']), // pr_per_mg
+      touchedBuckets: new Set<string>(), // bucket shown only via first_combo
+      unlockedIds: new Set([fc.id]), // first_combo entry badge
+      totalSessionCount: 7, // session_count milestone
+    });
+    const cards = buildAchievementPanelCards(input, 'all');
+    const kinds = new Set(cards.map((c) => c.kind));
+    // mg + bucket + milestone kinds all present.
+    expect(kinds).toEqual(new Set(['mg', 'bucket', 'milestone']));
+    // The bucket card is present BECAUSE of the unlocked first_combo
+    // (touchedBuckets is empty) → its entryBadge is lit, covering the
+    // first_combo category surface.
+    const bucketCard = cards.find((c) => c.kind === 'bucket')!;
+    expect(bucketCard.entryBadge).toBe(true);
+    // Milestone reflects the session_count category.
+    const milestone = cards.find((c) => c.kind === 'milestone')!;
+    expect(milestone.currentCount).toBe(7);
+    expect(milestone.currentTier).toBe(2); // cleared 1 + 5, next 10
+    expect(milestone.nextThreshold).toBe(10);
+  });
+});
+
+describe('volume vs weight cards are distinct per group', () => {
+  it('the same group produces independent weight + volume cards with independent tier state', () => {
+    const defs = mgLadder('mg-chest');
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set(['mg-chest']),
+      perMg: new Map([['mg-chest', { weight: 35, volume: 1 }]]),
+    });
+    const cards = buildAchievementPanelCards(input, 'mg');
+    const weight = cards.find((c) => c.prType === 'weight')!;
+    const volume = cards.find((c) => c.prType === 'volume')!;
+    // Weight: 35 → cleared 1,10,20,30 = tier 4, next 40.
+    expect(weight.currentTier).toBe(4);
+    expect(weight.nextThreshold).toBe(40);
+    // Volume: 1 → cleared only the first rung = tier 1, next 10.
+    expect(volume.currentTier).toBe(1);
+    expect(volume.nextThreshold).toBe(10);
+    // Distinct stable keys for list rendering.
+    expect(weight.key).not.toBe(volume.key);
+    expect(weight.key).toBe('mg-mg-chest-weight');
+    expect(volume.key).toBe('mg-mg-chest-volume');
+  });
+});
