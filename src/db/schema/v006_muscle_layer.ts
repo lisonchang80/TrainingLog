@@ -27,33 +27,33 @@ import {
  */
 export async function v006_muscle_layer(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE muscle_group (
+    CREATE TABLE IF NOT EXISTS muscle_group (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL UNIQUE,
       display_order INTEGER NOT NULL
     );
 
-    CREATE TABLE muscle (
+    CREATE TABLE IF NOT EXISTS muscle (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL UNIQUE,
       mg_id TEXT NOT NULL REFERENCES muscle_group(id),
       display_order INTEGER NOT NULL
     );
 
-    CREATE TABLE exercise_muscle (
+    CREATE TABLE IF NOT EXISTS exercise_muscle (
       exercise_id TEXT NOT NULL REFERENCES exercise(id),
       muscle_id TEXT NOT NULL REFERENCES muscle(id),
       role TEXT NOT NULL CHECK (role IN ('primary','secondary')),
       PRIMARY KEY (exercise_id, muscle_id)
     );
 
-    CREATE INDEX idx_exercise_muscle_exercise ON exercise_muscle(exercise_id);
-    CREATE INDEX idx_exercise_muscle_muscle ON exercise_muscle(muscle_id);
+    CREATE INDEX IF NOT EXISTS idx_exercise_muscle_exercise ON exercise_muscle(exercise_id);
+    CREATE INDEX IF NOT EXISTS idx_exercise_muscle_muscle ON exercise_muscle(muscle_id);
 
     ALTER TABLE exercise ADD COLUMN muscle_group_id TEXT REFERENCES muscle_group(id);
     ALTER TABLE exercise ADD COLUMN is_custom INTEGER NOT NULL DEFAULT 0;
 
-    CREATE INDEX idx_exercise_mg ON exercise(muscle_group_id);
+    CREATE INDEX IF NOT EXISTS idx_exercise_mg ON exercise(muscle_group_id);
   `);
 
   // Seed muscle_group

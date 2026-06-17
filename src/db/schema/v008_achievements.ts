@@ -21,7 +21,7 @@ import { ACHIEVEMENT_DEFINITION_SEEDS } from '../seed/v008Achievements';
  */
 export async function v008_achievements(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE achievement_definition (
+    CREATE TABLE IF NOT EXISTS achievement_definition (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,
       category TEXT NOT NULL CHECK (category IN ('first_combo','pr_per_mg','pr_per_bucket','session_count')),
@@ -34,11 +34,11 @@ export async function v008_achievements(db: Database): Promise<void> {
       tier INTEGER NOT NULL DEFAULT 1
     );
 
-    CREATE INDEX idx_ach_def_category ON achievement_definition(category);
-    CREATE INDEX idx_ach_def_mg ON achievement_definition(mg_id);
-    CREATE INDEX idx_ach_def_bucket ON achievement_definition(bucket_id);
+    CREATE INDEX IF NOT EXISTS idx_ach_def_category ON achievement_definition(category);
+    CREATE INDEX IF NOT EXISTS idx_ach_def_mg ON achievement_definition(mg_id);
+    CREATE INDEX IF NOT EXISTS idx_ach_def_bucket ON achievement_definition(bucket_id);
 
-    CREATE TABLE achievement_unlock (
+    CREATE TABLE IF NOT EXISTS achievement_unlock (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       achievement_definition_id INTEGER NOT NULL UNIQUE REFERENCES achievement_definition(id),
       unlocked_at INTEGER NOT NULL,
@@ -46,7 +46,7 @@ export async function v008_achievements(db: Database): Promise<void> {
       set_id TEXT REFERENCES "set"(id)
     );
 
-    CREATE INDEX idx_ach_unlock_session ON achievement_unlock(session_id);
+    CREATE INDEX IF NOT EXISTS idx_ach_unlock_session ON achievement_unlock(session_id);
   `);
 
   // Seed all 255 definitions. INSERT OR IGNORE keeps migration idempotent.

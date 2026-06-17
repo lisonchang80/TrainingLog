@@ -20,7 +20,7 @@ import type { Database } from '../types';
  */
 export async function v007_body_metric(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE body_metric (
+    CREATE TABLE IF NOT EXISTS body_metric (
       id TEXT PRIMARY KEY NOT NULL,
       recorded_at INTEGER NOT NULL,
       bodyweight_kg REAL,
@@ -28,6 +28,6 @@ export async function v007_body_metric(db: Database): Promise<void> {
       smm_kg REAL
     );
 
-    CREATE INDEX idx_body_metric_recorded_at ON body_metric(recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_body_metric_recorded_at ON body_metric(recorded_at);
   `);
 }

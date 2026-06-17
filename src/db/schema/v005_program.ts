@@ -28,7 +28,7 @@ import type { Database } from '../types';
  */
 export async function v005_program(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE program (
+    CREATE TABLE IF NOT EXISTS program (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       main_tag TEXT,
@@ -40,7 +40,7 @@ export async function v005_program(db: Database): Promise<void> {
       updated_at INTEGER NOT NULL
     );
 
-    CREATE TABLE program_cell (
+    CREATE TABLE IF NOT EXISTS program_cell (
       id TEXT PRIMARY KEY NOT NULL,
       program_id TEXT NOT NULL REFERENCES program(id),
       cycle_index INTEGER NOT NULL,
@@ -50,7 +50,7 @@ export async function v005_program(db: Database): Promise<void> {
       UNIQUE(program_id, cycle_index, day_index)
     );
 
-    CREATE INDEX idx_program_cell_program ON program_cell(program_id);
+    CREATE INDEX IF NOT EXISTS idx_program_cell_program ON program_cell(program_id);
 
     ALTER TABLE template ADD COLUMN program_id TEXT;
     ALTER TABLE template ADD COLUMN sub_tag TEXT;

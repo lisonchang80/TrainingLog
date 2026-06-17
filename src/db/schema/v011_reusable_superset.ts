@@ -22,7 +22,7 @@ import type { Database } from '../types';
  */
 export async function v011_reusable_superset(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE superset (
+    CREATE TABLE IF NOT EXISTS superset (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       color_hex TEXT,
@@ -31,13 +31,13 @@ export async function v011_reusable_superset(db: Database): Promise<void> {
       updated_at INTEGER NOT NULL
     );
 
-    CREATE TABLE superset_exercise (
+    CREATE TABLE IF NOT EXISTS superset_exercise (
       superset_id TEXT NOT NULL REFERENCES superset(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
       exercise_id TEXT NOT NULL REFERENCES exercise(id),
       PRIMARY KEY (superset_id, position)
     );
 
-    CREATE INDEX idx_superset_exercise_exercise ON superset_exercise(exercise_id);
+    CREATE INDEX IF NOT EXISTS idx_superset_exercise_exercise ON superset_exercise(exercise_id);
   `);
 }
