@@ -426,7 +426,12 @@ struct PickerSetLoggerPlaceholderView: View {
             // ~1.5s on a miss so this notice is actually visible (mirrors
             // iPhone's alert-and-proceed). On a match this branch is never
             // taken and the view flashes for ~0ms.
-            if vm.lastResolveMissed {
+            // ADR-0026 D3 (slice 16) — 極簡模式靜音 resolve-miss 提示，鏡像
+            // iPhone。VM 端 startFromWatch 已把 lastResolveMissed 設為
+            // `missed && !isMinimal`（noticeMissed），故此分支在極簡模式本就
+            // 不會進入；此處 `&& !vm.isMinimal` 為自我說明的防禦守門，避免未來
+            // VM 發佈邏輯回歸時這片橘色 ⚠ 又洩漏計劃概念。代換解析照常發生。
+            if vm.lastResolveMissed && !vm.isMinimal {
                 Label("此組合無對應模板，已使用最新版", systemImage: "exclamationmark.triangle")
                     .font(.caption2)
                     .foregroundStyle(.orange)
@@ -473,10 +478,25 @@ struct PickerSetLoggerPlaceholderView: View {
     }
 
     private var selectionSubtitle: String {
-        var parts: [String] = []
-        if let t = selection.template?.name { parts.append(t) }
-        parts.append(selection.program?.name ?? "通用")
-        parts.append(selection.intensity?.name ?? "通用")
+        // ADR-0026 D1 (slice 16) — 此 過場頁副標題自行重建 (模板 · 計劃 · 強度)
+        // 三元組，並非讀 snapshot.title，故 PickerViewModel.resolveSelectionExercises
+        // 的 F1 修正觸及不到這裡。極簡模式只顯示模板名，drop「· 通用 · 通用」後綴
+        // （通用 是計劃概念標籤）。
+        guard let templateName = selection.template?.name else {
+            // 非模板路徑（planned / 自由訓練）— 沿用原樣（無計劃三元組）。
+            var parts: [String] = []
+            parts.append(selection.program?.name ?? "通用")
+            parts.append(selection.intensity?.name ?? "通用")
+            return parts.joined(separator: " · ")
+        }
+        if vm.isMinimal {
+            return templateName
+        }
+        let parts = [
+            templateName,
+            selection.program?.name ?? "通用",
+            selection.intensity?.name ?? "通用",
+        ]
         return parts.joined(separator: " · ")
     }
 }
