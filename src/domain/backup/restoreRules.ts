@@ -130,9 +130,58 @@ export function preRestoreFileName(nowMs: number): string {
  * Keep exactly ONE pre-restore copy (the one about to be written): given the
  * existing file names in the pre-restore directory, return the ones to
  * delete. Non-matching names (other sandbox tenants) are never touched.
+ *
+ * Note: the crash-recovery marker ({@link RESTORE_IN_PROGRESS_MARKER}) does
+ * NOT start with `pre-restore-`, so this sweep can never delete it — the
+ * marker must survive a kill mid-restore so the next boot can recover.
  */
 export function selectStalePreRestoreFiles(existingNames: string[]): string[] {
   return existingNames.filter(
     (n) => n.startsWith(PRE_RESTORE_PREFIX) && n.endsWith(PRE_RESTORE_SUFFIX)
   );
+}
+
+/**
+ * Crash-recovery marker (🟠-1, 2026-06-18 boot/restore data-safety audit).
+ *
+ * `executeRestore` deletes the live DB (step 3) before copying the candidate
+ * in (step 4). A process kill in that window used to leave NO live file +
+ * NO boot self-heal → next launch opened a fresh empty DB and the user's
+ * history was silently gone (the pre-restore safety copy sat unused).
+ *
+ * The fix: just before the destructive window, copy the pre-restore safety
+ * copy to this fixed-name marker; clear it once the swap is confirmed. Its
+ * presence at boot means "a swap was interrupted" and the marker file itself
+ * IS a valid recovery source. Fixed name (not timestamped) so boot can find
+ * it without scanning, and so a re-interrupted restore overwrites rather than
+ * accumulates. Co-located with the live DB / pre-restore copies; never
+ * uploaded; never swept (see {@link selectStalePreRestoreFiles}).
+ */
+export const RESTORE_IN_PROGRESS_MARKER = 'restore-in-progress.sqlite';
+
+/** Absolute path of the crash-recovery marker inside the pre-restore dir. */
+export function restoreInProgressMarkerPath(preRestoreDir: string): string {
+  return `${preRestoreDir}/${RESTORE_IN_PROGRESS_MARKER}`;
+}
+
+/**
+ * Boot-time decision for an interrupted restore (🟠-1). The marker's mere
+ * presence is NOT enough to recover — `liveExists` is load-bearing:
+ *
+ *   - no marker → normal boot, nothing to do.
+ *   - marker + live MISSING → the swap was killed after the live DB was
+ *     deleted but before (or during) the candidate copy → recover the user's
+ *     data from the marker (a copy of the pre-restore live DB).
+ *   - marker + live PRESENT → live is authoritative; the kill happened either
+ *     while WRITING the marker (live not yet deleted — good data intact) or
+ *     after the candidate swap completed (live = restored data). In BOTH
+ *     cases overwriting live from the marker would DESTROY good data, so we
+ *     only clear the stale marker.
+ */
+export function decideBootRecovery(input: {
+  markerExists: boolean;
+  liveExists: boolean;
+}): 'none' | 'recover-from-marker' | 'clear-marker-only' {
+  if (!input.markerExists) return 'none';
+  return input.liveExists ? 'clear-marker-only' : 'recover-from-marker';
 }

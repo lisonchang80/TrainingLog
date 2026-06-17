@@ -1,7 +1,10 @@
 import {
+  decideBootRecovery,
   evaluateCandidate,
   isBackupCandidateName,
   preRestoreFileName,
+  restoreInProgressMarkerPath,
+  RESTORE_IN_PROGRESS_MARKER,
   selectStalePreRestoreFiles,
   sidecarPaths,
   sortCandidatesNewestFirst,
@@ -164,5 +167,41 @@ describe('pre-restore self-backup (Q11-A)', () => {
 
   it('returns empty when the directory has no pre-restore copies', () => {
     expect(selectStalePreRestoreFiles(['traininglog.db', 'misc.sqlite'])).toEqual([]);
+  });
+
+  it('never sweeps the crash-recovery marker (it must survive a kill mid-restore)', () => {
+    expect(
+      selectStalePreRestoreFiles([
+        'pre-restore-100.sqlite',
+        RESTORE_IN_PROGRESS_MARKER,
+      ])
+    ).toEqual(['pre-restore-100.sqlite']);
+  });
+});
+
+describe('restore crash-recovery marker (🟠-1)', () => {
+  it('joins the marker name under the pre-restore dir', () => {
+    expect(restoreInProgressMarkerPath('/sandbox/Library/Caches')).toBe(
+      '/sandbox/Library/Caches/restore-in-progress.sqlite'
+    );
+  });
+
+  describe('decideBootRecovery', () => {
+    it('no marker → none (normal boot)', () => {
+      expect(decideBootRecovery({ markerExists: false, liveExists: true })).toBe('none');
+      expect(decideBootRecovery({ markerExists: false, liveExists: false })).toBe('none');
+    });
+
+    it('marker + live missing → recover-from-marker (swap killed after delete)', () => {
+      expect(decideBootRecovery({ markerExists: true, liveExists: false })).toBe(
+        'recover-from-marker'
+      );
+    });
+
+    it('marker + live present → clear-marker-only (live is authoritative, never overwrite)', () => {
+      expect(decideBootRecovery({ markerExists: true, liveExists: true })).toBe(
+        'clear-marker-only'
+      );
+    });
   });
 });

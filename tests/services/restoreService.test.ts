@@ -6,9 +6,12 @@ import {
   executeRestore,
   getRestoreDeps,
   inspectCandidate,
+  isRestoreInFlight,
   pickRestorableCandidate,
+  recoverInterruptedRestore,
   setRestoreDeps,
   withTimeout,
+  __setRestoreInFlightForTests,
   type CandidateDbHandle,
   type RestoreServiceDeps,
 } from '../../src/services/restoreService';
@@ -350,12 +353,16 @@ describe('executeRestore — destructive step order', () => {
       'remove:/sandbox/Library/Caches/pre-restore-100.sqlite', // keep-1 sweep
       `copy:${LIVE}->/sandbox/Library/Caches/pre-restore-1765600000123.sqlite`,
       'closeLive',
+      // 🟠-1 crash-recovery marker written BEFORE the destructive window.
+      `copy:/sandbox/Library/Caches/pre-restore-1765600000123.sqlite->/sandbox/Library/Caches/restore-in-progress.sqlite`,
       `remove:${LIVE}`,
       `remove:${LIVE}-journal`, // R1 hard sidecar sweep
       `remove:${LIVE}-wal`,
       `remove:${LIVE}-shm`,
       `copy:${CANDIDATE}->${LIVE}`,
       'reopen',
+      // Marker cleared once the swap is confirmed.
+      'remove:/sandbox/Library/Caches/restore-in-progress.sqlite',
     ]);
   });
 
@@ -452,5 +459,104 @@ describe('deps registry (morning-integration wiring point)', () => {
     expect(getRestoreDeps()).toBe(deps);
     setRestoreDeps(null);
     expect(getRestoreDeps()).toBeNull();
+  });
+});
+
+describe('recoverInterruptedRestore — boot crash-recovery (🟠-1)', () => {
+  const LIVE = '/sandbox/Documents/SQLite/traininglog.db';
+  const MARKER = '/sandbox/Library/Caches/restore-in-progress.sqlite';
+
+  function recoveryDeps(present: { marker: boolean; live: boolean }) {
+    const log: string[] = [];
+    const deps = makeDeps({
+      fileOps: {
+        exists: jest.fn(async (p: string) => {
+          if (p === MARKER) return present.marker;
+          if (p === LIVE) return present.live;
+          return false;
+        }),
+        copy: jest.fn(async (src: string, dst: string) => {
+          log.push(`copy:${src}->${dst}`);
+        }),
+        remove: jest.fn(async (p: string) => {
+          log.push(`remove:${p}`);
+        }),
+        listDir: jest.fn(async () => []),
+      },
+    });
+    return { deps, log };
+  }
+
+  it('no marker → no-op (normal boot)', async () => {
+    const { deps, log } = recoveryDeps({ marker: false, live: true });
+    expect(await recoverInterruptedRestore(deps)).toEqual({ recovered: false });
+    expect(log).toEqual([]);
+  });
+
+  it('marker + live MISSING → restores from the marker (the kill-window case)', async () => {
+    const { deps, log } = recoveryDeps({ marker: true, live: false });
+    expect(await recoverInterruptedRestore(deps)).toEqual({ recovered: true });
+    expect(log).toEqual([
+      `remove:${LIVE}`,
+      `remove:${LIVE}-journal`,
+      `remove:${LIVE}-wal`,
+      `remove:${LIVE}-shm`,
+      `copy:${MARKER}->${LIVE}`,
+      `remove:${MARKER}`,
+    ]);
+  });
+
+  it('marker + live PRESENT → clears the stale marker, never overwrites live', async () => {
+    const { deps, log } = recoveryDeps({ marker: true, live: true });
+    expect(await recoverInterruptedRestore(deps)).toEqual({
+      recovered: false,
+      cleared: true,
+    });
+    expect(log).toEqual([`remove:${MARKER}`]);
+    expect(log.some((l) => l.includes(`->${LIVE}`))).toBe(false);
+  });
+
+  it('recovery copy failure leaves the marker for the next boot to retry', async () => {
+    const { deps } = recoveryDeps({ marker: true, live: false });
+    (deps.fileOps.copy as jest.Mock).mockRejectedValue(new Error('disk full'));
+    const out = await recoverInterruptedRestore(deps);
+    expect(out.recovered).toBe(false);
+    const removedMarker = (deps.fileOps.remove as jest.Mock).mock.calls.some(
+      (c) => c[0] === MARKER
+    );
+    expect(removedMarker).toBe(false);
+  });
+});
+
+describe('restore-in-flight latch (🟠-2)', () => {
+  afterEach(() => __setRestoreInFlightForTests(false));
+
+  it('is held across executeRestore and cleared on success', async () => {
+    let flagDuringClose = false;
+    const deps = makeDeps({
+      dbOps: {
+        openCandidate: jest.fn(),
+        closeAndResetLive: jest.fn(async () => {
+          flagDuringClose = isRestoreInFlight();
+        }),
+        reopenLive: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+    expect(isRestoreInFlight()).toBe(false);
+    await executeRestore(deps, { localPath: '/icloud/x.sqlite' });
+    expect(flagDuringClose).toBe(true);
+    expect(isRestoreInFlight()).toBe(false);
+  });
+
+  it('is cleared even when the swap fails', async () => {
+    const deps = makeDeps({
+      dbOps: {
+        openCandidate: jest.fn(),
+        closeAndResetLive: jest.fn().mockRejectedValue(new Error('busy')),
+        reopenLive: jest.fn(),
+      },
+    });
+    await executeRestore(deps, { localPath: '/icloud/x.sqlite' });
+    expect(isRestoreInFlight()).toBe(false);
   });
 });

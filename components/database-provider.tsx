@@ -11,6 +11,27 @@ import { ActivityIndicator, StyleSheet, Text, View, useColorScheme } from 'react
 import type { Database } from '@/src/db/types';
 import { openDatabase } from '@/src/adapters/sqlite/expoDatabase';
 import { backfillAchievementsIfNeeded } from '@/src/adapters/sqlite/achievementRepository';
+import {
+  getRestoreDeps,
+  recoverInterruptedRestore,
+} from '@/src/services/restoreService';
+
+/**
+ * 🟠-1 crash-recovery: before opening the live DB, heal a restore that was
+ * killed mid-swap (live DB deleted, replacement not yet in place). No-op when
+ * restore deps aren't wired or no marker is present. Best-effort — never
+ * blocks boot. See `recoverInterruptedRestore` / ADR-0011 2026-06-18 amend.
+ */
+async function healInterruptedRestore(): Promise<void> {
+  const deps = getRestoreDeps();
+  if (!deps) return;
+  try {
+    await recoverInterruptedRestore(deps);
+  } catch {
+    // Recovery is insurance; a failure here must not block boot. openDatabase
+    // below proceeds against whatever live DB exists.
+  }
+}
 
 /**
  * React glue for the Database singleton. Opens the production SQLite database
@@ -49,7 +70,8 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    openDatabase()
+    healInterruptedRestore()
+      .then(() => openDatabase())
       .then(async (d) => {
         // First-launch retroactive achievement unlocks for sessions logged
         // before slice 9 deployed. No-op when the sentinel is already set.
@@ -88,6 +110,10 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
       await fn();
     } finally {
       try {
+        // If `fn` (executeRestore) failed mid-swap and couldn't roll back, a
+        // crash-recovery marker is left behind — heal from it before reopening
+        // so we never reopen onto a deleted/half-swapped live DB.
+        await healInterruptedRestore();
         const d = await openDatabase();
         await backfillAchievementsIfNeeded(d);
         setDb(d);

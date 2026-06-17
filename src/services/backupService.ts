@@ -61,6 +61,7 @@ import {
   recordBackupSuccess,
   type BackupMetadata,
 } from '../adapters/sqlite/settingsRepository';
+import { isRestoreInFlight } from './restoreService';
 
 export type RunBackupOutcome =
   | { status: 'success'; fileName: string; sizeBytes: number | null }
@@ -122,6 +123,10 @@ export async function runBackup(
   const recordFailureFn = deps.recordBackupFailure ?? recordBackupFailure;
   const now = deps.now ?? Date.now;
 
+  // 🟠-2: never snapshot while a restore swap is closing/deleting/replacing
+  // the live DB (no shared mutex between the two engines). Treated as
+  // 'already-running' — a later trigger retries once the swap settles.
+  if (isRestoreInFlight()) return { status: 'already-running' };
   if (backupInFlight) return { status: 'already-running' };
   backupInFlight = true;
   try {
