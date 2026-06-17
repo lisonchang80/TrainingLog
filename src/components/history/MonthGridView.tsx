@@ -24,14 +24,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { useDatabase } from '@/components/database-provider';
-import { listSessions } from '@/src/adapters/sqlite/sessionRepository';
-import { listSetsBySession } from '@/src/adapters/sqlite/setRepository';
-import {
-  getSessionLinkedTemplateTriple,
-  getTemplateFull,
-} from '@/src/adapters/sqlite/templateRepository';
-import { computeSessionVolume } from '@/src/domain/session/sessionStats';
-import type { Session } from '@/src/domain/session/types';
+import { loadCalendarMonthRows } from '@/src/adapters/sqlite/sessionRepository';
 import {
   todayISO,
   formatISO,
@@ -105,43 +98,28 @@ export default function MonthGridView() {
 
   const load = useCallback(async () => {
     const { start, end } = monthRangeMs(year, month);
-    const all = await listSessions(db);
-    const window = all.filter(
-      (s: Session) => s.started_at >= start && s.started_at < end
-    );
+    // Month-scoped aggregate read (perf): one fixed set of queries scoped to
+    // [start, end) replaces the old `listSessions` (ALL rows) + JS filter +
+    // 1+3N per-session fan-out. Mirrors the History list's `loadHistoryListRows`.
+    const rows = await loadCalendarMonthRows(db, { start, end });
 
-    const enriched: EnrichedSession[] = await Promise.all(
-      window.map(async (s) => {
-        const [sets, triple] = await Promise.all([
-          listSetsBySession(db, s.id),
-          getSessionLinkedTemplateTriple(db, s.id),
-        ]);
-        const capacity = computeSessionVolume(sets);
-        let color = FREESTYLE_BG;
-        if (triple) {
-          const tpl = await getTemplateFull(db, triple.template_id);
-          if (tpl && tpl.color_hex.length > 0) color = tpl.color_hex;
-        }
-        // session.title is a planned column (ADR-0014) but not yet
-        // shipped in any v001-v020 migration on this branch. Until the
-        // column lands we always treat title as empty — title fallback
-        // resolves to template_name or 「空白訓練」per ADR-0015 spec.
-        const title = '';
-
-        return {
-          id: s.id,
-          date: localDateOf(s.started_at),
-          started_at: s.started_at,
-          title,
-          capacity,
-          template_id: triple?.template_id ?? null,
-          template_name: triple?.template_name ?? null,
-          color_hex: color,
-          sub_tag: triple?.sub_tag ?? null,
-          program_name: triple?.program_name ?? null,
-        };
-      })
-    );
+    const enriched: EnrichedSession[] = rows.map((r) => ({
+      id: r.id,
+      date: localDateOf(r.started_at),
+      started_at: r.started_at,
+      // session.title is a planned column (ADR-0014) but not yet surfaced on
+      // this calendar path — title fallback resolves to template_name or
+      // 「空白訓練」per ADR-0015 spec (see displaySessionTitle).
+      title: '',
+      capacity: r.capacity,
+      template_id: r.template_id,
+      template_name: r.template_name,
+      // Raw template color from the loader; apply the grey freestyle fallback
+      // here (empty / freestyle → FREESTYLE_BG) — same rule as before.
+      color_hex: r.color_hex.length > 0 ? r.color_hex : FREESTYLE_BG,
+      sub_tag: r.sub_tag,
+      program_name: r.program_name,
+    }));
 
     // Group by date, sort within each bucket by capacity DESC, tie-break by
     // started_at DESC (latest wins among ties).

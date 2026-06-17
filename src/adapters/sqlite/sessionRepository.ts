@@ -427,6 +427,173 @@ export async function loadHistoryListRows(db: Database): Promise<HistoryListRow[
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// History calendar — month-scoped aggregate read (perf: kill all-load + N+1)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * One calendar row for `MonthGridView`, pre-aggregated so the component never
+ * fans out per-session. Same volume / triple / color derivation as the old
+ * per-session path (`listSetsBySession` → `computeSessionVolume`,
+ * `getSessionLinkedTemplateTriple`, `getTemplateFull` for color), but computed
+ * in a FIXED number of queries scoped to the requested month.
+ *
+ * `color_hex` is the RAW linked-template color (`''` when freestyle or the
+ * template's color is empty) — the UI applies its own grey fallback, exactly
+ * as `HistoryListRow.triple.color_hex` does. `date`/`title` are NOT here:
+ * `date` must use the device's local timezone (only the runtime has it), so
+ * the component derives it from `started_at`; `title` stays `''` per the
+ * MonthGridView comment (the `session.title` column isn't surfaced on this
+ * path yet). All other `EnrichedSession` fields come straight from this row.
+ */
+export interface CalendarMonthRow {
+  id: string;
+  started_at: number;
+  /** Σ weight_kg × reps over logged non-warmup sets (kg, un-rounded). */
+  capacity: number;
+  /** Winning linked template id, or null for a freestyle session. */
+  template_id: string | null;
+  /** Winning linked template name, or null for freestyle. */
+  template_name: string | null;
+  /** Raw linked-template color_hex — '' for freestyle / empty. */
+  color_hex: string;
+  /** Winning template's sub_tag, or null. */
+  sub_tag: string | null;
+  /** Winning template's program name, or null. */
+  program_name: string | null;
+}
+
+/**
+ * Load every calendar row for the given month (`year`, `month` 1-12) in a
+ * FIXED 3 queries, replacing `MonthGridView.load()`'s old
+ * `listSessions` (ALL ~2000 rows) + JS month-filter + 1+3N fan-out
+ * (`listSetsBySession` + `getSessionLinkedTemplateTriple` + `getTemplateFull`
+ * per session). Month-scoped via `started_at ∈ [start, end)` — `start` = first
+ * day 00:00 local, `end` = first day of NEXT month — which `idx_session_started_at`
+ * (v026) covers. Mirrors `loadHistoryListRows`; behaviour-preserving (proven by
+ * `tests/db/loadCalendarMonthRows.test.ts`).
+ *
+ * `start`/`end` are the SAME local-timezone month bounds the component
+ * computes via `monthRangeMs`, passed in so the date math stays in one place
+ * (the runtime, which has the device timezone).
+ */
+export async function loadCalendarMonthRows(
+  db: Database,
+  range: { start: number; end: number }
+): Promise<CalendarMonthRow[]> {
+  // 1. Sessions in the month window. Same range filter `MonthGridView`
+  //    applied in JS (`started_at >= start && started_at < end`), now in SQL
+  //    backed by idx_session_started_at. Newest first for determinism.
+  const sessionRows = await db.getAllAsync<SessionRow>(
+    `SELECT id, started_at, ended_at, bodyweight_snapshot_kg, title, is_watch_tracked
+       FROM session
+      WHERE started_at >= ? AND started_at < ?
+      ORDER BY started_at DESC`,
+    range.start,
+    range.end
+  );
+
+  // 2. Per-session capacity (= computeSessionVolume) for the month's sessions
+  //    only. The CASE mirrors computeSessionVolume exactly: Σ weight×reps over
+  //    is_logged=1 AND set_kind != 'warmup', NULL weight/reps → 0. The
+  //    started_at-range subquery keeps this a single fixed query (no N+1).
+  const aggRows = await db.getAllAsync<{ session_id: string; volume: number }>(
+    `SELECT session_id,
+            COALESCE(SUM(
+              CASE WHEN is_logged = 1 AND set_kind != 'warmup'
+                   THEN COALESCE(weight_kg, 0) * COALESCE(reps, 0)
+                   ELSE 0 END
+            ), 0) AS volume
+       FROM "set"
+      WHERE session_id IN (
+              SELECT id FROM session
+               WHERE started_at >= ? AND started_at < ?
+            )
+      GROUP BY session_id`,
+    range.start,
+    range.end
+  );
+  const capacityBySession = new Map<string, number>();
+  for (const r of aggRows) capacityBySession.set(r.session_id, r.volume);
+
+  // 3. Per-session winning linked template (+ color, + program), scoped to the
+  //    month's sessions. ROW_NUMBER over (COUNT(*) DESC, MIN(ordering) ASC)
+  //    reproduces getSessionLinkedTemplateTriple's "most common, tie-break
+  //    earliest ordering" pick for ALL of the month's sessions at once; the
+  //    template JOIN's color_hex matches getTemplateFull's source row.
+  const tplRows = await db.getAllAsync<{
+    session_id: string;
+    template_id: string;
+    template_name: string;
+    program_name: string | null;
+    sub_tag: string | null;
+    color_hex: string | null;
+  }>(
+    `WITH ranked AS (
+       SELECT se.session_id AS session_id,
+              se.template_id AS template_id,
+              COUNT(*) AS cnt,
+              MIN(se.ordering) AS min_ord,
+              ROW_NUMBER() OVER (
+                PARTITION BY se.session_id
+                ORDER BY COUNT(*) DESC, MIN(se.ordering) ASC
+              ) AS rn
+         FROM session_exercise se
+        WHERE se.template_id IS NOT NULL
+          AND se.session_id IN (
+                SELECT id FROM session
+                 WHERE started_at >= ? AND started_at < ?
+              )
+        GROUP BY se.session_id, se.template_id
+     )
+     SELECT r.session_id AS session_id,
+            r.template_id AS template_id,
+            t.name        AS template_name,
+            p.name        AS program_name,
+            t.sub_tag     AS sub_tag,
+            t.color_hex   AS color_hex
+       FROM ranked r
+       JOIN template t ON t.id = r.template_id
+       LEFT JOIN program p ON p.id = t.program_id
+      WHERE r.rn = 1`,
+    range.start,
+    range.end
+  );
+  const tplBySession = new Map<
+    string,
+    {
+      template_id: string;
+      template_name: string;
+      program_name: string | null;
+      sub_tag: string | null;
+      color_hex: string;
+    }
+  >();
+  for (const r of tplRows) {
+    tplBySession.set(r.session_id, {
+      template_id: r.template_id,
+      template_name: r.template_name,
+      program_name: r.program_name ?? null,
+      sub_tag: r.sub_tag ?? null,
+      color_hex: r.color_hex ?? '',
+    });
+  }
+
+  return sessionRows.map((row) => {
+    const tpl = tplBySession.get(row.id);
+    return {
+      id: row.id,
+      started_at: row.started_at,
+      capacity: capacityBySession.get(row.id) ?? 0,
+      template_id: tpl?.template_id ?? null,
+      template_name: tpl?.template_name ?? null,
+      color_hex: tpl?.color_hex ?? '',
+      sub_tag: tpl?.sub_tag ?? null,
+      program_name: tpl?.program_name ?? null,
+    };
+  });
+}
+
 /**
  * One row per planned exercise inside a Session. Snapshot of a Template
  * captured at Session start (slice 3). `template_id` is nullable so a
