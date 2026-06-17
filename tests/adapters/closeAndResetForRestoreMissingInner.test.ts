@@ -101,27 +101,39 @@ describe('closeAndResetForRestore — structural `inner` cast (finding #3)', () 
     expect(innerHandle.closeAsync).toHaveBeenCalledTimes(1);
   });
 
-  // RECENT-MAIN-BUG (report 02, finding #3): a MISSING `inner` should be a
-  // HARD failure of closeAndResetForRestore — it must THROW so executeRestore
-  // aborts at 'close-live' BEFORE deleting the live DB file. Today the source
-  // returns success (`cached = null; return;`) on `!inner`, leaving a possibly
-  // still-open handle while the engine proceeds to hard-delete.
+  // RECENT-MAIN-BUG (report 02, finding #3) — NOW FIXED: a MISSING `inner` is
+  // a HARD failure — closeAndResetForRestore THROWS so executeRestore aborts
+  // at 'close-live' BEFORE deleting the live DB file, rather than reporting
+  // close-live done while a possibly still-open handle (+ `-wal`) lingers.
   //
-  // This branch is unreachable without editing source (openDatabase() always
-  // constructs an ExpoDatabase WITH `inner`; there is no public seam to inject
-  // an inner-less Database into the module-level `cached`). So this assertion
-  // of the DESIRED behavior is skipped and recorded as a fix candidate: the
-  // fix is to throw (or add a same-file accessor / compile-time assertion) on
-  // a missing `inner` instead of returning success.
-  it.skip('SHOULD throw on a missing `inner` (not silently succeed) (RECENT-MAIN-BUG #3)', async () => {
-    // Pseudocode for the desired contract once a seam exists / source is
-    // fixed: an inner-less wrapper in the cache must reject, not resolve.
-    //
-    //   primeCacheWith({} as Database);
-    //   await expect(closeAndResetForRestore()).rejects.toThrow();
-    //
-    // Intentionally left without a runnable body — see comment above for why
-    // the missing-inner path cannot be exercised from JS today.
-    expect(true).toBe(true);
+  // The seam is the same-file pure helper `extractInnerForRestore(db)`:
+  // closeAndResetForRestore extracts `inner` through it, and it throws on a
+  // missing field. The helper is the only JS way to inject an inner-less
+  // Database (openDatabase() always constructs an ExpoDatabase WITH `inner`),
+  // so we exercise the contract directly against it.
+  it('SHOULD throw on a missing `inner` (not silently succeed) (RECENT-MAIN-BUG #3)', () => {
+    const { extractInnerForRestore } = loadFresh();
+    // An inner-less wrapper (the latent future-refactor case) must reject.
+    expect(() => extractInnerForRestore({} as never)).toThrow(/no `inner`/);
+    // Spelled-out: structurally a Database with no `inner` property at all.
+    const innerless = {
+      execAsync: jest.fn(),
+      runAsync: jest.fn(),
+      getAllAsync: jest.fn(),
+      getFirstAsync: jest.fn(),
+      withTransactionAsync: jest.fn(),
+    };
+    expect(() => extractInnerForRestore(innerless as never)).toThrow();
+  });
+
+  it('extractInnerForRestore returns the live handle when `inner` IS present', () => {
+    // The complement of the throw path: a present `inner` is returned as-is so
+    // closeAndResetForRestore can close it. Pinned via the production wrapper.
+    const { openDatabase, extractInnerForRestore } = loadFresh();
+    const innerHandle = makeInner();
+    openDatabaseAsync.mockResolvedValueOnce(innerHandle);
+    return openDatabase().then((db) => {
+      expect(extractInnerForRestore(db)).toBe(innerHandle);
+    });
   });
 });

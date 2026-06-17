@@ -251,6 +251,13 @@ export function liveDatabasePath(): string {
  * Behaviour:
  * - Never opened (or a previous open failed) → no-op. Safe on the
  *   fresh-install RestoreGate path where no DB exists yet.
+ * - The cached wrapper has NO reachable `inner` → HARD failure: throw so the
+ *   restore engine aborts at 'close-live' BEFORE any file deletion, rather
+ *   than silently reporting close-live done while a live handle (+ `-wal`) may
+ *   still be open (report 02 finding #3, the R1 corruption class). Unreachable
+ *   in production today — `openDatabase()` always constructs an `ExpoDatabase`
+ *   WITH `inner` — but a future refactor that renames/removes the field must
+ *   fail loud, not quietly skip the close. See {@link extractInnerForRestore}.
  * - `closeAsync()` THROWS → the error still propagates so the restore engine
  *   aborts at its 'close-live' step BEFORE any file deletion. But whether we
  *   KEEP or CLEAR the singleton now depends on whether the connection is
@@ -268,6 +275,33 @@ export function liveDatabasePath(): string {
  *       also throws confirms a dead handle → clear the cache so the next
  *       call does a fresh open.
  */
+/**
+ * Reach the live `SQLiteDatabase` handle that {@link closeAndResetForRestore}
+ * must close. `inner` is TS-private on `ExpoDatabase` (compile-time only); we
+ * reach it via a structural cast because the class body above is frozen
+ * (append-only zone). Exported for unit testing the missing-`inner` contract
+ * — there is otherwise no JS seam to inject an inner-less Database into the
+ * module-level `cached`.
+ *
+ * Report 02 finding #3: a MISSING `inner` is a HARD failure, NOT a silent
+ * success. Returning success without a live handle would let the restore
+ * engine treat 'close-live' as done and hard-delete the live DB file while a
+ * stale connection (+ `-wal`) may still be open (R1 corruption). Latent today
+ * (`openDatabase()` always sets `inner`), but a future field rename must
+ * throw, so the engine aborts before any deletion.
+ */
+export function extractInnerForRestore(db: Database): SQLiteDatabase {
+  const inner = (db as unknown as { inner?: SQLiteDatabase }).inner;
+  if (!inner) {
+    throw new Error(
+      'closeAndResetForRestore: live database wrapper exposes no `inner` ' +
+        'handle — refusing to report close-live as done (would risk deleting ' +
+        'the live DB with an open connection). See report 02 finding #3.'
+    );
+  }
+  return inner;
+}
+
 export async function closeAndResetForRestore(): Promise<void> {
   const pending = cached;
   if (!pending) return;
@@ -278,13 +312,9 @@ export async function closeAndResetForRestore(): Promise<void> {
     // openDatabase()'s own .catch already cleared the cache for retry.
     return;
   }
-  // `inner` is TS-private on ExpoDatabase — compile-time only; reach it via
-  // a structural cast because the class body above is frozen (append-only).
-  const inner = (db as unknown as { inner?: SQLiteDatabase }).inner;
-  if (!inner) {
-    cached = null;
-    return;
-  }
+  // Missing `inner` THROWS (see extractInnerForRestore): a hard failure so the
+  // restore engine aborts close-live before any file deletion.
+  const inner = extractInnerForRestore(db);
   try {
     await inner.closeAsync();
     cached = null;
