@@ -170,6 +170,52 @@ export async function listExerciseHistorySets(
   return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }
 
+/** A single (weight, reps) pair — the only columns the PR engine consumes. */
+export interface ExercisePRSetRow {
+  weight_kg: number | null;
+  reps: number | null;
+}
+
+/**
+ * Lean PR-input query for the Today-screen PR snapshot (perf #2, scale audit
+ * 2026-06-17 report 08). `computePRSnapshot` only reads `weight_kg` + `reps`,
+ * so this returns JUST those two columns and drops everything
+ * `listExerciseHistorySets` carries for the history UI: the cluster
+ * `CASE … is_in_cluster` / `cluster_partner_exercise_id` correlated
+ * subqueries, the `session` / `session_exercise` JOINs, and the
+ * `ORDER BY created_at DESC` (PR math is order-independent — Pareto frontier +
+ * max are commutative). At scale this turns a ~32 ms/exercise query
+ * (uncovered `SCAN se2` + `TEMP B-TREE` sort) into a plain
+ * `idx_set_exercise` range scan.
+ *
+ * **Row-set invariant (behaviour-preserving)**: the WHERE clause is BYTE-FOR-
+ * BYTE the same predicate `listExerciseHistorySets` applies —
+ * `exercise_id = ? AND is_skipped = 0 AND is_logged = 1`. That means the SAME
+ * multiset of rows reaches `computePRSnapshot`:
+ *   - warmups: NOT excluded here (and weren't by the old path either); the PR
+ *     engine sees them. (Today's PR snapshot has always fed warmups in —
+ *     unlike `listPriorSetsForExercise`, which adds `set_kind = 'working'`.)
+ *   - dropset FOLLOWERS: already excluded by `is_logged = 1` — a follower's DB
+ *     `is_logged` stays 0 (UI toggles the head only; see dropset-chain-semantics
+ *     skill DB invariant #2), so neither path includes them.
+ * No JOIN/ORDER BY change can alter which rows count toward a PR; the proof is
+ * `tests/db/exercisePRSetRows.equivalence.test.ts`.
+ */
+export async function listExercisePRSetRows(
+  db: Database,
+  exercise_id: string
+): Promise<ExercisePRSetRow[]> {
+  return db.getAllAsync<ExercisePRSetRow>(
+    `SELECT s.weight_kg AS weight_kg,
+            s.reps      AS reps
+       FROM "set" s
+      WHERE s.exercise_id = ?
+        AND s.is_skipped = 0
+        AND s.is_logged = 1`,
+    exercise_id
+  );
+}
+
 /**
  * Same data, regrouped per Session (session DESC, sets within session ASC).
  * Each session row carries its bw snapshot once for assisted-class display.

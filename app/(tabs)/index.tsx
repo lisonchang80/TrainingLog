@@ -118,7 +118,7 @@ import {
   computePRSnapshot,
   type PRSnapshot,
 } from '@/src/domain/pr/prQuery';
-import { listExerciseHistorySets } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import { listExercisePRSetRows } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
@@ -287,7 +287,7 @@ export default function TodayScreen() {
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
   /**
    * Per-exercise all-time PR snapshot (ADR-0019 Q5). Keyed by exercise_id;
-   * computed once on refresh from listExerciseHistorySets (cross-session).
+   * computed once on refresh from listExercisePRSetRows (cross-session).
    * Stays static during the session — newly recorded PRs surface via the
    * existing PR banner (lastPRDelta), this map is the "已知 PR" baseline.
    */
@@ -381,13 +381,16 @@ export default function TodayScreen() {
       setPlan(planned);
       setBwSnapshotKg(active.bodyweight_snapshot_kg ?? null);
       setSessionTitle(active.title ?? '');
-      // Fetch all-time history for each planned exercise + compute its PR
-      // snapshot once per refresh. Per-exercise queries — cheap given the
-      // typical session has <10 planned exercises.
+      // Fetch all-time PR-input rows for each planned exercise + compute its
+      // PR snapshot once per refresh. Per-exercise queries — cheap given the
+      // typical session has <10 planned exercises. Uses the lean
+      // `listExercisePRSetRows` (just weight_kg/reps, no cluster subquery / sort)
+      // rather than the full `listExerciseHistorySets` the history UI needs —
+      // identical row-set (same is_skipped/is_logged predicate), identical PR.
       const prMap: Record<string, PRSnapshot> = {};
       await Promise.all(
         planned.map(async (p) => {
-          const history = await listExerciseHistorySets(db, p.exercise_id);
+          const history = await listExercisePRSetRows(db, p.exercise_id);
           prMap[p.exercise_id] = computePRSnapshot(
             history.map((h) => ({ weight_kg: h.weight_kg, reps: h.reps })),
           );
