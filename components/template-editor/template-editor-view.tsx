@@ -2495,31 +2495,35 @@ export default function TemplateEditorView() {
                 </Text>
               )}
             </View>
-            <Text style={styles.tripleText}>
-              {/* #50 C1 — display override prefers URL query (user's pick in
-                  start-template-sheet) over actual draft.program_id/sub_tag.
-                  Fallback path (#50): editor loads representative but shows
-                  user's selection here. undefined = no override = use draft.
-                  Resolves program_id → program_name via local lookup. */}
-              {(() => {
-                const programIdForDisplay =
-                  displayProgramOverride === undefined
-                    ? draft.program_id ?? null
-                    : displayProgramOverride;
-                const subTagForDisplay =
-                  displaySubTagOverride === undefined
-                    ? draft.sub_tag ?? null
-                    : displaySubTagOverride;
-                const programNameForDisplay = programIdForDisplay
-                  ? programs.find((p) => p.id === programIdForDisplay)?.name ??
-                    tt('common', 'default')
-                  : null;
-                return formatTemplateTriple(
-                  programNameForDisplay,
-                  subTagForDisplay,
-                );
-              })()}
-            </Text>
+            {/* ADR-0026 D1 — 極簡模式藏計劃/強度三元組副標題（通用 是計劃概念標籤）。
+                鏡像同檔 ~2631「另存強度」的 isMinimal gate。 */}
+            {!isMinimal && (
+              <Text style={styles.tripleText}>
+                {/* #50 C1 — display override prefers URL query (user's pick in
+                    start-template-sheet) over actual draft.program_id/sub_tag.
+                    Fallback path (#50): editor loads representative but shows
+                    user's selection here. undefined = no override = use draft.
+                    Resolves program_id → program_name via local lookup. */}
+                {(() => {
+                  const programIdForDisplay =
+                    displayProgramOverride === undefined
+                      ? draft.program_id ?? null
+                      : displayProgramOverride;
+                  const subTagForDisplay =
+                    displaySubTagOverride === undefined
+                      ? draft.sub_tag ?? null
+                      : displaySubTagOverride;
+                  const programNameForDisplay = programIdForDisplay
+                    ? programs.find((p) => p.id === programIdForDisplay)?.name ??
+                      tt('common', 'default')
+                    : null;
+                  return formatTemplateTriple(
+                    programNameForDisplay,
+                    subTagForDisplay,
+                  );
+                })()}
+              </Text>
+            )}
           </View>
           {/*
             Import mode (programs tab "+ 建立新模板"): top-right action becomes

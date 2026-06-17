@@ -79,12 +79,13 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback(
     async (next: AppMode) => {
-      let changed = false;
-      setModeState((curr) => {
-        changed = curr !== next;
-        return next;
-      });
-      if (!changed) return;
+      // Compare against the hook's current `mode` (captured in the callback's
+      // deps) rather than reading a `changed` flag out of a render-phase state
+      // updater — the latter is a React anti-pattern (double-invoke under
+      // StrictMode/dev would run the side effect twice). Settings also guards
+      // `if (next === appMode) return` upstream; this is the defensive backstop.
+      if (next === mode) return;
+      setModeState(next);
       try {
         await setAppMode(db, next);
       } catch {
@@ -92,7 +93,7 @@ export function AppModeProvider({ children }: { children: ReactNode }) {
         // on next launch just falls back to the previous stored value).
       }
     },
-    [db],
+    [db, mode],
   );
 
   const value = useMemo<AppModeContextValue>(
