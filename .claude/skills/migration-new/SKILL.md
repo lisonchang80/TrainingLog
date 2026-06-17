@@ -118,6 +118,8 @@ import { vNNN_name } from './schema/vNNN_name';
 const migrations: Record<number, MigrationFn> = { /* ... */, NNN: vNNN_name };
 ```
 
+> **⚠️ bump head 版號要連 `tests/db/migrateChain.test.ts` 一起掃**（不只 migrate.ts）。每加一版，該檔有**多處硬編舊 head 版號**會 fail：① describe 標題 `(v001 → vNN)` ② 開頭 docblock 的 `user_version = NN` ③ fresh-chain 斷言 `it('migrates a fresh DB to user_version = NN')` + `expect(await userVersion()).toBe(NN)` ④ idempotent-snapshot 斷言 `expect(v?.user_version).toBe(NN)` ⑤ populated-remigrate 斷言（同 `.toBe(NN)`）+ 其 `v019..vNN` 範圍註解 + 標題「migrates up to NN」。recipe：`grep -n "<舊版號>" tests/db/migrateChain.test.ts` 把全部一次改完（`.toBe(NN)` 有多筆同字串、用 `replace_all` 要小心別誤蓋無關數字）。**index migration 另加一條存在性測試**（`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_...'`）+ 一條冪等測試（rewind `PRAGMA user_version = NN-1` → 再 `migrate(db)` → index 仍只 1 筆）——mirror v026/v027。`closeAndResetForRestore.test.ts` 的 `migrationsMaxVersion: mockReturnValue(NN)` 是**假值 mock、不需跟著 bump**（與真鏈無關）。
+
 `tests/db/vNNN_name.test.ts`（用 in-memory Database；可直接呼叫 migration 函式，或用 `migrate(db)` 跑到目標版）：
 
 ```typescript
@@ -205,8 +207,11 @@ export async function insertNewTableRow(
 - **v022** `program_sub_tag` 字典表 — 新 table + backfill from `template.sub_tag` + `program_cell.sub_tag` + CASCADE + 19 test
 - **v023** `session.title` — 加 column（PRAGMA guard）+ backfill from linked template name
 - **v024** `session.is_watch_tracked` — α-model 5-tile predicate 用
+- **v025** `set.display_rank` — 加 column + backfill
+- **v026** `idx_session_started_at` — 純 index（perf P2、history ORDER BY started_at）
+- **v027** `idx_session_exercise_parent` — 純 index（perf P2、history cluster 相關子查詢 `se2.parent_id = se.id`；index migration 範本＝最小 4-part：DDL `CREATE INDEX IF NOT EXISTS` + 無 backfill + 無 CASCADE + migrateChain 存在性/冪等 test）
 
-下一個 v025 套這 template、約 1-2 hr 完成（包含 test）。
+下一個 v028 套這 template、約 1-2 hr 完成（包含 test）。純 index migration（如 v026/v027）更輕、~15 分鐘。
 
 ## 相關 skill / agent
 
