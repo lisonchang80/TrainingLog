@@ -274,29 +274,25 @@ describe('buildJsonExport — BLOB handling (LATENT: no BLOB column today)', () 
     expect(declaresBlob).toBe(false);
   });
 
-  it('ASSERTS current behavior: a BLOB value serializes LOSSILY (non-round-trippable)', async () => {
-    // RECENT-MAIN-BUG (report 02, finding #1): jsonExport.ts:106-109 dumps
-    // column values straight through JSON.stringify. A SQLite BLOB arrives as
-    // a Node Buffer (better-sqlite3) / Uint8Array (expo-sqlite); neither
-    // round-trips — Buffer renders as {"type":"Buffer","data":[...]}, which an
-    // importer cannot tell from a legit object column. We PIN that lossy shape
-    // so a future fix (base64 wrapper) breaks this test loudly.
+  it('encodes a BLOB value as a self-describing { $blob } wrapper (NOT lossy)', async () => {
+    // RECENT-MAIN-BUG (report 02, finding #1) — NOW FIXED. Previously the
+    // serializer dumped column values straight through JSON.stringify, so a
+    // SQLite BLOB (Node Buffer via better-sqlite3 / Uint8Array via expo-sqlite)
+    // rendered as {"type":"Buffer","data":[...]} — non-round-trippable and
+    // indistinguishable from a legit object column. It now becomes a namespaced
+    // base64 wrapper. (This test replaces the old "ASSERTS lossy" pin.)
     const env = await exportEnvelope(db);
     const row = env.tables.blobtest[0];
-    // The original bytes were "Hello" (0x48656C6C6F). They are NOT recoverable
-    // as a base64 string / typed wrapper — they come back as a Buffer JSON.
-    expect(row).toEqual({
-      id: 1,
-      data: { type: 'Buffer', data: [0x48, 0x65, 0x6c, 0x6c, 0x6f] },
-    });
+    // "Hello" (0x48656C6C6F) === base64 "SGVsbG8=".
+    expect(row).toEqual({ id: 1, data: { $blob: 'SGVsbG8=' } });
   });
 
   // RECENT-MAIN-BUG (report 02, finding #1): the DESIRED behavior is a
-  // self-describing, round-trippable BLOB encoding (e.g. base64 with a typed
-  // wrapper `{ "$blob": "<base64>" }`, per the report's suggested fix +
-  // ADR-0011 §5). The serializer does NOT do this today, so this is skipped
-  // and becomes a bug-fix candidate. Unskip once jsonExport encodes BLOBs.
-  it.skip('SHOULD encode a BLOB as a round-trippable base64 wrapper (RECENT-MAIN-BUG #1)', async () => {
+  // self-describing, round-trippable BLOB encoding — base64 with a typed
+  // wrapper `{ "$blob": "<base64>" }` (report's suggested fix; ADR-0011 §5 is
+  // silent on encoding so the wrapper shape is the chosen contract). Now
+  // implemented in jsonExport.ts (encodeRowBlobs).
+  it('SHOULD encode a BLOB as a round-trippable base64 wrapper (RECENT-MAIN-BUG #1)', async () => {
     const env = await exportEnvelope(db);
     const row = env.tables.blobtest[0] as { id: number; data: { $blob: string } };
     // "Hello" === base64 "SGVsbG8="

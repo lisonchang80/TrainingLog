@@ -63,6 +63,56 @@ interface TableNameRow {
 }
 
 /**
+ * Self-describing wrapper for a BLOB column value (ADR-0011 §5 is silent on
+ * the encoding, so we use this base64 envelope): `{ "$blob": "<base64>" }`.
+ * A raw BLOB arrives from the driver as a Node `Buffer` (better-sqlite3) or a
+ * `Uint8Array` (expo-sqlite); `JSON.stringify` would otherwise render a Buffer
+ * as `{"type":"Buffer","data":[...]}` — non-round-trippable and
+ * indistinguishable from a legit object column. The `$blob` key namespaces the
+ * value so an importer can recover the exact bytes via base64. No app table
+ * declares a BLOB column today (latent), so this only fires once one is added.
+ */
+export interface BlobValue {
+  $blob: string;
+}
+
+/** True for any byte-array representation a SQLite driver may hand back. */
+function isBinary(v: unknown): v is Uint8Array | ArrayBuffer {
+  return (
+    v instanceof Uint8Array || // covers Node Buffer (a Uint8Array subclass) + expo-sqlite
+    v instanceof ArrayBuffer
+  );
+}
+
+/**
+ * Base64-encode a driver BLOB value (Buffer / Uint8Array / ArrayBuffer) into a
+ * `{ $blob }` wrapper. Pure — no I/O. Uses `Buffer` (always present in the
+ * jest node env AND in the RN/Hermes runtime via the global Buffer shim) for a
+ * single, dependency-free base64 path across both representations.
+ */
+function encodeBlob(v: Uint8Array | ArrayBuffer): BlobValue {
+  const bytes = v instanceof ArrayBuffer ? new Uint8Array(v) : v;
+  return { $blob: Buffer.from(bytes).toString('base64') };
+}
+
+/**
+ * Replace any BLOB column value in a freshly-SELECTed row with its
+ * round-trippable `{ $blob }` wrapper, leaving every scalar (TEXT/INTEGER/
+ * REAL/NULL) untouched. Operates on a shallow copy — pure, no row mutation.
+ */
+function encodeRowBlobs(row: ExportRow): ExportRow {
+  let copy: ExportRow | null = null;
+  for (const key of Object.keys(row)) {
+    const value = row[key];
+    if (isBinary(value)) {
+      if (!copy) copy = { ...row };
+      copy[key] = encodeBlob(value);
+    }
+  }
+  return copy ?? row;
+}
+
+/**
  * A table belongs in the export when it is a real user table — i.e. NOT a
  * SQLite-internal bookkeeping table. SQLite reserves the `sqlite_` name
  * prefix for itself (`sqlite_sequence`, `sqlite_stat1`/`_stat4`, etc.); those
@@ -106,7 +156,9 @@ export async function buildJsonExport(
     const rows = await db.getAllAsync<ExportRow>(
       `SELECT * FROM "${name.replace(/"/g, '""')}"`
     );
-    tables[name] = rows;
+    // Encode any BLOB cell as a round-trippable `{ $blob: <base64> }` wrapper
+    // so the dump survives JSON.stringify (raw Buffer/Uint8Array would not).
+    tables[name] = rows.map(encodeRowBlobs);
   }
 
   const envelope: JsonExportEnvelope = {
