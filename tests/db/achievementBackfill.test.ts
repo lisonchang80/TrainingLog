@@ -205,3 +205,96 @@ describe('backfillAchievementsIfNeeded', () => {
     expect(all.some((u) => u.unlocked_at === t0 + 60_000)).toBe(true);
   });
 });
+
+/**
+ * O(N) single-pass rewrite attribution (2026-06-17, ADR-0009 § Amendment).
+ *
+ * The backfill no longer re-replays the whole history per session (was O(N²));
+ * it loads + replays ONCE and advances a running PR cumulative session-by-
+ * session. Two attribution guarantees fall out of that design:
+ *   1. pr_per_mg / pr_per_bucket unlocks land on the session that CROSSED the
+ *      threshold (progressive) — the meaningful timeline correction.
+ *   2. session_count unlocks are deliberately fed the FINAL count (NOT
+ *      progressive), so they attribute to the first logged session exactly like
+ *      the old loop — sidestepping the warmup-only edge case where a progressive
+ *      count could cross on a session evaluate() skips, dropping an unlock.
+ */
+describe('backfillAchievementsIfNeeded — O(N) single-pass attribution', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  // 10 sessions, each a NEW chest weight PR (Bench Press, increasing weight,
+  // reps 8 → 增肌 bucket), one per day. So per-(mg-chest) weight PR count climbs
+  // 1→10 across sessions[0..9], and there are 10 logged sessions.
+  const seedTenChestPRSessions = async (exId: string) => {
+    const t0 = 1_700_000_000_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const sessions = Array.from({ length: 10 }, (_, i) => ({
+      id: `pr-${i}`,
+      started_at: t0 + i * dayMs,
+      ended_at: t0 + i * dayMs + 60_000,
+      sets: [{ exercise_id: exId, weight_kg: 50 + i * 5, reps: 8 }],
+    }));
+    await seedSessions(db, sessions);
+    return sessions;
+  };
+
+  it('pr_per_mg weight unlocks land on the CROSSING session (progressive), not the first', async () => {
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const sessions = await seedTenChestPRSessions(bench.id);
+    await backfillAchievementsIfNeeded(db, { now: () => 9_999 });
+
+    const unlockedAtForThreshold = async (threshold: number) =>
+      (
+        await db.getFirstAsync<{ unlocked_at: number }>(
+          `SELECT au.unlocked_at
+             FROM achievement_unlock au
+             JOIN achievement_definition ad ON ad.id = au.achievement_definition_id
+            WHERE ad.category = 'pr_per_mg' AND ad.pr_type = 'weight'
+              AND ad.mg_id = 'mg-chest' AND ad.threshold = ?`,
+          threshold
+        )
+      )?.unlocked_at;
+
+    // threshold-1 fires on the 1st PR (session 0); threshold-10 fires on the
+    // 10th PR (session 9). The OLD loop fed the FINAL cumulative to every
+    // session, so BOTH would have landed on session 0 — this is the regression
+    // guard for the progressive (Q2-B) attribution.
+    expect(await unlockedAtForThreshold(1)).toBe(sessions[0].ended_at);
+    expect(await unlockedAtForThreshold(10)).toBe(sessions[9].ended_at);
+  });
+
+  it('session_count unlocks use the FINAL count → attributed to the first logged session', async () => {
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const sessions = await seedTenChestPRSessions(bench.id); // 10 logged sessions
+
+    await backfillAchievementsIfNeeded(db, { now: () => 9_999 });
+
+    const unlockedAtForThreshold = async (threshold: number) =>
+      (
+        await db.getFirstAsync<{ unlocked_at: number }>(
+          `SELECT au.unlocked_at
+             FROM achievement_unlock au
+             JOIN achievement_definition ad ON ad.id = au.achievement_definition_id
+            WHERE ad.category = 'session_count' AND ad.threshold = ?`,
+          threshold
+        )
+      )?.unlocked_at;
+
+    // Deliberately NOT progressive (see describe docblock + backfill source):
+    // the 1 / 5 / 10-session milestones all unlock at the FIRST session because
+    // the final total (10) already satisfies them on session 0. If this ever
+    // flips to a progressive count, revisit the warmup-only drop-an-unlock risk.
+    expect(await unlockedAtForThreshold(1)).toBe(sessions[0].ended_at);
+    expect(await unlockedAtForThreshold(5)).toBe(sessions[0].ended_at);
+    expect(await unlockedAtForThreshold(10)).toBe(sessions[0].ended_at);
+  });
+});

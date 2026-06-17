@@ -290,3 +290,49 @@ ADR-0017 Q14 grill 期間發現本 ADR 既訂「動作歷史頁 Filter chip 列 
 - 動作歷史頁實作（若已 ship）chip query 邏輯改 reps-based filter
 - ADR-0017 圖表頁 inherit 本規則
 
+---
+
+## 2026-06-17 Amendment — 回溯 backfill 改 O(N) 單趟 + PR 成就 progressive 歸屬
+
+> **觸發**：上架前效能/規模稽核（report 08）。`backfillAchievementsIfNeeded`（`src/adapters/sqlite/achievementRepository.ts`）原本**每個已結束 session 呼叫一次** `evaluateAndPersistAchievements`，而那支內部又 `loadReplayRecords`（掃全歷史 working set）+ `replayPRs`（全量重放）→ **O(sessions²)**（實測二次曲線、2000 場 ≈ 50s）。它掛在 `database-provider.tsx` 開機 await（`setDb` 前）→ N 大時整片 spinner 凍結。
+
+### 嚴重度定位（誠實）
+
+不是上架 blocker：backfill 由 `app_settings` 的 `achievements_backfilled_at` sentinel 把關，只在 sentinel 缺席時跑。新 App Store 用戶從 0 場起步 → sentinel 在「幾乎空」就寫入 → O(N²) 對乾淨新裝**永不觸發**；iCloud 整檔還原帶著 sentinel → 正常備份還原也 no-op。真正殘餘觸發 = sentinel 缺席 + 大量歷史（一次性升級成本、或還原 sentinel 之前的舊備份）。仍值得為上架做防禦性硬化。
+
+### D1 — 全歷史 load + replay 只跑一次（O(N)）
+
+`loadReplayRecords` + `replayPRs` 移到 session 迴圈**外**，只執行一次；迴圈內逐 session 重用快取的 `replay.flagsBySetId`，並維護一個 session-by-session 推進的 running PR 累計，逐場呼 `evaluate()`。複雜度 O(N²) → O(sets + N·defs)。`evaluate()` / `replayPRs` / `insertUnlocks` 引擎**完全不動**（只改 backfill caller）。
+
+**保留 boot await（不 de-block）**：重寫後 await <200ms 無感；保留 await 讓成就在首畫面前就緒（無 pop-in），且避免「只 de-block 不改演算法」會把 50s O(N²) 丟到背景與使用者搶 DB。
+
+### D2 — PR 類成就 progressive 歸屬（grill Q2-B）
+
+舊迴圈餵每個 session **最終**全歷史累計，所以 `pr_per_mg` / `pr_per_bucket` 成就的 `unlocked_at` 被壓縮到**第一個破 PR 的 session**、而非累計真正跨過門檻那場。改為逐場推進 running 累計後，這類成就落在**跨門檻那場**（歷史時間線更準）。
+
+- **解鎖集合不變**：累計單調 → 解鎖 ⇔ 最終累計 ≥ 門檻，與舊迴圈完全相同；只有時間戳變準。
+- 僅影響 backfill 那一次（live 逐場評估本就用「到當下」累計、歸屬正確）。
+
+### D3 — `session_count` 刻意維持 final-count（**非** progressive；warmup-only 守門）
+
+`session_count` 階梯仍餵**最終** `countLoggedSessions` 總數（不 progressive）。原因：`evaluate()` 的 session_count 分支以「本場有 logged **working** set」（`hasLogged`）把關，但 `countLoggedSessions` 連**只記熱身組的 session** 也算（謂詞無 `set_kind` 過濾），而 `loadReplayRecords` 只含 working set → 這類 session 在此處 evalSets 為空。若 session_count 改 progressive，門檻可能在一個 `evaluate()` 會 skip 的 warmup-only session 上跨過 → **漏一個舊迴圈會產生的解鎖**。餵最終總數則完全保留舊迴圈的集合與歸屬（第一個 working-set session）。
+
+### D4 — v027 index（perf P2、同批 ship）
+
+`CREATE INDEX idx_session_exercise_parent ON session_exercise(parent_id)`（`src/db/schema/v027_session_exercise_parent_index.ts`）。覆蓋 `exerciseHistoryRepository.ts` ~9 處 `WHERE se2.parent_id = se.id` cluster 相關子查詢的 `SCAN session_exercise`。純加 index、`IF NOT EXISTS` 冪等、無行為變更。
+
+### 影響
+
+- `src/adapters/sqlite/achievementRepository.ts`：`backfillAchievementsIfNeeded` 重寫（O(N) + progressive PR 累計 + final session_count）。
+- `src/db/schema/v027_*` + `src/db/migrate.ts`：新 migration（user_version 26→27）。
+- 測試：`achievementBackfill.test.ts` +2（progressive 歸屬 / session_count final-count 守門）、`migrateChain.test.ts` 更新 26→27 + v027 index 存在性 + 冪等。
+- **行為相容**：所有 backfill 成就**集合**與舊版逐 byte 相同；只有 PR 類成就 `unlocked_at` 變準。
+
+## 翻盤 ledger（greppable）
+
+| 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
+|---|---|---|---|---|---|
+| 2026-06-17 | backfill 複雜度 | 每 session 重放全歷史（O(N²)、boot await 凍結） | 全歷史 load+replay 只 1 次（O(N)、保留 await） | perf 稽核 report 08 + grill Q1 | 見本分支 perf(achievements) commit |
+| 2026-06-17 | PR 類成就 backfill 歸屬 | 餵最終累計 → unlocked_at 壓縮到第一個破 PR 場 | 逐場 progressive 累計 → 落在跨門檻場 | grill Q2-B | 同上 |
+| 2026-06-17 | session_count backfill 歸屬 | （grill Q2-B 原議「也 progressive」） | 維持 final-count（避免 warmup-only 漏解鎖） | 實作期發現 warmup-only SET-drop 風險 | 同上 |
+

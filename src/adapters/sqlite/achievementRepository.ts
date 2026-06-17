@@ -24,6 +24,7 @@ import type { BucketKey } from '../../domain/pr/types';
 import { classifyBucket } from '../../domain/pr/buckets';
 import type {
   AchievementDefinitionRow,
+  CumulativePRCounts,
   NewUnlock,
   SessionEvalSet,
 } from '../../domain/achievement/types';
@@ -242,10 +243,46 @@ interface BackfillOutcome {
 }
 
 /**
- * Walk every previously-ended session in chronological order and call
- * `evaluateAndPersistAchievements` for each, so users who logged sessions
- * before slice 9 deployed still get their retroactive unlocks. A sentinel
- * timestamp in `app_settings` short-circuits subsequent calls.
+ * Walk every previously-ended session in chronological order and persist the
+ * retroactive unlocks each one earns, so users who logged sessions before
+ * slice 9 deployed still get their achievements. A sentinel timestamp in
+ * `app_settings` short-circuits subsequent calls.
+ *
+ * Performance (perf audit 2026-06-17, report 08 — runs on the boot await in
+ * `database-provider.tsx` BEFORE the first paint)
+ * --------------------------------------------------------------------------
+ * This used to call `evaluateAndPersistAchievements` once per session, and
+ * THAT re-loaded the full working-set history (`loadReplayRecords`) and
+ * re-ran `replayPRs` over the WHOLE history on every iteration → O(N²) in the
+ * number of ended sessions (measured quadratic; ~50 s at 2000 sessions). Now
+ * the whole-history load + replay happen exactly ONCE, and the per-session
+ * unlock evaluation reuses the cached replay → O(N). It only ever runs with N
+ * large when the sentinel is absent AND the history is large (the one-time
+ * pre-backfill upgrade, or a restore of a sentinel-less older backup), but the
+ * boot-await placement makes the O(N²) a visible freeze, so this is fixed for
+ * robustness pre-launch (ADR-0009 § 2026-06-17 Amendment).
+ *
+ * Attribution (ADR-0009 § 2026-06-17 Amendment, grill Q2-B)
+ * ---------------------------------------------------------
+ * The old loop fed every session the FINAL whole-history cumulative counts, so
+ * `pr_per_mg` / `pr_per_bucket` unlocks were timestamped to the FIRST
+ * PR-breaking session rather than the session that actually crossed the
+ * threshold. This rewrite advances a running PR cumulative session-by-session,
+ * so those unlocks now land on the crossing session (a strictly more accurate
+ * historical timeline; the SET of unlocked definitions is unchanged — cumulative
+ * counts are monotonic, so an achievement unlocks iff its final count ≥ its
+ * threshold either way).
+ *
+ * `session_count` is the deliberate exception: it is still fed the FINAL
+ * `countLoggedSessions` total on every call (NOT a progressive count). Reason:
+ * `evaluate()` gates the `session_count` ladder on the *current* session having
+ * a logged WORKING set (`hasLogged`), but `countLoggedSessions` counts any
+ * session with a non-skipped set — including warmup-only sessions, which carry
+ * zero working sets here (the loader filters `set_kind = 'working'`). A
+ * progressive count could therefore cross a threshold on a warmup-only session
+ * that `evaluate()` skips, dropping an unlock the old loop produced. Feeding the
+ * final total preserves the exact old-loop SET + attribution (first working-set
+ * session) with no warmup-only edge case.
  *
  * Idempotent two ways:
  *   - Sentinel present → return immediately (the cheap path on every launch
@@ -271,13 +308,94 @@ export async function backfillAchievementsIfNeeded(
       ORDER BY started_at ASC, id ASC`
   );
 
+  // O(N): load + replay the whole working-set history ONCE (was: per session).
+  const [defs, replayRecords, totalSessions] = await Promise.all([
+    listAchievementDefinitions(db),
+    loadReplayRecords(db),
+    countLoggedSessions(db),
+  ]);
+  const replay = replayPRs(replayRecords);
+
+  // Group replay records by session (working sets only — the loader excludes
+  // warmup; created_at order within a session is preserved by push order).
+  const recordsBySession = new Map<string, ReplaySetRecord[]>();
+  for (const r of replayRecords) {
+    const arr = recordsBySession.get(r.session_id);
+    if (arr) arr.push(r);
+    else recordsBySession.set(r.session_id, [r]);
+  }
+
+  // Seed the unlocked set from any pre-existing unlocks, then accumulate
+  // in-memory across the walk (mirrors the old loop's per-iteration DB re-query
+  // + insert, minus the re-query).
+  const unlockedIds = new Set(await listUnlockedDefinitionIds(db));
+
+  // Running PR cumulative, advanced session-by-session so pr_per_mg /
+  // pr_per_bucket unlocks land on the crossing session (see docblock). By the
+  // final session this equals `replay.cumulative` exactly (same increments,
+  // just grouped by session).
+  const runningCumul: CumulativePRCounts = {
+    per_mg: new Map(),
+    per_bucket: new Map(),
+  };
+  const incMg = (mg: string, kind: 'weight' | 'volume') => {
+    const c = runningCumul.per_mg.get(mg) ?? { weight: 0, volume: 0 };
+    c[kind] += 1;
+    runningCumul.per_mg.set(mg, c);
+  };
+  const incBucket = (bucket: BucketKey, kind: 'weight' | 'volume') => {
+    const c = runningCumul.per_bucket.get(bucket) ?? { weight: 0, volume: 0 };
+    c[kind] += 1;
+    runningCumul.per_bucket.set(bucket, c);
+  };
+
   let totalNew = 0;
   for (const s of sessions) {
-    const outcome = await evaluateAndPersistAchievements(db, {
-      ended_session_id: s.id,
-      unlocked_at: s.ended_at,
+    const sRecords = recordsBySession.get(s.id) ?? [];
+
+    // Advance the running cumulative by THIS session's PR breaks BEFORE eval,
+    // so the count is "as of end of this session" (mirrors live evaluation,
+    // where loadReplayRecords includes the just-ended session).
+    for (const r of sRecords) {
+      const f = replay.flagsBySetId.get(r.set_id);
+      if (!f) continue;
+      if (f.weight_pr_broken) {
+        if (r.mg_id != null) incMg(r.mg_id, 'weight');
+        if (f.bucket != null) incBucket(f.bucket, 'weight');
+      }
+      if (f.volume_pr_broken) {
+        if (r.mg_id != null) incMg(r.mg_id, 'volume');
+        if (f.bucket != null) incBucket(f.bucket, 'volume');
+      }
+    }
+
+    const evalSets: SessionEvalSet[] = sRecords.map((r) => {
+      const flags = replay.flagsBySetId.get(r.set_id);
+      const bucket: BucketKey | null = flags?.bucket ?? classifyBucket(r.reps);
+      return {
+        set_id: r.set_id,
+        mg_id: r.mg_id,
+        bucket,
+        is_logged: r.is_logged,
+        weight_pr_broken: flags?.weight_pr_broken ?? false,
+        volume_pr_broken: flags?.volume_pr_broken ?? false,
+      };
     });
-    totalNew += outcome.newUnlocks.length;
+
+    const newUnlocks = evaluate({
+      session: { session_id: s.id, sets: evalSets },
+      defs,
+      unlockedIds,
+      cumulativePRCounts: runningCumul,
+      // session_count uses the FINAL total — see docblock (warmup-only guard).
+      totalSessionCount: totalSessions,
+    });
+
+    if (newUnlocks.length > 0) {
+      await insertUnlocks(db, newUnlocks, s.ended_at);
+      for (const u of newUnlocks) unlockedIds.add(u.definition_id);
+      totalNew += newUnlocks.length;
+    }
   }
 
   const now = opts.now ?? (() => Date.now());
