@@ -191,7 +191,7 @@ export async function insertNewTableRow(
 - ❌ migration 函式內自己 `withTransactionAsync` — runner 已包、會 nested
 - ❌ Migration 加新 NOT NULL column 不給 default + 沒 backfill — 既有 row 沒值會 crash
 - ❌ 加 column 用 `ALTER ... IF NOT EXISTS`（sqlite 不支援）— 用 `PRAGMA table_info` guard
-- ❌ Forget `IF NOT EXISTS`（建表）/ WHERE guard（backfill）— migration 重跑 crash 或重複塞
+- ❌ Forget `IF NOT EXISTS`（建表**與建 index**：`CREATE TABLE` ＋ `CREATE INDEX` 皆要）/ WHERE guard（backfill）— migration 重跑 crash 或重複塞。⚠️ **只給 CREATE TABLE 加、漏掉同 migration 的 CREATE INDEX ＝半修**：重跑時 table 過了、`CREATE INDEX idx_x` 仍 throw「index already exists」→ brick 只是從表移到 index（2026-06-18 boot/restore 資料安全稽核實證：v003-v011 早期 migration 兩者都裸寫）。但「完全 re-runnable」對含 `ALTER TABLE ADD COLUMN` 的 migration **做不到**（sqlite 無 ADD COLUMN IF NOT EXISTS、見上一條）→ 那些只能 single-run；安全前提＝runner 只前進 `user_version`、整檔備份還原 shape==pointer 不 desync，故 IF-NOT-EXISTS 屬 v016+ 慣例對齊／防禦縱深、非「保證可重跑」。測 idempotency 只能斷言 create-only（無 ALTER）migration 重跑為 no-op
 - ❌ FK without `ON DELETE` — 預設行為跨 sqlite 版本不一致、產生孤兒 row
 - ❌ Test 用真 simulator DB（在 `/tmp` 留檔）— 一律 in-memory better-sqlite3
 - ❌ **新加 child table 帶 FK → parent 但沒 audit parent 的既有 `delete*` repo 函式** — 本 migration 跑完後，未來刪 parent row 會在 commit 時 trip `SQLite error 19: FOREIGN KEY constraint failed`。Checklist：grep `src/adapters/sqlite/*Repository.ts` 找 `DELETE FROM <parent>`，每個都要在同一 transaction 內補 `UPDATE <child> SET <fk_col> = NULL WHERE <fk_col> = ?`（保留 child）或 `DELETE FROM <child> WHERE <fk_col> = ?`（cascade 刪）。實例：v005 加 `program_cell.template_id` 但漏補 `deleteTemplate`，2026-05-29 user 從 program 上套了 template 後刪 template 就炸（see `tests/db/deleteTemplate.test.ts` 的 program_cell case）。
