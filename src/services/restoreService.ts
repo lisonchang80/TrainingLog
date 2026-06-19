@@ -45,8 +45,10 @@
  */
 
 import {
+  decideBootRecovery,
   evaluateCandidate,
   preRestoreFileName,
+  restoreInProgressMarkerPath,
   selectStalePreRestoreFiles,
   sidecarPaths,
   sortCandidatesNewestFirst,
@@ -135,6 +137,28 @@ export function setRestoreDeps(deps: RestoreServiceDeps | null): void {
  * Settings restore entry treat null as "feature not wired" and stay inert. */
 export function getRestoreDeps(): RestoreServiceDeps | null {
   return registeredDeps;
+}
+
+// ---------------------------------------------------------------------------
+// Restore-in-flight latch (🟠-2, 2026-06-18 boot/restore data-safety audit)
+// ---------------------------------------------------------------------------
+
+/**
+ * Process-wide flag set for the duration of {@link executeRestore}'s swap.
+ * An auto-backup (`runBackup`) that fires WHILE the live DB is being closed /
+ * deleted / replaced would either snapshot a half-swapped DB or collide with
+ * copy-in; there is no shared mutex between the two engines. `backupService`
+ * checks this and skips the run, mirroring its own `backupInFlight` latch.
+ */
+let restoreInFlight = false;
+
+export function isRestoreInFlight(): boolean {
+  return restoreInFlight;
+}
+
+/** Test hook — force the restore-in-flight latch (paired reset). */
+export function __setRestoreInFlightForTests(v: boolean): void {
+  restoreInFlight = v;
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +391,9 @@ export async function executeRestore(
 ): Promise<RestoreOutcome> {
   const now = deps.now ?? Date.now;
   const live = deps.paths.liveDbPath;
+  const marker = restoreInProgressMarkerPath(deps.paths.preRestoreDir);
   let preRestorePath: string | null = null;
+  let markerWritten = false;
 
   const rollback = async (): Promise<boolean> => {
     if (!preRestorePath) return false;
@@ -382,49 +408,152 @@ export async function executeRestore(
     }
   };
 
-  // 1. Pre-restore self-backup (keep 1 — sweep older copies first).
+  // 🟠-2: hold the restore-in-flight latch across the whole swap so an
+  // auto-backup can't snapshot a half-swapped DB. Cleared no matter how we
+  // exit (every step below `return`s on failure).
+  restoreInFlight = true;
   try {
-    if (await deps.fileOps.exists(live)) {
-      const existing = await deps.fileOps.listDir(deps.paths.preRestoreDir);
-      for (const stale of selectStalePreRestoreFiles(existing)) {
-        await deps.fileOps.remove(`${deps.paths.preRestoreDir}/${stale}`);
+    // 1. Pre-restore self-backup (keep 1 — sweep older copies first).
+    try {
+      if (await deps.fileOps.exists(live)) {
+        const existing = await deps.fileOps.listDir(deps.paths.preRestoreDir);
+        for (const stale of selectStalePreRestoreFiles(existing)) {
+          await deps.fileOps.remove(`${deps.paths.preRestoreDir}/${stale}`);
+        }
+        preRestorePath = `${deps.paths.preRestoreDir}/${preRestoreFileName(now())}`;
+        await deps.fileOps.copy(live, preRestorePath);
       }
-      preRestorePath = `${deps.paths.preRestoreDir}/${preRestoreFileName(now())}`;
-      await deps.fileOps.copy(live, preRestorePath);
+    } catch (e) {
+      return { ok: false, step: 'self-backup', message: errMessage(e), rolledBack: false };
     }
+
+    // 2. Close + reset the live singleton.
+    try {
+      await deps.dbOps.closeAndResetLive();
+    } catch (e) {
+      // Nothing destroyed yet — the old connection (and data) remain live.
+      return { ok: false, step: 'close-live', message: errMessage(e), rolledBack: false };
+    }
+
+    // 2.5 🟠-1: drop a crash-recovery marker (a copy of the pre-restore safety
+    // copy) BEFORE the destructive window below. A process kill between the
+    // delete (step 3) and the copy-in (step 4) leaves no live DB; the marker
+    // lets the next boot (`recoverInterruptedRestore`) restore the user's data
+    // instead of silently opening a fresh empty DB. Skipped on the fresh-
+    // install path (no pre-restore copy = no data to protect). Best-effort:
+    // its own failure must not abort an otherwise-fine restore.
+    if (preRestorePath) {
+      try {
+        await deps.fileOps.copy(preRestorePath, marker);
+        markerWritten = true;
+      } catch (e) {
+        console.warn('[restore] crash-recovery marker write failed:', errMessage(e));
+      }
+    }
+
+    // 3. Hard-delete old main + sidecars (R1: stale -wal replay corrupts).
+    try {
+      await deps.fileOps.remove(live);
+      for (const sidecar of sidecarPaths(live)) await deps.fileOps.remove(sidecar);
+    } catch (e) {
+      return { ok: false, step: 'clear-old', message: errMessage(e), rolledBack: await rollback() };
+    }
+
+    // 4. Copy the candidate into place.
+    try {
+      await deps.fileOps.copy(preview.localPath, live);
+    } catch (e) {
+      return { ok: false, step: 'copy-in', message: errMessage(e), rolledBack: await rollback() };
+    }
+
+    // 5. Reopen → migrate() brings older-schema backups to head.
+    try {
+      await deps.dbOps.reopenLive();
+    } catch (e) {
+      return { ok: false, step: 'reopen', message: errMessage(e), rolledBack: await rollback() };
+    }
+
+    // Swap confirmed — the new DB is live. Clear the marker so the next boot
+    // doesn't mistake a completed restore for an interrupted one. Best-effort:
+    // a leftover marker only triggers a harmless boot check (live present →
+    // clear-marker-only). On the failure paths above we deliberately LEAVE the
+    // marker so boot recovery is the safety net.
+    if (markerWritten) {
+      try {
+        await deps.fileOps.remove(marker);
+      } catch (e) {
+        console.warn('[restore] crash-recovery marker clear failed:', errMessage(e));
+      }
+    }
+
+    return { ok: true, preRestorePath };
+  } finally {
+    restoreInFlight = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Boot recovery (🟠-1)
+// ---------------------------------------------------------------------------
+
+export type RestoreRecoveryResult =
+  /** No interrupted restore (no marker), or marker was merely stale and
+   * cleared because the live DB is authoritative. `recovered` stays false —
+   * nothing was copied over the live DB. */
+  | { recovered: false; cleared?: boolean; error?: string }
+  /** A killed swap left no live DB; the marker (a pre-restore copy) was
+   * restored over it. */
+  | { recovered: true };
+
+/**
+ * Run once at boot, BEFORE opening the live DB, to heal a restore that was
+ * killed mid-swap (🟠-1). Decision in {@link decideBootRecovery}:
+ *
+ *   - no marker → no-op.
+ *   - marker + live present → clear the stale marker, leave live untouched
+ *     (overwriting good/restored data would be the bug).
+ *   - marker + live MISSING → copy the marker into place (after clearing any
+ *     orphaned sidecars), then drop the marker. Idempotent if re-killed.
+ *
+ * Best-effort and self-contained: any IO failure resolves (never throws) so
+ * boot proceeds to `openDatabase()` regardless.
+ */
+export async function recoverInterruptedRestore(
+  deps: RestoreServiceDeps
+): Promise<RestoreRecoveryResult> {
+  const live = deps.paths.liveDbPath;
+  const marker = restoreInProgressMarkerPath(deps.paths.preRestoreDir);
+
+  let markerExists: boolean;
+  let liveExists: boolean;
+  try {
+    markerExists = await deps.fileOps.exists(marker);
+    liveExists = await deps.fileOps.exists(live);
   } catch (e) {
-    return { ok: false, step: 'self-backup', message: errMessage(e), rolledBack: false };
+    return { recovered: false, error: errMessage(e) };
   }
 
-  // 2. Close + reset the live singleton.
-  try {
-    await deps.dbOps.closeAndResetLive();
-  } catch (e) {
-    // Nothing destroyed yet — the old connection (and data) remain live.
-    return { ok: false, step: 'close-live', message: errMessage(e), rolledBack: false };
+  const action = decideBootRecovery({ markerExists, liveExists });
+  if (action === 'none') return { recovered: false };
+
+  if (action === 'clear-marker-only') {
+    try {
+      await deps.fileOps.remove(marker);
+    } catch {
+      /* leftover marker is harmless — retried next boot */
+    }
+    return { recovered: false, cleared: true };
   }
 
-  // 3. Hard-delete old main + sidecars (R1: stale -wal replay corrupts).
+  // recover-from-marker: the live DB was deleted in the swap window.
   try {
-    await deps.fileOps.remove(live);
+    await deps.fileOps.remove(live); // missing-ok no-op
     for (const sidecar of sidecarPaths(live)) await deps.fileOps.remove(sidecar);
+    await deps.fileOps.copy(marker, live);
+    await deps.fileOps.remove(marker);
+    return { recovered: true };
   } catch (e) {
-    return { ok: false, step: 'clear-old', message: errMessage(e), rolledBack: await rollback() };
+    // Leave the marker in place so the next boot retries the recovery.
+    return { recovered: false, error: errMessage(e) };
   }
-
-  // 4. Copy the candidate into place.
-  try {
-    await deps.fileOps.copy(preview.localPath, live);
-  } catch (e) {
-    return { ok: false, step: 'copy-in', message: errMessage(e), rolledBack: await rollback() };
-  }
-
-  // 5. Reopen → migrate() brings older-schema backups to head.
-  try {
-    await deps.dbOps.reopenLive();
-  } catch (e) {
-    return { ok: false, step: 'reopen', message: errMessage(e), rolledBack: await rollback() };
-  }
-
-  return { ok: true, preRestorePath };
 }

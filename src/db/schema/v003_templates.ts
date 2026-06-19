@@ -19,14 +19,14 @@ import type { Database } from '../types';
  */
 export async function v003_templates(db: Database): Promise<void> {
   await db.execAsync(`
-    CREATE TABLE template (
+    CREATE TABLE IF NOT EXISTS template (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
 
-    CREATE TABLE template_exercise (
+    CREATE TABLE IF NOT EXISTS template_exercise (
       id TEXT PRIMARY KEY NOT NULL,
       template_id TEXT NOT NULL REFERENCES template(id),
       exercise_id TEXT NOT NULL REFERENCES exercise(id),
@@ -36,9 +36,9 @@ export async function v003_templates(db: Database): Promise<void> {
       default_weight_kg REAL
     );
 
-    CREATE INDEX idx_template_exercise_template ON template_exercise(template_id);
+    CREATE INDEX IF NOT EXISTS idx_template_exercise_template ON template_exercise(template_id);
 
-    CREATE TABLE session_exercise (
+    CREATE TABLE IF NOT EXISTS session_exercise (
       id TEXT PRIMARY KEY NOT NULL,
       session_id TEXT NOT NULL REFERENCES session(id),
       exercise_id TEXT NOT NULL REFERENCES exercise(id),
@@ -49,6 +49,6 @@ export async function v003_templates(db: Database): Promise<void> {
       template_id TEXT
     );
 
-    CREATE INDEX idx_session_exercise_session ON session_exercise(session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_exercise_session ON session_exercise(session_id);
   `);
 }

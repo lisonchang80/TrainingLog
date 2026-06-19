@@ -44,7 +44,7 @@ export async function v009_template_set(db: Database): Promise<void> {
     ALTER TABLE template_exercise ADD COLUMN notes TEXT;
     ALTER TABLE template_exercise ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
 
-    CREATE TABLE template_set (
+    CREATE TABLE IF NOT EXISTS template_set (
       id TEXT PRIMARY KEY NOT NULL,
       template_exercise_id TEXT NOT NULL REFERENCES template_exercise(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
@@ -56,7 +56,7 @@ export async function v009_template_set(db: Database): Promise<void> {
       UNIQUE (template_exercise_id, position)
     );
 
-    CREATE INDEX idx_template_set_by_exercise
+    CREATE INDEX IF NOT EXISTS idx_template_set_by_exercise
       ON template_set(template_exercise_id, position);
   `);
 

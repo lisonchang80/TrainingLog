@@ -1,5 +1,9 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
+import { v003_templates } from '../../src/db/schema/v003_templates';
+import { v007_body_metric } from '../../src/db/schema/v007_body_metric';
+import { v008_achievements } from '../../src/db/schema/v008_achievements';
+import { v011_reusable_superset } from '../../src/db/schema/v011_reusable_superset';
 
 /**
  * Full migration-chain acceptance tests — the highest-stakes data-integrity
@@ -427,6 +431,36 @@ describe('migrate() preserves data on a populated re-migrate', () => {
       'PRAGMA user_version',
     );
     expect(v?.user_version).toBe(27);
+  });
+
+  it('re-running the create-only migrations on a populated DB is a safe no-op (🟡 IF NOT EXISTS guard)', async () => {
+    // 2026-06-18 migration-replay audit: the early migrations used bare
+    // `CREATE TABLE` / `CREATE INDEX`. If a populated DB's user_version were
+    // ever stamped below one of them, the runner re-runs it and the bare
+    // `CREATE` throws "already exists" → migration aborts → boot brick. This
+    // change adds `IF NOT EXISTS` to align with the v016+ convention.
+    //
+    // The migrations below (v003/v007/v008/v011) are CREATE-only (tables +
+    // indexes + `INSERT OR IGNORE` seeds) → now fully idempotent, asserted
+    // here. v005/v006/v009 ALSO add columns via `ALTER TABLE ADD COLUMN`,
+    // which SQLite cannot guard with IF NOT EXISTS — they remain single-run by
+    // design. That is safe: the runner only ever ADVANCES user_version
+    // (migrate.ts:97) and a whole-file backup restore keeps shape == pointer,
+    // so a desync that would re-run them is unreachable (audit report 06).
+    await migrate(db);
+    await seedRepresentative();
+    const before = await snapshotRows();
+
+    for (const m of [
+      v003_templates,
+      v007_body_metric,
+      v008_achievements,
+      v011_reusable_superset,
+    ]) {
+      await expect(m(db)).resolves.toBeUndefined();
+    }
+
+    expect(await snapshotRows()).toEqual(before);
   });
 
   it('preserves the dropset chain (parent_set_id) verbatim across re-migrate', async () => {

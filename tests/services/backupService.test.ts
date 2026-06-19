@@ -39,6 +39,7 @@ import {
   runBackup,
   type BackupServiceDeps,
 } from '../../src/services/backupService';
+import { __setRestoreInFlightForTests } from '../../src/services/restoreService';
 
 const NOW = 1_765_590_605_000;
 const MIN = 60 * 1000;
@@ -248,6 +249,19 @@ describe('runBackup — single-flight latch', () => {
     // latch released → next run proceeds normally
     const third = await runBackup(db, 'manual', makeDeps());
     expect(third.status).toBe('success');
+  });
+
+  it('🟠-2: skips while a restore swap is in flight (no shared mutex collision)', async () => {
+    __setRestoreInFlightForTests(true);
+    try {
+      const deps = makeDeps();
+      const outcome = await runBackup(db, 'background', deps);
+      expect(outcome).toEqual({ status: 'already-running' });
+      // never even reached the snapshot — restore owns the live DB.
+      expect(deps.createBackupSnapshot).not.toHaveBeenCalled();
+    } finally {
+      __setRestoreInFlightForTests(false);
+    }
   });
 });
 
