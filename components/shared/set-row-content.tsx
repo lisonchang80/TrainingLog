@@ -25,6 +25,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 import { displayToKg, displayWeight } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -167,6 +168,9 @@ export function SetRowContent<S extends SetRowItem>({
     <View style={[styles.setRow, compact && styles.setRowCompact]}>
       {hideLabel ? null : (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('button', 'a11yCycleSetKind')} (${setLabel})`}
+          accessibilityState={{ disabled: isDropsetFollower }}
           onPress={() => {
             if (!isDropsetFollower) onCycleLabel(set);
           }}
@@ -189,6 +193,8 @@ export function SetRowContent<S extends SetRowItem>({
       )}
       {onTapNumber ? (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('button', 'a11yEditWeight')}, ${set.weight} kg`}
           onPress={() => onTapNumber(set, 'weight', set.weight)}
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
@@ -197,6 +203,7 @@ export function SetRowContent<S extends SetRowItem>({
         </Pressable>
       ) : (
         <TextInput
+          accessibilityLabel={t('button', 'a11yEditWeight')}
           style={[styles.setInput, styles.setInputTextInline, compact && styles.setInputCompact]}
           value={weightText}
           onChangeText={handleWeightChange}
@@ -208,6 +215,8 @@ export function SetRowContent<S extends SetRowItem>({
       <Text style={[styles.setUnit, compact && styles.setUnitCompact]}>×</Text>
       {onTapNumber ? (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('button', 'a11yEditReps')}, ${set.reps}`}
           onPress={() => onTapNumber(set, 'reps', set.reps)}
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
@@ -216,6 +225,7 @@ export function SetRowContent<S extends SetRowItem>({
         </Pressable>
       ) : (
         <TextInput
+          accessibilityLabel={t('button', 'a11yEditReps')}
           style={[styles.setInput, styles.setInputTextInline, compact && styles.setInputCompact]}
           value={repsText}
           onChangeText={handleRepsChange}
@@ -234,6 +244,9 @@ export function SetRowContent<S extends SetRowItem>({
       {isDropsetFollower ? (
         <View style={styles.dropsetLeftGroup}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('button', 'a11yRemoveDropset')}
+            accessibilityState={{ disabled: minusDisabled }}
             onPress={() => onRemoveDropsetRow(set.id)}
             disabled={minusDisabled}
             hitSlop={6}
@@ -251,6 +264,8 @@ export function SetRowContent<S extends SetRowItem>({
           </Pressable>
           {showAddDrop ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('button', 'a11yAddDropset')}
               onPress={() => onAddDropsetRow(set.id)}
               hitSlop={6}
               style={styles.dropsetInlineBtn}>
@@ -268,6 +283,8 @@ export function SetRowContent<S extends SetRowItem>({
       */}
       {hideNoteIndicator ? null : hasNote ? (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('button', 'a11yOpenNote')}
           onPress={() => onShowSetNote(set)}
           style={styles.setNoteIndicator}
           hitSlop={6}>

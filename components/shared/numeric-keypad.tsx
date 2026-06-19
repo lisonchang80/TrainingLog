@@ -101,14 +101,30 @@ export function NumericKeypad({
       onRequestClose={onCancel}
     >
       <Pressable style={styles.backdrop} onPress={onCancel}>
-        {/* Stop touch propagation so taps on the sheet don't cancel the modal. */}
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        {/* Stop touch propagation so taps on the sheet don't cancel the modal.
+            accessibilityViewIsModal traps VoiceOver focus inside the keypad
+            (iOS) so the user can't swipe back to the obscured card behind it. */}
+        <Pressable
+          accessibilityViewIsModal
+          style={styles.sheet}
+          onPress={() => {}}
+        >
           <View style={styles.topBar}>
-            <Pressable onPress={onCancel} hitSlop={8}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('common', 'cancel')}
+              onPress={onCancel}
+              hitSlop={8}
+            >
               <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
             </Pressable>
             <Text style={styles.topBarTitle}>{label}</Text>
-            <Pressable onPress={handleConfirm} hitSlop={8}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('common', 'done')}
+              onPress={handleConfirm}
+              hitSlop={8}
+            >
               <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
                 {t('common', 'done')}
               </Text>
@@ -130,6 +146,12 @@ export function NumericKeypad({
                   return (
                     <Pressable
                       key={key}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        key === 'back'
+                          ? t('button', 'a11yKeypadBackspace')
+                          : keyLabel
+                      }
                       onPress={() => handleKey(key)}
                       style={({ pressed }) => [
                         styles.keyBtn,
