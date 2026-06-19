@@ -313,6 +313,9 @@ export const strings = {
       bucketRangesSection: '訓練目的次數範圍',
       bucketRangesHint:
         '調整每個訓練目的對應的次數區間，套用到全 App 的 PR 判定與分類，並同步至 Apple Watch。',
+      // ADR-0026 (slice 16) — App Mode section header + hint (計劃 / 極簡).
+      appModeSection: '訓練模式',
+      appModeHint: '極簡模式：只看模板名稱，隱藏計劃與強度，一律以「通用」開始訓練（iPhone 與 Apple Watch 皆同步）。',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: '顯示單位',
       unitPreferenceHint: '顯示單位切換（資料以 kg 儲存，僅影響顯示與輸入）。',
@@ -562,6 +565,9 @@ export const strings = {
       // Slice 17 — 獎章 toggle label + reps unit for the rep-range editor.
       achievementsEnabledLabel: '顯示獎章與 PR',
       repsShort: '下',
+      // ADR-0026 (slice 16) — App Mode radio labels.
+      appModePlan: '計劃模式',
+      appModeMinimal: '極簡模式',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: '還沒有計畫。按「新建」啟動 6 步建立精靈。',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.
@@ -1071,6 +1077,10 @@ export const strings = {
       bucketRangesSection: 'Rep Ranges',
       bucketRangesHint:
         'Adjust the rep range for each training purpose. Applies app-wide to PR detection and classification, and syncs to Apple Watch.',
+      // ADR-0026 (slice 16) — App Mode section header + hint (plan / minimal).
+      appModeSection: 'Training Mode',
+      appModeHint:
+        'Minimal mode: see only template names — programs and intensities are hidden, and every workout starts as 通用 (default). Applies to iPhone and Apple Watch.',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: 'Unit Preference',
       unitPreferenceHint:
@@ -1314,6 +1324,9 @@ export const strings = {
       // Slice 17 — Achievements toggle label + reps unit.
       achievementsEnabledLabel: 'Show achievements & PRs',
       repsShort: 'reps',
+      // ADR-0026 (slice 16) — App Mode radio labels.
+      appModePlan: 'Plan Mode',
+      appModeMinimal: 'Minimal Mode',
       // Phase 4.5 batch 1 — Programs tab empty-state CTA.
       noProgramsYetHint: 'No programs yet. Tap "New" to launch the 6-step wizard.',
       // Phase 4.5 batch 1 — Today program banner "today: {template}" prefix.

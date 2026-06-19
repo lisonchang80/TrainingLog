@@ -19,6 +19,7 @@ import { t } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 import { ThemeProvider, useTheme } from '@/src/theme';
+import { AppModeProvider } from '@/src/app-mode';
 import { initWatchBridge } from '@/src/adapters/watch';
 import { wireRestoreDeps } from '@/src/services/restoreDepsWiring';
 
@@ -144,6 +145,13 @@ export default function RootLayout() {
       {/* Slice 17 — achievement system on/off toggle (ADR-0009 amend). Inside
           DatabaseProvider (SQLite-backed); default `true` covers pre-hydration. */}
       <AchievementsEnabledProvider>
+      {/* Slice 16 (ADR-0026) — AppModeProvider sits INSIDE DatabaseProvider
+          (it reads `app_mode` from SQLite via useDatabase) and wraps the whole
+          UI tree so the 計劃模式 / 極簡模式 toggle re-renders every
+          program-concept surface (Programs tab, today's planned, pickers)
+          live. No boot-order constraint: it only gates UI that renders after
+          the DB is open, and defaults to 'plan' until hydrated. */}
+      <AppModeProvider>
       <ThemeProvider>
         <NavThemeBridge>
           <Stack>
@@ -236,6 +244,7 @@ export default function RootLayout() {
           </Stack>
         </NavThemeBridge>
       </ThemeProvider>
+      </AppModeProvider>
       </AchievementsEnabledProvider>
     </DatabaseProvider>
     </RestoreGate>

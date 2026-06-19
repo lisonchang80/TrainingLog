@@ -69,6 +69,7 @@ import { cellForDate } from '../../domain/program/programManager';
 import { localMsToIsoDate } from '../../domain/program/programManager';
 import { getBucketBoundaries } from '../../domain/pr/buckets';
 import type { BucketBoundary, BucketKey } from '../../domain/pr/types';
+import { getAppMode, type AppMode } from '../sqlite/settingsRepository';
 import { tExercise } from '../../i18n/strings';
 import type {
   HandshakePayload,
@@ -430,6 +431,16 @@ export interface Stage1ReplyPrefetch {
   programs?: ReadonlyArray<Stage1ProgramSummary>;
   todayPlanned?: Stage1TodayPlanned;
   bucketRanges?: ReadonlyArray<Stage1BucketRange>;
+  /**
+   * Slice 16 / ADR-0026 D2 — app-wide mode flag. `'minimal'` tells the
+   * Watch to hide the 「計劃訓練」section and skip both picker sheets
+   * (ProgramPicker + IntensityPicker) on template tap. Optional at the
+   * type level for forward-compat with pre-slice-16 callers; absent on
+   * the wire = Watch defaults to `'plan'` (today's full behaviour). This
+   * is an explicit flag, NOT an empty-data signal (ADR-0026 D2 rejects
+   * implicit degradation as ambiguous/fragile).
+   */
+  appMode?: AppMode;
 }
 
 export type Stage1ReplyPayload =
@@ -639,6 +650,10 @@ function bucketRangesToWire(
  *     absent on the wire; the Watch falls back to its built-in defaults.
  *     Each range's open-ended `max` (NULL in the domain shape) is OMITTED
  *     per the wire null rule, never sent as explicit `null`.
+ *   - `appMode` (slice 16 / ADR-0026 D2, optional) — `'plan' | 'minimal'`.
+ *     Omitted = absent on the wire; Watch defaults to `'plan'`. Ordered
+ *     AFTER `bucketRanges` so slice-17's positional call sites on main
+ *     stay correct; `appMode` is the new 7th positional arg.
  */
 export function buildStage1Reply(
   request: HandshakePayload,
@@ -647,6 +662,7 @@ export function buildStage1Reply(
   programs?: ReadonlyArray<Stage1ProgramSummary>,
   todayPlanned?: Stage1TodayPlanned,
   bucketRanges?: ReadonlyArray<BucketBoundary>,
+  appMode?: AppMode,
 ): Stage1ReplyPayload {
   const prefetch: Stage1ReplyPrefetch = { templates };
   if (programs !== undefined) prefetch.programs = programs;
@@ -654,6 +670,7 @@ export function buildStage1Reply(
   if (bucketRanges !== undefined) {
     prefetch.bucketRanges = bucketRangesToWire(bucketRanges);
   }
+  if (appMode !== undefined) prefetch.appMode = appMode;
   if (activeSession === null) {
     return {
       requestId: request.requestId,
@@ -1254,14 +1271,19 @@ export async function onHandshakeRequest(
   try {
     // Phase 2.5 + NEW-Q50 D28 — fan out programs + todayPlanned in
     // parallel with the active-session + fat-tree templates reads. All
-    // four are cheap independent queries; Promise.all keeps the
-    // round-trip latency at the slowest individual query.
-    const [activeSession, templates, programs, todayPlanned] = await Promise.all([
-      loadActiveSessionSummary(db),
-      loadTemplatesFullTree(db),
-      loadProgramsPrefetchList(db),
-      loadTodayPlanned(db),
-    ]);
+    // are cheap independent queries; Promise.all keeps the round-trip
+    // latency at the slowest individual query.
+    //
+    // Slice 16 / ADR-0026 D2 — `getAppMode` joins the fan-out so the
+    // Watch learns 計劃/極簡 mode via the explicit prefetch flag.
+    const [activeSession, templates, programs, todayPlanned, appMode] =
+      await Promise.all([
+        loadActiveSessionSummary(db),
+        loadTemplatesFullTree(db),
+        loadProgramsPrefetchList(db),
+        loadTodayPlanned(db),
+        getAppMode(db),
+      ]);
     // Slice 17 (ADR-0027 D5) — mirror the user's edited rep-bucket ranges
     // onto the Watch. Reads the live in-memory cache (synchronous, no DB
     // round-trip), so it sits outside the Promise.all fan-out.
@@ -1273,6 +1295,7 @@ export async function onHandshakeRequest(
       programs,
       todayPlanned,
       bucketRanges,
+      appMode,
     );
     replyHandler(toWireRecord(reply));
   } catch (e) {

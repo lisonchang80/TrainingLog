@@ -5,10 +5,14 @@ import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAppMode } from '@/src/app-mode';
 import { t } from '@/src/i18n';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  // ADR-0026 D1 — 極簡模式隱藏 Programs (計劃) 分頁。`href: null` 把 tab 從 bar
+  // 移除但保留 route 註冊（內部任何殘留導向不會 404），切回計劃模式立即恢復。
+  const { isMinimal } = useAppMode();
 
   return (
     <Tabs
@@ -33,6 +37,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="programs"
         options={{
+          // ADR-0026 D1 — href:null removes the 計劃 tab in 極簡模式 while keeping
+          // the route registered (reversible — switching back restores it).
+          href: isMinimal ? null : undefined,
           title: t('tabs', 'programs'),
           tabBarIcon: ({ color }) => (
             <IconSymbol size={28} name="calendar" color={color} />
