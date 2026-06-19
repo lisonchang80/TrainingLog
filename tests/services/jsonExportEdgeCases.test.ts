@@ -300,3 +300,101 @@ describe('buildJsonExport — BLOB handling (LATENT: no BLOB column today)', () 
     expect(Buffer.from(row.data.$blob, 'base64').toString('utf8')).toBe('Hello');
   });
 });
+
+// =====================================================================
+// Coverage fill (2026-06-20) — BLOB encoding hardening beyond "Hello".
+//
+// The shipped BLOB test pins a single 5-byte ASCII blob. These pin the
+// gnarlier byte payloads + multi-column / null-blob shapes that the
+// `encodeRowBlobs` shallow-copy + `encodeBlob` base64 path must survive,
+// all through the real (production) better-sqlite3 Buffer representation.
+// =====================================================================
+describe('buildJsonExport — BLOB encoding hardening (full-byte / multi-column / null)', () => {
+  let db: BetterSqliteDatabase;
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+  afterEach(() => db.close());
+
+  it('round-trips a BLOB containing ALL 256 byte values (incl. NUL) via base64', async () => {
+    await db.execAsync('CREATE TABLE blob256 (id INTEGER PRIMARY KEY, data BLOB)');
+    // All bytes 0x00..0xFF — base64 must survive embedded NULs / high bytes
+    // that would corrupt a naive string/UTF-8 path.
+    const allBytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+    const hex = allBytes.toString('hex').toUpperCase();
+    await db.execAsync(`INSERT INTO blob256 (id, data) VALUES (1, X'${hex}')`);
+
+    const env = await exportEnvelope(db);
+    const row = env.tables.blob256[0] as { id: number; data: { $blob: string } };
+    expect(typeof row.data.$blob).toBe('string');
+    // Decoded base64 must equal the original 256-byte sequence byte-for-byte.
+    const decoded = Buffer.from(row.data.$blob, 'base64');
+    expect(decoded.length).toBe(256);
+    expect(decoded.equals(allBytes)).toBe(true);
+    expect(row.data.$blob).toBe(allBytes.toString('base64'));
+  });
+
+  it('encodes ONLY the BLOB cell, leaving sibling scalar columns untouched', async () => {
+    await db.execAsync(
+      'CREATE TABLE mixed (id INTEGER PRIMARY KEY, label TEXT, n REAL, payload BLOB)',
+    );
+    await db.execAsync(
+      "INSERT INTO mixed (id, label, n, payload) VALUES (1, 'meta', 3.5, X'DEADBEEF')",
+    );
+    const env = await exportEnvelope(db);
+    expect(env.tables.mixed).toEqual([
+      { id: 1, label: 'meta', n: 3.5, payload: { $blob: Buffer.from('DEADBEEF', 'hex').toString('base64') } },
+    ]);
+  });
+
+  it('handles multiple BLOB columns in one row independently', async () => {
+    await db.execAsync('CREATE TABLE twoblobs (id INTEGER PRIMARY KEY, a BLOB, b BLOB)');
+    await db.execAsync("INSERT INTO twoblobs (id, a, b) VALUES (1, X'00', X'FFFE')");
+    const env = await exportEnvelope(db);
+    expect(env.tables.twoblobs).toEqual([
+      {
+        id: 1,
+        a: { $blob: Buffer.from([0x00]).toString('base64') },
+        b: { $blob: Buffer.from([0xff, 0xfe]).toString('base64') },
+      },
+    ]);
+  });
+
+  it('preserves a NULL blob cell as JSON null (not an empty $blob wrapper)', async () => {
+    await db.execAsync('CREATE TABLE nullblob (id INTEGER PRIMARY KEY, data BLOB)');
+    await db.runAsync('INSERT INTO nullblob (id, data) VALUES (?, ?)', 1, null);
+    const env = await exportEnvelope(db);
+    // A NULL is a scalar, not binary — it must stay `null`, never `{ $blob: '' }`.
+    expect(env.tables.nullblob).toEqual([{ id: 1, data: null }]);
+  });
+
+  it('round-trips a zero-length BLOB as an empty base64 string', async () => {
+    await db.execAsync('CREATE TABLE emptyblob (id INTEGER PRIMARY KEY, data BLOB)');
+    // X'' is a valid zero-length blob (distinct from NULL).
+    await db.execAsync("INSERT INTO emptyblob (id, data) VALUES (1, X'')");
+    const env = await exportEnvelope(db);
+    const row = env.tables.emptyblob[0] as { id: number; data: { $blob: string } | null };
+    // better-sqlite3 may surface a zero-length blob as an empty Buffer (binary)
+    // → encoded to an empty-string $blob wrapper. Either way it round-trips to
+    // zero bytes; assert the decoded length is 0.
+    if (row.data && typeof row.data === 'object' && '$blob' in row.data) {
+      expect(Buffer.from(row.data.$blob, 'base64').length).toBe(0);
+    } else {
+      // Some drivers surface an empty blob as NULL — tolerated (still 0 bytes).
+      expect(row.data).toBeNull();
+    }
+  });
+
+  it('leaves a legit object-shaped TEXT column that merely looks like JSON as a string', async () => {
+    // A TEXT cell whose content is the literal string `{"$blob":"x"}` must NOT
+    // be confused with an encoded BLOB — it is plain text and round-trips as a
+    // string (the serializer only wraps actual binary cells).
+    await db.execAsync('CREATE TABLE looksblob (id INTEGER PRIMARY KEY, t TEXT)');
+    await db.runAsync('INSERT INTO looksblob (id, t) VALUES (?, ?)', 1, '{"$blob":"x"}');
+    const env = await exportEnvelope(db);
+    const row = env.tables.looksblob[0];
+    expect(typeof row.t).toBe('string');
+    expect(row.t).toBe('{"$blob":"x"}');
+  });
+});

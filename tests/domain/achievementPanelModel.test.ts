@@ -518,3 +518,69 @@ describe('volume vs weight cards are distinct per group', () => {
     expect(volume.key).toBe('mg-mg-chest-volume');
   });
 });
+
+// =====================================================================
+// Coverage fill (2026-06-20) — EMPTY-LADDER edge.
+//
+// `tierState`'s `maxed` flag is guarded by `ladder.length > 0`. Every
+// shipped test feeds a non-empty ladder, so the empty-ladder branch — a
+// card whose definition rows carry NO thresholds (all `threshold: null`),
+// or the milestone filter when zero `session_count` defs were seeded — is
+// uncovered. The contract for an empty ladder is "no rungs to reach": tier
+// 0, totalTiers 0, nextThreshold null, and — critically — NOT maxed (a
+// rungless ladder must never render as a completed/full progress bar).
+// =====================================================================
+describe('empty-ladder edge (no thresholds → tier 0, never maxed)', () => {
+  it('milestone with zero session_count defs → totalTiers 0, next null, NOT maxed', () => {
+    // No session_count rows at all (e.g. a DB where the milestone ladder was
+    // never seeded). The milestone card is still always returned.
+    const cards = buildAchievementPanelCards(
+      baseInput({ defs: [], totalSessionCount: 42 }),
+      'milestone',
+    );
+    expect(cards).toHaveLength(1);
+    const m = cards[0];
+    expect(m.kind).toBe('milestone');
+    expect(m.totalTiers).toBe(0);
+    expect(m.currentTier).toBe(0);
+    expect(m.tierIndex).toBe(0);
+    expect(m.reachedThreshold).toBe(0);
+    expect(m.nextThreshold).toBeNull();
+    // The load-bearing assertion: an empty ladder is NOT maxed, even with a
+    // high count. Without the `ladder.length > 0` guard this would be `true`
+    // and the bar would render full for a ladder that has no rungs.
+    expect(m.maxed).toBe(false);
+  });
+
+  it('an mg ladder whose rows all have null thresholds → tier 0, never maxed', () => {
+    // pr_per_mg rows exist for the touched group but none carry a threshold
+    // (all null) — `ladderThresholds` drops nulls → empty ladder.
+    const defs: AchievementDefinitionRow[] = [];
+    for (const type of ['weight', 'volume'] as const) {
+      defs.push(
+        def({ category: 'pr_per_mg', mg_id: 'mg-chest', pr_type: type, threshold: null }),
+      );
+    }
+    const input = baseInput({
+      defs,
+      touchedMgs: new Set(['mg-chest']),
+      perMg: new Map([['mg-chest', { weight: 999, volume: 999 }]]),
+    });
+    const cards = buildAchievementPanelCards(input, 'mg');
+    expect(cards).toHaveLength(2); // weight + volume cards still produced
+    for (const c of cards) {
+      expect(c.totalTiers).toBe(0);
+      expect(c.currentTier).toBe(0);
+      expect(c.nextThreshold).toBeNull();
+      expect(c.maxed).toBe(false); // a thresholdless ladder is never "complete"
+    }
+  });
+
+  it("'all' filter with no defs at all returns just an empty milestone card", () => {
+    const cards = buildAchievementPanelCards(baseInput({ defs: [] }), 'all');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].kind).toBe('milestone');
+    expect(cards[0].totalTiers).toBe(0);
+    expect(cards[0].maxed).toBe(false);
+  });
+});
