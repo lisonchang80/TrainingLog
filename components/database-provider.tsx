@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
+import { t } from '@/src/i18n';
 import type { Database } from '@/src/db/types';
 import { openDatabase } from '@/src/adapters/sqlite/expoDatabase';
 import { backfillAchievementsIfNeeded } from '@/src/adapters/sqlite/achievementRepository';
@@ -125,8 +126,10 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   if (error) {
     return (
-      <View style={[styles.center, { backgroundColor: bootBg }]}>
-        <Text style={[styles.errorTitle, { color: bootText }]}>Database initialization failed</Text>
+      <View
+        accessibilityRole="alert"
+        style={[styles.center, { backgroundColor: bootBg }]}>
+        <Text style={[styles.errorTitle, { color: bootText }]}>{t('page', 'dbInitFailed')}</Text>
         <Text style={[styles.errorBody, { color: bootText }]}>{error.message}</Text>
       </View>
     );

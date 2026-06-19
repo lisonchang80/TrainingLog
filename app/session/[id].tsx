@@ -1959,6 +1959,8 @@ export default function SessionDetailScreen() {
       {/* Header — back btn + title + (edit mode) 完成 btn */}
       <View style={styles.header}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('common', 'backPlain')}
           onPress={() => {
             if (editMode) {
               // 編輯模式下，「返回」走 transactional discard path：
