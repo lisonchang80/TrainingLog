@@ -96,7 +96,12 @@ export function HRZoneChart({
   const showHint = shouldShowEmptyHint(samples);
 
   return (
-    <View style={styles.container} testID="hr-zone-chart">
+    <View
+      style={styles.container}
+      testID="hr-zone-chart"
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={t('button', 'a11yHrZoneChart')}>
       <Svg width={WIDTH} height={HEIGHT}>
         {/* Zone bands (background) */}
         <G testID="hr-zone-bands">

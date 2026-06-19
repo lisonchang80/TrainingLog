@@ -213,7 +213,8 @@ export function RestTimerModal({
       <Pressable style={styles.backdrop} onPress={onCancel}>
         <Pressable
           style={styles.card}
-          onPress={(e) => e.stopPropagation()}>
+          onPress={(e) => e.stopPropagation()}
+          accessibilityViewIsModal>
           <Text style={styles.title}>
             ⏱️ {t('status', 'restingHeader')}{exerciseName ? ` · ${exerciseName}` : ''}
           </Text>
@@ -226,6 +227,7 @@ export function RestTimerModal({
           <View style={styles.actions}>
             <Pressable
               onPress={onSkip}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.btn,
                 styles.btnPrimary,

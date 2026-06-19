@@ -94,15 +94,16 @@ export function ReorderExercisesSheet({
       presentationStyle="pageSheet"
       onRequestClose={onCancel}
     >
-      <View style={styles.sheet}>
+      <View style={styles.sheet} accessibilityViewIsModal>
         <View style={styles.topBar}>
-          <Pressable onPress={onCancel} hitSlop={8}>
+          <Pressable onPress={onCancel} hitSlop={8} accessibilityRole="button">
             <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
           </Pressable>
           <Text style={styles.topBarTitle}>{t('button', 'clusterReorderExercises')}</Text>
           <Pressable
             onPress={() => onConfirm(draft.map((d) => d.id))}
             hitSlop={8}
+            accessibilityRole="button"
           >
             <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
               {t('common', 'done')}

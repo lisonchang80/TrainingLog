@@ -454,9 +454,9 @@ export function TemplateMetaSheet({
         style={styles.avoider}
       >
       <Pressable style={styles.backdrop} onPress={onCancel}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
           <View style={styles.topBar}>
-            <Pressable onPress={onCancel} hitSlop={8} disabled={busy}>
+            <Pressable onPress={onCancel} hitSlop={8} disabled={busy} accessibilityRole="button">
               <Text
                 style={[
                   styles.topBarBtnText,
@@ -467,7 +467,7 @@ export function TemplateMetaSheet({
               </Text>
             </Pressable>
             <Text style={styles.topBarTitle}>{resolvedTitle}</Text>
-            <Pressable onPress={handleConfirm} hitSlop={8} disabled={busy}>
+            <Pressable onPress={handleConfirm} hitSlop={8} disabled={busy} accessibilityRole="button">
               <Text
                 style={[
                   styles.topBarBtnText,

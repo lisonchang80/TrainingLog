@@ -1081,7 +1081,10 @@ function TrendChart({
   const yAxisUnit = unitLabel(metric, unit);
 
   return (
-    <View>
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={t('button', 'a11yExerciseTrendChart')}>
       <Svg width={W} height={H}>
         <Line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />
         <Line x1={PL} y1={PT} x2={PL} y2={H - PB} stroke={tokens.text.tertiary} strokeWidth={1} />

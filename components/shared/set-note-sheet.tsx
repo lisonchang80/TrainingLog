@@ -63,13 +63,13 @@ export function SetNoteSheet({
       onRequestClose={onCancel}
     >
       <Pressable style={styles.backdrop} onPress={onCancel}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
           <View style={styles.topBar}>
-            <Pressable onPress={onCancel} hitSlop={8}>
+            <Pressable onPress={onCancel} hitSlop={8} accessibilityRole="button">
               <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
             </Pressable>
             <Text style={styles.topBarTitle}>{resolvedTitle}</Text>
-            <Pressable onPress={handleConfirm} hitSlop={8}>
+            <Pressable onPress={handleConfirm} hitSlop={8} accessibilityRole="button">
               <Text style={[styles.topBarBtnText, styles.topBarConfirm]}>
                 {t('common', 'done')}
               </Text>

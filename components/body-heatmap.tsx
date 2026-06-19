@@ -602,7 +602,11 @@ export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
   const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
   const backData = React.useMemo(() => buildSlugData(mQuintile, 'back'), [mQuintile]);
   return (
-    <View style={styles.row}>
+    <View
+      style={styles.row}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={t('button', 'a11yBodyHeatmap')}>
       <View style={styles.column}>
         <SideHeader side="front" label={t('page', 'bodyFront')} styles={styles} />
         <SideContainer side="front" mQuintile={mQuintile} data={frontData} styles={styles} />
