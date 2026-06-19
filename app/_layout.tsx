@@ -13,6 +13,7 @@ import 'react-native-reanimated';
 import { BackupTriggers } from '@/components/backup-triggers';
 import { BucketRangesHydrator } from '@/components/bucket-ranges-hydrator';
 import { DatabaseProvider } from '@/components/database-provider';
+import { ErrorBoundary } from '@/components/error-boundary';
 import { RestoreGate } from '@/components/restore-gate';
 import { AchievementsEnabledProvider } from '@/src/achievements-enabled';
 import { t } from '@/src/i18n';
@@ -145,6 +146,14 @@ export default function RootLayout() {
           DatabaseProvider (SQLite-backed); default `true` covers pre-hydration. */}
       <AchievementsEnabledProvider>
       <ThemeProvider>
+        {/* Recovery-robustness audit (HIGH) — app-wide ErrorBoundary lives
+            INSIDE <ThemeProvider> so its fallback can call useTheme() (which
+            throws outside the provider). It still wraps the whole screen tree
+            (NavThemeBridge → Stack → every route), so a render-time throw in
+            any screen shows a recoverable「重新嘗試」fallback instead of
+            white-screening the app. Placed here at the provider-render root,
+            well clear of the <Stack.Screen> nav-title block below. */}
+        <ErrorBoundary>
         <NavThemeBridge>
           <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -235,6 +244,7 @@ export default function RootLayout() {
           />
           </Stack>
         </NavThemeBridge>
+        </ErrorBoundary>
       </ThemeProvider>
       </AchievementsEnabledProvider>
     </DatabaseProvider>
