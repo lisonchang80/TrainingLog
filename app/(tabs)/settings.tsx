@@ -594,6 +594,7 @@ export default function SettingsScreen() {
             <Text style={styles.hint}>{t('page', 'autoPopupRestTimerHint')}</Text>
           </View>
           <Switch
+            accessibilityLabel={t('status', 'autoShowRestCountdown')}
             value={autoPopup ?? true}
             onValueChange={onToggleAutoPopup}
             disabled={autoPopup === null}
@@ -609,7 +610,11 @@ export default function SettingsScreen() {
             <Text style={styles.switchLabel}>{t('status', 'achievementsEnabledLabel')}</Text>
             <Text style={styles.hint}>{t('page', 'achievementsHint')}</Text>
           </View>
-          <Switch value={achievementsEnabled} onValueChange={onToggleAchievements} />
+          <Switch
+            accessibilityLabel={t('status', 'achievementsEnabledLabel')}
+            value={achievementsEnabled}
+            onValueChange={onToggleAchievements}
+          />
         </View>
 
         {/* Slice 17 / ADR-0027 — 訓練目的次數範圍 (editable rep buckets). Each
@@ -727,6 +732,7 @@ export default function SettingsScreen() {
             <Text style={styles.hint}>{t('page', 'autoBackupHint')}</Text>
           </View>
           <Switch
+            accessibilityLabel={t('status', 'autoBackupLabel')}
             value={(backupHealth?.metadata.mode ?? 'auto') === 'auto'}
             onValueChange={onToggleAutoBackup}
             disabled={backupHealth === null}
@@ -1022,7 +1028,7 @@ function BucketRangeRow({
         <View style={styles.rmStepper}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${label} −`}
+            accessibilityLabel={`${label} ${t('button', 'a11yDecrease')}`}
             disabled={!canDec}
             onPress={onDec}
             style={({ pressed }) => [
@@ -1034,7 +1040,7 @@ function BucketRangeRow({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${label} ＋`}
+            accessibilityLabel={`${label} ${t('button', 'a11yIncrease')}`}
             disabled={!canInc}
             onPress={onInc}
             style={({ pressed }) => [

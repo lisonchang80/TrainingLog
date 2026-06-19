@@ -272,6 +272,10 @@ export const strings = {
       a11yRemoveDropset: '移除遞減組',
       // 2026-06-04 a11y sweep — numeric-keypad (NumericKeypad) ⌫ key.
       a11yKeypadBackspace: '刪除',
+      // 2026-06-20 a11y sweep — slice17 獎章 tier 進度條 + 桶範圍 stepper。
+      a11yTierProgress: '進度',
+      a11yDecrease: '減少',
+      a11yIncrease: '增加',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -1078,6 +1082,10 @@ export const strings = {
       a11yRemoveDropset: 'Remove drop set',
       // 2026-06-04 a11y sweep — numeric-keypad (NumericKeypad) ⌫ key.
       a11yKeypadBackspace: 'Delete',
+      // 2026-06-20 a11y sweep — slice17 achievements tier progress + rep-range stepper.
+      a11yTierProgress: 'Progress',
+      a11yDecrease: 'Decrease',
+      a11yIncrease: 'Increase',
     },
 
     page: {

@@ -111,7 +111,11 @@ export function TierProgressCard({ card, resolveGroupLabel }: Props) {
         </Text>
       </View>
 
-      <View style={styles.progressTrack}>
+      <View
+        style={styles.progressTrack}
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`${t('button', 'a11yTierProgress')} ${Math.round(fraction * 100)}%`}>
         <View
           style={[
             styles.progressFill,
