@@ -65,6 +65,9 @@ export const strings = {
       errorTitle: '發生未預期的錯誤',
       errorBody: '畫面載入時出了點問題。請點下方按鈕重試；若仍無法恢復，請重新開啟 App。',
       retry: '重新嘗試',
+      // i18n leak sweep (2026-06-04) — fallback when an exercise has no name
+      // (template editor rows / reorder sheet). Distinct from unknownExercise.
+      exercisePlaceholder: '(動作)',
     },
 
     /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
@@ -411,6 +414,16 @@ export const strings = {
       appleHealthSection: 'Apple Health 整合',
       // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
       restoreGateTitle: '發現 iCloud 備份',
+      // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block
+      // (section header / row label / a11y label / mini-sheet heading).
+      bodyweightSection: '體重',
+      recordBodyweight: '紀錄體重',
+      recordBodyweightRow: '＋ 紀錄體重',
+      // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
+      newProgramNavTitle: '新計畫',
+      newExerciseNavTitle: '新動作',
+      // i18n leak sweep (2026-06-04) — template-list-section empty state.
+      noTemplatesEmpty: '沒有模板，點 [+ 新建模板] 開始建立。',
       // i18n regression recovery (2026-06-17, orig c23d198) — fatal DB-init
       // error boot screen (components/database-provider.tsx). Re-introduced as
       // a hardcoded literal by the slice-15 dark-mode boot rewrite.
@@ -524,6 +537,11 @@ export const strings = {
       exportJsonDone: '已匯出 (JSON)',
       exportJsonDoneBody: '檔案已儲存至：',
       exportJsonFailed: '匯出失敗',
+      // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
+      invalidBodyweightTitle: '體重輸入無效',
+      invalidBodyweightRange: '請輸入 0–500 之間的正數',
+      // i18n leak sweep (2026-06-04) — program wizard step-advance blocked title.
+      cannotContinue: '無法繼續',
     },
 
     /** 狀態 / empty state / 進行中 indicator / chart axis hint。 */
@@ -657,6 +675,8 @@ export const strings = {
       restoreActiveSessionBlocked: '訓練進行中，結束後才能還原',
       restoreFreshLaterHint: '稍後可在「設定 → 備份 / 還原」還原備份。',
       restoreRolledBackNote: '已復原原本的資料。',
+      // i18n leak sweep (2026-06-04) — template editor rest-time unit suffix.
+      secondsUnit: '秒',
     },
 
     /**
@@ -860,6 +880,8 @@ export const strings = {
       errorBody:
         'A problem occurred while loading the screen. Tap below to try again; if it keeps happening, please reopen the app.',
       retry: 'Try again',
+      // i18n leak sweep (2026-06-04) — fallback when an exercise has no name.
+      exercisePlaceholder: '(exercise)',
     },
 
     domain: {
@@ -1192,6 +1214,15 @@ export const strings = {
       appleHealthSection: 'Apple Health Integration',
       // Slice 15 C4 (2026-06-13) — first-launch RestoreGate.
       restoreGateTitle: 'iCloud Backup Found',
+      // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block.
+      bodyweightSection: 'Bodyweight',
+      recordBodyweight: 'Record bodyweight',
+      recordBodyweightRow: '＋ Record bodyweight',
+      // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
+      newProgramNavTitle: 'New Program',
+      newExerciseNavTitle: 'New Exercise',
+      // i18n leak sweep (2026-06-04) — template-list-section empty state.
+      noTemplatesEmpty: 'No templates. Tap [+ New Template] to create one.',
       // i18n regression recovery (2026-06-17, orig c23d198) — fatal DB-init
       // error boot screen (components/database-provider.tsx). Re-introduced as
       // a hardcoded literal by the slice-15 dark-mode boot rewrite.
@@ -1306,6 +1337,11 @@ export const strings = {
       exportJsonDone: 'Exported (JSON)',
       exportJsonDoneBody: 'File saved to:',
       exportJsonFailed: 'Export failed',
+      // i18n leak sweep (2026-06-04) — Settings 體重 mini-sheet invalid-input title.
+      invalidBodyweightTitle: 'Invalid bodyweight',
+      invalidBodyweightRange: 'Enter a positive number between 0 and 500.',
+      // i18n leak sweep (2026-06-04) — program wizard step-advance blocked title.
+      cannotContinue: 'Cannot continue',
     },
 
     status: {
@@ -1432,6 +1468,8 @@ export const strings = {
       restoreActiveSessionBlocked: 'Finish the active session before restoring',
       restoreFreshLaterHint: 'You can restore later in Settings → Backup / Restore.',
       restoreRolledBackNote: 'Your previous data was put back.',
+      // i18n leak sweep (2026-06-04) — template editor rest-time unit suffix.
+      secondsUnit: 'sec',
     },
 
     equipment: {

@@ -339,6 +339,11 @@ export function tBodyweightWithUnit(unit: string): string {
   return isEn() ? `Bodyweight (${unit})` : `體重 (${unit})`;
 }
 
+/** Settings 體重 row hint — unit follows the preference above. */
+export function tBodyweightUnitHint(unit: string): string {
+  return isEn() ? `Unit follows the preference above (${unit})` : `單位依上方偏好（${unit}）`;
+}
+
 /** PR delta line: `· 從 100 → 120`. */
 export function tPrDeltaLine(priorFormatted: string, newFormatted: string): string {
   return isEn()
@@ -492,4 +497,43 @@ export function tYearMonthTitle(year: number, month1To12: number): string {
     return `${tMonthOfYear(month1To12)} ${year}`;
   }
   return `${year}年${month1To12}月`;
+}
+
+/**
+ * i18n leak sweep (2026-06-04) — template-list-section row accessibilityLabel.
+ * `使用模板 PPL Push` / `Use template PPL Push`.
+ */
+export function tUseTemplate(name: string): string {
+  return isEn() ? `Use template ${name}` : `使用模板 ${name}`;
+}
+
+/**
+ * i18n leak sweep (2026-06-04) — stats-panel duration-histogram footnote.
+ * `6 期共 12 次已完成 Session` / `12 completed sessions across 6 buckets`.
+ */
+export function tDurationBucketFootnote(totalSessions: number): string {
+  return isEn()
+    ? `${totalSessions} completed sessions across 6 buckets`
+    : `6 期共 ${totalSessions} 次已完成 Session`;
+}
+
+/**
+ * i18n leak sweep (2026-06-04) — template editor exercise/cluster header
+ * warm+working set-count summary. `3熱+2組` / `3 warm + 2 work`.
+ * zh uses the 熱/組 chip vocabulary; en spells it out for clarity.
+ */
+export function tWarmWorkingSummary(warmCount: number, workingCount: number): string {
+  return isEn()
+    ? `${warmCount} warm + ${workingCount} work`
+    : `${warmCount}熱+${workingCount}組`;
+}
+
+/**
+ * i18n leak sweep (2026-06-04) — template-list-section row subtitle.
+ * `3 個動作 · 編輯於 …` / `3 exercises · Edited …`. Reuses tExerciseCount.
+ */
+export function tTemplateRowSubtitle(exerciseCount: number, editedAt: string): string {
+  return isEn()
+    ? `${tExerciseCount(exerciseCount)} · Edited ${editedAt}`
+    : `${tExerciseCount(exerciseCount)} · 編輯於 ${editedAt}`;
 }

@@ -159,23 +159,23 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen
             name="program-wizard/new"
-            options={{ presentation: 'modal', title: 'New Program' }}
+            options={{ presentation: 'modal', title: t('page', 'newProgramNavTitle') }}
           />
           <Stack.Screen
             name="program/[id]"
-            options={{ title: 'Program' }}
+            options={{ title: t('domain', 'program') }}
           />
           <Stack.Screen
             name="exercise/[id]"
-            options={{ title: 'Exercise' }}
+            options={{ title: t('domain', 'exercise') }}
           />
           <Stack.Screen
             name="exercise/new"
-            options={{ presentation: 'modal', title: 'New Exercise' }}
+            options={{ presentation: 'modal', title: t('page', 'newExerciseNavTitle') }}
           />
           <Stack.Screen
             name="exercise/edit/[id]"
-            options={{ presentation: 'modal', title: 'Edit Exercise' }}
+            options={{ presentation: 'modal', title: t('button', 'editExercise') }}
           />
           {/* Slice 10c overnight #16 — exercise-history / exercise-chart
               changed from modal → card (default Stack presentation). Modal's
