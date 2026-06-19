@@ -168,6 +168,66 @@ export async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]
   }));
 }
 
+// ---- Panel view-model loader (Slice 17 / ADR-0009 amendment) ----
+
+/**
+ * Everything the redesigned achievements panel needs, in one focus-time read.
+ *
+ * - `defs` / `unlockedIds`: definition rows + unlocked ids (first_combo level-0).
+ * - `perMg` / `perBucket`: cumulative PR counts replayed from the FULL working-set
+ *   history via the SAME `replayPRs` the engine uses to decide thresholds — so
+ *   the panel's progress numerators are in lock-step with unlocking.
+ * - `touchedMgs` / `touchedBuckets`: 碰過 signal = the mg/bucket has ≥1 working
+ *   (non-warmup) set logged. Derived from the same replay records (a set is
+ *   "touched" the moment it is logged, regardless of whether it broke a PR),
+ *   so no extra query and it respects the user's edited bucket ranges.
+ * - `totalSessionCount`: drives the always-shown milestone ladder.
+ */
+export interface AchievementPanelData {
+  defs: AchievementDefinitionRow[];
+  unlockedIds: Set<number>;
+  perMg: Map<string, { weight: number; volume: number }>;
+  perBucket: Map<BucketKey, { weight: number; volume: number }>;
+  touchedMgs: Set<string>;
+  touchedBuckets: Set<string>;
+  totalSessionCount: number;
+}
+
+export async function loadAchievementPanelData(
+  db: Database
+): Promise<AchievementPanelData> {
+  const [defs, unlockedIds, replayRecords, totalSessions] = await Promise.all([
+    listAchievementDefinitions(db),
+    listUnlockedDefinitionIds(db),
+    loadReplayRecords(db),
+    countLoggedSessions(db),
+  ]);
+
+  const replay = replayPRs(replayRecords);
+
+  // 碰過 = ≥1 logged working set in that mg / bucket. Derive from the same
+  // records: classify each logged set's bucket (reflects edited ranges) and
+  // mark its mg.
+  const touchedMgs = new Set<string>();
+  const touchedBuckets = new Set<string>();
+  for (const r of replayRecords) {
+    if (!r.is_logged) continue;
+    if (r.mg_id != null) touchedMgs.add(r.mg_id);
+    const bucket = classifyBucket(r.reps);
+    if (bucket != null) touchedBuckets.add(bucket);
+  }
+
+  return {
+    defs,
+    unlockedIds,
+    perMg: replay.cumulative.per_mg,
+    perBucket: replay.cumulative.per_bucket,
+    touchedMgs,
+    touchedBuckets,
+    totalSessionCount: totalSessions,
+  };
+}
+
 // ---- Pipeline ----
 
 interface EvaluationOutcome {

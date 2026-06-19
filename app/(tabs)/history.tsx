@@ -6,6 +6,7 @@ import { StatsPanel } from '@/components/stats-panel';
 import { AchievementsPanel } from '@/components/achievements-panel';
 import MonthGridView from '@/src/components/history/MonthGridView';
 import ListView from '@/src/components/history/ListView';
+import { useAchievementsEnabled } from '@/src/achievements-enabled';
 import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -52,27 +53,40 @@ export default function HistoryScreen() {
   const [tab, setTab] = useState<SubTab>('history');
   const [mode, setMode] = useState<HistoryMode>('calendar');
 
+  // Slice 17 / ADR-0009 amendment — UI-only gate. When the achievement system
+  // is OFF, hide the 獎章 sub-tab button entirely.
+  const { enabled: achievementsEnabled } = useAchievementsEnabled();
+  const visibleTabs = useMemo(
+    () => (achievementsEnabled ? SUB_TABS : SUB_TABS.filter((s) => s.key !== 'achievements')),
+    [achievementsEnabled],
+  );
+  // Robust fallback: if the toggle flips OFF while the user is parked on the
+  // (now-hidden) achievements tab, derive a still-visible tab for rendering so
+  // the hidden panel never shows. Derived rather than effect-driven so it stays
+  // correct on the same render the toggle changes.
+  const effectiveTab: SubTab = tab === 'achievements' && !achievementsEnabled ? 'history' : tab;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.heading}>{t('page', 'history')}</Text>
         <View style={styles.subTabRow}>
-          {SUB_TABS.map((sub) => (
+          {visibleTabs.map((sub) => (
             <Pressable
               key={sub.key}
-              style={[styles.subTabBtn, tab === sub.key && styles.subTabBtnActive]}
+              style={[styles.subTabBtn, effectiveTab === sub.key && styles.subTabBtnActive]}
               onPress={() => setTab(sub.key)}>
               <Text
                 style={[
                   styles.subTabBtnText,
-                  tab === sub.key && styles.subTabBtnTextActive,
+                  effectiveTab === sub.key && styles.subTabBtnTextActive,
                 ]}>
                 {subTabLabel(sub.key)}
               </Text>
             </Pressable>
           ))}
         </View>
-        {tab === 'history' ? (
+        {effectiveTab === 'history' ? (
           <View style={styles.modeRow}>
             {HISTORY_MODES.map((m) => (
               <Pressable
@@ -91,11 +105,11 @@ export default function HistoryScreen() {
           </View>
         ) : null}
       </View>
-      {tab === 'history' ? (
+      {effectiveTab === 'history' ? (
         mode === 'calendar' ? <MonthGridView /> : <ListView />
       ) : null}
-      {tab === 'stats' ? <StatsPanel /> : null}
-      {tab === 'achievements' ? <AchievementsPanel /> : null}
+      {effectiveTab === 'stats' ? <StatsPanel /> : null}
+      {effectiveTab === 'achievements' ? <AchievementsPanel /> : null}
     </SafeAreaView>
   );
 }

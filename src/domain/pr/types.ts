@@ -28,6 +28,21 @@ export interface BucketRange {
   max: number | null;
 }
 
+/**
+ * Persisted / wire shape of a single editable bucket boundary (slice 17,
+ * ADR-0027 「可編輯訓練目的次數範圍」). Carries only the rep bounds — the
+ * display `label` is canonical (keyed by `key`) and never user-editable, so
+ * it is NOT stored. Used by:
+ *   - `app_settings.bucket_ranges` persistence (settingsRepository)
+ *   - the in-memory bucket cache (`applyBucketRanges` / `getBucketBoundaries`)
+ *   - the Stage1 handshake reply that mirrors ranges onto the Watch
+ */
+export interface BucketBoundary {
+  key: BucketKey;
+  min: number;
+  max: number | null;
+}
+
 /** Two flavours of PR within a single bucket. */
 type PRType = 'weight' | 'volume';
 

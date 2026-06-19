@@ -67,6 +67,8 @@ import {
 } from '../sqlite/programRepository';
 import { cellForDate } from '../../domain/program/programManager';
 import { localMsToIsoDate } from '../../domain/program/programManager';
+import { getBucketBoundaries } from '../../domain/pr/buckets';
+import type { BucketBoundary, BucketKey } from '../../domain/pr/types';
 import { tExercise } from '../../i18n/strings';
 import type {
   HandshakePayload,
@@ -376,24 +378,58 @@ export type Stage1TodayPlanned =
   | { kind: 'noActiveProgram' };
 
 /**
+ * Slice 17 (ADR-0027 D5) — one editable rep-bucket range on the wire.
+ * Mirrors the persisted `BucketBoundary` shape (`{ key, min, max }`) but
+ * the open-ended top bucket's `max` (NULL in the domain type) is OMITTED
+ * here rather than sent as explicit `null` — the same wire null rule that
+ * `defaultReps` / `subTag` / `intensity` follow (`wc-add-envelope-kind`
+ * skill): a dict-array element carrying `null` only survives today because
+ * RN's JSI conversion happens to drop it; a flipped default would turn it
+ * into an NSNull → WCSession reject, killing the whole handshake reply (the
+ * picker lifeline). Swift decodes an absent `max` as nil = open-ended.
+ *
+ * `key` is the stable `BucketKey` enum the canonical labels are keyed by,
+ * so the Watch can resolve the bucket label locally without an i18n table
+ * on the wire (the display strings the Watch renders today still arrive
+ * pre-formatted on the history reply — this field is for a future Watch-side
+ * local classifier, e.g. an in-session rep-bucket indicator).
+ */
+export interface Stage1BucketRange {
+  key: BucketKey;
+  /** Inclusive lower bound on reps. */
+  min: number;
+  /** Inclusive upper bound; OMITTED for the open-ended top bucket. */
+  max?: number;
+}
+
+/**
  * NEW-Q50 D28 — extended prefetch envelope (v2 fat tree). `templates`
  * now carries the full exercise tree (previously a thin {id, name}
  * list pre-Q50). `programs` + `todayPlanned` were added by Phase 2.5
- * and retained verbatim under Q50.
+ * and retained verbatim under Q50. Slice 17 adds `bucketRanges`.
  *
- * `programs` / `todayPlanned` stay optional at the type level so the
- * same shape still type-checks for callers that pre-date Phase 2.5
- * (e.g. mock builders in unit tests). The orchestrator
- * (`onHandshakeRequest`) always populates both — `programs: []` when
+ * `programs` / `todayPlanned` / `bucketRanges` stay optional at the type
+ * level so the same shape still type-checks for callers that pre-date the
+ * field (e.g. mock builders in unit tests). The orchestrator
+ * (`onHandshakeRequest`) always populates them — `programs: []` when
  * no user programs exist, `todayPlanned: { kind: 'noActiveProgram' }`
- * when there's no active program. Watch-side Codable decode is
- * tolerant of missing keys via `JSONDecoder`'s default-value-on-
- * absent behaviour.
+ * when there's no active program, `bucketRanges` from the live cache.
+ * Watch-side Codable decode is tolerant of missing keys via
+ * `JSONDecoder`'s default-value-on-absent behaviour.
+ *
+ * `bucketRanges` (slice 17, ADR-0027 D5) carries the user's edited
+ * rep-bucket boundaries so the Watch's bucket labels match the iPhone.
+ * Today the Watch only DISPLAYS iPhone-computed bucket label strings
+ * (baked into `WatchHistoryRecord.topSetLine` — no local Swift
+ * classifier), so edited ranges already propagate via those strings;
+ * this field is a clean future-proofing addition for a Watch-side local
+ * classifier (Q5 wants ranges available on the Watch regardless).
  */
 export interface Stage1ReplyPrefetch {
   templates: ReadonlyArray<Stage1TemplateFullSummary>;
   programs?: ReadonlyArray<Stage1ProgramSummary>;
   todayPlanned?: Stage1TodayPlanned;
+  bucketRanges?: ReadonlyArray<Stage1BucketRange>;
 }
 
 export type Stage1ReplyPayload =
@@ -570,6 +606,21 @@ export interface SessionSnapshotSet {
 // ---------------------------------------------------------------------
 
 /**
+ * Slice 17 (ADR-0027 D5) — project persisted `BucketBoundary[]` onto the
+ * wire shape. Open-ended top bucket: `max === null` → OMIT the key (wire
+ * null rule, see `Stage1BucketRange` docblock). Pure — no clock, no DB.
+ */
+function bucketRangesToWire(
+  boundaries: ReadonlyArray<BucketBoundary>,
+): Stage1BucketRange[] {
+  return boundaries.map((b) => {
+    const wire: Stage1BucketRange = { key: b.key, min: b.min };
+    if (b.max != null) wire.max = b.max;
+    return wire;
+  });
+}
+
+/**
  * Build the Stage 1 reply payload. Pure — caller provides:
  *
  *   - `request` — the original Stage 1 envelope payload (for the
@@ -583,6 +634,11 @@ export interface SessionSnapshotSet {
  *   - `todayPlanned` (Phase 2.5, optional) — today's planned-day state.
  *     Omitted = absent on the wire; Watch defaults to `noActiveProgram`
  *     when missing.
+ *   - `bucketRanges` (slice 17 / ADR-0027 D5, optional) — the user's
+ *     edited rep-bucket boundaries (`getBucketBoundaries()`). Omitted =
+ *     absent on the wire; the Watch falls back to its built-in defaults.
+ *     Each range's open-ended `max` (NULL in the domain shape) is OMITTED
+ *     per the wire null rule, never sent as explicit `null`.
  */
 export function buildStage1Reply(
   request: HandshakePayload,
@@ -590,10 +646,14 @@ export function buildStage1Reply(
   templates: ReadonlyArray<Stage1TemplateFullSummary>,
   programs?: ReadonlyArray<Stage1ProgramSummary>,
   todayPlanned?: Stage1TodayPlanned,
+  bucketRanges?: ReadonlyArray<BucketBoundary>,
 ): Stage1ReplyPayload {
   const prefetch: Stage1ReplyPrefetch = { templates };
   if (programs !== undefined) prefetch.programs = programs;
   if (todayPlanned !== undefined) prefetch.todayPlanned = todayPlanned;
+  if (bucketRanges !== undefined) {
+    prefetch.bucketRanges = bucketRangesToWire(bucketRanges);
+  }
   if (activeSession === null) {
     return {
       requestId: request.requestId,
@@ -1202,12 +1262,17 @@ export async function onHandshakeRequest(
       loadProgramsPrefetchList(db),
       loadTodayPlanned(db),
     ]);
+    // Slice 17 (ADR-0027 D5) — mirror the user's edited rep-bucket ranges
+    // onto the Watch. Reads the live in-memory cache (synchronous, no DB
+    // round-trip), so it sits outside the Promise.all fan-out.
+    const bucketRanges = getBucketBoundaries();
     const reply = buildStage1Reply(
       env.payload,
       activeSession,
       templates,
       programs,
       todayPlanned,
+      bucketRanges,
     );
     replyHandler(toWireRecord(reply));
   } catch (e) {
@@ -1224,6 +1289,9 @@ export async function onHandshakeRequest(
       '[handshake] onHandshakeRequest failed, falling back to empty reply:',
       e instanceof Error ? e.message : String(e),
     );
+    // Slice 17 (ADR-0027 D5) — `getBucketBoundaries()` is a pure in-memory
+    // read (never throws), so the degraded reply can still carry the live
+    // ranges even when the DB read above failed.
     replyHandler({
       requestId: env.payload.requestId,
       hasActiveSession: false,
@@ -1231,6 +1299,7 @@ export async function onHandshakeRequest(
         templates: [],
         programs: [],
         todayPlanned: { kind: 'noActiveProgram' },
+        bucketRanges: bucketRangesToWire(getBucketBoundaries()),
       },
     });
   }

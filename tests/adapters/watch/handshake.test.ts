@@ -56,12 +56,19 @@ import {
   onHandshakeRequest,
   onStartFromWatch,
   type SessionSnapshot,
+  type Stage1BucketRange,
   type Stage1ProgramSummary,
   type Stage1ReplyPayload,
   type Stage1SessionSummary,
   type Stage1TemplateFullSummary,
   type StartFromWatchReconcile,
 } from '../../../src/adapters/watch/handshake';
+import {
+  applyBucketRanges,
+  getBucketBoundaries,
+  resetBucketRanges,
+} from '../../../src/domain/pr/buckets';
+import type { BucketBoundary } from '../../../src/domain/pr/types';
 import { getLocale, setLocale } from '../../../src/i18n/strings';
 
 // The Bench Press row seeded by v001_initial — used as a stable
@@ -271,6 +278,72 @@ describe('WC handshake — Stage 1 reply (pure builder, NEW-Q50 D28 fat tree)', 
     const reply = buildStage1Reply(sampleRequest, null, templates);
     const rt = JSON.parse(JSON.stringify(reply));
     expect(rt).toEqual(reply);
+  });
+
+  // -------------------------------------------------------------------
+  // (g) Slice 17 (ADR-0027 D5) — bucketRanges carry-through.
+  //     The reply mirrors the user's edited rep-bucket ranges onto the
+  //     Watch so its bucket labels match the iPhone.
+  // -------------------------------------------------------------------
+  it('omits prefetch.bucketRanges when not provided (forward-compat with pre-slice-17 callers)', () => {
+    const reply = buildStage1Reply(sampleRequest, null, []);
+    expect(reply.prefetch.bucketRanges).toBeUndefined();
+  });
+
+  it('projects provided bucketRanges, OMITTING the open-ended top bucket max (wire null rule)', () => {
+    const boundaries: BucketBoundary[] = [
+      { key: 'max_strength', min: 1, max: 3 },
+      { key: 'strength', min: 4, max: 6 },
+      { key: 'hypertrophy', min: 7, max: 10 },
+      { key: 'muscle_endurance', min: 11, max: 15 },
+      { key: 'endurance', min: 16, max: null },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, [], [], undefined, boundaries);
+    expect(reply.prefetch.bucketRanges).toEqual([
+      { key: 'max_strength', min: 1, max: 3 },
+      { key: 'strength', min: 4, max: 6 },
+      { key: 'hypertrophy', min: 7, max: 10 },
+      { key: 'muscle_endurance', min: 11, max: 15 },
+      // Top bucket: NULL max → ABSENT key (never explicit null). A JS null
+      // inside this reply-dict array would risk an NSNull → WCSession reject.
+      { key: 'endurance', min: 16 },
+    ]);
+    const top = reply.prefetch.bucketRanges?.[4] as Stage1BucketRange;
+    expect(top).not.toHaveProperty('max');
+  });
+
+  it('carries USER-EDITED ranges verbatim (the whole point — Watch labels match the phone)', () => {
+    // User shifted 增肌 to 6-12 etc. The wire must reflect THESE bounds.
+    const edited: BucketBoundary[] = [
+      { key: 'max_strength', min: 1, max: 2 },
+      { key: 'strength', min: 3, max: 5 },
+      { key: 'hypertrophy', min: 6, max: 12 },
+      { key: 'muscle_endurance', min: 13, max: 20 },
+      { key: 'endurance', min: 21, max: null },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, [], [], undefined, edited);
+    expect(reply.prefetch.bucketRanges).toEqual([
+      { key: 'max_strength', min: 1, max: 2 },
+      { key: 'strength', min: 3, max: 5 },
+      { key: 'hypertrophy', min: 6, max: 12 },
+      { key: 'muscle_endurance', min: 13, max: 20 },
+      { key: 'endurance', min: 21 },
+    ]);
+  });
+
+  it('bucketRanges reply JSON round-trips clean (no null leakage in the array)', () => {
+    const boundaries: BucketBoundary[] = [
+      { key: 'max_strength', min: 1, max: 3 },
+      { key: 'strength', min: 4, max: 6 },
+      { key: 'hypertrophy', min: 7, max: 10 },
+      { key: 'muscle_endurance', min: 11, max: 15 },
+      { key: 'endurance', min: 16, max: null },
+    ];
+    const reply = buildStage1Reply(sampleRequest, null, [], [], undefined, boundaries);
+    const json = JSON.stringify(reply);
+    // No `"max":null` anywhere in the serialised reply (wire null rule).
+    expect(json).not.toContain('"max":null');
+    expect(JSON.parse(json)).toEqual(reply);
   });
 });
 
@@ -1108,6 +1181,81 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
     ).resolves.toBeUndefined();
   });
 
+  // Slice 17 (ADR-0027 D5) — the reply mirrors the user's edited rep-bucket
+  // ranges from the live in-memory cache so the Watch's bucket labels match
+  // the iPhone. The cache is module-global, so reset after the edit case to
+  // avoid leaking into sibling suites.
+  describe('Slice 17 — bucketRanges in the reply (live cache)', () => {
+    afterEach(() => {
+      resetBucketRanges();
+    });
+
+    it('includes the live (default) bucketRanges in the reply prefetch', async () => {
+      const replies: Record<string, unknown>[] = [];
+      await onHandshakeRequest(db, buildEnv('req-bk'), (r) => replies.push(r));
+      const reply = replies[0] as unknown as Stage1ReplyPayload;
+      // Default v1 ranges, top bucket max OMITTED per the wire null rule.
+      expect(reply.prefetch.bucketRanges).toEqual([
+        { key: 'max_strength', min: 1, max: 3 },
+        { key: 'strength', min: 4, max: 6 },
+        { key: 'hypertrophy', min: 7, max: 10 },
+        { key: 'muscle_endurance', min: 11, max: 15 },
+        { key: 'endurance', min: 16 },
+      ]);
+    });
+
+    it('reflects USER edits applied to the live cache (the core slice-17 contract)', async () => {
+      // Simulate the Settings editor having shifted the ranges.
+      applyBucketRanges([
+        { key: 'max_strength', min: 1, max: 2 },
+        { key: 'strength', min: 3, max: 5 },
+        { key: 'hypertrophy', min: 6, max: 12 },
+        { key: 'muscle_endurance', min: 13, max: 20 },
+        { key: 'endurance', min: 21, max: null },
+      ]);
+      // Sanity — the cache took the edit.
+      expect(getBucketBoundaries()[2]).toEqual({
+        key: 'hypertrophy',
+        min: 6,
+        max: 12,
+      });
+
+      const replies: Record<string, unknown>[] = [];
+      await onHandshakeRequest(db, buildEnv('req-edited'), (r) =>
+        replies.push(r),
+      );
+      const reply = replies[0] as unknown as Stage1ReplyPayload;
+      expect(reply.prefetch.bucketRanges).toEqual([
+        { key: 'max_strength', min: 1, max: 2 },
+        { key: 'strength', min: 3, max: 5 },
+        { key: 'hypertrophy', min: 6, max: 12 },
+        { key: 'muscle_endurance', min: 13, max: 20 },
+        { key: 'endurance', min: 21 },
+      ]);
+    });
+
+    it('still carries the live ranges on the degraded (DB-throw) fallback reply', async () => {
+      // getBucketBoundaries() is a pure in-memory read → survives a DB throw.
+      db.close();
+      const replies: Record<string, unknown>[] = [];
+      await onHandshakeRequest(db, buildEnv('req-bk-err'), (r) =>
+        replies.push(r),
+      );
+      const reply = replies[0] as unknown as Stage1ReplyPayload;
+      expect(reply.hasActiveSession).toBe(false);
+      expect(reply.prefetch.bucketRanges).toEqual([
+        { key: 'max_strength', min: 1, max: 3 },
+        { key: 'strength', min: 4, max: 6 },
+        { key: 'hypertrophy', min: 7, max: 10 },
+        { key: 'muscle_endurance', min: 11, max: 15 },
+        { key: 'endurance', min: 16 },
+      ]);
+      // Re-open before afterEach.close() runs (harmless re-close otherwise).
+      db = new BetterSqliteDatabase(':memory:');
+      await migrate(db);
+    });
+  });
+
   it('falls back to empty fat-tree reply when the DB read throws (best-effort semantics)', async () => {
     db.close();
     const replies: Record<string, unknown>[] = [];
@@ -1120,6 +1268,16 @@ describe('WC handshake — onHandshakeRequest (orchestrator, NEW-Q50 fat-tree)',
         templates: [],
         programs: [],
         todayPlanned: { kind: 'noActiveProgram' },
+        // Slice 17 (ADR-0027 D5) — bucketRanges ride the degraded fallback
+        // too (pure in-memory read survives the DB throw). Default v1 ranges
+        // here (no test in this block mutates the live cache without reset).
+        bucketRanges: [
+          { key: 'max_strength', min: 1, max: 3 },
+          { key: 'strength', min: 4, max: 6 },
+          { key: 'hypertrophy', min: 7, max: 10 },
+          { key: 'muscle_endurance', min: 11, max: 15 },
+          { key: 'endurance', min: 16 },
+        ],
       },
     });
     // Re-open before afterEach.close() runs (harmless re-close otherwise).

@@ -1,52 +1,46 @@
 /**
- * Achievements sub-tab — grid of 255 system-seeded badges.
+ * Achievements sub-tab — tiered medal + progress-bar cards.
  *
- * Slice 9 / ADR-0009. Each cell shows the display_name + tier; unlocked cells
- * show the unlock date and a coloured ring; locked cells render greyed out
- * with a "未解鎖" placeholder.
+ * ADR-0009 Slice 17 amendment. The old 255-flat-card grid is replaced by
+ * COLLAPSED tier cards: each (mg × type) and (bucket × type) ladder becomes
+ * ONE card showing the current tier, a tier-coloured border/accent, and a
+ * progress bar with numerator/denominator (currentCount / nextThreshold).
  *
- * Top filter chips switch between [全部] / [部位] / [訓練目的] / [里程碑]:
- *   - 部位     → first_combo + pr_per_mg
- *   - 訓練目的 → pr_per_bucket
- *   - 里程碑   → session_count
+ * Filters:
+ *   全部     → mg cards + bucket cards + milestone
+ *   部位     → one card per touched (mg × weight) and (mg × volume)
+ *   訓練目的 → one card per touched (bucket × weight) and (bucket × volume),
+ *              with a level-0「入門」badge driven by first_combo
+ *   里程碑   → the single, always-shown session_count milestone card
  *
- * ADR-0025 — all colors flow from useTheme().tokens. Unlocked cell uses
- * action.warning (amber/gold trophy feel); locked cell uses bg.elevated.
+ * Only "碰過" groups (≥1 working set) get cards; the milestone is global.
+ *
+ * Drop-in contract: rendered by app/(tabs)/history.tsx with NO props.
+ * Colours flow from useTheme().tokens; the tier accent ramp lives in
+ * tier-progress-card.tsx (semantic-accent constant, exempt from token rule).
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
+import { TierProgressCard } from '@/components/achievements/tier-progress-card';
 import {
-  listAchievementDefinitions,
-  listUnlocks,
-  type AchievementUnlockRow,
+  loadAchievementPanelData,
+  type AchievementPanelData,
 } from '@/src/adapters/sqlite/achievementRepository';
-import type { AchievementDefinitionRow } from '@/src/domain/achievement/types';
-import { getLocale, t } from '@/src/i18n';
+import { listMuscleGroups } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import {
+  buildAchievementPanelCards,
+  type PanelFilter,
+} from '@/src/domain/achievement/achievementPanelModel';
+import { bucketLabel } from '@/src/domain/pr/buckets';
+import type { BucketKey } from '@/src/domain/pr/types';
+import { t, tMuscleGroup } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
-type FilterKey = 'all' | 'mg' | 'bucket' | 'milestone';
+type FilterKey = PanelFilter;
 
-/**
- * Inline dynamic helper — "N / M 已解鎖" / "N / M unlocked".
- * Kept local rather than in `src/i18n/dynamic.ts` (panel-only usage).
- */
-function tUnlockedRatio(unlocked: number, total: number): string {
-  return getLocale() === 'en'
-    ? `${unlocked} / ${total} unlocked`
-    : `${unlocked} / ${total} 已解鎖`;
-}
-
-/**
- * Filter chip labels. `all` round-trips via `common.all`; the other three
- * (部位 / 訓練目的 / 里程碑) have no exact i18n key — left inline with
- * TODO markers per Phase 4D spec. Achievement definitions themselves
- * (item.display_name / item.description) come from DB rows seeded in
- * v008Achievements.ts and are intentionally untranslated (Phase 2 user
- * decision: schema migration required).
- */
 function filterLabel(k: FilterKey): string {
   if (k === 'all') return t('common', 'all');
   if (k === 'mg') return t('status', 'filterMuscleGroup');
@@ -61,32 +55,31 @@ const FILTERS: readonly { key: FilterKey }[] = [
   { key: 'milestone' },
 ];
 
-const CATEGORY_FOR_FILTER: Record<FilterKey, AchievementDefinitionRow['category'][] | null> = {
-  all: null,
-  mg: ['first_combo', 'pr_per_mg'],
-  bucket: ['pr_per_bucket'],
-  milestone: ['session_count'],
+const EMPTY_DATA: AchievementPanelData = {
+  defs: [],
+  unlockedIds: new Set(),
+  perMg: new Map(),
+  perBucket: new Map(),
+  touchedMgs: new Set(),
+  touchedBuckets: new Set(),
+  totalSessionCount: 0,
 };
-
-function formatUnlockDate(ms: number): string {
-  return new Date(ms).toLocaleDateString();
-}
 
 export function AchievementsPanel() {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const [defs, setDefs] = useState<AchievementDefinitionRow[]>([]);
-  const [unlocks, setUnlocks] = useState<AchievementUnlockRow[]>([]);
+  const [data, setData] = useState<AchievementPanelData>(EMPTY_DATA);
+  const [mgNames, setMgNames] = useState<Map<string, string>>(new Map());
   const [filter, setFilter] = useState<FilterKey>('all');
 
   const load = useCallback(async () => {
-    const [d, u] = await Promise.all([
-      listAchievementDefinitions(db),
-      listUnlocks(db),
+    const [panel, mgs] = await Promise.all([
+      loadAchievementPanelData(db),
+      listMuscleGroups(db),
     ]);
-    setDefs(d);
-    setUnlocks(u);
+    setData(panel);
+    setMgNames(new Map(mgs.map((m) => [m.id, m.name])));
   }, [db]);
 
   useFocusEffect(
@@ -95,18 +88,21 @@ export function AchievementsPanel() {
     }, [load])
   );
 
-  const unlockByDefId = useMemo(() => {
-    const m = new Map<number, AchievementUnlockRow>();
-    for (const u of unlocks) m.set(u.achievement_definition_id, u);
-    return m;
-  }, [unlocks]);
+  const cards = useMemo(
+    () => buildAchievementPanelCards(data, filter),
+    [data, filter]
+  );
 
-  const filtered = useMemo(() => {
-    const allow = CATEGORY_FOR_FILTER[filter];
-    return allow == null ? defs : defs.filter((d) => allow.includes(d.category));
-  }, [defs, filter]);
-
-  const unlockedCount = useMemo(() => filtered.filter((d) => unlockByDefId.has(d.id)).length, [filtered, unlockByDefId]);
+  // Resolve a groupLabelKey (mg_id OR bucket key) to a localised label.
+  const resolveGroupLabel = useCallback(
+    (key: string): string => {
+      const mgName = mgNames.get(key);
+      if (mgName != null) return tMuscleGroup(mgName);
+      // Otherwise it's a bucket key — bucketLabel handles unknowns gracefully.
+      return bucketLabel(key as BucketKey);
+    },
+    [mgNames]
+  );
 
   return (
     <View style={styles.container}>
@@ -124,38 +120,16 @@ export function AchievementsPanel() {
         ))}
       </View>
 
-      <Text style={styles.summary}>
-        {tUnlockedRatio(unlockedCount, filtered.length)}
-      </Text>
-
       <FlatList
-        data={filtered}
-        keyExtractor={(item) => `def-${item.id}`}
-        numColumns={2}
-        columnWrapperStyle={styles.gridRow}
-        contentContainerStyle={styles.gridContainer}
-        renderItem={({ item }) => {
-          const unlock = unlockByDefId.get(item.id);
-          return (
-            <View style={[styles.cell, unlock ? styles.cellUnlocked : styles.cellLocked]}>
-              <Text
-                style={[styles.cellName, !unlock && styles.cellNameLocked]}
-                numberOfLines={2}>
-                {item.display_name}
-              </Text>
-              {item.description ? (
-                <Text style={styles.cellDesc} numberOfLines={2}>
-                  {item.description}
-                </Text>
-              ) : null}
-              <Text style={[styles.cellStatus, unlock ? styles.cellStatusUnlocked : null]}>
-                {unlock
-                  ? `✓ ${formatUnlockDate(unlock.unlocked_at)}`
-                  : t('status', 'achievementLocked')}
-              </Text>
-            </View>
-          );
-        }}
+        data={cards}
+        keyExtractor={(item) => item.key}
+        contentContainerStyle={styles.listContainer}
+        renderItem={({ item }) => (
+          <TierProgressCard card={item} resolveGroupLabel={resolveGroupLabel} />
+        )}
+        ListEmptyComponent={
+          <Text style={styles.empty}>{t('status', 'achievementNoTouched')}</Text>
+        }
       />
     </View>
   );
@@ -169,6 +143,7 @@ function makeStyles(tokens: ThemeTokens) {
       gap: 6,
       paddingHorizontal: 16,
       paddingTop: 12,
+      paddingBottom: 4,
     },
     filterChip: {
       paddingVertical: 6,
@@ -179,35 +154,14 @@ function makeStyles(tokens: ThemeTokens) {
     filterChipActive: { backgroundColor: tokens.action.primary },
     filterChipText: { fontSize: 13, color: tokens.text.secondary, fontWeight: '500' },
     filterChipTextActive: { color: tokens.action.onPrimary, fontWeight: '700' },
-    summary: {
-      fontSize: 12,
+    listContainer: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24, gap: 10 },
+    empty: {
+      fontSize: 13,
       color: tokens.text.secondary,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingVertical: 32,
+      paddingHorizontal: 8,
+      textAlign: 'center',
+      lineHeight: 20,
     },
-    gridContainer: { paddingHorizontal: 12, paddingBottom: 24, gap: 8 },
-    gridRow: { gap: 8 },
-    cell: {
-      flex: 1,
-      padding: 12,
-      borderRadius: 10,
-      minHeight: 92,
-      gap: 4,
-    },
-    cellUnlocked: {
-      // Subtle amber tint over elevated bg — works in both modes (the
-      // border carries the warning hue, fill is just a soft tint).
-      backgroundColor: tokens.bg.elevated,
-      borderWidth: 1,
-      borderColor: tokens.action.warning,
-    },
-    cellLocked: {
-      backgroundColor: tokens.bg.elevated,
-    },
-    cellName: { fontSize: 13, fontWeight: '700', color: tokens.text.primary },
-    cellNameLocked: { color: tokens.text.tertiary },
-    cellDesc: { fontSize: 11, color: tokens.text.secondary },
-    cellStatus: { fontSize: 11, marginTop: 'auto', color: tokens.text.tertiary },
-    cellStatusUnlocked: { color: tokens.action.warning, fontWeight: '700' },
   });
 }

@@ -49,11 +49,20 @@ import {
 } from '@/src/services/restoreService';
 import {
   getAutoPopupRestTimer,
+  getBucketRanges,
   getUnitPreference,
   setAutoPopupRestTimer,
   setBackupMode,
+  setBucketRanges,
   setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
+import { useAchievementsEnabled } from '@/src/achievements-enabled';
+import {
+  applyBucketRanges,
+  getBucketBoundaries,
+  resetBucketRanges,
+} from '@/src/domain/pr/buckets';
+import type { BucketBoundary, BucketKey } from '@/src/domain/pr/types';
 import {
   getBackupHealth,
   runBackup,
@@ -75,6 +84,25 @@ import { setLocale } from '@/src/i18n/strings';
 import { useTheme, type ThemeTokens, type StoredThemeValue } from '@/src/theme';
 
 /**
+ * Slice 17 — localized bucket label for the RM editor. Literal `t` keys (not a
+ * dynamic index) so it stays type-safe; called at render → locale-reactive.
+ */
+function bucketDomainLabel(key: BucketKey): string {
+  switch (key) {
+    case 'max_strength':
+      return t('domain', 'maxStrength');
+    case 'strength':
+      return t('domain', 'strength');
+    case 'hypertrophy':
+      return t('domain', 'hypertrophy');
+    case 'muscle_endurance':
+      return t('domain', 'muscularEndurance');
+    case 'endurance':
+      return t('domain', 'endurance');
+  }
+}
+
+/**
  * Settings tab — slice 7 ships the unit preference toggle.
  * Slice 15 (Backup) brings backup mode + export / restore.
  *
@@ -86,6 +114,23 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { tokens, stored: themePref, setStored: setThemePref } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+
+  /**
+   * Slice 17 — achievement system on/off (ADR-0009 amend). Sourced from the
+   * app-wide context so a toggle here re-renders the 獎章 sub-tab + 🏆 banner
+   * everywhere live (UI-only; background evaluation keeps running).
+   */
+  const { enabled: achievementsEnabled, setEnabled: setAchievementsEnabledPref } =
+    useAchievementsEnabled();
+  /**
+   * Slice 17 / ADR-0027 — editable rep-bucket boundaries. Seeded from the live
+   * cache (already boot-hydrated), reloaded from SQLite on focus. Each edit
+   * applies to the cache immediately (`applyBucketRanges`) + persists; screens
+   * pick up the new ranges on their next focus.
+   */
+  const [boundaries, setBoundaries] = useState<BucketBoundary[]>(() =>
+    getBucketBoundaries()
+  );
 
   const [unit, setUnit] = useState<UnitPreference>('kg');
   /**
@@ -145,18 +190,21 @@ export default function SettingsScreen() {
   const [exportBusy, setExportBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc, hkState, activeSession] = await Promise.all([
+    const [u, popup, loc, hkState, activeSession, ranges] = await Promise.all([
       getUnitPreference(db),
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
       getAuthorizationState(db),
       getActiveSession(db),
+      getBucketRanges(db),
     ]);
     setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
     setHkAuthState(hkState);
     setHasActiveSession(activeSession != null);
+    // Slice 17 — saved ranges, or the live cache (= defaults) if unset.
+    setBoundaries(ranges ?? getBucketBoundaries());
   }, [db]);
 
   useFocusEffect(
@@ -198,6 +246,56 @@ export default function SettingsScreen() {
     // same boolean twice = no-op).
     setAutoPopup(next);
     await setAutoPopupRestTimer(db, next);
+  };
+
+  /**
+   * Slice 17 — achievement system on/off. Context persists + re-renders the
+   * whole app, so the 獎章 sub-tab + 🏆 banner toggle live. UI-only: evaluation
+   * keeps running, so flipping back on needs no backfill.
+   */
+  const onToggleAchievements = (next: boolean) => {
+    void setAchievementsEnabledPref(next);
+  };
+
+  /**
+   * Slice 17 / ADR-0027 — move the boundary between bucket `index` and the
+   * next bucket by `delta` reps (steppers, ±1). Only one boundary moves:
+   * `boundaries[index].max` and `boundaries[index+1].min`. Clamped to keep
+   * both adjacent buckets non-empty (index 0 min is fixed at 1; the open-top
+   * bucket has no editable max). Applies to the live cache immediately +
+   * persists; other screens reflect the change on their next focus.
+   */
+  const onAdjustBucketMax = async (index: number, delta: number) => {
+    const cur = boundaries[index];
+    const next = boundaries[index + 1];
+    if (!cur || !next || cur.max == null) return; // last bucket: no editable max
+    const lower = cur.min; // keep this bucket non-empty (max ≥ min)
+    const upper = next.max == null ? 50 : next.max - 1; // keep next non-empty / sane open-top cap
+    const newMax = cur.max + delta;
+    if (newMax < lower || newMax > upper) return; // at a clamp boundary → no-op
+    const updated = boundaries.map((b) => ({ ...b }));
+    updated[index].max = newMax;
+    updated[index + 1].min = newMax + 1;
+    setBoundaries(updated);
+    applyBucketRanges(updated); // live cache → consumers reflect on next read
+    try {
+      await setBucketRanges(db, updated);
+    } catch {
+      // Defensive — cache + UI already updated; a persist failure just means
+      // the next launch re-hydrates the previous saved value.
+    }
+  };
+
+  /** Slice 17 — reset rep ranges to the v1 defaults (1–3 / 4–6 / 7–10 / 11–15 / 16+). */
+  const onResetBucketRanges = async () => {
+    resetBucketRanges();
+    const defaults = getBucketBoundaries();
+    setBoundaries(defaults);
+    try {
+      await setBucketRanges(db, defaults);
+    } catch {
+      // Defensive — see onAdjustBucketMax.
+    }
   };
 
   /** Slice 15 C3 — 自動備份 toggle (ADR-0011 Q14.8: default ON; OFF = 純手動
@@ -501,6 +599,55 @@ export default function SettingsScreen() {
             disabled={autoPopup === null}
           />
         </View>
+
+        {/* Slice 17 (ADR-0009 amend) — 獎章系統 on/off. UI-only: hides the 獎章
+            sub-tab + the in-session 🏆 PR banner; background evaluation keeps
+            running so turning it back on needs no backfill. */}
+        <Text style={styles.section}>{t('page', 'achievementsSection')}</Text>
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelGroup}>
+            <Text style={styles.switchLabel}>{t('status', 'achievementsEnabledLabel')}</Text>
+            <Text style={styles.hint}>{t('page', 'achievementsHint')}</Text>
+          </View>
+          <Switch value={achievementsEnabled} onValueChange={onToggleAchievements} />
+        </View>
+
+        {/* Slice 17 / ADR-0027 — 訓練目的次數範圍 (editable rep buckets). Each
+            stepper moves the boundary between adjacent buckets; the change
+            applies app-wide (PR / classification) + syncs to the Watch. */}
+        <Text style={styles.section}>{t('page', 'bucketRangesSection')}</Text>
+        <View style={styles.langGroup}>
+          {boundaries.map((b, i) => {
+            const isLast = b.max == null;
+            const next = boundaries[i + 1];
+            const upper = !next ? null : next.max == null ? 50 : next.max - 1;
+            const canDec = !isLast && (b.max as number) - 1 >= b.min;
+            const canInc = !isLast && upper != null && (b.max as number) + 1 <= upper;
+            const rangeText = isLast ? `${b.min}+` : `${b.min}–${b.max}`;
+            return (
+              <BucketRangeRow
+                key={b.key}
+                label={bucketDomainLabel(b.key)}
+                rangeText={rangeText}
+                unit={t('status', 'repsShort')}
+                editable={!isLast}
+                canDec={canDec}
+                canInc={canInc}
+                onDec={() => void onAdjustBucketMax(i, -1)}
+                onInc={() => void onAdjustBucketMax(i, 1)}
+                styles={styles}
+              />
+            );
+          })}
+        </View>
+        <Text style={styles.hint}>{t('page', 'bucketRangesHint')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void onResetBucketRanges()}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.btnPressed]}>
+          <Text style={styles.linkLabel}>{t('button', 'resetBucketRanges')}</Text>
+          <Text style={styles.linkChevron}>↺</Text>
+        </Pressable>
 
         {/* ADR-0025 — Color theme section. Placed above 語言 because visual
             preference is more impactful than text language. Same 3-radio
@@ -840,6 +987,73 @@ function RadioRow({
 }
 
 /**
+ * Slice 17 / ADR-0027 — one row of the rep-range editor. Left: bucket label.
+ * Right: current range + (for non-top buckets) −/＋ steppers that move the
+ * upper boundary. The top (open-ended) bucket shows "16+" with no steppers.
+ */
+function BucketRangeRow({
+  label,
+  rangeText,
+  unit,
+  editable,
+  canDec,
+  canInc,
+  onDec,
+  onInc,
+  styles,
+}: {
+  label: string;
+  rangeText: string;
+  unit: string;
+  editable: boolean;
+  canDec: boolean;
+  canInc: boolean;
+  onDec: () => void;
+  onInc: () => void;
+  styles: Styles;
+}) {
+  return (
+    <View style={styles.rmRow}>
+      <Text style={styles.rmLabel}>{label}</Text>
+      <Text style={styles.rmRange}>
+        {rangeText} {unit}
+      </Text>
+      {editable ? (
+        <View style={styles.rmStepper}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${label} −`}
+            disabled={!canDec}
+            onPress={onDec}
+            style={({ pressed }) => [
+              styles.rmStepBtn,
+              !canDec && styles.rmStepBtnDisabled,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.rmStepBtnText}>−</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${label} ＋`}
+            disabled={!canInc}
+            onPress={onInc}
+            style={({ pressed }) => [
+              styles.rmStepBtn,
+              !canInc && styles.rmStepBtnDisabled,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.rmStepBtnText}>＋</Text>
+          </Pressable>
+        </View>
+      ) : (
+        // Keep horizontal rhythm aligned with the stepper rows above.
+        <View style={styles.rmStepperSpacer} />
+      )}
+    </View>
+  );
+}
+
+/**
  * ADR-0025 — all colors come from tokens. Layout (flex / padding / radius)
  * stays in StyleSheet for perf; colors are interpolated per-token.
  */
@@ -923,6 +1137,38 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.action.onPrimary,
       fontWeight: '700',
     },
+    // Slice 17 / ADR-0027 — rep-range editor rows.
+    rmRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor: tokens.bg.elevated,
+      gap: 10,
+    },
+    rmLabel: { flex: 1, fontSize: 16, fontWeight: '500', color: tokens.text.primary },
+    rmRange: {
+      fontSize: 15,
+      fontVariant: ['tabular-nums'],
+      color: tokens.text.secondary,
+      minWidth: 76,
+      textAlign: 'right',
+    },
+    rmStepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    rmStepperSpacer: { width: 80 },
+    rmStepBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 8,
+      backgroundColor: tokens.bg.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border.subtle,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rmStepBtnText: { fontSize: 20, fontWeight: '600', color: tokens.text.primary },
+    rmStepBtnDisabled: { opacity: 0.3 },
     // ADR-0024 § 5 — 體重 row + mini sheet.
     bwRow: {
       paddingVertical: 14,

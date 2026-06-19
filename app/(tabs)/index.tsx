@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackupFailureBanner } from '@/components/backup-failure-banner';
 import { useDatabase } from '@/components/database-provider';
+import { useAchievementsEnabled } from '@/src/achievements-enabled';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import {
@@ -212,6 +213,10 @@ import {
 export default function TodayScreen() {
   const db = useDatabase();
   const router = useRouter();
+  // Slice 17 / ADR-0009 amendment — UI-only gate. PR banner (and other
+  // achievement surfaces) hide when the user turns the system OFF; background
+  // evaluation/persistence keeps running regardless.
+  const { enabled: achievementsEnabled } = useAchievementsEnabled();
   // ADR-0025 — all colors flow from useTheme().tokens via makeStyles below.
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
@@ -2981,7 +2986,7 @@ export default function TodayScreen() {
             </>
           )}
 
-          {lastPRDelta ? (
+          {lastPRDelta && achievementsEnabled ? (
             <View style={styles.prBanner}>
               <View style={styles.prBannerHeader}>
                 <Text style={styles.prBannerTitle}>🏆 PR! · {lastPRExerciseName}</Text>
