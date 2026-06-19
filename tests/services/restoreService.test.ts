@@ -15,6 +15,7 @@ import {
   type CandidateDbHandle,
   type RestoreServiceDeps,
 } from '../../src/services/restoreService';
+import { gateSkipReason } from '../../components/restore-gate.behavior';
 
 /**
  * Slice 15 C4 — restore engine orchestration tests.
@@ -525,6 +526,53 @@ describe('recoverInterruptedRestore — boot crash-recovery (🟠-1)', () => {
       (c) => c[0] === MARKER
     );
     expect(removedMarker).toBe(false);
+  });
+});
+
+describe('🟠-1 ✕ RestoreGate — heal runs BEFORE the gate decides (device smoke 2026-06-19)', () => {
+  // Regression guard for the 2026-06-19 device-smoke finding: RestoreGate mounts
+  // ABOVE DatabaseProvider, so the gate's own dbExists probe shadowed the boot
+  // self-heal — a kill-window interrupted restore (marker present, live deleted)
+  // was mistaken for a FRESH INSTALL and the gate prompted "發現 iCloud 備份"
+  // instead of silently recovering. The fix runs recoverInterruptedRestore at the
+  // TOP of RestoreGate's mount probe (restore-gate.tsx), before dbExists. This
+  // locks the COMPOSITION: heal → live restored → gateSkipReason returns a skip.
+  // (RestoreGate is a RN component; the node-env jest harness can't render it, so
+  // this guards the service+behavior chain the inline ordering relies on.)
+  const LIVE = '/sandbox/Documents/SQLite/traininglog.db';
+  const MARKER = '/sandbox/Library/Caches/restore-in-progress.sqlite';
+
+  it('marker + live-missing → after heal the live DB exists and the gate SKIPS (no fresh-install prompt)', async () => {
+    // Stateful in-memory fs starting in the kill-window state (marker, no live).
+    const files = new Set<string>([MARKER]);
+    const deps = makeDeps({
+      fileOps: {
+        exists: jest.fn(async (p: string) => files.has(p)),
+        copy: jest.fn(async (_src: string, dst: string) => {
+          files.add(dst);
+        }),
+        remove: jest.fn(async (p: string) => {
+          files.delete(p);
+        }),
+        listDir: jest.fn(async () => []),
+      },
+    });
+
+    // BEFORE the heal: gate sees no live DB → does NOT skip → would prompt.
+    expect(await deps.fileOps.exists(LIVE)).toBe(false);
+    expect(
+      gateSkipReason({ depsWired: true, declinedSentinel: false, dbExists: false })
+    ).toBeNull();
+
+    // RestoreGate's mount probe runs the heal first (the fix).
+    expect(await recoverInterruptedRestore(deps)).toEqual({ recovered: true });
+
+    // AFTER the heal: live restored from the marker → gate's probe sees it → SKIP.
+    const dbExists = await deps.fileOps.exists(LIVE);
+    expect(dbExists).toBe(true);
+    expect(
+      gateSkipReason({ depsWired: true, declinedSentinel: false, dbExists })
+    ).toBe('db-exists');
   });
 });
 

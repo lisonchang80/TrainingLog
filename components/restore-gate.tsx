@@ -8,6 +8,7 @@ import {
   executeRestore,
   getRestoreDeps,
   pickRestorableCandidate,
+  recoverInterruptedRestore,
 } from '@/src/services/restoreService';
 import {
   RESTORE_DECLINED_SENTINEL_KEY,
@@ -57,6 +58,22 @@ export function RestoreGate({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       const deps = getRestoreDeps();
+
+      // 🟠-1: an interrupted restore (process killed between delete-live and
+      // copy-in) leaves a crash-recovery marker + NO live DB. RestoreGate
+      // mounts ABOVE DatabaseProvider, so DatabaseProvider's self-heal is
+      // shadowed here — without this the gate sees "no live DB" and prompts as
+      // if it were a fresh install (device smoke 2026-06-19). Run the heal
+      // FIRST: marker + live-missing → restore live from the marker, so the
+      // dbExists probe below sees the recovered DB and the gate skips (silent
+      // recovery, as 🟠-1 intends). Best-effort — never holds boot hostage.
+      if (deps) {
+        try {
+          await recoverInterruptedRestore(deps);
+        } catch {
+          /* recovery hiccup must not block boot */
+        }
+      }
 
       let declinedSentinel = false;
       if (deps) {
