@@ -179,6 +179,43 @@ hide-unchecked filters (→ `src/domain/set/hideUncheckedFilter.ts`) out of the
   DON'T merge**; gate the ff-merge on a Reload-JS device smoke of the affected
   page(s). Same gate model as native/App-Store branches. (Contrast: extracting
   from a small leaf `components/*.tsx` with existing coverage can merge directly.)
+  **2026-06-20 refinement**: for a PURE-JS screen extraction the render is
+  sim-verifiable, so a Reload-JS **iOS-Sim** smoke suffices to ff-merge (per
+  `feedback_sim-smoke-first`) — reserve a real-device smoke for screens that
+  surface Watch / HealthKit / signing. Drive the sim flow with `ios-simulator-smoke`.
+
+## Screen-load orchestration → `src/services/` (2026-06-20, report 09 #3)
+
+A third target tier beyond `src/domain/` (pure) and adapter repos (SQL): when the
+thing you're lifting is a **whole screen's load/refresh engine** — a query fan-out +
+derivation invoked from many sites that sets a dozen state vars — extract it to
+`src/services/<loadX>.ts` returning a **flat state object**; the component keeps ONLY
+the setState wiring (+ any UI-state mapping like `fromRow`).
+
+Validated on the Training tab's `refresh()` (`app/(tabs)/index.tsx`), the de-facto
+state-sync engine called from ~20 sites (focus + every set op). → `src/services/
+loadTrainingTabState.ts`: `loadTrainingTabState(db, {now?})` returns a flat
+`TrainingTabState` (exercises / activeSession / activeProgram / unit / templates map /
+programCellToday / sets / plan / bw / title / prSnapshotById). The screen's `refresh`
+became `const s = await loadTrainingTabState(db); setX(s.x); …` + the one
+`fromRow(s.activeSession)` mapping. Commit `9602636`.
+
+- **`src/services/` not `src/domain/`** when it does IO (fans out repo reads). Domain
+  stays pure; services orchestrate repos + pure derivation (the `todayCell` /
+  `computePRSnapshot` primitives it sequences already live in domain).
+- **Return RAW data; leave UI-state mapping in the component.** Service returns the
+  raw `activeSession` row; the component maps it via `fromRow` into its `SessionState`
+  machine. Keeping state-machine/React concerns out is what keeps the service
+  node-testable.
+- **Inject `now` for date-dependent derivation** (`todayCell` needs "today") — same
+  deps rule as §4; default `Date.now`, tests pass a fixed ms.
+- **Single-phase setState is fine + cleaner** than the old two-phase inline refresh
+  (set base → await second fan-out → set session). React 18 batches the one wire; no
+  intermediate inconsistent render. Behaviour-equivalent.
+- **Sweep now-dead source imports.** The fan-out lift orphaned 9 imports in index.tsx
+  (`listExercises`, `getActiveProgram`, `listTemplates`, …) — remove them (grep
+  co-imports first to keep still-used siblings, e.g. `localMsToIsoDate` stayed). tsc
+  still exits 0 (no `noUnusedLocals`) but clean them anyway.
 
 ## DEDUP (N byte-identical copies) vs single extraction (2026-06-02, more #8)
 
