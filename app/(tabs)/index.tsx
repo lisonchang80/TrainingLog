@@ -18,13 +18,12 @@ import { BackupFailureBanner } from '@/components/backup-failure-banner';
 import { useDatabase } from '@/components/database-provider';
 import { useAchievementsEnabled } from '@/src/achievements-enabled';
 import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
-import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import {
   getExerciseNotes,
   updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
-import { getActiveProgram, listPrograms } from '@/src/adapters/sqlite/programRepository';
+import { listPrograms } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
   countSessionExercises,
@@ -34,13 +33,13 @@ import {
   endSession,
   getActiveSession,
   getSession,
-  listSessionExercisesWithName,
   appendReusableSupersetToSession,
   reorderSessionExercises,
   updateSessionExerciseRestSec,
   type SessionExerciseRowWithName,
 } from '@/src/adapters/sqlite/sessionRepository';
 import { runBackup } from '@/src/services/backupService';
+import { loadTrainingTabState } from '@/src/services/loadTrainingTabState';
 import { syncSessionWithHealthKit } from '@/src/services/healthkitSessionSync';
 import { pushEndToWatch } from '@/src/services/watchSessionEnd';
 import { reconcileEndSnapshot } from '@/src/services/endSnapshotReconcile';
@@ -65,9 +64,7 @@ import {
 } from '@/src/services/watchLiveTicksReceiver';
 import {
   deleteSetting,
-  getAutoPopupRestTimer,
   getSetting,
-  getUnitPreference,
   setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
 import {
@@ -115,17 +112,12 @@ import { BodyDataSheet } from '@/components/session/body-data-sheet';
 import { RestTimerModal } from '@/components/session/rest-timer-modal';
 import { ClusterCard } from '@/components/session/cluster-card';
 import { groupClusterSides } from '@/src/domain/session/clusterCard';
-import {
-  computePRSnapshot,
-  type PRSnapshot,
-} from '@/src/domain/pr/prQuery';
-import { listExercisePRSetRows } from '@/src/adapters/sqlite/exerciseHistoryRepository';
+import type { PRSnapshot } from '@/src/domain/pr/prQuery';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
-  listTemplates,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
@@ -145,7 +137,6 @@ import {
 import type { Exercise } from '@/src/domain/exercise/types';
 import {
   resolveProgramLabel,
-  todayCell,
   localMsToIsoDate,
 } from '@/src/domain/program/programManager';
 import type { ProgramCell, ProgramWithCells } from '@/src/domain/program/types';
@@ -357,58 +348,23 @@ export default function TodayScreen() {
   const [sheetLastSubTag, setSheetLastSubTag] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [exs, active, prog, tpls, u, popup] = await Promise.all([
-      listExercises(db),
-      getActiveSession(db),
-      getActiveProgram(db),
-      listTemplates(db),
-      getUnitPreference(db),
-      // ADR-0019 § slice 10d S1 — `getAutoPopupRestTimer` defaults missing
-      // key to ON (matches v016 seed intent + the new Settings Switch).
-      getAutoPopupRestTimer(db),
-    ]);
-    setExercises(exs);
-    setSessionState(fromRow(active));
-    setActiveProgram(prog);
-    setUnit(u);
-    setAutoPopupTimer(popup);
-    const tplMap: Record<string, TemplateSummary> = {};
-    for (const t of tpls) tplMap[t.id] = t;
-    setTemplatesById(tplMap);
-    const cell = todayCell({ active: prog, today: localMsToIsoDate(Date.now()) });
-    setProgramCellToday(cell);
-    if (active) {
-      const [sets, planned] = await Promise.all([
-        listSetsBySession(db, active.id),
-        listSessionExercisesWithName(db, active.id),
-      ]);
-      setSetsInSession(sets);
-      setPlan(planned);
-      setBwSnapshotKg(active.bodyweight_snapshot_kg ?? null);
-      setSessionTitle(active.title ?? '');
-      // Fetch all-time PR-input rows for each planned exercise + compute its
-      // PR snapshot once per refresh. Per-exercise queries — cheap given the
-      // typical session has <10 planned exercises. Uses the lean
-      // `listExercisePRSetRows` (just weight_kg/reps, no cluster subquery / sort)
-      // rather than the full `listExerciseHistorySets` the history UI needs —
-      // identical row-set (same is_skipped/is_logged predicate), identical PR.
-      const prMap: Record<string, PRSnapshot> = {};
-      await Promise.all(
-        planned.map(async (p) => {
-          const history = await listExercisePRSetRows(db, p.exercise_id);
-          prMap[p.exercise_id] = computePRSnapshot(
-            history.map((h) => ({ weight_kg: h.weight_kg, reps: h.reps })),
-          );
-        }),
-      );
-      setPrSnapshotById(prMap);
-    } else {
-      setSetsInSession([]);
-      setPlan([]);
-      setBwSnapshotKg(null);
-      setSessionTitle('');
-      setPrSnapshotById({});
-    }
+    // Query fan-out + derivation lives in the service (report 09 #3); this
+    // screen keeps only the setState wiring + the `fromRow` mapping into its
+    // SessionState machine. See loadTrainingTabState for the (behaviour-
+    // preserved) read/derive logic + per-exercise PR snapshot.
+    const s = await loadTrainingTabState(db);
+    setExercises(s.exercises);
+    setSessionState(fromRow(s.activeSession));
+    setActiveProgram(s.activeProgram);
+    setUnit(s.unit);
+    setAutoPopupTimer(s.autoPopupTimer);
+    setTemplatesById(s.templatesById);
+    setProgramCellToday(s.programCellToday);
+    setSetsInSession(s.setsInSession);
+    setPlan(s.plan);
+    setBwSnapshotKg(s.bwSnapshotKg);
+    setSessionTitle(s.sessionTitle);
+    setPrSnapshotById(s.prSnapshotById);
   }, [db]);
 
   // 5/19 polish #43 — banner mirror session linked template. Fetches the
