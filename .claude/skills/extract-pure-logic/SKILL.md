@@ -217,6 +217,47 @@ became `const s = await loadTrainingTabState(db); setX(s.x); …` + the one
   co-imports first to keep still-used siblings, e.g. `localMsToIsoDate` stayed). tsc
   still exits 0 (no `noUnusedLocals`) but clean them anyway.
 
+## Effectful subscription/listener cluster → `hooks/` (2026-06-20, report 09 #2)
+
+A fourth tier: when the thing to lift is NOT pure logic but an **effectful `useEffect`
+cluster** — a wall of `addListener` / subscribe / cleanup wiring (WC channels, event
+emitters, timers) — it can't go to `src/domain/` (it's effectful) nor `src/services/`
+(it's a hook). Lift it to a **custom hook** in `hooks/<useX>.ts` that takes the
+component's refs/setters as params and owns the `useEffect` + cleanup. The component
+shrinks to a one-line `useX(db, { refA, setB })` call.
+
+Validated on the Training tab's two WC-listener `useEffect`s (end-session dual-channel
++ the 10-listener handshake/start/live-mirror/tick cluster) → `hooks/useWatchSync.ts`,
+`app/(tabs)/index.tsx` −278 net lines. Commit `8ff1304` (branch `refactor/use-watch-sync`).
+
+- **Lift the effect bodies + comments 1:1.** Same channels, same handlers, same
+  intentional empty deps (`}, [])` + the `eslint-disable react-hooks/exhaustive-deps`),
+  same cleanup. Load-bearing comments (DO-NOT-REMOVE markers, dual-fire idempotent
+  notes) move verbatim — they encode why the wiring is shaped that way.
+- **⭐ Verify the param signature against the audit — snapshots DRIFT.** The audit's
+  proposed `useX(db, {...})` signature was written from a code snapshot; re-derive it
+  from the CURRENT effect bodies. This session caught two drifts: the audit listed
+  `endInFlightRef` (the effects never read it — only `finalizeEndAndRoute` does → dropped
+  it) and OMITTED `setWatchLiveTicks` (hr/kcal-tick reducers need it → added it). Grep
+  each candidate ref/setter inside the moved effects before putting it in the param list.
+  (Same spirit as grill-with-docs "audit recommendations are stale-by-default".)
+- **Type refs as `RefObject<T | null>`** (React 19.1: `useRef<T|null>(null)` returns
+  `RefObject`, `.current` is mutable); setters as `Dispatch<SetStateAction<T>>`. Name a
+  `type` alias for a fat callback ref (e.g. `FinalizeEndAndRoute`) so the hook stays
+  typed without importing back from the component (circular).
+- **jest count is UNCHANGED and that's correct.** A mechanical effect-lift has no new
+  pure unit to test — behaviour is verified at RUNTIME (sim/device), not by jest. Don't
+  manufacture a test to bump the count.
+- **Sim-smoke proves MOUNT, not the wired behaviour.** A Reload-JS iOS-Sim smoke
+  confirms the hook mounts cleanly (component renders, effects mount/unmount, no
+  red/white screen) + that adjacent flows (e.g. `refresh()` via the passed ref) still
+  fire — drive it with `ios-simulator-smoke`. But it CANNOT exercise the actual
+  subscriptions (no Watch/peer to send events). So **if the cluster wires Watch / HK /
+  live-sync runtime → push the branch but DON'T merge to main**; gate the merge on a
+  real-device round-trip smoke (the audit's "not a blind merge"). Same device-gate model
+  as §"Screen-file extractions". Because main may advance meanwhile, the eventual merge
+  is a normal 3-way merge (disjoint files = clean), not necessarily `--ff-only`.
+
 ## DEDUP (N byte-identical copies) vs single extraction (2026-06-02, more #8)
 
 A second flavour of extraction: not "lift one closure" but "collapse N copies of the

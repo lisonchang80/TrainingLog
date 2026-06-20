@@ -44,6 +44,10 @@ Then use the Agent tool with `subagent_type=Explore` to walk the codebase. Don't
 
 Apply the **deletion test** to anything you suspect is shallow: would deleting it concentrate complexity, or just move it? A "yes, concentrates" is the signal you want.
 
+**Before flagging a duplication/shallow seam as debt, verify it isn't documented-intentional.** Grep the suspected site for an in-source rationale comment first — a duplication with a "we inline this for simplicity / keep the prototype structure verbatim" note (or an ADR) is a *decision*, not debt, and "fixing" it contradicts the recorded reasoning. (2026-06-20: `template-editor-view.tsx` re-defines `normalizePositions`/`findTrailingClusterHeadIdx` that also live in `templateOps.ts` — looked like dead-simple DRY, but the file comments at ~1142 say the editor deliberately imports only the *hard* ops and inlines the simple per-set patches. Real but intentional → left alone.)
+
+**Calibrate after a recent comprehensive audit.** If a thorough arch-debt pass already ran (e.g. an audit report) and its findings shipped, a fresh re-scan will surface mostly *below-the-bar* candidates: sub-10-LOC derivations, intentional inlines, cosmetic DRY that widens an API for trivial gain. Say so plainly and recommend stopping — manufacturing marginal churn to "have a finding" is worse than reporting that the well is dry. (Validated 2026-06-20: post-report-09 re-scan of the next-tier god-files found zero safe autonomous wins above the bar.)
+
 ### 2. Present candidates
 
 Present a numbered list of deepening opportunities. For each candidate:
