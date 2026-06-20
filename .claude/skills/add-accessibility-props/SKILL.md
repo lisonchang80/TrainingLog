@@ -1,6 +1,6 @@
 ---
 name: add-accessibility-props
-description: Add VoiceOver / Dynamic-Type accessibility props to TrainingLog RN components (bottom sheets, modals, SVG charts, icon buttons). Trigger phrases - "a11y", "accessibility", "VoiceOver", "報告 07 a11y", "label the charts/sheets". Covers the `button.a11y*` i18n namespace, accessibilityViewIsModal on sheets, accessibilityRole="image" wrap on charts, what NOT to wrap, and the tsc+jest → VoiceOver-smoke gate. Validated 2026-06-02 (6 sheets + 5 charts, branch chore/a11y-sheets-charts).
+description: Add VoiceOver / Dynamic-Type accessibility props to TrainingLog RN components (bottom sheets, modals, SVG charts, icon buttons). Trigger phrases - "a11y", "accessibility", "VoiceOver", "報告 07 a11y", "label the charts/sheets". Covers the `button.a11y*` i18n namespace, accessibilityViewIsModal on sheets, accessibilityRole="image" wrap on charts, what NOT to wrap, and the verify gate — including **how to confirm props landed on the iOS Simulator via the accessibility tree (ui_describe_all / ui_find_element), no VoiceOver / no device needed** (Switch AXLabel null→labelled, labeled-image charts/progress bars, worded stepper labels, i18n leak scan). Validated 2026-06-02 (6 sheets + 5 charts) + 2026-06-20 (slice17 a11y sim-tree sign-off).
 ---
 
 # Add accessibility props (TrainingLog)
@@ -74,9 +74,37 @@ filter chips individually focusable.
 - Ignore the IDE's phantom "Cannot find name expect/describe / Cannot find
   module" diagnostics from a symlinked `node_modules` — `tsc` exit 0 is
   authoritative.
-- **Final confidence = VoiceOver on device** (turn it on, swipe through the
-  sheet/chart, confirm focus trap + announced labels). Cannot be done from
-  here — hand back for a quick VoiceOver pass.
+- **High confidence WITHOUT a device — the iOS-Simulator accessibility tree.**
+  You do NOT need VoiceOver or a device to confirm the props landed. The
+  `ios-simulator` MCP exposes the live a11y tree; these are JS-only changes so
+  Metro **Reload JS** (no rebuild) on the running sim is enough. Validated
+  2026-06-20 (Track-B a11y landing — caught nothing wrong, gave full sign-off).
+  - `mcp__ios-simulator__ui_describe_all` → dump every element with its
+    `AXLabel` / `role` / `subrole`. `ui_find_element {search:["減少","進度"]}`
+    → targeted check. (Coords are in **points**, matching `ui_tap`.)
+  - **Switch**: a bare `<Switch>` with no `accessibilityLabel` shows up as
+    `subrole:"AXSwitch"` with **`AXLabel:null`** — the sibling `<Text>` is NOT
+    auto-associated. After the fix it must read the label string (e.g.
+    `AXLabel:"顯示獎章與 PR"`). This is the canonical "did the Switch label
+    land" check.
+  - **labeled-image** (chart / progress bar): confirm `type:"Image"` +
+    non-empty `AXLabel` (e.g. `進度 44%`, `訓練部位熱力圖`). An un-wrapped
+    chart simply won't appear as an Image node.
+  - **icon button** (stepper ±): confirm the `AXLabel` is the **worded**
+    string (`最大力量 減少`), not the raw glyph (`最大力量 −`).
+  - **i18n**: the a11y tree also surfaces every visible `StaticText` AXLabel —
+    scan it to confirm zh has no English leak. For the **en** locale, flipping
+    Settings→Language→English does NOT live-re-render (locale is read at
+    module load); **relaunch the app** (`launch_app terminate_running:true`)
+    then re-check the tree / screenshot.
+  - Env gotcha: a **symlinked `node_modules` breaks Metro entry resolution**
+    (red screen). To sim-smoke a worktree branch, `git switch` the PRIMARY
+    worktree to it (real `node_modules`) rather than running Metro from a
+    symlinked worktree; switch back after.
+- **Optional final polish = VoiceOver on device** (focus-trap *feel* + spoken
+  output). No longer the gate — the sim a11y-tree above confirms label/role
+  presence, which is what regresses. Reserve the device pass for when the
+  user is already doing a device session.
 
 ## Workflow placement (don't disturb in-progress smoke / main)
 
