@@ -81,6 +81,75 @@ export async function insertSessionSet(
 }
 
 /**
+ * Insert a dropset FOLLOWER produced by the tap-label-cycle reducer
+ * (`cycleSessionSetKind` emitting an `insertFollower` op: warmup→dropset
+ * promotes the tapped row to a head and appends one follower right below).
+ * Unlike `addSessionDropsetRow` (which clones a source row's weight/reps and
+ * mints its own UUID), this takes the explicit weight/reps/new_set_id the
+ * reducer already computed.
+ *
+ * Atomicity (2026-06-20, report 09 #1) — the ordering-bump `UPDATE` and the
+ * row `INSERT` run inside ONE `withTransactionAsync`. Previously these were
+ * two bare `db.*` calls duplicated verbatim across `app/(tabs)/index.tsx`
+ * and `app/session/[id].tsx`; a failure between them left set ordering
+ * shifted with no row inserted → `computeSessionSetLayout` orphan rows (the
+ * exact bug the 2026-05-20 ordering fix was meant to prevent, re-reachable
+ * via partial failure). Single-sourcing here also closes the
+ * `set-ordering-surfaces` copy-paste-drift hazard.
+ *
+ * The follower lands at `head.ordering + 1` (read from the DB by
+ * `parent_set_id` inside the txn), shifting every set at or after that slot
+ * by +1 so the chain stays contiguous. `set_kind='dropset'`,
+ * `parent_set_id` points at the head, and `session_exercise_id` (v019
+ * isolation) is inherited from the head row.
+ */
+export async function insertDropsetFollower(
+  db: Database,
+  args: {
+    session_id: string;
+    parent_set_id: string;
+    exercise_id: string;
+    weight_kg: number | null;
+    reps: number | null;
+    new_set_id: string;
+    now?: () => number;
+  }
+): Promise<void> {
+  const ts = (args.now ?? (() => Date.now()))();
+  await db.withTransactionAsync(async () => {
+    const head = await db.getFirstAsync<{
+      ordering: number;
+      session_exercise_id: string | null;
+    }>(
+      `SELECT ordering, session_exercise_id FROM "set"
+        WHERE id = ? AND session_id = ?`,
+      args.parent_set_id,
+      args.session_id
+    );
+    const newOrdering = (head?.ordering ?? 0) + 1;
+    await db.runAsync(
+      `UPDATE "set" SET ordering = ordering + 1
+        WHERE session_id = ? AND ordering >= ?`,
+      args.session_id,
+      newOrdering
+    );
+    await insertSessionSet(db, {
+      id: args.new_set_id,
+      session_id: args.session_id,
+      exercise_id: args.exercise_id,
+      weight_kg: args.weight_kg,
+      reps: args.reps,
+      is_skipped: 0,
+      ordering: newOrdering,
+      created_at: ts,
+      set_kind: 'dropset',
+      parent_set_id: args.parent_set_id,
+      session_exercise_id: head?.session_exercise_id ?? null,
+    });
+  });
+}
+
+/**
  * Delete a set row. Cascades into the dropset chain when the target row is a
  * dropset HEAD: all rows with `parent_set_id = set_id` are deleted in the
  * same transaction so no follower is left orphaned (parent_set_id pointing

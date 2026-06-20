@@ -178,6 +178,38 @@ export async function getSessionKcal(db: Database, id: string): Promise<number |
 }
 
 /**
+ * Read the v016 HealthKit columns (`kcal`, `avg_hr_bpm`) for one session.
+ * Separate from `getSession` because the domain `Session` type doesn't model
+ * these HK-only columns (they stay NULL until HealthKit writes from slice 13
+ * onwards, and the detail page renders '—' / a grey overlay for NULLs).
+ *
+ * Defensive try/catch: a test DB migrated to a pre-v016 schema lacks these
+ * columns and the SELECT would throw — the catch degrades to nulls so the
+ * detail page still renders. (2026-06-20 report 09 #5 — lifted out of an
+ * inline screen-local `loadHealthkitColumns` in `app/session/[id].tsx`.)
+ */
+export async function loadSessionHealthKitColumns(
+  db: Database,
+  id: string
+): Promise<{ kcal: number | null; avg_hr_bpm: number | null }> {
+  try {
+    const row = await db.getFirstAsync<{
+      kcal: number | null;
+      avg_hr_bpm: number | null;
+    }>(
+      `SELECT kcal, avg_hr_bpm FROM session WHERE id = ?`,
+      id
+    );
+    return {
+      kcal: row?.kcal ?? null,
+      avg_hr_bpm: row?.avg_hr_bpm ?? null,
+    };
+  } catch {
+    return { kcal: null, avg_hr_bpm: null };
+  }
+}
+
+/**
  * kcal-only update for the lazy re-heal path (2026-06-12). Unlike
  * `setSessionHealthKitData` this must NOT touch `healthkit_workout_uuid` —
  * re-heal re-runs only the aggregate, never the HKWorkout writer, so the
@@ -633,6 +665,76 @@ interface SessionExerciseRow {
    * always set the field via snapshotForSession.
    */
   rest_sec?: number | null;
+}
+
+/**
+ * Resolve the source-side solo card for a「再次訓練」/ overwrite replay
+ * (report 09 #6, 2026-06-20 — lifted out of an inline SELECT in
+ * app/exercise-history/[id].tsx). #27 source isolation: scope by card shape
+ * (parent_id IS NULL AND reusable_superset_id IS NULL), NOT by exercise_id
+ * alone — otherwise a sibling RS A-side card sharing this exercise_id in the
+ * same source session could be picked up. Returns null when no solo card
+ * exists (caller surfaces the「找不到來源卡」alert).
+ */
+export async function findSoloReplaySource(
+  db: Database,
+  args: { source_session_id: string; exercise_id: string }
+): Promise<{ id: string } | null> {
+  return db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND parent_id IS NULL
+        AND reusable_superset_id IS NULL
+      ORDER BY ordering ASC
+      LIMIT 1`,
+    args.source_session_id,
+    args.exercise_id
+  );
+}
+
+/**
+ * Resolve the source-side cluster A/B cards for a Reusable-Superset replay
+ * (report 09 #6, 2026-06-20). A side = the RS parent (parent_id IS NULL AND
+ * reusable_superset_id IS NOT NULL); B side = its follower (parent_id =
+ * A.id), matched on the partner exercise_id. #27 source isolation — scope by
+ * card, so a sibling solo card for the same exercise isn't conflated.
+ *
+ * B is only queried once A is found (B's predicate depends on A.id), mirroring
+ * the previous inline two-step. Each side is null when missing so the caller
+ * can show the correct「A 側 / B 側 找不到」alert.
+ */
+export async function findClusterReplaySource(
+  db: Database,
+  args: {
+    source_session_id: string;
+    exercise_id_a: string;
+    exercise_id_b: string;
+  }
+): Promise<{ sourceA: { id: string } | null; sourceB: { id: string } | null }> {
+  const sourceA = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND parent_id IS NULL
+        AND reusable_superset_id IS NOT NULL
+      ORDER BY ordering ASC
+      LIMIT 1`,
+    args.source_session_id,
+    args.exercise_id_a
+  );
+  if (!sourceA) return { sourceA: null, sourceB: null };
+  const sourceB = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM session_exercise
+      WHERE session_id = ?
+        AND exercise_id = ?
+        AND parent_id = ?
+      LIMIT 1`,
+    args.source_session_id,
+    args.exercise_id_b,
+    sourceA.id
+  );
+  return { sourceA, sourceB };
 }
 
 export async function insertSessionExercise(

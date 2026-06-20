@@ -17,7 +17,7 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 - **Preview**: 
   - Slices 1-13a: iOS Simulator on Mac (`npx expo start` → press `i`) or Expo Go on iPhone (QR scan)
   - Slice 13b+: Bare workflow, Xcode build to real iPhone (Expo Go path retired). See `expo-bare-build-pipeline` skill.
-- **Build / TestFlight / App Store submission**: Apple Developer Program ($99/yr) purchased on 2026-05-07 (order W1540856250); enrollment **active** since 2026-05-08 (Welcome to ADP + App Store Connect emails received). Required from slice 11 onwards (HealthKit + App Group entitlements); slices 1–10 run on Expo Go without it.
+- **Build / TestFlight / App Store submission**: Apple Developer Program ($99/yr) purchased on 2026-05-07 (order W1540856250); enrollment **active** since 2026-05-08 (Welcome to ADP + App Store Connect emails received). Required from slice 11 onwards (HealthKit + iCloud entitlements — `ios/TrainingLog/TrainingLog.entitlements`; no App Group is defined or used); slices 1–10 run on Expo Go without it.
 
 ## Testing
 

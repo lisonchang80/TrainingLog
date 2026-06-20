@@ -31,7 +31,11 @@ import {
   type ExerciseHistorySession,
 } from '@/src/adapters/sqlite/exerciseHistoryRepository';
 import { getExerciseName } from '@/src/adapters/sqlite/exerciseRepository';
-import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
+import {
+  getActiveSession,
+  findSoloReplaySource,
+  findClusterReplaySource,
+} from '@/src/adapters/sqlite/sessionRepository';
 import {
   replayCardSetsFromHistoricalSession,
   replayClusterCardSetsFromHistoricalSession,
@@ -752,36 +756,21 @@ function HistoryPageContent({
                 return;
               }
               if (isClusterReplay) {
-                // #27 source isolation — look up the source session's RS A/B
-                // session_exercise rows so the replay helper can scope the
+                // #27 source isolation — resolve the source session's RS A/B
+                // session_exercise cards so the replay helper scopes the
                 // source SELECT by card (not by exercise_id alone, which
                 // would conflate a sibling solo Bench card with the RS A
-                // Bench card in the same source session).
-                const sourceA = await db.getFirstAsync<{ id: string }>(
-                  `SELECT id FROM session_exercise
-                    WHERE session_id = ?
-                      AND exercise_id = ?
-                      AND parent_id IS NULL
-                      AND reusable_superset_id IS NOT NULL
-                    ORDER BY ordering ASC
-                    LIMIT 1`,
-                  sourceSession.session_id,
-                  exerciseId,
-                );
+                // Bench card in the same source session). See
+                // sessionRepository.findClusterReplaySource (report 09 #6).
+                const { sourceA, sourceB } = await findClusterReplaySource(db, {
+                  source_session_id: sourceSession.session_id,
+                  exercise_id_a: exerciseId,
+                  exercise_id_b: partnerExerciseId!,
+                });
                 if (!sourceA) {
                   Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardASideNotFound'));
                   return;
                 }
-                const sourceB = await db.getFirstAsync<{ id: string }>(
-                  `SELECT id FROM session_exercise
-                    WHERE session_id = ?
-                      AND exercise_id = ?
-                      AND parent_id = ?
-                    LIMIT 1`,
-                  sourceSession.session_id,
-                  partnerExerciseId!,
-                  sourceA.id,
-                );
                 if (!sourceB) {
                   Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardBSideNotFound'));
                   return;
@@ -798,19 +787,13 @@ function HistoryPageContent({
                   uuid: randomUUID,
                 });
               } else {
-                // #27 source isolation — look up the source session's solo
-                // (non-RS, no parent) card for this exercise.
-                const sourceCard = await db.getFirstAsync<{ id: string }>(
-                  `SELECT id FROM session_exercise
-                    WHERE session_id = ?
-                      AND exercise_id = ?
-                      AND parent_id IS NULL
-                      AND reusable_superset_id IS NULL
-                    ORDER BY ordering ASC
-                    LIMIT 1`,
-                  sourceSession.session_id,
-                  exerciseId,
-                );
+                // #27 source isolation — resolve the source session's solo
+                // (non-RS, no parent) card for this exercise. See
+                // sessionRepository.findSoloReplaySource (report 09 #6).
+                const sourceCard = await findSoloReplaySource(db, {
+                  source_session_id: sourceSession.session_id,
+                  exercise_id: exerciseId,
+                });
                 if (!sourceCard) {
                   Alert.alert(t('alert', 'overwriteFailed'), t('alert', 'sourceCardNotFound'));
                   return;

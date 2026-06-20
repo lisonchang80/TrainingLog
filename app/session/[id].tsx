@@ -59,6 +59,7 @@ import {
   discardSession,
   getSession,
   listSessionExercisesWithName,
+  loadSessionHealthKitColumns,
   reorderSessionExercises,
   restoreSessionFromSnapshot,
   updateSessionExerciseRestSec,
@@ -67,14 +68,17 @@ import {
 } from '@/src/adapters/sqlite/sessionRepository';
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
 import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
-import { sessionSnapshotDirty } from '@/src/domain/session/sessionSnapshotDirty';
+import {
+  buildDirtyCheckState,
+  sessionSnapshotDirty,
+} from '@/src/domain/session/sessionSnapshotDirty';
 import {
   addClusterCycleAtEnd,
   addSessionDropsetCluster,
   addSessionDropsetRow,
   deleteClusterCycle,
   deleteSet,
-  insertSessionSet,
+  insertDropsetFollower,
   insertSessionSetAfter,
   listSetsBySession,
   prefillReusableSupersetFromLastSession,
@@ -408,7 +412,7 @@ export default function SessionDetailScreen() {
         getSession(db, id),
         listSetsBySession(db, id),
         listSessionExercisesWithName(db, id),
-        loadHealthkitColumns(db, id),
+        loadSessionHealthKitColumns(db, id),
         getUnitPreference(db),
       ]);
       if (!s) {
@@ -576,54 +580,23 @@ export default function SessionDetailScreen() {
           console.warn('[Card 12R] exit deleteSetting failed:', e);
         });
       };
-      const currentState = {
-        session: {
+      // Project live + snapshot rows via the shared builder (report 09 #4)
+      // so the dirty-check field list lives in one place next to the
+      // comparator. session falls back to the snapshot's timestamps when the
+      // live row hasn't loaded.
+      const currentState = buildDirtyCheckState(
+        {
           started_at: session?.started_at ?? editSnapshot.session.started_at,
           ended_at: session?.ended_at ?? editSnapshot.session.ended_at,
         },
-        sessionExercises: sessionExercises.map((se) => ({
-          id: se.id,
-          ordering: se.ordering,
-          parent_id: se.parent_id,
-          rest_sec: se.rest_sec ?? null,
-        })),
-        sets: sets.map((s) => ({
-          id: s.id,
-          weight_kg: s.weight_kg,
-          reps: s.reps,
-          is_skipped: s.is_skipped,
-          ordering: s.ordering,
-          set_kind: s.set_kind,
-          parent_set_id: s.parent_set_id,
-          is_logged: s.is_logged,
-          notes: s.notes,
-          session_exercise_id: s.session_exercise_id,
-        })),
-      };
-      const snapState = {
-        session: {
-          started_at: editSnapshot.session.started_at,
-          ended_at: editSnapshot.session.ended_at,
-        },
-        sessionExercises: editSnapshot.sessionExercises.map((se) => ({
-          id: se.id,
-          ordering: se.ordering,
-          parent_id: se.parent_id,
-          rest_sec: se.rest_sec,
-        })),
-        sets: editSnapshot.sets.map((s) => ({
-          id: s.id,
-          weight_kg: s.weight_kg,
-          reps: s.reps,
-          is_skipped: s.is_skipped,
-          ordering: s.ordering,
-          set_kind: s.set_kind,
-          parent_set_id: s.parent_set_id,
-          is_logged: s.is_logged,
-          notes: s.notes,
-          session_exercise_id: s.session_exercise_id,
-        })),
-      };
+        sessionExercises,
+        sets,
+      );
+      const snapState = buildDirtyCheckState(
+        editSnapshot.session,
+        editSnapshot.sessionExercises,
+        editSnapshot.sets,
+      );
       if (!sessionSnapshotDirty(currentState, snapState)) {
         setEditSnapshot(null);
         setEditMode(false);
@@ -1017,30 +990,16 @@ export default function SessionDetailScreen() {
           } else if (op.type === 'delete') {
             await deleteSet(db, op.set_id);
           } else {
-            // insertFollower — 2026-05-20 fix mirror Today: insert at
-            // head.ordering+1 with shift, not end-of-session, so the
-            // chain stays contiguous.
-            const head = sets.find((s) => s.id === op.parent_set_id);
-            const headOrdering = head?.ordering ?? 0;
-            const newOrdering = headOrdering + 1;
-            await db.runAsync(
-              `UPDATE "set" SET ordering = ordering + 1
-                WHERE session_id = ? AND ordering >= ?`,
-              id,
-              newOrdering,
-            );
-            await insertSessionSet(db, {
-              id: op.new_set_id,
+            // insertFollower — atomic ordering-shift + insert, single-sourced
+            // in setRepository (report 09 #1, 2026-06-20). Was a non-
+            // transactional 2-step duplicated verbatim from Today.
+            await insertDropsetFollower(db, {
               session_id: id,
+              parent_set_id: op.parent_set_id,
               exercise_id,
               weight_kg: op.weight_kg,
               reps: op.reps,
-              is_skipped: 0,
-              ordering: newOrdering,
-              created_at: Date.now(),
-              set_kind: 'dropset',
-              parent_set_id: op.parent_set_id,
-              session_exercise_id: head?.session_exercise_id ?? null,
+              new_set_id: op.new_set_id,
             });
           }
         }
@@ -2467,29 +2426,8 @@ interface SessionWithHK extends Session {
   avg_hr_bpm: number | null;
 }
 
-async function loadHealthkitColumns(
-  db: ReturnType<typeof useDatabase>,
-  id: string
-): Promise<{ kcal: number | null; avg_hr_bpm: number | null }> {
-  // Separate query because the Session domain type doesn't yet model v016
-  // columns. Defensive: if the columns don't exist (test DB migrating to a
-  // lower version), the catch falls back to nulls.
-  try {
-    const row = await db.getFirstAsync<{
-      kcal: number | null;
-      avg_hr_bpm: number | null;
-    }>(
-      `SELECT kcal, avg_hr_bpm FROM session WHERE id = ?`,
-      id
-    );
-    return {
-      kcal: row?.kcal ?? null,
-      avg_hr_bpm: row?.avg_hr_bpm ?? null,
-    };
-  } catch {
-    return { kcal: null, avg_hr_bpm: null };
-  }
-}
+// loadHealthkitColumns moved to sessionRepository.loadSessionHealthKitColumns
+// (2026-06-20 report 09 #5 — adapter layering; defensive v016-column read).
 
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleString();

@@ -74,7 +74,7 @@ import {
   addSessionDropsetCluster,
   addSessionDropsetRow,
   deleteSet,
-  insertSessionSet,
+  insertDropsetFollower,
   listSetsBySession,
   addClusterCycleAtEnd,
   deleteClusterCycle,
@@ -1398,34 +1398,19 @@ export default function TodayScreen() {
         } else if (op.type === 'delete') {
           await deleteSet(db, op.set_id);
         } else {
-          // insertFollower — 2026-05-20 fix: insert RIGHT AFTER the head
-          // (head.ordering + 1) with subsequent sets shifted by +1.
-          // Previously assigned maxOrdering+offset (end of session) which
-          // broke chain contiguity when other sets sat between head and
-          // the appended follower → computeSessionSetLayout flagged the
-          // later follower as orphan (empty label, dangling row).
-          // v019 isolation: inherit head's session_exercise_id.
-          const head = setsInSession.find((s) => s.id === op.parent_set_id);
-          const headOrdering = head?.ordering ?? 0;
-          const newOrdering = headOrdering + 1;
-          await db.runAsync(
-            `UPDATE "set" SET ordering = ordering + 1
-              WHERE session_id = ? AND ordering >= ?`,
+          // insertFollower — dropset head promotion appends one follower at
+          // head.ordering+1 with chain shift, ATOMICALLY (report 09 #1,
+          // 2026-06-20). Single-sourced in setRepository — see
+          // insertDropsetFollower for the ordering / v019-isolation /
+          // atomicity rationale (was a non-transactional 2-step duplicated
+          // here + session/[id].tsx).
+          await insertDropsetFollower(db, {
             session_id,
-            newOrdering,
-          );
-          await insertSessionSet(db, {
-            id: op.new_set_id,
-            session_id,
+            parent_set_id: op.parent_set_id,
             exercise_id,
             weight_kg: op.weight_kg,
             reps: op.reps,
-            is_skipped: 0,
-            ordering: newOrdering,
-            created_at: Date.now(),
-            set_kind: 'dropset',
-            parent_set_id: op.parent_set_id,
-            session_exercise_id: head?.session_exercise_id ?? null,
+            new_set_id: op.new_set_id,
           });
         }
       }

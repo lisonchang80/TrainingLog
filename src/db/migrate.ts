@@ -80,6 +80,16 @@ export function migrationsMaxVersion(): number {
   return Math.max(...Object.keys(migrations).map(Number));
 }
 
+/**
+ * INVARIANT (report 09 #7a): each migration runs EXACTLY ONCE — the loop is
+ * gated by `PRAGMA user_version` and every step runs inside its own
+ * `withTransactionAsync`, so a given `v` can never re-execute. Therefore the
+ * defensive `PRAGMA table_info` guards some schema files put before their
+ * `ALTER TABLE ADD COLUMN` (v023/v024/v025) are belt-and-suspenders, NOT
+ * required for correctness; the bare `ALTER` style (v004–v019) is equally
+ * safe. Don't cargo-cult either style as "the one that's needed" — pick
+ * whichever reads cleaner for a new vNNN.
+ */
 export async function migrate(db: Database): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>(
     'PRAGMA user_version'

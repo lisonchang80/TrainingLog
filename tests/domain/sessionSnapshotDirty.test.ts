@@ -1,4 +1,5 @@
 import {
+  buildDirtyCheckState,
   sessionSnapshotDirty,
   type DirtyCheckState,
 } from '../../src/domain/session/sessionSnapshotDirty';
@@ -226,5 +227,88 @@ describe('sessionSnapshotDirty', () => {
       { id: 's2', ...baseSet, ordering: 2 },
     ];
     expect(sessionSnapshotDirty(cur, snap)).toBe(false);
+  });
+});
+
+describe('buildDirtyCheckState (report 09 #4 extraction)', () => {
+  // Live row shapes carry a superset of the compared fields — the builder must
+  // project ONLY the dirty-check subset and normalise nullables to null.
+  const liveSet = {
+    id: 's1',
+    weight_kg: 80,
+    reps: 5,
+    is_skipped: 0,
+    ordering: 1,
+    set_kind: 'working',
+    parent_set_id: null,
+    is_logged: 1,
+    notes: null,
+    session_exercise_id: 'se1',
+    // extra fields present on the real SessionSetWithExercise row:
+    exercise_name: 'Bench',
+    created_at: 123,
+    display_rank: null,
+  };
+  const liveSE = {
+    id: 'se1',
+    ordering: 1,
+    parent_id: null,
+    rest_sec: 90,
+    // extra fields present on the real SessionExerciseRowWithName row:
+    exercise_name: 'Bench',
+    planned_sets: 3,
+  };
+
+  it('projects only the dirty-check field subset (extra live fields stripped)', () => {
+    const state = buildDirtyCheckState(
+      { started_at: 1000, ended_at: 2000 },
+      [liveSE],
+      [liveSet],
+    );
+    expect(state).toEqual({
+      session: { started_at: 1000, ended_at: 2000 },
+      sessionExercises: [{ id: 'se1', ordering: 1, parent_id: null, rest_sec: 90 }],
+      sets: [
+        {
+          id: 's1',
+          weight_kg: 80,
+          reps: 5,
+          is_skipped: 0,
+          ordering: 1,
+          set_kind: 'working',
+          parent_set_id: null,
+          is_logged: 1,
+          notes: null,
+          session_exercise_id: 'se1',
+        },
+      ],
+    });
+  });
+
+  it('normalises undefined ended_at / rest_sec to null', () => {
+    const { id: _id, exercise_name: _n, planned_sets: _p, ...seNoRest } = liveSE;
+    const state = buildDirtyCheckState(
+      { started_at: 1000, ended_at: undefined },
+      [{ id: 'se1', ...seNoRest, rest_sec: undefined }],
+      [liveSet],
+    );
+    expect(state.session.ended_at).toBeNull();
+    expect(state.sessionExercises[0].rest_sec).toBeNull();
+  });
+
+  it('round-trips: building both sides from the same rows yields not-dirty', () => {
+    const current = buildDirtyCheckState({ started_at: 1, ended_at: 2 }, [liveSE], [liveSet]);
+    const snapshot = buildDirtyCheckState({ started_at: 1, ended_at: 2 }, [liveSE], [liveSet]);
+    expect(sessionSnapshotDirty(current, snapshot)).toBe(false);
+  });
+
+  it('a real field edit through the builder surfaces as dirty', () => {
+    const current = buildDirtyCheckState(
+      { started_at: 1, ended_at: 2 },
+      [liveSE],
+      [{ ...liveSet, weight_kg: 85 }],
+    );
+    const snapshot = buildDirtyCheckState({ started_at: 1, ended_at: 2 }, [liveSE], [liveSet]);
+    expect(sessionSnapshotDirty(current, snapshot)).toBe(true);
   });
 });

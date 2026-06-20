@@ -85,6 +85,52 @@ function shallowEqSet(a: DirtyCheckSet, b: DirtyCheckSet): boolean {
   );
 }
 
+/**
+ * Project live (or snapshot) session rows into the field-subset
+ * `sessionSnapshotDirty` compares. Extracted 2026-06-20 (report 09 #4) — the
+ * two parallel inline `.map` projections previously lived in the session
+ * detail edit-mode exit handler (`app/session/[id].tsx`), where they were
+ * un-unit-testable and duplicated. Keeping the field list here, next to the
+ * comparator, means a field added to the dirty-check is changed in exactly
+ * one place. Accepts the richer live row types structurally (they carry a
+ * superset of these fields).
+ */
+export function buildDirtyCheckState(
+  session: { started_at: number; ended_at: number | null | undefined },
+  sessionExercises: ReadonlyArray<{
+    id: string;
+    ordering: number;
+    parent_id: string | null;
+    rest_sec?: number | null;
+  }>,
+  sets: ReadonlyArray<DirtyCheckSet>
+): DirtyCheckState {
+  return {
+    session: {
+      started_at: session.started_at,
+      ended_at: session.ended_at ?? null,
+    },
+    sessionExercises: sessionExercises.map((se) => ({
+      id: se.id,
+      ordering: se.ordering,
+      parent_id: se.parent_id ?? null,
+      rest_sec: se.rest_sec ?? null,
+    })),
+    sets: sets.map((s) => ({
+      id: s.id,
+      weight_kg: s.weight_kg,
+      reps: s.reps,
+      is_skipped: s.is_skipped,
+      ordering: s.ordering,
+      set_kind: s.set_kind,
+      parent_set_id: s.parent_set_id,
+      is_logged: s.is_logged,
+      notes: s.notes,
+      session_exercise_id: s.session_exercise_id,
+    })),
+  };
+}
+
 export function sessionSnapshotDirty(
   current: DirtyCheckState,
   snapshot: DirtyCheckState
