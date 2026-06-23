@@ -14,7 +14,7 @@ import { v011_reusable_superset } from '../../src/db/schema/v011_reusable_supers
  * Individual `vNNN_*.test.ts` files cover each migration's shape in isolation.
  * This file instead asserts the END-TO-END contract of the `migrate()` RUNNER:
  *
- *   1. A fresh (empty) DB migrated to head lands on `user_version = 28` with
+ *   1. A fresh (empty) DB migrated to head lands on `user_version = 29` with
  *      every key table + column present.
  *   2. Running `migrate()` AGAIN is a no-op (idempotent at the runner level —
  *      gated by PRAGMA user_version, no schema churn, no thrown error).
@@ -33,7 +33,7 @@ import { v011_reusable_superset } from '../../src/db/schema/v011_reusable_supers
  * DB, then migrate up) — the closest jest-testable analogue to the restore
  * path, since the native file IO itself is not testable here.
  */
-describe('migrate() full chain (v001 → v027)', () => {
+describe('migrate() full chain (v001 → v029)', () => {
   let db: BetterSqliteDatabase;
 
   beforeEach(() => {
@@ -65,9 +65,9 @@ describe('migrate() full chain (v001 → v027)', () => {
     return rows.map((r) => r.name);
   }
 
-  it('migrates a fresh DB to user_version = 28', async () => {
+  it('migrates a fresh DB to user_version = 29', async () => {
     await migrate(db);
-    expect(await userVersion()).toBe(28);
+    expect(await userVersion()).toBe(29);
   });
 
   it('creates all key tables', async () => {
@@ -255,7 +255,7 @@ describe('migrate() idempotency at the runner level', () => {
     const v = await db.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(v?.user_version).toBe(28);
+    expect(v?.user_version).toBe(29);
   });
 
   it('running migrate() a third time still no-ops (stable fixed point)', async () => {
@@ -430,7 +430,7 @@ describe('migrate() preserves data on a populated re-migrate', () => {
     const v = await db.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(v?.user_version).toBe(28);
+    expect(v?.user_version).toBe(29);
   });
 
   it('re-running the create-only migrations on a populated DB is a safe no-op (🟡 IF NOT EXISTS guard)', async () => {
@@ -539,7 +539,7 @@ describe('migrate() up-migration from an older schema version (restore-path anal
    * run migrate() and assert (a) it climbs to 27 and (b) the pre-existing rows
    * are backfilled correctly, not dropped.
    */
-  it('a v15-era populated DB migrates up to 28 and backfills new columns without row loss', async () => {
+  it('a v15-era populated DB migrates up to 29 and backfills new columns without row loss', async () => {
     // Build a DB only up to v015 by stamping user_version=15 won't work
     // directly (we need the v015 schema). Instead migrate fully, then verify
     // the BACKFILL columns (v019 session_exercise_id, v025 display_rank) are
@@ -572,7 +572,7 @@ describe('migrate() up-migration from an older schema version (restore-path anal
     expect(
       (await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))
         ?.user_version,
-    ).toBe(28);
+    ).toBe(29);
 
     // The legacy row must still exist...
     const row = await db.getFirstAsync<{
