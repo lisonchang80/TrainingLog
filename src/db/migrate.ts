@@ -27,6 +27,7 @@ import { v025_set_display_rank } from './schema/v025_set_display_rank';
 import { v026_session_started_at_index } from './schema/v026_session_started_at_index';
 import { v027_session_exercise_parent_index } from './schema/v027_session_exercise_parent_index';
 import { v028_exercise_media_library } from './schema/v028_exercise_media_library';
+import { v029_exercise_muscle_links } from './schema/v029_exercise_muscle_links';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -69,6 +70,7 @@ const migrations: Record<number, MigrationFn> = {
   26: v026_session_started_at_index,
   27: v027_session_exercise_parent_index,
   28: v028_exercise_media_library,
+  29: v029_exercise_muscle_links,
 };
 
 /**
