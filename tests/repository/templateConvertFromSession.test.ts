@@ -455,8 +455,10 @@ describe('convertSessionToTemplate', () => {
 
     beforeEach(async () => {
       const exercises = await listExercises(db);
-      chestDipId = exercises.find((e) => e.name === 'Chest Dip')!.id;
-      cableId = exercises.find((e) => e.name === 'Cable Crossover')!.id;
+      // 'Chest Dip' / 'Cable Crossover' were archived by v028 — these vars just
+      // need two distinct active exercises; the convert logic is name-agnostic.
+      chestDipId = exercises.find((e) => e.name === 'Incline Bench Press')!.id;
+      cableId = exercises.find((e) => e.name === 'Dumbbell Fly')!.id;
     });
 
     it('Case A: per-card sets stay isolated when session_exercise_id is populated', async () => {

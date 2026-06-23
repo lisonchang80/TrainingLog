@@ -43,7 +43,8 @@ describe('overwriteTemplateBody (ADR-0003 amendment 2026-06-03)', () => {
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
     squatId = exercises.find((e) => e.name === 'Back Squat')!.id;
-    dlId = exercises.find((e) => e.name === 'Deadlift')!.id;
+    // 'Deadlift' was archived by v028 — any third distinct active exercise works.
+    dlId = exercises.find((e) => e.name === 'Rack Pull')!.id;
     await createProgram(db, {
       program: {
         id: 'prog-A',

@@ -513,14 +513,14 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       // dup solo exercise so each row uses a different exercise_id.
       await db.runAsync(
         `INSERT INTO exercise (id, name, load_type, is_builtin) VALUES (?, ?, ?, ?)`,
-        '00000000-0000-4000-8000-000000000099',
+        '00000000-0000-4000-8000-000000000901',
         'TestEx2',
         'loaded',
         0,
       );
       await db.runAsync(
         `INSERT INTO exercise (id, name, load_type, is_builtin) VALUES (?, ?, ?, ?)`,
-        '00000000-0000-4000-8000-00000000009a',
+        '00000000-0000-4000-8000-000000000902',
         'TestEx3',
         'loaded',
         0,
@@ -533,12 +533,12 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       await appendSessionExercise(db, {
         id: 'se-2',
         session_id: 'sess-plan',
-        exercise_id: '00000000-0000-4000-8000-000000000099',
+        exercise_id: '00000000-0000-4000-8000-000000000901',
       });
       await appendSessionExercise(db, {
         id: 'se-3',
         session_id: 'sess-plan',
-        exercise_id: '00000000-0000-4000-8000-00000000009a',
+        exercise_id: '00000000-0000-4000-8000-000000000902',
       });
 
       const summary = await loadActiveSessionSummary(db);
@@ -2135,7 +2135,8 @@ describe('WC handshake — Bug Y exercise-name localisation (task #271)', () => 
   let savedLocale: ReturnType<typeof getLocale>;
   // A custom (non-seed) exercise name has no entry in the i18n dict, so
   // `tExercise` falls back to the verbatim value in EVERY locale.
-  const CUSTOM = '00000000-0000-4000-8000-0000000000ff';
+  // Out of the v028 seed id range (…01–…110) so it stays a genuine custom row.
+  const CUSTOM = '00000000-0000-4000-8000-000000000903';
   const CUSTOM_NAME = 'Zercher Carry (custom)';
 
   beforeEach(async () => {

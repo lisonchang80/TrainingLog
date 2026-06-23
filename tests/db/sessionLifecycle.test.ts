@@ -36,14 +36,17 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
 
   it('seeds the full Exercise Library after v001 + v002 + v006', async () => {
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(66);
+    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived).
+    expect(exercises).toHaveLength(233);
     const names = exercises.map((e) => e.name).sort();
     expect(names).toContain('Bench Press');
     expect(names).toContain('Back Squat');
-    expect(names).toContain('Deadlift');
-    expect(names).toContain('Overhead Press');
+    // Deadlift / Overhead Press / Pull-up were archived by v028 (superseded by
+    // equipment-prefixed curated variants) — assert still-active staples instead.
+    expect(names).toContain('Rack Pull');
+    expect(names).toContain('Dumbbell Shoulder Press');
     expect(names).toContain('Barbell Row');
-    expect(names).toContain('Pull-up');
+    expect(names).toContain('Dumbbell Row');
     expect(names).toContain('Push-up');
   });
 
@@ -183,6 +186,6 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
   it('migration is idempotent — re-running keeps the full Exercise Library', async () => {
     await migrate(db);
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(66);
+    expect(exercises).toHaveLength(233);
   });
 });

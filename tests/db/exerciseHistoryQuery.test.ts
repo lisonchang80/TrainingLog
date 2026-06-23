@@ -45,7 +45,8 @@ async function pickThreeExercises(
   const all = await listExercises(db);
   const bench = all.find((e) => e.name === 'Bench Press')!.id;
   const squat = all.find((e) => e.name === 'Back Squat')!.id;
-  const deadlift = all.find((e) => e.name === 'Deadlift')!.id;
+  // 'Deadlift' was archived by v028 — any third distinct active exercise works.
+  const deadlift = all.find((e) => e.name === 'Rack Pull')!.id;
   return { bench, squat, deadlift };
 }
 

@@ -61,8 +61,10 @@ describe('convertSessionToTemplate × 2 RS sharing an exercise (additional cover
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
     squatId = exercises.find((e) => e.name === 'Back Squat')!.id;
-    chestDipId = exercises.find((e) => e.name === 'Chest Dip')!.id;
-    cableId = exercises.find((e) => e.name === 'Cable Crossover')!.id;
+    // 'Chest Dip' / 'Cable Crossover' were archived by v028 — these vars just
+    // need any two distinct active exercises; the RS logic is name-agnostic.
+    chestDipId = exercises.find((e) => e.name === 'Incline Bench Press')!.id;
+    cableId = exercises.find((e) => e.name === 'Dumbbell Fly')!.id;
     counter = 0;
   });
 

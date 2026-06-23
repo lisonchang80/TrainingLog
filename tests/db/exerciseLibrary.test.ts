@@ -50,7 +50,8 @@ describe('exerciseLibraryRepository', () => {
 
   it('migrate seeds the full exercise library', async () => {
     const exercises = await listExercises(db);
-    expect(exercises.length).toBe(EXERCISE_LIBRARY_SEEDS.length);
+    // v028 grew the active built-in library 66 → 233 (206 new curated, 39 archived).
+    expect(exercises.length).toBe(233);
   });
 
   it('every seeded exercise has muscle_group_id backfilled (incl. v001/v002 rows)', async () => {
@@ -68,15 +69,17 @@ describe('exerciseLibraryRepository', () => {
         byExercise.set(l.exercise_id, (byExercise.get(l.exercise_id) ?? 0) + 1);
       }
     }
-    const exercises = await listExercises(db);
-    for (const ex of exercises) {
-      expect(byExercise.get(ex.id) ?? 0).toBeGreaterThanOrEqual(1);
+    // Scope to the v006 library seeds — those carry primary/secondary muscle
+    // mappings. The v028 curated additions resolve muscle_group only (no
+    // fine-grained muscle links by design), so they're not asserted here.
+    for (const seed of EXERCISE_LIBRARY_SEEDS) {
+      expect(byExercise.get(seed.id) ?? 0).toBeGreaterThanOrEqual(1);
     }
   });
 
   it('listExercisesWithLinks returns same dataset as separate calls', async () => {
     const { exercises, links } = await listExercisesWithLinks(db);
-    expect(exercises.length).toBe(EXERCISE_LIBRARY_SEEDS.length);
+    expect(exercises.length).toBe(233);
     expect(links.length).toBeGreaterThan(0);
   });
 
@@ -268,7 +271,7 @@ describe('exerciseLibraryRepository', () => {
     const exercises = await listExercises(db);
     const muscles = await listMuscles(db);
     const mgs = await listMuscleGroups(db);
-    expect(exercises.length).toBe(EXERCISE_LIBRARY_SEEDS.length);
+    expect(exercises.length).toBe(233);
     expect(muscles).toHaveLength(19);
     expect(mgs).toHaveLength(11);
   });
