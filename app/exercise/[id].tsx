@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseMediaFrames } from '@/components/exercise/exercise-media-frames';
 import { MuscleBodyTagger } from '@/components/exercise/muscle-body-tagger';
 import { useDatabase } from '@/components/database-provider';
-import { muscleHighlightMap } from '@/src/domain/exercise/exerciseLibrary';
+import { resolveExerciseHighlight } from '@/src/domain/exercise/exerciseLibrary';
 import type {
   ExerciseWithMuscles,
   MuscleGroup,
@@ -22,6 +22,7 @@ import {
   getExerciseMuscleLinks,
   getExerciseWithMuscles,
   listMuscleGroups,
+  listMuscles,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import {
   t,
@@ -72,13 +73,17 @@ export default function ExerciseDetailScreen() {
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [d, links, mgs] = await Promise.all([
+    const [d, links, mgs, ms] = await Promise.all([
       getExerciseWithMuscles(db, id),
       getExerciseMuscleLinks(db, id),
       listMuscleGroups(db),
+      listMuscles(db),
     ]);
     setData(d);
-    setHighlight(muscleHighlightMap(links));
+    // Precise per-muscle links if present; otherwise fall back to lighting the
+    // whole muscle group so curated exercises with only a group still show a
+    // body diagram (v028 library — 206 new exercises have no fine links).
+    setHighlight(resolveExerciseHighlight(links, d?.exercise.muscle_group_id, ms));
     setMuscleGroups(mgs);
   }, [db, id]);
 
@@ -143,7 +148,7 @@ export default function ExerciseDetailScreen() {
           />
         )}
 
-        {(data.primary.length > 0 || data.secondary.length > 0) && (
+        {highlight.size > 0 && (
           <View style={styles.diagramCard}>
             <MuscleBodyTagger highlight={highlight} mode="readonly" />
           </View>
