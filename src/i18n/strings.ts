@@ -2044,12 +2044,58 @@ export type StringKey<NS extends Namespace> = keyof StringsTree[NS];
 
 let currentLocale: Locale = 'zh';
 
+/**
+ * Locale "version" — a monotonically increasing counter bumped on every
+ * effective `setLocale()` change. React components subscribe to it (via
+ * `useLocale()` in `./useLocale`) so a language switch can force an app-wide
+ * re-render WITHOUT an app restart.
+ *
+ * Why a counter + subscription instead of a React Context for the locale?
+ * `t()` / `tExercise()` / the `dynamic.ts` helpers are plain functions read at
+ * hundreds of callsites — not hooks — so a Context value alone would never
+ * reach them. Keeping the locale as a module singleton and exposing a tiny
+ * subscribe/snapshot pair lets `useSyncExternalStore` drive a single root-level
+ * remount (re-key the navigator) that re-runs every `t(...)` with the new
+ * locale. See `app/_layout.tsx` for the consumer.
+ */
+let localeVersion = 0;
+const localeListeners = new Set<() => void>();
+
 export function getLocale(): Locale {
   return currentLocale;
 }
 
+/**
+ * Switch the active locale. No-op (and no version bump / notify) when the
+ * locale is unchanged, so a redundant pick never triggers a remount.
+ */
 export function setLocale(locale: Locale): void {
+  if (locale === currentLocale) return;
   currentLocale = locale;
+  localeVersion += 1;
+  // Snapshot before notifying so a listener that (un)subscribes during the
+  // callback can't mutate the set mid-iteration.
+  for (const listener of Array.from(localeListeners)) listener();
+}
+
+/**
+ * Snapshot of the current locale version. Pairs with `subscribeLocale` for
+ * `useSyncExternalStore`. The value itself is opaque — consumers only care
+ * that it changes when the locale changes.
+ */
+export function getLocaleVersion(): number {
+  return localeVersion;
+}
+
+/**
+ * Subscribe to locale changes. Returns an unsubscribe function. Used by the
+ * `useLocale()` hook; not intended for direct component use.
+ */
+export function subscribeLocale(listener: () => void): () => void {
+  localeListeners.add(listener);
+  return () => {
+    localeListeners.delete(listener);
+  };
 }
 
 // ---------------------------------------------------------------------------
