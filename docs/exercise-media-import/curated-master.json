@@ -29,7 +29,7 @@
  },
  {
   "part": "腿",
-  "zh": "槓鈴弓步蹲",
+  "zh": "槓鈴弓箭步",
   "equip_zh": "槓鈴",
   "en": "Barbell Lunge",
   "id": "Barbell_Lunge",
@@ -57,7 +57,7 @@
  },
  {
   "part": "腿",
-  "zh": "羅馬尼亞硬舉",
+  "zh": "槓鈴羅馬尼亞硬舉",
   "equip_zh": "槓鈴",
   "en": "Romanian Deadlift",
   "id": "Romanian_Deadlift",
@@ -71,7 +71,7 @@
  },
  {
   "part": "腿",
-  "zh": "相撲硬舉",
+  "zh": "槓鈴相撲硬舉",
   "equip_zh": "槓鈴",
   "en": "Sumo Deadlift",
   "id": "Sumo_Deadlift",
@@ -85,7 +85,7 @@
  },
  {
   "part": "腿",
-  "zh": "直腿硬舉",
+  "zh": "槓鈴直腿硬舉",
   "equip_zh": "槓鈴",
   "en": "Stiff-Legged Barbell Deadlift",
   "id": "Stiff-Legged_Barbell_Deadlift",
@@ -183,7 +183,7 @@
  },
  {
   "part": "肩",
-  "zh": "槓鈴肩推",
+  "zh": "站姿槓鈴肩推",
   "equip_zh": "槓鈴",
   "en": "Barbell Shoulder Press",
   "id": "Barbell_Shoulder_Press",
@@ -757,7 +757,7 @@
  },
  {
   "part": "腿",
-  "zh": "啞鈴弓步蹲",
+  "zh": "啞鈴弓箭步",
   "equip_zh": "啞鈴",
   "en": "Dumbbell Lunges",
   "id": "Dumbbell_Lunges",
@@ -785,7 +785,7 @@
  },
  {
   "part": "腿",
-  "zh": "相撲啞鈴深蹲",
+  "zh": "啞鈴相撲深蹲",
   "equip_zh": "啞鈴",
   "en": "Plie Dumbbell Squat",
   "id": "Plie_Dumbbell_Squat",
@@ -1163,7 +1163,7 @@
  },
  {
   "part": "三頭",
-  "zh": "三頭下壓",
+  "zh": "直桿三頭下壓",
   "equip_zh": "滑輪",
   "en": "Triceps Pushdown",
   "id": "Triceps_Pushdown",
@@ -1191,7 +1191,7 @@
  },
  {
   "part": "三頭",
-  "zh": "繩索過頭三頭伸展",
+  "zh": "繩索過頭臂屈伸",
   "equip_zh": "滑輪",
   "en": "Cable Rope Overhead Triceps Extension",
   "id": "Cable_Rope_Overhead_Triceps_Extension",
@@ -1387,7 +1387,7 @@
  },
  {
   "part": "腿",
-  "zh": "坐姿腿伸展",
+  "zh": "坐姿腿屈伸",
   "equip_zh": "固定機械",
   "en": "Leg Extensions",
   "id": "Leg_Extensions",
@@ -1625,7 +1625,7 @@
  },
  {
   "part": "臀",
-  "zh": "大腿外展機",
+  "zh": "坐姿腿外展",
   "equip_zh": "固定機械",
   "en": "Thigh Abductor",
   "id": "Thigh_Abductor",
@@ -1639,7 +1639,7 @@
  },
  {
   "part": "臀",
-  "zh": "大腿內收機",
+  "zh": "坐姿腿內收",
   "equip_zh": "固定機械",
   "en": "Thigh Adductor",
   "id": "Thigh_Adductor",
@@ -1667,7 +1667,7 @@
  },
  {
   "part": "腿",
-  "zh": "高腳杯深蹲",
+  "zh": "壺鈴高腳杯深蹲",
   "equip_zh": "壺鈴",
   "en": "Goblet Squat",
   "id": "Goblet_Squat",
@@ -2129,5 +2129,905 @@
   "img": "placeholder",
   "load_type": null,
   "note": "DB無六角槓划船；近似槓鈴划船"
+ },
+ {
+  "part": "腿",
+  "zh": "澤奇深蹲",
+  "equip_zh": "槓鈴",
+  "en": "Zercher Squats",
+  "id": "Zercher_Squats",
+  "images": [
+   "Zercher_Squats/0.jpg",
+   "Zercher_Squats/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "腿",
+  "zh": "槓鈴箱蹲",
+  "equip_zh": "槓鈴",
+  "en": "Box Squat",
+  "id": "Box_Squat",
+  "images": [
+   "Box_Squat/0.jpg",
+   "Box_Squat/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯分腿蹲",
+  "equip_zh": "史密斯機",
+  "en": "Smith Single-Leg Split Squat",
+  "id": "Smith_Single-Leg_Split_Squat",
+  "images": [
+   "Smith_Single-Leg_Split_Squat/0.jpg",
+   "Smith_Single-Leg_Split_Squat/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "腿",
+  "zh": "坐姿腿屈伸（單腿）",
+  "equip_zh": "固定機械",
+  "en": "Single-Leg Leg Extension",
+  "id": "Single-Leg_Leg_Extension",
+  "images": [
+   "Single-Leg_Leg_Extension/0.jpg",
+   "Single-Leg_Leg_Extension/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "腿",
+  "zh": "六角槓硬舉",
+  "equip_zh": "槓鈴",
+  "en": "Trap Bar Deadlift",
+  "id": "Trap_Bar_Deadlift",
+  "images": [
+   "Trap_Bar_Deadlift/0.jpg",
+   "Trap_Bar_Deadlift/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": "六角槓→equip槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "槓鈴抓舉",
+  "equip_zh": "槓鈴",
+  "en": "Snatch",
+  "id": "Snatch",
+  "images": [
+   "Snatch/0.jpg",
+   "Snatch/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "腿",
+  "zh": "架上深蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無pin/Anderson squat"
+ },
+ {
+  "part": "腿",
+  "zh": "槓鈴單腿硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無barbell single-leg DL"
+ },
+ {
+  "part": "腿",
+  "zh": "槓鈴分腿硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無barbell split DL"
+ },
+ {
+  "part": "腿",
+  "zh": "SSB深蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無safety-bar專項槓"
+ },
+ {
+  "part": "腿",
+  "zh": "SSB箱蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無safety-bar box"
+ },
+ {
+  "part": "腿",
+  "zh": "槓鈴分腿蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅side split squat，無正面"
+ },
+ {
+  "part": "腿",
+  "zh": "SSB分腿蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無safety-bar split"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯澤奇深蹲",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無Smith Zercher"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯硬舉",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅Smith Stiff-Legged DL"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯單腿硬舉",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無Smith single-leg DL"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯分腿硬舉",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無Smith split DL"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯羅馬尼亞硬舉",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅Smith Stiff-Legged DL，可借"
+ },
+ {
+  "part": "腿",
+  "zh": "史密斯弓箭步",
+  "equip_zh": "史密斯機",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無Smith lunge"
+ },
+ {
+  "part": "腿",
+  "zh": "腿推（單腿）",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙腿Leg Press"
+ },
+ {
+  "part": "腿",
+  "zh": "俯臥腿彎舉（單腿）",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙腿Lying Leg Curls，可借"
+ },
+ {
+  "part": "腿",
+  "zh": "坐姿腿彎舉（單腿）",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙腿Seated Leg Curl，可借"
+ },
+ {
+  "part": "腿",
+  "zh": "啞鈴高腳杯深蹲",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB Goblet Squat是壺鈴握法，可借"
+ },
+ {
+  "part": "腿",
+  "zh": "啞鈴羅馬尼亞硬舉",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅Stiff-Legged Dumbbell DL，可借"
+ },
+ {
+  "part": "腿",
+  "zh": "啞鈴單腿硬舉",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無dumbbell single-leg DL"
+ },
+ {
+  "part": "腿",
+  "zh": "啞鈴分腿硬舉",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無dumbbell split DL"
+ },
+ {
+  "part": "腿",
+  "zh": "地雷管硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無landmine；equip歸槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "地雷管羅馬尼亞硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無landmine；equip歸槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "地雷管單腿硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無landmine；equip歸槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "地雷管分腿硬舉",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無landmine；equip歸槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "六角槓深蹲",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無trap-bar squat；equip歸槓鈴"
+ },
+ {
+  "part": "腿",
+  "zh": "六角槓箭步走",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無trap-bar lunge；equip歸槓鈴"
+ },
+ {
+  "part": "臀",
+  "zh": "啞鈴臀推",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅Barbell Hip Thrust，可借"
+ },
+ {
+  "part": "臀",
+  "zh": "啞鈴單腿臀推",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無；近似Single Leg Glute Bridge"
+ },
+ {
+  "part": "臀",
+  "zh": "滑輪側踢腿",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅Cable髖內收(反方向)"
+ },
+ {
+  "part": "臀",
+  "zh": "機械後踢腿",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅自重Glute Kickback，可借"
+ },
+ {
+  "part": "臀",
+  "zh": "機械側踢腿",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "站姿髖外展機；DB僅坐姿外展機"
+ },
+ {
+  "part": "臀",
+  "zh": "啞鈴側弓箭步",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無side/lateral lunge"
+ },
+ {
+  "part": "肩",
+  "zh": "槓片前平舉",
+  "equip_zh": "其他",
+  "en": "Front Plate Raise",
+  "id": "Front_Plate_Raise",
+  "images": [
+   "Front_Plate_Raise/0.jpg",
+   "Front_Plate_Raise/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": "槓片→equip其他"
+ },
+ {
+  "part": "肩",
+  "zh": "啞鈴單側坐姿肩推",
+  "equip_zh": "啞鈴",
+  "en": "Dumbbell One-Arm Shoulder Press",
+  "id": "Dumbbell_One-Arm_Shoulder_Press",
+  "images": [
+   "Dumbbell_One-Arm_Shoulder_Press/0.jpg",
+   "Dumbbell_One-Arm_Shoulder_Press/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "肩",
+  "zh": "滑輪單側側平舉",
+  "equip_zh": "滑輪",
+  "en": "Standing Low-Pulley Deltoid Raise",
+  "id": "Standing_Low-Pulley_Deltoid_Raise",
+  "images": [
+   "Standing_Low-Pulley_Deltoid_Raise/0.jpg",
+   "Standing_Low-Pulley_Deltoid_Raise/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": "單臂跨身側舉"
+ },
+ {
+  "part": "肩",
+  "zh": "滑輪肩外旋",
+  "equip_zh": "滑輪",
+  "en": "External Rotation with Cable",
+  "id": "External_Rotation_with_Cable",
+  "images": [
+   "External_Rotation_with_Cable/0.jpg",
+   "External_Rotation_with_Cable/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "肩",
+  "zh": "滑輪肩內旋",
+  "equip_zh": "滑輪",
+  "en": "Cable Internal Rotation",
+  "id": "Cable_Internal_Rotation",
+  "images": [
+   "Cable_Internal_Rotation/0.jpg",
+   "Cable_Internal_Rotation/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "肩",
+  "zh": "滑輪前平舉",
+  "equip_zh": "滑輪",
+  "en": "Front Cable Raise",
+  "id": "Front_Cable_Raise",
+  "images": [
+   "Front_Cable_Raise/0.jpg",
+   "Front_Cable_Raise/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "肩",
+  "zh": "啞鈴後束肩旋",
+  "equip_zh": "啞鈴",
+  "en": "Reverse Flyes With External Rotation",
+  "id": "Reverse_Flyes_With_External_Rotation",
+  "images": [
+   "Reverse_Flyes_With_External_Rotation/0.jpg",
+   "Reverse_Flyes_With_External_Rotation/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "肩",
+  "zh": "啞鈴單側跪姿肩推",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅坐姿單臂"
+ },
+ {
+  "part": "肩",
+  "zh": "槓片單側跪姿肩推",
+  "equip_zh": "其他",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無；槓片→equip其他"
+ },
+ {
+  "part": "肩",
+  "zh": "槓鈴暫停肩推",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無paused"
+ },
+ {
+  "part": "肩",
+  "zh": "槓鈴架上肩推",
+  "equip_zh": "槓鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無pin/rack肩推"
+ },
+ {
+  "part": "肩",
+  "zh": "站姿滑輪側平舉",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "≈滑輪單側側平舉(DB同一)"
+ },
+ {
+  "part": "肩",
+  "zh": "滑輪單邊後束飛鳥",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙臂Cable Rear Delt Fly"
+ },
+ {
+  "part": "肩",
+  "zh": "機械側平舉",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無機械側平舉"
+ },
+ {
+  "part": "肩",
+  "zh": "坐姿啞鈴前平舉",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅站姿Front Dumbbell Raise，可借"
+ },
+ {
+  "part": "肩",
+  "zh": "啞鈴單邊後束肩旋",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無單臂版"
+ },
+ {
+  "part": "肩",
+  "zh": "半俯身側平舉",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "近似Seated Bent-Over Rear Delt Raise，可借"
+ },
+ {
+  "part": "肩",
+  "zh": "蝴蝶機單側後束飛鳥",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙臂Reverse Machine Flyes"
+ },
+ {
+  "part": "三頭",
+  "zh": "V-bar三頭下壓",
+  "equip_zh": "滑輪",
+  "en": "Triceps Pushdown - V-Bar Attachment",
+  "id": "Triceps_Pushdown_-_V-Bar_Attachment",
+  "images": [
+   "Triceps_Pushdown_-_V-Bar_Attachment/0.jpg",
+   "Triceps_Pushdown_-_V-Bar_Attachment/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "三頭",
+  "zh": "反手直桿三頭下壓",
+  "equip_zh": "滑輪",
+  "en": "Reverse Grip Triceps Pushdown",
+  "id": "Reverse_Grip_Triceps_Pushdown",
+  "images": [
+   "Reverse_Grip_Triceps_Pushdown/0.jpg",
+   "Reverse_Grip_Triceps_Pushdown/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "三頭",
+  "zh": "單側反手三頭下壓",
+  "equip_zh": "滑輪",
+  "en": "Cable One Arm Tricep Extension",
+  "id": "Cable_One_Arm_Tricep_Extension",
+  "images": [
+   "Cable_One_Arm_Tricep_Extension/0.jpg",
+   "Cable_One_Arm_Tricep_Extension/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": "DB單臂高滑輪=supinated反手"
+ },
+ {
+  "part": "三頭",
+  "zh": "單側平板啞鈴臂屈伸",
+  "equip_zh": "啞鈴",
+  "en": "One Arm Pronated Dumbbell Triceps Extension",
+  "id": "One_Arm_Pronated_Dumbbell_Triceps_Extension",
+  "images": [
+   "One_Arm_Pronated_Dumbbell_Triceps_Extension/0.jpg",
+   "One_Arm_Pronated_Dumbbell_Triceps_Extension/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": "臥姿單臂"
+ },
+ {
+  "part": "三頭",
+  "zh": "單側繩索三頭下壓",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無單臂繩索下壓"
+ },
+ {
+  "part": "三頭",
+  "zh": "單側三頭下壓",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB單臂高滑輪為反手(已給單側反手)"
+ },
+ {
+  "part": "三頭",
+  "zh": "單側繩索過頭臂屈伸",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB僅雙臂繩索過頭"
+ },
+ {
+  "part": "小臂",
+  "zh": "坐姿槓鈴腕彎舉（反手）",
+  "equip_zh": "槓鈴",
+  "en": "Seated Palms-Down Barbell Wrist Curl",
+  "id": "Seated_Palms-Down_Barbell_Wrist_Curl",
+  "images": [
+   "Seated_Palms-Down_Barbell_Wrist_Curl/0.jpg",
+   "Seated_Palms-Down_Barbell_Wrist_Curl/1.jpg"
+  ],
+  "img": "real",
+  "load_type": null,
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "單臂手提箱深蹲",
+  "equip_zh": "啞鈴",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": "loaded",
+  "note": "DB無suitcase squat"
+ },
+ {
+  "part": "核心",
+  "zh": "捲腹（自重）",
+  "equip_zh": "自重",
+  "en": "Crunches",
+  "id": "Crunches",
+  "images": [
+   "Crunches/0.jpg",
+   "Crunches/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "捲腹（負重）",
+  "equip_zh": "自重",
+  "en": "Weighted Crunches",
+  "id": "Weighted_Crunches",
+  "images": [
+   "Weighted_Crunches/0.jpg",
+   "Weighted_Crunches/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "loaded",
+  "note": "DB圖持藥球"
+ },
+ {
+  "part": "核心",
+  "zh": "懸掛抬腿（自重）",
+  "equip_zh": "自重",
+  "en": "Hanging Leg Raise",
+  "id": "Hanging_Leg_Raise",
+  "images": [
+   "Hanging_Leg_Raise/0.jpg",
+   "Hanging_Leg_Raise/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "懸掛抬腿（負重）",
+  "equip_zh": "自重",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": "loaded",
+  "note": "DB僅自重Hanging Leg Raise，可借"
+ },
+ {
+  "part": "核心",
+  "zh": "機械側捲腹",
+  "equip_zh": "固定機械",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": "loaded",
+  "note": "DB無機械側捲腹(僅正面Ab Crunch Machine)"
+ },
+ {
+  "part": "核心",
+  "zh": "俄羅斯轉體",
+  "equip_zh": "自重",
+  "en": "Russian Twist",
+  "id": "Russian_Twist",
+  "images": [
+   "Russian_Twist/0.jpg",
+   "Russian_Twist/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "平躺抬腿",
+  "equip_zh": "自重",
+  "en": "Flat Bench Lying Leg Raise",
+  "id": "Flat_Bench_Lying_Leg_Raise",
+  "images": [
+   "Flat_Bench_Lying_Leg_Raise/0.jpg",
+   "Flat_Bench_Lying_Leg_Raise/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "空中單車",
+  "equip_zh": "自重",
+  "en": "Air Bike",
+  "id": "Air_Bike",
+  "images": [
+   "Air_Bike/0.jpg",
+   "Air_Bike/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "核心",
+  "zh": "平板支撐",
+  "equip_zh": "自重",
+  "en": "Plank",
+  "id": "Plank",
+  "images": [
+   "Plank/0.jpg",
+   "Plank/1.jpg"
+  ],
+  "img": "real",
+  "load_type": "bodyweight",
+  "note": null
+ },
+ {
+  "part": "小腿",
+  "zh": "坐姿槓片提踵",
+  "equip_zh": "其他",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "DB無槓片版；近似Barbell Seated Calf Raise；槓片→其他"
  }
 ]

@@ -16,8 +16,8 @@
 ## 器材對應（Free Exercise DB → TrainingLog 8-enum）
 `barbell→槓鈴`、`dumbbell→啞鈴`、`kettlebells→壺鈴`、`cable→滑輪`、`machine→固定機械`、`body only/other(自重類)→自重`；名字含 `Smith`→`史密斯機`。**地雷管放棄**（DB 無分類＋enum 無此值）。
 
-## 清單總覽：155 個（142 有真照 / 13 placeholder）
-各部位：胸 30、背 30、肩 21、斜方 5、二頭 12、三頭 12、小臂 1、腿 25、臀 6、小腿 6、核心 7
+## 清單總覽：230 個（167 有真照 / 63 placeholder）
+各部位：胸 30、背 30、肩 39、斜方 5、二頭 12、三頭 19、小臂 2、腿 57、臀 12、小腿 7、核心 17
 
 ### 【胸】（30）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
@@ -87,30 +87,48 @@
 | 單臂直臂下壓 | 滑輪 | ⬚placeholder | DB無單臂；近似直臂下壓 |
 | 坐姿划船（寬握） | 滑輪 | ⬚placeholder | DB無寬握變體；近似坐姿划船 |
 
-### 【肩】（21）
+### 【肩】（39）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
 | 史密斯肩推 | 史密斯機 | 📷 | Smith Machine Overhead Shoulder Press |
+| 俯身後束飛鳥 | 啞鈴 | 📷 | Reverse Flyes |
+| 啞鈴側平舉 | 啞鈴 | 📷 | Side Lateral Raise |
+| 啞鈴前平舉 | 啞鈴 | 📷 | Front Dumbbell Raise |
+| 啞鈴單側坐姿肩推 | 啞鈴 | 📷 | Dumbbell One-Arm Shoulder Press |
+| 啞鈴後束肩旋 | 啞鈴 | 📷 | Reverse Flyes With External Rotation |
 | 啞鈴肩推 | 啞鈴 | 📷 | Dumbbell Shoulder Press |
 | 坐姿啞鈴肩推 | 啞鈴 | 📷 | Seated Dumbbell Press |
 | 阿諾肩推 | 啞鈴 | 📷 | Arnold Dumbbell Press |
-| 啞鈴側平舉 | 啞鈴 | 📷 | Side Lateral Raise |
-| 啞鈴前平舉 | 啞鈴 | 📷 | Front Dumbbell Raise |
-| 俯身後束飛鳥 | 啞鈴 | 📷 | Reverse Flyes |
-| 機械肩推 | 固定機械 | 📷 | Machine Shoulder (Military) Press |
 | 反向蝴蝶機後束 | 固定機械 | 📷 | Reverse Machine Flyes |
-| 壺鈴肩推 | 壺鈴 | 📷 | Two-Arm Kettlebell Military Press |
+| 機械肩推 | 固定機械 | 📷 | Machine Shoulder (Military) Press |
+| 坐姿滑輪側平舉 | 滑輪 | 📷 | Cable Seated Lateral Raise |
+| 滑輪前平舉 | 滑輪 | 📷 | Front Cable Raise |
+| 滑輪單側側平舉 | 滑輪 | 📷 | Standing Low-Pulley Deltoid Raise（單臂跨身側舉） |
+| 滑輪後束飛鳥 | 滑輪 | 📷 | Cable Rear Delt Fly |
+| 滑輪肩內旋 | 滑輪 | 📷 | Cable Internal Rotation |
+| 滑輪肩外旋 | 滑輪 | 📷 | External Rotation with Cable |
+| 面拉 | 滑輪 | 📷 | Face Pull |
+| 土耳其起立 | 壺鈴 | 📷 | Kettlebell Turkish Get-Up (Squat style) |
 | 壺鈴抓舉 | 壺鈴 | 📷 | One-Arm Kettlebell Snatch |
 | 壺鈴推蹲 | 壺鈴 | 📷 | Kettlebell Thruster |
-| 土耳其起立 | 壺鈴 | 📷 | Kettlebell Turkish Get-Up (Squat style) |
-| 槓鈴肩推 | 槓鈴 | 📷 | Barbell Shoulder Press |
-| 坐姿槓鈴肩推 | 槓鈴 | 📷 | Seated Barbell Military Press |
-| 站姿軍事推舉 | 槓鈴 | 📷 | Standing Military Press |
+| 壺鈴肩推 | 壺鈴 | 📷 | Two-Arm Kettlebell Military Press |
 | 借力推 | 槓鈴 | 📷 | Push Press |
+| 坐姿槓鈴肩推 | 槓鈴 | 📷 | Seated Barbell Military Press |
 | 槓鈴直立划船 | 槓鈴 | 📷 | Upright Barbell Row |
-| 面拉 | 滑輪 | 📷 | Face Pull |
-| 滑輪後束飛鳥 | 滑輪 | 📷 | Cable Rear Delt Fly |
-| 坐姿滑輪側平舉 | 滑輪 | 📷 | Cable Seated Lateral Raise |
+| 站姿槓鈴肩推 | 槓鈴 | 📷 | Barbell Shoulder Press |
+| 站姿軍事推舉 | 槓鈴 | 📷 | Standing Military Press |
+| 槓片前平舉 | 其他 | 📷 | Front Plate Raise（槓片→equip其他） |
+| 半俯身側平舉 | 啞鈴 | ⬚placeholder | 近似Seated Bent-Over Rear Delt Raise，可借 |
+| 啞鈴單側跪姿肩推 | 啞鈴 | ⬚placeholder | DB僅坐姿單臂 |
+| 啞鈴單邊後束肩旋 | 啞鈴 | ⬚placeholder | DB無單臂版 |
+| 坐姿啞鈴前平舉 | 啞鈴 | ⬚placeholder | DB僅站姿Front Dumbbell Raise，可借 |
+| 機械側平舉 | 固定機械 | ⬚placeholder | DB無機械側平舉 |
+| 蝴蝶機單側後束飛鳥 | 固定機械 | ⬚placeholder | DB僅雙臂Reverse Machine Flyes |
+| 滑輪單邊後束飛鳥 | 滑輪 | ⬚placeholder | DB僅雙臂Cable Rear Delt Fly |
+| 站姿滑輪側平舉 | 滑輪 | ⬚placeholder | ≈滑輪單側側平舉(DB同一) |
+| 槓鈴暫停肩推 | 槓鈴 | ⬚placeholder | DB無paused |
+| 槓鈴架上肩推 | 槓鈴 | ⬚placeholder | DB無pin/rack肩推 |
+| 槓片單側跪姿肩推 | 其他 | ⬚placeholder | DB無；槓片→equip其他 |
 
 ### 【斜方】（5）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
@@ -137,86 +155,144 @@
 | 繩索錘式彎舉 | 滑輪 | 📷 | Cable Hammer Curls - Rope Attachment |
 | 滑輪牧師彎舉 | 滑輪 | 📷 | Cable Preacher Curl |
 
-### 【三頭】（12）
+### 【三頭】（19）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
 | 史密斯窄握臥推 | 史密斯機 | 📷 | Smith Machine Close-Grip Bench Press |
-| 臥姿啞鈴三頭伸展 | 啞鈴 | 📷 | Lying Dumbbell Tricep Extension |
-| 站姿過頭啞鈴三頭伸展 | 啞鈴 | 📷 | Standing Dumbbell Triceps Extension |
 | 啞鈴三頭後屈伸 | 啞鈴 | 📷 | Tricep Dumbbell Kickback |
+| 單側平板啞鈴臂屈伸 | 啞鈴 | 📷 | One Arm Pronated Dumbbell Triceps Extension（臥姿單臂） |
 | 坐姿啞鈴三頭推 | 啞鈴 | 📷 | Seated Triceps Press |
+| 站姿過頭啞鈴三頭伸展 | 啞鈴 | 📷 | Standing Dumbbell Triceps Extension |
+| 臥姿啞鈴三頭伸展 | 啞鈴 | 📷 | Lying Dumbbell Tricep Extension |
 | 機械三頭伸展 | 固定機械 | 📷 | Machine Triceps Extension |
 | 機械臂屈伸 | 固定機械 | 📷 | Dip Machine |
-| 窄握槓鈴臥推 | 槓鈴 | 📷 | Close-Grip Barbell Bench Press |
-| 槓鈴顱骨粉碎 | 槓鈴 | 📷 | Lying Close-Grip Barbell Triceps Extension Behind The Head |
-| 三頭下壓 | 滑輪 | 📷 | Triceps Pushdown |
+| V-bar三頭下壓 | 滑輪 | 📷 | Triceps Pushdown - V-Bar Attachment |
+| 反手直桿三頭下壓 | 滑輪 | 📷 | Reverse Grip Triceps Pushdown |
+| 單側反手三頭下壓 | 滑輪 | 📷 | Cable One Arm Tricep Extension（DB單臂高滑輪=supinated反手） |
+| 直桿三頭下壓 | 滑輪 | 📷 | Triceps Pushdown |
 | 繩索三頭下壓 | 滑輪 | 📷 | Triceps Pushdown - Rope Attachment |
-| 繩索過頭三頭伸展 | 滑輪 | 📷 | Cable Rope Overhead Triceps Extension |
+| 繩索過頭臂屈伸 | 滑輪 | 📷 | Cable Rope Overhead Triceps Extension |
+| 槓鈴顱骨粉碎 | 槓鈴 | 📷 | Lying Close-Grip Barbell Triceps Extension Behind The Head |
+| 窄握槓鈴臥推 | 槓鈴 | 📷 | Close-Grip Barbell Bench Press |
+| 單側三頭下壓 | 滑輪 | ⬚placeholder | DB單臂高滑輪為反手(已給單側反手) |
+| 單側繩索三頭下壓 | 滑輪 | ⬚placeholder | DB無單臂繩索下壓 |
+| 單側繩索過頭臂屈伸 | 滑輪 | ⬚placeholder | DB僅雙臂繩索過頭 |
 
-### 【小臂】（1）
+### 【小臂】（2）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
 | 坐姿槓鈴腕彎舉 | 槓鈴 | 📷 | Seated Palm-Up Barbell Wrist Curl |
+| 坐姿槓鈴腕彎舉（反手） | 槓鈴 | 📷 | Seated Palms-Down Barbell Wrist Curl |
 
-### 【腿】（25）
+### 【腿】（57）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
+| 史密斯分腿蹲 | 史密斯機 | 📷 | Smith Single-Leg Split Squat |
 | 史密斯深蹲 | 史密斯機 | 📷 | Smith Machine Squat |
-| 啞鈴深蹲 | 啞鈴 | 📷 | Dumbbell Squat |
-| 啞鈴弓步蹲 | 啞鈴 | 📷 | Dumbbell Lunges |
-| 啞鈴登階 | 啞鈴 | 📷 | Dumbbell Step Ups |
-| 相撲啞鈴深蹲 | 啞鈴 | 📷 | Plie Dumbbell Squat |
 | 啞鈴分腿蹲 | 啞鈴 | 📷 | Split Squat with Dumbbells |
+| 啞鈴弓箭步 | 啞鈴 | 📷 | Dumbbell Lunges |
+| 啞鈴深蹲 | 啞鈴 | 📷 | Dumbbell Squat |
+| 啞鈴登階 | 啞鈴 | 📷 | Dumbbell Step Ups |
 | 啞鈴直腿硬舉 | 啞鈴 | 📷 | Stiff-Legged Dumbbell Deadlift |
-| 腿推 | 固定機械 | 📷 | Leg Press |
-| 坐姿腿伸展 | 固定機械 | 📷 | Leg Extensions |
-| 哈克深蹲 | 固定機械 | 📷 | Hack Squat |
+| 啞鈴相撲深蹲 | 啞鈴 | 📷 | Plie Dumbbell Squat |
 | 俯臥腿彎舉 | 固定機械 | 📷 | Lying Leg Curls |
+| 哈克深蹲 | 固定機械 | 📷 | Hack Squat |
+| 坐姿腿屈伸 | 固定機械 | 📷 | Leg Extensions |
+| 坐姿腿屈伸（單腿） | 固定機械 | 📷 | Single-Leg Leg Extension |
 | 坐姿腿彎舉 | 固定機械 | 📷 | Seated Leg Curl |
-| 壺鈴擺盪 | 壺鈴 | 📷 | One-Arm Kettlebell Swings |
-| 高腳杯深蹲 | 壺鈴 | 📷 | Goblet Squat |
-| 雙壺鈴前蹲 | 壺鈴 | 📷 | Front Squats With Two Kettlebells |
-| 壺鈴單腿硬舉 | 壺鈴 | 📷 | Kettlebell One-Legged Deadlift |
+| 腿推 | 固定機械 | 📷 | Leg Press |
 | 壺鈴上膊 | 壺鈴 | 📷 | One-Arm Kettlebell Clean |
-| 槓鈴深蹲 | 槓鈴 | 📷 | Barbell Squat |
-| 槓鈴前蹲 | 槓鈴 | 📷 | Front Barbell Squat |
-| 槓鈴弓步蹲 | 槓鈴 | 📷 | Barbell Lunge |
-| 槓鈴硬舉 | 槓鈴 | 📷 | Barbell Deadlift |
-| 羅馬尼亞硬舉 | 槓鈴 | 📷 | Romanian Deadlift |
-| 相撲硬舉 | 槓鈴 | 📷 | Sumo Deadlift |
-| 直腿硬舉 | 槓鈴 | 📷 | Stiff-Legged Barbell Deadlift |
+| 壺鈴單腿硬舉 | 壺鈴 | 📷 | Kettlebell One-Legged Deadlift |
+| 壺鈴擺盪 | 壺鈴 | 📷 | One-Arm Kettlebell Swings |
+| 壺鈴高腳杯深蹲 | 壺鈴 | 📷 | Goblet Squat |
+| 雙壺鈴前蹲 | 壺鈴 | 📷 | Front Squats With Two Kettlebells |
+| 六角槓硬舉 | 槓鈴 | 📷 | Trap Bar Deadlift（六角槓→equip槓鈴） |
 | 早安式體前屈 | 槓鈴 | 📷 | Good Morning |
+| 槓鈴前蹲 | 槓鈴 | 📷 | Front Barbell Squat |
+| 槓鈴弓箭步 | 槓鈴 | 📷 | Barbell Lunge |
+| 槓鈴抓舉 | 槓鈴 | 📷 | Snatch |
+| 槓鈴深蹲 | 槓鈴 | 📷 | Barbell Squat |
+| 槓鈴直腿硬舉 | 槓鈴 | 📷 | Stiff-Legged Barbell Deadlift |
+| 槓鈴相撲硬舉 | 槓鈴 | 📷 | Sumo Deadlift |
+| 槓鈴硬舉 | 槓鈴 | 📷 | Barbell Deadlift |
+| 槓鈴箱蹲 | 槓鈴 | 📷 | Box Squat |
+| 槓鈴羅馬尼亞硬舉 | 槓鈴 | 📷 | Romanian Deadlift |
+| 澤奇深蹲 | 槓鈴 | 📷 | Zercher Squats |
+| 史密斯分腿硬舉 | 史密斯機 | ⬚placeholder | DB無Smith split DL |
+| 史密斯單腿硬舉 | 史密斯機 | ⬚placeholder | DB無Smith single-leg DL |
+| 史密斯弓箭步 | 史密斯機 | ⬚placeholder | DB無Smith lunge |
+| 史密斯澤奇深蹲 | 史密斯機 | ⬚placeholder | DB無Smith Zercher |
+| 史密斯硬舉 | 史密斯機 | ⬚placeholder | DB僅Smith Stiff-Legged DL |
+| 史密斯羅馬尼亞硬舉 | 史密斯機 | ⬚placeholder | DB僅Smith Stiff-Legged DL，可借 |
+| 啞鈴分腿硬舉 | 啞鈴 | ⬚placeholder | DB無dumbbell split DL |
+| 啞鈴單腿硬舉 | 啞鈴 | ⬚placeholder | DB無dumbbell single-leg DL |
+| 啞鈴羅馬尼亞硬舉 | 啞鈴 | ⬚placeholder | DB僅Stiff-Legged Dumbbell DL，可借 |
+| 啞鈴高腳杯深蹲 | 啞鈴 | ⬚placeholder | DB Goblet Squat是壺鈴握法，可借 |
+| 俯臥腿彎舉（單腿） | 固定機械 | ⬚placeholder | DB僅雙腿Lying Leg Curls，可借 |
+| 坐姿腿彎舉（單腿） | 固定機械 | ⬚placeholder | DB僅雙腿Seated Leg Curl，可借 |
+| 腿推（單腿） | 固定機械 | ⬚placeholder | DB僅雙腿Leg Press |
+| SSB分腿蹲 | 槓鈴 | ⬚placeholder | DB無safety-bar split |
+| SSB深蹲 | 槓鈴 | ⬚placeholder | DB無safety-bar專項槓 |
+| SSB箱蹲 | 槓鈴 | ⬚placeholder | DB無safety-bar box |
+| 六角槓深蹲 | 槓鈴 | ⬚placeholder | DB無trap-bar squat；equip歸槓鈴 |
+| 六角槓箭步走 | 槓鈴 | ⬚placeholder | DB無trap-bar lunge；equip歸槓鈴 |
+| 地雷管分腿硬舉 | 槓鈴 | ⬚placeholder | DB無landmine；equip歸槓鈴 |
+| 地雷管單腿硬舉 | 槓鈴 | ⬚placeholder | DB無landmine；equip歸槓鈴 |
+| 地雷管硬舉 | 槓鈴 | ⬚placeholder | DB無landmine；equip歸槓鈴 |
+| 地雷管羅馬尼亞硬舉 | 槓鈴 | ⬚placeholder | DB無landmine；equip歸槓鈴 |
+| 架上深蹲 | 槓鈴 | ⬚placeholder | DB無pin/Anderson squat |
+| 槓鈴分腿硬舉 | 槓鈴 | ⬚placeholder | DB無barbell split DL |
+| 槓鈴分腿蹲 | 槓鈴 | ⬚placeholder | DB僅side split squat，無正面 |
+| 槓鈴單腿硬舉 | 槓鈴 | ⬚placeholder | DB無barbell single-leg DL |
 
-### 【臀】（6）
+### 【臀】（12）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
-| 大腿外展機 | 固定機械 | 📷 | Thigh Abductor |
-| 大腿內收機 | 固定機械 | 📷 | Thigh Adductor |
-| 槓鈴臀推 | 槓鈴 | 📷 | Barbell Hip Thrust |
-| 槓鈴臀橋 | 槓鈴 | 📷 | Barbell Glute Bridge |
+| 坐姿腿內收 | 固定機械 | 📷 | Thigh Adductor |
+| 坐姿腿外展 | 固定機械 | 📷 | Thigh Abductor |
 | 滑輪前後拉 | 滑輪 | 📷 | Pull Through |
 | 滑輪後踢腿 | 滑輪 | 📷 | One-Legged Cable Kickback |
+| 槓鈴臀推 | 槓鈴 | 📷 | Barbell Hip Thrust |
+| 槓鈴臀橋 | 槓鈴 | 📷 | Barbell Glute Bridge |
+| 啞鈴側弓箭步 | 啞鈴 | ⬚placeholder | DB無side/lateral lunge |
+| 啞鈴單腿臀推 | 啞鈴 | ⬚placeholder | DB無；近似Single Leg Glute Bridge |
+| 啞鈴臀推 | 啞鈴 | ⬚placeholder | DB僅Barbell Hip Thrust，可借 |
+| 機械側踢腿 | 固定機械 | ⬚placeholder | 站姿髖外展機；DB僅坐姿外展機 |
+| 機械後踢腿 | 固定機械 | ⬚placeholder | DB僅自重Glute Kickback，可借 |
+| 滑輪側踢腿 | 滑輪 | ⬚placeholder | DB僅Cable髖內收(反方向) |
 
-### 【小腿】（6）
+### 【小腿】（7）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
 | 史密斯提踵 | 史密斯機 | 📷 | Smith Machine Calf Raise |
 | 站姿啞鈴提踵 | 啞鈴 | 📷 | Standing Dumbbell Calf Raise |
 | 坐姿提踵 | 固定機械 | 📷 | Seated Calf Raise |
-| 站姿提踵 | 固定機械 | 📷 | Standing Calf Raises |
 | 機械蹬式提踵 | 固定機械 | 📷 | Calf Press |
+| 站姿提踵 | 固定機械 | 📷 | Standing Calf Raises |
 | 站姿槓鈴提踵 | 槓鈴 | 📷 | Standing Barbell Calf Raise |
+| 坐姿槓片提踵 | 其他 | ⬚placeholder | DB無槓片版；近似Barbell Seated Calf Raise；槓片→其他 |
 
-### 【核心】（7）
+### 【核心】（17）
 | 中文名 | 器材 | 圖 | 英文 / 備註 |
 |---|---|---|---|
 | 啞鈴體側屈 | 啞鈴 | 📷 | Dumbbell Side Bend |
 | 機械捲腹 | 固定機械 | 📷 | Ab Crunch Machine |
-| 壺鈴風車 | 壺鈴 | 📷 | Kettlebell Windmill |
-| 槓鈴滾輪捲腹 | 槓鈴 | 📷 | Barbell Ab Rollout |
-| 滑輪跪姿捲腹 | 滑輪 | 📷 | Cable Crunch |
 | 帕洛夫推 | 滑輪 | 📷 | Pallof Press |
 | 滑輪砍柴 | 滑輪 | 📷 | Standing Cable Wood Chop |
+| 滑輪跪姿捲腹 | 滑輪 | 📷 | Cable Crunch |
+| 壺鈴風車 | 壺鈴 | 📷 | Kettlebell Windmill |
+| 槓鈴滾輪捲腹 | 槓鈴 | 📷 | Barbell Ab Rollout |
+| 俄羅斯轉體 | 自重 | 📷 | Russian Twist |
+| 平板支撐 | 自重 | 📷 | Plank |
+| 平躺抬腿 | 自重 | 📷 | Flat Bench Lying Leg Raise |
+| 懸掛抬腿（自重） | 自重 | 📷 | Hanging Leg Raise |
+| 捲腹（自重） | 自重 | 📷 | Crunches |
+| 捲腹（負重） | 自重 | 📷 | Weighted Crunches（DB圖持藥球） |
+| 空中單車 | 自重 | 📷 | Air Bike |
+| 單臂手提箱深蹲 | 啞鈴 | ⬚placeholder | DB無suitcase squat |
+| 機械側捲腹 | 固定機械 | ⬚placeholder | DB無機械側捲腹(僅正面Ab Crunch Machine) |
+| 懸掛抬腿（負重） | 自重 | ⬚placeholder | DB僅自重Hanging Leg Raise，可借 |
+
 
 ## 明天 TODO
 1. 完成各部位譯名校對（胸/背已收一批增改；其餘部位待使用者過目）。
