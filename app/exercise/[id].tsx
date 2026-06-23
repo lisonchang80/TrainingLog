@@ -8,6 +8,7 @@ import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ExerciseMediaFrames } from '@/components/exercise/exercise-media-frames';
 import { MuscleBodyTagger } from '@/components/exercise/muscle-body-tagger';
 import { useDatabase } from '@/components/database-provider';
 import { muscleHighlightMap } from '@/src/domain/exercise/exerciseLibrary';
@@ -135,6 +136,13 @@ export default function ExerciseDetailScreen() {
           {data.exercise.is_custom === 1 ? t('common', 'custom') : ''}
         </Text>
 
+        {data.exercise.media_path && (
+          <ExerciseMediaFrames
+            mediaKey={data.exercise.media_path}
+            style={styles.mediaCard}
+          />
+        )}
+
         {(data.primary.length > 0 || data.secondary.length > 0) && (
           <View style={styles.diagramCard}>
             <MuscleBodyTagger highlight={highlight} mode="readonly" />
@@ -244,6 +252,13 @@ function makeStyles(tokens: ThemeTokens) {
       marginBottom: 4,
     },
     placeholder: { fontSize: 14, color: tokens.text.secondary, padding: 24 },
+    mediaCard: {
+      width: '100%',
+      aspectRatio: 16 / 9,
+      borderRadius: 14,
+      overflow: 'hidden',
+      backgroundColor: tokens.bg.elevated,
+    },
     diagramCard: {
       borderRadius: 14,
       padding: 12,

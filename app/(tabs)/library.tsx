@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import { hashColor } from '@/components/template-editor/palette';
+import { resolveExerciseMedia } from '@/src/db/seed/exerciseMediaMap';
 import {
   filterExercises,
   type ExerciseFilter,
@@ -669,7 +670,10 @@ function ExerciseCard({
 }) {
   const styles = useLibStyles();
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
-  const thumbnail = exercise.media_path;
+  // media_path stores a require-map key; resolve to [startFrame, endFrame].
+  // Grid shows the static start frame (poster) — the 2-frame crossfade lives on
+  // the detail page only, so we don't run 167 timers across the library grid.
+  const media = resolveExerciseMedia(exercise.media_path);
   return (
     <Pressable
       accessibilityRole="button"
@@ -696,8 +700,8 @@ function ExerciseCard({
         </View>
       )}
       <View style={styles.thumbWrap}>
-        {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
+        {media ? (
+          <Image source={media[0]} style={styles.thumbImage} />
         ) : (
           <PlaceholderThumb exercise={exercise} />
         )}
@@ -897,11 +901,11 @@ function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
   if (!exercise) {
     return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
   }
-  const thumbnail = exercise.media_path;
-  if (thumbnail) {
+  const media = resolveExerciseMedia(exercise.media_path);
+  if (media) {
     return (
       <View style={styles.supersetMiniThumb}>
-        <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
+        <Image source={media[0]} style={styles.thumbImage} />
       </View>
     );
   }
@@ -1137,9 +1141,10 @@ function makeStyles(tokens: ThemeTokens) {
     fontSize: 13,
   },
   thumbWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    // ADR-0017 Q8: 16:9 landscape card thumbnail (replaced the 96×96 circle).
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 10,
     backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',
