@@ -13,6 +13,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import {
+  MgEquipmentPicker,
+  type PickerCell,
+} from '@/components/exercise/mg-equipment-picker';
 import { hashColor } from '@/components/template-editor/palette';
 import { resolveExerciseMedia } from '@/src/db/seed/exerciseMediaMap';
 import {
@@ -373,7 +377,7 @@ export default function LibraryScreen() {
             />
           ) : (
             <>
-              <EquipmentChipRow
+              <EquipmentFilterDropdown
                 value={selectedEquipment}
                 onChange={setSelectedEquipment}
               />
@@ -504,9 +508,22 @@ function Sidebar(props: SidebarProps) {
   );
 }
 
-// ---------- Equipment chip row ----------
+// ---------- Equipment filter dropdown ----------
 
-function EquipmentChipRow({
+// Sentinel cell id for the "全部 / All" option inside the picker grid. Picker
+// cells are keyed by string id, so we use a reserved key that can never collide
+// with an Equipment enum value and map it back to `null` on select.
+const EQUIP_ALL_ID = '__all__';
+
+/**
+ * Equipment filter as a single dropdown button (replaces the old horizontal
+ * chip row, which overflowed + truncated labels like "Smith M…" on narrow
+ * iPhones). Tapping the button opens the shared MgEquipmentPicker bottom sheet
+ * (same即選即commit idiom used by the custom-exercise MG/用具 pickers). All
+ * existing filter values + behaviour are preserved: 全部 + the 8 EQUIPMENT_VALUES,
+ * single-select, null === no filter.
+ */
+function EquipmentFilterDropdown({
   value,
   onChange,
 }: {
@@ -514,53 +531,53 @@ function EquipmentChipRow({
   onChange: (eq: Equipment | null) => void;
 }) {
   const styles = useLibStyles();
+  const { tokens } = useTheme();
+  const [open, setOpen] = useState(false);
+  const cells: PickerCell[] = useMemo(
+    () => [
+      { id: EQUIP_ALL_ID, label: t('common', 'all') },
+      ...EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: tEquipment(eq) })),
+    ],
+    []
+  );
+  const buttonLabel = value === null ? t('common', 'all') : tEquipment(value);
   return (
     <View style={styles.equipRowOuter}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.equipRow}>
-        <EquipmentChip
-          label={t('common', 'all')}
-          active={value === null}
-          onPress={() => onChange(null)}
-        />
-        {EQUIPMENT_VALUES.map((eq) => (
-          <EquipmentChip
-            key={eq}
-            label={tEquipment(eq)}
-            active={value === eq}
-            onPress={() => onChange(value === eq ? null : eq)}
-          />
-        ))}
-      </ScrollView>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('page', 'selectEquipment')}
+        accessibilityValue={{ text: buttonLabel }}
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => [
+          styles.equipDropdownBtn,
+          value !== null && styles.equipDropdownBtnActive,
+          pressed && styles.pressed,
+        ]}>
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.equipDropdownText,
+            value !== null && styles.equipDropdownTextActive,
+          ]}>
+          {buttonLabel}
+        </Text>
+        <Text
+          style={[
+            styles.equipDropdownChevron,
+            { color: value !== null ? tokens.action.success : tokens.text.secondary },
+          ]}>
+          ▾
+        </Text>
+      </Pressable>
+      <MgEquipmentPicker
+        visible={open}
+        title={t('page', 'selectEquipment')}
+        cells={cells}
+        selectedId={value ?? EQUIP_ALL_ID}
+        onSelect={(id) => onChange(id === EQUIP_ALL_ID ? null : (id as Equipment))}
+        onClose={() => setOpen(false)}
+      />
     </View>
-  );
-}
-
-function EquipmentChip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const styles = useLibStyles();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.equipChip,
-        active && styles.equipChipActive,
-        pressed && styles.pressed,
-      ]}>
-      <Text style={[styles.equipText, active && styles.equipTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1029,29 +1046,37 @@ function makeStyles(tokens: ThemeTokens) {
   sidebarSubTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   content: { flex: 1, flexDirection: 'column', minWidth: 0 },
-  equipRowOuter: { height: 56 },
-  equipRow: {
+  equipRowOuter: {
+    height: 56,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  // Single dropdown trigger button (replaced the overflowing chip ScrollView).
+  // Sits inline at the top of the content column; alignSelf:flex-start keeps it
+  // compact instead of stretching across the full content width.
+  equipDropdownBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  equipChip: {
-    paddingHorizontal: 14,
-    height: 32,
-    borderRadius: 16,
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingLeft: 14,
+    paddingRight: 10,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: tokens.bg.elevated,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  // Semitransparent success tint kept as-is (success token at 18% alpha) —
-  // the active-chip overlay needs to read clearly against the page base in
-  // both themes; using bg.elevated here would lose the "this is selected"
-  // signal. Token-friendly variants use rgba of the success hex.
-  equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
-  equipText: { color: tokens.text.secondary, fontSize: 14 },
-  equipTextActive: { color: tokens.action.success, fontWeight: '600' },
+  // Semitransparent success tint (success token at 18% alpha) so an active
+  // filter reads as "selected" against the page base in both themes — mirrors
+  // the old active-chip treatment.
+  equipDropdownBtnActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
+  equipDropdownText: {
+    color: tokens.text.secondary,
+    fontSize: 14,
+    fontWeight: '500',
+    maxWidth: 180,
+  },
+  equipDropdownTextActive: { color: tokens.action.success, fontWeight: '600' },
+  equipDropdownChevron: { fontSize: 11, lineHeight: 14 },
 
   gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
   gridContent: {
