@@ -1385,7 +1385,9 @@ function DropdownButton({
         styles.dropdown,
         pressed && styles.btnPressed,
       ]}>
-      <Text style={styles.dropdownLabel}>{label}</Text>
+      <Text style={styles.dropdownLabel} numberOfLines={2} adjustsFontSizeToFit>
+        {label}
+      </Text>
       <Text style={styles.dropdownValue} numberOfLines={1}>
         {value} ▾
       </Text>
@@ -1844,6 +1846,8 @@ function makeStyles(tokens: ThemeTokens) {
       paddingVertical: 8,
       paddingHorizontal: 10,
       gap: 2,
+      minHeight: 56,
+      justifyContent: 'space-between',
     },
     dropdownLabel: {
       fontSize: 10,
