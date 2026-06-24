@@ -1139,14 +1139,14 @@ function HeaderCard({
               <Text style={styles.prValue}>
                 {t('domain', 'weight')} {formatHistoryWeight(pr.weight_best, pr.weight_best_raw, header.load_type, unit)}
                 {pr.weight_best_reps != null ? ` × ${pr.weight_best_reps}` : ''}
-                {pr.weight_best_at != null ? `（${formatDate(pr.weight_best_at)}）` : ''}
+                {pr.weight_best_at != null ? ` · ${formatDate(pr.weight_best_at)}` : ''}
               </Text>
               <Text style={styles.prValue}>
                 {t('domain', 'volume')} {formatVolume(pr.volume_best, unit)}
                 {pr.volume_best_weight != null && pr.volume_best_reps != null
                   ? ` (${formatHistoryWeight(pr.volume_best_weight, pr.volume_best_raw_weight, header.load_type, unit)} × ${pr.volume_best_reps})`
                   : ''}
-                {pr.volume_best_at != null ? `（${formatDate(pr.volume_best_at)}）` : ''}
+                {pr.volume_best_at != null ? ` · ${formatDate(pr.volume_best_at)}` : ''}
               </Text>
             </View>
           ))}
