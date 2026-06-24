@@ -2240,8 +2240,7 @@ export default function SessionDetailScreen() {
             ]}>
             <Text
               style={[styles.actionBtnText, styles.actionBtnTextPrimary]}
-              numberOfLines={1}
-              adjustsFontSizeToFit>
+              numberOfLines={2}>
               {t('button', 'addExercise')}
             </Text>
           </Pressable>
@@ -2249,7 +2248,7 @@ export default function SessionDetailScreen() {
           <Pressable
             style={styles.actionBtn}
             onPress={enterEditMode}>
-            <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+            <Text style={styles.actionBtnText} numberOfLines={2}>
               {t('button', 'editSession')}
             </Text>
           </Pressable>
@@ -2258,14 +2257,14 @@ export default function SessionDetailScreen() {
           style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
           disabled={isFreestyle}
           onPress={() => handleSaveTemplate('update')}>
-          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={styles.actionBtnText} numberOfLines={2}>
             {t('button', 'saveTemplate')}
           </Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
           onPress={() => handleSaveTemplate('create')}>
-          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+          <Text style={styles.actionBtnText} numberOfLines={2}>
             {t('button', 'saveAsTemplate')}
           </Text>
         </Pressable>
@@ -2274,8 +2273,7 @@ export default function SessionDetailScreen() {
           onPress={handleDelete}>
           <Text
             style={[styles.actionBtnText, styles.actionBtnTextDestructive]}
-            numberOfLines={1}
-            adjustsFontSizeToFit>
+            numberOfLines={2}>
             {t('common', 'delete')}
           </Text>
         </Pressable>
