@@ -1385,7 +1385,7 @@ function DropdownButton({
         styles.dropdown,
         pressed && styles.btnPressed,
       ]}>
-      <Text style={styles.dropdownLabel} numberOfLines={2} adjustsFontSizeToFit>
+      <Text style={styles.dropdownLabel} numberOfLines={2}>
         {label}
       </Text>
       <Text style={styles.dropdownValue} numberOfLines={1}>

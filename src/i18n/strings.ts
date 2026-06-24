@@ -925,7 +925,7 @@ export const strings = {
       freestyle: 'Freestyle',
       restDay: 'Rest Day',
       rest: 'Rest',
-      cycleLengthDays: 'Cycle Length (days)',
+      cycleLengthDays: 'Cycle Days',
       cycleCount: 'Cycle Count',
       history: 'History',
       chart: 'Chart',
