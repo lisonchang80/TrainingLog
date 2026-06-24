@@ -52,6 +52,7 @@ import {
 import { randomUUID } from 'expo-crypto';
 
 import { useDatabase } from '@/components/database-provider';
+import { useAppMode } from '@/src/app-mode';
 import { listDistinctSubTagsByProgram } from '@/src/adapters/sqlite/templateRepository';
 import { listProgramSubTags } from '@/src/adapters/sqlite/programRepository';
 import {
@@ -176,6 +177,10 @@ export function TemplateMetaSheet({
   // Default title resolved at call time so locale switches at runtime propagate.
   const resolvedTitle = title ?? t('button', 'saveAsTemplate');
   const db = useDatabase();
+  // ADR-0026 D1/D3 — 極簡模式：藏掉「計劃」與「強度」兩個 section，且 onConfirm
+  // 強制送 (program_id: null, sub_tag: null) → 另存模板一律存成通用。名稱 input
+  // 保留。計劃模式行為不變。caller 不需傳新 prop。
+  const { isMinimal } = useAppMode();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [name, setName] = useState(defaultName);
@@ -428,6 +433,12 @@ export function TemplateMetaSheet({
 
   const handleConfirm = () => {
     const trimmed = name.trim() || defaultName;
+    // ADR-0026 D1/D3 — 極簡模式無計劃概念：強制存成通用 (null, null)，無視任何
+    // 殘留 program/sub_tag state（兩 section 已隱藏，理論上 state 仍是初值）。
+    if (isMinimal) {
+      onConfirm({ name: trimmed, program_id: null, sub_tag: null });
+      return;
+    }
     // 通用 program → always null sub_tag (section hidden).
     const finalSubTag =
       programId == null
@@ -502,7 +513,9 @@ export function TemplateMetaSheet({
             )}
 
             {/* 歸屬計畫 — locked (另存強度) renders a single read-only chip;
-                otherwise the full selectable chip row + 「+ 新增計畫」CTA. */}
+                otherwise the full selectable chip row + 「+ 新增計畫」CTA.
+                ADR-0026 D1 — 極簡模式整段隱藏（無計劃概念）。 */}
+            {isMinimal ? null : (
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>{t('page', 'templateProgramLabel')}</Text>
               {lockProgram ? (
@@ -594,9 +607,11 @@ export function TemplateMetaSheet({
               </>
               )}
             </View>
+            )}
 
-            {/* 強度標籤 — only when a specific program is selected. */}
-            {programId !== null ? (
+            {/* 強度標籤 — only when a specific program is selected.
+                ADR-0026 D1 — 極簡模式整段隱藏（無強度概念）。 */}
+            {!isMinimal && programId !== null ? (
               <View style={styles.field}>
                 <Text style={styles.fieldLabel}>{t('page', 'templateIntensityLabel')}</Text>
                 <View style={styles.chipRow}>
@@ -660,9 +675,12 @@ export function TemplateMetaSheet({
               </View>
             ) : null}
 
-            <Text style={styles.hint}>
-              {tTemplateMetaHint(omitName, programId === null)}
-            </Text>
+            {/* ADR-0026 D1 — hint 只描述計劃/強度規則，極簡模式下無意義，隱藏。 */}
+            {isMinimal ? null : (
+              <Text style={styles.hint}>
+                {tTemplateMetaHint(omitName, programId === null)}
+              </Text>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>

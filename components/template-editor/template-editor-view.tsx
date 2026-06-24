@@ -126,6 +126,7 @@ import {
   sharedLabelBtnStyle,
   sharedLabelBtnPressedStyle,
 } from '@/src/theme';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that all read
@@ -279,6 +280,9 @@ export default function TemplateEditorView() {
   const { tokens } = useTheme();
   const styles = useEditorStyles();
   const insets = useSafeAreaInsets();
+  // ADR-0026 D1 — 極簡模式：⋯選單藏「另存強度」（無計劃就無強度可言）。
+  // 「儲存」/「另存模板」走 TemplateMetaSheet（已 minimal-aware），不動。
+  const { isMinimal } = useAppMode();
   // Program-wizard「新建模板」pre-creates the template row on entry
   // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
   // saving (取消 / swipe-back / discard), that row is an orphan — the
@@ -2491,31 +2495,35 @@ export default function TemplateEditorView() {
                 </Text>
               )}
             </View>
-            <Text style={styles.tripleText}>
-              {/* #50 C1 — display override prefers URL query (user's pick in
-                  start-template-sheet) over actual draft.program_id/sub_tag.
-                  Fallback path (#50): editor loads representative but shows
-                  user's selection here. undefined = no override = use draft.
-                  Resolves program_id → program_name via local lookup. */}
-              {(() => {
-                const programIdForDisplay =
-                  displayProgramOverride === undefined
-                    ? draft.program_id ?? null
-                    : displayProgramOverride;
-                const subTagForDisplay =
-                  displaySubTagOverride === undefined
-                    ? draft.sub_tag ?? null
-                    : displaySubTagOverride;
-                const programNameForDisplay = programIdForDisplay
-                  ? programs.find((p) => p.id === programIdForDisplay)?.name ??
-                    tt('common', 'default')
-                  : null;
-                return formatTemplateTriple(
-                  programNameForDisplay,
-                  subTagForDisplay,
-                );
-              })()}
-            </Text>
+            {/* ADR-0026 D1 — 極簡模式藏計劃/強度三元組副標題（通用 是計劃概念標籤）。
+                鏡像同檔 ~2631「另存強度」的 isMinimal gate。 */}
+            {!isMinimal && (
+              <Text style={styles.tripleText}>
+                {/* #50 C1 — display override prefers URL query (user's pick in
+                    start-template-sheet) over actual draft.program_id/sub_tag.
+                    Fallback path (#50): editor loads representative but shows
+                    user's selection here. undefined = no override = use draft.
+                    Resolves program_id → program_name via local lookup. */}
+                {(() => {
+                  const programIdForDisplay =
+                    displayProgramOverride === undefined
+                      ? draft.program_id ?? null
+                      : displayProgramOverride;
+                  const subTagForDisplay =
+                    displaySubTagOverride === undefined
+                      ? draft.sub_tag ?? null
+                      : displaySubTagOverride;
+                  const programNameForDisplay = programIdForDisplay
+                    ? programs.find((p) => p.id === programIdForDisplay)?.name ??
+                      tt('common', 'default')
+                    : null;
+                  return formatTemplateTriple(
+                    programNameForDisplay,
+                    subTagForDisplay,
+                  );
+                })()}
+              </Text>
+            )}
           </View>
           {/*
             Import mode (programs tab "+ 建立新模板"): top-right action becomes
@@ -2623,7 +2631,8 @@ export default function TemplateEditorView() {
               if (showSaveAs) {
                 saveAsTemplateIdx = opts.length;
                 opts.push(tt('button', 'saveAsTemplate'));
-                if (hasProgram) {
+                // ADR-0026 D1 — 極簡模式藏「另存強度」（強度概念隨計劃消失）。
+                if (hasProgram && !isMinimal) {
                   saveAsIntensityIdx = opts.length;
                   opts.push(tt('button', 'saveAsIntensity'));
                 }

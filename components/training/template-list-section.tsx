@@ -37,6 +37,7 @@ import {
 } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
+import { useAppMode } from '@/src/app-mode';
 import { SwipeableSetRow } from '@/components/shared/swipeable-set-row';
 import {
   createTemplate,
@@ -70,6 +71,9 @@ export function TemplateListSection({
 }: Props): React.ReactElement {
   const db = useDatabase();
   const router = useRouter();
+  // ADR-0026 D1 — 極簡模式：刪除同名 alert 省略 (計劃·強度) 變體預覽（計劃概念
+  // 在 UI 全消失，歷史/刪除預覽也藏）。刪除行為本身不變。
+  const { isMinimal } = useAppMode();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [rows, setRows] = useState<TemplateSummary[]>([]);
@@ -137,7 +141,12 @@ export function TemplateListSection({
       }
       Alert.alert(
         tt('alert', 'deleteAllSameNameTemplatesQ'),
-        tBatchDeleteBody(row.name, preview.templates, preview.affectedCells),
+        tBatchDeleteBody(
+          row.name,
+          preview.templates,
+          preview.affectedCells,
+          isMinimal,
+        ),
         [
           { text: tt('common', 'cancel'), style: 'cancel' },
           {
@@ -161,7 +170,7 @@ export function TemplateListSection({
         ],
       );
     },
-    [busy, db, load],
+    [busy, db, load, isMinimal],
   );
 
   return (
@@ -229,13 +238,24 @@ function formatTimestamp(ms: number): string {
  * (program · sub_tag) variant about to disappear, then — if any
  * program_cell currently schedules one of them — adds the rest-day
  * impact summary aggregated by program name.
+ *
+ * ADR-0026 D1 — when `minimal` is set, the (program · sub_tag) variant preview
+ * and the program-cell rest-day blurb are both omitted (計劃概念在 UI 全消失).
+ * The body collapses to a plain count + irreversible warning. Both extras are
+ * 計劃-only surfaces, so a 通用-only user never schedules cells nor sees variants.
  */
 function tBatchDeleteBody(
   name: string,
   templates: TemplateDeletionRow[],
   affectedCells: AffectedProgramCell[],
+  minimal: boolean,
 ): string {
   const en = getLocale() === 'en';
+  if (minimal) {
+    return en
+      ? `${templates.length} template${templates.length > 1 ? 's' : ''} named "${name}" will be permanently deleted. This cannot be undone.`
+      : `將永久刪除 ${templates.length} 個名為「${name}」的模板。此操作無法復原。`;
+  }
   const tripleLines = templates
     .map((t) => formatTripleLine(t, en))
     .join('\n');

@@ -412,10 +412,19 @@ enum Stage1TodayPlannedDTO: Codable, Equatable {
 /// payloads still decode cleanly (extra keys are ignored by
 /// JSONDecoder); newer Watch builds running against older iPhone
 /// payloads see `nil` and fall back to empty state.
+///
+/// Slice 16 / ADR-0026 D2 added `appMode` (`"plan" | "minimal"`).
+/// Optional + synthesised Codable decode = tolerant: an older iPhone
+/// payload that omits the key decodes to `nil`, which the consumer
+/// (`PickerViewModel.applyStage1Reply`) treats as `"plan"` (today's
+/// full behaviour). Explicit flag, NOT empty-data signal (D2).
 struct Stage1ReplyPrefetch: Codable, Equatable {
     let templates: [Stage1TemplateSummary]
     let programs: [Stage1ProgramSummary]?
     let todayPlanned: Stage1TodayPlannedDTO?
+    /// Slice 16 / ADR-0026 D2 — app-wide mode. nil ⇔ key absent on the
+    /// wire (pre-slice-16 iPhone) → consumer defaults to "plan".
+    let appMode: String?
 }
 
 /// Stage 1 reply payload. Discriminated by `hasActiveSession`; the

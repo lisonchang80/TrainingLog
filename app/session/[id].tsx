@@ -172,6 +172,7 @@ import {
   useTheme,
   type ThemeTokens,
 } from '@/src/theme';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * Phase A placeholder HRmax (220 - 30). Used to position HR zone band
@@ -242,6 +243,9 @@ export default function SessionDetailScreen() {
   }>();
   const db = useDatabase();
   const router = useRouter();
+  // ADR-0026 D1 — 極簡模式藏掉過去 session 詳情的「計劃·強度」副標題（計劃概念
+  // 在 UI 全消失；解析/儲存資料不動）。
+  const { isMinimal } = useAppMode();
   // ADR-0025 — token-driven styles for this screen.
   const styles = useSessionStyles();
 
@@ -1959,7 +1963,7 @@ export default function SessionDetailScreen() {
               </View>
             ) : null}
           </View>
-          {sessionTemplateInfo ? (
+          {sessionTemplateInfo && !isMinimal ? (
             <Text
               style={styles.headerSubtitle}
               numberOfLines={1}
