@@ -53,7 +53,7 @@ export function MgEquipmentPicker({
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
-              <Text style={styles.done}>{t('common', 'cancel')}</Text>
+              <Text style={styles.done}>{t('common', 'done')}</Text>
             </Pressable>
           </View>
           <View style={styles.grid}>
