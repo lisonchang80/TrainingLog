@@ -202,6 +202,31 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
     expect(setCount?.n).toBe(1);
   });
 
+  it('echo-drop — an originator:iphone snapshot is dropped, not applied (reverse-sync 拍板#7)', async () => {
+    await seedLiveSession(db, 'sess-1');
+    // The iPhone's OWN push echoed back (originator 'iphone') must NOT be
+    // applied — it would be a redundant self-write. Dropped before the apply.
+    const result = await onLiveMirror(db, snapshot({ originator: 'iphone' }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('echo');
+
+    // snapshot()'s se-1/set-1 were NOT applied (echo dropped before reconcile).
+    const setCount = await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM "set"',
+    );
+    expect(setCount?.n).toBe(0);
+  });
+
+  it('echo-drop — an explicit originator:watch snapshot still applies (contrast)', async () => {
+    await seedLiveSession(db, 'sess-1');
+    const result = await onLiveMirror(db, snapshot({ originator: 'watch' }));
+    expect(result.ok).toBe(true);
+    const setCount = await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM "set"',
+    );
+    expect(setCount?.n).toBe(1);
+  });
+
   it('bad-payload guard — non-object rejected, db untouched', async () => {
     const result = await onLiveMirror(db, null);
     expect(result.ok).toBe(false);
