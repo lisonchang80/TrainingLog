@@ -65,6 +65,18 @@ out=$(git merge-tree --write-tree --name-only main "origin/$b"); rc=$?
   only means the 3-way *content* merge has no conflict. **Always run `tsc --noEmit`
   + full `npm test` on the REBASED tip** — merge-tree doesn't catch TS1117 dup
   keys, dup `it()` names, or semantic breakage.
+  - ⚠️ **`--no-ff` merge commits do NOT trigger the pre-commit `tsc`+`jest` hook**
+    (the hook fires on `git commit`, not on the auto-created merge commit) → you
+    MUST run the gate manually after the merge, before push. (2026-06-24: both the
+    media-slice merge `3c60a13` and the slice16 re-integration needed a manual
+    `tsc --noEmit && npm test` — the hook stayed silent.)
+- **A 3-way merge that adds NEW files makes the editor/harness LSP emit PHANTOM
+  errors** — `Cannot find module '@/…'` / `'…' has no exported member 'X'` for the
+  just-merged files (and even for files on the OTHER branch after a `git switch`),
+  because the language server indexed the pre-merge tree and hasn't re-indexed.
+  **`npx tsc --noEmit` is ground truth, NOT the inline diagnostics.** (2026-06-24:
+  post-merge `useLocale`/`exerciseMediaMap`/`app-mode` "cannot find" diagnostics
+  were all stale — tsc was clean. Don't "fix" phantom imports; just run tsc.)
 - **local tip ≠ remote tip.** A mid-slice WIP branch can be ahead of its own
   remote by N un-pushable commits (2026-06-06 `slice/template-overwrite`: local
   `3986f3b` +47 vs remote `af444de` = clean 4). **Merge the REMOTE ref; never
