@@ -87,6 +87,15 @@ the bottom TAB BAR** (its AXFrame ≈ `y 787–835` sits right on top of the tab
 get the target button's AXFrame and tap its exact center (the toast is a sibling, not a
 true modal — the button underneath is still hit-testable at its own frame).
 
+⚠️ **For SHEET-CONFIRM buttons (e.g. the exercise-picker `完成 (N)` bar), the
+exact-center fallback is UNRELIABLE — just dismiss the toast first.** Re-validated
+2026-06-25 (~6 wasted taps): the toast's touch-capture zone extends BELOW its visible
+pill, so tapping `完成`'s exact center AND the exposed strip below the pill both
+no-op'd; only tapping the ✕ (right end of the toast bar, ≈ `x 371, y 796`) cleared it
+and made `完成` tappable. So: bottom action-bar / tab-bar buttons MAY be hit-testable at
+their frame, but full-width bottom-confirm bars usually are NOT — reach for the ✕ dismiss
+by default for those.
+
 ⚠️ **Tab-switch taps silently fail when this toast is up** — the #1 time-waster
 (2026-06-24: ~10 wasted round-trips). Symptom: you `ui_tap` a tab's exact AXFrame
 center and the screen DOESN'T switch (you stay on / bounce back to the current tab),
