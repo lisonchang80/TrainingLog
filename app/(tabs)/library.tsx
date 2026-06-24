@@ -667,16 +667,46 @@ function ExerciseGrid({
   );
 }
 
+// U+2060 WORD JOINER — a zero-width "no line break here" glue. Built via
+// fromCharCode so the source stays free of an invisible literal.
+const WORD_JOINER = String.fromCharCode(0x2060);
+
+/** Glue every「（…）」run internally so a parenthetical never splits across
+ *  lines (e.g.「…（上 / 胸）」). */
+function glueParens(s: string): string {
+  return s.replace(/（[^）]*）/g, (run) => run.split('').join(WORD_JOINER));
+}
+
 /**
- * Keep a CJK parenthetical「（…）」together so a 2-line card-name wrap lands
- * BEFORE the「（」instead of splitting mid-parenthetical (e.g.「坐姿機械推胸（上
- * 胸）」must never wrap as「…（上 / 胸）」). Joining the「（…）」run with U+2060
- * WORD JOINER makes it one unbreakable unit, so the natural CJK break point just
- * before「（」becomes the wrap site. No-op for names without「（…）」 (English
- * names keep wrapping on their spaces).
+ * Soft-wrap a 2-line card name so it breaks at a natural word boundary instead
+ * of mid-word. Two things are kept unbreakable via WORD_JOINER:
+ *
+ *  1. Any「（…）」parenthetical — never splits as「…（上 / 胸）」.
+ *  2. The trailing 2-CJK-char movement noun (划船 / 飛鳥 / 推胸 …) PLUS any
+ *     trailing「（…）」— so a long name wraps BEFORE the noun
+ *     (機械單側高位 / 划船) instead of THROUGH it (機械單側高位划 / 船).
+ *
+ * Greedy line-fill does the rest: the glued tail is one blob, so it drops to
+ * line 2 whole once the head fills line 1. Short / English names are a no-op
+ * (the blob still fits on one line, or English keeps wrapping on its spaces).
  */
-function keepParensTogether(name: string): string {
-  return name.replace(/（[^）]*）/g, (run) => run.split('').join('⁠'));
+function softWrapName(name: string): string {
+  // Peel off a trailing「（…）」so it stays attached to the movement noun.
+  const parenMatch = name.match(/（[^）]*）$/);
+  const paren = parenMatch ? parenMatch[0] : '';
+  const base = paren ? name.slice(0, name.length - paren.length) : name;
+
+  // Movement noun = the last 2 CJK characters of the base.
+  const m = base.match(/^(.*?)([一-鿿]{2})$/);
+  if (!m || m[1].length === 0) {
+    // No splittable head (English / short / non-CJK tail) — fall back to the
+    // paren-only glue so a「（…）」still never splits mid-parenthetical.
+    return glueParens(name);
+  }
+  const head = m[1];
+  const tail = m[2];
+  const gluedTail = (tail + paren).split('').join(WORD_JOINER);
+  return glueParens(head) + gluedTail;
 }
 
 function ExerciseCard({
@@ -735,7 +765,7 @@ function ExerciseCard({
         )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {keepParensTogether(tExercise(exercise.name))}
+        {softWrapName(tExercise(exercise.name))}
       </Text>
       {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
       {/* Overlays rendered AFTER the photo + name so they paint on the TOP
@@ -922,7 +952,7 @@ function SupersetCard({
         <SupersetMiniThumb exercise={exB} />
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {superset.name}
+        {softWrapName(superset.name)}
       </Text>
       {onInfoPress && (
         <Pressable
