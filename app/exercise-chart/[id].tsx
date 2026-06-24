@@ -37,7 +37,6 @@ import { effectiveLoad, estimateE1RM } from '@/src/domain/pr/e1rmEngine';
 import { setVolume } from '@/src/domain/pr/volumeEngine';
 import {
   REP_BUCKET_CHIPS,
-  bucketDomainLabel,
   matchesChip,
   repRangeLabel,
   type RepBucketChip,
@@ -83,16 +82,19 @@ type ChartToggle = ChartMetric | 'parallel';
  * literals (ADR-0007). Round-trip via this map to render localized variants
  * without touching domain. Mirror of exercise-history page helper.
  */
-const PR_BUCKET_ZH_TO_DOMAIN_KEY: Record<string, 'maxStrength' | 'strength' | 'hypertrophy' | 'muscularEndurance' | 'endurance'> = {
-  最大力量: 'maxStrength',
-  力量: 'strength',
-  增肌: 'hypertrophy',
-  肌耐力: 'muscularEndurance',
-  耐力: 'endurance',
-};
-function tPrBucketLabel(zhLabel: string): string {
-  const key = PR_BUCKET_ZH_TO_DOMAIN_KEY[zhLabel];
-  return key ? t('domain', key) : zhLabel;
+/**
+ * Short bucket labels for the compact filter-chip row (EN abbreviations; ZH
+ * stays full via the shared domain.*Chip i18n keys). Mirrors exercise-history.
+ */
+function tPrBucketChipLabel(chip: RepBucketChip): string {
+  switch (chip) {
+    case 'all': return t('common', 'all');
+    case 'max_strength': return t('domain', 'maxStrengthChip');
+    case 'strength': return t('domain', 'strengthChip');
+    case 'hypertrophy': return t('domain', 'hypertrophyChip');
+    case 'muscle_endurance': return t('domain', 'muscleEnduranceChip');
+    case 'endurance': return t('domain', 'enduranceChip');
+  }
 }
 
 function chartTitle(metric: ChartMetric): string {
@@ -570,7 +572,7 @@ function ChartPageContent({
                 return (
                   <FilterChip
                     key={chip}
-                    label={chip === 'all' ? t('common', 'all') : tPrBucketLabel(bucketDomainLabel(chip))}
+                    label={tPrBucketChipLabel(chip)}
                     sublabel={chip === 'all' ? undefined : `${repRangeLabel(chip)}RM`}
                     active={active}
                     onPress={() => onBucketChipTap(chip)}
@@ -677,7 +679,9 @@ function ChartPageContent({
                     style={[
                       styles.metricToggleText,
                       chartToggle === tog && styles.metricToggleTextActive,
-                    ]}>
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit>
                     {chartToggleLabel(tog)}
                   </Text>
                 </Pressable>
@@ -827,7 +831,8 @@ function FilterChip({
       ]}>
       <Text
         style={[styles.filterChipText, active && styles.filterChipTextActive]}
-        numberOfLines={1}>
+        numberOfLines={1}
+        adjustsFontSizeToFit>
         {label}
       </Text>
       {sublabel ? (
@@ -1419,6 +1424,8 @@ function makeStyles(tokens: ThemeTokens) {
       paddingHorizontal: 8,
       borderRadius: 999,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 32,
     },
     metricToggleBtnActive: { backgroundColor: tokens.action.primary },
     metricToggleText: {
