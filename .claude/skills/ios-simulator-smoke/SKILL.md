@@ -78,13 +78,24 @@ a probe printing `t()` fresh while the JSX rendered the stale cached value prove
 the compiler was reusing memoized output. Remove the probes + restart Metro clean
 when done.
 
-## Dev warning toast overlaps bottom buttons
+## Dev warning toast overlaps bottom buttons — INCLUDING the tab bar
 
 A dark "Open debugger to view warnings." toast sits at the bottom in dev builds and
-**overlaps the bottom action bar** (`Done`, `+ Exercise`, sheet confirm buttons). If
-a bottom tap is a no-op, either tap the toast's ✕ to dismiss first, or get the target
-button's AXFrame and tap its exact center (the toast is a sibling, not a true modal —
-the button underneath is still hit-testable at its own frame).
+**overlaps the bottom action bar** (`Done`, `+ Exercise`, sheet confirm buttons) **AND
+the bottom TAB BAR** (its AXFrame ≈ `y 787–835` sits right on top of the tab buttons at
+`y 791–840`). If a bottom tap is a no-op, either tap the toast's ✕ to dismiss first, or
+get the target button's AXFrame and tap its exact center (the toast is a sibling, not a
+true modal — the button underneath is still hit-testable at its own frame).
+
+⚠️ **Tab-switch taps silently fail when this toast is up** — the #1 time-waster
+(2026-06-24: ~10 wasted round-trips). Symptom: you `ui_tap` a tab's exact AXFrame
+center and the screen DOESN'T switch (you stay on / bounce back to the current tab),
+with no error — because the toast captured the touch. `ui_describe_point` on the tap
+coord still returns the tab Button (it's underneath), so the coord looks correct —
+misleading. **Fix: dismiss the toast FIRST** (tap its ✕ at the right edge, ≈ `x 375,
+y 811` in points — re-`ui_find_element {search:["Open debugger"]}` to confirm it's
+gone), THEN tap the tab. The toast reappears after some reloads, so re-check before each
+tab hop in a long flow.
 
 ## Set-row tap target (composite a11y button)
 
