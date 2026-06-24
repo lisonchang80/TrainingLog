@@ -680,8 +680,7 @@ function ChartPageContent({
                       styles.metricToggleText,
                       chartToggle === tog && styles.metricToggleTextActive,
                     ]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit>
+                    numberOfLines={2}>
                     {chartToggleLabel(tog)}
                   </Text>
                 </Pressable>
