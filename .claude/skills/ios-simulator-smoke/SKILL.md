@@ -53,6 +53,30 @@ rebuild**. Metro serves whatever's on disk in the **primary worktree**, so:
   (add `--clear` if still stale). Cost this skill's author 4+ wasted relaunch
   round-trips on 2026-06-24 before catching it. (Without `CI=1` the watcher + Fast
   Refresh pick edits up live — but the interactive CLI can hang the Bash tool.)
+- **Even WITHOUT `CI=1`, a COLD relaunch can still load a STALE bundle.** Fast
+  Refresh patches a *running* app live, but `terminate` + `launch_app` makes the
+  Expo **dev-client reload its own on-disk bundle cache** — it does not always
+  re-fetch from Metro, so your just-edited `.ts/.tsx` may not appear (verified
+  2026-06-24: a `'use no memo'` edit needed a Metro restart, not just relaunch,
+  to take effect). Reliable reset that ALWAYS picks up edits on the next launch:
+  restart Metro (`lsof -ti :8081 | xargs kill -9` → `npx expo start --dev-client`),
+  then `launch_app`. The FIRST cold launch against a fresh Metro process re-pulls
+  a clean build; subsequent relaunches may reuse the client cache again.
+
+## Reading on-sim `console.log` (RN logs you can't see)
+
+The user's Metro runs in a terminal you can't read, so app `console.log` is
+invisible — and the dev "Open debugger" toast means you can't attach a debugger
+either. To capture RN logs for a diagnosis (e.g. confirming a hook fires / what a
+value actually is at render time): kill their Metro and start your OWN piped to a
+file — `lsof -ti :8081 | xargs kill -9; nohup npx expo start --dev-client > /tmp/metro.log 2>&1 &`
+— then cold-launch the app and `grep` your tag out of `/tmp/metro.log` (record the
+line count before an action, `tail -n +N` after, to read only new lines). This +
+temporary `console.log('[DIAG] …')` probes is how the React-Compiler-memoizes-i18n
+root cause got nailed on 2026-06-24 (see `[[project-traininglog-react-compiler-i18n-gotcha]]`):
+a probe printing `t()` fresh while the JSX rendered the stale cached value proved
+the compiler was reusing memoized output. Remove the probes + restart Metro clean
+when done.
 
 ## Dev warning toast overlaps bottom buttons
 
