@@ -43,6 +43,16 @@ rebuild**. Metro serves whatever's on disk in the **primary worktree**, so:
   screen) — see `overnight-parallel-agents` gotcha #14. Switch back when done.
 - Confirm Metro is alive: `ps aux | grep "expo start"`. If dead:
   `npx expo start --dev-client` from the repo root.
+- **`CI=1` disables Metro's file watcher** — a Metro started with `CI=1 npx expo
+  start` (the non-interactive form used to avoid the embedded-terminal hang, per
+  `feedback_claude_code_embedded_terminal`) will **serve a STALE bundle** after you
+  edit a `.ts/.tsx` on disk: a `launch_app` relaunch re-pulls the *cached* bundle,
+  not your edit (symptom: a tiny "Bundled … (1 module)" rebuild and the old UI). To
+  pick up an edit you MUST restart Metro (fresh process re-reads files): kill it
+  (`lsof -ti :8081 | xargs kill`) and re-run `CI=1 npx expo start --dev-client`
+  (add `--clear` if still stale). Cost this skill's author 4+ wasted relaunch
+  round-trips on 2026-06-24 before catching it. (Without `CI=1` the watcher + Fast
+  Refresh pick edits up live — but the interactive CLI can hang the Bash tool.)
 
 ## Dev warning toast overlaps bottom buttons
 
