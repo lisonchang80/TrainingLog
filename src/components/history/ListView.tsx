@@ -46,7 +46,7 @@ import {
   buildSameDayIdMap,
   groupSessionsByDate,
 } from './historyListHelpers';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { tNExerciseCount } from '@/src/i18n/dynamic';
 
 /**
@@ -123,6 +123,11 @@ function formatDateParts(ms: number): { primary: string; year: string } {
 }
 
 export default function ListView() {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // the empty-state hint (t('status','noSessionsYetHint')) re-evaluates on
+  // language switch (this view stays mounted under the History tab).
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const styles = useListStyles();
@@ -230,6 +235,11 @@ interface RowProps {
 }
 
 function Row({ vm, onPress }: RowProps) {
+  // React Compiler i18n gotcha: each row renders t('domain','freestyle'),
+  // t('common','default') and tNExerciseCount() — subscribe to locale + opt out
+  // of memoization so rows re-render on language switch (memoized FlatList leaf).
+  'use no memo';
+  useLocale();
   const styles = useListStyles();
   const { session, volume, exerciseCount, triple, tplColor, extraSameDay } = vm;
   const { primary: dateMD, year: dateYear } = formatDateParts(session.started_at);

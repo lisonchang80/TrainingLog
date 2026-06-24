@@ -46,7 +46,7 @@ import {
   M_UPPER_CHEST,
   M_UPPER_GLUTE,
 } from '@/src/db/seed/v006ExerciseLibrary';
-import { t, tMuscle } from '@/src/i18n';
+import { t, tMuscle, useLocale } from '@/src/i18n';
 import {
   BACK_ANCHORS,
   FRONT_ANCHORS,
@@ -597,6 +597,11 @@ const LABEL_FONT_SIZE = 10;
 const COLOR_LABEL_TEXT = '#4B5563';
 
 export function BodyHeatmap({ mQuintile, mCount: _mCount }: BodyHeatmapProps) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // the inline t() a11y label + front/back side headers re-evaluate on language
+  // switch (memoized leaf needs its own subscription).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const frontData = React.useMemo(() => buildSlugData(mQuintile, 'front'), [mQuintile]);
@@ -637,6 +642,11 @@ function SideContainer({
   data: ExtendedBodyPart[];
   styles: HeatmapStyles;
 }): React.JSX.Element {
+  // React Compiler i18n gotcha: muscle-name labels call tMuscle() at render
+  // time — subscribe to locale + opt out of memoization so they refresh on
+  // language switch (memoized child needs its own subscription).
+  'use no memo';
+  useLocale();
   const anchors = side === 'front' ? FRONT_ANCHORS : BACK_ANCHORS;
   const items = React.useMemo(
     () => fanLayout(anchors, () => true, LANE_Y_MIN, LANE_Y_MAX),

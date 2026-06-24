@@ -31,7 +31,7 @@ import {
   type CalendarDayCell,
 } from '@/src/domain/calendar/monthGrid';
 import { CalendarGrid } from './CalendarGrid';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface EnrichedSession {
@@ -82,6 +82,11 @@ const FREESTYLE_BG = '#D1D5DB';
 const FREESTYLE_TEXT = '#374151';
 
 export default function MonthGridView() {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // the freestyle-title fallback (t('domain','freestyle')) re-evaluates on
+  // language switch (this view stays mounted under the History tab).
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const { tokens } = useTheme();
@@ -204,6 +209,11 @@ function DayCellView({
   styles: ReturnType<typeof makeStyles>;
   onPress: () => void;
 }) {
+  // React Compiler i18n gotcha: this cell calls displaySessionTitle (→ t())
+  // at render time, so it needs its own locale subscription + memo opt-out to
+  // refresh the freestyle label on language switch.
+  'use no memo';
+  useLocale();
   const main = bucket?.main ?? null;
   const isFreestyle = main != null && main.template_id == null;
   const title = main ? displaySessionTitle(main) : '';

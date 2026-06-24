@@ -15,7 +15,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { getLocale, t } from '@/src/i18n';
+import { getLocale, t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 import type { TierCardVM } from '@/src/domain/achievement/achievementPanelModel';
 
@@ -63,6 +63,11 @@ interface Props {
 }
 
 export function TierProgressCard({ card, resolveGroupLabel }: Props) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // the inline t()/getLocale()-backed title, tier label, and badges re-evaluate
+  // on language switch (memoized FlatList leaf needs its own subscription).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = React.useMemo(() => makeStyles(tokens), [tokens]);
 
