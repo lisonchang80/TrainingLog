@@ -32,6 +32,7 @@ import {
 } from '@/src/domain/calendar/monthGrid';
 import { CalendarGrid } from './CalendarGrid';
 import { t, useLocale } from '@/src/i18n';
+import { useAppMode } from '@/src/app-mode';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface EnrichedSession {
@@ -214,6 +215,8 @@ function DayCellView({
   // refresh the freestyle label on language switch.
   'use no memo';
   useLocale();
+  // ADR-0026 — 極簡模式：cell 第 3 行（強度 sub_tag）整段隱藏（無強度概念）。
+  const { isMinimal } = useAppMode();
   const main = bucket?.main ?? null;
   const isFreestyle = main != null && main.template_id == null;
   const title = main ? displaySessionTitle(main) : '';
@@ -267,9 +270,11 @@ function DayCellView({
               {isFreestyle ? `⚠️ ${title}` : title}
             </Text>
           </View>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {isFreestyle ? '' : subTag ?? '—'}
-          </Text>
+          {isMinimal ? null : (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {isFreestyle ? '' : subTag ?? '—'}
+            </Text>
+          )}
         </View>
       ) : (
         <View style={styles.chipStack} />
