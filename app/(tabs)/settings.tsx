@@ -73,7 +73,7 @@ import { getLatestCloudBackup } from '@/src/adapters/backup/icloudBackupAdapter'
 import type { ICloudBackupItem } from '@/modules/icloud-backup';
 import type { UnitPreference } from '@/src/domain/body/types';
 import { parseWeightInput } from '@/src/domain/body/unitConversion';
-import { t, tBodyweightUnitHint, tBodyweightWithUnit, tSaveOrSaving } from '@/src/i18n';
+import { t, tBodyweightUnitHint, tBodyweightWithUnit, tSaveOrSaving, useLocale } from '@/src/i18n';
 import {
   loadStoredLocale,
   resolveLocale,
@@ -110,6 +110,15 @@ function bucketDomainLabel(key: BucketKey): string {
  * here; if you need a new color, add a token to `constants/theme.ts` first.
  */
 export default function SettingsScreen() {
+  // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
+  // subscribe to language changes so this screen's many INLINE `t()` calls
+  // (section headers, switch labels, radio options, alerts) re-evaluate fresh on
+  // a `setLocale()`. This screen IS where the user picks the locale, so it must
+  // refresh in-place; the React Compiler would otherwise serve the cached
+  // strings even after the local-state bump. The memoized leaf BucketRangeRow
+  // needs its OWN subscription. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const { tokens, stored: themePref, setStored: setThemePref } = useTheme();
@@ -1018,6 +1027,12 @@ function BucketRangeRow({
   onInc: () => void;
   styles: Styles;
 }) {
+  // Memoized leaf — re-evaluate its t('button','a11yDecrease'/'a11yIncrease')
+  // stepper accessibility labels on a language switch. The `label`/`rangeText`/
+  // `unit` props are already-translated strings from the parent, but the inline
+  // t() calls need this. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   return (
     <View style={styles.rmRow}>
       <Text style={styles.rmLabel}>{label}</Text>
