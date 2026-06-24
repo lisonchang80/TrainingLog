@@ -126,6 +126,17 @@ Screenshot to `/tmp/<name>.png`, then `Read` it. Cross-check with the a11y tree
 assertions use `simulator-db-query`; to skip 10+ setup taps inject state with
 `sim-db-seed-smoke`.
 
+## Two MCP-call gotchas (validated 2026-06-24)
+
+- **`ui_type` only accepts ASCII** (`^[\x20-\x7E]+$`) — passing Chinese/CJK errors with
+  `Input validation error … Invalid`. You rarely need real text in a smoke; to make a
+  field/editor dirty (e.g. flip a template-editor `儲存` from disabled→enabled) just
+  `ui_type {text: " X"}` (a space + ASCII char). Don't burn turns trying to type the
+  localized string.
+- **`screenshot` output_path parent dir must already exist** — the MCP does NOT
+  `mkdir -p`; a path like `/tmp/slice16-smoke/01.png` errors `The folder … doesn't
+  exist` until you `mkdir -p /tmp/slice16-smoke` once up front.
+
 ## When NOT to use
 
 - Watch / HealthKit / signing / archive / iCloud first-sign behaviour → real device
