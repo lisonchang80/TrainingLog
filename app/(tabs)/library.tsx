@@ -61,7 +61,7 @@ import {
   selectionRank,
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
-import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
+import { t, tEquipment, tExercise, tMuscleGroup, tNSessions, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -87,7 +87,24 @@ function useLibStyles() {
  *   - picker: not yet wired here (L2 step) — multi-select + 完成 footer
  */
 export default function LibraryScreen() {
+  // `'use no memo'`: opt this screen out of React Compiler memoization so that
+  // on a language switch its INLINE `t()` calls (search placeholder, the「全部」
+  // equipment chip label, the「超級組」sidebar entry, section headers) re-evaluate
+  // fresh. Without it the compiler reuses the cached strings even though the
+  // `useLocale()` below forces a re-render. Memoized child components still need
+  // their own opt-out (see EquipmentFilter / ExerciseCard / SupersetCard).
+  'use no memo';
   const db = useDatabase();
+  // Live language switch: tab screens stay mounted, so a `setLocale()` while
+  // this tab was already visited never re-rendered it (the root
+  // `<Stack key={locale}>` in app/_layout.tsx does NOT remount mounted
+  // expo-router screens — the navigator state lives above it). Subscribing here
+  // re-renders this screen on every `setLocale()`, refreshing all INLINE text
+  // (the muscle-group sidebar, section headers, search placeholder). The
+  // React-Compiler-memoized leaf cards (ExerciseCard/SupersetCard/…) need their
+  // OWN `useLocale()` subscription on top of this — see their headers. Cf.
+  // `project_traininglog_react_compiler_i18n_gotcha`.
+  useLocale();
   const router = useRouter();
   // ADR-0025 — pull tokens here so we can use the raw value for
   // `placeholderTextColor` (inline prop, not in StyleSheet).
@@ -535,6 +552,10 @@ function EquipmentFilterDropdown({
   value: Equipment | null;
   onChange: (eq: Equipment | null) => void;
 }) {
+  // Memoized leaf — re-evaluate its t('common','all')「全部」label + equipment
+  // names on a language switch. See ExerciseCard note above.
+  'use no memo';
+  const locale = useLocale();
   const styles = useLibStyles();
   const { tokens } = useTheme();
   const [open, setOpen] = useState(false);
@@ -543,7 +564,9 @@ function EquipmentFilterDropdown({
       { id: EQUIP_ALL_ID, label: t('common', 'all') },
       ...EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: tEquipment(eq) })),
     ],
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `locale` is the
+    // intentional dep: recompute the t()/tEquipment() labels on a language switch.
+    [locale]
   );
   const buttonLabel = value === null ? t('common', 'all') : tEquipment(value);
   return (
@@ -732,6 +755,16 @@ function ExerciseCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  // Live language switch. This card is React-Compiler-memoized on its (stable)
+  // `exercise` prop, so when the user flips zh⇄en mid-session the parent reuses
+  // the cached element and the `tExercise(exercise.name)` below would keep the
+  // boot-language name. `useLocale()` force-re-renders this card on every
+  // `setLocale()`; `'use no memo'` makes that re-render re-evaluate `tExercise`
+  // fresh instead of returning the compiler-cached string. (Screen-level
+  // `useLocale()` only refreshes the screen's INLINE text — memoized leaves like
+  // this need their own subscription. Cf. project_traininglog_react_compiler_i18n_gotcha.)
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
   // media_path stores a require-map key; resolve to [startFrame, endFrame].
@@ -803,6 +836,9 @@ function ExerciseCard({
 }
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
+  // Memoized leaf — re-evaluate the tExercise() initial on a language switch.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   // Hash-color circle with first character — ADR-0017 Q8 v1 placeholder.
   // hash uses raw DB name so the color is stable across locales;
@@ -920,6 +956,10 @@ function SupersetCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  // Memoized leaf — re-render + re-evaluate its t()/tExercise() (cue link,
+  // mini-thumb initials) on a language switch. See ExerciseCard note above.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
@@ -972,6 +1012,9 @@ function SupersetCard({
 }
 
 function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
+  // Memoized leaf — re-evaluate its tExercise() initial on a language switch.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   if (!exercise) {
     return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
