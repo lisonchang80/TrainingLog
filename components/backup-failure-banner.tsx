@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { tBackupEscalationLine } from '@/components/backup-status.behavior';
 import { useDatabase } from '@/components/database-provider';
+import { useLocale } from '@/src/i18n';
 import { getBackupHealth } from '@/src/services/backupService';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -24,6 +25,9 @@ import { useTheme, type ThemeTokens } from '@/src/theme';
  * screen over a readout).
  */
 export function BackupFailureBanner() {
+  'use no memo'; // React Compiler memoizes tBackupEscalationLine()'s locale read;
+  // subscribe to locale so a language switch re-renders this banner live.
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const { tokens } = useTheme();
