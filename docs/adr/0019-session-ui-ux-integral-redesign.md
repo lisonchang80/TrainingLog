@@ -941,6 +941,7 @@ Per `grill-with-docs` skill closing ritual + `phase-precheck` skill sub-agent's 
 
 | 日期 | 翻盤項 | 原拍板 | 新拍板 | 觸發 | 關聯 commit |
 |---|---|---|---|---|---|
+| 2026-06-24 | 反向 iPhone→Watch 即時同步（Phase C / D32）3 項 plan 推薦翻盤 | plan C2＝(b) 可變 base；plan B2＝iPhone→Watch 不做 appContext 墊底；plan＝reorder 全延後 | C2→**(a) overlay 反投影**（base 全 app baked-in 不可變、overlay 是渲染唯一來源）；B2→**dual-fire**（appContext 槽此方向已驗空、不撞 forward）；reorder→**全做但拆 C-core(動作層,不動 id)/C-id(set 層+id-adoption)**。+ ⭐新拍板：**Watch 側 in-flight 閘**（防 apply-iphone 後 forward producer 彈回，forward 單向設計沒有它）。Watch/iPhone rev high-water **各自獨立變數** | grill-with-docs 7Q 2026-06-24（Watch state-model agent file:line ground、plan stale-by-default 驗證；見 § 2026-06-24 段）；user 選「反向 Watch 同步」+ 提問「會否影響原 forward」逼出 Watch 側閘 | n/a (pre-impl) |
 | 2026-06-13 | Stage1 prefetch shape v3（Watch 同名模板 Y-dup） | NEW-Q44/NEW-Q50 Q3：flat 全 variant rows（top-20）、Watch (計劃,強度) 選擇＝metadata theater 不影響 templateId | grouped-by-name + variants[] fat-tree；Watch 端 (programId, subTag) strict-NULL resolve 鏡像 planResolveTarget；20-cap 改 group-first 全局 variant 預算；miss → representative + 過場頁提示 | 預研報告 13 + grill 13Q 2026-06-13（詳見 § 2026-06-13 段） | n/a (pre-impl) |
 | 2026-06-12 | D17 串流落地 — HRFrozenPane 輪詢降階拍板翻盤 | （2026-06-11 #312 row 下）HRFrozenPane 接最近 HR + 動態 kcal 走 `TimelineView` 5s 輪詢、「D17 delegate 串流留 backlog」（D14 § 2026-06-11 amendment point 5 降階拍板）| **D17 落地**：`SessionController` adopt `HKLiveWorkoutBuilderDelegate`（`didCollectDataOf` HR/active/basal 三型別觸發、背景 queue → `Task { @MainActor [weak self] }` hop、`builder ===` 擋 teardown 遲到 callback）→ 新 `@Published streamedStats`（**等值閘門即節流**：比對相等不 assign、UI 更新率＝資料變動率 ~1Hz HR）；statistics 讀法抽 `computeStats(from:)` 與 `liveWorkoutStats()` 共用單一來源；HRFrozenPane 變純顯示 struct 吃下傳值、TimelineView 輪詢砍除；start() 清 streamedStats（新場顯 "--" 到首樣本）、三 teardown path 清（對齊舊輪詢 builder-nil 即 "--" 行為）。FinishPage onAppear pull path 不動。實作走 builder delegate 而非 D10 Q9 原文的 `activeWorkoutHeartRate` observer（builder delegate 同源 statistics、與 #312 讀法零複製）| overnight D17 backlog 收口 2026-06-12（#312 v2 降階先上、串流補回）| branch `slice/d17-hr-streaming`（SessionController delegate + SetLoggerView wire 兩 commit）|
 | 2026-06-11 | D14 完成頁 tiles 真資料化 + 改版（#312）| D14 凍結 spec：5-tile、❤ `142 bpm（平均）` / 🔥 `285 kcal` 硬編 placeholder、💪 `5 動作`＝全部動作數；D10 Q9 = HR/kcal 走 D17/D18 live observer ~1Hz | tiles 接 `HKLiveWorkoutBuilder` 真值（`liveWorkoutStats()`、無樣本 "--"）；❤ 平均→**範圍 min–max**；🔥 拆**動態/靜態兩行**（basal 型別新增進 typesToRead、5→6 tile）；💪 **`N/M 動作` 有非熱身 ✓ 才算 1**；HRFrozenPane 接最近 HR + 動態 kcal（TimelineView 5s 輪詢、D17 串流降階先上）| user 實機 smoke #312 v1 後 4 點反饋 + AskUserQuestion 3 拍板 2026-06-11 | `42b8f84`（v1 wire）+ 本批 v2 commits |
@@ -3415,3 +3416,67 @@ Swift（device-gated、停在此邊界等使用者）：
 - ⚠️ Watch 三 sheet (計劃,強度) 從 metadata theater 升級為 resolve 輸入（D8 P1 sheet 流程不變、語意變）
 
 **實作**（預研報告 13 micro-PRD；報告副本 `~/code/TrainingLog-overnight-reports/2026-06-12/13-watch-template-dedup.md`）：commit 1 TS（handshake builder 複用 pure `templateListGroups` + jest）→ commit 2 Swift（Stage1Reply tolerant decode + PickerViewModel.resolveVariant + 過場頁行）→ device smoke 7 項 → docs。無新 WC kind；reply-shape 遵守 wire null rule（NULL 省 key）+ tolerant decode 慣例。
+
+## 2026-06-24 — 反向 iPhone→Watch 即時同步（Phase C / D32）grill 拍板
+
+> **本段把 2026-05-31 § Slice 13d 同步重構的 Q6（反向渲染＝完全對稱全即時）落實成可開工的拍板。** Phase A（schema）+ D（墓碑 purge）已 ship；Watch→iPhone fast-lane（§ 2026-06-01 三段）已 ship main `89fbbed`。本段是**剩餘的另一半 = iPhone→Watch live 投影（Phase C / 程式碼註解的 D32）**的 grill 結果。**設計定案、純文件，實作是之後的 device session。**
+
+### Trigger / Context
+
+使用者選「想讓 app 更好用 → 反向 Watch 同步」。現況（唯讀 agent 全 file:line 查證）：iPhone 端 toggle/edit/add-exercise handler **只寫 SQLite + 本地 state、完全沒送 WC**（`app/session/[id].tsx` onToggleLogged ~1132 / onUpdateSet ~931 / add-exercise）；iPhone 對 Watch 主動送出只有 `start-from-iphone`（全快照、僅 session 啟動/空 session 加首動作 bootstrap）/`start-reconcile`/`end-session` 三種非 set-level 控制訊息；`set-completed/modified/added/exercise-added` 等 kind 雖在 `payloadSchema.ts:301-389` 定義成雙向但 iPhone 端零 outbound。Swift inbound 也只認 `end-session`+`start-reconcile`、**無 `didReceiveApplicationContext`**、連 `start-from-iphone` 都無 adoption handler（`WatchConnectivityCoordinator.swift:1113` 註解明寫這是計畫中的 **D32**）。`live-mirror` 是 **Watch→iPhone** 方向。**所以反向 = net-new 一整條 iPhone-producer + Watch-inbound-receiver + echo-drop。**
+
+用 `grill-with-docs` 跑完 7 題（含一個 Watch 端 state-model agent 全 file:line ground；plan stale-by-default 驗證**翻了 3 項既有 plan 推薦**）。
+
+### Decisions（8 拍板 ledger）
+
+| Q | 題 | 拍板 |
+|---|---|---|
+| 1 | v1 範圍 | **完全對稱**：打勾(isLogged) / 改 reps·weight / 加·刪動作 / 改標題 / reorder / 備註顯示，iPhone→Watch <1s。（落實 Q6） |
+| 2 | Watch apply 模型 | **(a) overlay 反投影**：base 維持不可變 `let`，diff 後寫進 `SessionInteractionState` overlay（既有 loggedSetIds/editedValues/deletedSetIds/deletedExerciseIds + **新增** addedExercises / notes(唯讀) / exercise-order-override）；render 100% 重用、`@Published` 自動重畫；**新寫一個 forward `LiveMirror.project` 的逆函式**（snapshot → overlay diff）。**🔁翻盤 plan C2 原推薦 (b) 可變 base** — 真因：base 不可變是全 app baked-in、overlay 是渲染唯一來源（agent 驗 `SetLoggerView.swift:31` `let snapshot` 無 reload 路徑、`SessionInteractionState.swift:125`）。 |
+| 3 | Transport | **重用既有 `live-mirror` kind + dual-fire**：`sendMessage` 即時主力 + iPhone→Watch `updateApplicationContext` 墊底（槽**已驗空**：TS 端零 production call site 對 Watch 送 appContext，forward 是 Watch→iPhone 方向、不撞）。rev 守門去重 dual-fire。**🔁翻盤 plan B2 原推薦「不做 iPhone→Watch appContext 墊底」** — 換來「Watch 醒來自動補最新」glance 情境（B2 原顧慮的「兩端同槽互蓋」不成立，因 forward 不用 iPhone→Watch 這個方向的 appContext 槽）。 |
+| 4 | 並發 / regression | **(A) 直接套用**：快照差異全套；正在打字的格子靠既有 `activeCell` 緩衝 shadow 自動保護（commit 時使用者值勝）；同時同秒短暫 regression 接受、下輪 forward+reverse 自癒。**不復活 per-field LWW**（D19/D20 已刪、守此拍板）。 |
+| 5 | reorder | **(A) 全粒度含 set 層、走 id-adoption**，但 **(5b) 拆兩階段**（見下）。**🔁翻盤 plan 原推薦「reorder 全延後」** — user 要全做，但接受拆階段隔離風險。 |
+| 6 | 備註 | **唯讀顯示**（手機改、手錶看；不可在 Watch 編輯）。net-new Watch 備註 UI＝**Swift impl 卡 user 視覺參考**（per `feedback_watch_ui_reference`）。 |
+| 7 | 機制 | **鏡像強制 + ⭐雙側回音抑制**（見下方專段）。 |
+| 8 | Phase 綁定 | Phase B（iPhone producer + echo-drop，純 TS/jest，可先寫但單獨 inert）**與 Phase C 綁一起 ship**；C-core 除備註外是純資料流、不卡視覺。 |
+
+### Q5 拆階段（reorder：全做但隔離風險）
+
+- **Phase C-core**：加/刪動作 + set 值 + 打勾 + 標題 + **動作層 reorder**（吃快照 `ordering` + order-override overlay、身分仍 `sessionExerciseId`、**不碰 id 模型**）+ 備註唯讀顯示。
+- **Phase C-id**：**set 層 reorder + id-adoption**（Watch 採 iPhone canonical id、id 全程收斂、根除 id 分岔 bug class＝動到 NEW-Q50 standalone id 模型）隨後**獨立做**。
+- 這吸收了 § 2026-06-01 evening 的 open fork（reorder option A vs C）：C-core 的動作層 reorder 走「快照 ordering + override overlay」不需 `displayOrder` wire 欄也不動 id（比 option C 更輕）；set 層 reorder 的真正 id 收斂留 C-id（= option A id-adoption）。
+
+### Q7 機制 — 雙側回音抑制（⭐本 grill 新逼出的硬要求）
+
+1. **Watch 新增 per-session `rev` high-water**（追 `iphone-rev`，**與 iPhone 追的 `watch-rev` 各自獨立變數、不可共用**）+ `originator == 'iphone'` 過濾（對稱 `onLiveMirror` 的 `rev <= lastApplied` drop）。
+2. **iPhone 與 Watch 兩側都要「正在套用遠端」in-flight 閘**：
+   - iPhone 側防 apply-watch 後回推（**既有設計已含** — B3 的 in-flight flag + `originator==='watch'` drop）。
+   - **⭐Watch 側防 apply-iphone 後 forward producer 原樣彈回**（**user 逼出的關鍵**）：Watch 的 forward `LiveMirrorProducer` 訂閱了**同一顆 overlay 的 9 個 `@Published`**，反向寫 overlay 會觸發它 `markDirty` → 彈回 iPhone。**忘了關最壞是「多一次無謂往返 + 同值 no-op」（非無限迴圈、非資料損壞，因 rev/originator 雙重去重 + 整包快照冪等），但必須關。**
+3. **iPhone producer**：debounce ~250–300ms、整包快照（**重用 end-path / handshake builder**）、`originator:'iphone'`、單調 rev、**在地化動作名（Bug Y 契約）+ notes**。
+
+### 對 forward（Watch→iPhone）功能的影響（user 提問）
+
+**資料流零侵入**：反向只寫 Watch overlay + iPhone 唯讀 producer，**不新增 iPhone DB 寫路徑、不重現 Bug X**（B2 reconcile vs live-mirror id 衝突）。唯一影響＝**系統變雙向後的回音耦合**（即 Q7 ② 兩側 in-flight 閘），其中 **Watch 側那個閘是本 grill 新逼出的硬要求**（forward 既有設計沒有它，因為 forward 是單向的、overlay 只有 Watch 自己寫）。實機 smoke 第 9 項（乒乓檢查）為 gate。
+
+### 翻盤的既有拍板（stale-plan-default）
+
+- ❌ **plan C2 原推薦 (b) 可變 base** → (a) overlay 反投影（base 全 app baked-in 不可變、overlay 是渲染唯一來源）。
+- ❌ **plan B2 原推薦「iPhone→Watch 不做 appContext 墊底」** → 做 dual-fire（appContext 槽在此方向已驗空、不撞 forward；換 glance 補最新）。
+- ❌ **plan 原推薦「reorder 全延後」** → 全做、但拆 C-core（動作層、不動 id）/ C-id（set 層 + id-adoption）兩階段隔離風險。
+- ⚠️ § 2026-06-01 evening 的 reorder option A/C fork → 收斂為「C-core 走快照 ordering + override overlay（比 C 輕、不動 id）、C-id 走 id-adoption（= A）」。
+
+### 落地順序（沿用 plan「落地順序建議」）
+
+1. **前置**：fast-lane 已在 main `89fbbed`（`live-mirror` kind + `onLiveMirror` rev 守門皆在）。
+2. **B 剩半**（iPhone producer + echo-drop，jest 綠、**不單獨 ship**——沒 C receiver 收仍 inert）。複用既有 `live-mirror` kind，不開新 kind。
+3. **C-core**（Swift，**備註顯示卡 Watch UI 視覺參考**）：overlay 反投影逆函式 + inbound receiver + Watch 側 rev 守門 + Watch 側 in-flight 閘 + 動作層 reorder + 備註唯讀。
+4. **全套實機 smoke**（C5 的 9 項，特別是第 9「乒乓檢查」）綠 → 整包 ship。
+5. **再做 Phase C-id**（set 層 reorder + id-adoption，獨立 slice）。
+
+### Cross-link
+
+- `docs/slice-13d-sync-phase-bc-plan.md` — Phase B/C 逐檔藍圖（本段拍板已折進該檔的 B1/B2/B3 + C1/C2/C3/C4 + reorder fork 段）。
+- § Slice 13d 同步重構 Q6（反向渲染完全對稱）— 本段是其落實拍板。
+- § 2026-06-01 三段（fast-lane transport / reconcile / render fold）+ H1 liveness gate — 反向重用其 `live-mirror` kind + rev 守門基礎建設。
+- `feedback_watch_ui_reference` — C-core 的備註顯示 UI 動工前先要 Watch 視覺參考。
+- `wc-add-envelope-kind` skill § LIVE 變體 — 反向複用同 kind、不開新 kind。

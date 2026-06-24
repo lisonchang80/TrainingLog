@@ -22,6 +22,23 @@
 
 ---
 
+> ## ✅ 2026-06-24 grill 拍板 refresh（反向 iPhone→Watch / Phase C / D32 — 全部 open fork 已收斂）
+>
+> **本檔原把好幾個抉擇標成「impl 時定」「grill 定」「open fork」。2026-06-24 用 `grill-with-docs` 跑完 7 題全部拍板**（權威記錄＝ADR-0019 § 2026-06-24 段 + 翻盤 ledger 該列）。以下逐點收斂，下方原文對應段落已加 `〔2026-06-24 拍板〕` 行內標注：
+>
+> | 抉擇 | 原狀態 | 2026-06-24 拍板 |
+> |---|---|---|
+> | **C2 overlay vs 可變 base** | plan 推薦 (b) 可變 base | **(a) overlay 反投影**（base 全 app baked-in 不可變、overlay 是渲染唯一來源；新寫 forward `LiveMirror.project` 的逆函式 snapshot→overlay diff、overlay 加 `addedExercises`/`notes`/`exercise-order-override`）。🔁翻 plan 推薦。 |
+> | **B2 iPhone→Watch appContext 墊底** | plan 建議「先只快車道、不做墊底」 | **做 dual-fire**（appContext 槽在 iPhone→Watch 方向**已驗空**、不撞 forward；換「Watch 醒來自動補最新」glance）。🔁翻 plan 建議。Watch C1 因此**要同時監聽 `didReceiveMessage`(`live-mirror`) + `didReceiveApplicationContext`**。 |
+> | **reorder 對稱** | plan 建議「第一版先不做」(option C 留 follow-up) | **全做、但拆兩階段**：**C-core**＝動作層 reorder（吃快照 `ordering` + order-override overlay、身分仍 `sessionExerciseId`、**不碰 id 模型、不需 `displayOrder` wire 欄**）；**C-id**＝set 層 reorder + id-adoption（= 原 option A、動 NEW-Q50 id 模型）獨立後做。🔁翻 plan 建議。 |
+> | **備註 Watch 端可編輯?** | C3 標「待使用者拍板」 | **唯讀顯示**（手機改、手錶看；net-new Watch 備註 UI 仍卡視覺參考）。 |
+> | **echo 抑制範圍** | B3/C1 只列 originator drop + iPhone 側 in-flight flag | **⭐雙側 in-flight 閘**：iPhone 側既有；**Watch 側新增**（防 apply-iphone 後 forward `LiveMirrorProducer`〔訂閱同顆 overlay 9 個 `@Published`〕`markDirty` 彈回 iPhone）。Watch/iPhone 各持**獨立** rev high-water 變數。 |
+> | **scope / Phase 綁定** | — | v1＝完全對稱（打勾/值/加刪動作/標題/reorder/備註）；B 與 C **綁一起 ship**（B 單獨 inert）。 |
+>
+> **落地順序拍板**：fast-lane 已在 main `89fbbed`（前置滿足）→ B 剩半（jest 綠、不單獨 ship）→ **C-core**（Swift、備註卡視覺參考）→ 9 項實機 smoke（特別第 9 乒乓）→ ship → 再做 **C-id**。
+
+---
+
 ## 0. 現況 5 大缺口（落地前必讀）
 
 > **〔2026-06-01 evening refresh — 缺口狀態重校準表〕** fast-lane 補齊的是 **Watch→iPhone** 半邊。摘要：
@@ -87,6 +104,7 @@
 - **快車道**：`connectivity.ts` 已有 `sendMessage`。producer push 時：reachable → `sendMessage({ kind:'live-mirror', payload })`（fire-and-forget，不等 reply，不判讀——同 Q3 精神）。
 - **背景底盤**：同一份快照也 `updateAppContext`（latest-replace）。**方向衝突（缺口 4，已大幅緩解）**：fast-lane 後前景即時已不靠 appContext；剩餘張力僅「兩端都用 appContext 墊底」會互蓋。
   - **建議**：快車道 sendMessage 為主（兩方向同 `live-mirror` kind，靠 `originator` 分辨）；iPhone→Watch 的**背景墊底可暫不做**（live tick 掉了下一次 push 自癒、`end-session` 才是耐久後備、且 iPhone→Watch 不背耐久情境）—— 先只做快車道、appContext 維持 Watch→iPhone 單向，避開撞車。日後若要 iPhone→Watch 墊底再評估走 TUI（FIFO、不互蓋）。**此抉擇 impl 時定**（影響 Watch receiver 要監聽哪個 channel；見 C1）。
+  - 〔**2026-06-24 拍板 — 翻盤此建議**〕**做 dual-fire**：iPhone→Watch 也送 `updateApplicationContext` 墊底。理由：該 appContext 槽在 iPhone→Watch 方向**已驗空**（TS 端零 production call site 對 Watch 送 appContext、forward 是 Watch→iPhone 方向），不撞 forward；換來「Watch 醒來/重連自動補最新整包快照」的 glance 情境。rev/originator 雙重去重吸收 dual-fire 重複。→ **Watch C1 因此要同時監聽 `didReceiveMessage`(`live-mirror`) + `didReceiveApplicationContext`**。見頂部 § 2026-06-24 refresh + ADR-0019 § 2026-06-24。
 
 ### B3 — echo 抑制（防乒乓）
 
@@ -140,13 +158,15 @@
 - **兩條路（impl 時擇一）**：
   - **(a) 擴 overlay**：加 `addedExercises`、`reorderedExerciseIds`、`exerciseNotes`、`titleOverride`。改動小但 overlay 邏輯變複雜。
   - **(b) 可變 base**：收到 iPhone 快照時**重建 base**（snapshot-replace，與 NEW-Q50 的 Watch→iPhone 對稱），把仍有效的本地未送出差異 re-apply。較乾淨但要小心丟失 Watch 端剛編輯未送出的差異。
-  - **推薦 (b)**——與整包快照哲學一致；但需處理「Watch 正在編、iPhone 同時改」的合併（接力使用下罕見，rev 較大者勝）。
-- **渲染端**：`SetLoggerView` / `ExerciseCard`（依 base + overlay 重繪）。reorder = 依快照 `ordering` 重排動作清單。
+  - ~~**推薦 (b)**——與整包快照哲學一致；但需處理「Watch 正在編、iPhone 同時改」的合併（接力使用下罕見，rev 較大者勝）。~~
+  - 〔**2026-06-24 拍板 — 翻盤推薦、改走 (a) overlay 反投影**〕Watch state-model agent 全 file:line 查證證明：**base 不可變是全 app baked-in**（`SetLoggerView.swift:31` `let snapshot` 無 reload 路徑、`SessionInteractionState.swift:125`），**overlay 是渲染唯一來源**。(b) 重建 base 沒有 reload 入口、且會丟 Watch 端未送出差異。**故走 (a)：base 維持不可變、把 iPhone 來的快照 diff 成 overlay 寫入**——overlay 加 `addedExercises` / `notes`(唯讀) / `exercise-order-override`；**新寫一個 forward `LiveMirror.project` 的逆函式**（snapshot → overlay diff）。render 100% 重用、`@Published` 自動重畫。並發＝直接套用（打字格靠既有 `activeCell` shadow 保護、commit 時使用者值勝），不復活 per-field LWW。見 ADR-0019 § 2026-06-24 Q2/Q4。
+- **渲染端**：`SetLoggerView` / `ExerciseCard`（依 base + overlay 重繪）。reorder = 依快照 `ordering` 重排動作清單（**C-core 走 order-override overlay、不碰 id**；set 層 reorder 留 C-id、見下方 reorder fork 段的 2026-06-24 拍板）。
 
 ### C3 — 備註顯示 UI（缺口：Watch 無備註 UI，net-new）
 
 - 現況：`notes` 在 `SessionInteractionState` 投影恆 `nil`（`:113`）；全 Watch 無 `TextField`/NoteSheet/備註元件。
 - **C 範圍（依視覺參考定）**：至少**顯示** iPhone 來的 per-exercise / per-set 備註（唯讀即可滿足「手機改、手錶看」的接力情境）。是否要 Watch 端**編輯**備註 = 待使用者拍板（手錶打字體驗差，可能維持唯讀）。
+- 〔**2026-06-24 拍板**〕**唯讀顯示**（手機改、手錶看；不可在 Watch 編輯）。net-new Watch 備註 UI 仍**卡 Watch 視覺參考**（per `feedback_watch_ui_reference`）＝C-core 唯一卡視覺的子項，其餘是純資料流。見 ADR-0019 § 2026-06-24 Q6。
 
 ### C4 — 出站對稱（Watch→iPhone 也帶新欄位）
 
@@ -182,7 +202,7 @@
 1. **先確認 fast-lane 已進 main**（或 base 在其上）——Phase B+C 依賴 `live-mirror` kind + `onLiveMirror` rev 守門。
 2. **B 剩半（iPhone producer + echo-drop，純 TS、jest 綠）** 但**不單獨 ship**——留在 branch（沒 C receiver 收仍 inert）。複用既有 `live-mirror` kind，不開新 kind。
 3. **接著 C（Swift）**，邊做邊用 B 推的快照驗證 Watch receiver。
-4. C2 的 overlay vs 可變 base 抉擇 + reorder 對稱 fork（option A/C）+ B2 的「iPhone→Watch 要不要 appContext 墊底」會**互相影響**——一起在 grill 定。
+4. ~~C2 的 overlay vs 可變 base 抉擇 + reorder 對稱 fork（option A/C）+ B2 的「iPhone→Watch 要不要 appContext 墊底」會**互相影響**——一起在 grill 定。~~ 〔**2026-06-24 grill 已全拍板**〕C2＝(a) overlay 反投影、reorder＝拆 C-core(動作層)/C-id(set 層+id-adoption)、B2＝做 dual-fire。詳見頂部 § 2026-06-24 refresh + ADR-0019 § 2026-06-24。
 5. 全套實機 smoke（C5 的 9 項）綠 → 才整包 ship。
 6. ship 時注意：若彼時 main 已被其它 branch 推進，沿用「branch 落地 + 視 git 狀態決定 ff/rebase」原則，勿擾動他人未提交工作。
 
@@ -202,5 +222,10 @@
 - **option A（Watch 採用 iPhone 真 id / id-adoption）**：`onStartFromWatch` reply 補 snapshot、Watch overlay 做 id-rebase，讓兩端 id 收斂，reorder 才能用穩定 id 表達順序。較大工程（動到 NEW-Q50 的 standalone id 模型）。
 
 **建議**：Phase C 第一版**先不做 reorder 對稱**（與 Watch→iPhone 的 Q2 代價對齊、保持雙向一致），只做「新增動作 / 備註 / 標題 / set 值」的對稱即時渲染；reorder 對稱列為 follow-up，屆時選 option C（侵入小）。**動工前在 grill 拍板此 fork。**
+
+〔**2026-06-24 拍板 — 翻盤此建議、reorder 全做但拆兩階段**〕user 要 reorder 也對稱，接受拆階段隔離風險：
+- **C-core（含本 slice）＝動作層 reorder**：吃快照 `ordering` + **order-override overlay**、身分仍 `sessionExerciseId`、**不碰 id 模型、不需 `displayOrder` wire 欄**（比 option C 更輕——因為走 overlay 反投影，動作層順序純由 overlay 表達、配對仍按 `sessionExerciseId`，沒有 forward 那個「`ordinal` 同時當身分 key + 顯示序」的互斥問題）。
+- **C-id（獨立後做）＝set 層 reorder + id-adoption**（= 原 option A）：Watch 採 iPhone canonical id、id 全程收斂、根除 id 分岔 bug class（動到 NEW-Q50 standalone id 模型）。
+見 ADR-0019 § 2026-06-24 Q5 + Q5 拆階段段。
 
 **Cross-link**：ADR-0019 § 2026-06-01「遞減組 reconcile：拿掉 producer ordinal permute」（Q1=B、Q2 接受 reorder 不同步、列明 option A/C 升級路徑）+ § 2026-06-01「Live-mirror fast lane」（transport）。⚠️ 兩段 ADR amendment 目前在 `slice/13d-livemirror-fastlane`，隨該 branch 進 main。`watch-setlogger-overlay-gesture` skill「iPhone reconcile ordinal 配對鐵律」。
