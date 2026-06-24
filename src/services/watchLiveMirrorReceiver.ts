@@ -80,7 +80,7 @@ type LiveMirrorResult =
   | { ok: true; sessionId: string; exerciseCount: number; setCount: number }
   | {
       ok: false;
-      code: 'bad-payload' | 'db-error' | 'stale' | 'session-gone';
+      code: 'bad-payload' | 'db-error' | 'stale' | 'session-gone' | 'echo';
       message: string;
     };
 
@@ -332,6 +332,21 @@ export async function onLiveMirror(
       ok: false,
       code: 'bad-payload',
       message: 'applicationContext did not parse to a SessionSnapshot',
+    };
+  }
+  // Echo suppression (ADR-0019 § 2026-06-24 拍板#7, reverse-sync Phase B). An
+  // `originator:'iphone'` snapshot reaching THIS (iPhone) receiver is the
+  // iPhone's OWN push echoed back (e.g. bounced off the Watch) — applying it
+  // would be a redundant self-write. Drop it BEFORE the rev claim (don't let an
+  // echo advance the high-water mark). Inert until the reverse lane is wired
+  // (no iphone-originated snapshot reaches the iPhone today), but the guard
+  // belongs with the receiver; symmetric to the Watch-side `originator=='watch'`
+  // drop (Phase C). Absent originator (legacy Watch producer) is NOT an echo.
+  if (snapshot.originator === 'iphone') {
+    return {
+      ok: false,
+      code: 'echo',
+      message: 'dropped iphone-originated snapshot (own echo)',
     };
   }
   // Anti-reorder guard (sync fast lane). Drop a stale / out-of-order
