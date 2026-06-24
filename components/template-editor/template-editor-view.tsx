@@ -652,6 +652,17 @@ export default function TemplateEditorView() {
     }
   }, [committed, draft, busy, persistDraft, id, db]);
 
+  // 極簡模式 fresh-template「儲存」直接存通用 + toast、跳過 TemplateMetaSheet
+  // （該 sheet 在極簡下三段全藏＝整片空白）。onSaveSheetConfirm 定義在下方，
+  // 改用 ref 在 runtime 取最新值，避免 onSave 的 dep array 在 TDZ 內引用它。
+  const onSaveSheetConfirmRef = useRef<
+    | ((
+        args: { name: string; program_id: string | null; sub_tag: string | null },
+        explicitMode?: 'save' | 'import',
+      ) => void | Promise<void>)
+    | null
+  >(null);
+
   const onSave = useCallback(() => {
     if (!dirty || !draft || busy) return;
     if (isFromWizard) {
@@ -661,12 +672,23 @@ export default function TemplateEditorView() {
     // 模板訓練「＋」新建、尚未分類的 fresh 模板：儲存＝「另存新檔」，跳
     // TemplateMetaSheet 讓使用者選 (program, sub_tag)（名稱已可在編輯器內改）。
     if (needsClassify) {
+      // ADR-0026 極簡模式：無計劃/強度概念，直接存成通用 (null, null) + toast，
+      // 不開（極簡下會是整片空白的）sheet。重用 onSaveSheetConfirm 的 commit
+      // 路徑（含 dup-triple 防護），explicitMode 直接帶 'save'，免依賴此刻尚未
+      // 更新的 saveSheetMode state。
+      if (isMinimal) {
+        void onSaveSheetConfirmRef.current?.(
+          { name: draft.name, program_id: null, sub_tag: null },
+          'save',
+        );
+        return;
+      }
       setSaveSheetMode('save');
       return;
     }
     // 已儲存模板：純 body commit + toast + 留頁。
     void onSaveBodyOnly();
-  }, [dirty, draft, busy, isFromWizard, needsClassify, onSaveFromWizard, onSaveBodyOnly]);
+  }, [dirty, draft, busy, isFromWizard, needsClassify, isMinimal, onSaveFromWizard, onSaveBodyOnly]);
 
   // Orphan cleanup for the program-wizard「新建模板」flow. The wizard
   // pre-creates the template row on entry; if the user leaves this editor
@@ -709,13 +731,18 @@ export default function TemplateEditorView() {
    * 預設 (program, sub_tag) 寫回 cell)。「儲存」沿用 dirty guard。
    */
   const onSaveSheetConfirm = useCallback(
-    async (args: {
-      name: string;
-      program_id: string | null;
-      sub_tag: string | null;
-    }) => {
+    async (
+      args: {
+        name: string;
+        program_id: string | null;
+        sub_tag: string | null;
+      },
+      // 極簡 fresh-save 直呼此函式時帶 'save'（onSave 那邊 saveSheetMode 還沒
+      // set），其餘照常從 state 取。
+      explicitMode?: 'save' | 'import',
+    ) => {
       if (!draft || busy) return;
-      const mode = saveSheetMode;
+      const mode = explicitMode ?? saveSheetMode;
       if (!mode) return;
       setBusy(true);
       try {
@@ -940,6 +967,8 @@ export default function TemplateEditorView() {
       router,
     ],
   );
+  // 讓 onSave 的極簡分支能在 runtime 取到最新的 onSaveSheetConfirm（見上方 ref）。
+  onSaveSheetConfirmRef.current = onSaveSheetConfirm;
 
   /**
    * 2026-06-04 redesign #4/#5/#6（含異常1 翻盤）— ⋯選單「另存模板」/「另存強度」確認。
