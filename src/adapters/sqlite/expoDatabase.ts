@@ -2,6 +2,7 @@ import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import type { Database, RunResult, SQLParam } from '../../db/types';
 import { migrate } from '../../db/migrate';
 import { createTransactionSerializer } from './transactionSerializer';
+import { fromFileUri } from '../../domain/backup/fileUri';
 
 /**
  * Production adapter: wraps expo-sqlite's `SQLiteDatabase` to conform to our
@@ -350,15 +351,18 @@ export interface CandidateDb {
  * running migrations. Throws when the path cannot be opened as SQLite —
  * the restore rules layer maps that to the 'not-sqlite' verdict.
  *
- * expo-sqlite addresses files as (name, directory), so the absolute path is
- * split on its last '/'.
+ * expo-sqlite addresses files as (name, directory) on a PLAIN POSIX path
+ * (its `directory` default `defaultDatabaseDirectory` is `...standardized.path`,
+ * not a URI), so a candidate sourced as a `file://` URI is first reduced via
+ * `fromFileUri` and then split on its last '/'.
  */
 export async function openCandidateDatabase(absolutePath: string): Promise<CandidateDb> {
-  const slash = absolutePath.lastIndexOf('/');
-  if (slash <= 0 || slash === absolutePath.length - 1) {
+  const path = fromFileUri(absolutePath);
+  const slash = path.lastIndexOf('/');
+  if (slash <= 0 || slash === path.length - 1) {
     throw new Error(`openCandidateDatabase: expected an absolute file path, got: ${absolutePath}`);
   }
-  const directory = absolutePath.slice(0, slash);
-  const name = absolutePath.slice(slash + 1);
+  const directory = path.slice(0, slash);
+  const name = path.slice(slash + 1);
   return openDatabaseAsync(name, undefined, directory);
 }

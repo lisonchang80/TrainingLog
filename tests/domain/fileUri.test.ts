@@ -4,7 +4,7 @@
  * the encodeURI version).
  */
 
-import { toFileUri } from '../../src/domain/backup/fileUri';
+import { fromFileUri, toFileUri } from '../../src/domain/backup/fileUri';
 
 describe('toFileUri', () => {
   it('prefixes a bare POSIX path with file://', () => {
@@ -23,5 +23,34 @@ describe('toFileUri', () => {
     expect(toFileUri('/private/var/Mobile Documents/iCloud~com~x/Documents/b.sqlite')).toBe(
       'file:///private/var/Mobile%20Documents/iCloud~com~x/Documents/b.sqlite'
     );
+  });
+});
+
+describe('fromFileUri', () => {
+  it('strips the file:// scheme to a plain POSIX path (expo-sqlite directory contract)', () => {
+    expect(fromFileUri('file:///sandbox/Documents/SQLite/traininglog.db')).toBe(
+      '/sandbox/Documents/SQLite/traininglog.db'
+    );
+  });
+
+  it('is idempotent for an already-plain path', () => {
+    const path = '/sandbox/Documents/SQLite/traininglog.db';
+    expect(fromFileUri(path)).toBe(path);
+  });
+
+  it('percent-decodes a space in the iCloud container path', () => {
+    expect(
+      fromFileUri('file:///private/var/Mobile%20Documents/iCloud~com~x/Documents/b.sqlite')
+    ).toBe('/private/var/Mobile Documents/iCloud~com~x/Documents/b.sqlite');
+  });
+
+  it('round-trips with toFileUri (path -> uri -> path) for a space-bearing path', () => {
+    const path = '/private/var/Mobile Documents/iCloud~com~x/Documents/b.sqlite';
+    expect(fromFileUri(toFileUri(path))).toBe(path);
+  });
+
+  it('returns the stripped path unchanged when percent-encoding is malformed', () => {
+    // A lone % is not a valid escape — decodeURI would throw; we keep the path.
+    expect(fromFileUri('file:///sandbox/100%done/b.sqlite')).toBe('/sandbox/100%done/b.sqlite');
   });
 });
