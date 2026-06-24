@@ -108,7 +108,12 @@ export default function LibraryScreen() {
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
   );
-  const cardHeight = Math.floor(cardWidth / 0.92);
+  // Card height hugs its content: 16:9 photo + a 2-line name + paddings. The
+  // old `cardWidth / 0.92` magic ratio was tuned for the legacy circle-thumb
+  // layout and left a large empty gap under the top-aligned 16:9 photo cards.
+  // Derive from the photo's real height (thumbWrap width = cardWidth − 2×10
+  // padding) plus a fixed block for the name + vertical paddings.
+  const cardHeight = Math.ceil((cardWidth - 20) * (9 / 16)) + 68;
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [links, setLinks] = useState<ExerciseMuscleLink[]>([]);
@@ -662,6 +667,18 @@ function ExerciseGrid({
   );
 }
 
+/**
+ * Keep a CJK parenthetical「（…）」together so a 2-line card-name wrap lands
+ * BEFORE the「（」instead of splitting mid-parenthetical (e.g.「坐姿機械推胸（上
+ * 胸）」must never wrap as「…（上 / 胸）」). Joining the「（…）」run with U+2060
+ * WORD JOINER makes it one unbreakable unit, so the natural CJK break point just
+ * before「（」becomes the wrap site. No-op for names without「（…）」 (English
+ * names keep wrapping on their spaces).
+ */
+function keepParensTogether(name: string): string {
+  return name.replace(/（[^）]*）/g, (run) => run.split('').join('⁠'));
+}
+
 function ExerciseCard({
   exercise,
   sessionCount,
@@ -703,30 +720,41 @@ function ExerciseCard({
         disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
-      {hasCues && (
-        <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
-          <Text style={styles.cuesPillText}>{t('button', 'cues')}</Text>
-        </View>
-      )}
-      {sessionCount > 0 && (
-        <Text style={styles.countBadge}>{tNSessions(sessionCount)}</Text>
-      )}
-      {selected && rank >= 0 && (
-        <View style={styles.selectedBadge}>
-          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
-        </View>
-      )}
       <View style={styles.thumbWrap}>
         {media ? (
           <Image source={media[0]} style={styles.thumbImage} />
         ) : (
           <PlaceholderThumb exercise={exercise} />
         )}
+        {sessionCount > 0 && (
+          <View style={styles.photoSessionBadge}>
+            <Text style={styles.photoSessionBadgeText}>
+              {tNSessions(sessionCount)}
+            </Text>
+          </View>
+        )}
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {tExercise(exercise.name)}
+        {keepParensTogether(tExercise(exercise.name))}
       </Text>
       {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
+      {/* Overlays rendered AFTER the photo + name so they paint on the TOP
+          layer. RN paints later siblings on top; when these sat before
+          <thumbWrap> the photo covered the selection badge (half-hidden /
+          clipped — worse on 2-line-name cards where center-justify pushed the
+          photo up under the badge). The session count moved INTO <thumbWrap>
+          (photo bottom-left) so the top-right selection badge never overlaps
+          it. */}
+      {hasCues && (
+        <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
+          <Text style={styles.cuesPillText}>{t('button', 'cues')}</Text>
+        </View>
+      )}
+      {selected && rank >= 0 && (
+        <View style={styles.selectedBadge}>
+          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
+        </View>
+      )}
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
@@ -1096,7 +1124,10 @@ function makeStyles(tokens: ThemeTokens) {
     borderRadius: 14,
     padding: 10,
     alignItems: 'center',
-    justifyContent: 'center',
+    // flex-start (not center) so the 16:9 photo always sits at the card top,
+    // uniform across 1-line vs 2-line names in the same row (center-justify
+    // left paired photos vertically misaligned).
+    justifyContent: 'flex-start',
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -1164,6 +1195,25 @@ function makeStyles(tokens: ThemeTokens) {
     right: 12,
     color: tokens.text.secondary,
     fontSize: 13,
+  },
+  // Session-count overlay for the 16:9 photo cards. Lives INSIDE <thumbWrap>
+  // (clipped to the photo) at the bottom-left, with a translucent dark pill so
+  // the count reads on any photo and never collides with the top-right
+  // selection badge or the top-left ⓘ. (SupersetCard keeps `countBadge` — it
+  // has no photo, only a centered mini-thumb row.)
+  photoSessionBadge: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  photoSessionBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   thumbWrap: {
     // ADR-0017 Q8: 16:9 landscape card thumbnail (replaced the 96×96 circle).
