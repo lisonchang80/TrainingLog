@@ -43,14 +43,59 @@ rebuild**. Metro serves whatever's on disk in the **primary worktree**, so:
   screen) — see `overnight-parallel-agents` gotcha #14. Switch back when done.
 - Confirm Metro is alive: `ps aux | grep "expo start"`. If dead:
   `npx expo start --dev-client` from the repo root.
+- **`CI=1` disables Metro's file watcher** — a Metro started with `CI=1 npx expo
+  start` (the non-interactive form used to avoid the embedded-terminal hang, per
+  `feedback_claude_code_embedded_terminal`) will **serve a STALE bundle** after you
+  edit a `.ts/.tsx` on disk: a `launch_app` relaunch re-pulls the *cached* bundle,
+  not your edit (symptom: a tiny "Bundled … (1 module)" rebuild and the old UI). To
+  pick up an edit you MUST restart Metro (fresh process re-reads files): kill it
+  (`lsof -ti :8081 | xargs kill`) and re-run `CI=1 npx expo start --dev-client`
+  (add `--clear` if still stale). Cost this skill's author 4+ wasted relaunch
+  round-trips on 2026-06-24 before catching it. (Without `CI=1` the watcher + Fast
+  Refresh pick edits up live — but the interactive CLI can hang the Bash tool.)
+- **Even WITHOUT `CI=1`, a COLD relaunch can still load a STALE bundle.** Fast
+  Refresh patches a *running* app live, but `terminate` + `launch_app` makes the
+  Expo **dev-client reload its own on-disk bundle cache** — it does not always
+  re-fetch from Metro, so your just-edited `.ts/.tsx` may not appear (verified
+  2026-06-24: a `'use no memo'` edit needed a Metro restart, not just relaunch,
+  to take effect). Reliable reset that ALWAYS picks up edits on the next launch:
+  restart Metro (`lsof -ti :8081 | xargs kill -9` → `npx expo start --dev-client`),
+  then `launch_app`. The FIRST cold launch against a fresh Metro process re-pulls
+  a clean build; subsequent relaunches may reuse the client cache again.
 
-## Dev warning toast overlaps bottom buttons
+## Reading on-sim `console.log` (RN logs you can't see)
+
+The user's Metro runs in a terminal you can't read, so app `console.log` is
+invisible — and the dev "Open debugger" toast means you can't attach a debugger
+either. To capture RN logs for a diagnosis (e.g. confirming a hook fires / what a
+value actually is at render time): kill their Metro and start your OWN piped to a
+file — `lsof -ti :8081 | xargs kill -9; nohup npx expo start --dev-client > /tmp/metro.log 2>&1 &`
+— then cold-launch the app and `grep` your tag out of `/tmp/metro.log` (record the
+line count before an action, `tail -n +N` after, to read only new lines). This +
+temporary `console.log('[DIAG] …')` probes is how the React-Compiler-memoizes-i18n
+root cause got nailed on 2026-06-24 (see `[[project-traininglog-react-compiler-i18n-gotcha]]`):
+a probe printing `t()` fresh while the JSX rendered the stale cached value proved
+the compiler was reusing memoized output. Remove the probes + restart Metro clean
+when done.
+
+## Dev warning toast overlaps bottom buttons — INCLUDING the tab bar
 
 A dark "Open debugger to view warnings." toast sits at the bottom in dev builds and
-**overlaps the bottom action bar** (`Done`, `+ Exercise`, sheet confirm buttons). If
-a bottom tap is a no-op, either tap the toast's ✕ to dismiss first, or get the target
-button's AXFrame and tap its exact center (the toast is a sibling, not a true modal —
-the button underneath is still hit-testable at its own frame).
+**overlaps the bottom action bar** (`Done`, `+ Exercise`, sheet confirm buttons) **AND
+the bottom TAB BAR** (its AXFrame ≈ `y 787–835` sits right on top of the tab buttons at
+`y 791–840`). If a bottom tap is a no-op, either tap the toast's ✕ to dismiss first, or
+get the target button's AXFrame and tap its exact center (the toast is a sibling, not a
+true modal — the button underneath is still hit-testable at its own frame).
+
+⚠️ **Tab-switch taps silently fail when this toast is up** — the #1 time-waster
+(2026-06-24: ~10 wasted round-trips). Symptom: you `ui_tap` a tab's exact AXFrame
+center and the screen DOESN'T switch (you stay on / bounce back to the current tab),
+with no error — because the toast captured the touch. `ui_describe_point` on the tap
+coord still returns the tab Button (it's underneath), so the coord looks correct —
+misleading. **Fix: dismiss the toast FIRST** (tap its ✕ at the right edge, ≈ `x 375,
+y 811` in points — re-`ui_find_element {search:["Open debugger"]}` to confirm it's
+gone), THEN tap the tab. The toast reappears after some reloads, so re-check before each
+tab hop in a long flow.
 
 ## Set-row tap target (composite a11y button)
 

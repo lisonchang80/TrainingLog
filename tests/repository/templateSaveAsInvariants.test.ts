@@ -52,7 +52,8 @@ describe('另存模板 / 覆蓋 data invariants (2026-06-04 redesign — hardeni
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
     squatId = exercises.find((e) => e.name === 'Back Squat')!.id;
-    ohpId = exercises.find((e) => e.name === 'Overhead Press')!.id;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    ohpId = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!.id;
     await createProgram(db, {
       program: {
         id: 'prog-A',

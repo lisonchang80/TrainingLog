@@ -166,7 +166,8 @@ describe('templateRepository v2 — commitTemplateDraft', () => {
     await migrate(db);
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
-    ohpId = exercises.find((e) => e.name === 'Overhead Press')!.id;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    ohpId = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!.id;
   });
 
   afterEach(() => db.close());
@@ -617,7 +618,8 @@ describe('templateRepository v2 — queryMemoryCandidates', () => {
     await migrate(db);
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
-    ohpId = exercises.find((e) => e.name === 'Overhead Press')!.id;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    ohpId = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!.id;
   });
   afterEach(() => db.close());
 
@@ -745,7 +747,8 @@ describe('templateRepository v2 — queryReusableSupersetMemory (slice 9.8b gril
     await migrate(db);
     const exercises = await listExercises(db);
     benchId = exercises.find((e) => e.name === 'Bench Press')!.id;
-    ohpId = exercises.find((e) => e.name === 'Overhead Press')!.id;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    ohpId = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!.id;
     // Seed reusable supersets so FK is valid
     await db.runAsync(
       `INSERT INTO superset (id, name, color_hex, use_count, created_at, updated_at)

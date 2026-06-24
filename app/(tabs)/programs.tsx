@@ -57,6 +57,7 @@ import {
   tDiscardFilledCells,
   tNCycles,
   tNDays,
+  useLocale,
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -138,6 +139,13 @@ type PickerState =
   | SubTagPickerKind;
 
 export default function ProgramsScreen() {
+  // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
+  // subscribe to language changes so this screen's INLINE `t()` calls (heading,
+  // meta labels, alerts) re-evaluate fresh on a `setLocale()` while the tab
+  // stays mounted. Memoized children (DropdownButton/PickerModal/…) need their
+  // OWN subscription. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const styles = useProgramsStyles();
@@ -1120,6 +1128,12 @@ function ProgramGrid({
   ) => void;
   onTapRestCell: (cycle_index: number, day_index: number) => void;
 }) {
+  // Memoized leaf — re-evaluate its tApplyTemplateToDay / tApplyIntensityToCycle
+  // / t('domain','rest') labels on a language switch. Needs its OWN useLocale()
+  // since the parent reuses its cached element. Cf.
+  // project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const styles = useProgramsStyles();
   const cellMap = useMemo(() => buildCellMap(program.cells), [program.cells]);
   const { cycle_count, cycle_length, start_date } = program.program;
@@ -1414,6 +1428,10 @@ function PickerModal({
   onPick: (key: string) => void;
   onClose: () => void;
 }) {
+  // Memoized leaf — re-evaluate its t('alert','noOptionsToSelect') on a language
+  // switch. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const styles = useProgramsStyles();
   return (
     <Modal
@@ -1479,6 +1497,11 @@ function TemplatePicker({
   onCreateNew: () => void;
   onClose: () => void;
 }) {
+  // Memoized leaf — re-evaluate its t() labels (rest row / new-template / empty
+  // / "intensity will be set" preview) on a language switch. Cf.
+  // project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const styles = useProgramsStyles();
   return (
     <Modal
@@ -1565,6 +1588,11 @@ function SubTagPicker({
   onPick: (sub_tag: string | null) => void;
   onClose: () => void;
 }) {
+  // Memoized leaf — re-evaluate its t() labels (default / create / add-intensity
+  // / new-name placeholder) on a language switch. Cf.
+  // project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const styles = useProgramsStyles();
   const { tokens } = useTheme();
   const [adding, setAdding] = useState(false);
@@ -1701,6 +1729,10 @@ function StartDateModal({
   onPick: (iso: string) => void;
   onClose: () => void;
 }) {
+  // Memoized leaf — re-evaluate its t() labels (title / cancel / confirm) on a
+  // language switch. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const styles = useProgramsStyles();
   const [draft, setDraft] = useState<Date>(() => parseIsoToLocalDate(initialIso));
 

@@ -39,7 +39,8 @@ describe('Template + snapshot isolation (slice 3)', () => {
 
   it('migration v003 creates the three template tables (Exercise Library seeded by v001/v002/v006)', async () => {
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(66);
+    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived).
+    expect(exercises).toHaveLength(233);
     // Tables exist if these queries don't throw.
     expect(await listTemplates(db)).toEqual([]);
   });
@@ -47,7 +48,8 @@ describe('Template + snapshot isolation (slice 3)', () => {
   it('CRUD round-trip for a Template + ordered exercises', async () => {
     const exercises = await listExercises(db);
     const bench = exercises.find((e) => e.name === 'Bench Press')!;
-    const ohp = exercises.find((e) => e.name === 'Overhead Press')!;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    const ohp = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!;
     const pushup = exercises.find((e) => e.name === 'Push-up')!;
 
     let n = 0;
@@ -176,7 +178,8 @@ describe('Template + snapshot isolation (slice 3)', () => {
     const exercises = await listExercises(db);
     const bench = exercises.find((e) => e.name === 'Bench Press')!;
     const squat = exercises.find((e) => e.name === 'Back Squat')!;
-    const ohp = exercises.find((e) => e.name === 'Overhead Press')!;
+    // 'Overhead Press' was archived by v028 — use an active overhead-press variant.
+    const ohp = exercises.find((e) => e.name === 'Dumbbell Shoulder Press')!;
 
     let n = 0;
     const uuid = () => `id-${++n}`;

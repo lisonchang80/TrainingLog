@@ -5,3 +5,4 @@
  */
 export * from './strings';
 export * from './dynamic';
+export * from './useLocale';

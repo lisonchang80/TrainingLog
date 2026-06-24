@@ -202,3 +202,36 @@ export function muscleHighlightMap(
   }
   return m;
 }
+
+/**
+ * Group-level highlight fallback: tag every muscle in `muscleGroupId` as
+ * primary. Used for exercises that carry only `muscle_group_id` with no
+ * fine-grained `exercise_muscle` links (the v028 curated library's 206 new
+ * exercises) — so the detail-page body diagram still lights the right region
+ * instead of rendering blank.
+ */
+export function groupFallbackHighlight(
+  muscleGroupId: string | null | undefined,
+  muscles: ReadonlyArray<{ id: string; mg_id: string }>
+): Map<string, MuscleRole> {
+  const m = new Map<string, MuscleRole>();
+  if (!muscleGroupId) return m;
+  for (const mu of muscles) {
+    if (mu.mg_id === muscleGroupId) m.set(mu.id, 'primary');
+  }
+  return m;
+}
+
+/**
+ * Resolve the body-diagram highlight for an exercise: prefer the precise
+ * per-muscle links; if there are none, fall back to lighting the whole
+ * muscle group (so the diagram never renders empty when a group is known).
+ */
+export function resolveExerciseHighlight(
+  links: ExerciseMuscleLink[],
+  muscleGroupId: string | null | undefined,
+  muscles: ReadonlyArray<{ id: string; mg_id: string }>
+): Map<string, MuscleRole> {
+  const fine = muscleHighlightMap(links);
+  return fine.size > 0 ? fine : groupFallbackHighlight(muscleGroupId, muscles);
+}

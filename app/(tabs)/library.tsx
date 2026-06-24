@@ -13,7 +13,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import {
+  MgEquipmentPicker,
+  type PickerCell,
+} from '@/components/exercise/mg-equipment-picker';
 import { hashColor } from '@/components/template-editor/palette';
+import { resolveExerciseMedia } from '@/src/db/seed/exerciseMediaMap';
 import {
   filterExercises,
   type ExerciseFilter,
@@ -56,7 +61,7 @@ import {
   selectionRank,
   toggleSelection,
 } from '@/src/domain/exercise/pickerSelection';
-import { t, tEquipment, tExercise, tMuscleGroup, tNSessions } from '@/src/i18n';
+import { t, tEquipment, tExercise, tMuscleGroup, tNSessions, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -82,7 +87,24 @@ function useLibStyles() {
  *   - picker: not yet wired here (L2 step) — multi-select + 完成 footer
  */
 export default function LibraryScreen() {
+  // `'use no memo'`: opt this screen out of React Compiler memoization so that
+  // on a language switch its INLINE `t()` calls (search placeholder, the「全部」
+  // equipment chip label, the「超級組」sidebar entry, section headers) re-evaluate
+  // fresh. Without it the compiler reuses the cached strings even though the
+  // `useLocale()` below forces a re-render. Memoized child components still need
+  // their own opt-out (see EquipmentFilter / ExerciseCard / SupersetCard).
+  'use no memo';
   const db = useDatabase();
+  // Live language switch: tab screens stay mounted, so a `setLocale()` while
+  // this tab was already visited never re-rendered it (the root
+  // `<Stack key={locale}>` in app/_layout.tsx does NOT remount mounted
+  // expo-router screens — the navigator state lives above it). Subscribing here
+  // re-renders this screen on every `setLocale()`, refreshing all INLINE text
+  // (the muscle-group sidebar, section headers, search placeholder). The
+  // React-Compiler-memoized leaf cards (ExerciseCard/SupersetCard/…) need their
+  // OWN `useLocale()` subscription on top of this — see their headers. Cf.
+  // `project_traininglog_react_compiler_i18n_gotcha`.
+  useLocale();
   const router = useRouter();
   // ADR-0025 — pull tokens here so we can use the raw value for
   // `placeholderTextColor` (inline prop, not in StyleSheet).
@@ -103,7 +125,12 @@ export default function LibraryScreen() {
   const cardWidth = Math.floor(
     (windowWidth - SIDEBAR_WIDTH - CONTENT_H_PADDING * 2 - CARD_GAP) / 2
   );
-  const cardHeight = Math.floor(cardWidth / 0.92);
+  // Card height hugs its content: 16:9 photo + a 2-line name + paddings. The
+  // old `cardWidth / 0.92` magic ratio was tuned for the legacy circle-thumb
+  // layout and left a large empty gap under the top-aligned 16:9 photo cards.
+  // Derive from the photo's real height (thumbWrap width = cardWidth − 2×10
+  // padding) plus a fixed block for the name + vertical paddings.
+  const cardHeight = Math.ceil((cardWidth - 20) * (9 / 16)) + 68;
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [links, setLinks] = useState<ExerciseMuscleLink[]>([]);
@@ -372,7 +399,7 @@ export default function LibraryScreen() {
             />
           ) : (
             <>
-              <EquipmentChipRow
+              <EquipmentFilterDropdown
                 value={selectedEquipment}
                 onChange={setSelectedEquipment}
               />
@@ -503,63 +530,82 @@ function Sidebar(props: SidebarProps) {
   );
 }
 
-// ---------- Equipment chip row ----------
+// ---------- Equipment filter dropdown ----------
 
-function EquipmentChipRow({
+// Sentinel cell id for the "全部 / All" option inside the picker grid. Picker
+// cells are keyed by string id, so we use a reserved key that can never collide
+// with an Equipment enum value and map it back to `null` on select.
+const EQUIP_ALL_ID = '__all__';
+
+/**
+ * Equipment filter as a single dropdown button (replaces the old horizontal
+ * chip row, which overflowed + truncated labels like "Smith M…" on narrow
+ * iPhones). Tapping the button opens the shared MgEquipmentPicker bottom sheet
+ * (same即選即commit idiom used by the custom-exercise MG/用具 pickers). All
+ * existing filter values + behaviour are preserved: 全部 + the 8 EQUIPMENT_VALUES,
+ * single-select, null === no filter.
+ */
+function EquipmentFilterDropdown({
   value,
   onChange,
 }: {
   value: Equipment | null;
   onChange: (eq: Equipment | null) => void;
 }) {
+  // Memoized leaf — re-evaluate its t('common','all')「全部」label + equipment
+  // names on a language switch. See ExerciseCard note above.
+  'use no memo';
+  const locale = useLocale();
   const styles = useLibStyles();
+  const { tokens } = useTheme();
+  const [open, setOpen] = useState(false);
+  const cells: PickerCell[] = useMemo(
+    () => [
+      { id: EQUIP_ALL_ID, label: t('common', 'all') },
+      ...EQUIPMENT_VALUES.map((eq) => ({ id: eq, label: tEquipment(eq) })),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `locale` is the
+    // intentional dep: recompute the t()/tEquipment() labels on a language switch.
+    [locale]
+  );
+  const buttonLabel = value === null ? t('common', 'all') : tEquipment(value);
   return (
     <View style={styles.equipRowOuter}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.equipRow}>
-        <EquipmentChip
-          label={t('common', 'all')}
-          active={value === null}
-          onPress={() => onChange(null)}
-        />
-        {EQUIPMENT_VALUES.map((eq) => (
-          <EquipmentChip
-            key={eq}
-            label={tEquipment(eq)}
-            active={value === eq}
-            onPress={() => onChange(value === eq ? null : eq)}
-          />
-        ))}
-      </ScrollView>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('page', 'selectEquipment')}
+        accessibilityValue={{ text: buttonLabel }}
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => [
+          styles.equipDropdownBtn,
+          value !== null && styles.equipDropdownBtnActive,
+          pressed && styles.pressed,
+        ]}>
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.equipDropdownText,
+            value !== null && styles.equipDropdownTextActive,
+          ]}>
+          {buttonLabel}
+        </Text>
+        <Text
+          style={[
+            styles.equipDropdownChevron,
+            { color: value !== null ? tokens.action.success : tokens.text.secondary },
+          ]}>
+          ▾
+        </Text>
+      </Pressable>
+      <MgEquipmentPicker
+        visible={open}
+        title={t('page', 'selectEquipment')}
+        cells={cells}
+        selectedId={value ?? EQUIP_ALL_ID}
+        onSelect={(id) => onChange(id === EQUIP_ALL_ID ? null : (id as Equipment))}
+        onClose={() => setOpen(false)}
+      />
     </View>
-  );
-}
-
-function EquipmentChip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const styles = useLibStyles();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.equipChip,
-        active && styles.equipChipActive,
-        pressed && styles.pressed,
-      ]}>
-      <Text style={[styles.equipText, active && styles.equipTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -644,6 +690,48 @@ function ExerciseGrid({
   );
 }
 
+// U+2060 WORD JOINER — a zero-width "no line break here" glue. Built via
+// fromCharCode so the source stays free of an invisible literal.
+const WORD_JOINER = String.fromCharCode(0x2060);
+
+/** Glue every「（…）」run internally so a parenthetical never splits across
+ *  lines (e.g.「…（上 / 胸）」). */
+function glueParens(s: string): string {
+  return s.replace(/（[^）]*）/g, (run) => run.split('').join(WORD_JOINER));
+}
+
+/**
+ * Soft-wrap a 2-line card name so it breaks at a natural word boundary instead
+ * of mid-word. Two things are kept unbreakable via WORD_JOINER:
+ *
+ *  1. Any「（…）」parenthetical — never splits as「…（上 / 胸）」.
+ *  2. The trailing 2-CJK-char movement noun (划船 / 飛鳥 / 推胸 …) PLUS any
+ *     trailing「（…）」— so a long name wraps BEFORE the noun
+ *     (機械單側高位 / 划船) instead of THROUGH it (機械單側高位划 / 船).
+ *
+ * Greedy line-fill does the rest: the glued tail is one blob, so it drops to
+ * line 2 whole once the head fills line 1. Short / English names are a no-op
+ * (the blob still fits on one line, or English keeps wrapping on its spaces).
+ */
+function softWrapName(name: string): string {
+  // Peel off a trailing「（…）」so it stays attached to the movement noun.
+  const parenMatch = name.match(/（[^）]*）$/);
+  const paren = parenMatch ? parenMatch[0] : '';
+  const base = paren ? name.slice(0, name.length - paren.length) : name;
+
+  // Movement noun = the last 2 CJK characters of the base.
+  const m = base.match(/^(.*?)([一-鿿]{2})$/);
+  if (!m || m[1].length === 0) {
+    // No splittable head (English / short / non-CJK tail) — fall back to the
+    // paren-only glue so a「（…）」still never splits mid-parenthetical.
+    return glueParens(name);
+  }
+  const head = m[1];
+  const tail = m[2];
+  const gluedTail = (tail + paren).split('').join(WORD_JOINER);
+  return glueParens(head) + gluedTail;
+}
+
 function ExerciseCard({
   exercise,
   sessionCount,
@@ -667,9 +755,22 @@ function ExerciseCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  // Live language switch. This card is React-Compiler-memoized on its (stable)
+  // `exercise` prop, so when the user flips zh⇄en mid-session the parent reuses
+  // the cached element and the `tExercise(exercise.name)` below would keep the
+  // boot-language name. `useLocale()` force-re-renders this card on every
+  // `setLocale()`; `'use no memo'` makes that re-render re-evaluate `tExercise`
+  // fresh instead of returning the compiler-cached string. (Screen-level
+  // `useLocale()` only refreshes the screen's INLINE text — memoized leaves like
+  // this need their own subscription. Cf. project_traininglog_react_compiler_i18n_gotcha.)
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   const hasCues = exercise.cues_text != null && exercise.cues_text.length > 0;
-  const thumbnail = exercise.media_path;
+  // media_path stores a require-map key; resolve to [startFrame, endFrame].
+  // Grid shows the static start frame (poster) — the 2-frame crossfade lives on
+  // the detail page only, so we don't run 167 timers across the library grid.
+  const media = resolveExerciseMedia(exercise.media_path);
   return (
     <Pressable
       accessibilityRole="button"
@@ -682,30 +783,41 @@ function ExerciseCard({
         disabled && styles.cardDisabled,
         pressed && styles.pressed,
       ]}>
+      <View style={styles.thumbWrap}>
+        {media ? (
+          <Image source={media[0]} style={styles.thumbImage} />
+        ) : (
+          <PlaceholderThumb exercise={exercise} />
+        )}
+        {sessionCount > 0 && (
+          <View style={styles.photoSessionBadge}>
+            <Text style={styles.photoSessionBadgeText}>
+              {tNSessions(sessionCount)}
+            </Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.cardName} numberOfLines={2}>
+        {softWrapName(tExercise(exercise.name))}
+      </Text>
+      {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
+      {/* Overlays rendered AFTER the photo + name so they paint on the TOP
+          layer. RN paints later siblings on top; when these sat before
+          <thumbWrap> the photo covered the selection badge (half-hidden /
+          clipped — worse on 2-line-name cards where center-justify pushed the
+          photo up under the badge). The session count moved INTO <thumbWrap>
+          (photo bottom-left) so the top-right selection badge never overlaps
+          it. */}
       {hasCues && (
         <View style={[styles.cuesPill, onInfoPress && styles.cuesPillWithInfo]}>
           <Text style={styles.cuesPillText}>{t('button', 'cues')}</Text>
         </View>
-      )}
-      {sessionCount > 0 && (
-        <Text style={styles.countBadge}>{tNSessions(sessionCount)}</Text>
       )}
       {selected && rank >= 0 && (
         <View style={styles.selectedBadge}>
           <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
         </View>
       )}
-      <View style={styles.thumbWrap}>
-        {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
-        ) : (
-          <PlaceholderThumb exercise={exercise} />
-        )}
-      </View>
-      <Text style={styles.cardName} numberOfLines={2}>
-        {tExercise(exercise.name)}
-      </Text>
-      {hasCues && <Text style={styles.cardCueLink}>{t('button', 'viewCues')}</Text>}
       {onInfoPress && (
         <Pressable
           accessibilityRole="button"
@@ -724,6 +836,9 @@ function ExerciseCard({
 }
 
 function PlaceholderThumb({ exercise }: { exercise: Exercise }) {
+  // Memoized leaf — re-evaluate the tExercise() initial on a language switch.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   // Hash-color circle with first character — ADR-0017 Q8 v1 placeholder.
   // hash uses raw DB name so the color is stable across locales;
@@ -841,6 +956,10 @@ function SupersetCard({
   disabled: boolean;
   onInfoPress: (() => void) | null;
 }) {
+  // Memoized leaf — re-render + re-evaluate its t()/tExercise() (cue link,
+  // mini-thumb initials) on a language switch. See ExerciseCard note above.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   const { superset, exercises } = item;
   const barColor = superset.color_hex ?? hashColor(superset.name);
@@ -873,7 +992,7 @@ function SupersetCard({
         <SupersetMiniThumb exercise={exB} />
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {superset.name}
+        {softWrapName(superset.name)}
       </Text>
       {onInfoPress && (
         <Pressable
@@ -893,15 +1012,18 @@ function SupersetCard({
 }
 
 function SupersetMiniThumb({ exercise }: { exercise: Exercise | undefined }) {
+  // Memoized leaf — re-evaluate its tExercise() initial on a language switch.
+  'use no memo';
+  useLocale();
   const styles = useLibStyles();
   if (!exercise) {
     return <View style={[styles.supersetMiniThumb, styles.supersetMiniThumbEmpty]} />;
   }
-  const thumbnail = exercise.media_path;
-  if (thumbnail) {
+  const media = resolveExerciseMedia(exercise.media_path);
+  if (media) {
     return (
       <View style={styles.supersetMiniThumb}>
-        <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
+        <Image source={media[0]} style={styles.thumbImage} />
       </View>
     );
   }
@@ -1025,29 +1147,37 @@ function makeStyles(tokens: ThemeTokens) {
   sidebarSubTextActive: { color: tokens.action.success, fontWeight: '600' },
 
   content: { flex: 1, flexDirection: 'column', minWidth: 0 },
-  equipRowOuter: { height: 56 },
-  equipRow: {
+  equipRowOuter: {
+    height: 56,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  // Single dropdown trigger button (replaced the overflowing chip ScrollView).
+  // Sits inline at the top of the content column; alignSelf:flex-start keeps it
+  // compact instead of stretching across the full content width.
+  equipDropdownBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  equipChip: {
-    paddingHorizontal: 14,
-    height: 32,
-    borderRadius: 16,
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingLeft: 14,
+    paddingRight: 10,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: tokens.bg.elevated,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  // Semitransparent success tint kept as-is (success token at 18% alpha) —
-  // the active-chip overlay needs to read clearly against the page base in
-  // both themes; using bg.elevated here would lose the "this is selected"
-  // signal. Token-friendly variants use rgba of the success hex.
-  equipChipActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
-  equipText: { color: tokens.text.secondary, fontSize: 14 },
-  equipTextActive: { color: tokens.action.success, fontWeight: '600' },
+  // Semitransparent success tint (success token at 18% alpha) so an active
+  // filter reads as "selected" against the page base in both themes — mirrors
+  // the old active-chip treatment.
+  equipDropdownBtnActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
+  equipDropdownText: {
+    color: tokens.text.secondary,
+    fontSize: 14,
+    fontWeight: '500',
+    maxWidth: 180,
+  },
+  equipDropdownTextActive: { color: tokens.action.success, fontWeight: '600' },
+  equipDropdownChevron: { fontSize: 11, lineHeight: 14 },
 
   gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
   gridContent: {
@@ -1067,7 +1197,10 @@ function makeStyles(tokens: ThemeTokens) {
     borderRadius: 14,
     padding: 10,
     alignItems: 'center',
-    justifyContent: 'center',
+    // flex-start (not center) so the 16:9 photo always sits at the card top,
+    // uniform across 1-line vs 2-line names in the same row (center-justify
+    // left paired photos vertically misaligned).
+    justifyContent: 'flex-start',
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -1136,10 +1269,30 @@ function makeStyles(tokens: ThemeTokens) {
     color: tokens.text.secondary,
     fontSize: 13,
   },
+  // Session-count overlay for the 16:9 photo cards. Lives INSIDE <thumbWrap>
+  // (clipped to the photo) at the bottom-left, with a translucent dark pill so
+  // the count reads on any photo and never collides with the top-right
+  // selection badge or the top-left ⓘ. (SupersetCard keeps `countBadge` — it
+  // has no photo, only a centered mini-thumb row.)
+  photoSessionBadge: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  photoSessionBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   thumbWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    // ADR-0017 Q8: 16:9 landscape card thumbnail (replaced the 96×96 circle).
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 10,
     backgroundColor: tokens.bg.surface,
     alignItems: 'center',
     justifyContent: 'center',

@@ -16,7 +16,7 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface BarData {
@@ -62,6 +62,11 @@ export function MiniBarChart({
   formatBarValue = (n) => String(Math.round(n)),
   showBarValues = false,
 }: MiniBarChartProps) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // the inline t() a11y label + avg-line prefix re-evaluate on language switch
+  // (memoized leaf needs its own subscription).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const usableHeight = height - PAD_TOP - PAD_BOTTOM;

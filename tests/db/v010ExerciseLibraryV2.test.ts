@@ -128,8 +128,10 @@ describe('v010 exercise library v2 migration', () => {
       for (const [id, expected] of EXERCISE_EQUIPMENT_SEED) {
         expect(byId[id]).toBe(expected);
       }
-      // Coverage: seed map covers every built-in
-      expect(builtinIds.length).toBe(rows.length);
+      // Coverage: the v010 equipment seed covers its original 66 built-ins.
+      // v028 later added more built-ins (some without an equipment-seed entry),
+      // so total built-in rows only need to be >= the seed map size.
+      expect(rows.length).toBeGreaterThanOrEqual(builtinIds.length);
     });
 
     it('seed map contains exactly 66 entries', () => {

@@ -43,7 +43,7 @@ import {
   todayISO,
   type CalendarDayCell,
 } from '../../domain/calendar/monthGrid';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { tYearMonthTitle } from '@/src/i18n/dynamic';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -90,6 +90,11 @@ export function CalendarGrid({
   renderCell,
   canGoNext: canGoNextProp,
 }: CalendarGridProps) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // weekday labels, the month-picker modal text, and tYearMonthTitle re-evaluate
+  // on language switch (this grid stays mounted under the History tab).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [showPicker, setShowPicker] = useState(false);

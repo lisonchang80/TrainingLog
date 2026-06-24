@@ -36,7 +36,7 @@ import type {
   StatsSetRecord,
 } from '@/src/domain/stats/types';
 import { MUSCLE_GROUP_SEEDS, MUSCLE_SEEDS } from '@/src/db/seed/v006ExerciseLibrary';
-import { t, tDurationBucketFootnote, tMuscleGroup } from '@/src/i18n';
+import { t, tDurationBucketFootnote, tMuscleGroup, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -97,6 +97,11 @@ function formatAnchorLabel(d: Date): string {
 }
 
 export function StatsPanel() {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline t()/tMuscleGroup()/tDurationBucketFootnote() re-evaluate on language
+  // switch (this panel stays mounted under the History tab).
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);

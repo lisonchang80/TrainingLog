@@ -114,7 +114,8 @@ describe('startSessionFromTemplate — Bug X session_exercise tree', () => {
     const exercises = await listExercises(db);
     bench = exercises.find((e) => e.name === 'Bench Press')!;
     squat = exercises.find((e) => e.name === 'Back Squat')!;
-    dead = exercises.find((e) => e.name === 'Deadlift')!;
+    // 'Deadlift' was archived by v028 — any third distinct active exercise works.
+    dead = exercises.find((e) => e.name === 'Rack Pull')!;
   });
 
   afterEach(() => {

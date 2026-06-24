@@ -7,7 +7,7 @@ import { AchievementsPanel } from '@/components/achievements-panel';
 import MonthGridView from '@/src/components/history/MonthGridView';
 import ListView from '@/src/components/history/ListView';
 import { useAchievementsEnabled } from '@/src/achievements-enabled';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type SubTab = 'history' | 'stats' | 'achievements';
@@ -48,6 +48,12 @@ function historyModeLabel(m: HistoryMode): string {
  * `ListView` carries the dense escape-hatch table now.
  */
 export default function HistoryScreen() {
+  // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
+  // subscribe to language changes so the heading + the inline subTabLabel() /
+  // historyModeLabel() t() calls re-evaluate fresh on a `setLocale()` while the
+  // tab stays mounted. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [tab, setTab] = useState<SubTab>('history');

@@ -183,6 +183,7 @@ import {
   tWarningPerExerciseSetsWithLogged,
   tWarningTotalSetsUnfinished,
   tWarningTotalSetsWithLogged,
+  useLocale,
 } from '@/src/i18n';
 import {
   useTheme,
@@ -202,6 +203,15 @@ import {
  * derived state — no risk of drifting from persisted reality.
  */
 export default function TodayScreen() {
+  // `'use no memo'` + `useLocale()`: opt this screen out of React Compiler
+  // memoization and subscribe to language changes so its many INLINE `t()` /
+  // `tExercise()` calls re-evaluate fresh on a `setLocale()`. Tab screens stay
+  // mounted, so without this subscription the boot-language strings stick (the
+  // root `<Stack key={locale}>` in app/_layout.tsx does NOT remount mounted
+  // expo-router screens). The memoized leaf `ExerciseCard` needs its OWN
+  // subscription on top of this. Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   // Slice 17 / ADR-0009 amendment — UI-only gate. PR banner (and other
@@ -3255,6 +3265,13 @@ function ExerciseCard({
    */
   onConfirmReorderSets: (orderedIds: string[]) => Promise<void> | void;
 }): React.ReactElement {
+  // Memoized leaf — re-render + re-evaluate its `tExercise(planRow.exercise_name)`
+  // + `t()` labels on a language switch. The parent reuses this card's cached
+  // element on stable props, so it needs its OWN `useLocale()` subscription
+  // (force-re-render) plus `'use no memo'` (re-evaluate, not serve cached
+  // strings). Cf. project_traininglog_react_compiler_i18n_gotcha.
+  'use no memo';
+  useLocale();
   // ADR-0025 — pull tokens locally so styles match parent (single token
   // source via Context; ExerciseCard re-renders when parent does).
   const { tokens } = useTheme();

@@ -16,7 +16,7 @@ import { DatabaseProvider } from '@/components/database-provider';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { RestoreGate } from '@/components/restore-gate';
 import { AchievementsEnabledProvider } from '@/src/achievements-enabled';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 import { ThemeProvider, useTheme } from '@/src/theme';
@@ -81,10 +81,20 @@ function NavThemeBridge({ children }: { children: ReactNode }) {
 }
 
 export default function RootLayout() {
+  // Subscribe the root to the active locale. `setLocale()` (Settings toggle or
+  // boot hydration) bumps a version counter in the i18n store; `useLocale()`
+  // re-renders this component on every change and returns the concrete locale.
+  // We feed that into the navigator `key` below so a language switch remounts
+  // the ENTIRE screen tree — every screen re-evaluates its `t(...)` calls with
+  // the new language WITHOUT an app restart. This is the app-wide fix for the
+  // old "lazy on focus/remount" behaviour where only the Settings screen (the
+  // one mounted at toggle time) picked up the change.
+  const locale = useLocale();
+
   // Phase 5 — hydrate locale from AsyncStorage on boot. A brief flash with
-  // the default ('zh') is acceptable; once resolved, every `t()` call in
-  // subsequent renders returns the user's chosen language. The Settings
-  // toggle updates module state directly so re-renders pick up the change.
+  // the default ('zh') is acceptable; once resolved, `setLocale` notifies the
+  // `useLocale()` subscription above and the tree remounts in the user's
+  // chosen language.
   //
   // ADR-0025 — theme preference is hydrated inside <ThemeProvider> on its
   // own (no useEffect needed here); see src/theme/ThemeContext.tsx.
@@ -155,7 +165,11 @@ export default function RootLayout() {
             well clear of the <Stack.Screen> nav-title block below. */}
         <ErrorBoundary>
         <NavThemeBridge>
-          <Stack>
+          {/* `key={locale}` — remount the whole navigator on language switch so
+              every screen (and every Stack.Screen `title`) re-renders in the new
+              locale immediately. See the `useLocale()` call at the top of
+              RootLayout. */}
+          <Stack key={locale}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen
             name="program-wizard/new"

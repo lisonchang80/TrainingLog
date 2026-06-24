@@ -36,7 +36,7 @@ import {
 } from '@/src/domain/achievement/achievementPanelModel';
 import { bucketLabel } from '@/src/domain/pr/buckets';
 import type { BucketKey } from '@/src/domain/pr/types';
-import { t, tMuscleGroup } from '@/src/i18n';
+import { t, tMuscleGroup, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 type FilterKey = PanelFilter;
@@ -66,6 +66,11 @@ const EMPTY_DATA: AchievementPanelData = {
 };
 
 export function AchievementsPanel() {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline t()/tMuscleGroup() (filter chips, empty hint, group labels) re-render
+  // on language switch (this panel stays mounted under the History tab).
+  'use no memo';
+  const locale = useLocale();
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
@@ -101,7 +106,8 @@ export function AchievementsPanel() {
       // Otherwise it's a bucket key — bucketLabel handles unknowns gracefully.
       return bucketLabel(key as BucketKey);
     },
-    [mgNames]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tMuscleGroup/bucketLabel read the active locale; rebuild on switch
+    [mgNames, locale]
   );
 
   return (
