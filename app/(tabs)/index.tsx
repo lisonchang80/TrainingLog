@@ -120,6 +120,7 @@ import {
   getSessionLinkedTemplateTriple,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
+import { useAppMode } from '@/src/app-mode';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
 import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
@@ -220,6 +221,9 @@ export default function TodayScreen() {
   const { enabled: achievementsEnabled } = useAchievementsEnabled();
   // ADR-0025 — all colors flow from useTheme().tokens via makeStyles below.
   const { tokens } = useTheme();
+  // ADR-0026 — 極簡模式：整個「計劃 (program)」概念在 UI 消失。reactive，
+  // 切換即時 re-render。gate 首頁三塊計劃面 + 開始模板直接帶 (null,null) 解析。
+  const { isMinimal } = useAppMode();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
@@ -920,6 +924,15 @@ export default function TodayScreen() {
    * between visits.
    */
   const onPickTemplate = async (item: TemplateSummary) => {
+    // ADR-0026 極簡模式：不開 StartTemplateSheet（無計劃/強度選擇器）。
+    // 直接把 (program=null, sub_tag=null) 丟進「現有」resolver = 通用：
+    // 群裡有通用 variant → 用它；沒有 → fallback 到 representative（最新）。
+    // 與 onSheetStart 共用 resolveTargetTemplateId / startSessionFromTemplate /
+    // WC push，唯一差異是 alert 靜音（D3）＋ 不寫 per-template sticky（計劃概念）。
+    if (isMinimal) {
+      await onStartMinimalTemplate(item);
+      return;
+    }
     setBusy(true);
     try {
       // 2026-06-04 — sticky last-used (program + intensity) is now PER-TEMPLATE
@@ -1110,6 +1123,55 @@ export default function TodayScreen() {
       await refresh();
       // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
       // See sibling call site in `onStartPlanned` for rationale.
+      void pushStartToWatch(db, session_id, {});
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotStartSession'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * ADR-0026 極簡模式的開始模板路徑 — 取代 StartTemplateSheet。把
+   * (program=null, sub_tag=null) 丟進「相同」的 resolveTargetTemplateId
+   * （RESERVED_NONE_PROGRAM_ID + intensity null → wanted (null,null) = 通用），
+   * 然後走「相同」的 startSessionFromTemplate + WC push side-effects。
+   *
+   * 與 onSheetStart 唯一差異（D3）：
+   *  - 不開 sheet、不寫 per-template sticky（計劃/強度都是計劃概念）。
+   *  - fallback miss 的「尚未建立模板」alert **靜音** —— 只取 resolved.template_id
+   *    （通用-first-else-newest），不顯示 resolved.alert。
+   * 計劃模式行為 100% 不受影響（此分支只在 isMinimal 走到）。
+   */
+  const onStartMinimalTemplate = async (item: TemplateSummary) => {
+    setBusy(true);
+    try {
+      const active = await getActiveSession(db);
+      if (active) {
+        Alert.alert(
+          t('alert', 'sessionAlreadyInProgress'),
+          t('alert', 'endActiveSessionFirst'),
+        );
+        return;
+      }
+      // 通用 selection：none-program sentinel + 無強度 → resolver 解析 (null,null)。
+      const resolved = await resolveTargetTemplateId(item, {
+        period_id: RESERVED_NONE_PROGRAM_ID,
+        intensity_id: null,
+      });
+      // resolved.alert（fallback_with_alert）= miss 提示 → 極簡模式靜音，
+      // 僅沿用 resolved.template_id。
+      const { session_id } = await startSessionFromTemplate(db, {
+        template_id: resolved.template_id,
+        uuid: randomUUID,
+        program_id: undefined,
+        sub_tag: null,
+      });
+      await refresh();
+      // D6 — fire WC `start-from-iphone` push to Watch（同 onSheetStart）。
       void pushStartToWatch(db, session_id, {});
     } catch (e) {
       Alert.alert(
@@ -2363,16 +2425,19 @@ export default function TodayScreen() {
       // (template 訓練預設 = 模板名)。banner 原本第一行又印一次
       // `template_name` → 與標題重複。移除該行，只留「計劃 · 強度」副標；
       // 若 session 未連 program/intensity (triple 為空) 整個 banner 不渲染。
+      // ADR-0026 極簡模式：「計劃·強度」副標 = 純計劃概念 → 整段藏掉。
       const triple = formatTemplateTriple(
         sessionTemplateInfo.program_name,
         sessionTemplateInfo.sub_tag,
       );
-      programBanner = triple ? (
-        <View style={styles.programBanner}>
-          <Text style={styles.programBannerCell}>{triple}</Text>
-        </View>
-      ) : null;
+      programBanner =
+        triple && !isMinimal ? (
+          <View style={styles.programBanner}>
+            <Text style={styles.programBannerCell}>{triple}</Text>
+          </View>
+        ) : null;
     } else {
+      // 空白訓練 marker 非計劃概念，極簡模式保留。
       programBanner = (
         <View style={styles.programBanner}>
           <Text style={styles.programBannerName} numberOfLines={1}>
@@ -2381,7 +2446,7 @@ export default function TodayScreen() {
         </View>
       );
     }
-  } else if (activeProgram) {
+  } else if (activeProgram && !isMinimal) {
     programBanner = (
       <View style={styles.programBanner}>
         <Text style={styles.programBannerName} numberOfLines={1}>
@@ -2427,64 +2492,68 @@ export default function TodayScreen() {
             where it surfaces the linked template / freestyle marker.
           */}
 
-          {/* (a) 計劃訓練 — ADR-0024 § 2.a */}
-          <View style={styles.section}>
-            <Text style={styles.sectionHeading}>
-              {t('page', 'plannedTraining')}
-            </Text>
-            {todayPlan.kind === 'no-program' && (
-              <View style={styles.emptyBox}>
-                <Text style={styles.emptyTextBlock}>
-                  {t('status', 'noActiveProgram')}
-                </Text>
+          {/* (a) 計劃訓練 — ADR-0024 § 2.a
+              ADR-0026 極簡模式：整個「計劃訓練」section（今日計劃 / 休息日 /
+              無計劃 CTA）= 純計劃概念 → 整段藏掉。 */}
+          {!isMinimal && (
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>
+                {t('page', 'plannedTraining')}
+              </Text>
+              {todayPlan.kind === 'no-program' && (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTextBlock}>
+                    {t('status', 'noActiveProgram')}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('button', 'gotoPrograms')}
+                    onPress={() => router.push('/programs')}
+                    style={({ pressed }) => [
+                      styles.secondaryBtn,
+                      pressed && styles.btnPressed,
+                    ]}>
+                    <Text style={styles.secondaryBtnText}>
+                      {t('button', 'createOrActivateProgram')}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+              {todayPlan.kind === 'rest' && (
+                <View style={styles.restRow}>
+                  <Text style={styles.restRowText}>
+                    {t('status', 'todayRest')}
+                  </Text>
+                </View>
+              )}
+              {todayPlan.kind === 'template' && (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={t('button', 'gotoPrograms')}
-                  onPress={() => router.push('/programs')}
+                  accessibilityLabel={tA11yStartPlanned(todayPlan.template.name)}
+                  onPress={() =>
+                    onStartPlanned(
+                      todayPlan.template.id,
+                      activeProgram?.program.id ?? null,
+                      todayPlan.cell.sub_tag,
+                    )
+                  }
+                  disabled={busy}
                   style={({ pressed }) => [
-                    styles.secondaryBtn,
+                    styles.plannedRow,
+                    busy && styles.btnDisabled,
                     pressed && styles.btnPressed,
                   ]}>
-                  <Text style={styles.secondaryBtnText}>
-                    {t('button', 'createOrActivateProgram')}
+                  <Text style={styles.plannedRowName}>
+                    {todayPlan.template.name}
+                  </Text>
+                  <Text style={styles.plannedRowDetails}>
+                    {tExerciseCount(todayPlan.template.exerciseCount)}
+                    {todayPlan.cell.sub_tag ? ` · ${todayPlan.cell.sub_tag}` : ''}
                   </Text>
                 </Pressable>
-              </View>
-            )}
-            {todayPlan.kind === 'rest' && (
-              <View style={styles.restRow}>
-                <Text style={styles.restRowText}>
-                  {t('status', 'todayRest')}
-                </Text>
-              </View>
-            )}
-            {todayPlan.kind === 'template' && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={tA11yStartPlanned(todayPlan.template.name)}
-                onPress={() =>
-                  onStartPlanned(
-                    todayPlan.template.id,
-                    activeProgram?.program.id ?? null,
-                    todayPlan.cell.sub_tag,
-                  )
-                }
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.plannedRow,
-                  busy && styles.btnDisabled,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.plannedRowName}>
-                  {todayPlan.template.name}
-                </Text>
-                <Text style={styles.plannedRowDetails}>
-                  {tExerciseCount(todayPlan.template.exerciseCount)}
-                  {todayPlan.cell.sub_tag ? ` · ${todayPlan.cell.sub_tag}` : ''}
-                </Text>
-              </Pressable>
-            )}
-          </View>
+              )}
+            </View>
+          )}
 
           {/* (b) 模板訓練 — ADR-0024 § 2.c (renumbered)
               2026-05-29 polish: reordered ABOVE 空白訓練. Rationale:

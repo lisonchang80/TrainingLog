@@ -72,6 +72,18 @@ final class PickerViewModel: ObservableObject {
     /// not a user-facing miss). Cleared in `resetSelection`.
     @Published var lastResolveMissed: Bool = false
 
+    // MARK: - App mode (slice 16 / ADR-0026 D2)
+
+    /// True when the iPhone is in 極簡模式（`appMode == "minimal"`). Set
+    /// from `reply.prefetch.appMode` in `applyStage1Reply`. When true,
+    /// `PickerRootView` hides the 「計劃訓練」section and a template-row
+    /// tap goes STRAIGHT into the set logger as 通用 (program=nil,
+    /// intensity=nil) — skipping both ProgramPickerSheet and
+    /// IntensityPickerSheet. Defaults to `false` (計劃模式 = today's full
+    /// behaviour) so a pre-slice-16 iPhone payload (appMode key absent →
+    /// nil) keeps the plan flow.
+    @Published var isMinimal: Bool = false
+
     // MARK: - 3-tuple navigation state
 
     @Published var selectedTemplate: TemplateOption?
@@ -221,6 +233,11 @@ final class PickerViewModel: ObservableObject {
                 todayPlanned = .noActiveProgram
             }
         }
+        // Slice 16 / ADR-0026 D2 — app-wide mode. Tolerant: the field is
+        // optional on the wire; a pre-slice-16 iPhone omits it (nil) →
+        // treat as "plan" (isMinimal = false = today's full behaviour).
+        // Only the exact string "minimal" flips us into 極簡模式.
+        isMinimal = reply.prefetch.appMode == "minimal"
         // NB: reply.hasActiveSession is intentionally ignored in
         // Phase 2. Phase 3 will branch here to auto-adopt the
         // iPhone-initiated session (skip picker → jump to set logger).
@@ -282,7 +299,15 @@ final class PickerViewModel: ObservableObject {
         // 過場頁 notice when the (program, intensity) combo had no variant
         // and we fell back to the representative (mirrors iPhone A1
         // alert-and-proceed). Consumed by PickerSetLoggerPlaceholderView.
-        lastResolveMissed = missed
+        //
+        // ADR-0026 D3 (slice 16) — 極簡模式靜音 resolve-miss 提示，鏡像
+        // iPhone（app/(tabs)/index.tsx onStartMinimalTemplate 丟掉
+        // resolved.alert）。代換解析本身（representative fallback）照常發生
+        // ——僅靜音「通知」：清掉 lastResolveMissed → 過場頁不顯示橘色 ⚠。
+        // 注意：極簡 tap 命中 strict 通用 (NULL,NULL) variant，並不會走
+        // representative short-circuit（不重蹈 #48）。
+        let noticeMissed = missed && !isMinimal
+        lastResolveMissed = noticeMissed
         // Grill Q2=A — on a resolve MISS, hold the transitional 過場頁
         // ~1.5s so the user actually SEES the "no matching variant, using
         // newest" notice before we drop into the set logger. The
@@ -290,7 +315,8 @@ final class PickerViewModel: ObservableObject {
         // flips true→false synchronously and the 過場頁 normally renders
         // for ~0ms; this await is the ONLY thing that lets syncingView
         // paint. Skipped entirely on a match → match path stays instant.
-        if missed {
+        // ADR-0026 D3 — 極簡模式無提示可看 → 不 hold（保持 instant）。
+        if noticeMissed {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
         // 2026-05-29 late-evening real-device smoke fix —
@@ -375,7 +401,15 @@ final class PickerViewModel: ObservableObject {
             // Q3=a — title always reflects the USER's selected (program,
             // intensity), even on a fallback miss (it represents intent;
             // the resolved variant's own triple may differ).
-            let title = "\(template.name) · \(programName) · \(intensityName)"
+            //
+            // ADR-0026 D1 (slice 16) — 極簡模式整個「計劃」概念在 UI 消失，
+            // 而 program / intensity 在極簡模式必為 nil → 三元組會渲染成
+            // 「X · 通用 · 通用」（通用 是計劃概念標籤）。此 title 透過
+            // snapshot.title 流向 SetLoggerView 標題 / FinishPageView 副標題 /
+            // 過場頁 selectionSubtitle 三處 → 在此單一來源 drop 後綴即三處同治。
+            let title = isMinimal
+                ? template.name
+                : "\(template.name) · \(programName) · \(intensityName)"
             // Stage1 prefetch v3 (2026-06-13 Y-dup) — resolve the concrete
             // variant from the user's (program, intensity) so the snapshot
             // tree AND the wire templateId come from the SAME variant.

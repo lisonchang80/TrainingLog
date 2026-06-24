@@ -3,14 +3,16 @@
  *
  * Per-row layout (ADR-0015 § Sub-tab toggle, lines 27-33):
  *   ┌─────┬─────────────────────────────────────┬──────────┐
- *   │ ▌▌  │ M-DD  推日 A (重訓加強) +1          │   3458   │
- *   │ ▌▌  │ 2026 強日 · 10-12RM · 7動 · 64'    │     kg   │
+ *   │ ▌▌  │ M-DD  推日 A                        │   3458   │
+ *   │ ▌▌  │ 2026 重訓加強 · 10-12RM · 7動 · 19:30–20:34 · 64' │  kg │
  *   └─────┴─────────────────────────────────────┴──────────┘
  *
  *   - 12 色 side bar (per-template `color_hex`; freestyle / empty → #D1D5DB)
  *   - 日期: M-DD primary, YYYY secondary
- *   - session.title row (freestyle adds ⚠️, multi-session day appends inline +N)
- *   - 週期 + 強度 · 動作數 · 訓練時間 (inline subtitle)
+ *   - session.title row (freestyle adds ⚠️). No +N badge — each session is
+ *     already its own row, so the same-day "+N" suffix was redundant.
+ *   - subtitle: 計劃 · 強度 · 動作數 · 時間起訖 (HH:MM–HH:MM) · 訓練時間
+ *     ADR-0026 極簡模式：計劃 + 強度 兩段隱藏 → 動作數 · 時間起訖 · 訓練時間。
  *   - 容量 (right-aligned), `kg` label below
  *
  * Watch ⌚ column is NOT shown — HealthKit lands in slice 13 (per task spec).
@@ -48,6 +50,7 @@ import {
 } from './historyListHelpers';
 import { t, useLocale } from '@/src/i18n';
 import { tNExerciseCount } from '@/src/i18n/dynamic';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * Side-bar color for freestyle / pre-backfill template rows. Stays literal
@@ -81,8 +84,6 @@ interface RowVM {
   triple: SessionLinkedTriple | null;
   tplColor: string;
   sameDayIds: string[];
-  /** Count of OTHER sessions on the same date (sameDayIds.length - 1). */
-  extraSameDay: number;
 }
 
 /**
@@ -120,6 +121,14 @@ function formatDateParts(ms: number): { primary: string; year: string } {
   const m = d.getMonth() + 1;
   const day = String(d.getDate()).padStart(2, '0');
   return { primary: `${m}-${day}`, year: String(d.getFullYear()) };
+}
+
+/** Format a unix-ms timestamp as a local `HH:MM` 24-hour clock label. */
+function formatClockTime(ms: number): string {
+  const d = new Date(ms);
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${min}`;
 }
 
 export default function ListView() {
@@ -224,7 +233,6 @@ async function loadInto(
       triple,
       tplColor,
       sameDayIds,
-      extraSameDay: Math.max(0, sameDayIds.length - 1),
     };
   });
 }
@@ -240,12 +248,13 @@ function Row({ vm, onPress }: RowProps) {
   // of memoization so rows re-render on language switch (memoized FlatList leaf).
   'use no memo';
   useLocale();
+  // ADR-0026 — 極簡模式：副標題不顯示計劃 (program) / 強度 (sub_tag)。
+  const { isMinimal } = useAppMode();
   const styles = useListStyles();
-  const { session, volume, exerciseCount, triple, tplColor, extraSameDay } = vm;
+  const { session, volume, exerciseCount, triple, tplColor } = vm;
   const { primary: dateMD, year: dateYear } = formatDateParts(session.started_at);
 
   const titleParts = deriveTitleParts(session, triple);
-  const titleSuffix = extraSameDay > 0 ? ` +${extraSameDay}` : '';
 
   const program = triple?.program_name ?? t('common', 'default');
   const subTag = triple?.sub_tag ?? t('common', 'default');
@@ -261,6 +270,18 @@ function Row({ vm, onPress }: RowProps) {
   const endTs = session.ended_at ?? Date.now();
   const durationSec = Math.max(0, Math.floor((endTs - session.started_at) / 1000));
   const durationLabel = formatDurationMinuteOnly(durationSec);
+
+  // 時間起訖 (HH:MM–HH:MM)：已結束的 session 顯示起–訖；進行中只顯示開始時間。
+  const startClock = formatClockTime(session.started_at);
+  const timeRange =
+    session.ended_at != null
+      ? `${startClock}–${formatClockTime(session.ended_at)}`
+      : startClock;
+
+  // 副標題各段：極簡模式去掉計劃·強度，保留 動作數 · 時間起訖 · 時長。
+  const subtitleParts = isMinimal
+    ? [tNExerciseCount(exerciseCount), timeRange, durationLabel]
+    : [program, subTag, tNExerciseCount(exerciseCount), timeRange, durationLabel];
 
   const volumeRounded = Math.round(volume);
 
@@ -288,10 +309,9 @@ function Row({ vm, onPress }: RowProps) {
         <Text style={titleStyles} numberOfLines={1}>
           {titleParts.isFreestyle ? '⚠️ ' : ''}
           {titleParts.text}
-          {titleSuffix}
         </Text>
         <Text style={styles.subtitle} numberOfLines={1}>
-          {program} · {subTag} · {tNExerciseCount(exerciseCount)} · {durationLabel}
+          {subtitleParts.join(' · ')}
         </Text>
       </View>
 
