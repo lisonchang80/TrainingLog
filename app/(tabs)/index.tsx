@@ -160,6 +160,7 @@ import {
   end as endState,
   fromRow,
   getSessionId,
+  isWatchLedReadOnly,
   start as startState,
   type SessionState,
 } from '@/src/domain/session/sessionManager';
@@ -1229,6 +1230,7 @@ export default function TodayScreen() {
     exercise_id: string,
     session_exercise_id: string,
   ) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
       Alert.alert(t('alert', 'noActiveSession'));
@@ -1342,6 +1344,7 @@ export default function TodayScreen() {
     set_id: string,
     patch: { reps?: number; weight?: number },
   ) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const dbPatch: { weight_kg?: number; reps?: number } = {};
     if (patch.reps !== undefined) dbPatch.reps = patch.reps;
     if (patch.weight !== undefined) dbPatch.weight_kg = patch.weight;
@@ -1392,6 +1395,7 @@ export default function TodayScreen() {
     set_id: string,
     is_in_cluster: boolean = false,
   ) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     // v019 isolation (slice 10c #17): cycle ops operate on a SINGLE card's
@@ -1455,6 +1459,7 @@ export default function TodayScreen() {
    * is one tap.
    */
   const onDeleteSet = async (set_id: string) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     try {
@@ -1480,6 +1485,7 @@ export default function TodayScreen() {
     _exercise_id: string,
     source_set_id: string,
   ) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1534,6 +1540,7 @@ export default function TodayScreen() {
    * Mirrors template editor's `addDropsetRow` UX, but persisted.
    */
   const onAddDropsetRow = async (after_set_id: string) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1597,6 +1604,7 @@ export default function TodayScreen() {
    *     set's "complete" side-effect, timer included).
    */
   const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
+    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     const nextLogged = currentlyLogged ? 0 : 1;

@@ -74,6 +74,25 @@ export function canRecordSet(state: SessionState): boolean {
   return state.status === 'in_progress';
 }
 
+/**
+ * True while a **Watch-led** session is in progress — the iPhone is read-only.
+ *
+ * The Apple Watch is the source of truth during a watch-tracked session; its
+ * next live-mirror tick runs a purge (`replaceLiveMirror`) that silently
+ * overwrites or DELETES any set the iPhone wrote, edited, or toggled (the iPhone
+ * edit is never in the Watch's snapshot). ADR-0019 NEW-Q50 specifies the iPhone
+ * is 唯讀 during Watch-led sessions; the in-session edit handlers short-circuit
+ * on this so a stray iPhone tap can't cause silent data-loss.
+ *
+ * INTERIM guard: the real fix — iPhone edits flowing TO the Watch — is the
+ * reverse-sync feature (Phase C / D32). When that lands, iPhone editing during a
+ * Watch-led session becomes a feature and this guard is removed.
+ * (2026-06-25 forward-sync audit 🟠.)
+ */
+export function isWatchLedReadOnly(state: SessionState): boolean {
+  return state.status === 'in_progress' && state.is_watch_tracked;
+}
+
 /** Returns the current session id, or null when idle. */
 export function getSessionId(state: SessionState): string | null {
   return state.status === 'idle' ? null : state.id;

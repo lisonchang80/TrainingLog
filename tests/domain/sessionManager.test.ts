@@ -4,6 +4,7 @@ import {
   end,
   fromRow,
   getSessionId,
+  isWatchLedReadOnly,
   start,
   summarize,
 } from '../../src/domain/session/sessionManager';
@@ -88,6 +89,39 @@ describe('sessionManager — state machine (slice 2)', () => {
     it('false when ended', () => {
       const closed = end(start({ id: 's1', started_at: 1000 }), 2000);
       expect(canRecordSet(closed)).toBe(false);
+    });
+  });
+
+  describe('isWatchLedReadOnly', () => {
+    it('false when idle', () => {
+      expect(isWatchLedReadOnly(IDLE)).toBe(false);
+    });
+
+    it('false for a non-watch in_progress session (normal iPhone session)', () => {
+      expect(
+        isWatchLedReadOnly(start({ id: 's1', started_at: 1000 })),
+      ).toBe(false);
+      expect(
+        isWatchLedReadOnly(
+          start({ id: 's1', started_at: 1000, is_watch_tracked: false }),
+        ),
+      ).toBe(false);
+    });
+
+    it('true for a Watch-led in_progress session (iPhone read-only)', () => {
+      expect(
+        isWatchLedReadOnly(
+          start({ id: 's1', started_at: 1000, is_watch_tracked: true }),
+        ),
+      ).toBe(true);
+    });
+
+    it('false once ended, even if it was watch-tracked', () => {
+      const closed = end(
+        start({ id: 's1', started_at: 1000, is_watch_tracked: true }),
+        2000,
+      );
+      expect(isWatchLedReadOnly(closed)).toBe(false);
     });
   });
 
