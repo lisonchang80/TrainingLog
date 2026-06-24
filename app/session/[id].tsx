@@ -2238,7 +2238,10 @@ export default function SessionDetailScreen() {
               busy && styles.actionBtnDisabled,
               pressed && styles.btnPressed,
             ]}>
-            <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>
+            <Text
+              style={[styles.actionBtnText, styles.actionBtnTextPrimary]}
+              numberOfLines={1}
+              adjustsFontSizeToFit>
               {t('button', 'addExercise')}
             </Text>
           </Pressable>
@@ -2246,24 +2249,33 @@ export default function SessionDetailScreen() {
           <Pressable
             style={styles.actionBtn}
             onPress={enterEditMode}>
-            <Text style={styles.actionBtnText}>{t('button', 'editSession')}</Text>
+            <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+              {t('button', 'editSession')}
+            </Text>
           </Pressable>
         )}
         <Pressable
           style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
           disabled={isFreestyle}
           onPress={() => handleSaveTemplate('update')}>
-          <Text style={styles.actionBtnText}>{t('button', 'saveTemplate')}</Text>
+          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+            {t('button', 'saveTemplate')}
+          </Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
           onPress={() => handleSaveTemplate('create')}>
-          <Text style={styles.actionBtnText}>{t('button', 'saveAsTemplate')}</Text>
+          <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+            {t('button', 'saveAsTemplate')}
+          </Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
           onPress={handleDelete}>
-          <Text style={[styles.actionBtnText, styles.actionBtnTextDestructive]}>
+          <Text
+            style={[styles.actionBtnText, styles.actionBtnTextDestructive]}
+            numberOfLines={1}
+            adjustsFontSizeToFit>
             {t('common', 'delete')}
           </Text>
         </Pressable>
@@ -3503,6 +3515,8 @@ function makeStyles(tokens: ThemeTokens) {
       borderRadius: 8,
       backgroundColor: tokens.bg.elevated,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 44,
     },
     actionBtnDisabled: { opacity: 0.4 },
     actionBtnPrimary: { backgroundColor: tokens.action.primary },
@@ -3510,6 +3524,7 @@ function makeStyles(tokens: ThemeTokens) {
       fontSize: 13,
       fontWeight: '600',
       color: tokens.action.primary,
+      textAlign: 'center',
     },
     actionBtnTextPrimary: { color: tokens.action.onPrimary, fontWeight: '700' },
     actionBtnTextDestructive: { color: tokens.action.destructive },
