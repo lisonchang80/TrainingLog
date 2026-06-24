@@ -97,6 +97,23 @@ function tPrBucketLabel(zhLabel: string): string {
   return key ? t('domain', key) : zhLabel;
 }
 
+/**
+ * Short bucket labels for the compact filter-chip row. EN abbreviates (the long
+ * "Max Strength" / "Muscular Endurance" truncate at chip width); ZH keeps the
+ * full name (already fits). Full names stay via tPrBucketLabel for the timeline
+ * "(Hypertrophy)" annotations — do NOT route those through here.
+ */
+function tPrBucketChipLabel(chip: RepBucketChip): string {
+  switch (chip) {
+    case 'all': return t('common', 'all');
+    case 'max_strength': return t('domain', 'maxStrengthChip');
+    case 'strength': return t('domain', 'strengthChip');
+    case 'hypertrophy': return t('domain', 'hypertrophyChip');
+    case 'muscle_endurance': return t('domain', 'muscleEnduranceChip');
+    case 'endurance': return t('domain', 'enduranceChip');
+  }
+}
+
 function prKeyLabel(k: PRKey): string {
   switch (k) {
     case 'all': return t('common', 'all');
@@ -110,7 +127,6 @@ function prKeyLabel(k: PRKey): string {
 
 import {
   REP_BUCKET_CHIPS,
-  bucketDomainLabel,
   matchesChip,
   repRangeLabel,
   type RepBucketChip,
@@ -878,7 +894,7 @@ function HistoryPageContent({
                 return (
                   <FilterChip
                     key={chip}
-                    label={chip === 'all' ? t('common', 'all') : tPrBucketLabel(bucketDomainLabel(chip))}
+                    label={tPrBucketChipLabel(chip)}
                     sublabel={chip === 'all' ? undefined : `${repRangeLabel(chip)}RM`}
                     active={active}
                     onPress={() => onBucketChipTap(chip)}
@@ -1166,7 +1182,8 @@ function FilterChip({
       ]}>
       <Text
         style={[styles.filterChipText, active && styles.filterChipTextActive]}
-        numberOfLines={1}>
+        numberOfLines={1}
+        adjustsFontSizeToFit>
         {label}
       </Text>
       {sublabel ? (
