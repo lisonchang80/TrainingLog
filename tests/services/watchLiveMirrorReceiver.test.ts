@@ -227,6 +227,37 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
     expect(setCount?.n).toBe(1);
   });
 
+  it('echo-drop — a dropped iphone echo does NOT advance the rev high-water (a later watch tick at the same rev still applies)', async () => {
+    // The echo-drop must run BEFORE the rev claim — otherwise the echoed
+    // snapshot would advance lastAppliedRev, and a legitimate watch-originated
+    // snapshot carrying the SAME rev (e.g. the iPhone's own push bounced off
+    // the Watch, then the Watch re-emits at an equal rev) would be gated out as
+    // stale. Assert the echo leaves the high-water mark untouched.
+    __resetLiveMirrorRevForTests();
+    await seedLiveSession(db, 'sess-1');
+
+    // The iPhone's own push (rev 500) echoes back as originator:iphone.
+    const echo = await onLiveMirror(
+      db,
+      snapshot({ originator: 'iphone', rev: 500 }),
+    );
+    expect(echo.ok).toBe(false);
+    if (!echo.ok) expect(echo.code).toBe('echo');
+
+    // A genuine watch tick at the SAME rev (500) must STILL apply — proof the
+    // echo never claimed the mark. (If the echo had claimed 500, this would be
+    // dropped as `stale`.)
+    const watchTick = await onLiveMirror(
+      db,
+      snapshot({ originator: 'watch', rev: 500 }),
+    );
+    expect(watchTick.ok).toBe(true);
+    const setCount = await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM "set"',
+    );
+    expect(setCount?.n).toBe(1);
+  });
+
   it('bad-payload guard — non-object rejected, db untouched', async () => {
     const result = await onLiveMirror(db, null);
     expect(result.ok).toBe(false);
