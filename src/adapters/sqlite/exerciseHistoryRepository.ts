@@ -170,10 +170,21 @@ export async function listExerciseHistorySets(
   return rows.map((r) => ({ ...r, is_in_cluster: r.is_in_cluster === 1 }));
 }
 
-/** A single (weight, reps) pair — the only columns the PR engine consumes. */
+/**
+ * PR-input row for the Today-screen PR snapshot. `weight_kg`/`reps` feed
+ * `computePRSnapshot`; `set_kind` + `bw_snapshot_kg` let the caller drop
+ * non-working sets and apply the assisted `effectiveLoad` (assist → strength)
+ * BEFORE the Pareto/max comparison, matching the per-exercise history page
+ * (`historyPrSnapshot.computePRs`). Without that an assisted lift surfaces its
+ * most-assisted (easiest) set as the "heaviest PR" (2026-06-25 audit 🟠).
+ */
 export interface ExercisePRSetRow {
   weight_kg: number | null;
   reps: number | null;
+  /** Working / warmup / dropset — the caller keeps only `working`. */
+  set_kind: SetKind;
+  /** This set's session bodyweight snapshot (assisted effectiveLoad input). */
+  bw_snapshot_kg: number | null;
 }
 
 /**
@@ -192,14 +203,22 @@ export interface ExercisePRSetRow {
  * BYTE the same predicate `listExerciseHistorySets` applies —
  * `exercise_id = ? AND is_skipped = 0 AND is_logged = 1`. That means the SAME
  * multiset of rows reaches `computePRSnapshot`:
- *   - warmups: NOT excluded here (and weren't by the old path either); the PR
- *     engine sees them. (Today's PR snapshot has always fed warmups in —
- *     unlike `listPriorSetsForExercise`, which adds `set_kind = 'working'`.)
+ *   - warmups: NOT excluded by the WHERE (and weren't by the old path either);
+ *     the equivalence proof still feeds them. (The Today *caller* now drops
+ *     `set_kind != 'working'` in JS — see below.)
  *   - dropset FOLLOWERS: already excluded by `is_logged = 1` — a follower's DB
  *     `is_logged` stays 0 (UI toggles the head only; see dropset-chain-semantics
  *     skill DB invariant #2), so neither path includes them.
- * No JOIN/ORDER BY change can alter which rows count toward a PR; the proof is
+ * No WHERE/ORDER BY change can alter which rows count toward a PR; the proof is
  * `tests/db/exercisePRSetRows.equivalence.test.ts`.
+ *
+ * **2026-06-25 (audit 🟠)**: the SELECT now ALSO returns `set_kind` +
+ * `bw_snapshot_kg` (one PK JOIN onto `session`, cheap — not the correlated
+ * cluster subqueries the perf work removed). The WHERE is unchanged, so the
+ * equivalence test holds. The new columns let `loadTrainingTabState` filter to
+ * working sets and apply `effectiveLoad` for assisted lifts BEFORE the Pareto
+ * comparison, so the Today card no longer surfaces the most-assisted set as the
+ * "heaviest PR" and now agrees with `historyPrSnapshot.computePRs`.
  */
 export async function listExercisePRSetRows(
   db: Database,
@@ -207,8 +226,11 @@ export async function listExercisePRSetRows(
 ): Promise<ExercisePRSetRow[]> {
   return db.getAllAsync<ExercisePRSetRow>(
     `SELECT s.weight_kg AS weight_kg,
-            s.reps      AS reps
+            s.reps      AS reps,
+            s.set_kind  AS set_kind,
+            ss.bodyweight_snapshot_kg AS bw_snapshot_kg
        FROM "set" s
+       JOIN session ss ON ss.id = s.session_id
       WHERE s.exercise_id = ?
         AND s.is_skipped = 0
         AND s.is_logged = 1`,

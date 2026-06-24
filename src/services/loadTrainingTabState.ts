@@ -20,6 +20,7 @@ import {
 } from '../adapters/sqlite/setRepository';
 import { listExercisePRSetRows } from '../adapters/sqlite/exerciseHistoryRepository';
 import { computePRSnapshot, type PRSnapshot } from '../domain/pr/prQuery';
+import { effectiveLoad } from '../domain/pr/e1rmEngine';
 import { todayCell, localMsToIsoDate } from '../domain/program/programManager';
 import type { ProgramCell, ProgramWithCells } from '../domain/program/types';
 import type { Session } from '../domain/session/types';
@@ -118,16 +119,29 @@ export async function loadTrainingTabState(
   ]);
 
   // All-time PR snapshot per planned exercise. Per-exercise queries — cheap
-  // given a typical session has <10 planned exercises. Uses the lean
-  // `listExercisePRSetRows` (weight_kg/reps only; same is_skipped/is_logged
-  // predicate as the history UI → identical PR).
+  // given a typical session has <10 planned exercises.
+  //
+  // 2026-06-25 (audit 🟠): keep only WORKING sets and reduce assisted lifts to
+  // effective load (bw − assist) BEFORE the Pareto/max comparison. Without this
+  // the card ranked an assisted exercise by raw `weight_kg` = the *assist*
+  // amount, so the most-assisted (easiest) set surfaced as the "heaviest PR" and
+  // volume was assist×reps. This mirrors `historyPrSnapshot.computePRs` so the
+  // Today card now agrees with the per-exercise history page. For loaded /
+  // bodyweight lifts `effectiveLoad` is identity → behaviour unchanged.
   const prSnapshotById: Record<string, PRSnapshot> = {};
   await Promise.all(
     plan.map(async (p) => {
       const history = await listExercisePRSetRows(db, p.exercise_id);
-      prSnapshotById[p.exercise_id] = computePRSnapshot(
-        history.map((h) => ({ weight_kg: h.weight_kg, reps: h.reps })),
-      );
+      const loadType = p.exercise_load_type;
+      const prInput = history.flatMap((h) => {
+        if (h.set_kind !== 'working') return [];
+        if (h.weight_kg == null || h.reps == null) return [];
+        const eff = effectiveLoad(h.weight_kg, loadType, h.bw_snapshot_kg);
+        if (eff == null) return [];
+        if (loadType === 'assisted' && eff <= 0) return [];
+        return [{ weight_kg: eff, reps: h.reps }];
+      });
+      prSnapshotById[p.exercise_id] = computePRSnapshot(prInput);
     }),
   );
 
