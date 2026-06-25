@@ -66,7 +66,10 @@ import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
-import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
+import {
+  getActiveSession,
+  isTemplateLinkedToActiveSession,
+} from '@/src/adapters/sqlite/sessionRepository';
 import {
   applyRecolorSiblings,
   applyRenameSiblings,
@@ -1100,6 +1103,26 @@ export default function TemplateEditorView() {
       : null;
     const triple = formatTemplateTriple(programName, draft.sub_tag ?? null);
     setBusy(true);
+    // 2026-06-25 audit 🟠 — block delete while a still-active session was started
+    // from THIS template. executeTemplateDeletion deliberately won't NULL an
+    // active session's session_exercise.template_id (no in-flight mutation), so
+    // deleting now would leave that session a permanent dangling pointer → it
+    // loses its template label in History forever. Ask the user to finish/discard
+    // the session first instead of corrupting it.
+    try {
+      if (await isTemplateLinkedToActiveSession(db, id)) {
+        setBusy(false);
+        Alert.alert(
+          tt('alert', 'cannotDelete'),
+          tt('alert', 'templateInUseByActiveSession'),
+        );
+        return;
+      }
+    } catch (e) {
+      setBusy(false);
+      Alert.alert(tt('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
+      return;
+    }
     let preview;
     try {
       preview = await previewTemplateDeletion(db, id);
@@ -1152,6 +1175,15 @@ export default function TemplateEditorView() {
       if (dirty) {
         await persistDraft();
       }
+      // The template is now persisted AND about to be referenced by the new
+      // active session (session_exercise.template_id = id). Mark it saved so the
+      // unmount orphan-cleanup (isFreshTemplate && !savedRef → executeTemplateDeletion)
+      // does NOT delete it after router.replace pops this editor. persistDraft is
+      // the one save path that never sets savedRef, so without this a fresh
+      // template + 開始訓練 would silently delete the just-built template and leave
+      // the live session's template_id dangling. Unconditional: even a non-dirty
+      // fresh template is now session-referenced and must survive. (2026-06-25 audit 🔴.)
+      savedRef.current = true;
       await startSessionFromTemplate(db, { template_id: id, uuid: randomUUID });
       router.replace('/');
     } catch (e) {

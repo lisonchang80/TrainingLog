@@ -279,6 +279,35 @@ export async function getActiveSession(db: Database): Promise<Session | null> {
   return row ? mapSessionRow(row) : null;
 }
 
+/**
+ * True when a still-active session (ended_at IS NULL) has at least one
+ * `session_exercise` row whose `template_id` points at this template.
+ *
+ * Used to GUARD template deletion: `executeTemplateDeletion` deliberately
+ * EXCLUDES active sessions from its `session_exercise.template_id` NULL-cleanup
+ * (it won't mutate an in-flight session's reads), so deleting the template that
+ * the current session was started from would leave a permanent dangling
+ * `template_id` — that session then loses its template label/color/program in
+ * History forever (the list query INNER-JOINs `template`). Rather than mutate
+ * the live session, the editor blocks the delete and asks the user to finish /
+ * discard the session first. (2026-06-25 template audit 🟠.)
+ */
+export async function isTemplateLinkedToActiveSession(
+  db: Database,
+  templateId: string
+): Promise<boolean> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT 1 AS n
+       FROM session_exercise se
+       JOIN session s ON s.id = se.session_id
+      WHERE se.template_id = ?
+        AND s.ended_at IS NULL
+      LIMIT 1`,
+    templateId
+  );
+  return row != null;
+}
+
 /** All sessions, newest first. Used by the History tab list. */
 export async function listSessions(db: Database): Promise<Session[]> {
   const rows = await db.getAllAsync<SessionRow>(

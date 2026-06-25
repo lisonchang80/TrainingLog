@@ -7,6 +7,7 @@ import {
   deleteTemplate,
   getTemplate,
 } from '../../src/adapters/sqlite/templateRepository';
+import { isTemplateLinkedToActiveSession } from '../../src/adapters/sqlite/sessionRepository';
 
 /**
  * Acceptance tests for the 5/19 #44 `deleteTemplate` cascade rewrite:
@@ -207,6 +208,64 @@ describe('deleteTemplate — three-layer cascade + dangling cleanup', () => {
     expect(
       await countRows('session_exercise', "id = 'se-active' AND template_id = 'tpl-A'")
     ).toBe(1);
+  });
+
+  // 2026-06-25 audit 🟠 — the editor uses isTemplateLinkedToActiveSession to
+  // BLOCK deleting the template an active session was started from (the delete
+  // would leave the above stale pointer permanently dangling). Verify the guard.
+  describe('isTemplateLinkedToActiveSession (delete guard)', () => {
+    it('true when an ACTIVE session references the template', async () => {
+      await seedTemplateWithExerciseAndSets('tpl-A', 'Push');
+      await db.runAsync(
+        `INSERT INTO session (id, started_at, ended_at, bodyweight_snapshot_kg)
+         VALUES ('sess-active', ?, NULL, NULL)`,
+        NOW - 1_000
+      );
+      await db.runAsync(
+        `INSERT INTO session_exercise
+           (id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id)
+         VALUES ('se-active', 'sess-active', ?, 0, 2, 8, 80, 'tpl-A')`,
+        benchId
+      );
+      expect(await isTemplateLinkedToActiveSession(db, 'tpl-A')).toBe(true);
+    });
+
+    it('false when only an ENDED session references the template', async () => {
+      await seedTemplateWithExerciseAndSets('tpl-A', 'Push');
+      await db.runAsync(
+        `INSERT INTO session (id, started_at, ended_at, bodyweight_snapshot_kg)
+         VALUES ('sess-ended', ?, ?, NULL)`,
+        NOW - 2_000,
+        NOW - 1_000
+      );
+      await db.runAsync(
+        `INSERT INTO session_exercise
+           (id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id)
+         VALUES ('se-ended', 'sess-ended', ?, 0, 2, 8, 80, 'tpl-A')`,
+        benchId
+      );
+      expect(await isTemplateLinkedToActiveSession(db, 'tpl-A')).toBe(false);
+    });
+
+    it('false when no session references the template', async () => {
+      await seedTemplateWithExerciseAndSets('tpl-A', 'Push');
+      // An active session that points at a DIFFERENT template must not match.
+      await db.runAsync(
+        `INSERT INTO session (id, started_at, ended_at, bodyweight_snapshot_kg)
+         VALUES ('sess-other', ?, NULL, NULL)`,
+        NOW - 1_000
+      );
+      await db.runAsync(
+        `INSERT INTO session_exercise
+           (id, session_id, exercise_id, ordering, planned_sets, planned_reps,
+            planned_weight_kg, template_id)
+         VALUES ('se-other', 'sess-other', ?, 0, 2, 8, 80, 'tpl-OTHER')`,
+        benchId
+      );
+      expect(await isTemplateLinkedToActiveSession(db, 'tpl-A')).toBe(false);
+    });
   });
 
   it('nulls out program_cell.template_id and leaves the program + cell row intact', async () => {
