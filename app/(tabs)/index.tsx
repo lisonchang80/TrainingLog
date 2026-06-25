@@ -121,7 +121,7 @@ import {
   getSessionLinkedTemplateTriple,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
-import { ensureGeneralTemplateReady } from '@/src/services/ensureGeneralTemplate';
+import { ensureTemplateVariantReady } from '@/src/services/ensureTemplateVariant';
 import { useAppMode } from '@/src/app-mode';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
@@ -988,10 +988,15 @@ export default function TodayScreen() {
   };
 
   /**
-   * Lookup-or-spawn shared by onSheetEdit + onSheetStart. Returns the
-   * template_id of the sibling matching the user's (period_id, intensity_id)
-   * selection. Pure planner is `planResolveTarget` in
-   * src/domain/template/resolveTargetTemplate.ts.
+   * Lookup-or-fallback used by onSheetEdit (編輯模板). Returns the template_id of
+   * the sibling matching the user's (period_id, intensity_id) selection, or the
+   * representative + 「尚未建立模板」alert on miss (#50 no-spawn). Pure planner is
+   * `planResolveTarget` in src/domain/template/resolveTargetTemplate.ts.
+   *
+   * 開始訓練 (onSheetStart) no longer uses this — it auto-materialises the picked
+   * variant via `ensureTemplateVariantReady` (option 1 推廣, 2026-06-26), so the
+   * START path never falls back/alerts; the editor's alert self-resolves once a
+   * start has created the row.
    */
   const resolveTargetTemplateId = useCallback(
     async (
@@ -1117,23 +1122,20 @@ export default function TodayScreen() {
       if (selection.period_id !== RESERVED_NONE_PROGRAM_ID) {
         await setGlobalLastUsed(db, selection.period_id, selection.intensity_id);
       }
-      // 通用 selected → materialise + prefill the 通用 template (no fallback
-      // alert); classified selections keep planResolveTarget's resolve + alert.
-      const isGeneralSelection =
-        selection.period_id === RESERVED_NONE_PROGRAM_ID &&
-        selection.intensity_id === null;
-      let targetTemplateId: string;
-      let resolvedAlert: { title: string; body: string } | undefined;
-      if (isGeneralSelection) {
-        targetTemplateId = await ensureGeneralTemplateReady(db, {
-          name: sheetTemplate.name,
-          uuid: randomUUID,
-        });
-      } else {
-        const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
-        targetTemplateId = resolved.template_id;
-        resolvedAlert = resolved.alert;
-      }
+      // option 1 推廣 — EVERY selection (通用 + 任何分類變體) materialises its
+      // exact (program, sub_tag) row + prefills it. 反轉 #50 no-spawn + #308
+      // start fallback-alert（僅 start 路徑；onSheetEdit 維持 fallback+告示）。
+      // 通用 = (null, null)。session 副標題吃這個新建/分類過的 linked template。
+      const wantedProgramId =
+        selection.period_id === RESERVED_NONE_PROGRAM_ID
+          ? null
+          : selection.period_id;
+      const targetTemplateId = await ensureTemplateVariantReady(db, {
+        name: sheetTemplate.name,
+        program_id: wantedProgramId,
+        sub_tag: selection.intensity_id,
+        uuid: randomUUID,
+      });
       const { session_id } = await startSessionFromTemplate(db, {
         template_id: targetTemplateId,
         uuid: randomUUID,
@@ -1141,11 +1143,6 @@ export default function TodayScreen() {
         sub_tag: selection.intensity_id,
       });
       closeSheet();
-      // #308 根因 1（A1 alert-and-proceed）— classified fallback 不再靜默。
-      // Alert 在 startSessionFromTemplate 之後 = 告知型、不阻斷開始（通用已自建、無 alert）。
-      if (resolvedAlert) {
-        Alert.alert(resolvedAlert.title, resolvedAlert.body);
-      }
       await refresh();
       // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
       // See sibling call site in `onStartPlanned` for rationale.
@@ -1162,9 +1159,9 @@ export default function TodayScreen() {
 
   /**
    * ADR-0026 極簡模式的開始模板路徑 — 取代 StartTemplateSheet。一律開「通用」
-   * 模板：`ensureGeneralTemplateReady` 解析-或-建立通用列（群組只有分類變體時
-   * 自動建）+ 空模板用最近一次訓練 prefill，再走「相同」的 startSessionFromTemplate
-   * + WC push side-effects。
+   * 模板：`ensureTemplateVariantReady(name, null, null)` 解析-或-建立通用列（群組
+   * 只有分類變體時自動建）+ 空模板用最近一次訓練 prefill，再走「相同」的
+   * startSessionFromTemplate + WC push side-effects。
    *
    * 與 onSheetStart 差異（D3）：不開 sheet、不寫 per-template / 全域 sticky（皆計劃
    * 概念）。計劃模式行為不受影響（此分支只在 isMinimal 走到）。取代舊的
@@ -1182,8 +1179,10 @@ export default function TodayScreen() {
         );
         return;
       }
-      const generalId = await ensureGeneralTemplateReady(db, {
+      const generalId = await ensureTemplateVariantReady(db, {
         name: item.name,
+        program_id: null,
+        sub_tag: null,
         uuid: randomUUID,
       });
       const { session_id } = await startSessionFromTemplate(db, {

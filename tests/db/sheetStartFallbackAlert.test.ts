@@ -1,25 +1,25 @@
 /**
- * Bug #308 決策 A1（alert-and-proceed）驗收測試。
+ * #50 / #308 fallback-alert 分流驗收測試。
  *
- * Fix：`app/(tabs)/index.tsx` onSheetStart 在 closeSheet 後補
- * `if (resolved.alert) Alert.alert(...)` —— 與同檔 onSheetEdit 既有寫法
- * 一致（mirror）。語意 = 告知型 alert、不阻斷：fallback 時仍照常
- * `startSessionFromTemplate` 開始訓練（A1，非 A2 block）。
+ * 2026-06-26 option 1 推廣翻盤：原本 onSheetStart（開始訓練）對 miss 的
+ * selection 會走 planResolveTarget fallback + #308 A1「告知型 alert + 照常
+ * 開始」。現在 onSheetStart 對「所有」selection 改走
+ * `ensureTemplateVariantReady` 自動建立該 (program, sub_tag) 變體 + prefill
+ * —— START 路徑不再 fallback、不再跳「尚未建立模板」alert（反 #50 no-spawn，
+ * 僅 start 路徑）。fallback + 告示只剩 onSheetEdit（編輯模板）保留：首次 start
+ * 把列建出來後，編輯路徑的告示也自然消失。
  *
  * jest 跑 `testEnvironment: node`、無 RN renderer，component 不能 render
- * 直測（見 skill rn-component-behavior-split；A1 新增邏輯僅一行 if，低於
- * 抽 behavior 模組的門檻）。故驗收拆兩層：
+ * 直測（見 skill rn-component-behavior-split）。故驗收拆兩層：
  *
- *   1. 行為層（in-memory DB）：鎖定 `resolved.alert` 的觸發/靜默條件與
- *      proceed 不被 block —— A1 的 `if (resolved.alert)` 閘門吃的就是
- *      planResolveTarget 的回傳，這裡鎖死「何時有 alert、何時沒有」。
+ *   1. 行為層（in-memory DB）：鎖定 planResolveTarget 的 fallback/靜默條件 ——
+ *      onSheetEdit 的 `if (resolved.alert)` 閘門吃的就是這個回傳。
  *   2. source guard（fs，前例 tests/domain/templatesTabRemoval.test.ts）：
- *      鎖定 onSheetStart 區塊真的含 alert 顯示、且順序在
- *      startSessionFromTemplate 之後（= alert-and-proceed，回歸防 A2 化
- *      或再度被刪）。
+ *      鎖定 onSheetStart 走 ensureTemplateVariantReady 自建（無 fallback alert）、
+ *      且 onSheetEdit 仍保留 fallback alert 顯示。
  *
- * 決策 B 維持 B2（副標題吃 linked-template、零改動）—— 本檔最後一條
- * 重申鎖定；probe tests/db/planResolveFallback.probe308.test.ts 亦續鎖。
+ * 決策 B 維持 B2（副標題吃 linked-template）—— probe
+ * tests/db/planResolveFallback.probe308.test.ts 續鎖。
  */
 
 import { readFileSync } from 'fs';
@@ -32,17 +32,15 @@ import {
   attachTemplateToProgram,
   addTemplateExercise,
   findTemplateByTriple,
-  getSessionLinkedTemplateTriple,
 } from '../../src/adapters/sqlite/templateRepository';
 import { createProgram } from '../../src/adapters/sqlite/programRepository';
 import { listExercises } from '../../src/adapters/sqlite/exerciseRepository';
-import { startSessionFromTemplate } from '../../src/adapters/sqlite/sessionFromTemplate';
 import { planResolveTarget } from '../../src/domain/template/resolveTargetTemplate';
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const NOW = 1_700_000_000_000;
 
-describe('#308 A1 — onSheetStart fallback alert（行為層）', () => {
+describe('#50/#308 — planResolveTarget fallback 語意（onSheetEdit 行為層）', () => {
   let db: BetterSqliteDatabase;
   let benchId: string;
   let uuidCounter: number;
@@ -123,14 +121,14 @@ describe('#308 A1 — onSheetStart fallback alert（行為層）', () => {
     return planResolveTarget(source, selection, found);
   }
 
-  it('fallback 觸發 → resolved 帶 alert（A1 的 if 閘門會開、文案＝planner 定案文案）', async () => {
+  it('fallback 觸發 → resolved 帶 alert（onSheetEdit 的 if 閘門會開、文案＝planner 定案文案）', async () => {
     const plan = await resolveLikeIndexTsx({
       wanted_program_id: 'prog-E',
       wanted_sub_tag: '強度E',
     });
     expect(plan.kind).toBe('fallback_with_alert');
     if (plan.kind !== 'fallback_with_alert') throw new Error('unreachable');
-    // onSheetStart 顯示的就是這兩個字串（與 onSheetEdit 同一來源、零新文案）。
+    // onSheetEdit 顯示的就是這兩個字串。
     expect(plan.alert).toEqual({ title: '尚未建立模板', body: '啟用最新模板' });
   });
 
@@ -159,58 +157,13 @@ describe('#308 A1 — onSheetStart fallback alert（行為層）', () => {
     expect('alert' in plan).toBe(false);
   });
 
-  it('proceed 不被 block：fallback 後 session 照常開始、內容＝fallback 模板（B·B）', async () => {
-    const plan = await resolveLikeIndexTsx({
-      wanted_program_id: 'prog-E',
-      wanted_sub_tag: '強度E',
-    });
-    expect(plan.kind).toBe('fallback_with_alert');
-
-    // A1 語意：alert 只是告知，session 一樣用 fallback template_id 開起來。
-    const { session_id } = await startSessionFromTemplate(db, {
-      template_id: plan.template_id,
-      uuid,
-      now: () => NOW,
-      program_id: 'prog-E', // decorative（probe 第 5 測已證）
-      sub_tag: '強度E',
-    });
-
-    const session = await db.getFirstAsync<{ id: string; ended_at: number | null }>(
-      `SELECT id, ended_at FROM session WHERE id = ?`,
-      session_id,
-    );
-    expect(session).toEqual({ id: session_id, ended_at: null });
-
-    const exercises = await db.getAllAsync<{ template_id: string }>(
-      `SELECT template_id FROM session_exercise WHERE session_id = ?`,
-      session_id,
-    );
-    expect(exercises).toEqual([{ template_id: 'tpl-bb' }]);
-  });
-
-  it('B2 維持：fallback session 的副標題 triple 仍吃 linked-template（B·B、誠實陳述）', async () => {
-    const plan = await resolveLikeIndexTsx({
-      wanted_program_id: 'prog-E',
-      wanted_sub_tag: '強度E',
-    });
-    expect(plan.kind).toBe('fallback_with_alert');
-    const { session_id } = await startSessionFromTemplate(db, {
-      template_id: plan.template_id,
-      uuid,
-      now: () => NOW,
-    });
-    const triple = await getSessionLinkedTemplateTriple(db, session_id);
-    expect(triple).toEqual({
-      template_id: 'tpl-bb',
-      template_name: 'X日',
-      program_id: 'prog-B',
-      program_name: '計畫B',
-      sub_tag: '強度B',
-    });
-  });
+  // 註：原「proceed 不被 block」「B2 副標題」兩條鎖的是 onSheetStart fallback 後
+  // 開 session 的行為；2026-06-26 起 START 路徑改自建（不再 fallback 開 session），
+  // 該情境已不存在。B2 副標題誠實陳述續由 probe
+  // tests/db/planResolveFallback.probe308.test.ts 鎖定。
 });
 
-describe('#308 A1 — onSheetStart source guard（alert-and-proceed 回歸鎖）', () => {
+describe('START 自建 vs 編輯 fallback — source guard（2026-06-26 option 1 推廣）', () => {
   const src = readFileSync(
     join(REPO_ROOT, 'app', '(tabs)', 'index.tsx'),
     'utf8',
@@ -225,33 +178,27 @@ describe('#308 A1 — onSheetStart source guard（alert-and-proceed 回歸鎖）
     return src.slice(start, next);
   }
 
-  it('onSheetStart：分類 selection 仍含 fallback alert 顯示（mirror onSheetEdit）', () => {
+  it('onSheetStart：所有 selection 走 ensureTemplateVariantReady 自建（含分類變體）', () => {
     const block = sliceHandler('onSheetStart');
-    // 2026-06-26：通用 selection 改走自建路徑（見下一條），fallback alert
-    // 變數更名 resolved.alert → resolvedAlert，但 #308 A1 告知型語意不變。
-    expect(block).toContain('if (resolvedAlert)');
-    expect(block).toContain(
-      'Alert.alert(resolvedAlert.title, resolvedAlert.body)',
-    );
+    // 通用 + 任何分類變體都自建/prefill 其 (program, sub_tag) 列。
+    expect(block).toContain('ensureTemplateVariantReady');
   });
 
-  it('onSheetStart：通用 selection 自走 ensureGeneralTemplateReady（自建+prefill、不 fallback alert）', () => {
+  it('onSheetStart：START 路徑不再 fallback／告示（反 #50 no-spawn）', () => {
     const block = sliceHandler('onSheetStart');
-    // 通用（RESERVED_NONE + 無強度）不再 fallback 到分類 representative + 跳
-    // 「尚未建立模板」，改為 ensureGeneralTemplateReady 自建/prefill 通用模板。
-    expect(block).toContain('isGeneralSelection');
-    expect(block).toContain('ensureGeneralTemplateReady');
+    // 不再「呼叫」resolveTargetTemplateId、也不再有 resolvedAlert 告示分支。
+    // 註：sliceHandler 會把下一個 handler 的 JSDoc 一起切進來，該 docstring 含
+    // 「resolveTargetTemplateId 路徑」字樣（無括號），故鎖呼叫形式 `(` 才精準。
+    expect(block).not.toContain('resolveTargetTemplateId(');
+    expect(block).not.toContain('resolvedAlert');
   });
 
-  it('A1 非 A2：alert 在 startSessionFromTemplate 之後（告知型、不阻斷開始）', () => {
-    const block = sliceHandler('onSheetStart');
-    const startIdx = block.indexOf('startSessionFromTemplate');
-    const alertIdx = block.indexOf('if (resolvedAlert)');
-    expect(startIdx).toBeGreaterThan(-1);
-    expect(alertIdx).toBeGreaterThan(startIdx);
+  it('onStartMinimalTemplate：極簡 start 也走 ensureTemplateVariantReady(null,null)', () => {
+    const block = sliceHandler('onStartMinimalTemplate');
+    expect(block).toContain('ensureTemplateVariantReady');
   });
 
-  it('一致性鎖：onSheetEdit 既有 alert 寫法仍在（兩 handler 同款）', () => {
+  it('一致性鎖：onSheetEdit 仍保留 fallback alert（編輯路徑維持 #50 fallback+告示）', () => {
     const block = sliceHandler('onSheetEdit');
     expect(block).toContain('if (resolved.alert)');
     expect(block).toContain(
