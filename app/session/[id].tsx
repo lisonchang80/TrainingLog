@@ -31,7 +31,10 @@ import type { HRSample } from '@/components/session/hr-zone-chart.behavior';
 import { queryHeartRateSamples } from '@/src/adapters/healthkit';
 import { rehealSessionKcal } from '@/src/services/healthkitSessionSync';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
-import { SessionTitleEditor } from '@/components/session/session-title-editor';
+import {
+  SessionTitleEditor,
+  type SessionTitleEditorHandle,
+} from '@/components/session/session-title-editor';
 import { ClusterCard } from '@/components/session/cluster-card';
 import {
   SetRowContent,
@@ -328,6 +331,12 @@ export default function SessionDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
 
+  // 2026-06-25 audit 🟡 — ref to the header SessionTitleEditor so any
+  // pending title edit commits-on-blur BEFORE a secondary surface (action-bar
+  // button / TemplateMetaSheet / time-editor / kebab menu) steals focus.
+  // Mirrors the Bug F4 (2026-05-25) fix on Today (`index.tsx` editorRef).
+  const titleRef = useRef<SessionTitleEditorHandle>(null);
+
   // Toast controller (Round F Q2 — replaces Alert.alert success on [儲存模板]).
   // Created once, kept alive for the entire page lifecycle; ToastHost subscribes.
   const toastRef = useRef<ToastController | null>(null);
@@ -551,17 +560,23 @@ export default function SessionDetailScreen() {
     }
   }, [db, id]);
 
-  const commitEditMode = useCallback(() => {
+  const commitEditMode = useCallback(async () => {
     // Edit ops 已陸續直寫 DB；commit 等同清掉 snapshot 即可。
+    // Card 12R — commit path 也清掉持久化 snapshot，避免下次 focus 又
+    // restore 到 commit 前的 baseline。2026-06-25 audit 🔵 — AWAIT the
+    // delete (was fire-and-forget) so the committed edit can't be reverted by
+    // a focus-restore if the persisted snapshot outlives an OS-kill in the
+    // sub-second window after commit. Clear it BEFORE flipping editMode off so
+    // a kill mid-commit leaves no stale baseline behind.
+    if (id) {
+      try {
+        await deleteSetting(db, editSnapshotKey(id));
+      } catch (e) {
+        console.warn('[Card 12R] commit deleteSetting failed:', e);
+      }
+    }
     setEditSnapshot(null);
     setEditMode(false);
-    // Card 12R — commit path 也清掉持久化 snapshot，避免下次 focus 又
-    // restore 到 commit 前的 baseline。
-    if (id) {
-      deleteSetting(db, editSnapshotKey(id)).catch((e) => {
-        console.warn('[Card 12R] commit deleteSetting failed:', e);
-      });
-    }
   }, [db, id]);
 
   // attemptExitEditMode：return true 表示「已 (或將) 退出 edit mode」、false
@@ -1941,6 +1956,7 @@ export default function SessionDetailScreen() {
           <View style={styles.headerTitleRow}>
             {session ? (
               <SessionTitleEditor
+                ref={titleRef}
                 sessionId={session.id}
                 initialTitle={session.title ?? ''}
                 placeholder={t('domain', 'freestyle')}
@@ -2069,7 +2085,10 @@ export default function SessionDetailScreen() {
                   ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={
                     session.ended_at != null
-                      ? () => setTimeEditorOpen(true)
+                      ? () => {
+                          titleRef.current?.blur();
+                          setTimeEditorOpen(true);
+                        }
                       : undefined
                   }
                 />
@@ -2141,7 +2160,10 @@ export default function SessionDetailScreen() {
                   ended_at_ms={session.ended_at ?? viewOpenedAtMs}
                   onTapDuration={
                     session.ended_at != null
-                      ? () => setTimeEditorOpen(true)
+                      ? () => {
+                          titleRef.current?.blur();
+                          setTimeEditorOpen(true);
+                        }
                       : undefined
                   }
                 />
@@ -2232,9 +2254,10 @@ export default function SessionDetailScreen() {
         {editMode ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() =>
-              router.push(`/exercise-picker?mode=picker&sessionId=${id}`)
-            }
+            onPress={() => {
+              titleRef.current?.blur();
+              router.push(`/exercise-picker?mode=picker&sessionId=${id}`);
+            }}
             disabled={busy}
             style={({ pressed }) => [
               styles.actionBtn,
@@ -2251,7 +2274,10 @@ export default function SessionDetailScreen() {
         ) : (
           <Pressable
             style={styles.actionBtn}
-            onPress={enterEditMode}>
+            onPress={() => {
+              titleRef.current?.blur();
+              enterEditMode();
+            }}>
             <Text style={styles.actionBtnText} numberOfLines={2}>
               {t('button', 'editSession')}
             </Text>
@@ -2260,21 +2286,30 @@ export default function SessionDetailScreen() {
         <Pressable
           style={[styles.actionBtn, isFreestyle && styles.actionBtnDisabled]}
           disabled={isFreestyle}
-          onPress={() => handleSaveTemplate('update')}>
+          onPress={() => {
+            titleRef.current?.blur();
+            handleSaveTemplate('update');
+          }}>
           <Text style={styles.actionBtnText} numberOfLines={2}>
             {t('button', 'saveTemplate')}
           </Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
-          onPress={() => handleSaveTemplate('create')}>
+          onPress={() => {
+            titleRef.current?.blur();
+            handleSaveTemplate('create');
+          }}>
           <Text style={styles.actionBtnText} numberOfLines={2}>
             {t('button', 'saveAsTemplate')}
           </Text>
         </Pressable>
         <Pressable
           style={styles.actionBtn}
-          onPress={handleDelete}>
+          onPress={() => {
+            titleRef.current?.blur();
+            handleDelete();
+          }}>
           <Text
             style={[styles.actionBtnText, styles.actionBtnTextDestructive]}
             numberOfLines={2}>
