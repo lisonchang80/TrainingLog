@@ -86,6 +86,41 @@ describe('session snapshot / restore', () => {
     expect(snap).toBeNull();
   });
 
+  it('captures and restores display_rank (Watch reorder fractional sort key)', async () => {
+    // A Watch-side reorder writes a fractional display_rank that differs from
+    // ordering. Discard (restore) must preserve it, not fall back to ordering.
+    await db.runAsync(
+      `UPDATE "set" SET display_rank = 2.5 WHERE id = 'origS1'`,
+    );
+    const snap = await captureSessionSnapshot(db, sessionId);
+    expect(snap!.sets[0].display_rank).toBe(2.5);
+
+    // Simulate an edit that loses the fractional rank, then restore.
+    await db.runAsync(
+      `UPDATE "set" SET display_rank = NULL, weight_kg = 999 WHERE id = 'origS1'`,
+    );
+    await restoreSessionFromSnapshot(db, snap!);
+
+    const after = await db.getFirstAsync<{
+      display_rank: number | null;
+      weight_kg: number;
+    }>(`SELECT display_rank, weight_kg FROM "set" WHERE id = 'origS1'`);
+    expect(after).toEqual({ display_rank: 2.5, weight_kg: 80 });
+  });
+
+  it('round-trips NULL display_rank (plain iPhone-authored set)', async () => {
+    await db.runAsync(
+      `UPDATE "set" SET display_rank = NULL WHERE id = 'origS1'`,
+    );
+    const snap = await captureSessionSnapshot(db, sessionId);
+    expect(snap!.sets[0].display_rank).toBeNull();
+    await restoreSessionFromSnapshot(db, snap!);
+    const after = await db.getFirstAsync<{ display_rank: number | null }>(
+      `SELECT display_rank FROM "set" WHERE id = 'origS1'`,
+    );
+    expect(after!.display_rank).toBeNull();
+  });
+
   it('restore reverts ADD: extra set added during edit is gone after restore', async () => {
     const snap = await captureSessionSnapshot(db, sessionId);
     // Simulate edit: add a new set

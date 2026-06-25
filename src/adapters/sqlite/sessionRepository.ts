@@ -1272,6 +1272,7 @@ export interface SessionSnapshot {
     is_logged: number;
     notes: string | null;
     session_exercise_id: string | null;
+    display_rank: number | null;
   }>;
   achievementUnlocks: ReadonlyArray<{ id: number; set_id: string }>;
 }
@@ -1304,7 +1305,7 @@ export async function captureSessionSnapshot(
   const sets = await db.getAllAsync<SessionSnapshot['sets'][number]>(
     `SELECT id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering,
             created_at, set_kind, parent_set_id, is_logged, notes,
-            session_exercise_id
+            session_exercise_id, display_rank
        FROM "set"
       WHERE session_id = ?`,
     session_id
@@ -1392,8 +1393,8 @@ export async function restoreSessionFromSnapshot(
         `INSERT INTO "set"
            (id, session_id, exercise_id, weight_kg, reps, is_skipped,
             ordering, created_at, set_kind, parent_set_id, is_logged,
-            notes, session_exercise_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            notes, session_exercise_id, display_rank)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         s.id,
         s.session_id,
         s.exercise_id,
@@ -1406,7 +1407,8 @@ export async function restoreSessionFromSnapshot(
         s.parent_set_id,
         s.is_logged,
         s.notes,
-        s.session_exercise_id
+        s.session_exercise_id,
+        s.display_rank
       );
     }
 
