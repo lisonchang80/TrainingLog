@@ -76,6 +76,31 @@ Any place that introduces a new sub_tag for a program (cell upsert, row-apply, c
 
 If you find a write path that lands a sub_tag onto `template.sub_tag` or `program_cell.sub_tag` but DOESN'T call `recordProgramSubTag`, that's a bug — the chip will "disappear from the picker" the next time the user views the program (because `listDistinctSubTagsByProgram` only returns it until something replaces it, and the cell-derived source is empty until a cell uses it).
 
+## Delete direction — when REMOVING a sub_tag (2026-06-26)
+
+Mirror of the WRITE rule: any path that DELETES a 強度 from a program must clean
+**all three** sources for the (program_id, sub_tag) pair, or a stale label/tag
+survives:
+
+1. `template.sub_tag` → `UPDATE … SET sub_tag = NULL WHERE program_id=? AND sub_tag=?` (templates become program-only — un-tag, do NOT delete the template)
+2. `program_cell.sub_tag` → `UPDATE … SET sub_tag = NULL WHERE program_id=? AND sub_tag=?`
+3. `program_sub_tag` dict → `DELETE FROM program_sub_tag WHERE program_id=? AND sub_tag=?`
+
+Canonical impl: **`deleteProgramSubTag(db, {program_id, sub_tag})`** in
+`programRepository.ts` (Programs-tab「刪除強度」, commit `2f0b045`). It also carries
+an **active-session guard**: if a template with exactly this (program, sub_tag)
+backs an in-progress session, it throws `PROGRAM_HAS_ACTIVE_SESSION` (nulling its
+sub_tag would yank the live session's 計劃·強度 subtitle). UI catches → Alert
+`cannotDelete` + `tOverwriteBlockedByActiveSession`.
+
+`deleteProgram(db, id)` (whole-program delete): orphans templates to 通用
+(program_id+sub_tag NULL), deletes program_cell, deletes program — `program_sub_tag`
+rows go via the FK `ON DELETE CASCADE`. Same active-session guard added 2026-06-26.
+
+If you add another sub_tag-removal path, run all three cleanups (or reuse
+`deleteProgramSubTag`). Skipping #2 (cells) is the easy miss — the grid keeps
+showing the deleted 強度 on its cells.
+
 ## Test fixture gotcha — v022 FK enforcement
 
 `program_sub_tag` has `FOREIGN KEY (program_id) REFERENCES program(id) ON DELETE CASCADE`. But `template.program_id` was added via `ALTER TABLE` in v005, and SQLite does NOT enforce FK on columns added by ALTER. This means **prior tests sometimes pass phantom `program_id` like `'prog-foo'` without seeding a program row** — that's fine for `template` writes but the moment those writes start cascading into `recordProgramSubTag`, the FK fires.
