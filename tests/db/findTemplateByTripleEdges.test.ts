@@ -117,15 +117,18 @@ describe('findTemplateByTriple — edge cases', () => {
     expect(r2?.id).toBe('tpl-null');
   });
 
-  it('name match is case-sensitive', async () => {
+  it('name match is case-insensitive (COLLATE NOCASE, consistent with dedup/delete layer)', async () => {
     await seedTemplate({ id: 'tpl-up', name: 'Push', program_id: 'prog-A', sub_tag: 'V1' });
 
+    // A case-variant of an existing name must collide with the dup guard so a
+    // hidden duplicate triple cannot be created (the list group / delete-by-name
+    // layer collapses case-variants via COLLATE NOCASE).
     const wrongCase = await findTemplateByTriple(db, {
       name: 'push',
       program_id: 'prog-A',
       sub_tag: 'V1',
     });
-    expect(wrongCase).toBeNull();
+    expect(wrongCase?.id).toBe('tpl-up');
 
     const exact = await findTemplateByTriple(db, {
       name: 'Push',

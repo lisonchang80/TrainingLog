@@ -122,7 +122,7 @@ export async function listTemplateVariantsByName(
   return db.getAllAsync<TemplateRow>(
     `SELECT id, name, created_at, updated_at, program_id, sub_tag
        FROM template
-      WHERE name = ?
+      WHERE name = ? COLLATE NOCASE
       ORDER BY updated_at DESC`,
     name
   );
@@ -183,7 +183,7 @@ export async function findTemplateByTriple(
 ): Promise<{ id: string } | null> {
   const row = await db.getFirstAsync<{ id: string }>(
     `SELECT id FROM template
-      WHERE name = ?
+      WHERE name = ? COLLATE NOCASE
         AND ((program_id IS NULL AND ? IS NULL) OR program_id = ?)
         AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
       LIMIT 1`,
@@ -1158,7 +1158,7 @@ export async function applyRenameSiblings(
   if (args.oldName === args.newName) return;
   const ts = (args.now ?? Date.now)();
   await db.runAsync(
-    `UPDATE template SET name = ?, updated_at = ? WHERE name = ?`,
+    `UPDATE template SET name = ?, updated_at = ? WHERE name = ? COLLATE NOCASE`,
     args.newName,
     ts,
     args.oldName
@@ -1176,7 +1176,7 @@ export async function applyRecolorSiblings(
 ): Promise<void> {
   const ts = (args.now ?? Date.now)();
   await db.runAsync(
-    `UPDATE template SET color_hex = ?, updated_at = ? WHERE name = ?`,
+    `UPDATE template SET color_hex = ?, updated_at = ? WHERE name = ? COLLATE NOCASE`,
     args.color_hex,
     ts,
     args.name
@@ -1662,7 +1662,7 @@ export async function cloneTemplateWithSubTag(
   // row and the dup guard would silently leak past a NULL/NULL collision.
   const existing = await db.getFirstAsync<{ id: string }>(
     `SELECT id FROM template
-      WHERE name = ?
+      WHERE name = ? COLLATE NOCASE
         AND program_id = ?
         AND ((sub_tag IS NULL AND ? IS NULL) OR sub_tag = ?)
       LIMIT 1`,

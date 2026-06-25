@@ -606,6 +606,29 @@ describe('templateRepository v2 — sibling group-wide ops', () => {
     );
     expect(rows.every((r) => r.color_hex === '#0000FF')).toBe(true);
   });
+
+  it('applyRenameSiblings matches name case-insensitively (COLLATE NOCASE)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    await createTemplate(db, { id: 't2', name: 'push', now: frozenNow() });
+    await applyRenameSiblings(db, { oldName: 'Push', newName: 'Push A', now: frozenNow(1000) });
+    const rows = await db.getAllAsync<{ id: string; name: string }>(
+      `SELECT id, name FROM template ORDER BY id`
+    );
+    expect(rows).toEqual([
+      { id: 't1', name: 'Push A' },
+      { id: 't2', name: 'Push A' },
+    ]);
+  });
+
+  it('applyRecolorSiblings matches name case-insensitively (COLLATE NOCASE)', async () => {
+    await createTemplate(db, { id: 't1', name: 'Push', now: frozenNow() });
+    await createTemplate(db, { id: 't2', name: 'push', now: frozenNow() });
+    await applyRecolorSiblings(db, { name: 'Push', color_hex: '#0000FF', now: frozenNow(1000) });
+    const rows = await db.getAllAsync<{ color_hex: string }>(
+      `SELECT color_hex FROM template`
+    );
+    expect(rows.every((r) => r.color_hex === '#0000FF')).toBe(true);
+  });
 });
 
 describe('templateRepository v2 — queryMemoryCandidates', () => {
