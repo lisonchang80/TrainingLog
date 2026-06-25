@@ -225,18 +225,28 @@ describe('#308 A1 — onSheetStart source guard（alert-and-proceed 回歸鎖）
     return src.slice(start, next);
   }
 
-  it('onSheetStart 含 fallback alert 顯示（mirror onSheetEdit 寫法）', () => {
+  it('onSheetStart：分類 selection 仍含 fallback alert 顯示（mirror onSheetEdit）', () => {
     const block = sliceHandler('onSheetStart');
-    expect(block).toContain('if (resolved.alert)');
+    // 2026-06-26：通用 selection 改走自建路徑（見下一條），fallback alert
+    // 變數更名 resolved.alert → resolvedAlert，但 #308 A1 告知型語意不變。
+    expect(block).toContain('if (resolvedAlert)');
     expect(block).toContain(
-      'Alert.alert(resolved.alert.title, resolved.alert.body)',
+      'Alert.alert(resolvedAlert.title, resolvedAlert.body)',
     );
+  });
+
+  it('onSheetStart：通用 selection 自走 ensureGeneralTemplateReady（自建+prefill、不 fallback alert）', () => {
+    const block = sliceHandler('onSheetStart');
+    // 通用（RESERVED_NONE + 無強度）不再 fallback 到分類 representative + 跳
+    // 「尚未建立模板」，改為 ensureGeneralTemplateReady 自建/prefill 通用模板。
+    expect(block).toContain('isGeneralSelection');
+    expect(block).toContain('ensureGeneralTemplateReady');
   });
 
   it('A1 非 A2：alert 在 startSessionFromTemplate 之後（告知型、不阻斷開始）', () => {
     const block = sliceHandler('onSheetStart');
     const startIdx = block.indexOf('startSessionFromTemplate');
-    const alertIdx = block.indexOf('if (resolved.alert)');
+    const alertIdx = block.indexOf('if (resolvedAlert)');
     expect(startIdx).toBeGreaterThan(-1);
     expect(alertIdx).toBeGreaterThan(startIdx);
   });

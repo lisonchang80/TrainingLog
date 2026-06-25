@@ -31,7 +31,6 @@ import {
   deleteSessionExerciseAndSets,
   discardSession,
   endSession,
-  findLastSessionWithExercises,
   getActiveSession,
   getSession,
   appendReusableSupersetToSession,
@@ -118,12 +117,11 @@ import type { PRSnapshot } from '@/src/domain/pr/prQuery';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
-  convertSessionToTemplate,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
-  getTemplateFull,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
+import { ensureGeneralTemplateReady } from '@/src/services/ensureGeneralTemplate';
 import { useAppMode } from '@/src/app-mode';
 import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
@@ -1119,18 +1117,34 @@ export default function TodayScreen() {
       if (selection.period_id !== RESERVED_NONE_PROGRAM_ID) {
         await setGlobalLastUsed(db, selection.period_id, selection.intensity_id);
       }
-      const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
+      // 通用 selected → materialise + prefill the 通用 template (no fallback
+      // alert); classified selections keep planResolveTarget's resolve + alert.
+      const isGeneralSelection =
+        selection.period_id === RESERVED_NONE_PROGRAM_ID &&
+        selection.intensity_id === null;
+      let targetTemplateId: string;
+      let resolvedAlert: { title: string; body: string } | undefined;
+      if (isGeneralSelection) {
+        targetTemplateId = await ensureGeneralTemplateReady(db, {
+          name: sheetTemplate.name,
+          uuid: randomUUID,
+        });
+      } else {
+        const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
+        targetTemplateId = resolved.template_id;
+        resolvedAlert = resolved.alert;
+      }
       const { session_id } = await startSessionFromTemplate(db, {
-        template_id: resolved.template_id,
+        template_id: targetTemplateId,
         uuid: randomUUID,
         program_id: selection.period_id,
         sub_tag: selection.intensity_id,
       });
       closeSheet();
-      // #308 根因 1（A1 alert-and-proceed）— mirror onSheetEdit：fallback 不再
-      // 靜默。Alert 在 startSessionFromTemplate 之後 = 告知型、不阻斷開始。
-      if (resolved.alert) {
-        Alert.alert(resolved.alert.title, resolved.alert.body);
+      // #308 根因 1（A1 alert-and-proceed）— classified fallback 不再靜默。
+      // Alert 在 startSessionFromTemplate 之後 = 告知型、不阻斷開始（通用已自建、無 alert）。
+      if (resolvedAlert) {
+        Alert.alert(resolvedAlert.title, resolvedAlert.body);
       }
       await refresh();
       // D6 — fire WC `start-from-iphone` push to Watch (silent, fire-and-forget).
@@ -1147,16 +1161,15 @@ export default function TodayScreen() {
   };
 
   /**
-   * ADR-0026 極簡模式的開始模板路徑 — 取代 StartTemplateSheet。把
-   * (program=null, sub_tag=null) 丟進「相同」的 resolveTargetTemplateId
-   * （RESERVED_NONE_PROGRAM_ID + intensity null → wanted (null,null) = 通用），
-   * 然後走「相同」的 startSessionFromTemplate + WC push side-effects。
+   * ADR-0026 極簡模式的開始模板路徑 — 取代 StartTemplateSheet。一律開「通用」
+   * 模板：`ensureGeneralTemplateReady` 解析-或-建立通用列（群組只有分類變體時
+   * 自動建）+ 空模板用最近一次訓練 prefill，再走「相同」的 startSessionFromTemplate
+   * + WC push side-effects。
    *
-   * 與 onSheetStart 唯一差異（D3）：
-   *  - 不開 sheet、不寫 per-template sticky（計劃/強度都是計劃概念）。
-   *  - fallback miss 的「尚未建立模板」alert **靜音** —— 只取 resolved.template_id
-   *    （通用-first-else-newest），不顯示 resolved.alert。
-   * 計劃模式行為 100% 不受影響（此分支只在 isMinimal 走到）。
+   * 與 onSheetStart 差異（D3）：不開 sheet、不寫 per-template / 全域 sticky（皆計劃
+   * 概念）。計劃模式行為不受影響（此分支只在 isMinimal 走到）。取代舊的
+   * resolveTargetTemplateId 路徑（其 miss 會 fallback 到分類 representative，害極簡
+   * 開到帶計劃的模板、且不建通用）。
    */
   const onStartMinimalTemplate = async (item: TemplateSummary) => {
     setBusy(true);
@@ -1169,32 +1182,12 @@ export default function TodayScreen() {
         );
         return;
       }
-      // 通用 selection：none-program sentinel + 無強度 → resolver 解析 (null,null)。
-      const resolved = await resolveTargetTemplateId(item, {
-        period_id: RESERVED_NONE_PROGRAM_ID,
-        intensity_id: null,
+      const generalId = await ensureGeneralTemplateReady(db, {
+        name: item.name,
+        uuid: randomUUID,
       });
-      // Phase B (autostart-prefill) — 極簡模式開的是通用模板。若它「沒資料」
-      // （0 動作），先把最近一次有動作的訓練內容覆蓋進通用模板（in-place，
-      // 保留通用身份 program/sub_tag=null），再開練 → session 直接帶上次動作；
-      // 模板本身也存下來，下次就有資料、不再 prefill。無歷史則照舊開空模板。
-      const resolvedFull = await getTemplateFull(db, resolved.template_id);
-      if (resolvedFull && resolvedFull.exercises.length === 0) {
-        const lastSessionId = await findLastSessionWithExercises(db);
-        if (lastSessionId) {
-          await convertSessionToTemplate(db, {
-            session_id: lastSessionId,
-            template_name: resolvedFull.name,
-            mode: 'update',
-            overwriteTemplateId: resolved.template_id,
-            uuid: randomUUID,
-          });
-        }
-      }
-      // resolved.alert（fallback_with_alert）= miss 提示 → 極簡模式靜音，
-      // 僅沿用 resolved.template_id。
       const { session_id } = await startSessionFromTemplate(db, {
-        template_id: resolved.template_id,
+        template_id: generalId,
         uuid: randomUUID,
         program_id: undefined,
         sub_tag: null,
