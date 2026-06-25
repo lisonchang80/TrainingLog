@@ -67,6 +67,15 @@ import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import {
+  getGlobalLastUsed,
+  setGlobalLastUsed,
+} from '@/src/adapters/sqlite/startStickyRepository';
+import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
+import {
+  resolveAutoClassify,
+  type AutoClassifyTarget,
+} from '@/src/domain/template/resolveAutoClassify';
+import {
   getActiveSession,
   isTemplateLinkedToActiveSession,
 } from '@/src/adapters/sqlite/sessionRepository';
@@ -1188,8 +1197,51 @@ export default function TemplateEditorView() {
         Alert.alert(tt('alert', 'addExerciseFirst'));
         return;
       }
+      // Phase A (autostart-prefill) — a FRESH (unclassified) template started via
+      // 開始訓練 auto-adopts the user's GLOBAL last-used (program, sub_tag) so the
+      // new session shows a real 計劃·強度 instead of 通用. resolveAutoClassify owns
+      // every fallback (no global yet / 通用 sentinel / deleted program / dup-triple
+      // collision → null = stay 通用, never blocks the start).
+      let autoTarget: AutoClassifyTarget | null = null;
+      if (needsClassify) {
+        const { program_id: gProgram, sub_tag: gSubTag } =
+          await getGlobalLastUsed(db);
+        const isNoneProgram = gProgram === RESERVED_NONE_PROGRAM_ID;
+        const programExists =
+          gProgram != null && programs.some((p) => p.id === gProgram);
+        // Probe for a dup-triple collision only when we'd actually attach a real
+        // program — adopting (name, gProgram, gSubTag) must not clash with an
+        // existing sibling (honours the 2026-06-25 dup-triple boundary 拍板).
+        let tripleCollision = false;
+        if (gProgram != null && !isNoneProgram && programExists) {
+          const sibling = await findTemplateByTriple(db, {
+            name: draft.name,
+            program_id: gProgram,
+            sub_tag: gSubTag,
+          });
+          tripleCollision = sibling != null && sibling.id !== id;
+        }
+        autoTarget = resolveAutoClassify({
+          storedProgramId: gProgram,
+          storedSubTag: gSubTag,
+          isNoneProgram,
+          programExists,
+          tripleCollision,
+        });
+      }
       if (dirty) {
         await persistDraft();
+      }
+      // Apply auto-classification AFTER the body commit. commitTemplateDraft never
+      // writes program_id/sub_tag, so the attach survives; the new session's linked
+      // template now carries (program, sub_tag) → the detail-page subtitle reads the
+      // loaded 計劃·強度 (same pipeline as a normally-classified template).
+      if (autoTarget) {
+        await attachTemplateToProgram(db, {
+          template_id: id,
+          program_id: autoTarget.program_id,
+          sub_tag: autoTarget.sub_tag,
+        });
       }
       // The template is now persisted AND about to be referenced by the new
       // active session (session_exercise.template_id = id). Mark it saved so the
@@ -1201,6 +1253,19 @@ export default function TemplateEditorView() {
       // fresh template is now session-referenced and must survive. (2026-06-25 audit 🔴.)
       savedRef.current = true;
       await startSessionFromTemplate(db, { template_id: id, uuid: randomUUID });
+      // Remember this start's effective program as the GLOBAL last-used so the NEXT
+      // fresh template auto-loads it. Only REAL programs are recorded — a 通用 start
+      // (autoTarget null + no real classification) must NOT overwrite the user's
+      // last real plan (e.g. a template-specific dup-triple collision shouldn't wipe
+      // a still-valid global). Mirror onSheetStart's real-program-only rule.
+      const effProgram =
+        autoTarget?.program_id ?? draft.program_id ?? committed?.program_id ?? null;
+      const effSubTag = autoTarget
+        ? autoTarget.sub_tag
+        : (draft.sub_tag ?? committed?.sub_tag ?? null);
+      if (effProgram != null && effProgram !== RESERVED_NONE_PROGRAM_ID) {
+        await setGlobalLastUsed(db, effProgram, effSubTag);
+      }
       router.replace('/');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1218,7 +1283,18 @@ export default function TemplateEditorView() {
     } finally {
       setBusy(false);
     }
-  }, [id, draft, busy, db, dirty, persistDraft, router]);
+  }, [
+    id,
+    draft,
+    busy,
+    db,
+    dirty,
+    persistDraft,
+    router,
+    needsClassify,
+    programs,
+    committed,
+  ]);
 
   // -----------------------------------------------------------------------
   // Draft mutators (mirror the prototype's per-set CRUD; pure ops live in

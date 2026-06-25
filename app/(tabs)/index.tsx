@@ -67,6 +67,7 @@ import {
   getSetting,
   setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
+import { setGlobalLastUsed } from '@/src/adapters/sqlite/startStickyRepository';
 import {
   addSessionDropsetCluster,
   addSessionDropsetRow,
@@ -1108,6 +1109,13 @@ export default function TodayScreen() {
         selection.period_id,
         selection.intensity_id,
       );
+      // Phase A (autostart-prefill) — remember this start's (program, intensity)
+      // as the GLOBAL last-used so a fresh template's 開始訓練 can auto-adopt it.
+      // Only REAL programs are recorded: a 通用 (reserved 「無」) start carries no
+      // 計劃 concept and must NOT overwrite the user's last real plan.
+      if (selection.period_id !== RESERVED_NONE_PROGRAM_ID) {
+        await setGlobalLastUsed(db, selection.period_id, selection.intensity_id);
+      }
       const resolved = await resolveTargetTemplateId(sheetTemplate, selection);
       const { session_id } = await startSessionFromTemplate(db, {
         template_id: resolved.template_id,
