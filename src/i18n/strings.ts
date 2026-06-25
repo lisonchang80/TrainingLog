@@ -471,6 +471,8 @@ export const strings = {
       noActiveSession: '找不到進行中的訓練。請先回 Today 頁開始一次訓練後再試。',
       sessionAlreadyInProgress: '已有進行中的訓練',
       endActiveSessionFirst: '請先在「今日」分頁結束目前的訓練再開始新的。',
+      templateInUseByActiveSession:
+        '目前進行中的訓練是從這個模板開始的，無法刪除。請先在「今日」分頁結束或放棄該訓練再刪除。',
       exerciseNotFound: '找不到此動作。',
       exerciseNotFoundOrArchived: '動作不存在或已封存。',
       sourceCardNotFound: '找不到該動作來源卡。',
@@ -491,6 +493,7 @@ export const strings = {
       noTemplatePickFirst: '先在格子點選 template，再回來套用強度。\n（強度只能掛在有 template 的格子上）',
       noTemplateOnRow: '此 row 沒有 template',
       shrinkProgramQ: '縮小計劃表？',
+      overwriteProgramQ: '覆蓋計劃？',
       noTemplatesYet: '沒有 template。先建一個再回來。',
       noOptionsToSelect: '沒有可選項目。',
       noProgramsAvailable: '沒有可用的 Program。',
@@ -1491,6 +1494,8 @@ export const strings = {
       noActiveSession: 'No active session found. Return to Today and start a session, then try again.',
       sessionAlreadyInProgress: 'A session is already in progress',
       endActiveSessionFirst: 'End the current session in the "Today" tab before starting a new one.',
+      templateInUseByActiveSession:
+        'The active session was started from this template, so it cannot be deleted. End or discard that session in the "Today" tab first.',
       exerciseNotFound: 'Exercise not found.',
       exerciseNotFoundOrArchived: 'Exercise does not exist or has been archived.',
       sourceCardNotFound: 'Source card for this exercise not found.',
@@ -1513,6 +1518,7 @@ export const strings = {
         'Pick a template in a cell first, then come back to apply intensity.\n(Intensity can only attach to cells that have a template.)',
       noTemplateOnRow: 'This row has no template',
       shrinkProgramQ: 'Shrink program schedule?',
+      overwriteProgramQ: 'Overwrite program?',
       noTemplatesYet: 'No templates. Create one first, then come back.',
       noOptionsToSelect: 'No options to select.',
       noProgramsAvailable: 'No available Programs.',

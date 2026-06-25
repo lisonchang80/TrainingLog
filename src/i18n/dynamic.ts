@@ -238,6 +238,17 @@ export function tDiscardFilledCells(lost: number): string {
     : `將砍掉 ${lost} 格已填內容（template + 強度）。此動作無法復原。`;
 }
 
+/**
+ * Wizard 載入計劃 → 覆蓋 confirmation. 「載入計劃」 only copies the program
+ * name, so overwriting replaces the whole grid — warn with the concrete count of
+ * filled cells about to be erased. (2026-06-25 wizard audit 🟠.)
+ */
+export function tOverwriteWillEraseCells(name: string, lost: number): string {
+  return isEn()
+    ? `Overwriting "${name}" will erase its ${lost} filled cells (template + intensity) and replace the whole grid. This cannot be undone.`
+    : `覆蓋「${name}」將清除既有的 ${lost} 格已填內容（template + 強度），並以這份新網格取代整個計劃。此動作無法復原。`;
+}
+
 // ---------------------------------------------------------------------------
 // Replay session prompts (history → current card)
 // ---------------------------------------------------------------------------
