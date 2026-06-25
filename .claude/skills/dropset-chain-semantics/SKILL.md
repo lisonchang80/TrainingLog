@@ -124,6 +124,15 @@ WHERE (
 
 This is heavier — prefer JS-side filter when caller has the full set list.
 
+> **Companion / opposite rule — see `is-logged-surfaces`.** That skill is for
+> *aggregate* surfaces (PR replay, stats volume, History volume) where the
+> correct filter IS the **plain `WHERE is_logged = 1`** this section warns
+> against — because there, dropset followers SHOULD be excluded (History does
+> the same, so the surfaces agree). The two rules don't conflict: aggregating
+> "how much / did this happen" → plain `is_logged = 1`; reconstructing "what
+> sets exist in the chain / progress" → effective is_logged (this skill). Don't
+> conflate them.
+
 ### Cluster cycle classification
 
 A cluster cycle (A.sets[i] + B.sets[i]) classifies as:
