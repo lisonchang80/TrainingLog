@@ -128,6 +128,22 @@ the AXLabel updates (`(1)`→`(熱)`→ row gains a follower) and confirms the c
   confirm `Discard`. Lands back on the idle 3-section Training tab (Planned /
   Templates / Freestyle) — good for smoking the `refresh()` idle branch.
 
+## ⛔ The template EDITOR is NOT sim-reachable (edit-flow behaviors are device-gated)
+
+Validated twice (2026-06-25 另存→Y nav + #6 dpid/dst subtitle). You cannot open
+`components/template-editor/template-editor-view.tsx` on the sim through the
+normal UI:
+- **模板訓練 list tap** → opens `StartTemplateSheet` (start a session), NOT the editor.
+- **計畫 tab program-cell tap** (e.g. `拉日`/`T1-1`) → **no navigation** at all
+  (cells are display-only outside 編輯 mode; `programs.tsx:1022` push doesn't fire).
+- **模板訓練「＋」** opens the editor but as a FRESH (`needsClassify`) template, so
+  `!needsClassify`-gated affordances (⋯「另存模板/另存強度」, 儲存-in-place re-classify) don't show.
+
+⟹ Any **editor-only** behavior — 另存→Y navigation, #6 dpid/dst subtitle clear,
+onSaveAsConfirm/onSaveSheetConfirm paths — is **device-gated**. Verify tsc+jest +
+code-review against the file's proven patterns, then defer the behavior check to a
+real device. Don't burn turns hunting a sim entry that isn't there.
+
 ## Verify a result
 
 Screenshot to `/tmp/<name>.png`, then `Read` it. Cross-check with the a11y tree
