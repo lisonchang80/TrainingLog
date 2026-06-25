@@ -123,7 +123,7 @@ interface ReplayRowDB {
   weight_kg: number | null;
   reps: number | null;
   bw_snapshot_kg: number | null;
-  is_skipped: number;
+  is_logged: number;
   created_at: number;
 }
 
@@ -132,6 +132,18 @@ export async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]
   // warmup + dropset cluster (含 parent root) 必須在 SQL 邊界排除，
   // 才不會把 backoff set 或熱身誤判為 PR 突破。Sibling to
   // listPriorSetsForExercise's set_kind filter (2026-05-27).
+  //
+  // F3-sibling fix (2026-06-25): also filter `AND s.is_logged = 1` so planned-
+  // but-unchecked sets (template / 動作記憶 defaults that `endSession` never
+  // purges — they persist with real weight/reps and is_logged=0) don't reach
+  // PR detection / achievement unlocks. The JS flag below USED to derive
+  // is_logged from a stale proxy (`is_skipped === 0`), which wrongly treated
+  // those unchecked sets as logged (their is_skipped is 0). This MIRRORS the
+  // History/PR canonical `listExercisePRSetRows` (plain `is_logged = 1`, NOT
+  // chain-aware) so achievement PR replay agrees with the PR-detail surface.
+  // Dropset followers are already excluded here by `set_kind = 'working'`
+  // (followers carry set_kind='dropset'), so this filter doesn't change
+  // dropset behaviour — it only drops genuinely-unchecked working sets.
   const rows = await db.getAllAsync<ReplayRowDB>(
     `SELECT s.id                  AS set_id,
             s.session_id           AS session_id,
@@ -141,12 +153,13 @@ export async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]
             s.weight_kg            AS weight_kg,
             s.reps                 AS reps,
             ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
-            s.is_skipped           AS is_skipped,
+            s.is_logged            AS is_logged,
             s.created_at           AS created_at
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
       WHERE s.set_kind = 'working'
+        AND s.is_logged = 1
       ORDER BY s.created_at ASC, s.id ASC`
   );
   return rows.map((r) => ({
@@ -158,8 +171,12 @@ export async function loadReplayRecords(db: Database): Promise<ReplaySetRecord[]
     weight_kg: r.weight_kg,
     reps: r.reps,
     bw_snapshot_kg: r.bw_snapshot_kg,
+    // Rows are already SQL-filtered to `is_logged = 1`; the value-validity
+    // guard below keeps a logged-but-blank row (null/invalid weight·reps) from
+    // qualifying as a PR-eligible "touched" set (mirrors the prior proxy's
+    // weight/reps guard, now anchored on the real column).
     is_logged:
-      r.is_skipped === 0 &&
+      r.is_logged === 1 &&
       r.weight_kg != null &&
       r.reps != null &&
       Number.isFinite(r.reps) &&

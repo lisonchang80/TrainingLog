@@ -42,6 +42,9 @@ const seedSessions = async (
         now: () => s.started_at + 1000 + ord,
       });
     }
+    // recordSetInSession writes is_logged=0; simulate the user's ✓-tap so the
+    // backfill replay counts these sets (loadReplayRecords filters is_logged=1).
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE session_id = ?`, s.id);
     await endSession(db, { id: s.id, ended_at: s.ended_at });
   }
 };

@@ -49,6 +49,38 @@ async function insertLoggedSet(
   await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, args.id);
 }
 
+/**
+ * A planned-but-never-checked working set: real weight/reps (template / 動作記憶
+ * default), is_skipped=0, but is_logged=0 because the user never tapped ✓.
+ * `endSession` does NOT purge these, so they persist in the DB.
+ */
+async function insertUncheckedSet(
+  db: Database,
+  args: {
+    id: string;
+    session_id: string;
+    exercise_id: string;
+    weight_kg: number;
+    reps: number;
+    ordering: number;
+    created_at: number;
+  }
+): Promise<void> {
+  await insertSessionSet(db, {
+    id: args.id,
+    session_id: args.session_id,
+    exercise_id: args.exercise_id,
+    weight_kg: args.weight_kg,
+    reps: args.reps,
+    is_skipped: 0,
+    ordering: args.ordering,
+    created_at: args.created_at,
+    set_kind: 'working',
+    parent_set_id: null,
+  });
+  // No ✓-tap → is_logged stays at its DEFAULT 0.
+}
+
 describe('loadReplayRecords — set_kind filter for PR engine (ADR-0012 line 173/100)', () => {
   let db: BetterSqliteDatabase;
   let benchId: string;
@@ -161,6 +193,40 @@ describe('loadReplayRecords — set_kind filter for PR engine (ADR-0012 line 173
     expect(records[1].set_id).toBe('s-2');
     expect(records[0].is_logged).toBe(true);
     expect(records[1].is_logged).toBe(true);
+  });
+
+  // F3-sibling regression (2026-06-25): planned-but-unchecked working sets
+  // (is_logged=0, real weight/reps) must NOT reach PR replay. Before the fix
+  // loadReplayRecords had no is_logged filter and derived is_logged from a
+  // stale `is_skipped === 0` proxy, so these sets counted toward PRs.
+  it('excludes unchecked planned working sets (is_logged=0) via the SQL filter', async () => {
+    await createSession(db, { id: 'sess-U', started_at: 4_000 });
+    await insertLoggedSet(db, {
+      id: 's-checked',
+      session_id: 'sess-U',
+      exercise_id: benchId,
+      weight_kg: 80,
+      reps: 8,
+      ordering: 1,
+      created_at: 4_001,
+      set_kind: 'working',
+    });
+    // A heavier planned set the user never ticked — would otherwise be a bigger
+    // (false) PR.
+    await insertUncheckedSet(db, {
+      id: 's-unchecked',
+      session_id: 'sess-U',
+      exercise_id: benchId,
+      weight_kg: 200,
+      reps: 8,
+      ordering: 2,
+      created_at: 4_002,
+    });
+
+    const records = await loadReplayRecords(db);
+    expect(records).toHaveLength(1);
+    expect(records[0].set_id).toBe('s-checked');
+    expect(records.some((r) => r.set_id === 's-unchecked')).toBe(false);
   });
 });
 

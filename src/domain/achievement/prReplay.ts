@@ -36,7 +36,8 @@ export interface ReplaySetRecord {
   weight_kg: number | null;
   reps: number | null;
   bw_snapshot_kg: number | null;
-  /** is_skipped = 0 (only logged sets count toward PR / cumulative counts). */
+  /** DB is_logged = 1 + usable weight/reps (only ✓-logged sets count toward
+   *  PR / cumulative counts; the adapter filters `is_logged = 1` at SQL). */
   is_logged: boolean;
   /** Sort key — sets are processed in ascending order of this value. */
   created_at: number;

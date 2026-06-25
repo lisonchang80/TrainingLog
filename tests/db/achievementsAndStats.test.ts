@@ -103,6 +103,9 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
       now: () => t0 + 3000,
       uuid,
     });
+    // recordSetInSession writes is_logged=0; simulate the user's ✓-tap so the
+    // sets count toward PR/achievements (loadReplayRecords filters is_logged=1).
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE session_id = ?`, session_id);
     await endSession(db, { id: session_id, ended_at: t0 + 60_000 });
 
     const outcome = await evaluateAndPersistAchievements(db, {
@@ -151,6 +154,9 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
       now: () => t0 + 1000,
       uuid,
     });
+    // recordSetInSession writes is_logged=0; simulate the ✓-tap (loadReplayRecords
+    // filters is_logged=1).
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE session_id = ?`, session_id);
     await endSession(db, { id: session_id, ended_at: t0 + 60_000 });
 
     const first = await evaluateAndPersistAchievements(db, {
@@ -226,5 +232,110 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
       end_ms: t0 + 2 * dayMs,
     });
     expect(mgFrequencyOverPeriod(recsDay2).has('mg-chest')).toBe(false);
+  });
+
+  // --- F3-sibling regression (2026-06-25): unchecked sets don't unlock --------
+  // Planned-but-unchecked working sets (real weight/reps, is_logged=0, which
+  // `endSession` never purges) must NOT count toward PR detection or achievement
+  // unlocks. loadReplayRecords now filters `is_logged = 1`, mirroring the
+  // History/PR canonical query. recordSetInSession leaves is_logged=0, so an
+  // un-marked set models the unchecked case directly.
+
+  it('a session of ONLY unchecked sets unlocks nothing (is_logged=0 excluded)', async () => {
+    const benchPress = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const session_id = 'session-unchecked-only';
+    const t0 = 1_700_000_000_000;
+    let nextId = 0;
+    const uuid = () => `set-${nextId++}`;
+
+    await createSession(db, { id: session_id, started_at: t0 });
+    // Two working sets with real weight/reps — but the user never tapped ✓, so
+    // recordSetInSession leaves is_logged=0. NOT marked logged on purpose.
+    await recSet(db, {
+      session_id,
+      exercise_id: benchPress.id,
+      weight_kg: 60,
+      reps: 8,
+      ordering: 0,
+      now: () => t0 + 1000,
+      uuid,
+    });
+    await recSet(db, {
+      session_id,
+      exercise_id: benchPress.id,
+      weight_kg: 80,
+      reps: 8,
+      ordering: 1,
+      now: () => t0 + 2000,
+      uuid,
+    });
+    await endSession(db, { id: session_id, ended_at: t0 + 60_000 });
+
+    const outcome = await evaluateAndPersistAchievements(db, {
+      ended_session_id: session_id,
+      unlocked_at: t0 + 60_000,
+    });
+
+    // No first_combo, no PR, and no session_count(1): the session carries zero
+    // logged working sets after the SQL filter.
+    expect(outcome.newUnlocks).toHaveLength(0);
+    expect(outcome.newDefinitions).toHaveLength(0);
+    expect(await listUnlocks(db)).toHaveLength(0);
+  });
+
+  it('an unchecked set in a different bucket does NOT unlock that bucket (only the logged one does)', async () => {
+    const benchPress = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    expect(benchPress.muscle_group_id).toBe('mg-chest');
+    const session_id = 'session-mixed-checked';
+    const t0 = 1_700_000_000_000;
+    let nextId = 0;
+    const uuid = () => `set-${nextId++}`;
+
+    await createSession(db, { id: session_id, started_at: t0 });
+    // Logged set: 8 reps → hypertrophy bucket. ✓-tapped.
+    const loggedSet = await recSet(db, {
+      session_id,
+      exercise_id: benchPress.id,
+      weight_kg: 50,
+      reps: 8,
+      ordering: 0,
+      now: () => t0 + 1000,
+      uuid,
+    });
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, loggedSet.set_id);
+    // Unchecked set: 5 reps → strength bucket, heavier weight. NOT ticked, so it
+    // would (pre-fix) have unlocked the strength first_combo + a strength PR.
+    await recSet(db, {
+      session_id,
+      exercise_id: benchPress.id,
+      weight_kg: 100,
+      reps: 5,
+      ordering: 1,
+      now: () => t0 + 2000,
+      uuid,
+    });
+    await endSession(db, { id: session_id, ended_at: t0 + 60_000 });
+
+    const outcome = await evaluateAndPersistAchievements(db, {
+      ended_session_id: session_id,
+      unlocked_at: t0 + 60_000,
+    });
+    const codes = outcome.newDefinitions.map((d) => d.code);
+
+    // The logged hypertrophy set unlocks its bucket combo + PRs.
+    expect(codes).toContain('first_mg-chest__hypertrophy');
+    expect(codes).toContain('pr_bucket_hypertrophy__weight__1');
+    // The unchecked strength set unlocks NOTHING in the strength bucket.
+    expect(codes).not.toContain('first_mg-chest__strength');
+    expect(codes).not.toContain('pr_bucket_strength__weight__1');
+    expect(codes).not.toContain('pr_bucket_strength__volume__1');
+    // And no unlock is anchored to the unchecked set's id.
+    const unchecked = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM "set" WHERE session_id = ? AND reps = 5`,
+      session_id
+    );
+    expect(await listUnlocks(db)).not.toContainEqual(
+      expect.objectContaining({ set_id: unchecked!.id })
+    );
   });
 });
