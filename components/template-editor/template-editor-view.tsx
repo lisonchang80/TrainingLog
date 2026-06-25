@@ -835,6 +835,15 @@ export default function TemplateEditorView() {
           // 純 body commit、⋯出現另存模板/另存強度），toast + 留在編輯頁。
           setNeedsClassify(false);
           setSaveSheetMode(null);
+          // 2026-06-25 audit 🟡 — the user just RE-CLASSIFIED this template
+          // in-place (program_id/sub_tag committed above), and we stay on the
+          // page. Clear the #50 C1 dpid/dst URL override so the header subtitle
+          // reflects the template's real (just-saved) classification instead of
+          // freezing on the original start-sheet pick. (The override is meant
+          // only for the initial fallback-load display, not after a re-classify.)
+          if (dpid !== undefined || dst !== undefined) {
+            router.setParams({ dpid: undefined, dst: undefined });
+          }
           toastRef.current?.show(tt('status', 'saveComplete'), {
             icon: 'success',
           });
