@@ -119,7 +119,6 @@ import { ReorderExercisesSheet } from '../shared/reorder-exercises-sheet';
 import { SetRowContent } from '../shared/set-row-content';
 import { SwipeableSetRow, type SwipeAction } from '../shared/swipeable-set-row';
 import { getLocale, t as tt, tExercise, tWarmWorkingSummary } from '@/src/i18n';
-import { tTemplateCreated, tTemplateUpdated } from '@/src/i18n/dynamic';
 import {
   useTheme,
   type ThemeTokens,
@@ -994,7 +993,9 @@ export default function TemplateEditorView() {
    *       color)保留、X 不刪**（複製語意，比照 ADR-0003 ①）。
    *     - 無撞 → createTemplate(Y) + attachTemplateToProgram(Y, 三元組) + writeBodyTo(Y)
    *       ＝從當前 body 建出新模板 Y。
-   *   成功皆 toast + 編輯器續停在 X（X 的 committed 狀態未動，故不需 persistDraft / 不動 dirty）。
+   *   成功後 router.replace 導航到目標 Y 的編輯頁（2026-06-25）；X 的 committed
+   *   狀態未動、copy 語意不變、故不需 persistDraft / 不動 dirty。X 必為已存模板
+   *   （另存只在 !needsClassify 出現）→ 離開時 fresh-unmount backstop no-op，不刪 X。
    */
   const onSaveAsConfirm = useCallback(
     async (args: {
@@ -1062,9 +1063,9 @@ export default function TemplateEditorView() {
                   try {
                     await writeBodyTo(existing.id);
                     setSaveAsMode(null);
-                    toastRef.current?.show(tTemplateUpdated(finalName), {
-                      icon: 'success',
-                    });
+                    // 2026-06-25 — jump to the overwritten target Y's editor
+                    // instead of staying on X (see create-branch note below).
+                    router.replace(`/template/${existing.id}`);
                   } catch (e2) {
                     Alert.alert(
                       tt('alert', 'saveFailed'),
@@ -1092,7 +1093,13 @@ export default function TemplateEditorView() {
         });
         await writeBodyTo(newId);
         setSaveAsMode(null);
-        toastRef.current?.show(tTemplateCreated(finalName), { icon: 'success' });
+        // 2026-06-25 — jump to the newly-saved template Y's editor instead of
+        // staying on X. The 另存 body is now in Y; landing on Y (a fresh route
+        // with no dpid/dst override) shows the real result. X is untouched:
+        // copy semantics preserved, and since X is an already-saved template
+        // (另存 only shows for !needsClassify) the unmount backstop no-ops, so
+        // navigating away neither deletes X nor commits its draft.
+        router.replace(`/template/${newId}`);
       } catch (e) {
         Alert.alert(
           tt('alert', 'saveFailed'),
@@ -1102,7 +1109,7 @@ export default function TemplateEditorView() {
         setBusy(false);
       }
     },
-    [draft, busy, db],
+    [draft, busy, db, router],
   );
 
   const onDeleteTemplate = useCallback(async () => {
