@@ -144,6 +144,29 @@ onSaveAsConfirm/onSaveSheetConfirm paths — is **device-gated**. Verify tsc+jes
 code-review against the file's proven patterns, then defer the behavior check to a
 real device. Don't burn turns hunting a sim entry that isn't there.
 
+### ✅ BUT the START flows ARE sim-reachable + DB-verifiable (validated 2026-06-26)
+
+The template-START handlers in `app/(tabs)/index.tsx` — NOT the editor — ARE
+fully sim-verifiable, and the strongest check is **DB-after-tap** (not pixels):
+
+- **計劃-mode StartTemplateSheet** (`onSheetStart`): `app_mode='plan'` → 模板訓練
+  list tap → sheet → tap a program/intensity chip (通用 / T1 / …) → 開始訓練 →
+  then query the sim DB: *which* `template_id` did `session_exercise` link to, and
+  did a new `template` row get created (e.g. a 通用/variant auto-create)? This
+  proved the 通用/variant resolve-or-create + prefill end-to-end.
+- **極簡-mode start** (`onStartMinimalTemplate`): `app_mode='minimal'` → 模板訓練
+  list tap (no sheet) → same DB check.
+- **FRESH editor 開始訓練** (`onStartSession`, reached via 模板訓練「＋」): IS
+  reachable — add exercise → 開始訓練 → DB check (template classified? session
+  linked? template survived = savedRef worked?). Only the CLASSIFIED-editor
+  另存/reclassify affordances are device-gated (above).
+
+Recipe: seed precise DB state first (`sqlite3` on the sim db, or `sim-db-seed-smoke`)
+— e.g. ensure NO 通用 row exists, NO active session, a prior session-with-exercises
+as the prefill source — then drive the taps and `sqlite3 SELECT` to assert the
+template/session rows. The flattened-sheet a11y tree often can't give per-button
+frames; estimate the bottom-bar button center from a screenshot and confirm via DB.
+
 ## Verify a result
 
 Screenshot to `/tmp/<name>.png`, then `Read` it. Cross-check with the a11y tree
