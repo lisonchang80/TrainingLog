@@ -165,4 +165,90 @@ describe('findTemplateByTriple — edge cases', () => {
     expect(r).not.toBeNull();
     expect(['tpl-dup-a', 'tpl-dup-b']).toContain(r!.id);
   });
+
+  // GAP (2026-06-25 integration hardening): the NOCASE fix (a8447a3) added one
+  // pure-ASCII case-variant assertion (`push` == `Push`). SQLite's built-in
+  // COLLATE NOCASE folds ONLY ASCII A–Z — it does NOT trim whitespace and does
+  // NOT fold accented / non-ASCII letters. The dedup layer it aligns with has
+  // the same scope. These tests pin those BOUNDARIES so nobody mistakes NOCASE
+  // for a full normalize (which would need TRIM + unicode folding the app does
+  // not do — a deliberate scope choice).
+
+  it('NOCASE folds mixed-case across the whole string (PuSh == push == PUSH)', async () => {
+    await seedTemplate({ id: 'tpl-mixed', name: 'PuSh Day', program_id: 'prog-A', sub_tag: 'V1' });
+
+    for (const probe of ['push day', 'PUSH DAY', 'Push Day', 'puSH dAy']) {
+      const r = await findTemplateByTriple(db, {
+        name: probe,
+        program_id: 'prog-A',
+        sub_tag: 'V1',
+      });
+      expect(r?.id).toBe('tpl-mixed');
+    }
+  });
+
+  it('NOCASE does NOT trim whitespace — a trailing/leading-space name is a DISTINCT identity', async () => {
+    await seedTemplate({ id: 'tpl-clean', name: 'Push', program_id: 'prog-A', sub_tag: 'V1' });
+
+    // SQLite COLLATE NOCASE compares byte-for-byte after ASCII case fold; the
+    // space makes these different strings, so the lookup misses. (If the app
+    // ever wants to collapse these it must TRIM at the write boundary — NOCASE
+    // alone won't.)
+    const trailing = await findTemplateByTriple(db, {
+      name: 'Push ',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(trailing).toBeNull();
+
+    const leading = await findTemplateByTriple(db, {
+      name: ' push',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(leading).toBeNull();
+  });
+
+  it('NOCASE does NOT fold accented / non-ASCII letters (Café ≠ CAFÉ), but DOES fold the ASCII part', async () => {
+    await seedTemplate({ id: 'tpl-cafe', name: 'Café', program_id: 'prog-A', sub_tag: 'V1' });
+
+    // The É (U+00C9) is outside ASCII A–Z, so NOCASE leaves it as-is: the
+    // upper-cased variant does NOT match.
+    const accentUpper = await findTemplateByTriple(db, {
+      name: 'CAFÉ',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(accentUpper).toBeNull();
+
+    // But folding the ASCII letters while keeping the SAME accented char (é,
+    // U+00E9 — identical to the seeded name) DOES match: NOCASE folds the
+    // leading C and keeps the é byte-exact.
+    const asciiFoldedSameAccent = await findTemplateByTriple(db, {
+      name: 'CAFé',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(asciiFoldedSameAccent?.id).toBe('tpl-cafe');
+  });
+
+  it('NOCASE leaves CJK names byte-exact (Chinese names match only themselves)', async () => {
+    // Chinese has no case, so NOCASE is a no-op here — a CJK name matches itself
+    // exactly and an unrelated CJK name does not collide.
+    await seedTemplate({ id: 'tpl-cjk', name: '推日', program_id: 'prog-A', sub_tag: 'V1' });
+
+    const same = await findTemplateByTriple(db, {
+      name: '推日',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(same?.id).toBe('tpl-cjk');
+
+    const different = await findTemplateByTriple(db, {
+      name: '拉日',
+      program_id: 'prog-A',
+      sub_tag: 'V1',
+    });
+    expect(different).toBeNull();
+  });
 });

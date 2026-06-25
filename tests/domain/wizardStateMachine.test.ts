@@ -260,3 +260,183 @@ describe('wizardStateMachine — pruneDraftToDimensions', () => {
     expect(pruneDraftToDimensions(s.draft)).toBe(s.draft);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GAP (2026-06-25 integration hardening) — validateStep ↔ tWizardValidationError
+// completeness.
+//
+// The i18n fix (3744aaf) added a tWizardValidationError suite, but it iterated a
+// HAND-MAINTAINED ALL_CODES list — a code that validateStep starts emitting
+// without a list entry would slip past it. This block closes the loop two ways:
+//   1. Drive validateStep through each REAL failure state and assert the code it
+//      emits maps to a localized, non-raw-code message (the actual leak path).
+//   2. A union-completeness sentinel: every WizardValidationCode in the type
+//      must round-trip through tWizardValidationError to a non-empty string in
+//      BOTH locales — derived from the union, not a duplicated literal list.
+// ---------------------------------------------------------------------------
+describe('validateStep → tWizardValidationError completeness (no raw-code leak)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { tWizardValidationError } = require('../../src/i18n/dynamic') as typeof import('../../src/i18n/dynamic');
+  const { setLocale } = require('../../src/i18n/strings') as typeof import('../../src/i18n/strings');
+
+  afterEach(() => setLocale('zh'));
+
+  // Build a draft that fails EXACTLY at the named step, returning the emitted
+  // error. Each entry exercises a distinct branch of validateStep's switch.
+  const failureCases: Array<{
+    label: string;
+    build: () => WizardState;
+    step: Parameters<typeof validateStep>[1];
+    expectedCode: string;
+  }> = [
+    {
+      label: 'empty name',
+      build: () => initialWizardState(TODAY), // name: ''
+      step: 'NameAndTag',
+      expectedCode: 'nameEmpty',
+    },
+    {
+      label: 'cycle_length below 3',
+      build: () => updateDraft(initialWizardState(TODAY), { cycle_length: 2 }),
+      step: 'CycleConfig',
+      expectedCode: 'cycleLengthRange',
+    },
+    {
+      label: 'cycle_count below 1',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), { cycle_length: 7, cycle_count: 0 }),
+      step: 'CycleConfig',
+      expectedCode: 'cycleCountRange',
+    },
+    {
+      label: 'malformed start_date',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 7,
+          cycle_count: 4,
+          start_date: 'not-a-date' as never,
+        }),
+      step: 'CycleConfig',
+      expectedCode: 'startDateFormat',
+    },
+    {
+      label: 'no template on any day',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 7,
+          cycle_count: 4,
+          dayPlans: [{ day_index: 0, template_id: null, sub_tag: null }],
+        }),
+      step: 'DayPattern',
+      expectedCode: 'dayPatternNoTemplate',
+    },
+    {
+      label: 'duplicate day_index',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 7,
+          cycle_count: 4,
+          dayPlans: [
+            { day_index: 0, template_id: 't1', sub_tag: null },
+            { day_index: 0, template_id: 't2', sub_tag: null },
+          ],
+        }),
+      step: 'DayPattern',
+      expectedCode: 'dayPlanDuplicate',
+    },
+    {
+      label: 'day_index outside cycle',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 3,
+          cycle_count: 4,
+          dayPlans: [{ day_index: 9, template_id: 't1', sub_tag: null }],
+        }),
+      step: 'DayPattern',
+      expectedCode: 'dayIndexOutOfRange',
+    },
+    {
+      label: 'override cycle out of range',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 7,
+          cycle_count: 2,
+          overrides: [{ cycle_index: 9, day_index: 0, sub_tag: 'x' }],
+        }),
+      step: 'CycleSubTags',
+      expectedCode: 'overrideCycleOutOfRange',
+    },
+    {
+      label: 'override day out of range',
+      build: () =>
+        updateDraft(initialWizardState(TODAY), {
+          cycle_length: 3,
+          cycle_count: 4,
+          overrides: [{ cycle_index: 0, day_index: 9, sub_tag: 'x' }],
+        }),
+      step: 'CycleSubTags',
+      expectedCode: 'overrideDayOutOfRange',
+    },
+  ];
+
+  for (const fc of failureCases) {
+    it(`validateStep emits "${fc.expectedCode}" on ${fc.label}, and it maps to a localized message`, () => {
+      const err = validateStep(fc.build().draft, fc.step);
+      expect(err).not.toBeNull();
+      expect(err!.code).toBe(fc.expectedCode);
+      for (const locale of ['zh', 'en'] as const) {
+        setLocale(locale);
+        const msg = tWizardValidationError(err!);
+        expect(typeof msg).toBe('string');
+        expect(msg.length).toBeGreaterThan(0);
+        // The raw code must never reach the UI.
+        expect(msg).not.toContain(err!.code);
+      }
+    });
+  }
+
+  it('the composite Confirm step surfaces the FIRST failing sub-step code (cascade order)', () => {
+    // Empty name AND a bad cycle_length — Confirm re-validates NameAndTag first.
+    const s = updateDraft(initialWizardState(TODAY), { name: '', cycle_length: 2 });
+    const err = validateStep(s.draft, 'Confirm');
+    expect(err?.code).toBe('nameEmpty');
+    expect(tWizardValidationError(err!)).not.toContain('nameEmpty');
+  });
+
+  // Union-completeness sentinel: assert tWizardValidationError handles EVERY
+  // code in the WizardValidationCode union (including alreadyLastStep, which
+  // validateStep itself doesn't return — `next` does — so the failure-case loop
+  // above can't reach it).
+  //
+  // The list is keyed off a Record typed by the union, so:
+  //   - a MISSING union member → object-literal-missing-property → tsc error
+  //   - an EXTRA non-union key  → excess-property → tsc error
+  // Either drift forces a test touch in lockstep with the type — a true
+  // completeness guard, not a hand-maintained array that can silently go stale.
+  it('tWizardValidationError covers every WizardValidationCode in BOTH locales', () => {
+    type Code = import('../../src/domain/program/wizardStateMachine').WizardValidationCode;
+    const ALL_CODES: Record<Code, true> = {
+      nameEmpty: true,
+      cycleLengthRange: true,
+      cycleCountRange: true,
+      startDateFormat: true,
+      dayPatternNoTemplate: true,
+      dayPlanDuplicate: true,
+      dayIndexOutOfRange: true,
+      overrideCycleOutOfRange: true,
+      overrideDayOutOfRange: true,
+      alreadyLastStep: true,
+    };
+
+    const codes = Object.keys(ALL_CODES) as Code[];
+    for (const locale of ['zh', 'en'] as const) {
+      setLocale(locale);
+      for (const code of codes) {
+        const msg = tWizardValidationError({ code });
+        expect(typeof msg).toBe('string');
+        expect(msg.length).toBeGreaterThan(0);
+        expect(msg).not.toContain(code);
+      }
+    }
+  });
+});
