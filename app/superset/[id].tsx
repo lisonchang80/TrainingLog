@@ -25,6 +25,7 @@ import {
   getReusableSupersetSessionCount,
   getReusableSupersetWithExercises,
 } from '@/src/adapters/sqlite/supersetRepository';
+import { resolveExerciseMedia } from '@/src/db/seed/exerciseMediaMap';
 import {
   t,
   tDeleteSupersetPrompt,
@@ -231,7 +232,10 @@ function ExerciseTile({
       </View>
     );
   }
-  const thumbnail = exercise.media_path;
+  // media_path is a require-map KEY into EXERCISE_MEDIA, NOT a uri. Resolve it
+  // to [startFrame, endFrame]; show the start frame (poster). Falls back to the
+  // letter placeholder when there's no photo. (Mirrors app/(tabs)/library.tsx.)
+  const media = resolveExerciseMedia(exercise.media_path);
   const bg = hashColor(exercise.name || exercise.id);
   const ch = tExercise(exercise.name ?? '')?.charAt(0) || '?';
   return (
@@ -241,8 +245,8 @@ function ExerciseTile({
       onPress={onPress}
       style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
       <View style={styles.tileThumb}>
-        {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={styles.tileThumbImage} />
+        {media ? (
+          <Image source={media[0]} style={styles.tileThumbImage} />
         ) : (
           <View
             style={[styles.tileThumbPlaceholder, { backgroundColor: bg }]}>

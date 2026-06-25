@@ -31,6 +31,7 @@ import {
   listExercisesWithLinks,
   listMuscleGroups,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
+import { resolveExerciseMedia } from '@/src/db/seed/exerciseMediaMap';
 import {
   defaultSupersetName,
   validateReusableSupersetDraft,
@@ -475,7 +476,10 @@ function ExercisePickerCard({
   onPress: () => void;
 }) {
   const styles = useNewSupersetStyles();
-  const thumbnail = exercise.media_path;
+  // media_path is a require-map KEY into EXERCISE_MEDIA, NOT a uri. Resolve it
+  // to [startFrame, endFrame]; show the start frame (poster). Falls back to the
+  // letter placeholder when there's no photo. (Mirrors app/(tabs)/library.tsx.)
+  const media = resolveExerciseMedia(exercise.media_path);
   return (
     <Pressable
       accessibilityRole="button"
@@ -492,8 +496,8 @@ function ExercisePickerCard({
         </View>
       )}
       <View style={styles.thumbWrap}>
-        {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={styles.thumbImage} />
+        {media ? (
+          <Image source={media[0]} style={styles.thumbImage} />
         ) : (
           <PlaceholderThumb exercise={exercise} />
         )}
