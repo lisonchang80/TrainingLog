@@ -22,6 +22,8 @@ import {
   applyTagToRow,
   applyTemplateToColumn,
   countFilledCellsOutsideBounds,
+  deleteProgram,
+  deleteProgramSubTag,
   getActiveProgram,
   getProgram,
   listProgramSubTags,
@@ -54,9 +56,12 @@ import {
   t,
   tApplyIntensityToCycle,
   tApplyTemplateToDay,
+  tDeleteProgramConfirm,
+  tDeleteSubTagConfirm,
   tDiscardFilledCells,
   tNCycles,
   tNDays,
+  tOverwriteBlockedByActiveSession,
   useLocale,
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
@@ -132,11 +137,19 @@ type SubTagPickerKind =
       current_template_id: string;
     };
 
+// 2026-06-26 — 閒置 header「刪除計劃 / 刪除強度」流程。兩者都先挑計劃；
+// 刪計劃直接 confirm，刪強度再挑該計劃的強度。
+type DeletePickerKind =
+  | { kind: 'delete_program' }
+  | { kind: 'delete_subtag_program' }
+  | { kind: 'delete_subtag'; program_id: string; program_name: string };
+
 type PickerState =
   | null
   | SimplePickerKind
   | TemplatePickerKind
-  | SubTagPickerKind;
+  | SubTagPickerKind
+  | DeletePickerKind;
 
 export default function ProgramsScreen() {
   // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
@@ -156,6 +169,8 @@ export default function ProgramsScreen() {
     Record<string, TemplateSummary>
   >({});
   const [editing, setEditing] = useState(false);
+  // 刪除強度流程：使用者選計劃後載入的該計劃強度清單。
+  const [deleteSubTagOptions, setDeleteSubTagOptions] = useState<string[]>([]);
   const [picker, setPicker] = useState<PickerState>(null);
   // Round 15 polish — picker 的強度 chip 列同時讀「cells 用過的強度」+「this
   // program 下所有 templates 的 sub_tag」。原本只看 cells，建立並導入剛寫進
@@ -473,6 +488,86 @@ export default function ProgramsScreen() {
     if (!shown || program_id === shown.program.id) return;
     await setActiveProgram(db, { id: program_id });
     await refresh();
+  };
+
+  // ── 刪除計劃 / 刪除強度（閒置 header 常駐，2026-06-26）────────────────
+  /** 刪除計劃 picker 選定計劃 → confirm Alert → deleteProgram（孤兒化模板成通用）。 */
+  const onPickProgramToDelete = (program_id: string) => {
+    closePicker();
+    const prog = allPrograms.find((p) => p.id === program_id);
+    if (!prog) return;
+    Alert.alert(t('common', 'delete'), tDeleteProgramConfirm(prog.name), [
+      { text: t('common', 'cancel'), style: 'cancel' },
+      {
+        text: t('common', 'delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteProgram(db, program_id);
+            await refresh();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            Alert.alert(
+              t('alert', 'cannotDelete'),
+              msg === 'PROGRAM_HAS_ACTIVE_SESSION'
+                ? tOverwriteBlockedByActiveSession(prog.name)
+                : msg,
+            );
+          }
+        },
+      },
+    ]);
+  };
+
+  /** 刪除強度 step 1：選計劃 → 載入該計劃強度；空則提示、否則開強度 picker。 */
+  const onPickProgramForSubTagDelete = async (program_id: string) => {
+    const prog = allPrograms.find((p) => p.id === program_id);
+    if (!prog) {
+      closePicker();
+      return;
+    }
+    const tags = await listProgramSubTags(db, program_id);
+    if (tags.length === 0) {
+      closePicker();
+      Alert.alert(t('alert', 'noSubTagsTitle'), t('alert', 'noSubTagsMsg'));
+      return;
+    }
+    setDeleteSubTagOptions(tags);
+    setPicker({ kind: 'delete_subtag', program_id, program_name: prog.name });
+  };
+
+  /** 刪除強度 step 2：選強度 → confirm → deleteProgramSubTag（cascade un-tag）。 */
+  const onPickSubTagToDelete = (
+    program_id: string,
+    program_name: string,
+    sub_tag: string,
+  ) => {
+    closePicker();
+    Alert.alert(
+      t('common', 'delete'),
+      tDeleteSubTagConfirm(program_name, sub_tag),
+      [
+        { text: t('common', 'cancel'), style: 'cancel' },
+        {
+          text: t('common', 'delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteProgramSubTag(db, { program_id, sub_tag });
+              await refresh();
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              Alert.alert(
+                t('alert', 'cannotDelete'),
+                msg === 'PROGRAM_HAS_ACTIVE_SESSION'
+                  ? tOverwriteBlockedByActiveSession(program_name)
+                  : msg,
+              );
+            }
+          },
+        },
+      ],
+    );
   };
 
   const onPickCycleLength = async (new_len: number) => {
@@ -797,6 +892,35 @@ export default function ProgramsScreen() {
           )}
         </View>
       </View>
+      {/* 閒置常駐管理列：刪除計劃 / 刪除強度（點了跳出選擇）。編輯模式隱藏。 */}
+      {!editing ? (
+        <View style={styles.manageRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('button', 'deleteProgramCta')}
+            onPress={() => setPicker({ kind: 'delete_program' })}
+            style={({ pressed }) => [
+              styles.deleteBtn,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.deleteBtnText}>
+              {t('button', 'deleteProgramCta')}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('button', 'deleteSubTagCta')}
+            onPress={() => setPicker({ kind: 'delete_subtag_program' })}
+            style={({ pressed }) => [
+              styles.deleteBtn,
+              pressed && styles.btnPressed,
+            ]}>
+            <Text style={styles.deleteBtnText}>
+              {t('button', 'deleteSubTagCta')}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
       <ScrollView
         contentContainerStyle={styles.body}
         scrollEnabled={!isDragging}>
@@ -942,6 +1066,45 @@ export default function ProgramsScreen() {
         visible={picker?.kind === 'start_date'}
         initialIso={shown.program.start_date}
         onPick={onPickStartDate}
+        onClose={closePicker}
+      />
+
+      {/* ── 刪除計劃 / 刪除強度 pickers（2026-06-26）──────────────── */}
+      <PickerModal
+        visible={picker?.kind === 'delete_program'}
+        title={t('page', 'deleteProgramTitle')}
+        options={allPrograms.map((p) => ({
+          key: p.id,
+          label: p.name + (p.is_active === 1 ? ` ${t('common', 'inProgress')}` : ''),
+          active: false,
+        }))}
+        onPick={(key) => onPickProgramToDelete(key)}
+        onClose={closePicker}
+      />
+      <PickerModal
+        visible={picker?.kind === 'delete_subtag_program'}
+        title={t('page', 'deleteSubTagProgramTitle')}
+        options={allPrograms.map((p) => ({
+          key: p.id,
+          label: p.name + (p.is_active === 1 ? ` ${t('common', 'inProgress')}` : ''),
+          active: false,
+        }))}
+        onPick={(key) => onPickProgramForSubTagDelete(key)}
+        onClose={closePicker}
+      />
+      <PickerModal
+        visible={picker?.kind === 'delete_subtag'}
+        title={t('page', 'deleteSubTagTitle')}
+        options={deleteSubTagOptions.map((tag) => ({
+          key: tag,
+          label: tag,
+          active: false,
+        }))}
+        onPick={(key) =>
+          picker?.kind === 'delete_subtag'
+            ? onPickSubTagToDelete(picker.program_id, picker.program_name, key)
+            : undefined
+        }
         onClose={closePicker}
       />
 
@@ -1850,6 +2013,22 @@ function makeStyles(tokens: ThemeTokens) {
       backgroundColor: tokens.bg.elevated,
     },
     cancelBtnText: { color: tokens.action.primary, fontWeight: '600' },
+    // 閒置常駐管理列：刪除計劃 / 刪除強度（destructive outline）。
+    manageRow: {
+      flexDirection: 'row',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+    },
+    deleteBtn: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: tokens.action.destructive,
+      backgroundColor: tokens.bg.elevated,
+    },
+    deleteBtnText: { color: tokens.action.destructive, fontWeight: '600' },
     empty: {
       fontSize: 14,
       color: tokens.text.secondary,

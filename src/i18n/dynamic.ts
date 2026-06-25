@@ -468,6 +468,26 @@ export function tOverwriteBlockedByActiveSession(programName: string): string {
     : `「${programName}」有進行中的 session，請先完成或捨棄。`;
 }
 
+/**
+ * Programs-tab「刪除計劃」confirm body (2026-06-26). Warns that classified
+ * templates become 通用 rather than being deleted.
+ */
+export function tDeleteProgramConfirm(name: string): string {
+  return isEn()
+    ? `Delete program "${name}"?\nIts classified templates become 通用 (they won't be deleted).`
+    : `刪除計劃「${name}」？\n其下分類的模板會變為「通用」（不會被刪除）。`;
+}
+
+/**
+ * Programs-tab「刪除強度」confirm body (2026-06-26). Warns templates / cells
+ * using the 強度 become un-tagged.
+ */
+export function tDeleteSubTagConfirm(programName: string, tag: string): string {
+  return isEn()
+    ? `Delete intensity "${tag}" from "${programName}"?\nTemplates and cells using it become un-tagged.`
+    : `刪除「${programName}」的強度「${tag}」？\n用到此強度的模板與格子會變為無強度。`;
+}
+
 // ---------------------------------------------------------------------------
 // Muscle (M layer) label translator — overnight 5/23 anatomy M-level heatmap.
 //

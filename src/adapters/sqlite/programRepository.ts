@@ -196,6 +196,23 @@ export async function clearActiveProgram(db: Database): Promise<void> {
  * history; deleting Program shouldn't shred prior Sessions' lineage).
  */
 export async function deleteProgram(db: Database, id: string): Promise<void> {
+  // Active-session guard (mirror overwriteProgram) — deleting a program orphans
+  // its templates to 通用; if one backs an in-progress session that would yank
+  // the live session's 計劃·強度 out from under it. Check BEFORE the transaction
+  // so the throw doesn't roll back any state. The UI catches this and Alerts.
+  const active = await db.getFirstAsync<{ id: string }>(
+    `SELECT s.id FROM session s
+       INNER JOIN session_exercise se ON se.session_id = s.id
+       INNER JOIN template t ON t.id = se.template_id
+      WHERE s.ended_at IS NULL
+        AND t.program_id = ?
+      LIMIT 1`,
+    id,
+  );
+  if (active) {
+    throw new Error('PROGRAM_HAS_ACTIVE_SESSION');
+  }
+
   await db.withTransactionAsync(async () => {
     // Orphan attached templates rather than deleting them.
     await db.runAsync(
@@ -204,6 +221,63 @@ export async function deleteProgram(db: Database, id: string): Promise<void> {
     );
     await db.runAsync(`DELETE FROM program_cell WHERE program_id = ?`, id);
     await db.runAsync(`DELETE FROM program WHERE id = ?`, id);
+  });
+}
+
+/**
+ * Delete a single 強度 (sub_tag) from a program — Programs-tab「刪除強度」flow
+ * (2026-06-26). The 強度 lives in 3 places; all are cleaned for this
+ * (program_id, sub_tag) pair:
+ *   - `template.sub_tag`     → NULL  (classified templates become program-only)
+ *   - `program_cell.sub_tag` → NULL  (grid cells lose the 強度 label)
+ *   - `program_sub_tag`      → row DELETEd (removed from the v022 label dict)
+ *
+ * Templates / cells are NOT deleted — only un-tagged (mirror deleteProgram's
+ * "orphan, don't delete" philosophy). The program itself is untouched.
+ *
+ * Active-session guard: if a template carrying exactly this (program, sub_tag)
+ * backs an in-progress session, throws `PROGRAM_HAS_ACTIVE_SESSION` (nulling its
+ * sub_tag would change the live session's 計劃·強度 subtitle). UI catches + Alerts.
+ */
+export async function deleteProgramSubTag(
+  db: Database,
+  args: { program_id: string; sub_tag: string; now?: () => number }
+): Promise<void> {
+  const ts = (args.now ?? Date.now)();
+  const active = await db.getFirstAsync<{ id: string }>(
+    `SELECT s.id FROM session s
+       INNER JOIN session_exercise se ON se.session_id = s.id
+       INNER JOIN template t ON t.id = se.template_id
+      WHERE s.ended_at IS NULL
+        AND t.program_id = ?
+        AND t.sub_tag = ?
+      LIMIT 1`,
+    args.program_id,
+    args.sub_tag,
+  );
+  if (active) {
+    throw new Error('PROGRAM_HAS_ACTIVE_SESSION');
+  }
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE template SET sub_tag = NULL, updated_at = ?
+        WHERE program_id = ? AND sub_tag = ?`,
+      ts,
+      args.program_id,
+      args.sub_tag,
+    );
+    await db.runAsync(
+      `UPDATE program_cell SET sub_tag = NULL
+        WHERE program_id = ? AND sub_tag = ?`,
+      args.program_id,
+      args.sub_tag,
+    );
+    await db.runAsync(
+      `DELETE FROM program_sub_tag WHERE program_id = ? AND sub_tag = ?`,
+      args.program_id,
+      args.sub_tag,
+    );
   });
 }
 
