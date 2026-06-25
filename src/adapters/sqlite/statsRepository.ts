@@ -30,7 +30,7 @@ interface RawRow {
   weight_kg: number | null;
   reps: number | null;
   bw_snapshot_kg: number | null;
-  is_skipped: number;
+  is_logged: number;
 }
 
 export async function loadStatsSetRecords(
@@ -41,6 +41,17 @@ export async function loadStatsSetRecords(
   // 都算容量）。stats 顯示用同樣語意，warmup 不算進 stats 容量。
   // 在 SQL 邊界過濾，跟 listPriorSetsForExercise / loadReplayRecords pattern 一致
   // (2026-05-27).
+  //
+  // F3 fix (2026-06-25): also filter `AND s.is_logged = 1` so planned-but-
+  // unchecked sets (template / 動作記憶 defaults that `endSession` never
+  // purges) don't inflate stats volume. This MIRRORS the History-tab volume
+  // (`sessionRepository.ts` per-session SUM CASE `is_logged = 1`) and
+  // `listExercisePRSetRows` — both plain `is_logged = 1`, NOT chain-aware.
+  // Dropset followers carry DB `is_logged = 0` (only the head flips on ✓; see
+  // dropset-chain-semantics skill DB invariant #2), so this drops follower
+  // volume EXACTLY as History does — keeping Stats and History in agreement
+  // (the explicit goal). We do NOT resolve follower → head here; that would
+  // make Stats over-count vs History.
   const rows = await db.getAllAsync<RawRow>(
     `SELECT s.id                  AS set_id,
             s.session_id           AS session_id,
@@ -52,12 +63,13 @@ export async function loadStatsSetRecords(
             s.weight_kg            AS weight_kg,
             s.reps                 AS reps,
             ss.bodyweight_snapshot_kg AS bw_snapshot_kg,
-            s.is_skipped           AS is_skipped
+            s.is_logged            AS is_logged
        FROM "set" s
        JOIN session ss ON ss.id = s.session_id
        JOIN exercise e ON e.id = s.exercise_id
       WHERE ss.started_at >= ? AND ss.started_at < ?
         AND s.set_kind != 'warmup'
+        AND s.is_logged = 1
       ORDER BY ss.started_at ASC, s.created_at ASC`,
     range.start_ms,
     range.end_ms
@@ -89,8 +101,11 @@ export async function loadStatsSetRecords(
   }
 
   return rows.map((r) => {
+    // Rows are already SQL-filtered to `is_logged = 1`; the value-validity
+    // guard below only gates `volume` (a logged row with a null/invalid
+    // weight·reps yields null volume, never a NaN).
     const isLogged =
-      r.is_skipped === 0 &&
+      r.is_logged === 1 &&
       r.weight_kg != null &&
       r.reps != null &&
       Number.isFinite(r.reps) &&

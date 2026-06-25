@@ -25,6 +25,7 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import { migrate } from '../../src/db/migrate';
 import { loadStatsSetRecords } from '../../src/adapters/sqlite/statsRepository';
+import { loadHistoryListRows } from '../../src/adapters/sqlite/sessionRepository';
 import type { LoadType } from '../../src/domain/exercise/types';
 
 describe('loadStatsSetRecords', () => {
@@ -85,6 +86,9 @@ describe('loadStatsSetRecords', () => {
     reps: number | null;
     set_kind?: 'working' | 'warmup' | 'dropset';
     is_skipped?: 0 | 1;
+    // Defaults to 1 (logged/performed) — that's what a checked-off set carries
+    // and what stats volume counts (F3 fix). Pass 0 for planned-but-unchecked.
+    is_logged?: 0 | 1;
     parent_set_id?: string | null;
     id?: string;
   }): Promise<string> {
@@ -94,7 +98,7 @@ describe('loadStatsSetRecords', () => {
       `INSERT INTO "set"
          (id, session_id, exercise_id, weight_kg, reps, is_skipped, ordering,
           created_at, set_kind, parent_set_id, is_logged)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       opts.session_id,
       opts.exercise_id,
@@ -104,7 +108,8 @@ describe('loadStatsSetRecords', () => {
       seq,
       seq,
       opts.set_kind ?? 'working',
-      opts.parent_set_id ?? null
+      opts.parent_set_id ?? null,
+      opts.is_logged ?? 1
     );
     return id;
   }
@@ -170,20 +175,22 @@ describe('loadStatsSetRecords', () => {
 
   // --- is_logged exclusion (skip / null / reps<1) ----------------------
 
-  it('is_skipped set is KEPT as a record but is_logged=false, volume=null', async () => {
+  it('unchecked planned set (is_logged=0) is EXCLUDED by the SQL filter (F3)', async () => {
     await addExercise('ex1', 'chest');
     await addSession('s1', 5000);
-    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_skipped: 1 });
+    // A planned-but-never-checked set: real weight/reps (template default) but
+    // is_logged=0 because the user never tapped ✓. Must NOT reach stats.
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 0 });
 
     const records = await loadStatsSetRecords(db, FULL_RANGE);
-    expect(records).toHaveLength(1);
-    expect(records[0].is_logged).toBe(false);
-    expect(records[0].volume).toBeNull();
+    expect(records).toEqual([]);
   });
 
-  it('null weight or null reps → not logged, null volume', async () => {
+  it('logged set with null weight or null reps → is_logged=false (value guard), null volume', async () => {
     await addExercise('ex1', 'chest');
     await addSession('s1', 5000);
+    // is_logged=1 in DB but no usable weight/reps → the JS value guard keeps
+    // the row but reports is_logged=false + null volume (no NaN).
     await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: null, reps: 5 });
     await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 80, reps: null });
 
@@ -193,7 +200,7 @@ describe('loadStatsSetRecords', () => {
     expect(records.every((r) => r.volume === null)).toBe(true);
   });
 
-  it('reps < 1 is treated as not-logged', async () => {
+  it('logged set with reps < 1 → value guard reports not-logged, null volume', async () => {
     await addExercise('ex1', 'chest');
     await addSession('s1', 5000);
     await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 0 });
@@ -231,17 +238,22 @@ describe('loadStatsSetRecords', () => {
     expect(distinct.size).toBe(2);
   });
 
-  // --- dropset double-count guard --------------------------------------
+  // --- dropset chain: mirror History (head's is_logged only) -----------
 
-  it('dropset head + follower each yield their own record (both count toward volume)', async () => {
+  it('dropset head (is_logged=1) counts; follower (DB is_logged=0) is excluded — mirrors History', async () => {
     await addExercise('ex1', 'back');
     await addSession('s1', 5000);
+    // Real chain DB shape: user taps ✓ on the HEAD only, so the head carries
+    // is_logged=1 and the follower stays is_logged=0 (dropset-chain-semantics
+    // DB invariant #2). The History-tab per-session volume uses plain
+    // `is_logged = 1`, so it counts the head only — stats must agree.
     const head = await addSet({
       session_id: 's1',
       exercise_id: 'ex1',
       weight_kg: 100,
       reps: 8,
       set_kind: 'dropset',
+      is_logged: 1,
     });
     await addSet({
       session_id: 's1',
@@ -250,14 +262,15 @@ describe('loadStatsSetRecords', () => {
       reps: 6,
       set_kind: 'dropset',
       parent_set_id: head,
+      is_logged: 0,
     });
 
     const records = await loadStatsSetRecords(db, FULL_RANGE);
-    // both dropset rows are distinct sets → 2 records, NOT collapsed
-    expect(records).toHaveLength(2);
-    expect(records.every((r) => r.is_logged === true)).toBe(true);
+    // Only the head survives the SQL `is_logged = 1` filter.
+    expect(records).toHaveLength(1);
+    expect(records[0].is_logged).toBe(true);
     const total = records.reduce((acc, r) => acc + (r.volume ?? 0), 0);
-    expect(total).toBe(100 * 8 + 80 * 6); // 800 + 480 = 1280
+    expect(total).toBe(100 * 8); // 800 — follower's 480 is NOT counted (matches History)
   });
 
   // --- load_type asymmetry passes through ------------------------------
@@ -312,5 +325,76 @@ describe('loadStatsSetRecords', () => {
 
     const records = await loadStatsSetRecords(db, FULL_RANGE);
     expect(records[0].mg_id).toBeNull();
+  });
+
+  // --- F3 regression: Stats volume == History volume ===================
+  // The Stats-tab muscle-group volume and the History-tab per-session volume
+  // must report the SAME number for the same session. Before the fix the
+  // Stats query had no `is_logged = 1` clause, so planned-but-unchecked sets
+  // (which `endSession` never purges) inflated stats volume vs History.
+
+  it('F3: unchecked planned sets do NOT inflate stats volume; Stats == History', async () => {
+    await addExercise('ex1', 'chest');
+    await addSession('s1', 5000);
+    // Report repro: 5 working sets at 100kg×5; only the first 2 checked off.
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 1 });
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 1 });
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 0 });
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 0 });
+    await addSet({ session_id: 's1', exercise_id: 'ex1', weight_kg: 100, reps: 5, is_logged: 0 });
+
+    const records = await loadStatsSetRecords(db, FULL_RANGE);
+    const statsVolume = records.reduce((acc, r) => acc + (r.volume ?? 0), 0);
+    // Only the 2 logged sets count: 2 × 100 × 5 = 1000 (NOT 2500).
+    expect(records).toHaveLength(2);
+    expect(statsVolume).toBe(1000);
+
+    // History-tab path for the same session must agree exactly.
+    const historyRows = await loadHistoryListRows(db);
+    const historyRow = historyRows.find((r) => r.session.id === 's1');
+    expect(historyRow?.volume).toBe(1000);
+    expect(statsVolume).toBe(historyRow?.volume);
+  });
+
+  it('F3 chain-aware: stats counts dropset head only, agreeing with History', async () => {
+    await addExercise('ex1', 'back');
+    await addSession('s1', 5000);
+    // A logged dropset chain: head ✓ (is_logged=1), 2 followers is_logged=0.
+    // History counts the head only (plain is_logged=1 SUM); stats must match.
+    const head = await addSet({
+      session_id: 's1',
+      exercise_id: 'ex1',
+      weight_kg: 100,
+      reps: 8,
+      set_kind: 'dropset',
+      is_logged: 1,
+    });
+    await addSet({
+      session_id: 's1',
+      exercise_id: 'ex1',
+      weight_kg: 80,
+      reps: 6,
+      set_kind: 'dropset',
+      parent_set_id: head,
+      is_logged: 0,
+    });
+    await addSet({
+      session_id: 's1',
+      exercise_id: 'ex1',
+      weight_kg: 60,
+      reps: 4,
+      set_kind: 'dropset',
+      parent_set_id: head,
+      is_logged: 0,
+    });
+
+    const records = await loadStatsSetRecords(db, FULL_RANGE);
+    const statsVolume = records.reduce((acc, r) => acc + (r.volume ?? 0), 0);
+    expect(statsVolume).toBe(100 * 8); // 800 — head only
+
+    const historyRows = await loadHistoryListRows(db);
+    const historyRow = historyRows.find((r) => r.session.id === 's1');
+    expect(historyRow?.volume).toBe(100 * 8);
+    expect(statsVolume).toBe(historyRow?.volume);
   });
 });

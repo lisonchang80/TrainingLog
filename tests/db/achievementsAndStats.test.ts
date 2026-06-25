@@ -182,7 +182,7 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
     await createSession(db, { id: 'sess-day1', started_at: t0 });
     let nextId = 0;
     const uuid = () => `set-${nextId++}`;
-    await recSet(db, {
+    const day1Set = await recSet(db, {
       session_id: 'sess-day1',
       exercise_id: benchPress.id,
       weight_kg: 50,
@@ -191,11 +191,14 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
       now: () => t0 + 1000,
       uuid,
     });
+    // recordSetInSession writes is_logged=0; mark it logged (user ✓-tap) so it
+    // counts toward stats volume/frequency (F3: stats filters is_logged=1).
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, day1Set.set_id);
     await endSession(db, { id: 'sess-day1', ended_at: t0 + 60 * 60 * 1000 });
 
     // Day 2: leg session
     await createSession(db, { id: 'sess-day2', started_at: t0 + dayMs });
-    await recSet(db, {
+    const day2Set = await recSet(db, {
       session_id: 'sess-day2',
       exercise_id: backSquat.id,
       weight_kg: 100,
@@ -204,6 +207,7 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
       now: () => t0 + dayMs + 1000,
       uuid,
     });
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, day2Set.set_id);
     await endSession(db, { id: 'sess-day2', ended_at: t0 + dayMs + 60 * 60 * 1000 });
 
     // Range covering both days
