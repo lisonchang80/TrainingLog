@@ -31,6 +31,7 @@ import {
   deleteSessionExerciseAndSets,
   discardSession,
   endSession,
+  findLastSessionWithExercises,
   getActiveSession,
   getSession,
   appendReusableSupersetToSession,
@@ -117,8 +118,10 @@ import type { PRSnapshot } from '@/src/domain/pr/prQuery';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
+  convertSessionToTemplate,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
+  getTemplateFull,
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { useAppMode } from '@/src/app-mode';
@@ -1171,6 +1174,23 @@ export default function TodayScreen() {
         period_id: RESERVED_NONE_PROGRAM_ID,
         intensity_id: null,
       });
+      // Phase B (autostart-prefill) — 極簡模式開的是通用模板。若它「沒資料」
+      // （0 動作），先把最近一次有動作的訓練內容覆蓋進通用模板（in-place，
+      // 保留通用身份 program/sub_tag=null），再開練 → session 直接帶上次動作；
+      // 模板本身也存下來，下次就有資料、不再 prefill。無歷史則照舊開空模板。
+      const resolvedFull = await getTemplateFull(db, resolved.template_id);
+      if (resolvedFull && resolvedFull.exercises.length === 0) {
+        const lastSessionId = await findLastSessionWithExercises(db);
+        if (lastSessionId) {
+          await convertSessionToTemplate(db, {
+            session_id: lastSessionId,
+            template_name: resolvedFull.name,
+            mode: 'update',
+            overwriteTemplateId: resolved.template_id,
+            uuid: randomUUID,
+          });
+        }
+      }
       // resolved.alert（fallback_with_alert）= miss 提示 → 極簡模式靜音，
       // 僅沿用 resolved.template_id。
       const { session_id } = await startSessionFromTemplate(db, {

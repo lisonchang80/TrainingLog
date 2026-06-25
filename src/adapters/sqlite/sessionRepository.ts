@@ -318,6 +318,32 @@ export async function listSessions(db: Database): Promise<Session[]> {
   return rows.map(mapSessionRow);
 }
 
+/**
+ * The most recent session (by `started_at`) that actually contains at least one
+ * exercise — i.e. the user's last real workout, skipping any empty/freestyle
+ * sessions that never had an exercise added. Returns the session id, or null
+ * when no such session exists.
+ *
+ * Backs Phase B of the autostart-prefill spec: starting the 通用 template in
+ * 極簡 mode when it has no exercises pulls this session's content into the
+ * template first (via `convertSessionToTemplate` overwrite) so the workout is
+ * pre-filled instead of starting empty.
+ */
+export async function findLastSessionWithExercises(
+  db: Database
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT s.id
+       FROM session s
+      WHERE EXISTS (
+              SELECT 1 FROM session_exercise se WHERE se.session_id = s.id
+            )
+      ORDER BY s.started_at DESC, s.id DESC
+      LIMIT 1`
+  );
+  return row?.id ?? null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // History tab — aggregate list read (perf: collapse N+1 fan-out)
 // ─────────────────────────────────────────────────────────────────────────
