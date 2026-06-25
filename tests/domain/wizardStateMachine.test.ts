@@ -7,6 +7,7 @@ import {
   jumpTo,
   next,
   prev,
+  pruneDraftToDimensions,
   stepIndex,
   updateDraft,
   validateStep,
@@ -206,5 +207,50 @@ describe('wizardStateMachine — stepIndex', () => {
   it('produces 0..5 sequentially', () => {
     const indices = WIZARD_STEPS.map((s) => stepIndex(s));
     expect(indices).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
+
+// 2026-06-25 audit 🟠 — pruning out-of-dimension plans prevents the silent
+// soft-lock when the user shrinks cycle_length / cycle_count after later steps
+// were filled (stale rows are invisible on Step 3/4 but fail validateStep).
+describe('wizardStateMachine — pruneDraftToDimensions', () => {
+  it('drops dayPlans whose day_index >= cycle_length', () => {
+    const s = updateDraft(initialWizardState(TODAY), {
+      cycle_length: 4,
+      dayPlans: [
+        { day_index: 0, template_id: 't1', sub_tag: null },
+        { day_index: 5, template_id: 't2', sub_tag: null }, // stale (was on a 7-day grid)
+      ],
+    });
+    const pruned = pruneDraftToDimensions(s.draft);
+    expect(pruned.dayPlans.map((d) => d.day_index)).toEqual([0]);
+    // And the pruned draft now passes DayPattern validation (no soft-lock).
+    expect(validateStep(pruned, 'DayPattern')).toBeNull();
+  });
+
+  it('drops overrides whose cycle_index >= cycle_count or day_index >= cycle_length', () => {
+    const s = updateDraft(initialWizardState(TODAY), {
+      cycle_length: 4,
+      cycle_count: 2,
+      dayPlans: [{ day_index: 0, template_id: 't1', sub_tag: null }],
+      overrides: [
+        { cycle_index: 0, day_index: 0, sub_tag: 'keep' },
+        { cycle_index: 5, day_index: 0, sub_tag: 'staleCycle' },
+        { cycle_index: 0, day_index: 6, sub_tag: 'staleDay' },
+      ],
+    });
+    const pruned = pruneDraftToDimensions(s.draft);
+    expect(pruned.overrides.map((o) => o.sub_tag)).toEqual(['keep']);
+    expect(validateStep(pruned, 'CycleSubTags')).toBeNull();
+  });
+
+  it('returns the SAME draft reference when nothing is out of range (no-op)', () => {
+    const s = updateDraft(initialWizardState(TODAY), {
+      cycle_length: 7,
+      cycle_count: 4,
+      dayPlans: [{ day_index: 0, template_id: 't1', sub_tag: null }],
+      overrides: [{ cycle_index: 1, day_index: 0, sub_tag: 'x' }],
+    });
+    expect(pruneDraftToDimensions(s.draft)).toBe(s.draft);
   });
 });

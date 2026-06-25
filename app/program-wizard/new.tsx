@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
 import {
+  countFilledCells,
   createProgram,
   listProgramSubTags,
   listPrograms,
@@ -44,6 +45,7 @@ import {
   isLastStep,
   next as nextStep,
   prev as prevStep,
+  pruneDraftToDimensions,
   stepIndex,
   updateDraft,
   validateStep,
@@ -56,6 +58,7 @@ import {
   tNDays,
   tOverwriteBlockedByActiveSession,
   tOverwriteBannerTitle,
+  tOverwriteWillEraseCells,
   tRemoveIntensity,
   tWeekdayLabels,
 } from '@/src/i18n';
@@ -233,7 +236,19 @@ export default function ProgramWizardScreen() {
         await recordProgramSubTag(db, overwriteTarget.id, tag);
       }
     }
-    const r = nextStep(state);
+    // 2026-06-25 audit 🟠 — advancing OUT of CycleConfig commits the cycle
+    // dimensions. If the user navigated Back and SHRANK cycle_length / cycle_count,
+    // dayPlans / overrides built for the larger grid now reference out-of-range
+    // indices; Step 3/4 no longer render those rows (panels map 0..length-1), so
+    // they're invisible — yet validateStep rejects them, greying out Next with no
+    // visible cause (silent soft-lock). Prune them here so the draft stays
+    // consistent with its dimensions. Done on Next (not on keystroke) so clearing
+    // the field to 0 mid-typing can't wipe the user's day plans.
+    const source =
+      state.step === 'CycleConfig'
+        ? { step: state.step, draft: pruneDraftToDimensions(state.draft) }
+        : state;
+    const r = nextStep(source);
     if ('error' in r) {
       Alert.alert(t('alert', 'cannotContinue'), r.error);
       return;
@@ -253,6 +268,35 @@ export default function ProgramWizardScreen() {
       // new. `overwriteTarget` is only set after explicit user confirm in
       // the modal, so this branch faithfully reflects user intent.
       if (overwriteTarget) {
+        // 2026-06-25 audit 🟠 — 「載入計劃」 only copies the program NAME (not the
+        // cycle dimensions or cells), so overwriting silently replaces a
+        // fully-built program with the near-empty wizard grid. Gate the
+        // irreversible overwrite behind a confirm that names the concrete count
+        // of filled cells about to be erased (mirrors the resize shrink-confirm
+        // at programs.tsx). 0 filled cells → nothing to lose → no prompt.
+        const lost = await countFilledCells(db, overwriteTarget.id);
+        if (lost > 0) {
+          const ok = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              t('alert', 'overwriteProgramQ'),
+              tOverwriteWillEraseCells(overwriteTarget.name, lost),
+              [
+                {
+                  text: t('common', 'cancel'),
+                  style: 'cancel',
+                  onPress: () => resolve(false),
+                },
+                {
+                  text: t('button', 'overwrite'),
+                  style: 'destructive',
+                  onPress: () => resolve(true),
+                },
+              ],
+              { cancelable: true, onDismiss: () => resolve(false) },
+            );
+          });
+          if (!ok) return;
+        }
         const programCore = {
           id: overwriteTarget.id,
           name: r.draft.name.trim(),

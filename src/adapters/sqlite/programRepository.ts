@@ -359,6 +359,30 @@ export async function countFilledCellsOutsideBounds(
 }
 
 /**
+ * Total count of FILLED cells (template_id != null) in a program — i.e. how much
+ * populated grid content an overwrite would destroy. `overwriteProgram` DELETEs
+ * EVERY `program_cell` of the target and re-inserts the wizard's fresh grid, so
+ * this is the full "will be erased" count. NULL-template (休息) cells carry no
+ * meaningful content and are excluded, mirroring `countFilledCellsOutsideBounds`.
+ *
+ * Used by the program wizard's 載入計劃 → 覆蓋 path to put a concrete
+ * destruction count in front of the user before the irreversible overwrite —
+ * "載入計劃" only copies the name, so without this gate a tweak-and-save can wipe
+ * a fully-built multi-week grid silently. (2026-06-25 wizard audit 🟠.)
+ */
+export async function countFilledCells(
+  db: Database,
+  programId: string
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM program_cell
+      WHERE program_id = ? AND template_id IS NOT NULL`,
+    programId
+  );
+  return row?.n ?? 0;
+}
+
+/**
  * Wave 15 (2026-05-21) — atomic resize of a program's grid dimensions.
  * Updates `cycle_length` / `cycle_count` on the program row and DELETEs
  * any `program_cell` rows that fall outside the new bounds.

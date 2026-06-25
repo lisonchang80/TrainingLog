@@ -1,5 +1,6 @@
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
 import {
+  countFilledCells,
   countFilledCellsOutsideBounds,
   createProgram,
   getProgram,
@@ -139,6 +140,27 @@ describe('programRepository — resize (wave 15)', () => {
         new_cycle_count: 1,
       });
       expect(lost).toBe(0);
+    });
+  });
+
+  // 2026-06-25 audit 🟠 — the wizard 載入計劃 → 覆蓋 path uses countFilledCells to
+  // warn the user how many filled cells an overwrite will erase (覆蓋 DELETEs the
+  // whole grid; 「載入計劃」 only copied the name).
+  describe('countFilledCells', () => {
+    it('counts every template_id != NULL cell across the whole grid', async () => {
+      const program_id = await seed7x2WithSomeFilled(); // fills 3 cells
+      expect(await countFilledCells(db, program_id)).toBe(3);
+    });
+
+    it('returns 0 for a grid with only rest (NULL-template) cells', async () => {
+      const program = buildProgram({ cycle_length: 7, cycle_count: 2 });
+      const cells = expandWizardDraft({
+        program,
+        dayPlans: [{ day_index: 0, template_id: null, sub_tag: null }],
+        uuid,
+      });
+      await createProgram(db, { program, cells });
+      expect(await countFilledCells(db, program.id)).toBe(0);
     });
   });
 

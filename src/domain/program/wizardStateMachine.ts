@@ -212,6 +212,45 @@ export function updateDraft(
 }
 
 /**
+ * Drop any dayPlans / overrides that fall OUTSIDE the draft's current
+ * cycle_length / cycle_count dimensions. Pure; returns the SAME draft reference
+ * when nothing is out of range (so callers can cheaply detect a no-op).
+ *
+ * Why: shrinking cycle_length / cycle_count after later steps were filled leaves
+ * stale dayPlans (`day_index ≥ cycle_length`) / overrides (`cycle_index ≥
+ * cycle_count`) behind. Those rows are no longer rendered on Step 3 / 4 (the
+ * panels only map `0..length-1`), so the user can't see or delete them — yet
+ * `validateStep('DayPattern'/'CycleSubTags')` rejects them, greying out Next with
+ * no on-screen cause (a silent soft-lock). Pruning keeps the draft consistent
+ * with its dimensions. `expandWizardDraft` already applies the same clamp at
+ * commit time; this is the interactive mirror so the wizard can't dead-end.
+ * (2026-06-25 program-wizard audit 🟠.)
+ *
+ * Call this only at a dimension-COMMIT point (e.g. advancing out of CycleConfig),
+ * NOT on every keystroke — clearing the field to 0 mid-typing would otherwise
+ * wipe every day plan.
+ */
+export function pruneDraftToDimensions(draft: WizardDraft): WizardDraft {
+  const dayPlans = draft.dayPlans.filter(
+    (dp) => dp.day_index >= 0 && dp.day_index < draft.cycle_length
+  );
+  const overrides = draft.overrides.filter(
+    (o) =>
+      o.cycle_index >= 0 &&
+      o.cycle_index < draft.cycle_count &&
+      o.day_index >= 0 &&
+      o.day_index < draft.cycle_length
+  );
+  if (
+    dayPlans.length === draft.dayPlans.length &&
+    overrides.length === draft.overrides.length
+  ) {
+    return draft;
+  }
+  return { ...draft, dayPlans, overrides };
+}
+
+/**
  * Final completion: validate the WHOLE draft (treats it as Confirm step) and
  * either return the validated draft or an error. Caller passes this draft +
  * a uuid into `expandWizardDraft` (programManager) to produce the cell list.
