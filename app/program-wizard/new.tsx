@@ -61,6 +61,7 @@ import {
   tOverwriteWillEraseCells,
   tRemoveIntensity,
   tWeekdayLabels,
+  tWizardValidationError,
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
@@ -250,7 +251,7 @@ export default function ProgramWizardScreen() {
         : state;
     const r = nextStep(source);
     if ('error' in r) {
-      Alert.alert(t('alert', 'cannotContinue'), r.error);
+      Alert.alert(t('alert', 'cannotContinue'), tWizardValidationError(r.error));
       return;
     }
     setState(r);
@@ -259,7 +260,7 @@ export default function ProgramWizardScreen() {
   const onConfirm = async () => {
     const r = complete(state);
     if ('error' in r) {
-      Alert.alert(t('alert', 'cannotSave'), r.error);
+      Alert.alert(t('alert', 'cannotSave'), tWizardValidationError(r.error));
       return;
     }
     setBusy(true);
@@ -380,6 +381,16 @@ export default function ProgramWizardScreen() {
         Alert.alert(
           t('alert', 'cannotOverwrite'),
           tOverwriteBlockedByActiveSession(overwriteTarget.name),
+        );
+      } else if (msg === 'DUPLICATE_PROGRAM_NAME') {
+        // 2026-06-25 audit 🟡 — createProgram's dup-guard scans ALL programs
+        // (incl. the reserved 「無」 row, which overwriteMatch excludes), so a
+        // plausible name like 「無」 routes to the create path and throws this
+        // code. Map it to the localized "name already exists" Alert (mirrors
+        // template-meta-sheet) instead of leaking the raw code into the TC UI.
+        Alert.alert(
+          t('alert', 'programNameExists'),
+          t('alert', 'programNameExistsMsg'),
         );
       } else {
         Alert.alert(t('alert', 'saveFailed'), msg);
@@ -1218,7 +1229,9 @@ function ConfirmPanel({
           {`${t('page', 'summaryIntensityOverride')}${state.draft.overrides.length}${t('page', 'summarySuffixCount')}`}
         </Text>
       </View>
-      {err ? <Text style={styles.errorLine}>⚠️ {err}</Text> : null}
+      {err ? (
+        <Text style={styles.errorLine}>⚠️ {tWizardValidationError(err)}</Text>
+      ) : null}
     </View>
   );
 }

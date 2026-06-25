@@ -47,8 +47,8 @@ describe('validateStep cascade — Preview / Confirm surface FIRST failing step'
     const s = initialWizardState(TODAY);
     const previewErr = validateStep(s.draft, 'Preview');
     const confirmErr = validateStep(s.draft, 'Confirm');
-    expect(previewErr).toBe('Program name cannot be empty');
-    expect(confirmErr).toBe('Program name cannot be empty');
+    expect(previewErr?.code).toBe('nameEmpty');
+    expect(confirmErr?.code).toBe('nameEmpty');
   });
 
   it('rank 1: name OK, CycleConfig invalid (cycle_length=0), DayPattern empty → CycleConfig error wins', () => {
@@ -57,8 +57,8 @@ describe('validateStep cascade — Preview / Confirm surface FIRST failing step'
     // dayPlans still empty (would later fail DayPattern), but cascade
     // hits CycleConfig first.
     const err = validateStep(s.draft, 'Preview');
-    expect(err).toBe('cycle_length must be 3-14');
-    expect(validateStep(s.draft, 'Confirm')).toBe('cycle_length must be 3-14');
+    expect(err?.code).toBe('cycleLengthRange');
+    expect(validateStep(s.draft, 'Confirm')?.code).toBe('cycleLengthRange');
   });
 
   it('rank 2: name+CycleConfig OK, DayPattern invalid (no template picked anywhere), CycleSubTags has out-of-range override → DayPattern error wins', () => {
@@ -80,10 +80,8 @@ describe('validateStep cascade — Preview / Confirm surface FIRST failing step'
       ],
     });
     const err = validateStep(s.draft, 'Preview');
-    expect(err).toBe('Pick a template for at least one day');
-    expect(validateStep(s.draft, 'Confirm')).toBe(
-      'Pick a template for at least one day',
-    );
+    expect(err?.code).toBe('dayPatternNoTemplate');
+    expect(validateStep(s.draft, 'Confirm')?.code).toBe('dayPatternNoTemplate');
   });
 
   it('rank 3: name+CycleConfig+DayPattern OK, only CycleSubTags invalid (override cycle out of range) → CycleSubTags error surfaces', () => {
@@ -99,14 +97,15 @@ describe('validateStep cascade — Preview / Confirm surface FIRST failing step'
       ],
     });
     const err = validateStep(s.draft, 'Preview');
-    expect(err).toBe('Override cycle 5 out of range');
-    expect(validateStep(s.draft, 'Confirm')).toBe('Override cycle 5 out of range');
+    expect(err?.code).toBe('overrideCycleOutOfRange');
+    expect(err?.params).toEqual({ cycleIndex: 5 });
+    expect(validateStep(s.draft, 'Confirm')?.code).toBe('overrideCycleOutOfRange');
     // And complete() echoes the same error (it routes through
     // validateStep(draft, 'Confirm') internally).
     const r = complete(s);
     expect('error' in r).toBe(true);
     if ('error' in r) {
-      expect(r.error).toBe('Override cycle 5 out of range');
+      expect(r.error.code).toBe('overrideCycleOutOfRange');
     }
   });
 
@@ -138,7 +137,7 @@ describe('validateStep cascade — Preview / Confirm surface FIRST failing step'
       }).draft, // rank 3
     ];
     for (const d of drafts) {
-      expect(validateStep(d, 'Preview')).toBe(validateStep(d, 'Confirm'));
+      expect(validateStep(d, 'Preview')).toEqual(validateStep(d, 'Confirm'));
     }
   });
 });

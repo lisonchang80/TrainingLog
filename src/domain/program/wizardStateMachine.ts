@@ -60,6 +60,36 @@ export interface WizardState {
   draft: WizardDraft;
 }
 
+/**
+ * Stable, locale-agnostic validation error. `validateStep` returns one of these
+ * (or null) so the UI can map `code` → a localized message via
+ * `tWizardValidationError` instead of surfacing the raw English literal that
+ * used to leak into the TC UI (2026-06-25 audit 🟡). `params` carries the
+ * interpolated values (day / cycle indices, cycle dimensions) for the messages
+ * that need them.
+ */
+export type WizardValidationCode =
+  | 'nameEmpty'
+  | 'cycleLengthRange'
+  | 'cycleCountRange'
+  | 'startDateFormat'
+  | 'dayPatternNoTemplate'
+  | 'dayPlanDuplicate'
+  | 'dayIndexOutOfRange'
+  | 'overrideCycleOutOfRange'
+  | 'overrideDayOutOfRange'
+  | 'alreadyLastStep';
+
+export interface WizardValidationError {
+  code: WizardValidationCode;
+  params?: {
+    day?: number;
+    dayIndex?: number;
+    cycleIndex?: number;
+    cycleLength?: number;
+  };
+}
+
 /** Brand-new wizard with sensible defaults. */
 export function initialWizardState(today: IsoDate): WizardState {
   return {
@@ -98,13 +128,18 @@ export function isLastStep(step: WizardStep): boolean {
 }
 
 /**
- * Validate a single step's slice of the draft. Returns null on OK or a
- * human-readable error. Does NOT mutate state.
+ * Validate a single step's slice of the draft. Returns null on OK or a stable
+ * `WizardValidationError` (code + optional interpolation params). Does NOT
+ * mutate state. The UI maps the code to a localized message via
+ * `tWizardValidationError`.
  */
-export function validateStep(draft: WizardDraft, step: WizardStep): string | null {
+export function validateStep(
+  draft: WizardDraft,
+  step: WizardStep
+): WizardValidationError | null {
   switch (step) {
     case 'NameAndTag':
-      if (!draft.name || !draft.name.trim()) return 'Program name cannot be empty';
+      if (!draft.name || !draft.name.trim()) return { code: 'nameEmpty' };
       return null;
     case 'CycleConfig':
       if (
@@ -112,30 +147,33 @@ export function validateStep(draft: WizardDraft, step: WizardStep): string | nul
         draft.cycle_length < 3 ||
         draft.cycle_length > 14
       ) {
-        return 'cycle_length must be 3-14';
+        return { code: 'cycleLengthRange' };
       }
       if (!Number.isInteger(draft.cycle_count) || draft.cycle_count < 1) {
-        return 'cycle_count must be ≥ 1';
+        return { code: 'cycleCountRange' };
       }
       if (!draft.start_date || !/^\d{4}-\d{2}-\d{2}$/.test(draft.start_date)) {
-        return 'start_date must be ISO yyyy-mm-dd';
+        return { code: 'startDateFormat' };
       }
       return null;
     case 'DayPattern':
       // At least one non-rest day so the program isn't completely empty.
       if (draft.dayPlans.every((dp) => dp.template_id == null)) {
-        return 'Pick a template for at least one day';
+        return { code: 'dayPatternNoTemplate' };
       }
       // No duplicate day_index entries.
       {
         const seen = new Set<number>();
         for (const dp of draft.dayPlans) {
           if (seen.has(dp.day_index)) {
-            return `Duplicate day plan for day ${dp.day_index}`;
+            return { code: 'dayPlanDuplicate', params: { day: dp.day_index } };
           }
           seen.add(dp.day_index);
           if (dp.day_index < 0 || dp.day_index >= draft.cycle_length) {
-            return `Day index ${dp.day_index} outside cycle length ${draft.cycle_length}`;
+            return {
+              code: 'dayIndexOutOfRange',
+              params: { dayIndex: dp.day_index, cycleLength: draft.cycle_length },
+            };
           }
         }
       }
@@ -144,10 +182,16 @@ export function validateStep(draft: WizardDraft, step: WizardStep): string | nul
       // Optional step — overrides may be empty.
       for (const o of draft.overrides) {
         if (o.cycle_index < 0 || o.cycle_index >= draft.cycle_count) {
-          return `Override cycle ${o.cycle_index} out of range`;
+          return {
+            code: 'overrideCycleOutOfRange',
+            params: { cycleIndex: o.cycle_index },
+          };
         }
         if (o.day_index < 0 || o.day_index >= draft.cycle_length) {
-          return `Override day ${o.day_index} out of range`;
+          return {
+            code: 'overrideDayOutOfRange',
+            params: { dayIndex: o.day_index },
+          };
         }
       }
       return null;
@@ -167,10 +211,12 @@ export function validateStep(draft: WizardDraft, step: WizardStep): string | nul
  * Try to advance one step. Returns the new state or `{ error }`. Refuses to
  * advance past the last step or when the current step doesn't validate.
  */
-export function next(state: WizardState): WizardState | { error: string } {
+export function next(
+  state: WizardState
+): WizardState | { error: WizardValidationError } {
   const err = validateStep(state.draft, state.step);
   if (err) return { error: err };
-  if (isLastStep(state.step)) return { error: 'Already at last step' };
+  if (isLastStep(state.step)) return { error: { code: 'alreadyLastStep' } };
   const nextIdx = stepIndex(state.step) + 1;
   return { step: WIZARD_STEPS[nextIdx], draft: state.draft };
 }
@@ -190,7 +236,7 @@ export function prev(state: WizardState): WizardState {
 export function jumpTo(
   state: WizardState,
   target: WizardStep
-): WizardState | { error: string } {
+): WizardState | { error: WizardValidationError } {
   const fromIdx = stepIndex(state.step);
   const toIdx = stepIndex(target);
   if (toIdx <= fromIdx) {
@@ -198,7 +244,7 @@ export function jumpTo(
   }
   for (let i = fromIdx; i < toIdx; i++) {
     const err = validateStep(state.draft, WIZARD_STEPS[i]);
-    if (err) return { error: `${WIZARD_STEPS[i]}: ${err}` };
+    if (err) return { error: err };
   }
   return { step: target, draft: state.draft };
 }
@@ -257,7 +303,7 @@ export function pruneDraftToDimensions(draft: WizardDraft): WizardDraft {
  */
 export function complete(
   state: WizardState
-): { draft: WizardDraft } | { error: string } {
+): { draft: WizardDraft } | { error: WizardValidationError } {
   const err = validateStep(state.draft, 'Confirm');
   if (err) return { error: err };
   return { draft: state.draft };

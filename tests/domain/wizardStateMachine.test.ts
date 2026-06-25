@@ -103,34 +103,34 @@ describe('wizardStateMachine — step navigation', () => {
 describe('wizardStateMachine — validateStep', () => {
   it('NameAndTag fails on empty name', () => {
     expect(
-      validateStep(initialWizardState(TODAY).draft, 'NameAndTag')
-    ).toMatch(/name/);
+      validateStep(initialWizardState(TODAY).draft, 'NameAndTag')?.code
+    ).toBe('nameEmpty');
   });
 
   it('CycleConfig fails on out-of-range cycle_length', () => {
     let s = updateDraft(initialWizardState(TODAY), { cycle_length: 2 });
-    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_length/);
+    expect(validateStep(s.draft, 'CycleConfig')?.code).toBe('cycleLengthRange');
     s = updateDraft(s, { cycle_length: 20 });
-    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_length/);
+    expect(validateStep(s.draft, 'CycleConfig')?.code).toBe('cycleLengthRange');
   });
 
   it('CycleConfig fails on cycle_count below 1', () => {
     let s = updateDraft(initialWizardState(TODAY), { cycle_count: 0 });
-    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_count/);
+    expect(validateStep(s.draft, 'CycleConfig')?.code).toBe('cycleCountRange');
     s = updateDraft(initialWizardState(TODAY), { cycle_count: 1.5 });
-    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/cycle_count/);
+    expect(validateStep(s.draft, 'CycleConfig')?.code).toBe('cycleCountRange');
   });
 
   it('CycleConfig fails on bad start_date', () => {
     const s = updateDraft(initialWizardState(TODAY), { start_date: '2026-5-1' });
-    expect(validateStep(s.draft, 'CycleConfig')).toMatch(/start_date/);
+    expect(validateStep(s.draft, 'CycleConfig')?.code).toBe('startDateFormat');
   });
 
   it('DayPattern fails when every day is rest', () => {
     const s = updateDraft(initialWizardState(TODAY), {
       dayPlans: [{ day_index: 0, template_id: null, sub_tag: null }],
     });
-    expect(validateStep(s.draft, 'DayPattern')).toMatch(/at least one/);
+    expect(validateStep(s.draft, 'DayPattern')?.code).toBe('dayPatternNoTemplate');
   });
 
   it('DayPattern fails on duplicate day_index', () => {
@@ -140,14 +140,16 @@ describe('wizardStateMachine — validateStep', () => {
         { day_index: 0, template_id: 't2', sub_tag: null },
       ],
     });
-    expect(validateStep(s.draft, 'DayPattern')).toMatch(/Duplicate/);
+    expect(validateStep(s.draft, 'DayPattern')?.code).toBe('dayPlanDuplicate');
   });
 
-  it('DayPattern fails on day_index out of range', () => {
+  it('DayPattern fails on day_index out of range (carries day + cycleLength params)', () => {
     const s = updateDraft(initialWizardState(TODAY), {
       dayPlans: [{ day_index: 9, template_id: 't1', sub_tag: null }], // cycle_length is 7
     });
-    expect(validateStep(s.draft, 'DayPattern')).toMatch(/outside cycle length/);
+    const err = validateStep(s.draft, 'DayPattern');
+    expect(err?.code).toBe('dayIndexOutOfRange');
+    expect(err?.params).toEqual({ dayIndex: 9, cycleLength: 7 });
   });
 
   it('CycleSubTags accepts empty overrides', () => {
@@ -161,7 +163,9 @@ describe('wizardStateMachine — validateStep', () => {
       cycle_length: 7,
       overrides: [{ cycle_index: 9, day_index: 0, sub_tag: 'x' }],
     });
-    expect(validateStep(s.draft, 'CycleSubTags')).toMatch(/cycle/);
+    expect(validateStep(s.draft, 'CycleSubTags')?.code).toBe(
+      'overrideCycleOutOfRange'
+    );
   });
 
   it('CycleSubTags fails on override day_index out of range (valid cycle_index)', () => {
@@ -170,7 +174,9 @@ describe('wizardStateMachine — validateStep', () => {
       cycle_length: 7,
       overrides: [{ cycle_index: 0, day_index: 7, sub_tag: 'x' }],
     });
-    expect(validateStep(s.draft, 'CycleSubTags')).toMatch(/day/);
+    expect(validateStep(s.draft, 'CycleSubTags')?.code).toBe(
+      'overrideDayOutOfRange'
+    );
   });
 
   it('CycleSubTags accepts an override that is fully in range', () => {
@@ -184,7 +190,7 @@ describe('wizardStateMachine — validateStep', () => {
 
   it('Confirm rolls up validation of all earlier steps', () => {
     const s = initialWizardState(TODAY); // empty name
-    expect(validateStep(s.draft, 'Confirm')).toMatch(/name/);
+    expect(validateStep(s.draft, 'Confirm')?.code).toBe('nameEmpty');
   });
 });
 

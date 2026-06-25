@@ -55,7 +55,12 @@ import {
   tSaveOrSaving,
   tDuplicateRsPairError,
   tMainTagLine,
+  tWizardValidationError,
 } from '../../src/i18n/dynamic';
+import type {
+  WizardValidationCode,
+  WizardValidationError,
+} from '../../src/domain/program/wizardStateMachine';
 
 afterEach(() => {
   setLocale('zh');
@@ -361,5 +366,68 @@ describe('misc inline templates', () => {
     expect(tMainTagLine('Hypertrophy-Q1')).toBe('主標籤：Hypertrophy-Q1');
     setLocale('en');
     expect(tMainTagLine('Hypertrophy-Q1')).toBe('Main tag: Hypertrophy-Q1');
+  });
+});
+
+describe('tWizardValidationError — wizard validation i18n (2026-06-25 audit 🟡)', () => {
+  // Every WizardValidationCode must produce a localized (non-English-leaking,
+  // non-raw-code) message in BOTH locales. A new code with no case would hit
+  // the never-exhaustive switch and surface `undefined`, which this catches.
+  const ALL_CODES: WizardValidationError[] = [
+    { code: 'nameEmpty' },
+    { code: 'cycleLengthRange' },
+    { code: 'cycleCountRange' },
+    { code: 'startDateFormat' },
+    { code: 'dayPatternNoTemplate' },
+    { code: 'dayPlanDuplicate', params: { day: 2 } },
+    { code: 'dayIndexOutOfRange', params: { dayIndex: 8, cycleLength: 7 } },
+    { code: 'overrideCycleOutOfRange', params: { cycleIndex: 5 } },
+    { code: 'overrideDayOutOfRange', params: { dayIndex: 7 } },
+    { code: 'alreadyLastStep' },
+  ];
+
+  test('every code maps to a non-empty zh message', () => {
+    for (const err of ALL_CODES) {
+      const msg = tWizardValidationError(err);
+      expect(typeof msg).toBe('string');
+      expect(msg.length).toBeGreaterThan(0);
+      // Must not leak the raw code into the UI.
+      expect(msg).not.toContain(err.code);
+    }
+  });
+
+  test('every code maps to a non-empty en message', () => {
+    setLocale('en');
+    for (const err of ALL_CODES) {
+      const msg = tWizardValidationError(err);
+      expect(typeof msg).toBe('string');
+      expect(msg.length).toBeGreaterThan(0);
+      expect(msg).not.toContain(err.code);
+    }
+  });
+
+  test('interpolates params (1-indexed day / cycle for the user)', () => {
+    expect(
+      tWizardValidationError({
+        code: 'dayIndexOutOfRange',
+        params: { dayIndex: 8, cycleLength: 7 },
+      }),
+    ).toBe('第 9 天超出 7 天的週期範圍。');
+    setLocale('en');
+    expect(
+      tWizardValidationError({ code: 'overrideCycleOutOfRange', params: { cycleIndex: 5 } }),
+    ).toBe('Cycle 6 intensity is out of range.');
+  });
+
+  test('falls back gracefully when params are missing', () => {
+    // params is optional on the type; a defensive ?? 0 keeps it from crashing.
+    expect(tWizardValidationError({ code: 'dayIndexOutOfRange' })).toContain('1');
+  });
+
+  // Compile-time exhaustiveness sentinel: keeps the codes list in lockstep with
+  // the union so a new code can't be added without a test touch.
+  test('codes list matches the union', () => {
+    const codes: WizardValidationCode[] = ALL_CODES.map((e) => e.code);
+    expect(new Set(codes).size).toBe(ALL_CODES.length);
   });
 });

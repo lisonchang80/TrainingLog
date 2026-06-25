@@ -16,6 +16,7 @@
  * `v008Achievements.ts`) intentionally skipped — see Phase 2 user decision.
  */
 
+import type { WizardValidationError } from '../domain/program/wizardStateMachine';
 import { getLocale, tExercise } from './strings';
 
 const isEn = (): boolean => getLocale() === 'en';
@@ -229,6 +230,49 @@ export function tApplyIntensityToCycle(cycleIndex0Based: number): string {
 /** Wizard preview column header. `週期 1` / `Cycle 1`. (alias of `tCycleN`, kept for callsite clarity) */
 export function tCycleHeader(cycleIndex0Based: number): string {
   return tCycleN(cycleIndex0Based + 1);
+}
+
+/**
+ * Map a `validateStep` error code → a localized message. `validateStep`
+ * returns a stable `WizardValidationError` (code + params) instead of a raw
+ * English literal so this is the single i18n boundary for wizard validation
+ * (2026-06-25 audit 🟡 — English error strings were leaking into the TC UI on
+ * the Confirm panel + cannotContinue/cannotSave alerts).
+ */
+export function tWizardValidationError(err: WizardValidationError): string {
+  const en = isEn();
+  switch (err.code) {
+    case 'nameEmpty':
+      return en ? 'Program name cannot be empty.' : '計劃名稱不可為空。';
+    case 'cycleLengthRange':
+      return en ? 'Cycle length must be 3–14 days.' : '週期天數需介於 3–14 天。';
+    case 'cycleCountRange':
+      return en ? 'Cycle count must be at least 1.' : '週期數至少為 1。';
+    case 'startDateFormat':
+      return en ? 'Pick a valid start date.' : '請選擇有效的開始日期。';
+    case 'dayPatternNoTemplate':
+      return en
+        ? 'Pick a template for at least one day.'
+        : '請至少為一天選擇一個 template。';
+    case 'dayPlanDuplicate':
+      return en
+        ? `Day ${(err.params?.day ?? 0) + 1} has a duplicate plan.`
+        : `第 ${(err.params?.day ?? 0) + 1} 天有重複的安排。`;
+    case 'dayIndexOutOfRange':
+      return en
+        ? `Day ${(err.params?.dayIndex ?? 0) + 1} is outside the ${err.params?.cycleLength ?? 0}-day cycle.`
+        : `第 ${(err.params?.dayIndex ?? 0) + 1} 天超出 ${err.params?.cycleLength ?? 0} 天的週期範圍。`;
+    case 'overrideCycleOutOfRange':
+      return en
+        ? `Cycle ${(err.params?.cycleIndex ?? 0) + 1} intensity is out of range.`
+        : `第 ${(err.params?.cycleIndex ?? 0) + 1} 週期的強度設定超出範圍。`;
+    case 'overrideDayOutOfRange':
+      return en
+        ? `Day ${(err.params?.dayIndex ?? 0) + 1} intensity is out of range.`
+        : `第 ${(err.params?.dayIndex ?? 0) + 1} 天的強度設定超出範圍。`;
+    case 'alreadyLastStep':
+      return en ? 'Already at the last step.' : '已在最後一步。';
+  }
 }
 
 /** Shrink program resize confirmation. */
