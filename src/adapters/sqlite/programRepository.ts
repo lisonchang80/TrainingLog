@@ -394,9 +394,10 @@ export async function countFilledCells(
  * `getProgram` quick on large programs.
  *
  * `cycle_length` is CHECK 3-14 per ADR-0004 (v005 schema); `cycle_count`
- * is CHECK >= 1. Caller is responsible for validating the user input
- * before calling — the SQLite CHECK will throw but the message won't be
- * friendly to surface.
+ * is CHECK >= 1. Defense-in-depth: we pre-validate the dimensions here
+ * (mirroring the wizard's `validateStep` 'CycleConfig' bounds) and throw
+ * `INVALID_PROGRAM_DIMENSIONS` rather than letting an out-of-range value
+ * reach SQLite and surface a raw `SQLITE_CONSTRAINT` mid-transaction.
  */
 export async function resizeProgram(
   db: Database,
@@ -407,6 +408,15 @@ export async function resizeProgram(
     now?: () => number;
   }
 ): Promise<void> {
+  if (
+    !Number.isInteger(args.new_cycle_length) ||
+    args.new_cycle_length < 3 ||
+    args.new_cycle_length > 14 ||
+    !Number.isInteger(args.new_cycle_count) ||
+    args.new_cycle_count < 1
+  ) {
+    throw new Error('INVALID_PROGRAM_DIMENSIONS');
+  }
   const ts = (args.now ?? Date.now)();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
@@ -699,8 +709,11 @@ export async function applyTagToRow(
  * start_date via `cellDate` in the renderer).
  *
  * `start_date` MUST be a valid `YYYY-MM-DD` string. SQLite doesn't enforce
- * this at the column level (TEXT NOT NULL with default 'today'); caller is
- * responsible for validating before calling.
+ * this at the column level (TEXT NOT NULL with default 'today'). Defense-in-
+ * depth: we pre-validate the format here (mirroring the wizard's
+ * `validateStep` 'CycleConfig' `start_date` regex) and throw
+ * `INVALID_START_DATE` rather than writing a malformed string verbatim, which
+ * would later crash `isoDateToUtcMs` at the next schedule resolution.
  *
  * No-op when the program doesn't exist.
  */
@@ -712,6 +725,9 @@ export async function updateProgramStartDate(
     now?: () => number;
   },
 ): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.start_date)) {
+    throw new Error('INVALID_START_DATE');
+  }
   const ts = (args.now ?? Date.now)();
   await db.runAsync(
     `UPDATE program SET start_date = ?, updated_at = ? WHERE id = ?`,

@@ -5,6 +5,7 @@ import {
   createProgram,
   getProgram,
   resizeProgram,
+  updateProgramStartDate,
 } from '../../src/adapters/sqlite/programRepository';
 import { migrate } from '../../src/db/migrate';
 import { expandWizardDraft } from '../../src/domain/program/programManager';
@@ -221,6 +222,75 @@ describe('programRepository — resize (wave 15)', () => {
         program_id
       );
       expect(after?.updated_at).toBeGreaterThan(before?.updated_at ?? 0);
+    });
+  });
+
+  // 2026-06-25 audit 🟡 F1 (report 20) — defense-in-depth: resizeProgram /
+  // updateProgramStartDate now JS-pre-validate (mirroring the wizard's
+  // validateStep 'CycleConfig' bounds) and throw a typed error BEFORE the
+  // write, instead of letting an out-of-range value hit a raw SQLITE_CONSTRAINT
+  // or a malformed start_date reach the scheduler (`isoDateToUtcMs`).
+  describe('resizeProgram — dimension pre-validation', () => {
+    const baseline = { new_cycle_length: 7, new_cycle_count: 2 };
+
+    it.each([
+      ['cycle_length below 3', { new_cycle_length: 2, new_cycle_count: 2 }],
+      ['cycle_length above 14', { new_cycle_length: 15, new_cycle_count: 2 }],
+      ['cycle_length zero', { new_cycle_length: 0, new_cycle_count: 2 }],
+      ['cycle_length non-integer', { new_cycle_length: 7.5, new_cycle_count: 2 }],
+      ['cycle_count below 1', { new_cycle_length: 7, new_cycle_count: 0 }],
+      ['cycle_count negative', { new_cycle_length: 7, new_cycle_count: -1 }],
+      ['cycle_count non-integer', { new_cycle_length: 7, new_cycle_count: 2.3 }],
+    ])('throws INVALID_PROGRAM_DIMENSIONS for %s', async (_label, dims) => {
+      const program_id = await seed7x2WithSomeFilled();
+      await expect(
+        resizeProgram(db, { program_id, ...dims })
+      ).rejects.toThrow('INVALID_PROGRAM_DIMENSIONS');
+      // No partial write: dimensions unchanged
+      const after = await getProgram(db, program_id);
+      expect(after?.program.cycle_length).toBe(7);
+      expect(after?.program.cycle_count).toBe(2);
+    });
+
+    it.each([
+      ['min length / min count', { new_cycle_length: 3, new_cycle_count: 1 }],
+      ['max length', { new_cycle_length: 14, new_cycle_count: 2 }],
+      ['baseline still works', baseline],
+    ])('accepts valid dimensions (%s)', async (_label, dims) => {
+      const program_id = await seed7x2WithSomeFilled();
+      await expect(
+        resizeProgram(db, { program_id, ...dims })
+      ).resolves.toBeUndefined();
+      const after = await getProgram(db, program_id);
+      expect(after?.program.cycle_length).toBe(dims.new_cycle_length);
+      expect(after?.program.cycle_count).toBe(dims.new_cycle_count);
+    });
+  });
+
+  describe('updateProgramStartDate — start_date pre-validation', () => {
+    it.each([
+      ['empty string', ''],
+      ['garbage', 'not-a-date'],
+      ['wrong format (slashes)', '2026/05/01'],
+      ['missing day', '2026-05'],
+      ['too short', '26-5-1'],
+    ])('throws INVALID_START_DATE for %s', async (_label, bad) => {
+      const program_id = await seed7x2WithSomeFilled();
+      await expect(
+        updateProgramStartDate(db, { program_id, start_date: bad })
+      ).rejects.toThrow('INVALID_START_DATE');
+      // No write: start_date unchanged
+      const after = await getProgram(db, program_id);
+      expect(after?.program.start_date).toBe('2026-05-01');
+    });
+
+    it('accepts a valid yyyy-mm-dd and writes it', async () => {
+      const program_id = await seed7x2WithSomeFilled();
+      await expect(
+        updateProgramStartDate(db, { program_id, start_date: '2027-01-15' })
+      ).resolves.toBeUndefined();
+      const after = await getProgram(db, program_id);
+      expect(after?.program.start_date).toBe('2027-01-15');
     });
   });
 });
