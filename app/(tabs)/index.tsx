@@ -56,6 +56,7 @@ import {
   sendUserInfo,
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
+import { ToastController, ToastHost } from '@/components/ui/Toast';
 import {
   applyHrTick,
   applyKcalTick,
@@ -539,6 +540,27 @@ export default function TodayScreen() {
   // listeners use, so we capture it via ref.
   const refreshRef = useRef<(() => void) | null>(null);
   refreshRef.current = refresh;
+
+  // D32 interim — while a session is Watch-led (`isWatchLedReadOnly`), every
+  // iPhone set mutation short-circuits to prevent the Watch's next live-mirror
+  // tick from silently overwriting the edit (see sessionManager.isWatchLedReadOnly).
+  // Without feedback the user just sees "tapping does nothing". Surface a toast so
+  // the read-only state is explained. (Real fix = reverse-sync Phase C / D32, which
+  // removes the guard once iPhone edits flow to the Watch.) Debounced so rapid taps
+  // across the 7 gated handlers don't stack toasts.
+  const watchLedToastRef = useRef<ToastController | null>(null);
+  if (watchLedToastRef.current == null) {
+    watchLedToastRef.current = new ToastController();
+  }
+  const lastWatchLedToastAtRef = useRef(0);
+  const notifyWatchLedReadOnly = useCallback(() => {
+    const now = Date.now();
+    if (now - lastWatchLedToastAtRef.current < 2500) return;
+    lastWatchLedToastAtRef.current = now;
+    watchLedToastRef.current?.show(t('status', 'watchLedReadOnly'), {
+      icon: 'info',
+    });
+  }, []);
   useEffect(() => {
     const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
       await onHandshakeRequest(db, env, reply);
@@ -1250,7 +1272,7 @@ export default function TodayScreen() {
     exercise_id: string,
     session_exercise_id: string,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
       Alert.alert(t('alert', 'noActiveSession'));
@@ -1364,7 +1386,7 @@ export default function TodayScreen() {
     set_id: string,
     patch: { reps?: number; weight?: number },
   ) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const dbPatch: { weight_kg?: number; reps?: number } = {};
     if (patch.reps !== undefined) dbPatch.reps = patch.reps;
     if (patch.weight !== undefined) dbPatch.weight_kg = patch.weight;
@@ -1415,7 +1437,7 @@ export default function TodayScreen() {
     set_id: string,
     is_in_cluster: boolean = false,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     // v019 isolation (slice 10c #17): cycle ops operate on a SINGLE card's
@@ -1479,7 +1501,7 @@ export default function TodayScreen() {
    * is one tap.
    */
   const onDeleteSet = async (set_id: string) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     try {
@@ -1505,7 +1527,7 @@ export default function TodayScreen() {
     _exercise_id: string,
     source_set_id: string,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1560,7 +1582,7 @@ export default function TodayScreen() {
    * Mirrors template editor's `addDropsetRow` UX, but persisted.
    */
   const onAddDropsetRow = async (after_set_id: string) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1624,7 +1646,7 @@ export default function TodayScreen() {
    *     set's "complete" side-effect, timer included).
    */
   const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
-    if (isWatchLedReadOnly(sessionState)) return; // Watch-led: iPhone 唯讀 (audit 🟠)
+    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     const nextLogged = currentlyLogged ? 0 : 1;
@@ -3251,6 +3273,8 @@ export default function TodayScreen() {
         onClose={() => setBodySheetVisible(false)}
         busy={busy}
       />
+      {/* D32 interim — Watch-led read-only feedback toast. */}
+      <ToastHost controller={watchLedToastRef.current!} />
     </SafeAreaView>
   );
 }
