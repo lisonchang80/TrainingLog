@@ -81,6 +81,123 @@ export async function insertSessionSet(
 }
 
 /**
+ * F1/F2 fix — Opt A (2026-06-26). The iPhone-local set mutations historically
+ * only wrote `ordering` (global per-session identity) and left `display_rank`
+ * NULL, while every render surface sorts by `display_rank ?? ordering`
+ * (`computeSessionSetLayout` / `sortSetsByDisplayRank`). On a card the Watch had
+ * reordered, the Watch rows carry per-card `display_rank` (0,1,2…) while a fresh
+ * iPhone insert's NULL fell back to its *global* `ordering` (e.g. 6,7…) → it
+ * sorted to the wrong end (F1); and an iPhone long-press reorder only rewrote
+ * `ordering`, which the comparator ignores → silent no-op (F2).
+ *
+ * The fix makes the iPhone speak the same per-card display-coordinate space:
+ * after any structural mutation we renumber the affected card's `display_rank`
+ * to clean integers `0..N-1` in its CURRENT render order. `ordering` is left
+ * untouched as the reconcile identity key (ADR-0019 §2026-06-02; the
+ * `set-ordering-surfaces` skill). Per the 2026-06-26 grill: integer renumber
+ * (not fractional midpoint) — the edit path runs on ENDED sessions where no live
+ * Watch tick can race (`replaceLiveMirror` drops ticks on `ended_at != null`).
+ *
+ * Card scope mirrors the v019 isolation pattern used by every writer here:
+ * scope to `session_exercise_id` when present, else fall back to
+ * `(session_id, exercise_id)` for legacy rows the v019 backfill couldn't match.
+ * For superset/cluster cards each side is its own `session_exercise_id`, so the
+ * two sides renumber independently (matches `clusterCard.sortedSetsFor`, which
+ * sorts each side by `display_rank ?? ordering` and pairs A[i]/B[i] by index).
+ */
+type CardRef = {
+  session_id: string;
+  exercise_id: string;
+  session_exercise_id: string | null;
+};
+
+/** Read a card's set ids in current render order (`display_rank ?? ordering`,
+ *  `ordering` tie-break). */
+async function readCardSetIdsRenderOrdered(
+  db: Database,
+  card: CardRef
+): Promise<string[]> {
+  const rows = card.session_exercise_id
+    ? await db.getAllAsync<{
+        id: string;
+        ordering: number;
+        display_rank: number | null;
+      }>(
+        `SELECT id, ordering, display_rank FROM "set"
+          WHERE session_exercise_id = ?`,
+        card.session_exercise_id
+      )
+    : await db.getAllAsync<{
+        id: string;
+        ordering: number;
+        display_rank: number | null;
+      }>(
+        `SELECT id, ordering, display_rank FROM "set"
+          WHERE session_id = ? AND exercise_id = ?`,
+        card.session_id,
+        card.exercise_id
+      );
+  return rows
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.display_rank ?? a.ordering) - (b.display_rank ?? b.ordering) ||
+        a.ordering - b.ordering
+    )
+    .map((r) => r.id);
+}
+
+/** Stamp `display_rank = 0..N-1` onto the given ids in order. */
+async function stampDisplayRanks(
+  db: Database,
+  orderedIds: string[]
+): Promise<void> {
+  for (let i = 0; i < orderedIds.length; i++) {
+    await db.runAsync(
+      `UPDATE "set" SET display_rank = ? WHERE id = ?`,
+      i,
+      orderedIds[i]
+    );
+  }
+}
+
+/**
+ * Renumber a card's `display_rank` after inserting `newIds` (in order). The new
+ * rows are placed right AFTER `afterId` in the card's render order, or appended
+ * to the end when `afterId` is null / not found. Existing rows keep their
+ * relative display order (just compacted to clean integers).
+ *
+ * IMPORTANT: we splice `newIds` by explicit position rather than re-sorting by
+ * `display_rank ?? ordering` — a freshly-inserted row has `display_rank = NULL`
+ * and its global `ordering` is NOT comparable to a Watch-reordered card's
+ * per-card ranks, so a naive re-sort would push it to the wrong end (the F1 bug
+ * itself). MUST run inside the caller's transaction (or, for the
+ * non-transactional `recordSetInSession`, immediately after the insert).
+ */
+async function renumberCardAfterInsert(
+  db: Database,
+  card: CardRef,
+  newIds: string[],
+  afterId: string | null
+): Promise<void> {
+  const allOrdered = await readCardSetIdsRenderOrdered(db, card);
+  const isNew = new Set(newIds);
+  const existing = allOrdered.filter((id) => !isNew.has(id));
+  let final: string[];
+  if (afterId != null && existing.includes(afterId)) {
+    const idx = existing.indexOf(afterId);
+    final = [
+      ...existing.slice(0, idx + 1),
+      ...newIds,
+      ...existing.slice(idx + 1),
+    ];
+  } else {
+    final = [...existing, ...newIds];
+  }
+  await stampDisplayRanks(db, final);
+}
+
+/**
  * Insert a dropset FOLLOWER produced by the tap-label-cycle reducer
  * (`cycleSessionSetKind` emitting an `insertFollower` op: warmup→dropset
  * promotes the tapped row to a head and appends one follower right below).
@@ -146,6 +263,19 @@ export async function insertDropsetFollower(
       parent_set_id: args.parent_set_id,
       session_exercise_id: head?.session_exercise_id ?? null,
     });
+    // F1 fix (Opt A): renumber the card's display_rank so the new follower
+    // lands right after its parent head in render order (not at the bottom of
+    // a Watch-reordered card).
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: args.exercise_id,
+        session_exercise_id: head?.session_exercise_id ?? null,
+      },
+      [args.new_set_id],
+      args.parent_set_id
+    );
   });
 }
 
@@ -510,6 +640,33 @@ export async function cloneClusterCycle(
         );
       }
     }
+    // F1 fix (Opt A): renumber each side's display_rank so the cloned cycle
+    // lands at the END of each side in render order. Sides are independent
+    // session_exercise_ids (clusterCard pairs A[i]/B[i] by index).
+    if (args.a_source) {
+      await renumberCardAfterInsert(
+        db,
+        {
+          session_id: args.session_id,
+          exercise_id: args.a_source.exercise_id,
+          session_exercise_id: args.a_source.session_exercise_id ?? null,
+        },
+        [args.new_a_set_id],
+        null
+      );
+    }
+    if (args.b_source) {
+      await renumberCardAfterInsert(
+        db,
+        {
+          session_id: args.session_id,
+          exercise_id: args.b_source.exercise_id,
+          session_exercise_id: args.b_source.session_exercise_id ?? null,
+        },
+        [args.new_b_set_id],
+        null
+      );
+    }
   });
 }
 
@@ -605,6 +762,28 @@ export async function addClusterCycleAtEnd(
       set_kind,
       args.b.session_exercise_id ?? null
     );
+    // F1 fix (Opt A): renumber each side's display_rank so the new cycle lands
+    // at the END of each side in render order.
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: args.a.exercise_id,
+        session_exercise_id: args.a.session_exercise_id ?? null,
+      },
+      [args.a.new_set_id],
+      null
+    );
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: args.b.exercise_id,
+        session_exercise_id: args.b.session_exercise_id ?? null,
+      },
+      [args.b.new_set_id],
+      null
+    );
   });
 }
 
@@ -657,6 +836,21 @@ export async function recordSetInSession(
     created_at: ts,
     session_exercise_id: args.session_exercise_id ?? null,
   });
+
+  // F1 fix (Opt A): renumber the card's display_rank so the appended set lands
+  // at the END of the card in render order (not mis-sorted on a Watch-reordered
+  // card). recordSetInSession isn't transaction-wrapped (matches its existing
+  // style); the renumber is a best-effort follow-up write.
+  await renumberCardAfterInsert(
+    db,
+    {
+      session_id: args.session_id,
+      exercise_id: args.input.exercise_id,
+      session_exercise_id: args.session_exercise_id ?? null,
+    },
+    [set_id],
+    null
+  );
 
   return { set_id, ordering, created_at: ts };
 }
@@ -974,6 +1168,18 @@ export async function insertSessionSetAfter(
       parent_set_id: null,
       session_exercise_id: src.session_exercise_id,
     });
+    // F1 fix (Opt A): renumber the card's display_rank so the new row lands
+    // right after its source in render order, even on a Watch-reordered card.
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: src.exercise_id,
+        session_exercise_id: src.session_exercise_id,
+      },
+      [new_set_id],
+      args.source_set_id
+    );
   });
 
   return { set_id: new_set_id, ordering: new_ordering, created_at: ts };
@@ -1065,6 +1271,18 @@ export async function addSessionDropsetRow(
       parent_set_id: headId,
       session_exercise_id: src.session_exercise_id,
     });
+    // F1 fix (Opt A): renumber the card's display_rank so the new follower lands
+    // right after the tapped row in render order.
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: src.exercise_id,
+        session_exercise_id: src.session_exercise_id,
+      },
+      [new_set_id],
+      args.after_set_id
+    );
   });
 
   return { set_id: new_set_id, ordering: new_ordering, created_at: ts };
@@ -1214,6 +1432,18 @@ export async function addSessionDropsetCluster(
         session_exercise_id: src.session_exercise_id,
       });
     }
+    // F1 fix (Opt A): renumber the card's display_rank so the new cluster lands
+    // right after the source chain's last row in render order.
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.session_id,
+        exercise_id: src.exercise_id,
+        session_exercise_id: src.session_exercise_id,
+      },
+      [head_id, ...follower_ids],
+      lastInChain.id
+    );
   });
 
   return { head_id, follower_ids };
@@ -1345,15 +1575,15 @@ export async function reorderSessionSetsForExercise(
   }
 
   await db.withTransactionAsync(async () => {
-    for (let i = 0; i < args.orderedIds.length; i++) {
-      const target_id = args.orderedIds[i];
-      const slot_ordering = slots[i].ordering;
-      await db.runAsync(
-        `UPDATE "set" SET ordering = ? WHERE id = ?`,
-        slot_ordering,
-        target_id
-      );
-    }
+    // F2 fix (Opt A, 2026-06-26): a long-press reorder writes the new order to
+    // `display_rank` (the display sort key every surface reads via
+    // `display_rank ?? ordering`), 0..N-1 in the dropped order — NOT `ordering`.
+    // `ordering` stays the immutable reconcile identity key (ADR-0019
+    // §2026-06-02; ADR-0012 cross-link: "a reorder in the sync world means write
+    // display_rank, leave ordering"). The OLD code rewrote `ordering`, which the
+    // comparator ignores on any card carrying `display_rank` (Watch-reordered,
+    // or v025-backfilled where display_rank == ordering) → silent no-op = F2.
+    await stampDisplayRanks(db, args.orderedIds);
   });
 }
 
@@ -1570,6 +1800,19 @@ export async function replayCardSetsFromHistoricalSession(
         session_exercise_id: args.current_se_id,
       });
     }
+    // F1 fix (Opt A): stamp clean integer display_rank 0..N-1 so a replayed
+    // card never carries NULL display_rank (which would re-mix coordinate
+    // spaces on the next iPhone insert). Fresh rows arrive in ordering order.
+    await renumberCardAfterInsert(
+      db,
+      {
+        session_id: args.current_session_id,
+        exercise_id: args.source_exercise_id,
+        session_exercise_id: args.current_se_id,
+      },
+      [],
+      null
+    );
   });
 
   return { inserted: sourceSets.length };
@@ -1756,6 +1999,18 @@ export async function replayClusterCardSetsFromHistoricalSession(
           session_exercise_id,
         });
       }
+      // F1 fix (Opt A): stamp clean integer display_rank 0..N-1 on this side so
+      // a replayed cluster card never carries NULL display_rank.
+      await renumberCardAfterInsert(
+        db,
+        {
+          session_id: args.current_session_id,
+          exercise_id,
+          session_exercise_id,
+        },
+        [],
+        null
+      );
     };
 
     await insertSide(
