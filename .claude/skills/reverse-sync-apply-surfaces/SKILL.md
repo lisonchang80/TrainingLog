@@ -49,11 +49,25 @@ path runs no edit handler).
 
 ### Layer 2 — does the WIRE carry the field?
 
-`iphoneLiveMirrorProducer.buildLiveMirrorPayload` re-reads via the shared
-`fetchSessionSnapshot` (handshake.ts) then omit-nulls. Confirm the field is
-SELECTed + put on the wire set/snapshot (e.g. `:191 if (s.display_rank != null)
-wireSet.display_rank = …`, `:205 title: snap.title`). If it's not on the wire,
-no Swift fix helps.
+Layer 2 is TWO stages — a field must survive BOTH or it never reaches Swift:
+
+1. **DB → snapshot** (`fetchSessionSnapshot`, handshake.ts ~:1202 `bucket.map`).
+   The SQL (`listSetsBySession`, setRepository.ts) SELECTs the column, but the
+   `bucket.map((s) => ({...}))` projection must also COPY it onto the
+   `SessionSnapshotSet`. A field that the type declares + the SQL selects but
+   the projection forgets is silently `undefined` on the snapshot.
+2. **snapshot → wire** (`iphoneLiveMirrorProducer.projectToWire`, omit-null).
+   `:181 is_logged` always emitted; `:191 if (s.display_rank != null) …` is
+   conditional. Omit-null collapses the stage-1 `undefined` to "absent" — so a
+   stage-1 miss looks identical to a legitimately-null field. No Swift fix helps.
+
+⚠️ The 2026-06-26 ③ bug lived in **stage 1**: `SessionSnapshotSet.display_rank`
+existed in the type, `listSetsBySession` SELECTed `s.display_rank`, the producer
++ Swift apply + render were all correct — but `fetchSessionSnapshot`'s `bucket.map`
+dropped `display_rank`, so it was never on the snapshot → omit-null hid it → the
+Watch's `setRankOverrides` stayed empty. When a reverse field "has all the
+plumbing but still doesn't arrive", grep `fetchSessionSnapshot`'s projection
+FIRST — it's the easiest stage to forget because the type + SQL both look right.
 
 ### Layer 3 — does the Watch APPLY map it + does RENDER read the override?
 
@@ -108,12 +122,23 @@ didn't load). Always have the user hard-reload before concluding a TS push
 
 ## 2026-06-26 device-session status (slice/13d-phase-c-device-2026-06-26)
 
-Verified syncing: ① 加動作 / ⑥ 刪動作. Layer-3 fixes landed (titleOverride ④,
-setRankOverrides ③) but **⑤ 打勾 + ③ set 排序 still NOT syncing as of last
-report** — open. ⑤ has loggedSetIds apply (Layer 3 ok) so suspect Layer 1
-(push not firing for onToggleLogged) OR stale bundle; ③ has the apply map +
-render now, so suspect Layer 2 (does the iPhone set-reorder actually write
-`display_rank` to DB for the surface the user reordered — 詳情頁 session/[id].tsx
-is NOT push-wired, only index.tsx is) or a render not re-observing. Next session:
-re-walk the 3 layers for ⑤/③ specifically; check `session/[id].tsx` reorder has
-no `pushMirrorIfWatchLed` (only index.tsx was wired).
+Verified syncing on device: ① 加動作 / ⑥ 刪動作.
+
+**③ set 排序 — ROOT CAUSE FOUND + FIXED (commit 4d8ad9e), pending device-verify.**
+Pure Layer-2 stage-1 miss (see ⚠️ above): `fetchSessionSnapshot`'s `bucket.map`
+dropped `display_rank`, so the wire never carried it. One-line fix
+(`display_rank: s.display_rank ?? null`) — **JS-only, NO Watch rebuild** (the
+Swift apply/render shipped in dc44d31). Verify by Metro JS reload only. NOTE the
+detail page `session/[id].tsx` reorder is STILL not push-wired (only index.tsx's
+Today-tab drag pushes, via its `refresh()` tail) — if the user reorders on the
+detail page during a Watch-led session, wire `pushMirrorIfWatchLed` there too.
+
+**⑤ 打勾 — NO code bug; concluded STALE BUNDLE.** Walked all 3 layers in code:
+Layer 1 ✓ (`onToggleLogged` calls `pushMirrorIfWatchLed`, index.tsx:1684), Layer
+2 ✓ (`is_logged` always emitted, producer:181 + fetchSessionSnapshot:1212), Layer
+3 ✓ (apply `newLogged.insert/remove`, render `isLogged()`). The "add/delete
+exercise syncs but set-edits don't" signature = the running iPhone JS predates
+faa959a's per-handler push (the refresh-tail push from 189c233 covers exercise
+ops; the per-handler push for set edits didn't load). Fix = hard reload
+(terminate + relaunch the iPhone app, NOT shake-reload) — see the stale-bundle
+section above. Re-smoke ⑤ AFTER a confirmed hard reload before suspecting code.
