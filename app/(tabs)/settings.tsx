@@ -5,8 +5,10 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -73,8 +75,10 @@ import { buildJsonExport, writeJsonExport } from '@/src/services/jsonExport';
 import { getLatestCloudBackup } from '@/src/adapters/backup/icloudBackupAdapter';
 import type { ICloudBackupItem } from '@/modules/icloud-backup';
 import type { UnitPreference } from '@/src/domain/body/types';
+import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
 import { parseWeightInput } from '@/src/domain/body/unitConversion';
-import { t, tBodyweightUnitHint, tBodyweightWithUnit, tSaveOrSaving, useLocale } from '@/src/i18n';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { t, tBodyweightUnitHint, tSaveOrSaving, useLocale } from '@/src/i18n';
 import {
   loadStoredLocale,
   resolveLocale,
@@ -174,6 +178,12 @@ export default function SettingsScreen() {
    */
   const [bwSheetOpen, setBwSheetOpen] = useState(false);
   const [bwInput, setBwInput] = useState('');
+  const [pbfInput, setPbfInput] = useState('');
+  const [smmInput, setSmmInput] = useState('');
+  // 2026-06-27 — settings 身體數據 modal now records all three metrics
+  // (體重/PBF/SMM, consistent with BodyDataSheet) + a chosen date, so past
+  // entries can be backfilled. recordedAt defaults to now.
+  const [recordedAt, setRecordedAt] = useState(() => Date.now());
   const [bwBusy, setBwBusy] = useState(false);
   /**
    * Slice 15 C4 — minimal restore entry (grill Q8-C entry B; the full
@@ -438,29 +448,35 @@ export default function SettingsScreen() {
   // ADR-0024 § 5 — 體重 mini sheet handlers.
   const onOpenBwSheet = () => {
     setBwInput('');
+    setPbfInput('');
+    setSmmInput('');
+    setRecordedAt(Date.now());
     setBwSheetOpen(true);
   };
 
   const onSaveBw = async () => {
-    const bwKg = parseWeightInput(bwInput, unit);
-    if (bwKg == null || bwKg <= 0 || bwKg > 500) {
+    // weight fields are unit-aware (→ kg); PBF is a plain percent.
+    const parseField = (raw: string, kind: 'weight' | 'pct'): number | null => {
+      const s = raw.trim();
+      if (s === '') return null;
+      if (kind === 'weight') return parseWeightInput(s, unit);
+      const n = Number(s);
+      return Number.isFinite(n) ? n : NaN;
+    };
+    const draft = {
+      recorded_at: recordedAt,
+      bodyweight_kg: parseField(bwInput, 'weight'),
+      pbf: parseField(pbfInput, 'pct'),
+      smm_kg: parseField(smmInput, 'weight'),
+    };
+    if (validateBodyMetric(draft) != null) {
       Alert.alert(t('alert', 'invalidBodyweightTitle'), t('alert', 'invalidBodyweightRange'));
       return;
     }
     setBwBusy(true);
     try {
-      await insertBodyMetric(
-        db,
-        {
-          recorded_at: Date.now(),
-          bodyweight_kg: bwKg,
-          pbf: null,
-          smm_kg: null,
-        },
-        randomUUID,
-      );
+      await insertBodyMetric(db, draft, randomUUID);
       setBwSheetOpen(false);
-      setBwInput('');
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
@@ -910,52 +926,102 @@ export default function SettingsScreen() {
 
       </ScrollView>
 
-      {/* ADR-0024 § 5 — 體重 mini sheet (modal). 單一 TextInput + 儲存。 */}
+      {/* ADR-0024 § 5 → 2026-06-27 — 身體數據 mini sheet (modal). Date picker
+          on top + 體重/PBF/SMM 三輸入格 (一致 with BodyDataSheet). KAV lifts the
+          centered card above the keyboard. */}
       <Modal
         visible={bwSheetOpen}
         transparent
         animationType="fade"
         onRequestClose={() => setBwSheetOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalHeading}>{t('page', 'recordBodyweight')}</Text>
-            <Text style={styles.modalLabel}>{tBodyweightWithUnit(unit)}</Text>
-            <TextInput
-              style={styles.modalInput}
-              keyboardType="decimal-pad"
-              selectTextOnFocus
-              value={bwInput}
-              onChangeText={setBwInput}
-              placeholder={unit === 'kg' ? '70.0' : '154.0'}
-              placeholderTextColor={tokens.text.tertiary}
-              autoFocus
-            />
-            <View style={styles.modalActions}>
-              <Pressable
-                onPress={() => setBwSheetOpen(false)}
-                disabled={bwBusy}
-                style={({ pressed }) => [
-                  styles.modalSecondaryBtn,
-                  bwBusy && styles.btnDisabled,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.modalSecondaryText}>{t('common', 'cancel')}</Text>
-              </Pressable>
-              <Pressable
-                onPress={onSaveBw}
-                disabled={bwBusy}
-                style={({ pressed }) => [
-                  styles.modalPrimaryBtn,
-                  bwBusy && styles.btnDisabled,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.modalPrimaryText}>
-                  {tSaveOrSaving(bwBusy)}
-                </Text>
-              </Pressable>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalAvoider}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalSheet}>
+              <Text style={styles.modalHeading}>{t('page', 'recordBodyData')}</Text>
+
+              <View style={styles.modalDateRow}>
+                <Text style={styles.modalLabel}>{t('page', 'recordDateLabel')}</Text>
+                <DateTimePicker
+                  value={new Date(recordedAt)}
+                  mode="date"
+                  display="compact"
+                  maximumDate={new Date()}
+                  onChange={(_e, d) => {
+                    if (d) setRecordedAt(d.getTime());
+                  }}
+                />
+              </View>
+
+              <View style={styles.modalFieldRow}>
+                <View style={styles.modalField}>
+                  <Text style={styles.modalFieldLabel}>
+                    {`${t('domain', 'bodyweight')} (${unit})`}
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                    value={bwInput}
+                    onChangeText={setBwInput}
+                    placeholder="—"
+                    placeholderTextColor={tokens.text.tertiary}
+                  />
+                </View>
+                <View style={styles.modalField}>
+                  <Text style={styles.modalFieldLabel}>PBF (%)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                    value={pbfInput}
+                    onChangeText={setPbfInput}
+                    placeholder="—"
+                    placeholderTextColor={tokens.text.tertiary}
+                  />
+                </View>
+                <View style={styles.modalField}>
+                  <Text style={styles.modalFieldLabel}>{`SMM (${unit})`}</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                    value={smmInput}
+                    onChangeText={setSmmInput}
+                    placeholder="—"
+                    placeholderTextColor={tokens.text.tertiary}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.modalActions}>
+                <Pressable
+                  onPress={() => setBwSheetOpen(false)}
+                  disabled={bwBusy}
+                  style={({ pressed }) => [
+                    styles.modalSecondaryBtn,
+                    bwBusy && styles.btnDisabled,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.modalSecondaryText}>{t('common', 'cancel')}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onSaveBw}
+                  disabled={bwBusy}
+                  style={({ pressed }) => [
+                    styles.modalPrimaryBtn,
+                    bwBusy && styles.btnDisabled,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.modalPrimaryText}>
+                    {tSaveOrSaving(bwBusy)}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1259,6 +1325,16 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.text.primary,
     },
     modalActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+    modalAvoider: { flex: 1 },
+    modalDateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 4,
+    },
+    modalFieldRow: { flexDirection: 'row', gap: 8 },
+    modalField: { flex: 1, gap: 4 },
+    modalFieldLabel: { fontSize: 11, color: tokens.text.secondary },
     modalPrimaryBtn: {
       flex: 1,
       paddingVertical: 14,

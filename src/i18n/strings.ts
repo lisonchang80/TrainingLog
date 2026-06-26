@@ -172,8 +172,8 @@ export const strings = {
       discardSession: '🚫 放棄訓練',
       discardSimple: '放棄',
       // Smoke F3 patch — in-session header ⋯ menu option + BodyDataSheet
-      // top bar title.
-      bodyData: '體重資料',
+      // top bar title. 2026-06-27 renamed 體重資料 → 身體數據 (covers 體重/PBF/SMM).
+      bodyData: '身體數據',
       saveTemplate: '儲存模板',
       saveAsTemplate: '另存模板',
       saveAsIntensity: '另存強度',
@@ -436,6 +436,8 @@ export const strings = {
       // (section header / row label / a11y label / mini-sheet heading).
       bodyweightSection: '體重',
       recordBodyweight: '紀錄體重',
+      recordBodyData: '紀錄身體數據',
+      recordDateLabel: '日期',
       recordBodyweightRow: '＋ 紀錄體重',
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: '新計畫',
@@ -1474,6 +1476,8 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block.
       bodyweightSection: 'Bodyweight',
       recordBodyweight: 'Record bodyweight',
+      recordBodyData: 'Record body data',
+      recordDateLabel: 'Date',
       recordBodyweightRow: '＋ Record bodyweight',
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: 'New Program',
