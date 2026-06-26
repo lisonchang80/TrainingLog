@@ -16,7 +16,16 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { t } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
@@ -62,9 +71,17 @@ export function SetNoteSheet({
       animationType="slide"
       onRequestClose={onCancel}
     >
-      <Pressable style={styles.backdrop} onPress={onCancel}>
-        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
-          <View style={styles.topBar}>
+      {/* 2026-06-27 — the bottom sheet + autoFocus TextInput was hidden behind
+          the keyboard (no avoidance). KeyboardAvoidingView (padding on iOS)
+          pads the bottom by the keyboard height so the flex-end sheet floats
+          just above it. */}
+      <KeyboardAvoidingView
+        style={styles.fill}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable style={styles.backdrop} onPress={onCancel}>
+          <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
+            <View style={styles.topBar}>
             <Pressable onPress={onCancel} hitSlop={8} accessibilityRole="button">
               <Text style={styles.topBarBtnText}>{t('common', 'cancel')}</Text>
             </Pressable>
@@ -86,14 +103,18 @@ export function SetNoteSheet({
             autoFocus
             textAlignVertical="top"
           />
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 function makeStyles(tokens: ThemeTokens) {
   return StyleSheet.create({
+    fill: {
+      flex: 1,
+    },
     backdrop: {
       flex: 1,
       // HIG-standard modal scrim — mode-agnostic.
