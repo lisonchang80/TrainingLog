@@ -659,9 +659,11 @@ private struct SessionCardListPage: View {
             ScrollViewReader { proxy in
             ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                // Session title (Phase A: read from snapshot).
-                if !snapshot.title.isEmpty {
-                    Text(snapshot.title)
+                // Session title — prefer the iPhone-pushed override (reverse
+                // sync, Phase C-core ④) over the immutable base snapshot title.
+                let displayTitle = state.titleOverride ?? snapshot.title
+                if !displayTitle.isEmpty {
+                    Text(displayTitle)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)

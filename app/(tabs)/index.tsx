@@ -2283,6 +2283,19 @@ export default function TodayScreen() {
               onPress: async () => {
                 const session_id = getSessionId(sessionState);
                 if (!session_id) return;
+                // Phase C-core (2026-06-26) — tell the paired Watch to end its
+                // session too. Discard = an end for the Watch's teardown, so
+                // reuse the end-session envelope (the Watch's handler runs
+                // SessionController.end → discardWorkout). Watch-led only;
+                // fire-and-forget (never blocks discard UX); fired BEFORE the
+                // local delete so the sessionId is unambiguous. Mirrors the
+                // finalize path's pushEndToWatch (finish already syncs).
+                if (
+                  sessionState.status === 'in_progress' &&
+                  sessionState.is_watch_tracked
+                ) {
+                  void pushEndToWatch(db, session_id);
+                }
                 try {
                   await discardSession(db, session_id);
                   setSessionState(IDLE);

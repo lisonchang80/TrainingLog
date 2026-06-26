@@ -219,6 +219,12 @@ final class SessionInteractionState: ObservableObject {
     /// override, mirrors `setRankOverrides`' philosophy for the set level.
     @Published var exerciseOrderOverride: [String] = []
 
+    /// C-core — session title pushed from iPhone. The Watch renders the title
+    /// from the IMMUTABLE base snapshot, so an iPhone rename can't reach it
+    /// without this overlay. nil ⇒ render the base title. (2026-06-26 device
+    /// smoke: ④ title was not syncing because there was no override field.)
+    @Published var titleOverride: String? = nil
+
     /// Monotonic counter for minting unique `AddedSet` ids within this
     /// session. Survives view re-mounts (the state object outlives them).
     private var addCounter = 0
@@ -625,8 +631,11 @@ final class SessionInteractionState: ObservableObject {
         deletedExerciseIds.formUnion(Set(baseExById.keys).subtracting(snapExIds))
         addedExercises = snap.exercises.filter { baseExById[$0.sessionExerciseId] == nil }
 
-        // 2. exercise display order (動作層 reorder).
+        // 2. exercise display order (動作層 reorder) + session title (the Watch
+        //    renders the title from the immutable base, so an iPhone rename
+        //    needs this overlay — ④ device-smoke fix).
         exerciseOrderOverride = snap.exercises.map(\.sessionExerciseId)
+        titleOverride = snap.title
 
         // 3. per-set diff over base exercises (added exercises ride whole in
         //    `addedExercises`; their per-set logged/edited live in the snapshot
@@ -636,6 +645,10 @@ final class SessionInteractionState: ObservableObject {
         var newDeletedSets = deletedSetIds
         var newNotes = notesOverride
         var newAddedSets = addedSets
+        // set-level display order — the iPhone's display_rank per set. The base
+        // snapshot is immutable (carries the OLD rank), so a set reorder needs
+        // this overlay or the Watch keeps the base order (③ device-smoke fix).
+        var newRankOverrides = setRankOverrides
         let allBaseSets = base.exercises.flatMap(\.sets)
         let baseSetById = Dictionary(
             allBaseSets.map { ($0.setId, $0) },
@@ -682,6 +695,10 @@ final class SessionInteractionState: ObservableObject {
                     ))
                 }
                 if let n = s.notes { newNotes[s.setId] = n }
+                // set-level display order — adopt the iPhone's display_rank so a
+                // set reorder reaches the Watch (the immutable base keeps the
+                // OLD rank). nil ⇒ leave whatever override was there.
+                if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
             }
         }
         // Assign once each → ≤ one @Published willSet per field per apply.
@@ -690,6 +707,7 @@ final class SessionInteractionState: ObservableObject {
         deletedSetIds = newDeletedSets
         notesOverride = newNotes
         addedSets = newAddedSets
+        setRankOverrides = newRankOverrides
     }
 
     // MARK: - Display value
