@@ -1013,6 +1013,67 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       // denormalises from session_exercise (null when unset).
       expect(ex?.sets[0].rpe).toBeNull();
       expect(ex?.sets[0].rest_sec).toBeNull();
+      // v025 display_rank — a plain iPhone-authored set has NULL display_rank
+      // (never reordered); the snapshot surfaces it as null (the omit-null
+      // collapse happens later, at the producer wire boundary).
+      expect(ex?.sets[0].display_rank ?? null).toBeNull();
+    });
+
+    it('surfaces display_rank so a set reorder reverse-syncs to the Watch (③)', async () => {
+      // Device-session 2026-06-26 ③ root cause: this projection used to drop
+      // `display_rank`, so a long-press reorder (which rewrites ONLY
+      // display_rank, not ordering) never reached the Watch. Lock it: a card
+      // whose sets carry display_rank must surface it on the snapshot.
+      await createSession(db, {
+        id: 'sess-rank',
+        started_at: 1_700_000_000_000,
+        title: 'Reordered',
+      });
+      await appendSessionExercise(db, {
+        id: 'se-r',
+        session_id: 'sess-rank',
+        exercise_id: BENCH,
+      });
+      // Two sets, creation order 1,2 — then "reordered" so set-b renders first.
+      await insertSessionSet(db, {
+        id: 'set-a',
+        session_id: 'sess-rank',
+        exercise_id: BENCH,
+        weight_kg: 100,
+        reps: 5,
+        is_skipped: 0,
+        ordering: 1,
+        created_at: 1_700_000_000_001,
+        set_kind: 'working',
+        parent_set_id: null,
+        session_exercise_id: 'se-r',
+      });
+      await insertSessionSet(db, {
+        id: 'set-b',
+        session_id: 'sess-rank',
+        exercise_id: BENCH,
+        weight_kg: 105,
+        reps: 4,
+        is_skipped: 0,
+        ordering: 2,
+        created_at: 1_700_000_000_002,
+        set_kind: 'working',
+        parent_set_id: null,
+        session_exercise_id: 'se-r',
+      });
+      // Simulate a long-press reorder: rewrite display_rank ONLY (ordering
+      // stays the reconcile identity key). set-b now ranks before set-a.
+      await db.runAsync(`UPDATE "set" SET display_rank = ? WHERE id = ?`, 0, 'set-b');
+      await db.runAsync(`UPDATE "set" SET display_rank = ? WHERE id = ?`, 1, 'set-a');
+
+      const snap = await fetchSessionSnapshot(db, 'sess-rank');
+      const sets = snap?.exercises[0].sets ?? [];
+      const byId = new Map(sets.map((s) => [s.setId, s] as const));
+      // The snapshot keeps creation-order iteration (ORDER BY ordering), but
+      // EACH set must carry its display_rank so the Watch can apply the
+      // override (the producer omit-nulls; the Swift apply →setRankOverrides).
+      expect(byId.get('set-b')?.display_rank).toBe(0);
+      expect(byId.get('set-a')?.display_rank).toBe(1);
     });
 
     it('drops sets whose session_exercise_id is null (legacy backfill miss)', async () => {

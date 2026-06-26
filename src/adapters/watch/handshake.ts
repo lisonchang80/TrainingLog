@@ -1211,6 +1211,15 @@ export async function fetchSessionSnapshot(
           (s.set_kind as SessionSnapshotSet['set_kind']) ?? 'working',
         is_logged: s.is_logged === 1,
         parent_set_id: s.parent_set_id ?? null,
+        // v025 display rank — the Watch's effective sort key. WITHOUT this
+        // the reverse iPhone→Watch live-mirror could never carry a set
+        // reorder (③): the producer omits-null + the Swift apply maps it to
+        // `setRankOverrides`, but a long-press reorder rewrites ONLY
+        // `display_rank` (not `ordering`), so dropping it here meant the wire
+        // never saw the new order → the Watch kept the stale rank. NULL (a
+        // plain iPhone-authored set) is omitted downstream → Watch falls back
+        // to `ordering`. (Device-session 2026-06-26 ③ root cause.)
+        display_rank: s.display_rank ?? null,
       })),
     };
   });
