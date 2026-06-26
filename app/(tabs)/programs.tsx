@@ -3,7 +3,9 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1784,18 +1786,21 @@ function SubTagPicker({
       animationType="fade"
       transparent
       onRequestClose={onCloseLocal}>
-      <Pressable style={styles.modalOverlay} onPress={onCloseLocal}>
-        <Pressable
-          style={styles.modalCard}
-          onPress={(e) => e.stopPropagation?.()}>
-          <Text style={styles.modalTitle}>{title}</Text>
-          <ScrollView style={styles.modalList}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalRow,
-                pressed && styles.btnPressed,
-              ]}
-              onPress={() => onPickLocal(null)}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.modalAvoider}>
+        <Pressable style={styles.modalOverlay} onPress={onCloseLocal}>
+          <Pressable
+            style={styles.modalCard}
+            onPress={(e) => e.stopPropagation?.()}>
+            <Text style={styles.modalTitle}>{title}</Text>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modalRow,
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={() => onPickLocal(null)}>
               <Text
                 style={[
                   styles.modalRowText,
@@ -1852,9 +1857,10 @@ function SubTagPicker({
                 <Text style={styles.modalRowTextAdd}>{t('button', 'addIntensity')}</Text>
               </Pressable>
             )}
-          </ScrollView>
+            </ScrollView>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -2067,6 +2073,7 @@ function makeStyles(tokens: ThemeTokens) {
     },
     dropdownValue: { fontSize: 13, fontWeight: '600', color: tokens.text.primary },
     // ── Picker modal ────────────────────────────────────────────────────
+    modalAvoider: { flex: 1 },
     modalOverlay: {
       flex: 1,
       // Fixed-dark scrim — standard modal overlay convention.
