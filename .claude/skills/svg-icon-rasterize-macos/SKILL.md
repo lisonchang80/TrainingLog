@@ -35,6 +35,48 @@ sips -g pixelWidth -g pixelHeight icon-1024.png | grep pixel
 - **一定要 `Read` 那張 PNG 目視確認**：qlmanage 偶爾對複雜 SVG 出空白/透明/縮放錯。簡單 flat SVG（純 rect + pattern）實測 OK。
 - 品質夠當預覽/開發 icon；**送 App Store 前**建議用設計工具或日後裝 `librsvg`/`resvg` 從同一份 `icon.svg` 重出，色彩/抗鋸齒更準。
 
+## ⚠️ 去 alpha（ios/ AppIcon 與 Watch 必做、2026-06-26 抓到真因）
+
+**qlmanage 產出的 PNG 即使滿版不透明、`sips -g hasAlpha` 仍回 `yes`**（含全 255 alpha 通道）。Apple 對 **app icon** 不准有 alpha 通道——含 alpha 的 1024 在 Xcode/驗證會被退或顯示異常（**這就是「之前 icon size 出不來」的真因**，不是尺寸算錯）。
+
+- **Expo 路徑**（`assets/images/icon.png`）：Expo prebuild 會自動 flatten，含 alpha 沒關係。
+- **但 `ios/**/AppIcon.appiconset/` 是手維護**（bare workflow、ios/ 進版控、prebuild 不重生）→ **Expo 的 flatten 救不到**，必須自己先把 master 壓成無 alpha 再餵 `gen-ios-icons.sh` + Watch master。
+
+**macOS 原生實測**：`sips --setProperty hasAlpha no` / tiff round-trip 都**去不掉** alpha；只有 jpeg round-trip 行但有損（銳利邊殘影）。**用 repo 內建的 `pngjs`（純 JS、無損）壓平**：
+
+```bash
+cat > /tmp/flatten-png.js <<'EOF'
+const fs=require('fs'),{PNG}=require('pngjs');
+const[,,src,out]=process.argv,png=PNG.sync.read(fs.readFileSync(src)),d=png.data;
+const r=d[0],g=d[1],b=d[2];
+for(let i=0;i<d.length;i+=4){const a=d[i+3]/255;d[i]=Math.round(d[i]*a+r*(1-a));d[i+1]=Math.round(d[i+1]*a+g*(1-a));d[i+2]=Math.round(d[i+2]*a+b*(1-a));d[i+3]=255;}
+fs.writeFileSync(out,PNG.sync.write(png,{colorType:2}));console.log('wrote',out);
+EOF
+# 從 repo root 跑（NODE_PATH 指 repo node_modules，因為腳本在 /tmp）
+NODE_PATH="$PWD/node_modules" node /tmp/flatten-png.js "$PWD/assets/logo/icon-1024.png" /tmp/icon-flat.png
+sips -g hasAlpha /tmp/icon-flat.png   # 應為 hasAlpha: no
+```
+
+（composite 到左上角背景色 + `colorType:2` 輸出 RGB；滿版底色時 alpha 全不透明＝無損。）
+
+## 全表面替換（一次換到底）
+
+把無 alpha 的 flat master 鋪到所有表面：
+
+```bash
+FLAT=/tmp/icon-flat.png
+cp "$FLAT" assets/logo/icon-1024.png                       # 修正 master 本身（之後不再含 alpha）
+cp "$FLAT" assets/images/icon.png                          # Expo
+cp "$FLAT" assets/images/splash-icon.png                   # splash
+sips -z 48 48 "$FLAT" --out assets/images/favicon.png -s format png
+cp "$FLAT" "ios/TrainingLog/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png"
+scripts/gen-ios-icons.sh "$FLAT"                           # 產 13 個降尺寸（無 alpha source → 全無 alpha）
+cp "$FLAT" "ios/TrainingLog Watch Watch App/Assets.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png"  # Watch（單張 1024、Xcode 自動降尺寸）
+```
+
+- Android adaptive（`android-icon-foreground/background/monochrome.png`）需**透明前景符號**，本流程的滿版 master 不適用 → 從 `logo-mark.svg` 另出，非 iOS 上架目標可 defer。
+- 換完 ios/ appicon 要 **native rebuild** 才看得到（sim/dev build 不會即時反映；Expo 的 `icon.png` 倒是 Metro reload 就生效）。
+
 ## 換成正式 app icon
 
 不要擅自覆蓋現有 `assets/images/icon.png`（先 surface，那可能是還在用的舊圖）。給使用者這行讓他自己換：
@@ -43,7 +85,7 @@ sips -g pixelWidth -g pixelHeight icon-1024.png | grep pixel
 cp /Users/hao800922/code/TrainingLog/assets/logo/icon-1024.png /Users/hao800922/code/TrainingLog/assets/images/icon.png
 ```
 
-換完要重新 build（`expo prebuild` / dev build）才看得到。**Expo 的 icon pipeline 會自動 flatten alpha + 產各尺寸**，所以滿版不透明 PNG 直接可用，alpha 不用自己處理。
+換完要重新 build（`expo prebuild` / dev build）才看得到。**Expo 的 icon pipeline 只對這條 Expo 路徑自動 flatten alpha + 產各尺寸**；手維護的 `ios/**/AppIcon.appiconset/` **不在此列**，必須先依上面「⚠️ 去 alpha」段壓平再餵 `gen-ios-icons.sh`。完整一次換到底見「全表面替換」段。
 
 ## SVG 母檔做法重點
 
