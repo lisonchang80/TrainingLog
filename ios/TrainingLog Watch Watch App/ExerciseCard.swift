@@ -349,6 +349,11 @@ struct ExerciseCard: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             commitReorder(from: from, to: to)
                         }
+                    },
+                    onMoveStateChange: { moving in
+                        // Goal 3b — while this group is orange (long-press), show
+                        // its first set's note in the top overlay; clear on release.
+                        state.longPressNoteSetId = moving ? groupMembers(group).first : nil
                     }
                 ) { isReordering in
                     groupRow(group, isReordering: isReordering)
@@ -564,6 +569,11 @@ struct ReorderableRow<Content: View>: View {
     let isActive: Bool
     /// (fromIndex, finger-Y translation) — parent resolves the drop target.
     let onCommit: (Int, CGFloat) -> Void
+    /// Goal 3b — fired when this row's long-press move mode (orange) toggles:
+    /// `true` on enter, `false` on release. The parent uses it to show / hide the
+    /// top note overlay for this group's set, in lockstep with the orange.
+    /// Default no-op so SupersetCard's pair reorder can reuse the wrapper unwired.
+    var onMoveStateChange: (Bool) -> Void = { _ in }
     /// Built with the live move-mode flag so the row paints its border orange
     /// (replacing green) while dragging.
     @ViewBuilder let content: (_ isReordering: Bool) -> Content
@@ -590,6 +600,11 @@ struct ReorderableRow<Content: View>: View {
             // pre-claims the touch on hold, so the drag still moves the row.
             // Idle rows stay inert via the `.subviews` mask (Anomaly 1 fix).
             .simultaneousGesture(reorderGesture, including: isActive ? .all : .subviews)
+            // Goal 3b — mirror the orange highlight (`drag.isMoving`) up to the
+            // parent so the top note overlay appears / disappears in lockstep
+            // with move mode. `@GestureState` resets on release / cancel either
+            // way, so this fires `false` even on a no-drag long-press release.
+            .onChange(of: drag.isMoving) { _, moving in onMoveStateChange(moving) }
     }
 
     private var reorderGesture: some Gesture {

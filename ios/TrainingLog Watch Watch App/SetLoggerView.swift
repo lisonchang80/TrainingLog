@@ -664,7 +664,21 @@ private struct SessionCardListPage: View {
         // set. With the pane outside the ScrollView, scrollTo .top aligns the
         // active set to the ScrollView's top = just under the pane.
         VStack(spacing: 0) {
+            // Goal 3b — the HR/time pane, with the long-press note box overlaid
+            // on TOP of it (覆蓋時間與心率). The box rides `state.longPressNoteSetId`
+            // (set by ReorderableRow when a row goes orange, cleared on release)
+            // and only appears when that set actually has a note. `.overlay`
+            // (not a ZStack in the VStack) so a 2-line note FLOATS over the first
+            // card instead of pushing the list down under the dragging finger.
             HRFrozenPane(stats: liveStats)
+                .overlay(alignment: .top) {
+                    if let noteSetId = state.longPressNoteSetId,
+                       let note = state.notesOverride[noteSetId], !note.isEmpty {
+                        LongPressNoteOverlay(note: note)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.12), value: state.longPressNoteSetId)
             ScrollViewReader { proxy in
             ScrollView {
             VStack(alignment: .leading, spacing: 8) {
@@ -814,6 +828,44 @@ private struct HRFrozenPane: View {
         .background(.ultraThinMaterial)
         .overlay(alignment: .bottom) {
             Divider()
+        }
+    }
+}
+
+// MARK: - Long-press note overlay (Goal 3b)
+
+/// The per-set note box shown OVER the HR pane while a row is long-pressed
+/// (orange / reorder). Opaque so it「直接蓋住時間與心率」(2026-06-26 拍板 3b);
+/// it rides the same signal as the orange highlight via
+/// `SessionInteractionState.longPressNoteSetId`, so it appears on press and
+/// vanishes on release. Display-only — the data is the reverse-synced per-set
+/// note (`notesOverride[setId]`); the box never renders when that note is empty.
+private struct LongPressNoteOverlay: View {
+    let note: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "note.text")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            Text(note)
+                .font(.caption2)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Opaque black (watchOS screen bg) so the HR readout underneath is fully
+        // covered, not see-through; an orange hairline marks the「按住看備註」mode.
+        .background(Color.black)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.orange)
+                .frame(height: 1)
         }
     }
 }

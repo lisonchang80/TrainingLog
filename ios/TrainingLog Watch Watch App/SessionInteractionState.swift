@@ -225,6 +225,15 @@ final class SessionInteractionState: ObservableObject {
     /// smoke: ④ title was not syncing because there was no override field.)
     @Published var titleOverride: String? = nil
 
+    /// Goal 3b (2026-06-26) — the setId whose per-set note is shown in the top
+    /// overlay box (covering the HR/time pane) WHILE its row is in long-press
+    /// (orange / reorder) mode. nil ⇒ no overlay. `ReorderableRow` pushes the
+    /// group's first member setId here when `drag.isMoving` turns true and nil on
+    /// release — so the box rides the EXACT same signal as the orange highlight
+    /// (按住變橘→冒方塊、放手兩者一起消). Display-only: the box reads
+    /// `notesOverride[setId]` and shows nothing when that set has no note.
+    @Published var longPressNoteSetId: String? = nil
+
     /// Monotonic counter for minting unique `AddedSet` ids within this
     /// session. Survives view re-mounts (the state object outlives them).
     private var addCounter = 0
