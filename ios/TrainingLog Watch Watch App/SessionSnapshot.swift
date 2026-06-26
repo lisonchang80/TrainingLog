@@ -234,6 +234,26 @@ struct SessionSnapshot: Codable, Equatable {
     }
 }
 
+extension SessionSnapshot {
+    /// Phase C-core (2026-06-26) — decode an inbound reverse-sync wire dict
+    /// (iPhone→Watch live mirror) into a SessionSnapshot. The iPhone producer
+    /// (`iphoneLiveMirrorProducer.ts`) ships the SAME wire shape the Watch's
+    /// forward `snapshotToWireDict` produces (snake_case set fields, nulls
+    /// omitted), so a JSONSerialization→JSONDecoder round-trip over the
+    /// synthesized Codable decodes it: `decodeIfPresent` tolerates the absent
+    /// nullable fields, and `rev`/`originator` ride along. Returns nil on any
+    /// malformed payload (caller drops it rather than crash).
+    static func decodeInbound(_ dict: [String: Any]) -> SessionSnapshot? {
+        guard
+            JSONSerialization.isValidJSONObject(dict),
+            let data = try? JSONSerialization.data(withJSONObject: dict)
+        else {
+            return nil
+        }
+        return try? JSONDecoder().decode(SessionSnapshot.self, from: data)
+    }
+}
+
 /// Local start-attempt result consumed by `PickerRootView` routing.
 /// Top-level `sessionId` mirrors the snapshot's own sessionId on
 /// success; on failure both `sessionId == ""` and `snapshot == nil`.

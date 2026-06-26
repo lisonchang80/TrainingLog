@@ -85,6 +85,20 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     private let sessionController: SessionController
     private let session: WCSession?
 
+    /// Phase C-core (2026-06-26) — reverse-sync apply engine, injected by
+    /// `SetLoggerView`'s `.task` (mirror of how the live-mirror producer is
+    /// configured). `nil` until a SetLoggerView mounts; an inbound iPhone
+    /// snapshot arriving with no engine bound is dropped (no live session to
+    /// apply onto).
+    weak var reverseSyncApply: ReverseSyncApply?
+
+    /// Per-session high-water mark for the iPhone producer's `rev` (Phase
+    /// C-core). SEPARATE from any forward counter — the Watch tracks the
+    /// iPhone's rev, not its own. Drops stale / duplicate reverse deliveries
+    /// (the iPhone dual-fires sendMessage + applicationContext; both land in
+    /// `ingestReverseMirror`).
+    private var lastAppliedIphoneRev: [String: Int64] = [:]
+
     init(sessionController: SessionController) {
         self.sessionController = sessionController
         if WCSession.isSupported() {
@@ -1038,6 +1052,66 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
         }
     }
 
+    // MARK: - Phase C-core reverse-sync inbound (2026-06-26)
+
+    /// applicationContext backstop. The iPhone producer's
+    /// `updateApplicationContext(payload)` lands here as the RAW snapshot dict
+    /// (NO {kind,payload} envelope — mirrors the Watch's own forward appContext
+    /// shape). Latest-state-replace, OS-paced. The Watch's
+    /// `didReceiveApplicationContext` slot was previously unused (forward
+    /// appContext flows Watch→iPhone), so this collides with nothing.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveApplicationContext applicationContext: [String: Any]
+    ) {
+        ingestReverseMirror(applicationContext)
+    }
+
+    /// Common ingest for both reverse-sync channels (sendMessage fast-lane +
+    /// applicationContext backstop). Pure gate (originator + per-session rev
+    /// high-water) then applies on the MainActor via `reverseSyncApply`.
+    /// Dropped silently when no SetLoggerView is mounted (`reverseSyncApply ==
+    /// nil`) — there's no live session to apply onto.
+    nonisolated func ingestReverseMirror(_ dict: [String: Any]) {
+        // originator filter — drop own-watch echoes + anything not from iPhone.
+        guard let originator = dict["originator"] as? String, originator == "iphone" else {
+            Task { @MainActor [weak self] in self?.lastInbound = "rev-mirror drop: not-iphone" }
+            return
+        }
+        guard let sessionId = dict["sessionId"] as? String, !sessionId.isEmpty else { return }
+        // rev unbox — tolerate Int64 / Int / NSNumber (WC unboxes inconsistently
+        // across iOS versions; same pattern as StartReconcileResult).
+        let revRaw = dict["rev"]
+        let rev: Int64? = (revRaw as? Int64)
+            ?? (revRaw as? Int).map(Int64.init)
+            ?? (revRaw as? NSNumber)?.int64Value
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // rev high-water — mirror the iPhone onLiveMirror guard: rev <=
+            // lastApplied → drop (a late appContext can't clobber a fresher
+            // sendMessage, and the dual-fire's second leg is absorbed here).
+            if let rev {
+                if let prev = self.lastAppliedIphoneRev[sessionId], rev <= prev {
+                    self.lastInbound = "rev-mirror stale rev=\(rev)<=\(prev)"
+                    return
+                }
+                self.lastAppliedIphoneRev[sessionId] = rev
+            }
+            guard let snap = SessionSnapshot.decodeInbound(dict) else {
+                self.lastInbound = "rev-mirror bad-payload"
+                return
+            }
+            guard let apply = self.reverseSyncApply else {
+                self.lastInbound = "rev-mirror no-session (drop)"
+                return
+            }
+            apply.applyRemote(snap)
+            let revStr = snap.rev.map(String.init) ?? "nil"
+            self.lastInbound =
+                "rev-mirror applied ex=\(snap.exercises.count) rev=\(revStr)"
+        }
+    }
+
     /// Inbound handler. Called on a WC-internal background thread.
     /// Per D7-Swift scope: only `end-session` with `side == 'iphone'`
     /// is honoured. Any other shape → reply non-ok and drop.
@@ -1050,6 +1124,17 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
+        // Phase C-core reverse-sync fast lane (2026-06-26). The iPhone
+        // dual-fires a 'live-mirror' envelope ({kind,payload}); the payload IS
+        // the raw snapshot dict (mirrors the Watch's own forward shape). Ack
+        // immediately so iOS doesn't 7016-time-out the leg, then ingest.
+        if message["kind"] as? String == "live-mirror" {
+            if let payload = message["payload"] as? [String: Any] {
+                ingestReverseMirror(payload)
+            }
+            replyHandler(["ok": true])
+            return
+        }
         // Synchronous validation — reject malformed envelopes inline.
         guard
             let kind = message["kind"] as? String,

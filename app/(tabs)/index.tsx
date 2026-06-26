@@ -56,7 +56,10 @@ import {
   sendUserInfo,
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
-import { ToastController, ToastHost } from '@/components/ui/Toast';
+import {
+  scheduleLiveMirrorPush,
+  runWhileApplyingRemoteSnapshot,
+} from '@/src/services/iphoneLiveMirrorProducer';
 import {
   applyHrTick,
   applyKcalTick,
@@ -163,7 +166,6 @@ import {
   end as endState,
   fromRow,
   getSessionId,
-  isWatchLedReadOnly,
   start as startState,
   type SessionState,
 } from '@/src/domain/session/sessionManager';
@@ -383,6 +385,18 @@ export default function TodayScreen() {
     setBwSnapshotKg(s.bwSnapshotKg);
     setSessionTitle(s.sessionTitle);
     setPrSnapshotById(s.prSnapshotById);
+    // Phase C-core (2026-06-26) reverse sync — single collection point. Every
+    // edit handler already calls refreshRef.current?.(), so pushing here covers
+    // them all without per-handler wiring. Gated to a watch-led in-progress
+    // session (loadTrainingTabState only returns a non-null activeSession when
+    // one is in progress, so the null-check IS the in-progress check; exactly
+    // the set the retired read-only guard covered). The producer's 280ms
+    // debounce coalesces bursts; its applyDepth>0 latch (set by
+    // runWhileApplyingRemoteSnapshot around the inbound apply) no-ops a refresh
+    // caused by applying a Watch snapshot, so this can't ping-pong.
+    if (s.activeSession && s.activeSession.is_watch_tracked) {
+      scheduleLiveMirrorPush(db, s.activeSession.id);
+    }
   }, [db]);
 
   // 5/19 polish #43 — banner mirror session linked template. Fetches the
@@ -541,26 +555,11 @@ export default function TodayScreen() {
   const refreshRef = useRef<(() => void) | null>(null);
   refreshRef.current = refresh;
 
-  // D32 interim — while a session is Watch-led (`isWatchLedReadOnly`), every
-  // iPhone set mutation short-circuits to prevent the Watch's next live-mirror
-  // tick from silently overwriting the edit (see sessionManager.isWatchLedReadOnly).
-  // Without feedback the user just sees "tapping does nothing". Surface a toast so
-  // the read-only state is explained. (Real fix = reverse-sync Phase C / D32, which
-  // removes the guard once iPhone edits flow to the Watch.) Debounced so rapid taps
-  // across the 7 gated handlers don't stack toasts.
-  const watchLedToastRef = useRef<ToastController | null>(null);
-  if (watchLedToastRef.current == null) {
-    watchLedToastRef.current = new ToastController();
-  }
-  const lastWatchLedToastAtRef = useRef(0);
-  const notifyWatchLedReadOnly = useCallback(() => {
-    const now = Date.now();
-    if (now - lastWatchLedToastAtRef.current < 2500) return;
-    lastWatchLedToastAtRef.current = now;
-    watchLedToastRef.current?.show(t('status', 'watchLedReadOnly'), {
-      icon: 'info',
-    });
-  }, []);
+  // 2026-06-26 — the D32 interim "Watch-led ⇒ iPhone read-only + toast" guard
+  // is RETIRED. iPhone edits during a Watch-led session now flow to the Watch
+  // (reverse-sync Phase C-core): each edit writes the DB, `refresh()` runs, and
+  // its tail `scheduleLiveMirrorPush` pushes the tree to the wrist. The 7 set
+  // handlers below therefore no longer short-circuit.
   useEffect(() => {
     const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
       await onHandshakeRequest(db, env, reply);
@@ -709,8 +708,13 @@ export default function TodayScreen() {
     // / db error) — we just refresh so the iPhone in-session UI reflects
     // the latest mirrored sets/exercises.
     const unsubLiveMirror = addAppContextListener(async (ctx) => {
-      await onLiveMirror(db, ctx);
-      refreshRef.current?.();
+      // Phase C-core (2026-06-26): wrap the inbound apply so the refresh it
+      // triggers (which now tail-calls scheduleLiveMirrorPush) is no-op'd by
+      // the producer's applyDepth gate — a Watch snapshot must not bounce back.
+      await runWhileApplyingRemoteSnapshot(async () => {
+        await onLiveMirror(db, ctx);
+        refreshRef.current?.();
+      });
     });
     // Sync fast lane (2026-06-01) — the SAME live-mirror snapshot, dual-fired
     // by the Watch over `sendMessage` for instant (<1s, FIFO-ordered) delivery
@@ -722,8 +726,10 @@ export default function TodayScreen() {
     // applicationContext alone was the "又慢、又亂、時有時無（尤其遞減組）"
     // regression — sendMessage is the real-time channel.
     const unsubLiveMirrorMsg = addMessageListener('live-mirror', async (env) => {
-      await onLiveMirror(db, env.payload);
-      refreshRef.current?.();
+      await runWhileApplyingRemoteSnapshot(async () => {
+        await onLiveMirror(db, env.payload);
+        refreshRef.current?.();
+      });
     });
     // point2 live-sync (2026-06-12) — hr-tick / kcal-tick inbound (Q4
     // channels #9/#10). The Watch's LiveTicksProducer throttles its D17
@@ -1272,7 +1278,6 @@ export default function TodayScreen() {
     exercise_id: string,
     session_exercise_id: string,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) {
       Alert.alert(t('alert', 'noActiveSession'));
@@ -1386,7 +1391,6 @@ export default function TodayScreen() {
     set_id: string,
     patch: { reps?: number; weight?: number },
   ) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const dbPatch: { weight_kg?: number; reps?: number } = {};
     if (patch.reps !== undefined) dbPatch.reps = patch.reps;
     if (patch.weight !== undefined) dbPatch.weight_kg = patch.weight;
@@ -1437,7 +1441,6 @@ export default function TodayScreen() {
     set_id: string,
     is_in_cluster: boolean = false,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     // v019 isolation (slice 10c #17): cycle ops operate on a SINGLE card's
@@ -1501,7 +1504,6 @@ export default function TodayScreen() {
    * is one tap.
    */
   const onDeleteSet = async (set_id: string) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     try {
@@ -1527,7 +1529,6 @@ export default function TodayScreen() {
     _exercise_id: string,
     source_set_id: string,
   ) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1582,7 +1583,6 @@ export default function TodayScreen() {
    * Mirrors template editor's `addDropsetRow` UX, but persisted.
    */
   const onAddDropsetRow = async (after_set_id: string) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!canRecordSet(sessionState) || !session_id) return;
     setBusy(true);
@@ -1646,7 +1646,6 @@ export default function TodayScreen() {
    *     set's "complete" side-effect, timer included).
    */
   const onToggleLogged = async (set_id: string, currentlyLogged: boolean) => {
-    if (isWatchLedReadOnly(sessionState)) { notifyWatchLedReadOnly(); return; } // Watch-led: iPhone 唯讀 (audit 🟠)
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
     const nextLogged = currentlyLogged ? 0 : 1;
@@ -3274,7 +3273,6 @@ export default function TodayScreen() {
         busy={busy}
       />
       {/* D32 interim — Watch-led read-only feedback toast. */}
-      <ToastHost controller={watchLedToastRef.current!} />
     </SafeAreaView>
   );
 }

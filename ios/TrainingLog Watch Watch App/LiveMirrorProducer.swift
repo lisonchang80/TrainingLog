@@ -114,7 +114,12 @@ enum LiveMirror {
         deletedSets: Set<String>,
         addedSets: [AddedSet],
         kindOverrides: [String: String],
-        rankOverrides: [String: Double]
+        rankOverrides: [String: Double],
+        // Phase C-core reverse-sync overlay (2026-06-26). Defaults keep the
+        // forward-only behaviour for any caller that doesn't supply them.
+        addedExercises: [SessionSnapshotExercise] = [],
+        notesOverride: [String: String] = [:],
+        exerciseOrderOverride: [String] = []
     ) -> SessionSnapshot {
         // Phase F: drop exercises / sets the user deleted on the Watch and
         // MERGE in the sets they added. The projection is what reaches the
@@ -125,7 +130,27 @@ enum LiveMirror {
         // matches sets by `(session_exercise_id, ordinal)` value, so
         // preserving ordinals is what makes a mid-list delete purge the
         // right row instead of shifting data onto a neighbour.
-        let exercises = base.exercises
+        //
+        // Phase C-core: an iPhone-added exercise (`addedExercises`) is unioned
+        // in like an added set; `exerciseOrderOverride` reorders the union
+        // (mirrors the iPhone display order); a deleted base exercise is still
+        // dropped. Surviving exercises with a non-nil note pushed from iPhone
+        // echo it back (notesOverride wins over the stale immutable base note),
+        // so the forward round-trip can't clobber an iPhone note edit.
+        let unionExercises = base.exercises + addedExercises
+        let orderedExercises: [SessionSnapshotExercise]
+        if exerciseOrderOverride.isEmpty {
+            orderedExercises = unionExercises
+        } else {
+            let rank = Dictionary(
+                exerciseOrderOverride.enumerated().map { ($1, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            orderedExercises = unionExercises.sorted {
+                (rank[$0.sessionExerciseId] ?? Int.max) < (rank[$1.sessionExerciseId] ?? Int.max)
+            }
+        }
+        let exercises = orderedExercises
             .filter { !deletedExercises.contains($0.sessionExerciseId) }
             .map { ex -> SessionSnapshotExercise in
             let merged = mergeSets(
@@ -171,7 +196,10 @@ enum LiveMirror {
                     reps: reps,
                     rpe: s.rpe,
                     restSec: s.restSec,
-                    notes: s.notes,
+                    // Phase C-core: echo the iPhone-pushed note (display-only on
+                    // the Watch) so the forward round-trip is idempotent and
+                    // can't clobber an iPhone note edit with the stale base note.
+                    notes: notesOverride[s.setId] ?? s.notes,
                     setKind: s.setKind,
                     isLogged: logged.contains(s.setId),
                     parentSetId: s.parentSetId,
@@ -216,6 +244,25 @@ final class LiveMirrorProducer: ObservableObject {
     private var lastEmit: Date?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Phase C-core reverse-sync gate (2026-06-26). When a remote (iPhone)
+    /// snapshot is being applied to the overlay, the resulting `@Published`
+    /// mutations would re-fire the sinks below → `markDirty` → a forward
+    /// `emit` that bounces the just-applied state straight back to the iPhone.
+    /// `markDirty` + `emit` short-circuit while this is set. `ReverseSyncApply`
+    /// wraps the whole apply in begin/end. Because `markDirty` short-circuits
+    /// at its TOP (before scheduling its deferred async emit), no stray emit is
+    /// queued during the apply, so a synchronous `endApplyingRemote()` in the
+    /// caller's `defer` is sufficient — no extra runloop hop needed.
+    private var applyingRemote = false
+
+    /// Phase C-core reverse-sync apply engine, created in `configure()` and
+    /// OWNED (strong) here so its lifetime == the producer's (== the
+    /// SetLoggerView `@StateObject`). The coordinator holds only a `weak` ref,
+    /// so on unmount this producer deallocs → the engine deallocs → the
+    /// coordinator's `reverseSyncApply` nils out. `ReverseSyncApply` holds a
+    /// `weak` back-ref to the producer, so no retain cycle.
+    private(set) var reverseSyncApply: ReverseSyncApply?
+
     /// Monotonic high-water for the per-emit `rev` stamp. Seeded from the
     /// wall clock on each emit but forced strictly increasing (see `nextRev`).
     private var revCounter: Int64 = 0
@@ -240,6 +287,14 @@ final class LiveMirrorProducer: ObservableObject {
         self.base = base
         self.interaction = interaction
         self.coordinator = coordinator
+        // Phase C-core — build the reverse-sync apply engine bound to the same
+        // base + overlay. SetLoggerView assigns it into `coordinator.
+        // reverseSyncApply` (weak) right after this call.
+        self.reverseSyncApply = ReverseSyncApply(
+            base: base,
+            interaction: interaction,
+            producer: self
+        )
         cancellables.removeAll()
         // dropFirst() — @Published replays its current value on subscribe;
         // skip that so only genuine post-configure mutations mark dirty.
@@ -314,7 +369,10 @@ final class LiveMirrorProducer: ObservableObject {
             deletedSets: interaction.deletedSetIds,
             addedSets: interaction.addedSets,
             kindOverrides: interaction.setKindOverrides,
-            rankOverrides: interaction.setRankOverrides
+            rankOverrides: interaction.setRankOverrides,
+            addedExercises: interaction.addedExercises,
+            notesOverride: interaction.notesOverride,
+            exerciseOrderOverride: interaction.exerciseOrderOverride
         )
     }
 
@@ -323,6 +381,10 @@ final class LiveMirrorProducer: ObservableObject {
     /// otherwise just flag dirty and let the poll loop emit the latest once
     /// `throttle` passes (bursts coalesce to ≤2 pushes/sec).
     private func markDirty() {
+        // Phase C-core gate — suppress the bounce-back while applying a remote
+        // snapshot. Short-circuit BEFORE setting `dirty` / scheduling the async
+        // emit so nothing is queued for after the apply.
+        if applyingRemote { return }
         dirty = true
         guard shouldEmitNow() else { return }
         // `@Published` publishes in `willSet` — the mutated stored property is
@@ -353,7 +415,17 @@ final class LiveMirrorProducer: ObservableObject {
         return revCounter
     }
 
+    // MARK: - Phase C-core reverse-sync gate (2026-06-26)
+
+    /// Open the gate before applying a remote (iPhone) snapshot to the overlay.
+    func beginApplyingRemote() { applyingRemote = true }
+    /// Close the gate after the apply. Safe to call synchronously in a `defer`
+    /// (see `applyingRemote` doc — `markDirty` short-circuits at its top).
+    func endApplyingRemote() { applyingRemote = false }
+
     private func emit(force: Bool) {
+        // Phase C-core gate — never push out the overlay we're mid-applying.
+        if applyingRemote { return }
         guard let base, let interaction, let coordinator else { return }
         if !force && !dirty { return }
         let projected = LiveMirror.project(
@@ -364,7 +436,10 @@ final class LiveMirrorProducer: ObservableObject {
             deletedSets: interaction.deletedSetIds,
             addedSets: interaction.addedSets,
             kindOverrides: interaction.setKindOverrides,
-            rankOverrides: interaction.setRankOverrides
+            rankOverrides: interaction.setRankOverrides,
+            addedExercises: interaction.addedExercises,
+            notesOverride: interaction.notesOverride,
+            exerciseOrderOverride: interaction.exerciseOrderOverride
         )
         // Stamp a monotonic rev + originator so the iPhone receiver can drop
         // out-of-order / stale redeliveries (the dual-fired sendMessage +
@@ -380,5 +455,38 @@ final class LiveMirrorProducer: ObservableObject {
         coordinator.updateLiveMirror(live)
         dirty = false
         lastEmit = Date()
+    }
+}
+
+/// Phase C-core (2026-06-26) — the INVERSE of `LiveMirrorProducer`: applies an
+/// inbound iPhone snapshot to the Watch overlay, wrapping the whole apply in
+/// the producer's in-flight gate (`begin/endApplyingRemote`) so the resulting
+/// `@Published` overlay mutations don't bounce straight back out to the iPhone.
+/// Injected into `WatchConnectivityCoordinator.reverseSyncApply` by
+/// `SetLoggerView`'s `.task` (mirror of how the producer is configured), so it
+/// holds the same immutable `base` snapshot + live `interaction` overlay.
+@MainActor
+final class ReverseSyncApply {
+    private let base: SessionSnapshot
+    private weak var interaction: SessionInteractionState?
+    private weak var producer: LiveMirrorProducer?
+
+    init(
+        base: SessionSnapshot,
+        interaction: SessionInteractionState,
+        producer: LiveMirrorProducer
+    ) {
+        self.base = base
+        self.interaction = interaction
+        self.producer = producer
+    }
+
+    /// Fold an iPhone-originated snapshot into the overlay. Gate open → apply →
+    /// gate closed (synchronous `defer`; safe because `markDirty` short-circuits
+    /// at its top so nothing is queued during the apply — see `applyingRemote`).
+    func applyRemote(_ snap: SessionSnapshot) {
+        producer?.beginApplyingRemote()
+        defer { producer?.endApplyingRemote() }
+        interaction?.applyRemoteSnapshot(snap, base: base)
     }
 }

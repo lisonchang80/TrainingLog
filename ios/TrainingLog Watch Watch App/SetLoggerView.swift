@@ -375,6 +375,11 @@ struct SetLoggerView: View {
                     interaction: interactionState,
                     coordinator: coordinator
                 )
+                // Phase C-core (2026-06-26) — route inbound iPhone snapshots
+                // into THIS overlay. The producer owns the engine (strong);
+                // the coordinator keeps a weak ref, so it auto-nils when this
+                // view unmounts (producer @StateObject deallocs).
+                coordinator.reverseSyncApply = liveMirror.reverseSyncApply
                 await liveMirror.run()
             }
             // point2 live-sync (2026-06-12) — start the hr/kcal tick
@@ -579,7 +584,26 @@ private struct SessionCardListPage: View {
     /// card disappears immediately (and the shrunk tree is what the
     /// live-mirror projection pushes for the E2 end-session purge).
     private var visibleExercises: [SessionSnapshotExercise] {
-        snapshot.exercises.filter { !state.isExerciseDeleted($0.sessionExerciseId) }
+        // Phase C-core (2026-06-26): union the immutable base with iPhone-added
+        // exercises (reverse sync), apply the iPhone display order
+        // (`exerciseOrderOverride`; empty ⇒ base order), then drop deleted.
+        // Reading the @Published overlays makes the card list re-render the
+        // moment an iPhone edit folds in. cardUnits (RS folding) is unchanged —
+        // it consumes this list's order.
+        let all = snapshot.exercises + state.addedExercises
+        let ordered: [SessionSnapshotExercise]
+        if state.exerciseOrderOverride.isEmpty {
+            ordered = all
+        } else {
+            let rank = Dictionary(
+                state.exerciseOrderOverride.enumerated().map { ($1, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            ordered = all.sorted {
+                (rank[$0.sessionExerciseId] ?? Int.max) < (rank[$1.sessionExerciseId] ?? Int.max)
+            }
+        }
+        return ordered.filter { !state.isExerciseDeleted($0.sessionExerciseId) }
     }
 
     /// D15 — a rendered card is either a solo exercise or a superset PAIR.
