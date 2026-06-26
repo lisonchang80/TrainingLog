@@ -263,6 +263,11 @@ struct SetLoggerView: View {
                         historyLoad: { exerciseId in
                             await coordinator.requestExerciseHistory(exerciseId: exerciseId)
                         },
+                        // Goal 3a — 備註 pull closure built here (where the
+                        // coordinator lives) + threaded to the cards' ⋯ `.sheet`.
+                        notesLoad: { exerciseId in
+                            await coordinator.requestExerciseNotes(exerciseId: exerciseId)
+                        },
                         // #312 v2 → D17 (2026-06-12) — HRFrozenPane 改吃
                         // delegate 串流：streamedStats 是 @Published、一變
                         // 就觸發本 view（@EnvironmentObject 持有處）
@@ -562,6 +567,10 @@ private struct SessionCardListPage: View {
     /// instantiation in `SetLoggerView`). Cards forward it to `ExerciseHistoryView`.
     let historyLoad: ExerciseHistoryLoad
 
+    /// Goal 3a — 備註 pull closure, threaded down to each card (mirror
+    /// `historyLoad`). Cards forward it to `ExerciseNotesView`.
+    let notesLoad: ExerciseNotesLoad
+
     /// #312 v2 → D17 (2026-06-12) — live builder stats for the
     /// HRFrozenPane top bar (即時 HR + 動態 kcal)。D17 起傳「值」不傳
     /// closure：SetLoggerView（SessionController environment object 持有
@@ -714,9 +723,9 @@ private struct SessionCardListPage: View {
                     ForEach(cardUnits) { unit in
                         switch unit {
                         case .solo(let ex):
-                            ExerciseCard(exercise: ex, state: state, historyLoad: historyLoad)
+                            ExerciseCard(exercise: ex, state: state, historyLoad: historyLoad, notesLoad: notesLoad)
                         case .superset(let a, let b):
-                            SupersetCard(state: state, exerciseA: a, exerciseB: b, historyLoad: historyLoad)
+                            SupersetCard(state: state, exerciseA: a, exerciseB: b, historyLoad: historyLoad, notesLoad: notesLoad)
                         }
                     }
                 }

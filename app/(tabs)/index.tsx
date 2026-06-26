@@ -52,6 +52,7 @@ import {
   makeEnvelope,
   onHandshakeRequest,
   onHistoryRequest,
+  onNotesRequest,
   onStartFromWatch,
   sendUserInfo,
 } from '@/src/adapters/watch';
@@ -572,6 +573,13 @@ export default function TodayScreen() {
     const unsubHistory = addMessageListener('history-request', async (env, reply) => {
       await onHistoryRequest(db, env, reply);
     });
+    // Goal 3a (2026-06-26) — Watch 備註 pull-on-tap. Same request-reply shape
+    // as history: the Watch sends `notes-request { exerciseId }`, we read the
+    // per-exercise global note (exercise.notes) and ack via the replyHandler.
+    // Reply shape lives in watchNotes.ts (not a modelled WC kind).
+    const unsubNotes = addMessageListener('notes-request', async (env, reply) => {
+      await onNotesRequest(db, env, reply);
+    });
     // NEW-Q50 D9 Wave 2 wire-in (2026-05-29) — `start-from-watch` swapped
     // from sendMessage path (v1) to TUI transport (v2). The Watch
     // initiator side sends via `transferUserInfo` so the envelope queues
@@ -750,6 +758,7 @@ export default function TodayScreen() {
     return () => {
       unsubHandshake();
       unsubHistory();
+      unsubNotes();
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();

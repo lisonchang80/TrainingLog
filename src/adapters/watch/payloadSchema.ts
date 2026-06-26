@@ -64,10 +64,11 @@ export type WCMessageKind =
   | 'end-session'
   | 'discard-session'
   | 'settings-sync'
-  | 'history-request';
+  | 'history-request'
+  | 'notes-request';
 
 /**
- * All 18 kinds as a frozen tuple — used by the type guard, jest
+ * All 19 kinds as a frozen tuple — used by the type guard, jest
  * `it.each` tables, and the Swift mirror generator (D4/D5). Keep in
  * sync with `WCMessageKind` literal union above.
  *
@@ -110,6 +111,7 @@ export const WC_MESSAGE_KINDS = [
   'discard-session',
   'settings-sync',
   'history-request',
+  'notes-request',
 ] as const satisfies readonly WCMessageKind[];
 
 // ---------------------------------------------------------------------
@@ -146,6 +148,23 @@ export interface HistoryRequestPayload {
   /** Caller-generated nonce; echoed back by iPhone in its reply. */
   requestId: string;
   /** The `exercise.id` (solo) / per-side `exercise.id` (cluster A/B) to fetch history for. */
+  exerciseId: string;
+}
+
+/**
+ * `notes-request` — Watch → iPhone, request-reply (Goal 3a, 2026-06-26).
+ * User tapped 備註 on an in-session exercise card's ⋯ menu; the Watch (no
+ * SQLite, and the per-EXERCISE global note is too large to ride the Stage 1
+ * prefetch — see `loadTemplateExerciseTree` envelope sizing) pulls the single
+ * exercise's `exercise.notes` on demand. Same shape as `history-request`; the
+ * REPLY is NOT a modelled kind — it rides the `sendMessage` replyHandler ack
+ * (shape per `WatchNotesReplyPayload` in `src/adapters/watch/watchNotes.ts`).
+ * Display-only on the wrist (拍板 3a: pull-on-tap, mirror #311 history).
+ */
+export interface NotesRequestPayload {
+  /** Caller-generated nonce; echoed back by iPhone in its reply. */
+  requestId: string;
+  /** The `exercise.id` whose global note to fetch (the per-exercise note pivot). */
   exerciseId: string;
 }
 
@@ -564,7 +583,8 @@ export type WCMessage =
   | WCEnvelope<'end-session', EndSessionPayload>
   | WCEnvelope<'discard-session', DiscardSessionPayload>
   | WCEnvelope<'settings-sync', SettingsSyncPayload>
-  | WCEnvelope<'history-request', HistoryRequestPayload>;
+  | WCEnvelope<'history-request', HistoryRequestPayload>
+  | WCEnvelope<'notes-request', NotesRequestPayload>;
 
 // ---------------------------------------------------------------------
 // Section 5 — Per-kind payload lookup (compile-time, used by factory)
@@ -593,6 +613,7 @@ export interface WCPayloadMap {
   'discard-session': DiscardSessionPayload;
   'settings-sync': SettingsSyncPayload;
   'history-request': HistoryRequestPayload;
+  'notes-request': NotesRequestPayload;
 }
 
 // ---------------------------------------------------------------------

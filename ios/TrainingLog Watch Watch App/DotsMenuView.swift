@@ -38,6 +38,16 @@ struct DotsMenuHistoryTarget: Hashable {
     let exerciseName: String
 }
 
+/// Value pushed by the menu's 備註 NavigationLink (Goal 3a, 2026-06-26). The
+/// card registers a matching `.navigationDestination(for:)` building an
+/// `ExerciseNotesView`. Mirrors `DotsMenuHistoryTarget` exactly — solo card has
+/// 1 notes target, superset has 2 (one per side). Distinct type from the history
+/// target so the two `navigationDestination(for:)` handlers don't collide.
+struct DotsMenuNotesTarget: Hashable {
+    let exerciseId: String
+    let exerciseName: String
+}
+
 struct DotsMenuView: View {
 
     /// Target exercise name (locale-aware, comes from caller).
@@ -56,6 +66,11 @@ struct DotsMenuView: View {
     /// 📊 rows render as `NavigationLink(value:)`; the card's stack root
     /// resolves them via `.navigationDestination(for:)`.
     let historyTargets: [DotsMenuHistoryTarget]
+
+    /// Notes push targets (Goal 3a) — solo: `[self]`, superset: `[A, B]`, mirror
+    /// of `historyTargets`. The 備註 rows render as `NavigationLink(value:)`; the
+    /// card resolves them via `.navigationDestination(for: DotsMenuNotesTarget)`.
+    let notesTargets: [DotsMenuNotesTarget]
 
     // MARK: - Callbacks
     //
@@ -96,6 +111,17 @@ struct DotsMenuView: View {
                     historyLink(label: "查看\(historyTargets[1].exerciseName)歷史", value: historyTargets[1])
                 } else if let target = historyTargets.first {
                     historyLink(label: "查看歷史", value: target)
+                }
+
+                // 備註 (Goal 3a) — grouped with 歷史 (both are "view" actions),
+                // before the destructive 刪除. Always enabled: with pull-on-tap
+                // the Watch can't know emptiness upfront, so an empty note opens
+                // the「尚無備註」state (拍板 3a).
+                if isCluster && notesTargets.count >= 2 {
+                    notesLink(label: "\(notesTargets[0].exerciseName) 備註", value: notesTargets[0])
+                    notesLink(label: "\(notesTargets[1].exerciseName) 備註", value: notesTargets[1])
+                } else if let target = notesTargets.first {
+                    notesLink(label: "備註", value: target)
                 }
 
                 // Destructive last (per spec Q6=A).
@@ -143,6 +169,16 @@ struct DotsMenuView: View {
     private func historyLink(label: String, value: DotsMenuHistoryTarget) -> some View {
         NavigationLink(value: value) {
             menuRowLabel(systemImage: "chart.bar.doc.horizontal", label: label)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 備註 row (Goal 3a) — declarative NavigationLink, mirror of `historyLink`.
+    /// The push (`ExerciseNotesView`) is owned by the NavigationStack so `‹`
+    /// returns here, and the menu stays underneath.
+    private func notesLink(label: String, value: DotsMenuNotesTarget) -> some View {
+        NavigationLink(value: value) {
+            menuRowLabel(systemImage: "note.text", label: label)
         }
         .buttonStyle(.plain)
     }
@@ -218,6 +254,9 @@ struct DotsMenuView: View {
             historyTargets: [
                 DotsMenuHistoryTarget(exerciseId: "ex-1", exerciseName: "深蹲")
             ],
+            notesTargets: [
+                DotsMenuNotesTarget(exerciseId: "ex-1", exerciseName: "深蹲")
+            ],
             onReset: {},
             onSkip: {},
             onDelete: {}
@@ -233,6 +272,9 @@ struct DotsMenuView: View {
             isSkipped: true,
             historyTargets: [
                 DotsMenuHistoryTarget(exerciseId: "ex-1", exerciseName: "深蹲")
+            ],
+            notesTargets: [
+                DotsMenuNotesTarget(exerciseId: "ex-1", exerciseName: "深蹲")
             ],
             onReset: {},
             onSkip: {},
@@ -250,6 +292,10 @@ struct DotsMenuView: View {
             historyTargets: [
                 DotsMenuHistoryTarget(exerciseId: "ex-a", exerciseName: "臥推"),
                 DotsMenuHistoryTarget(exerciseId: "ex-b", exerciseName: "划船"),
+            ],
+            notesTargets: [
+                DotsMenuNotesTarget(exerciseId: "ex-a", exerciseName: "臥推"),
+                DotsMenuNotesTarget(exerciseId: "ex-b", exerciseName: "划船"),
             ],
             onReset: {},
             onSkip: {},

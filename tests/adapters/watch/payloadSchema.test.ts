@@ -151,6 +151,13 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         requestId: 'req-hist-1',
         exerciseId: 'ex-1',
       } as unknown as WCPayloadMap[K];
+    case 'notes-request':
+      // Goal 3a — Watch→iPhone exercise-notes pull (mirror history). The
+      // reply (notes string) rides replyHandler; only the request is modelled.
+      return {
+        requestId: 'req-notes-1',
+        exerciseId: 'ex-1',
+      } as unknown as WCPayloadMap[K];
   }
   // Exhaustiveness sentinel — if a new kind is added without a sample,
   // TypeScript treats the absence as `never` and the test grows red.

@@ -993,6 +993,94 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             )
         }
     }
+
+    // MARK: - Outbound: notes-request (Goal 3a, 備註 ⋯ menu pull-on-tap)
+    //
+    // Request one exercise's per-exercise global note from iPhone and await the
+    // reply. Mirrors `requestExerciseHistory` exactly: a `notes-request` envelope
+    // (WC kind #19, per `NotesRequestPayload {requestId, exerciseId}`) sent via
+    // `sendMessage(_:replyHandler:errorHandler:)`. The REPLY is NOT a modelled WC
+    // kind — it rides the replyHandler ack (request-reply PULL), shape per TS
+    // `WatchNotesReplyPayload` (`src/adapters/watch/watchNotes.ts`), parsed by
+    // `ExerciseNotesReply.parse`.
+    //
+    // The per-exercise note is pulled on demand (not on the Stage 1 prefetch —
+    // envelope cap, see `loadTemplateExerciseTree`). iPhone side:
+    // `onNotesRequest(db, env, reply)` registered via
+    // `addMessageListener('notes-request', …)` in `app/(tabs)/index.tsx`; it
+    // reads `exercise.notes` and replies `toWireRecord({...ok, notes})`.
+    //
+    // Same never-hang guarantees as history: a fresh `requestId` per call +
+    // explicit 6s watchdog + `WCReplyOnce` box (a killed iPhone app stays
+    // "reachable" but its dead JS never replies — device-verified rationale in
+    // `requestExerciseHistory`). Returns nil → the view's `.error` state.
+    func requestExerciseNotes(exerciseId: String) async -> ExerciseNotesReply? {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "notes skip: not activated"
+            return nil
+        }
+        guard session.isReachable else {
+            lastOutbound = "notes skip: iPhone unreachable"
+            return nil
+        }
+        guard !exerciseId.isEmpty else {
+            lastOutbound = "notes skip: empty exerciseId"
+            return nil
+        }
+
+        let requestId = UUID().uuidString
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": "notes-request",
+            "payload": [
+                "requestId": requestId,
+                "exerciseId": exerciseId,
+            ],
+        ]
+
+        lastOutbound = "notes req=\(prefix8(requestId))… ex=\(prefix8(exerciseId))"
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<ExerciseNotesReply?, Never>) in
+            let once = WCReplyOnce(cont)
+
+            // Watchdog: WC's errorHandler only covers DELIVERY failure. A killed
+            // iPhone app is still "reachable" (iOS wakes it in the background),
+            // so a dead JS layer means neither closure ever fires without this
+            // (device-verified 2026-06-11 on history; same guarantee here).
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard !once.isResolved else { return }
+                self?.lastOutbound = "notes timeout: no reply in 6s"
+                once.resume(nil)
+            }
+
+            session.sendMessage(
+                envelope,
+                replyHandler: { [weak self] reply in
+                    Task { @MainActor [weak self] in
+                        let parsed = ExerciseNotesReply.parse(
+                            from: reply, expectedRequestId: requestId
+                        )
+                        if let parsed {
+                            self?.lastInbound =
+                                "notes reply ok=\(parsed.ok) len=\(parsed.notes.count)"
+                        } else {
+                            self?.lastInbound = "notes reply: malformed or stale"
+                        }
+                        once.resume(parsed)
+                    }
+                },
+                errorHandler: { [weak self] error in
+                    Task { @MainActor [weak self] in
+                        self?.lastOutbound =
+                            "notes err: \(error.localizedDescription)"
+                        once.resume(nil)
+                    }
+                }
+            )
+        }
+    }
 }
 
 /// Resume-once box for a continuation with three competing resume paths

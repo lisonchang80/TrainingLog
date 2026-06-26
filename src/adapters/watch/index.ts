@@ -119,3 +119,9 @@ export type { SyncState, SyncStatusInput } from './syncStatus';
 // src/domain/watch/watchExerciseHistory.ts. ADR-0019 § Slice 13d D15.
 export { onHistoryRequest } from './watchHistory';
 export type { WatchHistoryReplyPayload } from './watchHistory';
+
+// Goal 3a (2026-06-26) — Watch 備註 pull-on-tap handler. Same request-reply
+// mirror as onHistoryRequest; reads the per-exercise global note (exercise.notes)
+// on demand because the Stage 1 prefetch can't carry it (envelope cap).
+export { onNotesRequest } from './watchNotes';
+export type { WatchNotesReplyPayload } from './watchNotes';

@@ -76,6 +76,10 @@ struct SupersetCard: View {
     /// previews compile.
     var historyLoad: ExerciseHistoryLoad = { _ in nil }
 
+    /// Goal 3a (2026-06-26) — per-side 備註 pull (mirror `historyLoad`). Threaded
+    /// from `SetLoggerView`; defaults to a no-op so previews compile.
+    var notesLoad: ExerciseNotesLoad = { _ in nil }
+
     // D15 ⋯ menu state (chained sheets so swiping the inner confirm/history
     // returns to the menu).
     @State private var dotsMenuOpen: Bool = false
@@ -321,6 +325,16 @@ struct SupersetCard: View {
                         exerciseName: exerciseB.exerciseName
                     ),
                 ],
+                notesTargets: [
+                    DotsMenuNotesTarget(
+                        exerciseId: exerciseA.exerciseId,
+                        exerciseName: exerciseA.exerciseName
+                    ),
+                    DotsMenuNotesTarget(
+                        exerciseId: exerciseB.exerciseId,
+                        exerciseName: exerciseB.exerciseName
+                    ),
+                ],
                 onReset: { resetSupersetInMemory() },
                 onSkip: { isSkipped.toggle() },
                 onDelete: { pendingConfirm = true }
@@ -331,6 +345,14 @@ struct SupersetCard: View {
                     exerciseName: target.exerciseName,
                     exerciseId: target.exerciseId,
                     load: historyLoad
+                )
+            }
+            // 備註 push (Goal 3a) — value-based, mirror of history (A/B sides).
+            .navigationDestination(for: DotsMenuNotesTarget.self) { target in
+                ExerciseNotesView(
+                    exerciseName: target.exerciseName,
+                    exerciseId: target.exerciseId,
+                    load: notesLoad
                 )
             }
             .sheet(isPresented: $pendingConfirm) {

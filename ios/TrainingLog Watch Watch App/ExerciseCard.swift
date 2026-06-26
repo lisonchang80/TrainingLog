@@ -35,6 +35,13 @@ struct ExerciseCard: View {
     /// the default surfaces the view's `.error` state if ever opened.
     var historyLoad: ExerciseHistoryLoad = { _ in nil }
 
+    /// Goal 3a (2026-06-26) — pull this exercise's global note over WC for the
+    /// 備註 sub-page. Threaded from `SetLoggerView` (real
+    /// `coordinator.requestExerciseNotes`), same injection rationale as
+    /// `historyLoad` (the notes view lives inside the ⋯ `.sheet`, no environment
+    /// inheritance). Defaults to a no-op so previews compile.
+    var notesLoad: ExerciseNotesLoad = { _ in nil }
+
     // MARK: - D15 ⋯ menu state
     //
     // `dotsMenuOpen` drives the sheet that mounts DotsMenuView.
@@ -178,6 +185,12 @@ struct ExerciseCard: View {
                             exerciseName: exercise.exerciseName
                         )
                     ],
+                    notesTargets: [
+                        DotsMenuNotesTarget(
+                            exerciseId: exercise.exerciseId,
+                            exerciseName: exercise.exerciseName
+                        )
+                    ],
                     onReset: {
                         resetExerciseInMemory()
                     },
@@ -197,6 +210,14 @@ struct ExerciseCard: View {
                         exerciseName: target.exerciseName,
                         exerciseId: target.exerciseId,
                         load: historyLoad
+                    )
+                }
+                // 備註 push (Goal 3a) — value-based, mirror of history.
+                .navigationDestination(for: DotsMenuNotesTarget.self) { target in
+                    ExerciseNotesView(
+                        exerciseName: target.exerciseName,
+                        exerciseId: target.exerciseId,
+                        load: notesLoad
                     )
                 }
                 // Confirm dialog stacked as another sheet so dismissing
