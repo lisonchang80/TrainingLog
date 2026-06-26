@@ -4,6 +4,7 @@ import {
   createSession,
   insertSessionExercise,
   getActiveSession,
+  endSession,
 } from './sessionRepository';
 import { insertSessionSet } from './setRepository';
 import { getTemplateFull } from './templateRepository';
@@ -73,13 +74,30 @@ export async function startSessionFromTemplate(
      * header row's PK changes.
      */
     session_id?: string;
+    /**
+     * 補訓練 (backfill, 2026-06-26). When true, skip the single-active-session
+     * guard. The backfill flow creates an ALREADY-FINISHED session (it pairs
+     * this with `ended_at`), so it never occupies the "active" slot — but the
+     * guard would still throw if a real live session is in progress. Defaults
+     * to false → every existing live-start call site keeps the guard.
+     */
+    skip_active_guard?: boolean;
+    /**
+     * 補訓練. When set, the session is finalized (ended_at written) inside the
+     * same transaction, so it is born as a completed history record rather
+     * than an active session. `endSession` floors it to > started_at. Omit
+     * for the normal live-start path (session stays in progress).
+     */
+    ended_at?: number;
   }
 ): Promise<{ session_id: string; planned_count: number }> {
-  const active = await getActiveSession(db);
-  if (active) {
-    throw new Error(
-      `Cannot start a new session — session ${active.id} is already in progress`
-    );
+  if (!args.skip_active_guard) {
+    const active = await getActiveSession(db);
+    if (active) {
+      throw new Error(
+        `Cannot start a new session — session ${active.id} is already in progress`
+      );
+    }
   }
 
   // getTemplateFull (vs the older getTemplate) hydrates each exercise's sets[]
@@ -235,6 +253,12 @@ export async function startSessionFromTemplate(
     }
     for (const s of plannedSets) {
       await insertSessionSet(db, s);
+    }
+    // 補訓練 — when an `ended_at` is supplied the session is born as a
+    // completed history record (never holds the active slot). endSession
+    // floors it to > started_at. Omitted on the normal live-start path.
+    if (args.ended_at != null) {
+      await endSession(db, { id: session_id, ended_at: args.ended_at });
     }
   });
 

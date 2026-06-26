@@ -19,9 +19,10 @@
  * not toISOString().slice(0,10) — UTC would shift evening sessions to the
  * next day and corrupt the per-day grouping for users in non-UTC zones.
  */
-import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { randomUUID } from 'expo-crypto';
 
 import { useDatabase } from '@/components/database-provider';
 import { loadCalendarMonthRows } from '@/src/adapters/sqlite/sessionRepository';
@@ -34,6 +35,15 @@ import { CalendarGrid } from './CalendarGrid';
 import { t, useLocale } from '@/src/i18n';
 import { useAppMode } from '@/src/app-mode';
 import { useTheme, type ThemeTokens } from '@/src/theme';
+import {
+  BackfillSheet,
+  type BackfillPick,
+} from '@/components/session/backfill-sheet';
+import { backfillTimestampsFromISO } from '@/src/domain/backfill/backfillTime';
+import {
+  backfillBlankSession,
+  backfillSessionFromTemplate,
+} from '@/src/services/backfillSession';
 
 interface EnrichedSession {
   id: string;
@@ -102,6 +112,17 @@ export default function MonthGridView() {
   const [month, setMonth] = useState(today.m);
   const [byDate, setByDate] = useState<Map<string, DayBucket>>(new Map());
 
+  // 補訓練 (2026-06-26) — tapping an empty in-month day opens a small box
+  // (`backfillDate` set) whose 補訓練 button opens the 3-way picker
+  // (`backfillSheetOpen`). The picker creates a back-dated, already-finished
+  // session and routes into its detail page edit mode (`?edit=1`).
+  const [backfillDate, setBackfillDate] = useState<string | null>(null);
+  const [backfillSheetOpen, setBackfillSheetOpen] = useState(false);
+  // Session created by the picker, awaiting navigation once the picker Modal
+  // has fully dismissed (onClosed). Navigating while the Modal is still on
+  // screen freezes the pushed page (stuck native modal).
+  const pendingBackfillNavRef = useRef<string | null>(null);
+
   const load = useCallback(async () => {
     const { start, end } = monthRangeMs(year, month);
     // Month-scoped aggregate read (perf): one fixed set of queries scoped to
@@ -166,6 +187,53 @@ export default function MonthGridView() {
     [router]
   );
 
+  // 補訓練 — resolve the picker choice into a back-dated, already-finished
+  // session anchored to the tapped (empty) day at noon, then route into its
+  // detail page edit mode so the user ticks the sets.
+  const onBackfillPick = useCallback(
+    async (pick: BackfillPick) => {
+      if (!backfillDate) return;
+      const { started_at, ended_at } = backfillTimestampsFromISO(backfillDate);
+      try {
+        const sessionId =
+          pick.kind === 'blank'
+            ? await backfillBlankSession(db, {
+                id: randomUUID(),
+                started_at,
+                ended_at,
+              })
+            : await backfillSessionFromTemplate(db, {
+                template_id: pick.template_id,
+                started_at,
+                ended_at,
+                uuid: randomUUID,
+              });
+        // 2026-06-26 freeze fix — defer the navigation to onBackfillClosed
+        // (the picker Modal's onDismiss). Pushing while the modal is still on
+        // screen leaves the native modal stuck over the new page (frozen).
+        pendingBackfillNavRef.current = sessionId;
+        setBackfillSheetOpen(false);
+      } catch {
+        // Best-effort — close the picker; the calendar reloads on focus return.
+        pendingBackfillNavRef.current = null;
+        setBackfillSheetOpen(false);
+        setBackfillDate(null);
+      }
+    },
+    [backfillDate, db]
+  );
+
+  // 補訓練 — fired once the picker Modal has fully dismissed. NOW it is safe to
+  // push the detail page (backfill=1 marks a fresh-compose page → 取消 discards;
+  // edit=1 auto-enters edit mode).
+  const onBackfillClosed = useCallback(() => {
+    const sessionId = pendingBackfillNavRef.current;
+    if (!sessionId) return;
+    pendingBackfillNavRef.current = null;
+    setBackfillDate(null);
+    router.push(`/session/${sessionId}?edit=1&backfill=1`);
+  }, [router]);
+
   const renderCell = useCallback(
     (cell: CalendarDayCell) => {
       const bucket = byDate.get(cell.date);
@@ -177,7 +245,10 @@ export default function MonthGridView() {
           sessionCount={sessionCount}
           styles={styles}
           onPress={() => {
+            // Day with sessions → detail page (existing). Empty in-month day
+            // → open the 補訓練 box. Out-of-month empty cells stay inert.
             if (bucket) onTapDay(bucket);
+            else if (cell.inMonth) setBackfillDate(cell.date);
           }}
         />
       );
@@ -192,6 +263,41 @@ export default function MonthGridView() {
         month={month}
         onMonthChange={onMonthChange}
         renderCell={renderCell}
+      />
+
+      {/* 補訓練 box — opens when an empty in-month day is tapped. Shows the
+          date + a 補訓練 button that escalates to the 3-way picker. */}
+      <Modal
+        visible={backfillDate != null && !backfillSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBackfillDate(null)}>
+        <Pressable style={styles.boxBackdrop} onPress={() => setBackfillDate(null)}>
+          <Pressable style={styles.box} onPress={() => {}}>
+            <Text style={styles.boxDate}>{backfillDate ?? ''}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setBackfillSheetOpen(true)}
+              style={({ pressed }) => [
+                styles.boxBtn,
+                pressed && styles.boxBtnPressed,
+              ]}>
+              <Text style={styles.boxBtnText}>{t('button', 'backfill')}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <BackfillSheet
+        visible={backfillSheetOpen}
+        dateLabel={backfillDate ?? ''}
+        targetDateISO={backfillDate ?? ''}
+        onPick={onBackfillPick}
+        onClosed={onBackfillClosed}
+        onCancel={() => {
+          setBackfillSheetOpen(false);
+          setBackfillDate(null);
+        }}
       />
     </View>
   );
@@ -225,11 +331,13 @@ function DayCellView({
   return (
     <Pressable
       onPress={onPress}
-      disabled={!bucket}
+      // Empty in-month days are tappable too (補訓練 box); out-of-month empty
+      // cells stay inert.
+      disabled={!bucket && !cell.inMonth}
       style={({ pressed }) => [
         styles.cell,
         !cell.inMonth && styles.cellOutMonth,
-        pressed && bucket && styles.cellPressed,
+        pressed && (bucket || cell.inMonth) && styles.cellPressed,
       ]}>
       <View style={styles.cellTopRow}>
         <View style={[styles.dayNumWrap, cell.isToday && styles.dayNumToday]}>
@@ -342,6 +450,40 @@ function makeStyles(tokens: ThemeTokens) {
       fontSize: 8,
       color: tokens.text.secondary,
       textAlign: 'center',
+    },
+    // 補訓練 box (empty-day tap popup).
+    boxBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    box: {
+      backgroundColor: tokens.bg.modal,
+      borderRadius: 16,
+      paddingVertical: 24,
+      paddingHorizontal: 28,
+      alignItems: 'center',
+      gap: 16,
+      minWidth: 220,
+    },
+    boxDate: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: tokens.text.primary,
+      fontVariant: ['tabular-nums'],
+    },
+    boxBtn: {
+      paddingVertical: 12,
+      paddingHorizontal: 32,
+      borderRadius: 10,
+      backgroundColor: tokens.action.primary,
+    },
+    boxBtnPressed: { opacity: 0.7 },
+    boxBtnText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: tokens.action.onPrimary,
     },
   });
 }

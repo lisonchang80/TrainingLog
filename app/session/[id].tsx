@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
+  InteractionManager,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -31,6 +32,15 @@ import type { HRSample } from '@/components/session/hr-zone-chart.behavior';
 import { queryHeartRateSamples } from '@/src/adapters/healthkit';
 import { rehealSessionKcal } from '@/src/services/healthkitSessionSync';
 import { SessionTimeEditorSheet } from '@/components/session/session-time-editor-sheet';
+import {
+  BackfillSheet,
+  type BackfillPick,
+} from '@/components/session/backfill-sheet';
+import { backfillTimestampsFromEpoch } from '@/src/domain/backfill/backfillTime';
+import {
+  backfillBlankSession,
+  backfillSessionFromTemplate,
+} from '@/src/services/backfillSession';
 import {
   SessionTitleEditor,
   type SessionTitleEditorHandle,
@@ -236,13 +246,19 @@ export default function SessionDetailScreen() {
   // emits ?sameDayIds=<csv> so the detail page can show ← N/M → switcher
   // between sessions sharing the same date. Absent param (e.g. opened from
   // Today end-session flow) → buildSameDayNavState degrades to single view.
-  const { id, sameDayIds, dir } = useLocalSearchParams<{
+  const { id, sameDayIds, dir, edit, backfill } = useLocalSearchParams<{
     id: string;
     sameDayIds?: string;
     // #4 (2026-05-30) — 同日 session 切換方向。prev → 頁面從左滑入；
     // next / undefined(首次從歷史進入) → 從右滑入。驅動 <Stack.Screen>
     // 的 animation 讓「按左箭頭從左進、按右箭頭從右進」符合直覺。
     dir?: 'prev' | 'next';
+    // 補訓練 (2026-06-26) — when a backfill create routes here with edit=1, the
+    // page auto-enters edit mode so the user lands in the 「完全未打勾」 surface.
+    edit?: string;
+    // backfill=1 marks a FRESH-compose page (just-created backfill session):
+    // 取消 (左上) discards the session entirely (不記錄), 完成 toasts 完成補訓練.
+    backfill?: string;
   }>();
   const db = useDatabase();
   const router = useRouter();
@@ -390,6 +406,18 @@ export default function SessionDetailScreen() {
   const [reorderSheetOpen, setReorderSheetOpen] = useState(false);
   // Tap-訓練時間 → time editor sheet (overnight #59).
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  // 補訓練 (2026-06-26) — header 補訓練 button opens the picker; it anchors a
+  // new back-dated session to THIS session's day. `autoEditDoneRef` guards the
+  // one-shot edit-mode auto-enter when this page is itself a fresh backfill
+  // (routed in with ?edit=1).
+  const [backfillSheetOpen, setBackfillSheetOpen] = useState(false);
+  const autoEditDoneRef = useRef(false);
+  // Session created by the backfill picker, awaiting nav once the picker Modal
+  // fully dismisses (onClosed) — pushing while the modal is on screen freezes it.
+  const pendingBackfillNavRef = useRef<string | null>(null);
+  // True while THIS page is a freshly-created backfill being composed. 取消
+  // discards the session; 完成 toasts + clears this. Captured once from the param.
+  const backfillComposeRef = useRef(backfill === '1');
 
   // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次 programs
   // 給 picker 用；sub_tags 由 sheet 內依選擇 program 動態查 (5/18 polish round 30).
@@ -560,6 +588,68 @@ export default function SessionDetailScreen() {
     }
   }, [db, id]);
 
+  // 補訓練 — auto-enter edit mode ONCE when this page is itself a freshly
+  // created backfill (routed in with ?edit=1), after the session has loaded.
+  useEffect(() => {
+    if (autoEditDoneRef.current) return;
+    if (edit !== '1') return;
+    if (!session) return; // wait for the load
+    autoEditDoneRef.current = true;
+    // 2026-06-26 freeze fix — defer entering edit mode until AFTER the screen
+    // push transition + initial load settle. Entering edit mode (snapshot +
+    // setSetting + heavy re-render) mid-transition could wedge the page. The
+    // Card 12R force-kill path deliberately never auto-enters for the same
+    // class of reason; we auto-enter but only once interactions are idle.
+    if (!editMode) {
+      InteractionManager.runAfterInteractions(() => {
+        void enterEditMode();
+      });
+    }
+  }, [edit, session, editMode, enterEditMode]);
+
+  // 補訓練 — picker choice → create a back-dated, already-finished session
+  // anchored to THIS session's day, then route into its detail edit mode.
+  const onBackfillPick = useCallback(
+    async (pick: BackfillPick) => {
+      if (!session) return;
+      const { started_at, ended_at } = backfillTimestampsFromEpoch(
+        session.started_at,
+      );
+      try {
+        const newId =
+          pick.kind === 'blank'
+            ? await backfillBlankSession(db, {
+                id: randomUUID(),
+                started_at,
+                ended_at,
+              })
+            : await backfillSessionFromTemplate(db, {
+                template_id: pick.template_id,
+                started_at,
+                ended_at,
+                uuid: randomUUID,
+              });
+        // 2026-06-26 freeze fix — defer nav to onBackfillClosed (the picker
+        // Modal's onDismiss). Pushing while the modal is on screen leaves the
+        // native modal stuck over the new page (frozen).
+        pendingBackfillNavRef.current = newId;
+        setBackfillSheetOpen(false);
+      } catch {
+        pendingBackfillNavRef.current = null;
+        setBackfillSheetOpen(false);
+      }
+    },
+    [session, db],
+  );
+
+  // 補訓練 — fired once the picker Modal has fully dismissed; NOW safe to push.
+  const onBackfillClosed = useCallback(() => {
+    const newId = pendingBackfillNavRef.current;
+    if (!newId) return;
+    pendingBackfillNavRef.current = null;
+    router.push(`/session/${newId}?edit=1&backfill=1`);
+  }, [router]);
+
   const commitEditMode = useCallback(async () => {
     // Edit ops 已陸續直寫 DB；commit 等同清掉 snapshot 即可。
     // Card 12R — commit path 也清掉持久化 snapshot，避免下次 focus 又
@@ -578,6 +668,27 @@ export default function SessionDetailScreen() {
     setEditSnapshot(null);
     setEditMode(false);
   }, [db, id]);
+
+  // 補訓練 (B) — 取消 (左上) on a fresh-compose page discards the whole session
+  // (不記錄) and returns to the 月曆/歷史.
+  const onBackfillCancel = useCallback(async () => {
+    try {
+      if (id) await discardSession(db, id);
+    } catch {
+      // best-effort — fall through to navigation regardless.
+    }
+    backfillComposeRef.current = false;
+    router.back();
+  }, [db, id, router]);
+
+  // 補訓練 (C) — 完成 (右上) commits the edit, toasts 完成補訓練 (mirrors the
+  // template editor's saveComplete toast), and clears the compose flag so the
+  // page is now a normal saved session.
+  const onBackfillDone = useCallback(async () => {
+    await commitEditMode();
+    backfillComposeRef.current = false;
+    toastRef.current?.show(t('status', 'backfillComplete'), { icon: 'success' });
+  }, [commitEditMode]);
 
   // attemptExitEditMode：return true 表示「已 (或將) 退出 edit mode」、false
   // 表示「使用者選擇繼續編輯，沒退出」。caller 可依此決定要不要繼續做後續事
@@ -1940,7 +2051,10 @@ export default function SessionDetailScreen() {
           accessibilityRole="button"
           accessibilityLabel={t('common', 'backPlain')}
           onPress={() => {
-            if (editMode) {
+            // 補訓練 (B) — fresh-compose page: 取消 discards the whole session.
+            if (backfillComposeRef.current) {
+              void onBackfillCancel();
+            } else if (editMode) {
               // 編輯模式下，「返回」走 transactional discard path：
               // 若有變更 alert 確認、確認後 restore；無變更則 silent 退出。
               // onExited 在退出 edit mode 後不再做事（停在詳情頁）。
@@ -1993,10 +2107,25 @@ export default function SessionDetailScreen() {
         </View>
         {editMode ? (
           <Pressable
-            onPress={commitEditMode}
+            onPress={() => {
+              // 補訓練 (C) — 完成 on a fresh-compose page commits + toasts
+              // 完成補訓練; otherwise the normal edit-mode commit.
+              if (backfillComposeRef.current) void onBackfillDone();
+              else void commitEditMode();
+            }}
             style={styles.headerDoneBtn}
             accessibilityRole="button">
             <Text style={styles.headerDoneText}>{t('common', 'done')}</Text>
+          </Pressable>
+        ) : session ? (
+          // 補訓練 — read-mode top-right opens the backfill picker anchored to
+          // this session's day.
+          <Pressable
+            onPress={() => setBackfillSheetOpen(true)}
+            style={styles.headerDoneBtn}
+            accessibilityRole="button"
+            accessibilityLabel={t('button', 'backfill')}>
+            <Text style={styles.headerDoneText}>{t('button', 'backfill')}</Text>
           </Pressable>
         ) : (
           <View style={styles.headerSpacer} />
@@ -2457,6 +2586,15 @@ export default function SessionDetailScreen() {
         ended_at_ms={session?.ended_at ?? viewOpenedAtMs}
         onSave={handleTimeSave}
         onClose={() => setTimeEditorOpen(false)}
+      />
+      {/* 補訓練 — picker anchored to this session's day (2026-06-26). */}
+      <BackfillSheet
+        visible={backfillSheetOpen}
+        dateLabel={session ? formatDateLabel(session.started_at) : ''}
+        targetDateISO={session ? formatLocalYmdFromMs(session.started_at) : ''}
+        onPick={onBackfillPick}
+        onClosed={onBackfillClosed}
+        onCancel={() => setBackfillSheetOpen(false)}
       />
       {/* Round F Q2 — bottom toast (replaces Alert.alert on [儲存模板]). */}
       <ToastHost controller={toastRef.current!} />

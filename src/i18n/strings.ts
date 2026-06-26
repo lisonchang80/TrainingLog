@@ -247,6 +247,7 @@ export const strings = {
       addProgram: '新增計畫',
       editTemplate: '編輯模板',
       startSession: '開始訓練',
+      backfill: '補訓練',
       createAndImport: '建立並導入',
       selectColorAction: '配色',
       deleteTemplate: '刪除模板',
@@ -505,6 +506,9 @@ export const strings = {
       noOptionsToSelect: '沒有可選項目。',
       noProgramsAvailable: '沒有可用的 Program。',
       noProgramsToLoad: '尚無計劃可載入',
+      cannotBackfillPlan: '無法補計劃訓練',
+      backfillNoActiveProgram: '目前沒有啟用的計劃。',
+      backfillRestDay: '啟用的計劃在這天沒有排定訓練。',
       programHasNoSubTag: '此計畫沒有強度紀錄。',
       // Wave 18g (Phase 6) — same-name overwrite UX consequence banner.
       overwriteSheetBodyConsequence:
@@ -572,6 +576,7 @@ export const strings = {
       ending: '結束中…',
       saved: '已儲存',
       saveComplete: '完成儲存',
+      backfillComplete: '完成補訓練',
       savedAsNew: '已另存',
       selected: '已選擇',
       noTrainingRecords: '還沒有訓練紀錄',
@@ -1285,6 +1290,7 @@ export const strings = {
       addProgram: 'Add Program',
       editTemplate: 'Edit Template',
       startSession: 'Start Session',
+      backfill: 'Backfill',
       createAndImport: 'Create and Import',
       selectColorAction: 'Color',
       deleteTemplate: 'Delete Template',
@@ -1537,6 +1543,9 @@ export const strings = {
       noOptionsToSelect: 'No options to select.',
       noProgramsAvailable: 'No available Programs.',
       noProgramsToLoad: 'No programs available to load',
+      cannotBackfillPlan: 'Cannot backfill planned training',
+      backfillNoActiveProgram: 'No active program.',
+      backfillRestDay: 'The active program has no workout scheduled for this day.',
       programHasNoSubTag: 'This program has no intensity records.',
       // Wave 18g (Phase 6) — same-name overwrite UX consequence banner.
       overwriteSheetBodyConsequence:
@@ -1603,6 +1612,7 @@ export const strings = {
       ending: 'Ending…',
       saved: 'Saved',
       saveComplete: 'Saved',
+      backfillComplete: 'Backfill Complete',
       savedAsNew: 'Saved as new',
       selected: 'Selected',
       noTrainingRecords: 'No training records yet',

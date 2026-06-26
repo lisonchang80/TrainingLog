@@ -100,6 +100,26 @@ type StartTemplateSheetProps = {
     intensity_id: string | null;
   }) => void;
   onCancel: () => void;
+  /**
+   * 補訓練 reuse (2026-06-26) — hide the [編輯模板] secondary action so the
+   * sheet is purely a (計劃, 強度) picker for a back-dated session. The primary
+   * button goes full-width.
+   */
+  hideEdit?: boolean;
+  /** Override the primary action label (default 「開始訓練」; backfill = 補訓練). */
+  startLabel?: string;
+  /**
+   * 補訓練 計劃訓練 (2026-06-26) — the program is already chosen upstream, so
+   * hide the 「選擇計畫」 section and keep it fixed to `lastUsedProgramId`;
+   * only 「選擇強度」 is pickable.
+   */
+  lockProgram?: boolean;
+  /**
+   * iOS — fires once the sheet's Modal has FULLY dismissed. Used by the
+   * backfill flow to navigate ONLY after the modal is gone (avoids a stuck
+   * modal over the pushed screen).
+   */
+  onDismiss?: () => void;
 };
 
 /**
@@ -128,6 +148,10 @@ export function StartTemplateSheet({
   onEdit,
   onStart,
   onCancel,
+  hideEdit = false,
+  startLabel,
+  lockProgram = false,
+  onDismiss,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
   const { tokens } = useTheme();
@@ -243,6 +267,7 @@ export function StartTemplateSheet({
       transparent
       animationType="slide"
       onRequestClose={onCancel}
+      onDismiss={onDismiss}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -269,27 +294,35 @@ export function StartTemplateSheet({
                 改由編輯器「另存模板 / 另存強度」建立。sticky last-used 仍會被
                 預選（resolveProgramDefaults + per-program union effect），只是
                 拿掉了 hint label 以對齊外觀。 */}
-            <Text style={styles.sectionLabel}>{t('page', 'selectProgramAlt')}</Text>
-            <View style={styles.divider} />
-            <View style={styles.chipRow}>
-              {periodOptions.map((opt) => {
-                const isFixedNone = opt.id === RESERVED_NONE_PROGRAM_ID;
-                // Defensive local rename: display「通用」for the reserved row
-                // even if listPrograms ever surfaced the legacy「無」name.
-                const displayName = isFixedNone
-                  ? t('common', 'default')
-                  : opt.name;
-                return (
-                  <Chip
-                    key={opt.id}
-                    label={displayName}
-                    active={opt.id === periodId}
-                    onPress={() => setPeriodId(opt.id)}
-                    styles={styles}
-                  />
-                );
-              })}
-            </View>
+            {/* 計劃訓練 backfill (lockProgram) — program already chosen
+                upstream, so the 「選擇計畫」 picker is hidden; only 強度 shows. */}
+            {!lockProgram && (
+              <>
+                <Text style={styles.sectionLabel}>
+                  {t('page', 'selectProgramAlt')}
+                </Text>
+                <View style={styles.divider} />
+                <View style={styles.chipRow}>
+                  {periodOptions.map((opt) => {
+                    const isFixedNone = opt.id === RESERVED_NONE_PROGRAM_ID;
+                    // Defensive local rename: display「通用」for the reserved row
+                    // even if listPrograms ever surfaced the legacy「無」name.
+                    const displayName = isFixedNone
+                      ? t('common', 'default')
+                      : opt.name;
+                    return (
+                      <Chip
+                        key={opt.id}
+                        label={displayName}
+                        active={opt.id === periodId}
+                        onPress={() => setPeriodId(opt.id)}
+                        styles={styles}
+                      />
+                    );
+                  })}
+                </View>
+              </>
+            )}
 
             {!isNoneSelected && (
               <>
@@ -318,22 +351,24 @@ export function StartTemplateSheet({
           </ScrollView>
 
           <View style={styles.actionRow}>
-            <Pressable
-              onPress={() =>
-                onEdit({
-                  period_id: periodId,
-                  intensity_id: effectiveIntensity,
-                })
-              }
-              style={({ pressed }) => [
-                styles.actionBtn,
-                styles.actionBtnSecondary,
-                pressed && styles.actionBtnPressed,
-              ]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.actionBtnTextSecondary}>{t('button', 'editTemplate')}</Text>
-            </Pressable>
+            {!hideEdit && (
+              <Pressable
+                onPress={() =>
+                  onEdit({
+                    period_id: periodId,
+                    intensity_id: effectiveIntensity,
+                  })
+                }
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  styles.actionBtnSecondary,
+                  pressed && styles.actionBtnPressed,
+                ]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.actionBtnTextSecondary}>{t('button', 'editTemplate')}</Text>
+              </Pressable>
+            )}
             <Pressable
               onPress={() =>
                 onStart({
@@ -348,7 +383,9 @@ export function StartTemplateSheet({
               ]}
               accessibilityRole="button"
             >
-              <Text style={styles.actionBtnTextPrimary}>{t('button', 'startSession')}</Text>
+              <Text style={styles.actionBtnTextPrimary}>
+                {startLabel ?? t('button', 'startSession')}
+              </Text>
             </Pressable>
           </View>
         </Pressable>
