@@ -26,7 +26,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -87,8 +89,12 @@ export function BodyDataSheet({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.avoider}
+      >
+        <Pressable style={styles.backdrop} onPress={onClose}>
+          <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
           <View style={styles.topBar}>
             <Pressable onPress={onClose} hitSlop={8} disabled={busy} accessibilityRole="button">
               <Text
@@ -149,8 +155,9 @@ export function BodyDataSheet({
 
             <Text style={styles.hint}>{t('status', 'bwSnapshotFrozenHint')}</Text>
           </View>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -195,6 +202,7 @@ function Field({
  */
 function makeStyles(tokens: ThemeTokens) {
   return StyleSheet.create({
+    avoider: { flex: 1 },
     backdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.4)',
