@@ -59,13 +59,20 @@ export async function insertSessionSet(
     set_kind: SetKind;
     parent_set_id: string | null;
     session_exercise_id?: string | null;
+    /**
+     * Per-set note (v018 `set.notes`). Optional — defaults to NULL when omitted
+     * so every existing caller (live-record / dropset follower / restore) stays
+     * unchanged. The template→session copy path passes `template_set.notes`
+     * through here so a set note authored in the template editor carries over.
+     */
+    notes?: string | null;
   }
 ): Promise<void> {
   await db.runAsync(
     `INSERT INTO "set" (id, session_id, exercise_id, weight_kg, reps,
                         is_skipped, ordering, created_at,
-                        set_kind, parent_set_id, session_exercise_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        set_kind, parent_set_id, session_exercise_id, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     set.id,
     set.session_id,
     set.exercise_id,
@@ -76,7 +83,8 @@ export async function insertSessionSet(
     set.created_at,
     set.set_kind,
     set.parent_set_id,
-    set.session_exercise_id ?? null
+    set.session_exercise_id ?? null,
+    set.notes ?? null
   );
 }
 
