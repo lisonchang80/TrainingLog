@@ -10,6 +10,7 @@ import type {
 } from '../../domain/template/types';
 import type { MemoryCandidate } from '../../domain/template/templateMemory';
 import { colorForTemplateName } from '../../domain/template/templateColor';
+import { sortSetsByDisplayRank } from '../../domain/set/sessionSetLayout';
 import { recordProgramSubTag } from './programRepository';
 
 /**
@@ -1376,10 +1377,18 @@ export async function convertSessionToTemplate(
     set_kind: 'warmup' | 'working' | 'dropset';
     parent_set_id: string | null;
     notes: string | null;
+    display_rank: number | null;
   };
+  // `display_rank` is fetched so the per-card set order captured into the
+  // template matches the VISIBLE order, not the stale on-disk `ordering`.
+  // After a reorder / mid-insert the render surfaces sort by
+  // `display_rank ?? ordering` (set-ordering-surfaces skill) while `ordering`
+  // stays frozen as the identity key — so without this the saved template
+  // would freeze the pre-reorder sequence. We sort per card below with the
+  // canonical `sortSetsByDisplayRank` comparator.
   const setRows = await db.getAllAsync<SetRow>(
     `SELECT id, exercise_id, session_exercise_id, weight_kg, reps, ordering, is_skipped,
-            set_kind, parent_set_id, notes
+            set_kind, parent_set_id, notes, display_rank
        FROM "set"
       WHERE session_id = ? AND is_skipped = 0
       ORDER BY exercise_id ASC, ordering ASC`,
@@ -1518,10 +1527,16 @@ export async function convertSessionToTemplate(
       // sees the other RS's Chest Dip sets and the resulting template ends
       // up with both cards holding the merged set list).
       // Pattern mirrors #17 / #23 / #24 / #27 wave fixes.
-      const exSets = setRows.filter(
-        (s) =>
-          s.session_exercise_id === se.id ||
-          (s.session_exercise_id == null && s.exercise_id === se.exercise_id),
+      // Sort each card's sets by the canonical display comparator so the
+      // template_set `position` (= loop index below) follows what the user
+      // sees after any reorder / mid-insert. The dropset second pass below is
+      // id-keyed, so this re-ordering is safe for chains.
+      const exSets = sortSetsByDisplayRank(
+        setRows.filter(
+          (s) =>
+            s.session_exercise_id === se.id ||
+            (s.session_exercise_id == null && s.exercise_id === se.exercise_id),
+        ),
       );
 
       await db.runAsync(
