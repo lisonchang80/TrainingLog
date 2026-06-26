@@ -107,6 +107,44 @@ showing the deleted 強度 on its cells.
 
 **If you add `recordProgramSubTag` to an existing write helper, scan its tests** — any test that passes a non-existent `program_id` now needs `await createProgram(db, { program: {...} })` first. See `tests/repository/templateConvertFromSession.test.ts::seedProgram` helper as the canonical pattern (2026-05-29).
 
+## Cell sub_tag ≠ template sub_tag — surfacing a cell's 強度 on a session (2026-06-26)
+
+`program_cell.sub_tag` is the **per-cell 強度**, stored on the cell — SEPARATE from the
+`sub_tag` of the template the cell *assigns* (`program_cell.template_id`). A cell can point
+at a 通用 / program-only template (`template.sub_tag = NULL`) while the cell itself carries
+強度 「強」. The live 計劃訓練 idle row displays `cell.sub_tag` directly, so it looks like
+the template "has" that 強度 — it does NOT.
+
+This bites when you START / BACKFILL a session from a cell and expect the session's
+「計劃 · 強度」 subtitle to show the cell's 強度. The subtitle comes from
+**`getSessionLinkedTemplateTriple`** (`templateRepository.ts`), which reads the **LINKED
+template's** `(t.program_id, t.sub_tag)` via the most-common `session_exercise.template_id`
+— NOT the cell. So a session seeded from `cell.template_id` (sub_tag NULL) shows the
+program but **drops the 強度**. (The live 計劃訓練 onStartPlanned has the same latent gap —
+it links to `cell.template_id` and passes `cell.sub_tag` only as a now-decorative arg.)
+
+**Fix — link the session to a `(program, cell.sub_tag)` variant, find-or-clone:**
+
+```ts
+const existing = await findTemplateByTriple(db, {
+  name: template.name, program_id: cell.program_id, sub_tag: cell.sub_tag,
+});
+const variantId = existing
+  ? existing.id                                   // reuse → correct subtitle + its sets
+  : await cloneTemplateWithSubTag(db, {           // clone the cell's planned template into
+      source_template_id: template.id,            // the (program, cell.sub_tag) triple →
+      new_program_id: cell.program_id,            // correct subtitle AND planned sets
+      new_sub_tag: cell.sub_tag, uuid: randomUUID,
+    });
+// seed the session from variantId
+```
+
+`findTemplateByTriple` first (dedup → repeat backfills reuse the same variant, no
+proliferation); `cloneTemplateWithSubTag` copies the source template's exercises+sets, so
+the seeded sets are the planned ones (NOT `ensureTemplateVariantReady`, which would prefill
+from the last *session* → wrong sets for a planned-day backfill). Canonical call site:
+`components/session/backfill-sheet.tsx` `onPlannedTraining` (補訓練 計劃訓練).
+
 ## References
 
 - ADR-0021: `docs/adr/0021-program-sub-tag-dictionary.md`
