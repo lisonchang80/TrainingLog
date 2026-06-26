@@ -618,74 +618,112 @@ final class SessionInteractionState: ObservableObject {
     ///   - per-set logged / weight·reps edit / delete / mid-insert / notes →
     ///     the existing per-set overlays, over base exercises' sets.
     func applyRemoteSnapshot(_ snap: SessionSnapshot, base: SessionSnapshot) {
-        let baseExById = Dictionary(
-            base.exercises.map { ($0.sessionExerciseId, $0) },
-            uniquingKeysWith: { first, _ in first }
+        // ⭐ Phase C-core fix (2026-06-26 device session — ⑤ logged / ③ reorder
+        // never reached the Watch). ROOT CAUSE: a Watch-led TEMPLATE start makes
+        // the iPhone mint FRESH session_exercise + session_set uuids
+        // (`sessionFromTemplate.ts` `newSeId = snapshots[i].id` + `args.uuid()`),
+        // so the inbound snapshot's ids NEVER match this Watch's immutable base.
+        // The original C-core matched by id (`sessionExerciseId` / `setId`), so
+        // EVERY exercise was misclassified as "added", the per-set loop was
+        // `guard`-skipped, and `loggedSetIds` / `setRankOverrides` stayed empty —
+        // while the renderer reads ✓/rank from those overlays by BASE id. ④ title
+        // + 3a add-exercise worked because they don't depend on set-level base
+        // matching; ⑤/③ didn't because they only populate inside the skipped loop.
+        //
+        // FIX: mirror the FORWARD reconcile (`replaceLiveMirror.ts`), which is
+        // position/content-based precisely BECAUSE the ids diverge — match
+        // exercises by `exerciseId` (occurrence order) and sets by `ordinal`,
+        // resolving every incoming row to its BASE id so the overlays are keyed by
+        // exactly what the renderer reads. `ordinal` is reorder-stable (the wire
+        // ordinal is glued to identity; reorder rides `display_rank`), so ③ works.
+
+        // 1. Claim base exercises by `exerciseId` occurrence (FIFO per id), the
+        //    same identity the forward reconcile uses. matchedBase[i] = the base
+        //    exercise the i-th snap exercise resolves to (nil = genuinely added).
+        var baseQueues: [String: [SessionSnapshotExercise]] = [:]
+        for ex in base.exercises { baseQueues[ex.exerciseId, default: []].append(ex) }
+        var matchedBase: [SessionSnapshotExercise?] = []
+        var claimedBaseIds = Set<String>()
+        for ex in snap.exercises {
+            if var q = baseQueues[ex.exerciseId], !q.isEmpty {
+                let b = q.removeFirst()
+                baseQueues[ex.exerciseId] = q
+                matchedBase.append(b)
+                claimedBaseIds.insert(b.sessionExerciseId)
+            } else {
+                matchedBase.append(nil)
+            }
+        }
+
+        // 2. exercise add / delete (overlay only — base immutable). delete = base
+        //    exercises never claimed (MONOTONIC formUnion: an iPhone-dropped base
+        //    exercise never needs un-hiding; a Watch-local delete the iPhone still
+        //    mirrors must not resurrect).
+        deletedExerciseIds.formUnion(
+            base.exercises.map(\.sessionExerciseId).filter { !claimedBaseIds.contains($0) }
         )
-        let snapExIds = Set(snap.exercises.map(\.sessionExerciseId))
+        addedExercises = zip(snap.exercises, matchedBase).compactMap { $0.1 == nil ? $0.0 : nil }
 
-        // 1. exercise add / delete (overlay only — base immutable).
-        //    delete = MONOTONIC formUnion (a base exercise the iPhone still
-        //    mirrors must not resurrect a Watch-local delete; an iPhone-deleted
-        //    base exercise can never come back, so never needs un-hiding).
-        deletedExerciseIds.formUnion(Set(baseExById.keys).subtracting(snapExIds))
-        addedExercises = snap.exercises.filter { baseExById[$0.sessionExerciseId] == nil }
-
-        // 2. exercise display order (動作層 reorder) + session title (the Watch
-        //    renders the title from the immutable base, so an iPhone rename
-        //    needs this overlay — ④ device-smoke fix).
-        exerciseOrderOverride = snap.exercises.map(\.sessionExerciseId)
+        // 3. exercise display order (動作層 reorder) — map each snap exercise to
+        //    its RENDERED id (matched → BASE id, added → its own id) so the order
+        //    override lines up with what `visibleExercises` renders. + ④ title.
+        exerciseOrderOverride = zip(snap.exercises, matchedBase).map {
+            $0.1?.sessionExerciseId ?? $0.0.sessionExerciseId
+        }
         titleOverride = snap.title
 
-        // 3. per-set diff over base exercises (added exercises ride whole in
-        //    `addedExercises`; their per-set logged/edited live in the snapshot
-        //    rows the renderer reads directly).
+        // 4. per-set diff. MATCHED exercise → resolve each snap set to its base
+        //    set by `ordinal` and key overlays by the BASE setId (what the
+        //    renderer reads); base sets whose ordinal is absent from snap are
+        //    deletes. ADDED exercise → renders whole from the snapshot rows (their
+        //    own ids), so seed logged/rank/notes keyed by the snap setId.
         var newLogged = loggedSetIds
         var newEdited = editedValues
         var newDeletedSets = deletedSetIds
         var newNotes = notesOverride
         var newAddedSets = addedSets
-        // set-level display order — the iPhone's display_rank per set. The base
-        // snapshot is immutable (carries the OLD rank), so a set reorder needs
-        // this overlay or the Watch keeps the base order (③ device-smoke fix).
         var newRankOverrides = setRankOverrides
-        let allBaseSets = base.exercises.flatMap(\.sets)
-        let baseSetById = Dictionary(
-            allBaseSets.map { ($0.setId, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
 
-        for ex in snap.exercises {
-            guard baseExById[ex.sessionExerciseId] != nil else {
-                // iPhone-added exercise — carried whole in `addedExercises`.
-                // Still surface its per-set notes for display.
-                for s in ex.sets where s.notes != nil { newNotes[s.setId] = s.notes }
+        for (i, ex) in snap.exercises.enumerated() {
+            guard let baseEx = matchedBase[i] else {
+                // ADDED exercise — surface its per-set ✓ / reorder / notes via the
+                // overlay (the shared renderer reads `state.isLogged(setId)` /
+                // `setRankOverrides[setId]` even for added exercises).
+                for s in ex.sets {
+                    if s.isLogged { newLogged.insert(s.setId) }
+                    if let n = s.notes { newNotes[s.setId] = n }
+                    if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
+                }
                 continue
             }
-            let baseSetIds = Set((baseExById[ex.sessionExerciseId]?.sets ?? []).map(\.setId))
-            let snapSetIds = Set(ex.sets.map(\.setId))
-            // sets the iPhone deleted (in base-of-this-ex, absent from snap).
-            // Monotonic union — mirrors the exercise-delete rationale above.
-            newDeletedSets.formUnion(baseSetIds.subtracting(snapSetIds))
+            let baseByOrdinal = Dictionary(
+                baseEx.sets.map { ($0.ordinal, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let snapOrdinals = Set(ex.sets.map(\.ordinal))
+            // base sets the iPhone deleted (ordinal absent from snap).
+            for b in baseEx.sets where !snapOrdinals.contains(b.ordinal) {
+                newDeletedSets.insert(b.setId)
+            }
             for s in ex.sets {
-                // logged — snapshot is authoritative for the rows it carries.
-                if s.isLogged { newLogged.insert(s.setId) } else { newLogged.remove(s.setId) }
-                // value override vs base (only when the iPhone set a non-nil
-                // value that differs — `editedValues` can't represent a clear).
-                if let b = baseSetById[s.setId] {
+                if let b = baseByOrdinal[s.ordinal] {
+                    // resolve snap row → BASE setId → overlay key the renderer reads.
+                    let id = b.setId
+                    if s.isLogged { newLogged.insert(id) } else { newLogged.remove(id) }
                     if let w = s.weight, w != b.weight {
-                        newEdited[EditedValueKey(setId: s.setId, field: .weight)] = w
+                        newEdited[EditedValueKey(setId: id, field: .weight)] = w
                     }
                     if let r = s.reps, r != b.reps {
-                        newEdited[EditedValueKey(setId: s.setId, field: .reps)] = Double(r)
+                        newEdited[EditedValueKey(setId: id, field: .reps)] = Double(r)
                     }
-                }
-                // a set the iPhone added to an EXISTING exercise → addedSets.
-                if baseSetById[s.setId] == nil,
-                   !newAddedSets.contains(where: { $0.id == s.setId }) {
+                    if let n = s.notes { newNotes[id] = n }
+                    if let dr = s.displayRank { newRankOverrides[id] = dr }
+                } else if !newAddedSets.contains(where: { $0.id == s.setId }) {
+                    // snap set beyond base (iPhone added a set to this exercise) →
+                    // addedSet under the BASE exercise's id so mergeSets folds it.
                     newAddedSets.append(AddedSet(
                         id: s.setId,
-                        sessionExerciseId: ex.sessionExerciseId,
+                        sessionExerciseId: baseEx.sessionExerciseId,
                         ordinal: s.ordinal,
                         displayRank: s.displayRank ?? Double(s.ordinal),
                         weight: s.weight,
@@ -693,12 +731,10 @@ final class SessionInteractionState: ObservableObject {
                         setKind: s.setKind,
                         parentSetId: s.parentSetId
                     ))
+                    if s.isLogged { newLogged.insert(s.setId) }
+                    if let n = s.notes { newNotes[s.setId] = n }
+                    if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
                 }
-                if let n = s.notes { newNotes[s.setId] = n }
-                // set-level display order — adopt the iPhone's display_rank so a
-                // set reorder reaches the Watch (the immutable base keeps the
-                // OLD rank). nil ⇒ leave whatever override was there.
-                if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
             }
         }
         // Assign once each → ≤ one @Published willSet per field per apply.
