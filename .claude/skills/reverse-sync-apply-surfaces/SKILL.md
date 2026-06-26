@@ -152,42 +152,52 @@ grep "REVSYNC-PROBE" /tmp/metro-probe.log     # read the device's logs yourself
   on the Watch but the ✓ still doesn't → the Watch APPLY is broken (not delivery),
   because a known-working push carried the logged state and the Watch ignored it.
 
-## 2026-06-26 device-session — ⑤/③ bug is 100% WATCH-SIDE apply (NOT iPhone, NOT bundle)
+## 2026-06-26 device-session — ⑤/③ ROOT CAUSE = reverse apply matched by id, but iPhone re-keys (FIXED + device-verified)
 
-**The earlier "⑤ = stale bundle" conclusion was DISPROVEN.** Proven via the
-Metro-takeover + probes above: device runs fresh JS, `pushMirrorIfWatchLed PUSH`
-fires, `applyDepth:0` (not suppressed), and the WIRE carries the toggled set
-correctly (`setId=…,se=…,ord=1,logged:true`, rank present). The behavioral test
-gave **3a 新動作出現 / 3b ✓沒套用** — the ✓ rode along on a *working*
-add-exercise push and the Watch still didn't apply it. ∴ iPhone is perfect; the
-bug is in `SessionInteractionState.applyRemoteSnapshot`'s SET-level apply.
-Exercise-level (keyed by `sessionExerciseId`) works; set-level (keyed by `setId`)
-fails — so ⑤ (loggedSetIds) AND ③ (setRankOverrides) both break together.
+**Confirmed STATICALLY (no diagnostic build needed) + device-verified ✅ (smoke
+全過 ⑤③④+加動作).** Fix commit `d0048a8` (Swift) + `4d8ad9e` (③ wire).
 
-**③ wire gap fixed (commit 4d8ad9e):** `fetchSessionSnapshot`'s `bucket.map`
-dropped `display_rank` (JS-only fix, on branch) — necessary but NOT sufficient;
-③ still won't sync until the Watch-side set-apply bug below is fixed.
+**Root cause:** a Watch-led **template** start makes the iPhone mint FRESH
+`session_exercise` + `session_set` uuids — `sessionFromTemplate.ts` does
+`newSeId = snapshots[i].id` (~:201) and `setIdMap.set(ts.id, args.uuid())` (~:207).
+So the reverse snapshot's ids (read from the iPhone DB) **never match this Watch's
+immutable base ids** (built independently in `buildSnapshotFromFatTree` BEFORE the
+iPhone created the session; the `created reply` carries only `sessionId`, not the
+new ids). The original C-core `applyRemoteSnapshot` matched by id
+(`sessionExerciseId` / `setId`), so:
+- line ~631 `deletedExerciseIds.formUnion(baseKeys − snapExIds)` → ALL base
+  exercises marked deleted; line ~632 → ALL iPhone exercises become `addedExercises`.
+- line ~659 `guard baseExById[ex.sessionExerciseId] != nil` → nil for EVERY
+  exercise → the **per-set loop is `continue`-skipped** → `loggedSetIds` (⑤) and
+  `setRankOverrides` (③) NEVER populate.
+- the renderer reads ✓/rank from those overlays by BASE id (ExerciseCard
+  `state.isLogged(set.setId)`), so they stay empty → ⑤/③ never show.
 
-**Two concrete Watch suspects (instrument to pick):**
-1. **`applyRemoteSnapshot` line ~659 guard** — `guard baseExById[ex.sessionExerciseId] != nil`
-   skips the whole set loop (`continue`) for an exercise whose `sessionExerciseId`
-   isn't in the Watch's base → logged/rank never applied.
-2. **`AddedSet` struct has no `isLogged` field** (apply ~686-695) — a set that
-   falls into `newAddedSets` (because `baseSetById[s.setId] == nil`, i.e. setId
-   didn't match base) renders permanently un-✓.
+This resolves the earlier **"deletedSets would hide ALL base sets — but they
+DIDN'T vanish"** contradiction: the base sets ARE marked deleted, but the iPhone
+re-adds them as `addedExercises` with identical content, so they're visually
+unchanged in place — only the per-set ✓/rank overlay is missing. ④ title + 3a
+add-exercise worked throughout because they don't depend on set-level base matching.
 
-Both fire only if the Watch's base `sessionExerciseId`/`setId` ≠ the iPhone's
-reverse ids. CodingKeys are all correct (not a decode bug). `localizeSetId`
-(`replaceLiveMirror.ts:355-377`) only namespaces on cross-session setId collision
-— normally the iPhone keeps the Watch's setId, so ids *should* match (and a pure
-mismatch would make `deletedSets` hide ALL base sets, which DIDN'T happen). So
-the exact id divergence is unknown from the iPhone side — **needs Watch-side
-logging**.
+**The one-line framing:** the FORWARD reconcile (`replaceLiveMirror.ts`) was built
+position/content-based PRECISELY because the ids diverge — exercises claimed by
+`exercise_id` occurrence (~:304-336), sets by `(session_exercise_id, ordinal)`
+(`SELECT … WHERE session_exercise_id=? AND ordering=?` ~:356). The reverse C-core
+matched by id = the bug.
 
-**NEXT (surgical, one Watch rebuild):** instrument `applyRemoteSnapshot` to log
-base-vs-incoming `sessionExerciseId`/`setId` + guard hits + `newLogged`, ROUTED
-back to the iPhone over WC → Metro (so you can read it). Optionally land the
-principled fix in the same build: resolve set overlays by `(sessionExerciseId,
-ordinal)` → base `setId` (mirrors the forward `replaceLiveMirror` identity; a
-no-op when ids already match) + give `AddedSet` an `isLogged`. Then build +
-install + one smoke to read the ids and confirm.
+**Fix (`d0048a8`, mirror the forward identity):** in `applyRemoteSnapshot`, claim
+base exercises by `exerciseId` occurrence (FIFO per id), match sets by `ordinal`,
+**resolve each incoming row to its BASE setId**, and key every overlay (logged /
+rank / edited / deletedSets) by the base setId = exactly what the renderer reads.
+Genuinely-added exercises (no base match) keep the `addedExercises` path but ALSO
+seed logged/rank/notes by their snap setId (the shared renderer reads them via
+`state`). `ordinal` is reorder-stable (the wire ordinal is glued to identity;
+reorder rides `display_rank`), so ③ works once `display_rank` is on the wire
+(`4d8ad9e` — `fetchSessionSnapshot.bucket.map` had dropped it).
+
+**Lesson:** before instrumenting a Watch rebuild, check whether the iPhone
+RE-KEYS ids on the path under test (`sessionFromTemplate` / `replaceLiveMirror`
+both do). If it does, any reverse-direction code that matches by id is broken by
+construction — mirror the forward reconcile's position/content key instead. The
+"base == render snapshot" check (both `SetLoggerView` bind `snapshotForRender`)
+killed the divergence-of-base theory and pinned it to id matching, statically.
