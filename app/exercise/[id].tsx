@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ExerciseMediaFrames } from '@/components/exercise/exercise-media-frames';
 import { MuscleBodyTagger } from '@/components/exercise/muscle-body-tagger';
+import { SetNoteSheet } from '@/components/shared/set-note-sheet';
 import { useDatabase } from '@/components/database-provider';
 import { resolveExerciseHighlight } from '@/src/domain/exercise/exerciseLibrary';
 import type {
@@ -20,15 +21,18 @@ import type {
 import {
   archiveCustomExercise,
   getExerciseMuscleLinks,
+  getExerciseNotes,
   getExerciseWithMuscles,
   listMuscleGroups,
   listMuscles,
+  updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import {
   t,
   tDeleteExerciseFromLibrary,
   tEquipment,
   tExercise,
+  tExerciseNoteHeader,
   tLoadType,
   tMuscleGroup,
 } from '@/src/i18n';
@@ -70,16 +74,22 @@ export default function ExerciseDetailScreen() {
   const [data, setData] = useState<ExerciseWithMuscles | null>(null);
   const [highlight, setHighlight] = useState<Map<string, MuscleRole>>(new Map());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
+  // Per-Exercise GLOBAL note (exercise.notes) — the SAME column the in-session
+  // exercise card edits (ADR-0017), so edits here & in a session stay in sync.
+  const [notes, setNotes] = useState<string | null>(null);
+  const [noteSheetOpen, setNoteSheetOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [d, links, mgs, ms] = await Promise.all([
+    const [d, links, mgs, ms, n] = await Promise.all([
       getExerciseWithMuscles(db, id),
       getExerciseMuscleLinks(db, id),
       listMuscleGroups(db),
       listMuscles(db),
+      getExerciseNotes(db, id),
     ]);
     setData(d);
+    setNotes(n);
     // Precise per-muscle links if present; otherwise fall back to lighting the
     // whole muscle group so curated exercises with only a group still show a
     // body diagram (v028 library — 206 new exercises have no fine links).
@@ -153,6 +163,13 @@ export default function ExerciseDetailScreen() {
             <MuscleBodyTagger highlight={highlight} mode="readonly" />
           </View>
         )}
+
+        {notes && notes.trim().length > 0 && (
+          <View style={styles.noteCard}>
+            <Text style={styles.noteLabel}>{t('domain', 'note')}</Text>
+            <Text style={styles.noteText}>{notes}</Text>
+          </View>
+        )}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -163,6 +180,10 @@ export default function ExerciseDetailScreen() {
         <FooterButton
           label={t('domain', 'chart')}
           onPress={() => router.push(`/exercise-chart/${id}`)}
+        />
+        <FooterButton
+          label={t('domain', 'note')}
+          onPress={() => setNoteSheetOpen(true)}
         />
         <FooterButton
           label={t('common', 'edit')}
@@ -209,6 +230,26 @@ export default function ExerciseDetailScreen() {
           }}
         />
       </View>
+
+      <SetNoteSheet
+        visible={noteSheetOpen}
+        initialValue={notes}
+        title={tExerciseNoteHeader(tExercise(data.exercise.name))}
+        placeholder={t('page', 'notePlaceholder')}
+        onConfirm={async (next) => {
+          try {
+            await updateExerciseNotes(db, id, next);
+            setNotes(next);
+          } catch (e) {
+            Alert.alert(
+              t('alert', 'saveFailed'),
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+          setNoteSheetOpen(false);
+        }}
+        onCancel={() => setNoteSheetOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -269,6 +310,22 @@ function makeStyles(tokens: ThemeTokens) {
       padding: 12,
       backgroundColor: tokens.bg.elevated,
       alignItems: 'center',
+    },
+    noteCard: {
+      borderRadius: 14,
+      padding: 14,
+      backgroundColor: tokens.bg.elevated,
+      gap: 6,
+    },
+    noteLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: tokens.text.secondary,
+    },
+    noteText: {
+      fontSize: 15,
+      lineHeight: 21,
+      color: tokens.text.primary,
     },
     headerBack: {
       color: tokens.action.primary,
