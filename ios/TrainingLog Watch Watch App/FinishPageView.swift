@@ -200,11 +200,11 @@ struct FinishPageView: View {
     }
 
     private var subtitleText: String {
-        // 2026-05-29 late-evening polish — snapshot.title now carries
-        // the full "模板 · 計劃 · 強度" 3-tuple at start-from-watch time
-        // (per PickerViewModel.resolveSelectionExercises). Display
-        // verbatim; fall back to "—" only if the title is truly empty
-        // (degenerate freestyle path or mock snapshot edge case).
+        // 2026-06-26 Goal 2d — the 3-tuple「模板 · 計劃 · 強度」moved from
+        // `title` (now line 1 = template name only) to the new `subtitle`
+        // field. Prefer it; fall back to `title` (planned / minimal / freestyle
+        // sessions carry no subtitle) and finally "—" when both are empty.
+        if let sub = snapshot.subtitle, !sub.isEmpty { return sub }
         return snapshot.title.isEmpty ? "—" : snapshot.title
     }
 

@@ -25,6 +25,7 @@ enum SetLoggerMockData {
         SessionSnapshot(
             sessionId: "mock-session-1",
             title: "推日（A）",
+            subtitle: "推日（A） · Linear · 中度日",
             startedAt: Int64(Date().timeIntervalSince1970 * 1000),
             exercises: [
                 SessionSnapshotExercise(

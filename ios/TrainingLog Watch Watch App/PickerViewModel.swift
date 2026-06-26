@@ -294,7 +294,7 @@ final class PickerViewModel: ObservableObject {
         // Falls back to SetLoggerMockData.mockSnapshot() when neither
         // source has exercises (pre-Q50 iPhone payload OR genuinely
         // empty template) so SetLoggerView still mounts.
-        let (resolvedTitle, resolvedExercises, resolvedTemplateId, missed) = resolveSelectionExercises(selection)
+        let (resolvedTitle, resolvedSubtitle, resolvedExercises, resolvedTemplateId, missed) = resolveSelectionExercises(selection)
         // Stage1 prefetch v3 (2026-06-13 Y-dup) — surface a one-line
         // 過場頁 notice when the (program, intensity) combo had no variant
         // and we fell back to the representative (mirrors iPhone A1
@@ -340,6 +340,7 @@ final class PickerViewModel: ObservableObject {
         let snapshot = buildSnapshotFromFatTree(
             sessionId: localSessionId,
             title: resolvedTitle,
+            subtitle: resolvedSubtitle,
             exercises: resolvedExercises
         )
         let localReply = StartFromWatchReply(
@@ -384,7 +385,7 @@ final class PickerViewModel: ObservableObject {
     /// intensity) combo matched no variant in the name group and fell
     /// back to the representative — surfaced to the user (Q2).
     private func resolveSelectionExercises(_ selection: PickerSelection)
-        -> (title: String, exercises: [Stage1TemplateExerciseDTO], templateId: String?, missed: Bool)
+        -> (title: String, subtitle: String?, exercises: [Stage1TemplateExerciseDTO], templateId: String?, missed: Bool)
     {
         // Template-tap path — template was selected via the 模板訓練
         // section row, possibly drilled through 計劃 + 強度 sheets.
@@ -402,13 +403,18 @@ final class PickerViewModel: ObservableObject {
             // intensity), even on a fallback miss (it represents intent;
             // the resolved variant's own triple may differ).
             //
+            // 2026-06-26 Goal 2d — split the old single「模板 · 計劃 · 強度」title
+            // into TWO fields: line 1 = the template name (= the editable session
+            // title, matches iPhone session.title), line 2 = the immutable identity
+            // badge. The Watch has no editor so both stay read-only on the wrist.
+            //
             // ADR-0026 D1 (slice 16) — 極簡模式整個「計劃」概念在 UI 消失，
-            // 而 program / intensity 在極簡模式必為 nil → 三元組會渲染成
-            // 「X · 通用 · 通用」（通用 是計劃概念標籤）。此 title 透過
-            // snapshot.title 流向 SetLoggerView 標題 / FinishPageView 副標題 /
-            // 過場頁 selectionSubtitle 三處 → 在此單一來源 drop 後綴即三處同治。
-            let title = isMinimal
-                ? template.name
+            // program / intensity 必為 nil → 不組第二行（subtitle = nil 即隱藏），
+            // 與極簡模式各處藏「計劃·強度」一致。FinishPageView 副標題 fallback 回
+            // title；過場頁 selectionSubtitle 自行重建、與此處無關。
+            let title = template.name
+            let subtitle: String? = isMinimal
+                ? nil
                 : "\(template.name) · \(programName) · \(intensityName)"
             // Stage1 prefetch v3 (2026-06-13 Y-dup) — resolve the concrete
             // variant from the user's (program, intensity) so the snapshot
@@ -421,7 +427,7 @@ final class PickerViewModel: ObservableObject {
                 program: selection.program,
                 intensity: selection.intensity
             )
-            return (title, resolved.exercises, resolved.templateId, resolved.missed)
+            return (title, subtitle, resolved.exercises, resolved.templateId, resolved.missed)
         }
         // Planned-row path — selection is all-nil per PickerRootView's
         // planSection planned-case (the program-day already carries the
@@ -430,9 +436,11 @@ final class PickerViewModel: ObservableObject {
         // (e.g. "推日 W3D1（今日）") so we don't synthesize a 3-tuple.
         if case .planned(_, _, _, _, _, let templateId, let exercises) = todayPlanned, !exercises.isEmpty {
             let label = plannedLabel ?? "今日訓練"
-            return (label, exercises, templateId.isEmpty ? nil : templateId, false)
+            // Planned label is already a meaningful display string (e.g.
+            // "推日 W3D1（今日）") — no separate 3-tuple second line.
+            return (label, nil, exercises, templateId.isEmpty ? nil : templateId, false)
         }
-        return ("自由訓練", [], nil, false)
+        return ("自由訓練", nil, [], nil, false)
     }
 
     /// Stage1 prefetch v3 (2026-06-13 Y-dup) — resolve the concrete
@@ -517,6 +525,7 @@ final class PickerViewModel: ObservableObject {
     private func buildSnapshotFromFatTree(
         sessionId: String,
         title: String,
+        subtitle: String?,
         exercises: [Stage1TemplateExerciseDTO]
     ) -> SessionSnapshot {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -586,6 +595,7 @@ final class PickerViewModel: ObservableObject {
         return SessionSnapshot(
             sessionId: sessionId,
             title: title,
+            subtitle: subtitle,
             startedAt: nowMs,
             exercises: snapshotExercises
         )

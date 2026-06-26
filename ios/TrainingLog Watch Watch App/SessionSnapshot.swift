@@ -186,8 +186,18 @@ struct SessionSnapshotExercise: Codable, Equatable {
 /// a session.
 struct SessionSnapshot: Codable, Equatable {
     let sessionId: String
-    /// Per-session display title. Empty string for freestyle path.
+    /// Per-session display title (line 1) — the editable session name (= the
+    /// originating template name for a template-started session). Empty string
+    /// for the freestyle path.
     let title: String
+    /// Second-line identity badge「模板名 · 計劃 · 強度」(2026-06-26 Goal 2d).
+    /// Built Watch-side at start (`PickerViewModel.resolveSelectionExercises`);
+    /// IMMUTABLE per session — program / intensity are fixed at start, so an
+    /// iPhone rename of line 1 never touches it. nil ⇒ no second line (planned /
+    /// freestyle / minimal mode). Reverse-sync inbound omits it (decodeIfPresent
+    /// → nil) and the apply path reads only `title`, so the immutable base
+    /// snapshot keeps its own subtitle and line 2 survives a live-mirror apply.
+    let subtitle: String?
     /// Epoch ms.
     let startedAt: Int64
     let exercises: [SessionSnapshotExercise]
@@ -206,6 +216,7 @@ struct SessionSnapshot: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case sessionId
         case title
+        case subtitle
         case startedAt
         case exercises
         case rev
@@ -220,6 +231,7 @@ struct SessionSnapshot: Codable, Equatable {
     init(
         sessionId: String,
         title: String,
+        subtitle: String? = nil,
         startedAt: Int64,
         exercises: [SessionSnapshotExercise],
         rev: Int64? = nil,
@@ -227,6 +239,7 @@ struct SessionSnapshot: Codable, Equatable {
     ) {
         self.sessionId = sessionId
         self.title = title
+        self.subtitle = subtitle
         self.startedAt = startedAt
         self.exercises = exercises
         self.rev = rev

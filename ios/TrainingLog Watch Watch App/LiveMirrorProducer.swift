@@ -225,6 +225,7 @@ enum LiveMirror {
         return SessionSnapshot(
             sessionId: base.sessionId,
             title: base.title,
+            subtitle: base.subtitle,
             startedAt: base.startedAt,
             exercises: exercises
         )
@@ -447,6 +448,7 @@ final class LiveMirrorProducer: ObservableObject {
         let live = SessionSnapshot(
             sessionId: projected.sessionId,
             title: projected.title,
+            subtitle: projected.subtitle,
             startedAt: projected.startedAt,
             exercises: projected.exercises,
             rev: nextRev(),

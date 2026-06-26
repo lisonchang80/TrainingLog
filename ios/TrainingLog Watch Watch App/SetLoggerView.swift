@@ -659,15 +659,32 @@ private struct SessionCardListPage: View {
             ScrollViewReader { proxy in
             ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                // Session title — prefer the iPhone-pushed override (reverse
-                // sync, Phase C-core ④) over the immutable base snapshot title.
+                // Session header — TWO lines (2026-06-26 Goal 2d):
+                //   line 1 = the editable session name (template name); prefer
+                //     the iPhone-pushed override (reverse sync, Phase C-core ④)
+                //     over the immutable base title. Primary, slightly larger.
+                //   line 2 = the immutable「模板 · 計劃 · 強度」identity badge
+                //     (`snapshot.subtitle`, built at start, never reverse-synced).
+                //     Secondary, smaller. Hidden when nil (planned / minimal /
+                //     freestyle). Watch has no title editor → both read-only.
                 let displayTitle = state.titleOverride ?? snapshot.title
+                let displaySubtitle = snapshot.subtitle ?? ""
                 if !displayTitle.isEmpty {
                     Text(displayTitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .padding(.horizontal, 4)
                         .padding(.top, 2)
+                }
+                if !displaySubtitle.isEmpty {
+                    Text(displaySubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 4)
                 }
 
                 // 2026-05-29 late-evening real-device smoke fix —
