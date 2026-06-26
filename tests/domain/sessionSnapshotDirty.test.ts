@@ -14,6 +14,7 @@ const baseSet = {
   is_logged: 1,
   notes: null,
   session_exercise_id: 'se1',
+  display_rank: null,
 };
 const baseSE = {
   ordering: 1,
@@ -85,6 +86,25 @@ describe('sessionSnapshotDirty', () => {
     const cur = base();
     cur.sets = [{ id: 's1', ...baseSet, notes: 'a note' }];
     expect(sessionSnapshotDirty(cur, base())).toBe(true);
+  });
+
+  // F2 fix (2026-06-26) — a long-press reorder now rewrites ONLY display_rank
+  // (ordering untouched). Before this field was compared, a reorder-only edit
+  // looked "not dirty" and 返回 silently persisted it instead of prompting.
+  it('detects display_rank change (reorder-only edit, ordering unchanged)', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, display_rank: 2 }];
+    const snap = base();
+    snap.sets = [{ id: 's1', ...baseSet, display_rank: 0 }];
+    expect(sessionSnapshotDirty(cur, snap)).toBe(true);
+  });
+
+  it('detects display_rank null → number (nullish-coalescing branch)', () => {
+    const cur = base();
+    cur.sets = [{ id: 's1', ...baseSet, display_rank: 0 }];
+    const snap = base();
+    snap.sets = [{ id: 's1', ...baseSet, display_rank: null }];
+    expect(sessionSnapshotDirty(cur, snap)).toBe(true);
   });
 
   it('detects sessionExercise ordering change', () => {
@@ -194,6 +214,7 @@ describe('sessionSnapshotDirty', () => {
         is_logged: 0,
         notes: null,
         session_exercise_id: null,
+        display_rank: null,
       },
     ];
     const snap = base();
@@ -210,6 +231,7 @@ describe('sessionSnapshotDirty', () => {
         is_logged: 0,
         notes: null,
         session_exercise_id: null,
+        display_rank: null,
       },
     ];
     expect(sessionSnapshotDirty(cur, snap)).toBe(false);
@@ -280,6 +302,7 @@ describe('buildDirtyCheckState (report 09 #4 extraction)', () => {
           is_logged: 1,
           notes: null,
           session_exercise_id: 'se1',
+          display_rank: null,
         },
       ],
     });

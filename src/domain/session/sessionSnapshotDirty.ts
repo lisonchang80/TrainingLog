@@ -11,7 +11,10 @@
  *     (planned_sets / planned_reps / planned_weight_kg / template_id /
  *      is_evergreen / exercise_id / reusable_superset_id are immutable in
  *      edit mode)
- *   - sets: id-keyed map of all per-set mutable fields
+ *   - sets: id-keyed map of all per-set mutable fields (including
+ *     `display_rank` — a long-press reorder rewrites ONLY that column
+ *     post-2026-06-26, so omitting it would make a reorder-only edit look
+ *     "not dirty" and 返回 would silently persist it)
  *
  * Returns true if any field differs, including added or removed rows.
  *
@@ -44,6 +47,14 @@ interface DirtyCheckSet {
   is_logged: number;
   notes: string | null;
   session_exercise_id: string | null;
+  // 2026-06-26 — a long-press reorder now rewrites ONLY `display_rank`
+  // (ADR-pure, leaves `ordering` untouched — F2 fix Opt A,
+  // setRepository.reorderSessionSetsForExercise). Without this field the
+  // reorder is invisible to the dirty-check, so 返回 takes the silent
+  // no-diff exit and the new display order persists instead of prompting
+  // 「捨棄修改?」. Captured by captureSessionSnapshot + restored on discard
+  // (dff6e44), so it round-trips cleanly.
+  display_rank: number | null;
 }
 
 export interface DirtyCheckState {
@@ -81,7 +92,8 @@ function shallowEqSet(a: DirtyCheckSet, b: DirtyCheckSet): boolean {
     (a.parent_set_id ?? null) === (b.parent_set_id ?? null) &&
     a.is_logged === b.is_logged &&
     (a.notes ?? null) === (b.notes ?? null) &&
-    (a.session_exercise_id ?? null) === (b.session_exercise_id ?? null)
+    (a.session_exercise_id ?? null) === (b.session_exercise_id ?? null) &&
+    (a.display_rank ?? null) === (b.display_rank ?? null)
   );
 }
 
@@ -127,6 +139,7 @@ export function buildDirtyCheckState(
       is_logged: s.is_logged,
       notes: s.notes,
       session_exercise_id: s.session_exercise_id,
+      display_rank: s.display_rank,
     })),
   };
 }
