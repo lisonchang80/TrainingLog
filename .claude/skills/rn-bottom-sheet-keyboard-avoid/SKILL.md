@@ -1,6 +1,6 @@
 ---
 name: rn-bottom-sheet-keyboard-avoid
-description: Fix React Native bottom-sheet TextInput hidden by iOS keyboard. Trigger words 'TextField 鍵盤擋住'、'sheet 鍵盤遮住'、'inline 新增 TextField 看不到'、'keyboard cover input'、'底部 sheet 鍵盤'、'另存模板 sheet 鍵盤'、'儲存模板 鍵盤'. Covers Modal+slide animation+justifyContent flex-end pattern (TrainingLog 慣例) 為何 iOS 不會自動 shift、KeyboardAvoidingView wrap 位置 (Modal 內第一層、包住 backdrop)、ScrollView keyboardShouldPersistTaps='handled' 為何必要、avoider flex:1 style、Platform.OS iOS/Android behavior 差異。涉及檔案 pattern: components/**/*-sheet.tsx with inline TextInput at bottom of ScrollView.
+description: Fix React Native bottom-sheet TextInput hidden by iOS keyboard. Trigger words 'TextField 鍵盤擋住'、'sheet 鍵盤遮住'、'備註被鍵盤蓋'、'備註 鍵盤'、'note sheet 鍵盤'、'inline 新增 TextField 看不到'、'keyboard cover input'、'底部 sheet 鍵盤'、'另存模板 sheet 鍵盤'、'儲存模板 鍵盤'. ⚠️ App 有兩個不同的備註 sheet（SetNoteSheet vs template-editor-view Modal）— 看 footnote 辨識，別只修一個. Covers Modal+slide animation+justifyContent flex-end pattern (TrainingLog 慣例) 為何 iOS 不會自動 shift、KeyboardAvoidingView wrap 位置 (Modal 內第一層、包住 backdrop)、ScrollView keyboardShouldPersistTaps='handled' 為何必要、avoider flex:1 style、Platform.OS iOS/Android behavior 差異。涉及檔案 pattern: components/**/*-sheet.tsx with inline TextInput at bottom of ScrollView.
 ---
 
 # RN Bottom-Sheet Keyboard-Avoid Pattern
@@ -78,6 +78,17 @@ avoider: { flex: 1 },
 - `components/session/template-meta-sheet.tsx` — 「另存模板 / 儲存模板」sheet 內「新增計畫」+「新增強度」chip
 
 兩個 sheet pattern 完全一致、修法 1:1 套用。
+
+## 套過的檔案 (2026-06-27) — 備註 editor 兩處（⚠️ 注意有「兩個不同」note sheet）
+
+TrainingLog 有 **兩個獨立的備註 sheet**，外觀像但是不同元件、各自要修：
+
+- `components/shared/set-note-sheet.tsx` — `SetNoteSheet`：**per-set** 備註（session set logger 右滑備註）+ Goal 4 動作庫詳情頁 📝 + 今日卡片。placeholder=`page.setNotePlaceholder`、title=`domain.note`、**無 footnote**。
+- `components/template-editor/template-editor-view.tsx`（`noteEditing` Modal ~L2890）— **per-exercise** 備註（⚙ gear → 備註）。**模板編輯器 + session 詳情頁共用**此元件。placeholder=`page.noteEditorPlaceholder`、底下有 footnote `status.noteEditorFootnote`（「備註用於記錄動作 cue / 注意事項。」）。
+
+**辨識關鍵**：截圖底下**有沒有那行 footnote**＝ template-editor-view 那個；沒有＝SetNoteSheet。第一次只修了 SetNoteSheet、user 回報「位置依然會被鍵盤擋」，因為實際畫面是 template-editor-view 的 per-exercise 備註（footnote 是 tell）。**先看 footnote/placeholder i18n key 確定是哪一個元件再修**，別只 grep 一個 *-sheet.tsx 就收工。
+
+這兩個跟上面 2 個的差別：**內部沒有 ScrollView**（只有單一 multiline TextInput + 可選 footnote、完成鈕在 top bar），所以 `keyboardShouldPersistTaps` 不需要；KAV wrap backdrop 即可。
 
 ## 何時不用這個 pattern
 

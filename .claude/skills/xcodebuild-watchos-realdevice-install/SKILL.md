@@ -533,3 +533,28 @@ singleton `RCTEventEmitter` buffering inbound events behind `hasObservers`):
 2026-05-29 morning: ~45 min lost iterating "rebuild → user reports old Watch UI → re-investigate". Three full xcodebuild rounds (07:12, 07:36, 07:50) all printed `** INSTALL SUCCEEDED **` while iPhone had no app installed. Only at 08:00 did `devicectl install` solve Trap 1, and only after clean build at 07:50 was Watch target actually compiled (Trap 2). User then hit Trap 3 (cached old Watch UI) until iPhone host app was fully deleted at 08:30.
 
 Don't repeat. Start with `clean install` + `devicectl install` from the start when shipping new Watch Swift code to wrist.
+
+## Diagnose "我裝的版本對嗎 / 新功能都沒出來" (2026-06-27)
+
+When the user says a just-built feature isn't on the device, FIRST prove which build is installed before re-building — don't assume.
+
+```bash
+IPHONE=<udid>
+# 1. Installed host build = CFBundleVersion (auto-bumped = unix epoch timestamp)
+xcrun devicectl device info apps --device "$IPHONE" | grep -i training
+#    → e.g. "TrainingLog  com.lisonchang.TrainingLog  1.0.0  1782472003"
+date -r 1782472003 '+%Y-%m-%d %H:%M'                 # convert the build ts
+git show -s --format='%cd' --date=format:'%Y-%m-%d %H:%M' HEAD   # your branch tip
+# If installed build ts < your commit ts → the device DOES NOT have your code yet.
+# 2. Confirm a specific NEW symbol is in the staged Watch binary (Trap 4 caveat:
+#    Debug splits into .debug.dylib, but a combined binary also happens — grep BOTH):
+APP="<DerivedData>/.../InstallationBuildProductsLocation/Applications/TrainingLog.app"
+strings "$APP/Watch/TrainingLog Watch Watch App.app/TrainingLog Watch Watch App" | grep -m3 MyNewSymbol
+find "$APP/Watch" -name "*.debug.dylib" -exec strings {} \; | grep MyNewSymbol
+```
+
+Gotchas validated 2026-06-27:
+- **`devicectl install` / `process launch` prints `Failed to load provisioning parameter list ... No provider was found. Code=1002`** — this is BENIGN. The very next line `App installed:` / `Launched application ...` is the real success signal. Don't treat the warning as a failure.
+- **The Watch app icon in the iPhone「Apple Watch」app list is a CACHED thumbnail** — it stays the OLD icon until the Watch actually re-syncs the new embedded app. An old icon there ≠ icon regression; it's just Trap-3 sync lag. Don't go hunting the AppIcon asset.
+- **You CANNOT compile-verify the Watch Swift via the umbrella scheme + a watchOS-Simulator destination** — the scheme's iOS host can't target watchOS, so the build produces no Watch compile (empty output). The real compile-verify is the `clean install` device build itself: when the log reaches `CodeSign ... TrainingLog Watch Watch App.app` (and `grep -cE "SwiftCompile.*Watch Watch App"` ≥ 20), every Watch .swift compiled cleanly. Treat that CodeSign line as the "Swift has no typos" gate.
+- **Reading "都沒實現" as a build problem, not a code problem** — features committed to a branch but never built/installed simply aren't on the device. iPhone dev builds load JS from Metro (so TS/JSX changes hot-reload), but ALL Swift (host + Watch) is baked into the binary and needs the rebuild.
