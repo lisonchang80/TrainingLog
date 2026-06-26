@@ -134,10 +134,11 @@ export default function MonthGridView() {
       id: r.id,
       date: localDateOf(r.started_at),
       started_at: r.started_at,
-      // session.title is a planned column (ADR-0014) but not yet surfaced on
-      // this calendar path — title fallback resolves to template_name or
-      // 「空白訓練」per ADR-0015 spec (see displaySessionTitle).
-      title: '',
+      // session.title (ADR-0014, user-editable) — calendar shows the session's
+      // own name; displaySessionTitle falls back to template_name then
+      // 「空白訓練」when title is empty (2026-06-26: previously hard-coded ''
+      // which always lost the user's edited name).
+      title: r.title,
       capacity: r.capacity,
       template_id: r.template_id,
       template_name: r.template_name,

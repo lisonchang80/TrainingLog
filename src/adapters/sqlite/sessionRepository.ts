@@ -536,6 +536,8 @@ export async function loadHistoryListRows(db: Database): Promise<HistoryListRow[
 export interface CalendarMonthRow {
   id: string;
   started_at: number;
+  /** User-editable session title (ADR-0014); '' for an un-named freestyle. */
+  title: string;
   /** Σ weight_kg × reps over logged non-warmup sets (kg, un-rounded). */
   capacity: number;
   /** Winning linked template id, or null for a freestyle session. */
@@ -671,6 +673,7 @@ export async function loadCalendarMonthRows(
     return {
       id: row.id,
       started_at: row.started_at,
+      title: row.title ?? '',
       capacity: capacityBySession.get(row.id) ?? 0,
       template_id: tpl?.template_id ?? null,
       template_name: tpl?.template_name ?? null,

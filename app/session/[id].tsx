@@ -108,7 +108,7 @@ import {
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
 } from '@/src/adapters/sqlite/templateRepository';
-import { formatTemplateTriple } from '@/src/domain/template/templateManager';
+import { formatSessionSubtitle } from '@/src/domain/template/templateManager';
 import {
   getExerciseNotes,
   updateExerciseNotes,
@@ -2098,7 +2098,8 @@ export default function SessionDetailScreen() {
               style={styles.headerSubtitle}
               numberOfLines={1}
               ellipsizeMode="tail">
-              {formatTemplateTriple(
+              {formatSessionSubtitle(
+                sessionTemplateInfo.template_name,
                 sessionTemplateInfo.program_name,
                 sessionTemplateInfo.sub_tag,
               )}

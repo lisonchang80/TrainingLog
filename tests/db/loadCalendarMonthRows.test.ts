@@ -293,6 +293,8 @@ describe('loadCalendarMonthRows — equivalence with the old per-session calenda
     expect(byId.get('in-1')!.capacity).toBe(980);
     expect(byId.get('in-1')!.template_id).toBe('tpl-push');
     expect(byId.get('in-1')!.template_name).toBe('Push Day');
+    // 2026-06-26 — calendar surfaces session.title (was hard-coded '').
+    expect(byId.get('in-1')!.title).toBe('In1');
     expect(byId.get('in-1')!.program_name).toBe('增肌-Q2');
     expect(byId.get('in-1')!.sub_tag).toBe('5x5');
     expect(byId.get('in-1')!.color_hex).toBe('#FF0000');
@@ -304,6 +306,7 @@ describe('loadCalendarMonthRows — equivalence with the old per-session calenda
     // in-3: freestyle → null template, 600.
     expect(byId.get('in-3')!.template_id).toBeNull();
     expect(byId.get('in-3')!.template_name).toBeNull();
+    expect(byId.get('in-3')!.title).toBe('In3');
     expect(byId.get('in-3')!.color_hex).toBe('');
     expect(byId.get('in-3')!.capacity).toBe(600);
     // in-edge-start (June 1 00:00 exactly): included, 700.

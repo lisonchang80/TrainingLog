@@ -231,3 +231,26 @@ export function formatTemplateTriple(
   if (!sub_tag) return p;
   return `${p} · ${sub_tag}`;
 }
+
+/**
+ * Session header subtitle (line 2) — the immutable template-identity badge:
+ * 「模板名 · 計劃 · 強度」(2026-06-26 拍板). Distinct from `formatTemplateTriple`
+ * (which leads with 計劃/強度 only): this prefixes the originating template
+ * name so the second line keeps showing the full origin even after the user
+ * renames the editable title (line 1). The template name is sourced from the
+ * LINKED template (stable), not session.title (mutable).
+ *
+ * Joins only the present parts with U+00B7 ( · ); degenerate parts drop out:
+ *   ('胸推日', '推日訓練', '中度日') → '胸推日 · 推日訓練 · 中度日'
+ *   ('胸推日', '推日訓練', null)    → '胸推日 · 推日訓練'
+ *   ('胸推日', null, null)          → '胸推日'
+ */
+export function formatSessionSubtitle(
+  template_name: string | null,
+  program_name: string | null,
+  sub_tag: string | null
+): string {
+  return [template_name, program_name, sub_tag]
+    .filter((p): p is string => !!p && p.length > 0)
+    .join(' · ');
+}

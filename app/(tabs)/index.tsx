@@ -131,7 +131,7 @@ import { RESERVED_NONE_PROGRAM_ID } from '@/src/db/seed/v017ProgramNone';
 import { planResolveTarget } from '@/src/domain/template/resolveTargetTemplate';
 import type { ProgramOption } from '@/src/domain/program/resolveProgramDefaults';
 import { StartTemplateSheet } from '@/components/templates/start-template-sheet';
-import { formatTemplateTriple } from '@/src/domain/template/templateManager';
+import { formatSessionSubtitle } from '@/src/domain/template/templateManager';
 import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
 import type { UnitPreference } from '@/src/domain/body/types';
 import {
@@ -2512,19 +2512,20 @@ export default function TodayScreen() {
   let programBanner: ReactNode = null;
   if (sessionState.status === 'in_progress') {
     if (sessionTemplateInfo) {
-      // #6 (2026-05-30) — header 的 SessionTitleEditor 已顯示 session 標題
-      // (template 訓練預設 = 模板名)。banner 原本第一行又印一次
-      // `template_name` → 與標題重複。移除該行，只留「計劃 · 強度」副標；
-      // 若 session 未連 program/intensity (triple 為空) 整個 banner 不渲染。
-      // ADR-0026 極簡模式：「計劃·強度」副標 = 純計劃概念 → 整段藏掉。
-      const triple = formatTemplateTriple(
+      // 2026-06-26 翻盤 — 第2行(banner) = 不可改的「模板名·計劃·強度」身份標
+      // (使用者拍板：模板名固定取自模板，刻意與第1行可改標題並列)。原 #6
+      // (2026-05-30) 為避免與標題重複而拿掉模板名行；現使用者要求加回，故
+      // 改用 formatSessionSubtitle 前綴模板名。subtitle 永遠 truthy(至少有
+      // 模板名)；ADR-0026 極簡模式仍整段藏掉(純計劃概念)。
+      const subtitle = formatSessionSubtitle(
+        sessionTemplateInfo.template_name,
         sessionTemplateInfo.program_name,
         sessionTemplateInfo.sub_tag,
       );
       programBanner =
-        triple && !isMinimal ? (
+        subtitle && !isMinimal ? (
           <View style={styles.programBanner}>
-            <Text style={styles.programBannerCell}>{triple}</Text>
+            <Text style={styles.programBannerCell}>{subtitle}</Text>
           </View>
         ) : null;
     } else {
