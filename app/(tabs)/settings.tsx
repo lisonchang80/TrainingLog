@@ -5,8 +5,10 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -916,8 +918,11 @@ export default function SettingsScreen() {
         transparent
         animationType="fade"
         onRequestClose={() => setBwSheetOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalAvoider}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalSheet}>
             <Text style={styles.modalHeading}>{t('page', 'recordBodyweight')}</Text>
             <Text style={styles.modalLabel}>{tBodyweightWithUnit(unit)}</Text>
             <TextInput
@@ -954,8 +959,9 @@ export default function SettingsScreen() {
                 </Text>
               </Pressable>
             </View>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1234,6 +1240,7 @@ function makeStyles(tokens: ThemeTokens) {
     bwRowLabel: { fontSize: 16, fontWeight: '600', color: tokens.text.primary },
     bwRowHint: { fontSize: 12, color: tokens.text.secondary },
     btnDisabled: { opacity: 0.5 },
+    modalAvoider: { flex: 1 },
     modalBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.5)',
