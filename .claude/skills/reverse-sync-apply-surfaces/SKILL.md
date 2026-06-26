@@ -120,25 +120,74 @@ behaviour (e.g. exercise ops sync but set ops don't = the per-handler commit
 didn't load). Always have the user hard-reload before concluding a TS push
 "still doesn't fire".
 
-## 2026-06-26 device-session status (slice/13d-phase-c-device-2026-06-26)
+## Reading the DEVICE's runtime — take over Metro + console.log probes
 
-Verified syncing on device: ① 加動作 / ⑥ 刪動作.
+When the user can't read the Metro terminal (or you need the *device's* runtime
+state, not the source), TAKE OVER Metro so its stdout (which includes the
+device's `console.log`) lands in a file you can `grep`:
 
-**③ set 排序 — ROOT CAUSE FOUND + FIXED (commit 4d8ad9e), pending device-verify.**
-Pure Layer-2 stage-1 miss (see ⚠️ above): `fetchSessionSnapshot`'s `bucket.map`
-dropped `display_rank`, so the wire never carried it. One-line fix
-(`display_rank: s.display_rank ?? null`) — **JS-only, NO Watch rebuild** (the
-Swift apply/render shipped in dc44d31). Verify by Metro JS reload only. NOTE the
-detail page `session/[id].tsx` reorder is STILL not push-wired (only index.tsx's
-Today-tab drag pushes, via its `refresh()` tail) — if the user reorders on the
-detail page during a Watch-led session, wire `pushMirrorIfWatchLed` there too.
+```bash
+pkill -f "expo start --dev-client"           # kill the user's Metro
+npx expo start --dev-client --port 8081 --clear > /tmp/metro-probe.log 2>&1 &  # yours, logged to file
+# user reloads the app (it reconnects to :8081, shows "Downloading" = pulling from Metro)
+grep "REVSYNC-PROBE" /tmp/metro-probe.log     # read the device's logs yourself
+```
 
-**⑤ 打勾 — NO code bug; concluded STALE BUNDLE.** Walked all 3 layers in code:
-Layer 1 ✓ (`onToggleLogged` calls `pushMirrorIfWatchLed`, index.tsx:1684), Layer
-2 ✓ (`is_logged` always emitted, producer:181 + fetchSessionSnapshot:1212), Layer
-3 ✓ (apply `newLogged.insert/remove`, render `isLogged()`). The "add/delete
-exercise syncs but set-edits don't" signature = the running iPhone JS predates
-faa959a's per-handler push (the refresh-tail push from 189c233 covers exercise
-ops; the per-handler push for set edits didn't load). Fix = hard reload
-(terminate + relaunch the iPhone app, NOT shake-reload) — see the stale-bundle
-section above. Re-smoke ⑤ AFTER a confirmed hard reload before suspecting code.
+- **Confirm the device runs the latest JS** (rules out stale-bundle without a
+  rebuild): fetch the bundle Metro actually serves and grep for a fresh symbol.
+  The expo-router dev-client entry is
+  `http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false`
+  (NOT `/index.bundle` — that 404s with `UnableToResolveError`). A dev bundle
+  keeps function names un-mangled, so `grep -c pushMirrorIfWatchLed` works.
+  On-device "Downloading" (not "Bundling") = it IS pulling from Metro (this app
+  has no expo-updates/OTA, verified — so Downloading is never a stale OTA).
+- Add temporary `console.log('[REVSYNC-PROBE] ...')` at the push entry
+  (`pushMirrorIfWatchLed`), the producer (`scheduleLiveMirrorPush`), AND inside
+  `pushLiveMirrorToWatch` log the WIRE set list `{se, ord, setId, logged, rank}`
+  — that proves Layer 1+2 from the device. Probes are uncommitted; `git checkout`
+  the files to remove them after.
+- **Behavioral disambiguation (push-vs-apply, no rebuild):** have the user
+  toggle ✓ on the iPhone, THEN add an exercise. The add-exercise push carries
+  the FULL snapshot incl. the toggled `logged:true`. If the new exercise appears
+  on the Watch but the ✓ still doesn't → the Watch APPLY is broken (not delivery),
+  because a known-working push carried the logged state and the Watch ignored it.
+
+## 2026-06-26 device-session — ⑤/③ bug is 100% WATCH-SIDE apply (NOT iPhone, NOT bundle)
+
+**The earlier "⑤ = stale bundle" conclusion was DISPROVEN.** Proven via the
+Metro-takeover + probes above: device runs fresh JS, `pushMirrorIfWatchLed PUSH`
+fires, `applyDepth:0` (not suppressed), and the WIRE carries the toggled set
+correctly (`setId=…,se=…,ord=1,logged:true`, rank present). The behavioral test
+gave **3a 新動作出現 / 3b ✓沒套用** — the ✓ rode along on a *working*
+add-exercise push and the Watch still didn't apply it. ∴ iPhone is perfect; the
+bug is in `SessionInteractionState.applyRemoteSnapshot`'s SET-level apply.
+Exercise-level (keyed by `sessionExerciseId`) works; set-level (keyed by `setId`)
+fails — so ⑤ (loggedSetIds) AND ③ (setRankOverrides) both break together.
+
+**③ wire gap fixed (commit 4d8ad9e):** `fetchSessionSnapshot`'s `bucket.map`
+dropped `display_rank` (JS-only fix, on branch) — necessary but NOT sufficient;
+③ still won't sync until the Watch-side set-apply bug below is fixed.
+
+**Two concrete Watch suspects (instrument to pick):**
+1. **`applyRemoteSnapshot` line ~659 guard** — `guard baseExById[ex.sessionExerciseId] != nil`
+   skips the whole set loop (`continue`) for an exercise whose `sessionExerciseId`
+   isn't in the Watch's base → logged/rank never applied.
+2. **`AddedSet` struct has no `isLogged` field** (apply ~686-695) — a set that
+   falls into `newAddedSets` (because `baseSetById[s.setId] == nil`, i.e. setId
+   didn't match base) renders permanently un-✓.
+
+Both fire only if the Watch's base `sessionExerciseId`/`setId` ≠ the iPhone's
+reverse ids. CodingKeys are all correct (not a decode bug). `localizeSetId`
+(`replaceLiveMirror.ts:355-377`) only namespaces on cross-session setId collision
+— normally the iPhone keeps the Watch's setId, so ids *should* match (and a pure
+mismatch would make `deletedSets` hide ALL base sets, which DIDN'T happen). So
+the exact id divergence is unknown from the iPhone side — **needs Watch-side
+logging**.
+
+**NEXT (surgical, one Watch rebuild):** instrument `applyRemoteSnapshot` to log
+base-vs-incoming `sessionExerciseId`/`setId` + guard hits + `newLogged`, ROUTED
+back to the iPhone over WC → Metro (so you can read it). Optionally land the
+principled fix in the same build: resolve set overlays by `(sessionExerciseId,
+ordinal)` → base `setId` (mirrors the forward `replaceLiveMirror` identity; a
+no-op when ids already match) + give `AddedSet` an `isLogged`. Then build +
+install + one smoke to read the ids and confirm.
