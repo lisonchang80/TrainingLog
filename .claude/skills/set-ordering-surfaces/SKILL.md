@@ -23,6 +23,49 @@ smoke at a time).
   surface sorts by `display_rank ?? ordering` (ordering tie-break). NULL → legacy
   fallback (display == creation).
 
+## The 2026-06-26 rule: the iPhone WRITES display_rank too (F1/F2 fix, Opt A)
+
+Originally only the **Watch** wrote `display_rank`; every iPhone-local set
+mutation left it NULL and only touched `ordering`. On a Watch-reordered card that
+mixed coordinate spaces — existing rows in per-card `display_rank` (0,1,2…), a
+fresh iPhone insert's NULL falling back to its *global* `ordering` (6,7…) → it
+sorted to the wrong end (**F1**); and an iPhone long-press reorder rewrote only
+`ordering`, which the comparator ignores → silent no-op (**F2**). Reachable on the
+session-detail edit page (ended session, ungated).
+
+**Fix (`setRepository.ts`):** every iPhone-local mutation now renumbers the
+affected card's `display_rank` to clean integers `0..N-1` in render order, via the
+private helper **`renumberCardAfterInsert(db, card, newIds, afterId)`** (reads the
+card render-ordered, splices `newIds` after `afterId` or appends, stamps). `ordering`
+stays untouched (identity). Grill 2026-06-26: **integer renumber, not fractional
+midpoint** (edit path is ended-session, no live Watch race).
+
+- **insert writers** (renumber, `afterId` = anchor): `insertSessionSetAfter`
+  (afterId=source), `insertDropsetFollower` (afterId=parent head),
+  `addSessionDropsetRow` (afterId=tapped), `addSessionDropsetCluster`
+  (afterId=lastInChain). **append writers** (`afterId=null`): `recordSetInSession`,
+  `addClusterCycleAtEnd` (both sides), `cloneClusterCycle` (both sides).
+- **reorder** (`reorderSessionSetsForExercise`): now `stampDisplayRanks(orderedIds)`
+  (= display_rank 0..N-1 in dropped order), **does NOT rewrite `ordering`** — the
+  ADR-0019 §2026-06-02 / ADR-0012 cross-link literal ("a reorder in the sync world
+  = write display_rank, leave ordering"). This is the F2 fix.
+- **replay** (`replayCardSetsFromHistoricalSession`, `replayClusterCardSets…`):
+  stamp `0..N-1` so a replayed card never carries NULL (which would re-mix spaces
+  on the next insert). Cluster = per-side via `insertSide`.
+- **Cluster = per side**: each side is its own `session_exercise_id`;
+  `clusterCard.sortedSetsFor` sorts each side independently and pairs A[i]/B[i] by
+  index. So renumber each side separately (clone/addCycle call it twice).
+- **Helper card scope** mirrors v019: `session_exercise_id` when present, else
+  `(session_id, exercise_id)` fallback.
+- ⚠️ **A reorder no longer changes `ORDER BY ordering`** — tests asserting reorder
+  via `listSetsBySession` order are asserting the OLD (F2) contract; assert on
+  `sortSetsByDisplayRank` render order + `display_rank` values instead (see
+  `tests/db/reorderSessionSets.test.ts`, `reorderClusterCycles.test.ts`,
+  `setDisplayRankOptA.test.ts`).
+- **Hard prereq (already in main):** the wave3 edit-mode capture/restore fix
+  (`f44ce9c`) preserves `display_rank` across edit-discard — without it, Opt A's
+  writes get nulled on discard.
+
 ## The surfaces (audit ALL when a sort key changes)
 
 | # | Surface | File | Sort site | Smoke |
