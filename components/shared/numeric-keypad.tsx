@@ -55,14 +55,22 @@ export function NumericKeypad({
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [buffer, setBuffer] = useState(() => String(initialValue));
+  // 反白取代 (2026-06-26) — the value opens "selected"; the first key replaces
+  // it. `fresh` is true on (re)open and flips to false after the first press.
+  const [fresh, setFresh] = useState(true);
 
-  // Reset buffer whenever the modal re-opens with a (potentially) new value.
+  // Reset buffer + selection whenever the modal re-opens with a (potentially)
+  // new value, so the existing value is shown 反白 ready to be overwritten.
   useEffect(() => {
-    if (visible) setBuffer(String(initialValue));
+    if (visible) {
+      setBuffer(String(initialValue));
+      setFresh(true);
+    }
   }, [visible, initialValue]);
 
   const handleKey = (key: string) => {
-    setBuffer((b) => applyKeypadKey(b, key, mode));
+    setBuffer((b) => applyKeypadKey(b, key, mode, fresh));
+    setFresh(false);
   };
 
   const handleConfirm = () => {
@@ -132,7 +140,12 @@ export function NumericKeypad({
           </View>
 
           <View style={styles.display}>
-            <Text style={styles.displayText}>{buffer}</Text>
+            {/* 反白取代 — while `fresh`, the value renders "selected" so the
+                user sees the first key will overwrite it. */}
+            <Text
+              style={[styles.displayText, fresh && styles.displayTextSelected]}>
+              {buffer}
+            </Text>
           </View>
 
           <View style={styles.grid}>
@@ -217,6 +230,13 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '300',
       color: tokens.text.primary,
       fontVariant: ['tabular-nums'],
+    },
+    // 反白取代 — selection highlight on the value box (text bg = accent,
+    // glyphs = onPrimary) so the "first key replaces" affordance reads
+    // like a native text selection.
+    displayTextSelected: {
+      color: tokens.action.onPrimary,
+      backgroundColor: tokens.action.primary,
     },
     grid: {
       paddingHorizontal: 8,

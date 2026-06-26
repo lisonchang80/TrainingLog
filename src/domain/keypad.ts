@@ -13,6 +13,13 @@
  *   - '.':     append decimal point (decimal mode only; no-op if buffer
  *              already contains '.', integer mode, or buffer at cap)
  *   - 'back':  remove last char; if buffer would become empty, returns '0'
+ *
+ * `fresh` (2026-06-26) — overwrite-on-first-key (反白取代). When the modal
+ * opens on an existing value it shows that value "selected" (反白); the FIRST
+ * key REPLACES the whole value instead of appending, then normal append/edit
+ * resumes. The component owns the flag (true on open → false after the first
+ * press). `fresh` defaults to false so the 3-arg call form keeps the legacy
+ * append behaviour — mirrors native TextInput `selectTextOnFocus`.
  */
 
 export type KeypadMode = 'integer' | 'decimal';
@@ -32,7 +39,19 @@ export function applyKeypadKey(
   buffer: string,
   key: string,
   mode: KeypadMode,
+  fresh = false,
 ): string {
+  // 反白取代 (2026-06-26) — when `fresh`, the displayed value is shown
+  // "selected" and the first key replaces it wholesale rather than appending.
+  // The component flips `fresh` to false after this first press, so subsequent
+  // keys fall through to the normal append/edit logic below.
+  if (fresh) {
+    if (key === 'back') return '0'; // delete the selected value
+    if (key === '.') return mode === 'decimal' ? '0.' : '0';
+    if (key >= '0' && key <= '9') return key === '0' ? '0' : key;
+    return buffer; // unknown key — keep the selection intact
+  }
+
   if (key === 'back') {
     if (buffer.length <= 1) return '0';
     return buffer.slice(0, -1);

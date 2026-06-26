@@ -79,6 +79,77 @@ describe('keypad — applyKeypadKey decimal mode', () => {
   });
 });
 
+describe('keypad — applyKeypadKey fresh (反白取代, overwrite on first key)', () => {
+  it('first digit replaces a multi-digit value (integer)', () => {
+    expect(applyKeypadKey('85', '1', 'integer', true)).toBe('1');
+  });
+
+  it('first digit replaces a decimal value', () => {
+    expect(applyKeypadKey('100.5', '7', 'decimal', true)).toBe('7');
+  });
+
+  it('first key "0" replaces with "0" (no leading-zero buildup)', () => {
+    expect(applyKeypadKey('85', '0', 'integer', true)).toBe('0');
+  });
+
+  it('first "." starts a fresh "0." (decimal)', () => {
+    expect(applyKeypadKey('85', '.', 'decimal', true)).toBe('0.');
+  });
+
+  it('first back clears the selected value to "0"', () => {
+    expect(applyKeypadKey('85', 'back', 'integer', true)).toBe('0');
+  });
+
+  it('unknown key keeps the selection while fresh', () => {
+    expect(applyKeypadKey('85', 'x', 'integer', true)).toBe('85');
+  });
+
+  it('fresh defaults to false → backward-compatible append', () => {
+    // The 3-arg call form (no fresh) must behave exactly as before.
+    expect(applyKeypadKey('12', '5', 'integer')).toBe('125');
+  });
+});
+
+describe('keypad — fresh typing sequence (component semantics)', () => {
+  // The component opens with fresh=true and flips it to false after the first
+  // key press, so only the FIRST key overwrites; the rest append normally.
+  function typeFresh(
+    keys: string[],
+    mode: 'integer' | 'decimal',
+    start: string,
+  ): { buffer: string; value: number } {
+    let buffer = start;
+    let fresh = true;
+    for (const k of keys) {
+      buffer = applyKeypadKey(buffer, k, mode, fresh);
+      fresh = false;
+    }
+    return { buffer, value: parseKeypadBuffer(buffer) };
+  }
+
+  it('open on 85, type 1 2 → 12 (replace then append)', () => {
+    const { buffer, value } = typeFresh(['1', '2'], 'integer', '85');
+    expect(buffer).toBe('12');
+    expect(value).toBe(12);
+  });
+
+  it('open on 100, type 6 0 → 60 (decimal)', () => {
+    const { buffer } = typeFresh(['6', '0'], 'decimal', '100');
+    expect(buffer).toBe('60');
+  });
+
+  it('open on 60, type . 5 → 0.5', () => {
+    const { buffer, value } = typeFresh(['.', '5'], 'decimal', '60');
+    expect(buffer).toBe('0.5');
+    expect(value).toBe(0.5);
+  });
+
+  it('confirm without pressing keeps the original value', () => {
+    const { value } = typeFresh([], 'integer', '85');
+    expect(value).toBe(85);
+  });
+});
+
 describe('keypad — parseKeypadBuffer', () => {
   it('parses "12" as 12', () => {
     expect(parseKeypadBuffer('12')).toBe(12);
