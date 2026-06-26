@@ -44,7 +44,9 @@ import {
 import {
   ActionSheetIOS,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -2892,6 +2894,12 @@ export default function TemplateEditorView() {
           transparent
           animationType="slide"
           onRequestClose={() => setNoteEditing(null)}>
+          {/* 2026-06-27 — the bottom note sheet + autoFocus TextInput was hidden
+              behind the keyboard. KeyboardAvoidingView (padding on iOS) floats it
+              above the keyboard. Shared by template editor + session detail. */}
+          <KeyboardAvoidingView
+            style={styles.flexFill}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <Pressable
             style={styles.sheetBackdrop}
             onPress={() => setNoteEditing(null)}>
@@ -2922,6 +2930,7 @@ export default function TemplateEditorView() {
               </Text>
             </Pressable>
           </Pressable>
+          </KeyboardAvoidingView>
         </Modal>
 
         <ReorderExercisesSheet
