@@ -1274,6 +1274,21 @@ export default function TodayScreen() {
    * Subsequent commits will swap this minimum-viable handler for the full
    * 5-gesture wire-up (right-swipe add + notes, etc.).
    */
+  // Phase C-core (2026-06-26) reverse sync — push the live tree to the Watch
+  // after a LOCAL set/title edit. These handlers mutate via optimistic setState
+  // (setSetsInSession / setSessionTitle), NOT refresh, so the refresh-tail push
+  // misses them; each calls this explicitly. Re-reads the DB fresh (debounced),
+  // gated to a watch-led in-progress session. Called ONLY from user-driven edit
+  // handlers — the WC inbound path runs none of them — so it can NEVER echo a
+  // just-applied Watch snapshot back (no ping-pong, even during concurrent use).
+  const pushMirrorIfWatchLed = () => {
+    if (sessionState.status !== 'in_progress' || !sessionState.is_watch_tracked) {
+      return;
+    }
+    const sid = getSessionId(sessionState);
+    if (sid) scheduleLiveMirrorPush(db, sid);
+  };
+
   const onAddSet = async (
     exercise_id: string,
     session_exercise_id: string,
@@ -1313,6 +1328,7 @@ export default function TodayScreen() {
         });
         const sets = await listSetsBySession(db, session_id);
         setSetsInSession(sets);
+        pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
       } catch (e) {
         Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
       } finally {
@@ -1365,6 +1381,7 @@ export default function TodayScreen() {
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
       // NOTE: PR detection moved to onToggleLogged — new sets start unlogged,
       // so the PR ceremony should fire only when user marks the set complete.
       // Per user 「還沒打勾就跳出ＰＲ！」 (smoke 2026-05-17 ultra-late).
@@ -1412,6 +1429,7 @@ export default function TodayScreen() {
             : s,
         ),
       );
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
@@ -1493,6 +1511,7 @@ export default function TodayScreen() {
       }
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
@@ -1510,6 +1529,7 @@ export default function TodayScreen() {
       await deleteSet(db, set_id);
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(t('alert', 'deleteFailed'), e instanceof Error ? e.message : String(e));
     }
@@ -1567,6 +1587,7 @@ export default function TodayScreen() {
       }
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
       // PR detection moved to onToggleLogged — new rows start unlogged.
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
@@ -1594,6 +1615,7 @@ export default function TodayScreen() {
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(t('alert', 'addDropsetFailed'), e instanceof Error ? e.message : String(e));
     } finally {
@@ -1618,6 +1640,7 @@ export default function TodayScreen() {
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('DROPSET_CHAIN_TOO_SHORT')) {
@@ -1658,6 +1681,7 @@ export default function TodayScreen() {
           s.id === set_id ? { ...s, is_logged: nextLogged } : s,
         ),
       );
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       console.warn('[toggle is_logged] failed:', e);
       return;
@@ -1781,6 +1805,7 @@ export default function TodayScreen() {
           return s;
         }),
       );
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       console.warn('[cluster cycle ✓] failed:', e);
       return;
@@ -1813,6 +1838,7 @@ export default function TodayScreen() {
       await deleteClusterCycle(db, args);
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(
         t('alert', 'deleteFailed'),
@@ -1860,6 +1886,7 @@ export default function TodayScreen() {
       }
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(
         t('alert', 'cloneFailed'),
@@ -1950,6 +1977,7 @@ export default function TodayScreen() {
       });
       const sets = await listSetsBySession(db, session_id);
       setSetsInSession(sets);
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(
         t('alert', 'addCycleFailed'),
@@ -1971,6 +1999,7 @@ export default function TodayScreen() {
       setSetsInSession((curr) =>
         curr.map((s) => (s.id === set_id ? { ...s, notes } : s)),
       );
+      pushMirrorIfWatchLed(); // Phase C-core reverse sync (local edit → Watch)
     } catch (e) {
       Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
     }
@@ -2693,7 +2722,10 @@ export default function TodayScreen() {
                 sessionId={session_id}
                 initialTitle={sessionTitle}
                 placeholder={t('page', 'sessionTitlePlaceholder')}
-                onUpdated={setSessionTitle}
+                onUpdated={(tt) => {
+                  setSessionTitle(tt);
+                  pushMirrorIfWatchLed(); // Phase C-core reverse sync (title → Watch)
+                }}
               />
             );
           })()}
