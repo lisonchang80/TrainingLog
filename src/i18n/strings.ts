@@ -596,6 +596,8 @@ export const strings = {
       hideUnchecked: '隱藏未打勾',
       // Card 12R / Round G — force-kill recovery toast on session detail focus.
       editSnapshotRestored: '上次未完成編輯已還原',
+      // D32 interim — iPhone set edits blocked while the session is Watch-led.
+      watchLedReadOnly: '訓練由 Apple Watch 主控，請在手錶上編輯',
       // cluster A/B switcher disabled hints
       alreadyASide: '已是 A 側',
       alreadyBSide: '已是 B 側',
@@ -1632,6 +1634,8 @@ export const strings = {
       hideUnchecked: 'Hide unchecked',
       // Card 12R / Round G — force-kill recovery toast on session detail focus.
       editSnapshotRestored: 'Restored your unfinished edits',
+      // D32 interim — iPhone set edits blocked while the session is Watch-led.
+      watchLedReadOnly: 'Workout is controlled by Apple Watch — edit on the Watch',
       alreadyASide: 'Already A side',
       alreadyBSide: 'Already B side',
       highestVolumePerSession: '(Highest-volume set per session)',
