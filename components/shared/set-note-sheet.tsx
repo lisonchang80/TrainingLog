@@ -77,7 +77,7 @@ export function SetNoteSheet({
           just above it. */}
       <KeyboardAvoidingView
         style={styles.fill}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <Pressable style={styles.backdrop} onPress={onCancel}>
           <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>

@@ -2899,7 +2899,7 @@ export default function TemplateEditorView() {
               above the keyboard. Shared by template editor + session detail. */}
           <KeyboardAvoidingView
             style={styles.flexFill}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Pressable
             style={styles.sheetBackdrop}
             onPress={() => setNoteEditing(null)}>
