@@ -20,9 +20,10 @@ import { getTemplateFull } from './templateRepository';
  *   3. Persist Session header + planned-exercise rows + planned set rows in one
  *      transaction:
  *        - For each newly-inserted session_exercise, INSERT its template's
- *          set rows directly into the session set table (kind / reps / weight
- *          copied as-is, parent_set_id remapped from template_set.id space to
- *          the new session set.id space). All sets land with `is_logged = 0`.
+ *          set rows directly into the session set table (kind / reps / weight /
+ *          per-set notes copied as-is, parent_set_id remapped from
+ *          template_set.id space to the new session set.id space). All sets land
+ *          with `is_logged = 0`.
  *
  * **#51 (2026-05-19 evening)** — direct copy from `template_set`. Pre-#51 the
  * post-insert phase ran `prefillSetsForNewSessionExercise` which walked a
@@ -188,6 +189,10 @@ export async function startSessionFromTemplate(
     set_kind: 'warmup' | 'working' | 'dropset';
     parent_set_id: string | null;
     session_exercise_id: string;
+    // Per-set note authored in the template editor (template_set.notes, v009).
+    // Copied verbatim so it carries over into the new session's set rows. NULL
+    // when the template set had no note.
+    notes: string | null;
   };
   const plannedSets: PlannedSessionSet[] = [];
   const ts = nowFn();
@@ -230,6 +235,7 @@ export async function startSessionFromTemplate(
         set_kind: tset.kind,
         parent_set_id: remappedParent,
         session_exercise_id: newSeId,
+        notes: tset.notes ?? null,
       });
     }
   }

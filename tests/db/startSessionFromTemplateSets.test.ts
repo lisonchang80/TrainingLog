@@ -37,6 +37,7 @@ interface SessionSetRow {
   ordering: number;
   set_kind: 'warmup' | 'working' | 'dropset';
   parent_set_id: string | null;
+  notes: string | null;
 }
 
 async function fetchSessionSets(
@@ -45,7 +46,7 @@ async function fetchSessionSets(
 ): Promise<SessionSetRow[]> {
   return db.getAllAsync<SessionSetRow>(
     `SELECT id, session_id, exercise_id, session_exercise_id, weight_kg, reps,
-            is_skipped, is_logged, ordering, set_kind, parent_set_id
+            is_skipped, is_logged, ordering, set_kind, parent_set_id, notes
        FROM "set"
       WHERE session_id = ?
       ORDER BY session_exercise_id, ordering ASC`,
@@ -340,6 +341,63 @@ describe('startSessionFromTemplate — #51 set copy', () => {
     expect(planned_count).toBe(1);
     const sets = await fetchSessionSets(db, session_id);
     expect(sets).toHaveLength(0);
+  });
+
+  it('carries per-set template notes over into the session set rows', async () => {
+    // Regression for the per-set-note carryover bug: a note authored on a
+    // template_set (template editor) was dropped when starting a session from
+    // the template. The exercise-level note (exercise.notes, ADR-0017 global)
+    // carried over fine; only the per-SET note was lost. Root cause: the
+    // template→session set copy in `sessionFromTemplate` never read
+    // `template_set.notes`, and `insertSessionSet` never wrote `set.notes`.
+    const exercises = await listExercises(db);
+    const bench = exercises.find((e) => e.name === 'Bench Press')!;
+
+    let n = 0;
+    const uuid = () => `id-${++n}`;
+
+    await createTemplate(db, { id: 'tpl-notes', name: 'Notes', now: () => 100 });
+    const { id: teId } = await addTemplateExercise(db, {
+      template_id: 'tpl-notes',
+      exercise_id: bench.id,
+      default_sets: 0,
+      default_reps: 0,
+      default_weight_kg: 0,
+      uuid,
+      now: () => 100,
+    });
+
+    // Set 0 has a note, set 1 has no note (NULL) — assert both carry through.
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight, notes)
+       VALUES (?, ?, ?, 'working', ?, ?, ?)`,
+      'tsn-0',
+      teId,
+      0,
+      8,
+      80,
+      '爆發力 — 控制離心',
+    );
+    await db.runAsync(
+      `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight, notes)
+       VALUES (?, ?, ?, 'working', ?, ?, NULL)`,
+      'tsn-1',
+      teId,
+      1,
+      8,
+      85,
+    );
+
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-notes',
+      uuid,
+      now: () => 1_000,
+    });
+
+    const sets = await fetchSessionSets(db, session_id);
+    expect(sets).toHaveLength(2);
+    expect(sets[0].notes).toBe('爆發力 — 控制離心');
+    expect(sets[1].notes).toBeNull();
   });
 
   it('all materialised sets have is_logged=0 and is_skipped=0 (unlogged plan)', async () => {
