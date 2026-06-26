@@ -3480,3 +3480,35 @@ Swift（device-gated、停在此邊界等使用者）：
 - § 2026-06-01 三段（fast-lane transport / reconcile / render fold）+ H1 liveness gate — 反向重用其 `live-mirror` kind + rev 守門基礎建設。
 - `feedback_watch_ui_reference` — C-core 的備註顯示 UI 動工前先要 Watch 視覺參考。
 - `wc-add-envelope-kind` skill § LIVE 變體 — 反向複用同 kind、不開新 kind。
+
+## 2026-06-26 — Phase C-core device-prep grill（notes scope / 5a wiring / markDirty race 收斂）
+
+> **承接** 上段 8 拍板。在排 Phase C-core device session 前，把 runbook
+> `~/code/TrainingLog-overnight-reports/2026-06-25/03-phasec-core-runbook.md`
+> 逼出的剩餘開放點收斂。觸發＝使用者回報「手機 Watch-led 時無法編輯 set（#1）+
+> 手機新增動作未同步手錶（#2）」，根因驗證＝兩者皆為本 Phase C / D32 缺口（#1=
+> `isWatchLedReadOnly` interim 唯讀閘、#2=反向投影未實作），非 regression。已先上
+> **interim toast**（Watch-led 編輯時提示「請在手錶編輯」，commit on branch
+> `slice/13d-reverse-sync-phase-c-iphone`）。
+
+### 收斂 ledger（Q1 user / Q2–Q4 工程判斷）
+
+| Q | 點 | 拍板 | 理由 |
+|---|---|---|---|
+| 1 | notes scope | **per-set notes 純資料流（`notesOverride` populate，已在 wire）；notes 顯示 UI defer**；exercise-level notes（無 wire 欄）= follow-up | 解除唯一卡 Watch 視覺參考的子項（runbook §7 🔴）。smoke #2 用 placeholder/debug 驗資料到位即可。**收窄上段 Q6「net-new 備註 UI」+ C-core「備註唯讀顯示」= C-core 不做正式 notes UI** |
+| 2 | 5a push wiring | **per-handler**（每個 edit handler DB 寫成功後 `scheduleLiveMirrorPush`），**不走 refresh-收口** | refresh 會因 timer/nav/focus 等非編輯原因觸發；watch-tracked 下那些 refresh 會把鏡像彈回手錶＝echo，而 `applyDepth` 閘只擋 inbound-apply 那條 refresh、擋不住其他。per-handler 只在真編輯時 push、精準無 echo |
+| 3 | markDirty race（Q7② Watch 閘細節） | **`endApplyingRemote()` 延後一個 runloop**（`DispatchQueue.main.async`）；smoke #9 乒乓 gate | `markDirty` 內 `DispatchQueue.main.async`（延一 runloop 等 willSet→didSet）；若 `applyingRemote` 在同 runloop 由 `defer` 釋放，會早於 producer 的 deferred emit → 仍彈回一次。延後釋放讓它晚於 producer emit |
+| 4 | scope 邊界 | **C-core 只做動作層 reorder**（身分＝`sessionExerciseId`、不 adopt iPhone id）；set 層 reorder + id-adoption = **C-id 獨立 slice**；`app/session/[id].tsx` **inbound listener = out of scope**（已知缺口，detail 頁只做 push 方向 5a、不做即時收 Watch） | 不碰 NEW-Q50 standalone id 模型（重申上段）；detail-page inbound 補一條 listener 留 follow-up |
+
+### 翻盤的既有拍板（stale-plan-default）
+
+- ❌ **runbook §5a 推薦「refresh-收口更省」** → 改 **per-handler**（Q2）：refresh-收口
+  在非編輯 refresh 上有 echo 風險，`applyDepth` 閘覆蓋不足。
+
+### 落地（device session，runbook 03 turnkey）
+
+純文件收斂，code 是 device session：Swift 反投影 apply 引擎 + Watch 雙閘（§4，
+endApplyingRemote 延後）+ 動作層 reorder + inbound path → build/裝機 → iPhone TS
+5a（per-handler）/5b（index.tsx inbound 包 `runWhileApplyingRemoteSnapshot`）→ 9 項
+smoke（runbook §6）→ 全綠 ship → 再排 C-id。interim toast + F1/F2（branch
+`fix/set-display-rank-opt-a`）同一次 device session 一起 build+驗。
