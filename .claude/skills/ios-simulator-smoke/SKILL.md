@@ -41,9 +41,14 @@ doesn't follow a symlinked-node_modules worktree.)
 ## ⭐ The #1 trap: tap coords are POINTS, the screenshot is SCALED
 
 `ui_tap {x,y}` takes **points** (same space as `ui_find_element` / `ui_describe_all`
-`AXFrame`). The PNG from `screenshot` is rendered at a **larger scale** (~1.5× on the
-iPhone 17 sim: a 402-pt-wide screen → ~603-px-wide PNG). So **NEVER eyeball a tap
-coordinate off the screenshot** — you'll tap ~1.5× too low/right and hit nothing.
+`AXFrame`). The PNG from `screenshot` is rendered at a **larger scale**, so **NEVER
+eyeball a tap coordinate off the screenshot** — you'll tap too low/right and hit nothing.
+
+**Don't hardcode the scale — measure it.** `sips -g pixelWidth -g pixelHeight <shot>.png`
+÷ the pt screen (iPhone 17 = 402×874). Validated 2026-06-27: the **MCP `screenshot`
+tool wrote 1206×2622 px → exactly 3× pt, NOT 1.5×** (an older note here said ~1.5× /
+603-px-wide — that undercounts the MCP path; `xcrun simctl io` may differ, so always
+measure rather than assume). Screenshot px ÷ scale = tap pt.
 
 Recipe for every tap:
 1. `ui_find_element {search:["Button label"]}` (or `ui_describe_all`) → read the
@@ -53,6 +58,16 @@ Recipe for every tap:
 
 (2026-06-20: tapped y=854 read off the screenshot → no-op; the real button was at
 AXFrame y≈546, center ≈569. One wasted round-trip. Always go via AXFrame.)
+
+**Fallback when `ui_describe_all` collapses a sheet into ONE node** (validated
+2026-06-27 on `TemplateMetaSheet` 另存模板): a RN bottom-sheet / modal can surface as a
+single full-screen `GenericElement` whose `AXLabel` concatenates all its children
+("取消, 另存模板, 儲存, 模板名稱, …") with **no per-child `AXFrame`** — `ui_find_element`
+and `ui_describe_point` can't give you a button's box. Recipe: `sips -c <h> <w>
+--cropOffset <top> <left> shot.png --out strip.png` to crop a horizontal strip where the
+target sits, `Read` the strip to eyeball the element's px position **within the strip**,
+then `(strip_left + px_x)/scale`, `(crop_top + px_y)/scale` → tap pt. Cropping isolates
+the row so the Read estimate is tight; ÷scale (=3, per above) converts to points.
 
 ## Relaunch = JS reload (no rebuild for .ts/.tsx changes)
 
