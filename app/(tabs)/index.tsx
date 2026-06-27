@@ -160,6 +160,7 @@ import {
 } from '@/components/session/session-title-editor';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
+import { pushCastToWatch } from '@/src/services/watchSessionCast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -2290,22 +2291,30 @@ export default function TodayScreen() {
   };
 
   /**
-   * 投影 Watch — manually (re-)push the active session to the paired Watch.
-   * Reuses the D6 `start-from-iphone` envelope (pushStartToWatch): the Watch,
-   * when reachable, hydrates its mirror + auto-jumps to the in-session view; if
-   * its app is backgrounded the envelope queues until next open (iOS cannot
+   * 投影 Watch — push the active session to the paired Watch via the
+   * `cast-session` envelope (`pushCastToWatch`). Unlike the old path (which
+   * sent a D6 `start-from-iphone` with an EMPTY `{}` snapshot to a Watch that
+   * had no consumer — "跳已送出 但手錶無反應"), this fetches the FULL session
+   * snapshot and dual-fires it: an instant `sendMessage` when the Watch is
+   * reachable (the Watch navigates into the session NOW + acks → synced) PLUS a
+   * durable TUI backstop that lands on the Watch's next wake (iOS cannot
    * force-launch the Watch app). Fire-and-forget — never blocks the UI; a toast
-   * reports whether the Watch acked (synced) vs queued.
+   * reports synced / queued / failed.
    */
   const handleCastToWatch = useCallback(() => {
     if (sessionState.status !== 'in_progress') return;
     const session_id = sessionState.id;
     void (async () => {
-      const res = await pushStartToWatch(db, session_id, {});
-      toastRef.current?.show(
-        res.acked ? t('status', 'castToWatchOk') : t('status', 'castToWatchQueued'),
-        { icon: res.acked ? 'success' : 'info' },
-      );
+      const res = await pushCastToWatch(db, session_id);
+      if (res.acked) {
+        toastRef.current?.show(t('status', 'castToWatchOk'), { icon: 'success' });
+      } else if (res.queued) {
+        toastRef.current?.show(t('status', 'castToWatchQueued'), { icon: 'info' });
+      } else {
+        // NO_SNAPSHOT — should not happen for an in-progress session (the row
+        // vanished). Report honestly rather than a false "已送出".
+        toastRef.current?.show(t('status', 'castToWatchFailed'), { icon: 'error' });
+      }
     })();
   }, [db, sessionState]);
 
@@ -2313,7 +2322,7 @@ export default function TodayScreen() {
    * Header [⋯] menu (ADR-0019 Q15). Items:
    *   1. 儲存模板 — overwrite linked template (convertSessionToTemplate update)
    *   2. 另存模板 — open TemplateMetaSheet (convertSessionToTemplate create)
-   *   3. 投影 Watch — re-push active session to paired Watch (D6 envelope)
+   *   3. 投影 Watch — cast active session to paired Watch (cast-session envelope)
    *   4. Body data — open body-data editor sheet (slice 10c overnight #4 第 3 點)
    *   5. 🚫 放棄訓練 — destructive, CASCADE delete the active session
    * Cancel is index 0.
