@@ -934,7 +934,7 @@ export default function SettingsScreen() {
         animationType="fade"
         onRequestClose={() => setBwSheetOpen(false)}>
         <View style={styles.modalBackdrop}>
-            <View style={styles.modalSheet}>
+            <View style={styles.modalSheet} accessibilityViewIsModal>
               <Text style={styles.modalHeading}>{t('page', 'recordBodyData')}</Text>
 
               <View style={styles.modalDateRow}>
@@ -995,6 +995,7 @@ export default function SettingsScreen() {
                 <Pressable
                   onPress={() => setBwSheetOpen(false)}
                   disabled={bwBusy}
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.modalSecondaryBtn,
                     bwBusy && styles.btnDisabled,
@@ -1005,6 +1006,7 @@ export default function SettingsScreen() {
                 <Pressable
                   onPress={onSaveBw}
                   disabled={bwBusy}
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.modalPrimaryBtn,
                     bwBusy && styles.btnDisabled,
