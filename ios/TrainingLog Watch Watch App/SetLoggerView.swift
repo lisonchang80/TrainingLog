@@ -375,6 +375,14 @@ struct SetLoggerView: View {
             // interaction overlay + the outbound coordinator; run() does
             // the initial full-tree push then the throttled loop.
             .task {
+                // 投影 Watch (2026-06-27) — seed the ✓ overlay from the snapshot
+                // BEFORE the producer binds its `$loggedSetIds` sink + does its
+                // initial full-tree push. A session CAST from the iPhone carries
+                // sets already ✓'d; without this they'd render un-checked AND the
+                // initial push would echo the empty overlay back, clearing the
+                // iPhone's ✓s too. No-op for the Watch-led path (all isLogged
+                // false → empty set), so it's safe on every mount.
+                interactionState.seedLoggedFromSnapshot(snapshotForRender)
                 liveMirror.configure(
                     base: snapshotForRender,
                     interaction: interactionState,

@@ -282,6 +282,26 @@ final class SessionInteractionState: ObservableObject {
         loggedSetIds.contains(setId)
     }
 
+    /// 投影 Watch (2026-06-27) — seed the ✓ overlay from a handed-over snapshot.
+    /// `loggedSetIds` is otherwise EMPTY on mount (the Watch-led assumption: a
+    /// session starts with nothing logged, and `isLogged(setId:)` reads ONLY
+    /// this overlay, never the snapshot's `isLogged`). When the iPhone CASTS an
+    /// in-progress session (`pushCastToWatch`), some sets already carry
+    /// `isLogged == true`; without seeding the Watch renders them un-checked AND
+    /// the producer's initial full-tree push echoes the empty state back → the
+    /// iPhone clears its own ✓s (device 2026-06-27: "兩邊都變未打勾"). Idempotent
+    /// for the Watch-led path (all sets isLogged=false → empty set). Call BEFORE
+    /// the live-mirror producer attaches its `$loggedSetIds` sink so this seed
+    /// doesn't `markDirty` a spurious forward emit.
+    func seedLoggedFromSnapshot(_ snapshot: SessionSnapshot) {
+        loggedSetIds = Set(
+            snapshot.exercises
+                .flatMap(\.sets)
+                .filter(\.isLogged)
+                .map(\.setId)
+        )
+    }
+
     func toggleLogged(setId: String) {
         if loggedSetIds.contains(setId) {
             loggedSetIds.remove(setId)
