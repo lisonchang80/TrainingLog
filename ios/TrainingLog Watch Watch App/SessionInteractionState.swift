@@ -712,6 +712,7 @@ final class SessionInteractionState: ObservableObject {
         var newNotes = notesOverride
         var newAddedSets = addedSets
         var newRankOverrides = setRankOverrides
+        var newKindOverrides = setKindOverrides
 
         for (i, ex) in snap.exercises.enumerated() {
             guard let baseEx = matchedBase[i] else {
@@ -747,6 +748,24 @@ final class SessionInteractionState: ObservableObject {
                     }
                     if let n = s.notes { newNotes[id] = n }
                     if let dr = s.displayRank { newRankOverrides[id] = dr }
+                    // set_kind sync (2026-06-27 device bug — iPhone「#/熱/D#」切換
+                    // 沒反映到手錶). The matched branch synced logged / weight /
+                    // reps / notes / display_rank but OMITTED set_kind, so an
+                    // iPhone working→warmup left the row unchanged, and a
+                    // working→warmup→dropset left the head as「working」while its
+                    // inserted follower (new ordinal, no base match) fell to the
+                    // added branch below and rendered as a stray「D1」head. Mirror
+                    // the logged set/remove pattern: override when the iPhone kind
+                    // differs from base, clear the override when it matches again
+                    // (e.g. dropset→working revert). With the head's kind now
+                    // flipped to「dropset」, `ExerciseCard` folds it + the follower
+                    // into ONE cluster (the fold is array-adjacency by
+                    // chain-head, so the follower needs no parent-id rewrite).
+                    if s.setKind != b.setKind {
+                        newKindOverrides[id] = s.setKind
+                    } else {
+                        newKindOverrides.removeValue(forKey: id)
+                    }
                 } else if !newAddedSets.contains(where: { $0.id == s.setId }) {
                     // snap set beyond base (iPhone added a set to this exercise) →
                     // addedSet under the BASE exercise's id so mergeSets folds it.
@@ -773,6 +792,7 @@ final class SessionInteractionState: ObservableObject {
         notesOverride = newNotes
         addedSets = newAddedSets
         setRankOverrides = newRankOverrides
+        setKindOverrides = newKindOverrides
     }
 
     // MARK: - Display value

@@ -186,6 +186,16 @@ struct SupersetCard: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             commitReorder(from: from, to: to)
                         }
+                    },
+                    onMoveStateChange: { moving in
+                        // Goal 3b — while this pair is orange (long-press), show
+                        // its A-side set's note in the top overlay; clear on
+                        // release. Mirrors ExerciseCard; the superset variant
+                        // had been left UNWIRED, so the long-press note overlay
+                        // never appeared for superset cards (2026-06-27 device
+                        // bug「超級組沒備註」). canonicalId = A's setId (B falls
+                        // back), the same key `notesOverride` is populated under.
+                        state.longPressNoteSetId = moving ? pair.canonicalId : nil
                     }
                 ) { isReordering in
                     SupersetPairBox(
