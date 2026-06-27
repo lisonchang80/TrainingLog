@@ -86,7 +86,17 @@ the renderer reads the base directly, an iPhone edit can't reach it.
 | 動作排序 | `exerciseOrderOverride` ([sessionExerciseId]) | `visibleExercises` sort ⭐ |
 | **set 排序** | **`setRankOverrides[setId] = s.displayRank`** | **`mergeSets` `rankOverrides[id] ?? …`** ⭐ |
 | **標題** | **`titleOverride = snap.title`** | **`state.titleOverride ?? snapshot.title`** ⭐ |
-| 備註 | `notesOverride[setId/seId]` | ⚠️ NO on-card UI yet (visual-ref blocked) |
+| 備註 | `notesOverride[setId/seId]` | `LongPressNoteOverlay` (3b 長按) + ⋯選單 (3a) |
+| **set_kind (#/熱/D)** | **`setKindOverrides[id]` (set when `≠ base`, remove when `== base`)** | **`mergeSets`/`applyKindOverride` `kindOverrides[setId]`** ⭐ |
+
+⚠️ The matched-set branch of `applyRemoteSnapshot` is a **per-field allow-list** — it
+only writes the overlays it explicitly maps. It originally synced logged / weight /
+reps / notes / display_rank but **silently OMITTED set_kind** (`cebde71`, 2026-06-28
+device bug「熱身沒反映 / D# 多一行」). Symptom of an omitted matched-branch field:
+the iPhone edit reaches the Watch snapshot fine (Layer 1+2 OK) but the matched row
+ignores it. When adding a reverse field, add it to BOTH the matched branch AND the
+added-set branch (and clear the override on the `== base` case, mirroring `logged`'s
+insert/remove, so a revert un-sticks).
 
 ⭐ = needed a NEW overlay field AND a render-side `?? base` change (the base is
 immutable; reading it directly is the #1 reverse-sync bug). Both must land —
@@ -244,3 +254,55 @@ that ALSO reads `coordinator.pendingCast` on appear, deduped against `.onChange`
 by the `CastRequest.token` (monotonic), so a queued cast routes exactly once on
 next app open. (iOS has NO remote foreground-launch API — "open even when closed"
 is impossible; the achievable half is "lands when the user opens the app".)
+
+## 2026-06-28 — dropset (D#) reverse-sync: folds by array-adjacency, but iPhone ordinal-SHIFT breaks non-last (set_kind shipped, deep fix deferred)
+
+set_kind reverse-sync shipped `cebde71` (matched-branch `setKindOverrides`). It
+fully fixes **warmup** (kind-only, no row count change) and **dropset on the LAST
+set** — but **dropset on a non-last set still corrupts** the Watch. Two facts pin
+why, and the fix direction.
+
+**Watch dropset folding is ARRAY-ADJACENCY, not parent-id matching.**
+`ExerciseCard.SetRowGrouping.group(sets:)`: a `dropset` row with `parent_set_id ==
+nil` opens a NEW cluster (chain HEAD); `parent_set_id != nil` appends to the
+currently-open cluster; anything else (`working`/`warmup`) flushes it. So a
+follower folds into the head purely by (a) being non-nil-parent AND (b) appearing
+right AFTER the head in `mergeSets` display order. **The follower's parent VALUE is
+never matched against the head's id** — so once the matched-branch flips the head's
+kind to `dropset` (chain head, parent stays nil), the existing reverse-synced
+follower folds in for free. Do NOT "resolve the follower's parentSetId to the base
+head id" — it's unnecessary for folding AND it breaks the Watch→iPhone forward fold
+(the round-trip needs the follower's parent to stay the iPhone's real head id).
+
+**Why non-last dropset corrupts = iPhone ordinal SHIFT vs ordinal-based apply.**
+`insertDropsetFollower` (`setRepository.ts:254`) does `UPDATE set SET ordering =
+ordering + 1 WHERE session_id=? AND ordering >= newOrd` — it BUMPS every set after
+the head. `fetchSessionSnapshot` sends the wire `ordinal = set.ordering`
+(`handshake.ts:1204`). But `applyRemoteSnapshot` matches snap→base by **ordinal
+value** against the IMMUTABLE base (frozen at start/cast, pre-shift). So for a
+dropset on a non-last set, the follower's new ordinal collides with the NEIGHBOUR
+base set's ordinal:
+- Device trace (照片 `D1 / D2 / 1 / 1`): head(ord N) matches base → flips to D1 ✓;
+  follower(ord N+1) collides with base neighbour(ord N+1) → that neighbour gets
+  kind→dropset but `parent_set_id` stays nil → it becomes a SECOND head → renders
+  **D2**; the real trailing sets (now ord N+2…) shift off the end → mis-render.
+- After reverting D→working the Watch leaves residue (`1,2,2`): the matched branch
+  never PRUNES `addedSets` that are no longer in the snapshot, so a follower added
+  in a prior apply lingers.
+
+This is the symmetric opposite of the FORWARD invariant: the Watch NEVER re-stamps
+ordinals (added sets get dense max+1, base sets keep theirs) precisely so the iPhone
+can match by `(se_id, ordinal)` value. The iPhone DOES re-stamp on dropset insert,
+so reverse ordinal-matching is broken by construction — the same class of bug as the
+2026-06-26 id-rekey one above, but on the ordinal axis instead of the id axis.
+
+**Deferred fix direction (next round, ≈C-core size, needs device iterations):**
+make `applyRemoteSnapshot` match **id-first, ordinal-fallback**. For a cast / 投影
+session the base carries the iPhone's REAL ids → a follower (fresh id) has no base
+match → routes to `addedSets` cleanly, and the shifted working sets keep their ids →
+match by id regardless of the bumped ordinal. For a template-start session ids
+diverge (the 2026-06-26 case) → no id ever matches → 100% ordinal fallback =
+unchanged, so ⑤③④ don't regress. Plus: PRUNE `addedSets` whose id is absent from a
+matched exercise's snapshot (provenance-aware, to avoid wiping in-flight Watch-local
+adds). Same round picks up the sibling report「超級組『新增1組』→ 手錶編號 1,3,3,4」
+(reverse-sync superset rank dup).
