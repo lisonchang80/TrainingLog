@@ -23,7 +23,7 @@ import {
   updateExerciseNotes,
 } from '@/src/adapters/sqlite/exerciseLibraryRepository';
 import { consumePick } from '@/src/domain/exercise/pickerBridge';
-import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
+import { listPrograms } from '@/src/adapters/sqlite/programRepository';
 import {
   appendSessionExercise,
   countSessionExercises,
@@ -122,7 +122,6 @@ import type { PRSnapshot } from '@/src/domain/pr/prQuery';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import {
-  convertSessionToTemplate,
   findTemplateByTriple,
   getSessionLinkedTemplateTriple,
   type TemplateSummary,
@@ -163,13 +162,8 @@ import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTempl
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
-import { computeDefaultTemplateName } from '@/src/domain/session/sessionDetailLabels';
+import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
 import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
-import {
-  tTemplateCreated,
-  tTemplateUpdated,
-  tDuplicateTemplateTriple,
-} from '@/src/i18n/dynamic';
 import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
 import {
   IDLE,
@@ -283,25 +277,34 @@ export default function TodayScreen() {
   const [inlineBwInput, setInlineBwInput] = useState('');
   const [inlinePbfInput, setInlinePbfInput] = useState('');
   const [inlineSmmInput, setInlineSmmInput] = useState('');
-  // 儲存模板 / 另存模板 from the in-session ⋯ menu (2026-06-27). This MIRRORS
-  // the session 詳情頁 (app/session/[id].tsx) handlers handleSaveTemplate /
-  // handleTemplateMetaConfirm — same convertSessionToTemplate + TemplateMetaSheet
-  // flow, applied to the IN-PROGRESS session (lets the user snapshot a template
-  // mid-workout without finishing). The detail page keeps its own copy (post-
-  // finish entry); the 2026-05-18 single-entry decision is intentionally
-  // relaxed to dual-entry per user request. (Dedup into a shared hook = backlog.)
+  // 儲存模板 / 另存模板 from the in-session ⋯ menu (2026-06-27), applied to the
+  // IN-PROGRESS session (lets the user snapshot a template mid-workout without
+  // finishing). The detail page (app/session/[id].tsx) has its own entry point
+  // (post-finish); the 2026-05-18 single-entry decision is intentionally relaxed
+  // to dual-entry per user request. Both entries share useSessionTemplateSave —
+  // here we seed the default name from the live header title.
   const toastRef = useRef<ToastController | null>(null);
   if (toastRef.current == null) {
     toastRef.current = new ToastController();
   }
-  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
-  const [templateMetaSheetOpen, setTemplateMetaSheetOpen] = useState(false);
-  const [templateMetaBusy, setTemplateMetaBusy] = useState(false);
-  const [templateMetaPrefill, setTemplateMetaPrefill] = useState<{
-    name: string;
-    program_id: string | null;
-    sub_tag: string | null;
-  } | null>(null);
+  const {
+    programs,
+    templateMetaSheetOpen,
+    templateMetaPrefill,
+    templateMetaBusy,
+    handleSaveTemplate,
+    handleTemplateMetaConfirm,
+    closeSheet: closeTemplateMetaSheet,
+  } = useSessionTemplateSave({
+    db,
+    getSessionId: () =>
+      sessionState.status === 'in_progress' ? sessionState.id : null,
+    getStartedAt: () =>
+      sessionState.status === 'in_progress' ? sessionState.started_at : null,
+    getSessionTitle: () =>
+      sessionState.status === 'in_progress' ? sessionTitle.trim() || null : null,
+    toast: toastRef,
+  });
   const [lastPRDelta, setLastPRDelta] = useState<PRDelta | null>(null);
   const [lastPRExerciseName, setLastPRExerciseName] = useState<string>('');
   /** Per-set notes editor sheet — `null` means closed. */
@@ -2287,147 +2290,6 @@ export default function TodayScreen() {
   };
 
   /**
-   * 儲存模板 / 另存模板 from the in-session ⋯ menu (2026-06-27). FAITHFUL
-   * MIRROR of app/session/[id].tsx handleSaveTemplate — same
-   * convertSessionToTemplate flow, applied to the ACTIVE in-progress session.
-   * `update` overwrites the linked template (freestyle → 另存 hint); `create`
-   * opens TemplateMetaSheet. Detail page keeps its own twin copy; dedup into a
-   * shared hook is a backlog item.
-   */
-  const handleSaveTemplate = useCallback(
-    async (mode: 'update' | 'create') => {
-      if (sessionState.status !== 'in_progress') return;
-      const session_id = sessionState.id;
-      const started_at = sessionState.started_at;
-
-      if (mode === 'create') {
-        try {
-          const [progs, linked] = await Promise.all([
-            listPrograms(db),
-            getSessionLinkedTemplateTriple(db, session_id),
-          ]);
-          setPrograms(progs);
-          const dateLabel = formatLocalYmdFromMs(started_at);
-          const prefillName = computeDefaultTemplateName({
-            sessionTitle: sessionTitle.trim() || null,
-            linkedTemplateName: linked?.template_name,
-            dateLabel,
-          });
-          setTemplateMetaPrefill({
-            name: prefillName,
-            program_id: linked?.program_id ?? null,
-            sub_tag: linked?.sub_tag ?? null,
-          });
-        } catch (e) {
-          Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
-          return;
-        }
-        setTemplateMetaSheetOpen(true);
-        return;
-      }
-
-      // mode === 'update' (儲存模板): direct overwrite of the linked template.
-      // Freestyle (no linked template) → tell the user to use 另存模板 instead.
-      let linked: Awaited<ReturnType<typeof getSessionLinkedTemplateTriple>>;
-      try {
-        linked = await getSessionLinkedTemplateTriple(db, session_id);
-      } catch (e) {
-        Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
-        return;
-      }
-      if (!linked) {
-        Alert.alert(
-          t('alert', 'originalTemplateNotFound'),
-          t('alert', 'sessionTemplateMissing'),
-        );
-        return;
-      }
-      try {
-        await convertSessionToTemplate(db, {
-          session_id,
-          template_name: linked.template_name,
-          mode: 'update',
-          uuid: randomUUID,
-        });
-        toastRef.current?.show(tTemplateUpdated(linked.template_name), { icon: 'success' });
-      } catch (e) {
-        Alert.alert(t('alert', 'failed'), e instanceof Error ? e.message : String(e));
-      }
-    },
-    [db, sessionState, sessionTitle],
-  );
-
-  const handleTemplateMetaConfirm = useCallback(
-    async (args: { name: string; program_id: string | null; sub_tag: string | null }) => {
-      if (sessionState.status !== 'in_progress') return;
-      const session_id = sessionState.id;
-      const dateLabel = formatLocalYmdFromMs(sessionState.started_at);
-      const defaultName = computeDefaultTemplateName({
-        sessionTitle: sessionTitle.trim() || null,
-        linkedTemplateName: null,
-        dateLabel,
-      });
-      const finalName = args.name.trim() || defaultName;
-      const runConvert = (overwriteTemplateId?: string) =>
-        convertSessionToTemplate(db, {
-          session_id,
-          template_name: finalName,
-          mode: 'create',
-          program_id: args.program_id,
-          sub_tag: args.sub_tag,
-          uuid: randomUUID,
-          ...(overwriteTemplateId ? { overwriteTemplateId } : {}),
-        });
-      const overwriteExisting = (targetId: string) => {
-        setTemplateMetaBusy(true);
-        void (async () => {
-          try {
-            await runConvert(targetId);
-            setTemplateMetaSheetOpen(false);
-            toastRef.current?.show(tTemplateUpdated(finalName), { icon: 'success' });
-          } catch (e2) {
-            Alert.alert(t('alert', 'failed'), e2 instanceof Error ? e2.message : String(e2));
-          } finally {
-            setTemplateMetaBusy(false);
-          }
-        })();
-      };
-      setTemplateMetaBusy(true);
-      try {
-        await runConvert();
-        setTemplateMetaSheetOpen(false);
-        Alert.alert(t('status', 'savedAsNew'), tTemplateCreated(finalName));
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          const existing = await findTemplateByTriple(db, {
-            name: finalName,
-            program_id: args.program_id,
-            sub_tag: args.sub_tag,
-          });
-          if (existing) {
-            Alert.alert(t('alert', 'variantExists'), t('alert', 'overwriteTemplateConfirm'), [
-              { text: t('common', 'cancel'), style: 'cancel' },
-              {
-                text: t('button', 'overwrite'),
-                style: 'destructive',
-                onPress: () => overwriteExisting(existing.id),
-              },
-            ]);
-          } else {
-            Alert.alert(t('alert', 'variantExists'), tDuplicateTemplateTriple(finalName));
-          }
-        } else {
-          Alert.alert(t('alert', 'failed'), message);
-        }
-      } finally {
-        setTemplateMetaBusy(false);
-      }
-    },
-    [db, sessionState, sessionTitle],
-  );
-
-  /**
    * 投影 Watch — manually (re-)push the active session to the paired Watch.
    * Reuses the D6 `start-from-iphone` envelope (pushStartToWatch): the Watch,
    * when reachable, hydrates its mirror + auto-jumps to the in-session view; if
@@ -3552,7 +3414,7 @@ export default function TodayScreen() {
         defaultProgramId={templateMetaPrefill?.program_id ?? null}
         defaultSubTag={templateMetaPrefill?.sub_tag ?? null}
         programs={programs}
-        onCancel={() => setTemplateMetaSheetOpen(false)}
+        onCancel={closeTemplateMetaSheet}
         onConfirm={handleTemplateMetaConfirm}
         busy={templateMetaBusy}
       />

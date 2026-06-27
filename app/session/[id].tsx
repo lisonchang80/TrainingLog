@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@/components/database-provider';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
+import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
 import { SessionStatsPanel } from '@/components/session/session-stats-panel';
 import { HRZoneChart } from '@/components/session/hr-zone-chart';
 import type { HRSample } from '@/components/session/hr-zone-chart.behavior';
@@ -59,10 +60,6 @@ import {
 } from '@/src/domain/session/reorderSessionItems';
 import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { SegmentedProgressBar } from '@/components/shared/segmented-progress-bar';
-import {
-  listPrograms,
-  type ProgramSummary,
-} from '@/src/adapters/sqlite/programRepository';
 import {
   appendReusableSupersetToSession,
   appendSessionExercise,
@@ -104,8 +101,6 @@ import {
 } from '@/src/adapters/sqlite/setRepository';
 import { getReusableSupersetWithExercises } from '@/src/adapters/sqlite/supersetRepository';
 import {
-  convertSessionToTemplate,
-  findTemplateByTriple,
   getSessionLinkedTemplateTriple,
 } from '@/src/adapters/sqlite/templateRepository';
 import { formatSessionSubtitle } from '@/src/domain/template/templateManager';
@@ -121,7 +116,6 @@ import {
   type ClusterGroup,
 } from '@/src/domain/session/clusterCard';
 import {
-  computeDefaultTemplateName,
   computeDeleteConfirmMessage,
   shouldShowEditChip,
 } from '@/src/domain/session/sessionDetailLabels';
@@ -165,14 +159,11 @@ import { countPerformedExercises } from '@/src/domain/session/countPerformedExer
 import { validateRecordSet } from '@/src/domain/set/validateRecordSet';
 import {
   t,
-  tDuplicateTemplateTriple,
   tExercise,
   tExerciseNoteHeader,
   tRemoveExerciseFromSessionPrompt,
   tRemoveSupersetFromSessionPrompt,
   tRestSecondsHeader,
-  tTemplateCreated,
-  tTemplateUpdated,
   tWarningPerExerciseSetsUnfinished,
   tWarningPerExerciseSetsWithLogged,
   tWarningTotalSetsUnfinished,
@@ -419,21 +410,32 @@ export default function SessionDetailScreen() {
   // discards the session; 完成 toasts + clears this. Captured once from the param.
   const backfillComposeRef = useRef(backfill === '1');
 
-  // 另存模板 bottom sheet state (2026-05-18). Sheet 在開啟時取一次 programs
-  // 給 picker 用；sub_tags 由 sheet 內依選擇 program 動態查 (5/18 polish round 30).
-  const [templateMetaSheetOpen, setTemplateMetaSheetOpen] = useState(false);
-  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
-  const [templateMetaBusy, setTemplateMetaBusy] = useState(false);
-  // 2026-05-20 overnight #55: prefill from the session's linked template if any.
-  // Freestyle session → all three null (sheet opens blank, default name only).
-  // Template-based session → linked template's (name, program_id, sub_tag)
-  // pre-populate so user can either rename (creates an independent template)
-  // or change (program, sub_tag) to spawn a sibling under ADR-0003 三元組 identity.
-  const [templateMetaPrefill, setTemplateMetaPrefill] = useState<{
-    name: string;
-    program_id: string | null;
-    sub_tag: string | null;
-  } | null>(null);
+  // 另存模板 / 儲存模板 — convertSessionToTemplate flow shared with the
+  // in-session Today screen (app/(tabs)/index.tsx) via useSessionTemplateSave.
+  // Detail page targets the route-`id` session; it has no title column so the
+  // default name seeds from linked template / date only (getSessionTitle → null).
+  //
+  // KNOWN RISK (Round F 2026-05-24 拍板接受): edit mode 期間呼叫 [儲存模板] 會
+  // silent overwrite，未列入 commitEditMode / discardSession 的 transactional
+  // protection (template-side write 走獨立 convertSessionToTemplate path)。user
+  // 決議不動、ADR-0019 § Q10 Round F 段確認 — 4-btn bar 在 edit mode 只剩
+  // [+ 動作][...] 兩 btn、[儲存模板] 不可見，所以 racing 入口窄；萬一未來把 btn
+  // 拿回 edit mode 要重新評估 protection cost。
+  const {
+    programs,
+    templateMetaSheetOpen,
+    templateMetaPrefill,
+    templateMetaBusy,
+    handleSaveTemplate,
+    handleTemplateMetaConfirm,
+    closeSheet,
+  } = useSessionTemplateSave({
+    db,
+    getSessionId: () => id ?? null,
+    getStartedAt: () => session?.started_at ?? null,
+    getSessionTitle: () => null,
+    toast: toastRef,
+  });
 
   // ADR-0014 + ADR-0019 Q10 — header subtitle 「週期 · 強度」. Resolved from the
   // session's linked template (most-common non-null `session_exercise.template_id`).
@@ -1618,176 +1620,6 @@ export default function SessionDetailScreen() {
 
   // ── Top-level handlers ────────────────────────────────────────────────────
 
-  // KNOWN RISK (Round F 2026-05-24 拍板接受):
-  // edit mode 期間呼叫 [儲存模板] 會 silent overwrite，未列入
-  // commitEditMode / discardSession 的 transactional protection
-  // (template-side write 走獨立 convertSessionToTemplate path)。
-  // user 決議不動、ADR-0019 § Q10 Round F 段確認 — 4-btn bar 在 edit mode
-  // 只剩 [+ 動作][...] 兩 btn、[儲存模板] 不可見，所以 racing 入口窄；
-  // 萬一未來把 btn 拿回 edit mode 要重新評估 protection cost。
-  const handleSaveTemplate = useCallback(
-    async (mode: 'update' | 'create') => {
-      if (!session) return;
-
-      if (mode === 'create') {
-        try {
-          const [progs, linked] = await Promise.all([
-            listPrograms(db),
-            getSessionLinkedTemplateTriple(db, id!),
-          ]);
-          setPrograms(progs);
-          // Round F Q3 — prefill 跟著 fallback chain (sessionTitle [尚無欄位、
-          // 永遠 null] → linkedTemplateName → dateLabel) 走，避免 freestyle
-          // session 開 TemplateMetaSheet 時 input 空白。
-          const dateLabel = formatDateLabel(session.started_at);
-          const prefillName = computeDefaultTemplateName({
-            sessionTitle: null,
-            linkedTemplateName: linked?.template_name,
-            dateLabel,
-          });
-          setTemplateMetaPrefill({
-            name: prefillName,
-            program_id: linked?.program_id ?? null,
-            sub_tag: linked?.sub_tag ?? null,
-          });
-        } catch (e) {
-          Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
-          return;
-        }
-        setTemplateMetaSheetOpen(true);
-        return;
-      }
-
-      // mode === 'update' (儲存模板):
-      //   Direct overwrite of the linked template — no name prompt. Button
-      //   is dimmed/disabled when isFreestyle, so we expect a linked template
-      //   to exist; if it was deleted between session start and now we tell
-      //   the user to use 另存模板 instead (rather than silently fall through
-      //   to a create-mode dialog they didn't ask for).
-      //   User-facing change (2026-05-20): the prompt asking for a name was
-      //   counter-intuitive — template-based session 已經知道要寫哪個模板，
-      //   不該再問名稱。
-      let linked: Awaited<
-        ReturnType<typeof getSessionLinkedTemplateTriple>
-      >;
-      try {
-        linked = await getSessionLinkedTemplateTriple(db, id!);
-      } catch (e) {
-        Alert.alert(t('alert', 'loadFailed'), e instanceof Error ? e.message : String(e));
-        return;
-      }
-      if (!linked) {
-        Alert.alert(
-          t('alert', 'originalTemplateNotFound'),
-          t('alert', 'sessionTemplateMissing'),
-        );
-        return;
-      }
-      try {
-        await convertSessionToTemplate(db, {
-          session_id: id!,
-          template_name: linked.template_name,
-          mode: 'update',
-          uuid: randomUUID,
-        });
-        // Round F Q2 — success feedback 改 toast (was Alert.alert).
-        toastRef.current?.show(tTemplateUpdated(linked.template_name), {
-          icon: 'success',
-        });
-      } catch (e) {
-        Alert.alert(t('alert', 'failed'), e instanceof Error ? e.message : String(e));
-      }
-    },
-    [db, id, session]
-  );
-
-  const handleTemplateMetaConfirm = useCallback(
-    async (args: {
-      name: string;
-      program_id: string | null;
-      sub_tag: string | null;
-    }) => {
-      if (!session) return;
-      // Round F Q3 — final fallback chain mirrors the prefill chain so the
-      // dialog default and the "user submitted blank input" default agree.
-      const dateLabel = formatDateLabel(session.started_at);
-      const defaultName = computeDefaultTemplateName({
-        sessionTitle: null,
-        linkedTemplateName: null,
-        dateLabel,
-      });
-      const finalName = args.name.trim() || defaultName;
-      // #3 ①: convert (optionally overwriting the colliding template Y).
-      const runConvert = (overwriteTemplateId?: string) =>
-        convertSessionToTemplate(db, {
-          session_id: id!,
-          template_name: finalName,
-          mode: 'create',
-          program_id: args.program_id,
-          sub_tag: args.sub_tag,
-          uuid: randomUUID,
-          ...(overwriteTemplateId ? { overwriteTemplateId } : {}),
-        });
-      // #3 ①「覆蓋」: replace the colliding template Y's body with this
-      // session, keeping Y's identity. Y resolved via findTemplateByTriple.
-      const overwriteExisting = (targetId: string) => {
-        setTemplateMetaBusy(true);
-        void (async () => {
-          try {
-            await runConvert(targetId);
-            setTemplateMetaSheetOpen(false);
-            toastRef.current?.show(tTemplateUpdated(finalName), {
-              icon: 'success',
-            });
-          } catch (e2) {
-            Alert.alert(
-              t('alert', 'failed'),
-              e2 instanceof Error ? e2.message : String(e2),
-            );
-          } finally {
-            setTemplateMetaBusy(false);
-          }
-        })();
-      };
-      setTemplateMetaBusy(true);
-      try {
-        await runConvert();
-        setTemplateMetaSheetOpen(false);
-        Alert.alert(t('status', 'savedAsNew'), tTemplateCreated(finalName));
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        if (message === 'DUPLICATE_TEMPLATE_TRIPLE') {
-          const existing = await findTemplateByTriple(db, {
-            name: finalName,
-            program_id: args.program_id,
-            sub_tag: args.sub_tag,
-          });
-          if (existing) {
-            Alert.alert(
-              t('alert', 'variantExists'),
-              t('alert', 'overwriteTemplateConfirm'),
-              [
-                { text: t('common', 'cancel'), style: 'cancel' },
-                {
-                  text: t('button', 'overwrite'),
-                  style: 'destructive',
-                  onPress: () => overwriteExisting(existing.id),
-                },
-              ],
-            );
-          } else {
-            Alert.alert(t('alert', 'variantExists'), tDuplicateTemplateTriple(finalName));
-          }
-        } else {
-          Alert.alert(t('alert', 'failed'), message);
-        }
-      } finally {
-        setTemplateMetaBusy(false);
-      }
-    },
-    [db, id, session]
-  );
-
   const handleDelete = useCallback(() => {
     // Round F Q4 — confirm 文案含 session 顯示名（目前 = dateLabel；session
     // table 還沒 title 欄位、未來加上後 displayName 自動 follow header title）。
@@ -2458,7 +2290,7 @@ export default function SessionDetailScreen() {
         defaultProgramId={templateMetaPrefill?.program_id ?? null}
         defaultSubTag={templateMetaPrefill?.sub_tag ?? null}
         programs={programs}
-        onCancel={() => setTemplateMetaSheetOpen(false)}
+        onCancel={closeSheet}
         onConfirm={handleTemplateMetaConfirm}
         busy={templateMetaBusy}
       />
