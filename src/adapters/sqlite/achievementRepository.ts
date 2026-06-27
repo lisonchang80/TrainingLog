@@ -488,6 +488,21 @@ export async function backfillAchievementsIfNeeded(
 /**
  * Count of sessions where ended_at IS NOT NULL AND at least one logged set.
  * Used as `totalSessionCount` for the session_count ladder.
+ *
+ * F3-sibling fix (2026-06-28): the predicate now anchors on the real
+ * `s.is_logged = 1` column. The prior proxy (`is_skipped = 0 AND weight_kg/reps
+ * NOT NULL`) could NOT tell a planned-but-never-✓-tapped session from a
+ * performed one: a session opened from a template / 動作記憶 default carries
+ * real weight·reps + is_logged=0 + is_skipped=0, and `endSession` never purges
+ * those unchecked rows (`sessionRepository.endSession` only writes `ended_at`).
+ * So a session whose sets the user only *typed* but never *did* inflated
+ * `totalSessionCount`, unlocking a session_count milestone one (or more)
+ * sessions early. This mirrors the sibling `loadReplayRecords` fix
+ * (`AND s.is_logged = 1`, 2026-06-25) and now matches this helper's own
+ * docblock ("at least one logged set"). The warmup-only reasoning in
+ * `backfillAchievementsIfNeeded`'s docblock is unaffected: that count is fed as
+ * the FINAL total (not progressive), and `evaluate()` still gates each unlock on
+ * the current session's working-set `hasLogged`.
  */
 async function countLoggedSessions(db: Database): Promise<number> {
   const row = await db.getFirstAsync<{ n: number }>(
@@ -496,6 +511,7 @@ async function countLoggedSessions(db: Database): Promise<number> {
        JOIN "set" s ON s.session_id = ss.id
       WHERE ss.ended_at IS NOT NULL
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND s.weight_kg IS NOT NULL
         AND s.reps IS NOT NULL`
   );

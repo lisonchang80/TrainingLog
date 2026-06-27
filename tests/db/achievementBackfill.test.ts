@@ -301,3 +301,138 @@ describe('backfillAchievementsIfNeeded — O(N) single-pass attribution', () => 
     expect(await unlockedAtForThreshold(10)).toBe(sessions[0].ended_at);
   });
 });
+
+/**
+ * Regression for `countLoggedSessions` (F3-sibling, 2026-06-28).
+ *
+ * `countLoggedSessions` feeds `totalSessionCount` for the session_count ladder.
+ * It must count only sessions with ≥1 PERFORMED (✓-tapped, `is_logged = 1`) set
+ * — NOT a session whose sets the user merely typed (planned from a template /
+ * 動作記憶 default: real weight·reps, is_logged=0, is_skipped=0) and ended
+ * without ticking. `endSession` never purges those unchecked rows, so the prior
+ * proxy (`is_skipped = 0 AND weight/reps NOT NULL`) over-counted, unlocking a
+ * session_count milestone one session early.
+ */
+describe('session_count ladder excludes planned-but-never-tapped sessions', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  /**
+   * Seed a session whose sets carry real weight·reps but were NEVER ✓-tapped
+   * (is_logged stays 0, the DB default from `recordSetInSession`). Mirrors a
+   * template / 動作記憶 plan the user opened and ended without ticking.
+   */
+  const seedPlannedOnlySession = async (s: SeedSession) => {
+    let nextId = 0;
+    const uuid = () => `planned-set-${s.id}-${nextId++}`;
+    await createSession(db, { id: s.id, started_at: s.started_at });
+    for (const [ord, set] of s.sets.entries()) {
+      await recordSetInSession(db, {
+        session_id: s.id,
+        input: {
+          exercise_id: set.exercise_id,
+          weight_kg: set.weight_kg,
+          reps: set.reps,
+        },
+        uuid,
+        now: () => s.started_at + 1000 + ord,
+      });
+    }
+    // NO is_logged=1 UPDATE — the user typed the plan but never ticked.
+    await endSession(db, { id: s.id, ended_at: s.ended_at });
+  };
+
+  it('1 logged + 4 planned-only sessions: only the 1-session milestone unlocks, not the 5', async () => {
+    // Real performed count = 1. With the bug, countLoggedSessions = 5 (the 4
+    // planned-only sessions are over-counted), so the 5-session milestone would
+    // also fire on the one logged session. The single logged session is what
+    // carries the unlock (`hasLogged` gate), so a planned-only-only DB unlocks
+    // nothing — the inflation only bites when a real logged session exists to
+    // attach the (wrongly-high) milestone to. This test pins both directions.
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const t0 = 1_700_000_000_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // 1 genuinely-performed (tapped) session FIRST so it carries the unlock.
+    await seedSessions(db, [
+      {
+        id: 'logged-1',
+        started_at: t0,
+        ended_at: t0 + 60_000,
+        sets: [{ exercise_id: bench.id, weight_kg: 60, reps: 8 }],
+      },
+    ]);
+    // 4 planned-only (typed, never tapped, ended) sessions.
+    for (let i = 0; i < 4; i++) {
+      await seedPlannedOnlySession({
+        id: `planned-${i}`,
+        started_at: t0 + (i + 1) * dayMs,
+        ended_at: t0 + (i + 1) * dayMs + 60_000,
+        sets: [{ exercise_id: bench.id, weight_kg: 100, reps: 5 }],
+      });
+    }
+
+    await backfillAchievementsIfNeeded(db, { now: () => 9_999 });
+
+    const threshold = async (t: number) =>
+      await db.getFirstAsync<{ unlocked_at: number }>(
+        `SELECT au.unlocked_at
+           FROM achievement_unlock au
+           JOIN achievement_definition ad ON ad.id = au.achievement_definition_id
+          WHERE ad.category = 'session_count' AND ad.threshold = ?`,
+        t
+      );
+    expect(await threshold(1)).toBeTruthy();
+    expect(await threshold(5)).toBeFalsy();
+  });
+
+  it('a planned-only session does not push the count over the 5-session milestone boundary', async () => {
+    // The session_count ladder thresholds are [1, 5, 10, ...]. Seed exactly 4
+    // genuinely-performed sessions + 1 planned-only. The real performed count is
+    // 4 → the 5-session milestone must NOT unlock. Before the fix the planned-
+    // only session was counted, totalSessionCount = 5, and the milestone fired.
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const t0 = 1_700_000_000_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // 4 genuinely-performed (tapped) sessions, progressively heavier.
+    await seedSessions(
+      db,
+      Array.from({ length: 4 }, (_, i) => ({
+        id: `logged-${i}`,
+        started_at: t0 + i * dayMs,
+        ended_at: t0 + i * dayMs + 60_000,
+        sets: [{ exercise_id: bench.id, weight_kg: 50 + i * 5, reps: 8 }],
+      }))
+    );
+    // 1 planned-only (typed 5×100, never tapped, ended).
+    await seedPlannedOnlySession({
+      id: 'planned-1',
+      started_at: t0 + 4 * dayMs,
+      ended_at: t0 + 4 * dayMs + 60_000,
+      sets: [{ exercise_id: bench.id, weight_kg: 100, reps: 5 }],
+    });
+
+    await backfillAchievementsIfNeeded(db, { now: () => 9_999 });
+
+    const threshold = async (t: number) =>
+      await db.getFirstAsync<{ unlocked_at: number }>(
+        `SELECT au.unlocked_at
+           FROM achievement_unlock au
+           JOIN achievement_definition ad ON ad.id = au.achievement_definition_id
+          WHERE ad.category = 'session_count' AND ad.threshold = ?`,
+        t
+      );
+    // 4 performed sessions: the 1-session milestone unlocks, the 5 does NOT.
+    expect(await threshold(1)).toBeTruthy();
+    expect(await threshold(5)).toBeFalsy();
+  });
+});
