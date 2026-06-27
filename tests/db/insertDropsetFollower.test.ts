@@ -14,10 +14,11 @@ import {
  * app/(tabs)/index.tsx + app/session/[id].tsx (warmup→dropset promotion:
  * the tapped row becomes a head, one follower is appended directly below).
  *
- * Invariants under test:
- *   - follower lands at head.ordering + 1
- *   - every set at/after that slot shifts +1 (chain stays contiguous, no
- *     orphan rows — the bug the 2026-05-20 ordering fix prevented)
+ * Invariants under test (A1 no-shift, 2026-06-28):
+ *   - follower lands at session-wide MAX(ordering)+1 — a NON-colliding append
+ *     ordinal; NO later set's `ordering` is shifted (the reverse-sync fix)
+ *   - render position is carried by `display_rank`: the follower sorts
+ *     IMMEDIATELY after its head per `display_rank ?? ordering`
  *   - set_kind='dropset', parent_set_id = head, weight/reps from the op args
  *   - v019: follower inherits session_exercise_id from the HEAD row (read
  *     from the DB inside the txn), not from the caller
@@ -63,7 +64,7 @@ describe('insertDropsetFollower', () => {
     });
   }
 
-  it('inserts follower at head.ordering+1, shifts later sets, inherits head session_exercise_id', async () => {
+  it('inserts follower at MAX(ordering)+1 WITHOUT shifting later sets, inherits head session_exercise_id', async () => {
     // head (now a dropset head) at ordering 1; an unrelated later set at 2.
     await seedSet('head', 1, exId, 'dropset', seId);
     await seedSet('later', 2, otherExId, 'working', 'se-other');
@@ -78,14 +79,16 @@ describe('insertDropsetFollower', () => {
       now: () => now,
     });
 
-    const rows = await listSetsBySession(db, sessionId);
-    // Contiguity: head(1), f1(2), later shifted to 3.
-    expect(rows.map((r) => [r.id, r.ordering])).toEqual([
-      ['head', 1],
-      ['f1', 2],
-      ['later', 3],
-    ]);
-    const f1 = rows.find((r) => r.id === 'f1')!;
+    const byId = new Map(
+      (await listSetsBySession(db, sessionId)).map((r) => [r.id, r] as const),
+    );
+    // A1 no-shift: existing ordinals are UNTOUCHED (forward reconcile keys on
+    // them). The follower appends at MAX+1 = 3 (NOT head+1, which would have
+    // shifted `later`). `later` keeps ordering 2.
+    expect(byId.get('head')!.ordering).toBe(1);
+    expect(byId.get('later')!.ordering).toBe(2);
+    expect(byId.get('f1')!.ordering).toBe(3);
+    const f1 = byId.get('f1')!;
     expect(f1.set_kind).toBe('dropset');
     expect(f1.parent_set_id).toBe('head');
     expect(f1.weight_kg).toBe(60);
@@ -95,21 +98,20 @@ describe('insertDropsetFollower', () => {
     expect(f1.session_exercise_id).toBe(seId);
   });
 
-  it('NON-LAST middle insert shifts EVERY subsequent ordinal by +1 (reverse-sync root cause)', async () => {
-    // This is the exact mechanic the 2026-06-28 Swift id-first reverse-apply
-    // fix exists to tolerate. The iPhone `insertDropsetFollower` does
-    //   UPDATE "set" SET ordering = ordering + 1 WHERE ordering >= newOrd
-    // and the wire `ordinal = ordering`, so inserting a follower in the
-    // MIDDLE of a session shifts the ordinal of every set AFTER it. A
-    // Watch reverse-apply that matched by ordinal (not setId) would then
-    // mis-align — hence the Swift fix matches setId-first. Lock the shift
-    // so a future TS refactor can't silently stop producing it (which would
-    // make the Swift id-first path look unnecessary and invite a regression).
+  it('NON-LAST middle insert does NOT shift any later ordinal (A1 reverse-sync fix)', async () => {
+    // A1 (2026-06-28) REPLACED the old `UPDATE … ordering+1 WHERE ordering >=
+    // newOrd` shift with a non-colliding MAX(ordering)+1 append. This test
+    // locks the new contract: inserting a follower in the MIDDLE of a session
+    // leaves EVERY pre-existing set's `ordering` byte-identical, so the
+    // reverse-sync wire ordinal (= `ordering`) no longer collides a shifted
+    // value onto a neighbour base set on the immutable Watch — the exact bug
+    // ("非末組遞減亂跳 / 1,2,2 / D2") A1 fixes. The new follower gets a unique
+    // high ordinal (MAX+1) absent from the base → reverse-apply's ordinal
+    // fallback routes it cleanly to addedSet.
     //
     // Layout BEFORE: [head(1, exA), tailA(2, exA), tailB(3, exB), tailC(4, exB)]
-    // Insert a follower under `head` → it lands at ordering 2; tailA→3,
-    // tailB→4, tailC→5 ALL shift (three rows, two of them a DIFFERENT
-    // exercise — the shift is session-global, not card-scoped).
+    // Insert a follower under `head` → it appends at ordering 5; head/tailA/
+    // tailB/tailC ALL keep their ordinals.
     await seedSet('head', 1, exId, 'dropset', seId);
     await seedSet('tailA', 2, exId, 'working', seId);
     await seedSet('tailB', 3, otherExId, 'working', 'se-other');
@@ -125,14 +127,16 @@ describe('insertDropsetFollower', () => {
       now: () => now,
     });
 
-    const rows = await listSetsBySession(db, sessionId);
-    expect(rows.map((r) => [r.id, r.ordering])).toEqual([
-      ['head', 1],
-      ['f1', 2],
-      ['tailA', 3],
-      ['tailB', 4],
-      ['tailC', 5],
-    ]);
+    const byId = new Map(
+      (await listSetsBySession(db, sessionId)).map((r) => [r.id, r.ordering] as const),
+    );
+    // No shift: every pre-existing ordinal is unchanged.
+    expect(byId.get('head')).toBe(1);
+    expect(byId.get('tailA')).toBe(2);
+    expect(byId.get('tailB')).toBe(3);
+    expect(byId.get('tailC')).toBe(4);
+    // New follower appends at MAX+1 = 5 (unique, non-colliding).
+    expect(byId.get('f1')).toBe(5);
   });
 
   it('display_rank lands the follower IMMEDIATELY after its parent head (renumberCardAfterInsert)', async () => {

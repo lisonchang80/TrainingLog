@@ -1,32 +1,28 @@
 /**
- * Reverse-sync dropset wire-stability — regression coverage for the TS
- * PRECONDITION the 2026-06-28 Swift id-first reverse-apply fix relies on
- * (branch `slice/13d-reverse-dropset-idmatch`, commit 30dc919).
+ * Reverse-sync dropset wire-stability — regression coverage for the TS side
+ * of the iPhone→Watch reverse-apply contract.
  *
- * BACKGROUND. The Watch's reverse-apply (iPhone→Watch live projection /
- * cast-session) used to match incoming sets by `ordinal`. The iPhone
- * `insertDropsetFollower` does, in ONE transaction:
+ * ⚠️ UPDATED 2026-06-28 for Option A1 (no-shift). The ORIGINAL tests (committed
+ * `62ce68e`) locked the OLD `insertDropsetFollower` behaviour:
  *     UPDATE "set" SET ordering = ordering + 1 WHERE ordering >= newOrd
- * and the wire `ordinal = ordering`. So inserting a dropset follower in the
- * MIDDLE of a session shifts the `ordinal` of every later set — and an
- * ordinal-keyed Watch match then re-aligns the wrong rows, corrupting the
- * card (the device bug: "非末組遞減亂跳 / 1,2,2 / 1,3,3,4"). The Swift fix
- * changed the match to setId-first (ordinal only as a fallback), which is
- * safe BECAUSE the iPhone keeps each set's id STABLE across the shift.
- *
- * The Swift half can't be jest-tested, but the TS side that PRODUCES the wire
- * payload + the DB mutation that creates the shift ARE. These tests lock:
- *   B. the wire ordinal DOES carry the post-insert shift (∴ id-first matching
- *      is provably NECESSARY — an ordinal match would mis-align), while the
- *      setId of every pre-existing set stays IDENTICAL across the shift (∴
- *      id-first matching is provably SUFFICIENT to re-align correctly);
+ * They asserted the post-insert wire ordinals SHIFTED (workA 2→3, tail 3→4) as
+ * the "id-first matching is NECESSARY" proof. A1 REMOVED that shift: the
+ * follower now appends at session-wide MAX(ordering)+1 and every pre-existing
+ * set keeps its ordinal. This is an INTENDED behaviour change (the spike's
+ * whole point), so these tests now assert the A1 contract:
+ *   B. a non-last `insertDropsetFollower` does NOT shift any later ordinal
+ *      (head/workA/tail keep 1/2/3); the follower gets a unique high ordinal
+ *      (MAX+1 = 4) that is ABSENT from the Watch's immutable base, so the
+ *      reverse-apply ordinal fallback routes it cleanly to an addedSet instead
+ *      of colliding onto a neighbour base set (the "非末組遞減亂跳" bug). Every
+ *      pre-existing setId still stays byte-identical (id-first match stays
+ *      sufficient for cast). display_rank still folds the follower after its
+ *      head on the wire.
  *   C. the cast-session snapshot (`buildStartFromIphone`) preserves each set's
- *      id end-to-end — the precondition the Swift fix documents as its coverage
- *      ("只蓋 cast/投影 session").
+ *      id end-to-end, and now carries the NON-shifted ordinals.
  *
- * If a future TS refactor silently dropped the shift, or re-keyed set ids on
- * insert, these would fail — flagging that the Swift id-first contract no
- * longer matches what the iPhone emits BEFORE a wasted device session.
+ * Net: A1 makes BOTH the id-axis (cast: ids stable) AND the ordinal-axis
+ * (template-start: no collision) safe — see report 05-a1-noshift-spike.md.
  *
  * Real in-memory SQLite (better-sqlite3) — same fixture idiom as
  * handshake.test.ts / iphoneLiveMirrorProducer.test.ts / watchSessionCast.test.ts.
@@ -156,14 +152,16 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------
-// B. Wire-payload stability for a dropset chain — the wire ordinal carries
-//    the post-insert shift (id-first NECESSARY) AND setId is stable across
-//    the shift (id-first SUFFICIENT). Exercised through BOTH wire builders:
-//    fetchSessionSnapshot (cast / start-from-iphone) and the live-mirror
-//    producer (live projection).
+// B. Wire-payload stability for a dropset chain (A1 no-shift) — a non-last
+//    follower insert does NOT shift any later ordinal (so no ordinal collision
+//    on the immutable Watch base), the follower gets a unique high ordinal
+//    absent from the base (clean addedSet on ordinal fallback), and every
+//    pre-existing setId stays stable (id-first match still works for cast).
+//    Exercised through BOTH wire builders: fetchSessionSnapshot (cast /
+//    start-from-iphone) and the live-mirror producer (live projection).
 // ---------------------------------------------------------------------
-describe('B. dropset-follower insert → wire payload ordinal shift + stable setId', () => {
-  it('fetchSessionSnapshot: a NON-LAST follower insert shifts later ordinals while every pre-existing setId is unchanged', async () => {
+describe('B. dropset-follower insert → wire payload no-shift + stable setId (A1)', () => {
+  it('fetchSessionSnapshot: a NON-LAST follower insert leaves later ordinals UNCHANGED; the follower gets a unique MAX+1 ordinal', async () => {
     const db = await makeDb();
     await seedNonLastChain(db, 'sess-b1');
 
@@ -187,20 +185,19 @@ describe('B. dropset-follower insert → wire payload ordinal shift + stable set
 
     const after = setsById((await fetchSessionSnapshot(db, 'sess-b1'))!);
 
-    // (1) id-first NECESSARY: the wire ordinal DID shift for the later sets.
-    //     An ordinal-keyed Watch match would now re-align `workA` (was 2) onto
-    //     whatever new row sits at 2 (the follower) — corruption. The new
-    //     follower lands at 2; workA→3; tail→4.
-    expect(after.get('follow')!.ordinal).toBe(2);
-    expect(after.get('workA')!.ordinal).toBe(3);
-    expect(after.get('tail')!.ordinal).toBe(4);
-    // `head` stays at ordinal 1 (the insert was AFTER it).
+    // (1) A1 NO-SHIFT: every pre-existing wire ordinal is UNCHANGED. So an
+    //     ordinal-keyed Watch reverse-apply re-binds head/workA/tail onto their
+    //     OWN base rows (no collision) — the "非末組遞減亂跳" corruption is gone
+    //     at the source. The follower appends at the session MAX+1 = 4, a value
+    //     ABSENT from the immutable Watch base → ordinal fallback routes it to a
+    //     clean addedSet.
     expect(after.get('head')!.ordinal).toBe(1);
+    expect(after.get('workA')!.ordinal).toBe(2);
+    expect(after.get('tail')!.ordinal).toBe(3);
+    expect(after.get('follow')!.ordinal).toBe(4);
 
-    // (2) id-first SUFFICIENT: every pre-existing set keeps its EXACT setId —
-    //     the insert mints a fresh id ('follow') and never re-keys existing
-    //     rows. So a setId-keyed Watch match re-aligns head/workA/tail
-    //     correctly regardless of the ordinal churn.
+    // (2) id stability preserved: the insert mints a fresh id ('follow') and
+    //     never re-keys existing rows — so cast (id-first) matching still works.
     expect(after.has('head')).toBe(true);
     expect(after.has('workA')).toBe(true);
     expect(after.has('tail')).toBe(true);
@@ -214,7 +211,7 @@ describe('B. dropset-follower insert → wire payload ordinal shift + stable set
     expect(after.get('follow')!.parent_set_id).toBe('head');
   });
 
-  it('live-mirror producer: same shift + stable-setId contract on the OMIT-NULL wire shape', async () => {
+  it('live-mirror producer: same no-shift + stable-setId contract on the OMIT-NULL wire shape', async () => {
     const db = await makeDb();
     await seedNonLastChain(db, 'sess-b2');
 
@@ -236,10 +233,12 @@ describe('B. dropset-follower insert → wire payload ordinal shift + stable set
         wire.set(s.setId as string, s);
       }
     }
-    // Ordinal shift carried through the producer's wire projection.
-    expect(wire.get('follow')!.ordinal).toBe(2);
-    expect(wire.get('workA')!.ordinal).toBe(3);
-    expect(wire.get('tail')!.ordinal).toBe(4);
+    // A1 no-shift carried through the producer's wire projection: base ordinals
+    // unchanged, follower at MAX+1 = 4.
+    expect(wire.get('head')!.ordinal).toBe(1);
+    expect(wire.get('workA')!.ordinal).toBe(2);
+    expect(wire.get('tail')!.ordinal).toBe(3);
+    expect(wire.get('follow')!.ordinal).toBe(4);
     // setIds stable — the follower is the only new id.
     expect([...wire.keys()].sort()).toEqual(
       ['follow', 'head', 'tail', 'workA'].sort(),
@@ -333,7 +332,7 @@ describe('C. cast-session snapshot preserves every set id end-to-end', () => {
     expect(followerParent).toBe('head');
   });
 
-  it('cast wire ordinals reflect the post-shift DB state (so id-first, not ordinal, is the only safe match)', async () => {
+  it('cast wire ordinals reflect the A1 no-shift DB state (base ordinals stable, follower appended)', async () => {
     const db = await makeDb();
     await seedNonLastChain(db, 'sess-c2');
     await insertDropsetFollower(db, {
@@ -351,13 +350,14 @@ describe('C. cast-session snapshot preserves every set id end-to-end', () => {
     for (const ex of castPayload.snapshot.exercises as Array<{ sets: Array<{ setId: string; ordinal: number }> }>) {
       for (const s of ex.sets) wireSets.set(s.setId, s.ordinal);
     }
-    // The cast wire carries the SHIFTED ordinals (tail moved 3→4). If the
-    // Watch matched by ordinal it would mis-bind `tail`; it must match by the
-    // stable setId. This asserts the shift is genuinely present on the cast
-    // payload (not silently normalised away somewhere upstream).
-    expect(wireSets.get('follow')).toBe(2);
-    expect(wireSets.get('workA')).toBe(3);
-    expect(wireSets.get('tail')).toBe(4);
+    // A1: the cast wire carries the UN-shifted ordinals (tail stays 3, workA
+    // stays 2); the new follower appends at MAX+1 = 4. For cast the Watch base
+    // carries the real ids so it matches id-first anyway, but A1 ALSO removes
+    // the ordinal churn — both axes are now safe.
+    expect(wireSets.get('head')).toBe(1);
+    expect(wireSets.get('workA')).toBe(2);
+    expect(wireSets.get('tail')).toBe(3);
+    expect(wireSets.get('follow')).toBe(4);
   });
 });
 

@@ -7,6 +7,7 @@ import {
   listSetsBySession,
   removeSessionDropsetRow,
 } from '../../src/adapters/sqlite/setRepository';
+import { sortSetsByDisplayRank } from '../../src/domain/set/sessionSetLayout';
 
 /**
  * `addSessionDropsetRow` + `removeSessionDropsetRow` — slice 10c overnight #61.
@@ -15,8 +16,9 @@ import {
  * (Today) and session detail edit mode. Mirror template editor's
  * `addDropsetRow` / `removeDropsetRow` DB-side behaviour.
  *
- * Invariants under test:
- *   - new follower is inserted DIRECTLY below source row (ordering = src.ordering + 1)
+ * Invariants under test (A1 no-shift, 2026-06-28):
+ *   - new follower appends at session-wide MAX(ordering)+1 (NO shift of later
+ *     rows); render order ("DIRECTLY below source") is carried by display_rank
  *   - new follower attaches to chain HEAD (parent_set_id = headId regardless
  *     of whether source was head or follower)
  *   - new follower mirrors source weight_kg / reps / set_kind = 'dropset'
@@ -83,10 +85,16 @@ describe('addSessionDropsetRow + removeSessionDropsetRow', () => {
       uuid: randomUUID,
     });
 
-    expect(res.ordering).toBe(2);
+    // A1: appends at MAX(ordering)+1 = 3, NOT src.ordering+1 (which would have
+    // shifted f1). Existing ordinals untouched; render order via display_rank.
+    expect(res.ordering).toBe(3);
     const rows = await listSetsBySession(db, sessionId);
-    // Expected order: h(1), new(2), f1(3).
-    expect(rows.map((r) => r.id)).toEqual(['h', res.set_id, 'f1']);
+    const ordById = new Map(rows.map((r) => [r.id, r.ordering] as const));
+    expect(ordById.get('h')).toBe(1);
+    expect(ordById.get('f1')).toBe(2);
+    expect(ordById.get(res.set_id)).toBe(3);
+    // Render order (display_rank): h → new → f1.
+    expect(sortSetsByDisplayRank(rows).map((r) => r.id)).toEqual(['h', res.set_id, 'f1']);
     const newRow = rows.find((r) => r.id === res.set_id)!;
     expect(newRow.parent_set_id).toBe('h');
     expect(newRow.set_kind).toBe('dropset');
@@ -107,10 +115,21 @@ describe('addSessionDropsetRow + removeSessionDropsetRow', () => {
       uuid: randomUUID,
     });
 
-    // ordering goes to 3 (f1+1); f2 shifts to 4.
-    expect(res.ordering).toBe(3);
+    // A1: appends at MAX(ordering)+1 = 4; f2 keeps ordering 3 (no shift).
+    expect(res.ordering).toBe(4);
     const rows = await listSetsBySession(db, sessionId);
-    expect(rows.map((r) => r.id)).toEqual(['h', 'f1', res.set_id, 'f2']);
+    const ordById = new Map(rows.map((r) => [r.id, r.ordering] as const));
+    expect(ordById.get('h')).toBe(1);
+    expect(ordById.get('f1')).toBe(2);
+    expect(ordById.get('f2')).toBe(3);
+    expect(ordById.get(res.set_id)).toBe(4);
+    // Render order (display_rank): h → f1 → new → f2.
+    expect(sortSetsByDisplayRank(rows).map((r) => r.id)).toEqual([
+      'h',
+      'f1',
+      res.set_id,
+      'f2',
+    ]);
     const newRow = rows.find((r) => r.id === res.set_id)!;
     // KEY: new follower attaches to chain HEAD, not to source f1.
     expect(newRow.parent_set_id).toBe('h');

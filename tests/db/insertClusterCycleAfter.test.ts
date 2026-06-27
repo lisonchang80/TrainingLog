@@ -6,6 +6,7 @@ import {
   insertSessionSetAfter,
   listSetsBySession,
 } from '../../src/adapters/sqlite/setRepository';
+import { sortSetsByDisplayRank } from '../../src/domain/set/sessionSetLayout';
 
 /**
  * Slice 10c overnight (2026-05-17) 第 6 點 — right-swipe `+1` on a cluster
@@ -13,11 +14,26 @@ import {
  * each side's end.
  *
  * Implementation strategy: call `insertSessionSetAfter` twice (once for A
- * source, once for B source). Each call shifts everything `>= new_ordering`
- * by +1 in the session, so by the time the B call runs, b_source's ordering
- * has been pushed down by 1 — but the repo re-reads source ordering inside
- * the call, so transitive correctness is preserved.
+ * source, once for B source).
+ *
+ * A1 no-shift (2026-06-28): each `insertSessionSetAfter` now APPENDS at
+ * session-wide MAX(ordering)+1 instead of shifting later rows; the "directly
+ * below source" placement is carried entirely by per-card `display_rank`
+ * (each cluster side is its own session_exercise_id / exercise_id, sorted
+ * independently). So these tests assert per-SIDE render order
+ * (`sortSetsByDisplayRank` over each exercise's rows), not the global
+ * `ORDER BY ordering` interleave.
  */
+
+/** Per-side render order via display_rank (one card per exercise here). */
+function sideRenderOrder(
+  rows: Array<{ id: string; exercise_id: string; ordering: number; display_rank?: number | null }>,
+  exercise_id: string,
+): string[] {
+  return sortSetsByDisplayRank(rows.filter((r) => r.exercise_id === exercise_id)).map(
+    (r) => r.id,
+  );
+}
 
 describe('cluster cycle insert after source (two insertSessionSetAfter calls)', () => {
   let db: BetterSqliteDatabase;
@@ -84,22 +100,17 @@ describe('cluster cycle insert after source (two insertSessionSetAfter calls)', 
       uuid: randomUUID,
     });
 
-    // Expected ordering ASC after both shifts:
-    //   1=a1, 2=b1, 3=a2, 4=newA, 5=b2, 6=newB, 7=a3, 8=b3.
+    // A1: newA appends at MAX+1 = 7, newB at MAX+1 = 8 (no shift of a3/b3).
+    expect(aRes.ordering).toBe(7);
+    expect(bRes.ordering).toBe(8);
     const rows = await listSetsBySession(db, sessionId);
-    expect(rows.map((r) => r.id)).toEqual([
-      'a1',
-      'b1',
-      'a2',
-      aRes.set_id,
-      'b2',
-      bRes.set_id,
-      'a3',
-      'b3',
-    ]);
-    // New pair sits BELOW source cycle's A and B respectively.
-    expect(aRes.ordering).toBe(4);
-    expect(bRes.ordering).toBe(6);
+    // Pre-existing ordinals untouched.
+    const ordById = new Map(rows.map((r) => [r.id, r.ordering] as const));
+    expect(ordById.get('a3')).toBe(5);
+    expect(ordById.get('b3')).toBe(6);
+    // Per-side render order: new row sits BELOW source cycle on each side.
+    expect(sideRenderOrder(rows, exA)).toEqual(['a1', 'a2', aRes.set_id, 'a3']);
+    expect(sideRenderOrder(rows, exB)).toEqual(['b1', 'b2', bRes.set_id, 'b3']);
   });
 
   it('mirrors source weight/reps/set_kind on each side', async () => {
@@ -178,17 +189,13 @@ describe('cluster cycle insert after source (two insertSessionSetAfter calls)', 
     });
 
     const rows = await listSetsBySession(db, sessionId);
-    // After both:
-    //   First call: src a2 at 3 → newA at 4. Shift: 1=a1, 2=b1, 3=a2, 4=newA, 5=b2.
-    //   Second call: src b2 now at 5 → newB at 6. Shift: nothing >= 6.
-    // Final: 1=a1, 2=b1, 3=a2, 4=newA, 5=b2, 6=newB.
-    expect(rows.map((r) => r.id)).toEqual([
-      'a1',
-      'b1',
-      'a2',
-      aRes.set_id,
-      'b2',
-      bRes.set_id,
-    ]);
+    // A1 (no shift): newA appends at MAX+1 = 5, newB at MAX+1 = 6. The source
+    // cycle (a2,b2) is the last cycle, so render order still ends with the new
+    // pair on each side — but verify via per-side display_rank, not the global
+    // ordering interleave.
+    expect(aRes.ordering).toBe(5);
+    expect(bRes.ordering).toBe(6);
+    expect(sideRenderOrder(rows, exA)).toEqual(['a1', 'a2', aRes.set_id]);
+    expect(sideRenderOrder(rows, exB)).toEqual(['b1', 'b2', bRes.set_id]);
   });
 });

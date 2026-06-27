@@ -251,13 +251,25 @@ export async function insertDropsetFollower(
       args.parent_set_id,
       args.session_id
     );
-    const newOrdering = (head?.ordering ?? 0) + 1;
-    await db.runAsync(
-      `UPDATE "set" SET ordering = ordering + 1
-        WHERE session_id = ? AND ordering >= ?`,
-      args.session_id,
-      newOrdering
+    // A1 no-shift (2026-06-28): allocate a NON-colliding append ordinal at
+    // session-wide MAX(ordering)+1 instead of shifting later rows down. The
+    // old `UPDATE … ordering + 1 WHERE ordering >= head+1` re-stamped every
+    // later set's `ordering`, but the reverse-sync wire ordinal = `ordering`
+    // and `applyRemoteSnapshot` matches the IMMUTABLE Watch base by ordinal
+    // value, so a non-last follower insert collided the shifted ordinals onto
+    // neighbour base sets → "非末組遞減亂跳 / 1,2,2 / D2". Appending instead
+    // keeps every existing set's `ordering` intact (so forward reconcile's
+    // `(session_exercise_id, ordering)` match still hits them) and gives the
+    // new row a unique high ordinal absent from the base (so reverse-apply's
+    // ordinal fallback routes it cleanly to addedSet). Render position is
+    // carried entirely by `display_rank` via renumberCardAfterInsert below
+    // (every render surface sorts by `display_rank ?? ordering` —
+    // `set-ordering-surfaces` skill).
+    const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+      `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+      args.session_id
     );
+    const newOrdering = (maxRow?.max_ordering ?? 0) + 1;
     await insertSessionSet(db, {
       id: args.new_set_id,
       session_id: args.session_id,
@@ -1149,17 +1161,22 @@ export async function insertSessionSetAfter(
   const new_set_id = args.uuid();
   const now = args.now ?? Date.now;
   const ts = now();
-  const new_ordering = src.ordering + 1;
 
+  let new_ordering = 0;
   await db.withTransactionAsync(async () => {
-    // Shift everything from new_ordering onwards down by 1 to free the slot.
-    await db.runAsync(
-      `UPDATE "set" SET ordering = ordering + 1
-        WHERE session_id = ? AND ordering >= ?`,
-      args.session_id,
-      new_ordering
+    // A1 no-shift (2026-06-28): append at session-wide MAX(ordering)+1 rather
+    // than shifting later rows to free `src.ordering+1`. See the rationale on
+    // `insertDropsetFollower`: the ordinal shift corrupted reverse-sync because
+    // the wire ordinal = `ordering` and the Watch matches the immutable base by
+    // ordinal value. Existing rows keep their `ordering` (forward reconcile's
+    // `(session_exercise_id, ordering)` match stays valid); render position is
+    // carried by `display_rank` via renumberCardAfterInsert below.
+    const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+      `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+      args.session_id
     );
-    // Insert at the freed slot, mirroring source's exercise / kind / values.
+    new_ordering = (maxRow?.max_ordering ?? 0) + 1;
+    // Insert mirroring source's exercise / kind / values.
     // v019 isolation fix: inherit source's session_exercise_id so the new
     // sibling lands on the SAME card (cluster A side stays on A, never
     // leaks to a coincidentally-same-exercise solo card).
@@ -1255,17 +1272,20 @@ export async function addSessionDropsetRow(
   const new_set_id = args.uuid();
   const now = args.now ?? Date.now;
   const ts = now();
-  const new_ordering = src.ordering + 1;
 
+  let new_ordering = 0;
   await db.withTransactionAsync(async () => {
-    // Shift everything from new_ordering onwards down by 1 to free the slot.
-    await db.runAsync(
-      `UPDATE "set" SET ordering = ordering + 1
-        WHERE session_id = ? AND ordering >= ?`,
-      args.session_id,
-      new_ordering
+    // A1 no-shift (2026-06-28): append the follower at session-wide
+    // MAX(ordering)+1 instead of shifting later rows. Same reverse-sync
+    // rationale as `insertDropsetFollower`. The follower still folds under its
+    // head via `parent_set_id` + `display_rank` adjacency (renumberCardAfterInsert
+    // below) — fold has never depended on contiguous `ordering`.
+    const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+      `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+      args.session_id
     );
-    // Insert new follower in the freed slot, attached to chain head.
+    new_ordering = (maxRow?.max_ordering ?? 0) + 1;
+    // Insert new follower, attached to chain head.
     await insertSessionSet(db, {
       id: new_set_id,
       session_id: args.session_id,
@@ -1391,24 +1411,29 @@ export async function addSessionDropsetCluster(
     );
   }
 
-  // Find last row of source chain — new cluster lands AFTER this row.
+  // Find last row of source chain — new cluster lands AFTER this row in
+  // display order (via display_rank below); `ordering` is appended.
   const lastInChain = chainRows[chainRows.length - 1];
   const head_id = args.uuid();
   const follower_ids = chainRows.slice(1).map(() => args.uuid());
-  const totalNewRows = chainRows.length; // 1 head + N followers, same count as source
   const now = args.now ?? Date.now;
   const ts = now();
-  const head_ordering = lastInChain.ordering + 1;
 
+  let head_ordering = 0;
   await db.withTransactionAsync(async () => {
-    // Free `totalNewRows` ordering slots directly after the source chain.
-    await db.runAsync(
-      `UPDATE "set" SET ordering = ordering + ?
-        WHERE session_id = ? AND ordering >= ?`,
-      totalNewRows,
-      args.session_id,
-      head_ordering
+    // A1 no-shift (2026-06-28): append the whole new cluster at session-wide
+    // MAX(ordering)+1 .. +N instead of shifting later rows by N. Same
+    // reverse-sync rationale as `insertDropsetFollower` — the cluster's rows
+    // get unique high ordinals absent from the immutable Watch base (so reverse
+    // ordinal-fallback routes them to addedSets) while every existing set keeps
+    // its `ordering` (forward reconcile match preserved). The cluster's head +
+    // followers still fold via `parent_set_id` + `display_rank` adjacency
+    // (renumberCardAfterInsert below).
+    const maxRow = await db.getFirstAsync<{ max_ordering: number | null }>(
+      `SELECT MAX(ordering) AS max_ordering FROM "set" WHERE session_id = ?`,
+      args.session_id
     );
+    head_ordering = (maxRow?.max_ordering ?? 0) + 1;
     // Insert new HEAD (cloned from source head's weight/reps).
     await insertSessionSet(db, {
       id: head_id,
