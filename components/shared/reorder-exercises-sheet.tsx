@@ -69,9 +69,20 @@ export function ReorderExercisesSheet({
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [draft, setDraft] = useState<ReorderItem[]>(initialItems);
 
+  // Snapshot the incoming order ONLY when the sheet OPENS — NOT on every
+  // `initialItems` reference change. The parent rebuilds `initialItems`
+  // (buildSessionReorderRows / buildTemplateReorderRows) fresh on every render,
+  // so an unstable reference would re-fire this effect mid-drag and WIPE the
+  // user's reorder back to the original order. That is invisible in a quiet
+  // screen but constant during a Watch-synced session (frequent re-renders from
+  // live-mirror / HR ticks) — the "排序回彈" device bug (2026-06-27, root-caused
+  // via on-device logging: the sheet returned the ORIGINAL order because the
+  // draft was reset between drag and confirm). The draft is user-owned while
+  // open; we only re-seed it on the next open.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (visible) setDraft(initialItems);
-  }, [visible, initialItems]);
+  }, [visible]);
 
   const renderItem = ({ item, drag, isActive }: RenderItemParams<ReorderItem>) => (
     <Pressable

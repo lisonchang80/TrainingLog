@@ -24,8 +24,16 @@
  * only `planned_sets` (never `ordering`), and exercise matching is by
  * `exercise_id` occurrence (order-independent), so a stale-ordering snapshot
  * must NOT revert the iPhone reorder. If this test ever fails, the revert IS in
- * the data path and the fix is here; if it passes, the device revert is a
- * UI/timing race outside `replaceLiveMirror`.
+ * the data path and the fix is here; if it passes, the device revert is outside
+ * `replaceLiveMirror`.
+ *
+ * It PASSES — ruling out the data path. ACTUAL root cause (found via on-device
+ * logging, 2026-06-27): `ReorderExercisesSheet` reset its drag draft on every
+ * `initialItems` REFERENCE change, and the parent rebuilds that array on every
+ * render — so during a Watch-synced session (constant re-renders from
+ * live-mirror / HR ticks) the draft was wiped between drag and confirm and the
+ * sheet returned the ORIGINAL order. Fixed by seeding the draft only on open
+ * (`reorder-exercises-sheet.tsx`). This test stays as a data-path invariant.
  */
 
 import { BetterSqliteDatabase } from '../../src/adapters/sqlite/betterSqliteDatabase';
