@@ -33,7 +33,9 @@
 import Foundation
 
 /// Per-set rows shipped inside a SessionSnapshot.
-struct SessionSnapshotSet: Codable, Equatable {
+/// Hashable so `SessionSnapshot` can ride inside the `PickerDestination`
+/// navigation enum (cast-session route, 2026-06-27).
+struct SessionSnapshotSet: Codable, Equatable, Hashable {
     let setId: String
     let ordinal: Int
     /// Kilograms. Null when the user hasn't entered a weight yet.
@@ -138,7 +140,7 @@ struct SessionSnapshotSet: Codable, Equatable {
 }
 
 /// Per-exercise rows shipped inside a SessionSnapshot.
-struct SessionSnapshotExercise: Codable, Equatable {
+struct SessionSnapshotExercise: Codable, Equatable, Hashable {
     let sessionExerciseId: String
     let exerciseId: String
     let exerciseName: String
@@ -184,7 +186,7 @@ struct SessionSnapshotExercise: Codable, Equatable {
 
 /// Full session tree returned by iPhone after creating (or adopting)
 /// a session.
-struct SessionSnapshot: Codable, Equatable {
+struct SessionSnapshot: Codable, Equatable, Hashable {
     let sessionId: String
     /// Per-session display title (line 1) — the editable session name (= the
     /// originating template name for a template-started session). Empty string

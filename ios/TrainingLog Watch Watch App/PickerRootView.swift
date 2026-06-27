@@ -44,11 +44,32 @@ enum PickerDestination: Hashable {
     /// view that just prints the 3-tuple; Phase 3 wires the actual
     /// outbound + replaces this with the real D11 view.
     case setLogger(selection: PickerSelection)
+
+    /// Terminal: enter the Set logger for a session CAST from the iPhone
+    /// (2026-06-27, 投影 Watch). Unlike `.setLogger` this carries the full
+    /// snapshot directly and renders `SetLoggerView(snapshot:)` WITHOUT going
+    /// through `PickerSetLoggerPlaceholderView` — so it never fires
+    /// `startFromWatch` (the session already exists on iPhone; the Watch is
+    /// adopting it, not creating one). Live-mirror keeps it synced after mount.
+    case castSession(snapshot: SessionSnapshot)
 }
 
 struct PickerRootView: View {
     @StateObject private var vm: PickerViewModel
     @State private var path: [PickerDestination] = []
+
+    /// Injected at ContentView level (`.environmentObject(watchConn)`). Used to
+    /// observe inbound `cast-session` (投影 Watch) via `$pendingCast`.
+    @EnvironmentObject private var coordinator: WatchConnectivityCoordinator
+
+    /// Id of the session currently open on the wrist (Watch-led OR cast),
+    /// nil at the picker root. Drives the cast conflict decision: same id →
+    /// no-op, different id → ask before replacing. Cleared on session end.
+    @State private var openSessionId: String?
+
+    /// Set when a `cast-session` arrives while a DIFFERENT session is open →
+    /// presents the conflict alert. nil dismisses it.
+    @State private var castConflict: SessionSnapshot?
 
     /// Bumped on session-end return so the carousel List re-creates and resets
     /// its scroll to the TOP (user 2026-06-01: 完成/放棄後回第一頁、捲到最上層).
@@ -111,7 +132,57 @@ struct PickerRootView: View {
             // Re-create the List (→ scroll resets to top) on session-end
             // return. Stable at all other times so there's no render loop.
             .id(listResetToken)
+            // 投影 Watch (2026-06-27) — route an inbound cast-session.
+            .onChange(of: coordinator.pendingCast) { _, newValue in
+                guard let req = newValue else { return }
+                routeCast(req.snapshot)
+            }
+            // Track the Watch-LED session id so a later cast of a DIFFERENT
+            // session is detected as a conflict (a cast of the SAME id no-ops).
+            .onChange(of: vm.startResult) { _, newValue in
+                if let reply = newValue.flatMap({ $0 }), reply.isOK,
+                   let snap = reply.snapshot {
+                    openSessionId = snap.sessionId
+                }
+            }
+            // Conflict: iPhone cast a DIFFERENT session while one is open.
+            .alert(
+                "切換到投影的訓練？",
+                isPresented: Binding(
+                    get: { castConflict != nil },
+                    set: { if !$0 { castConflict = nil } }
+                ),
+                presenting: castConflict
+            ) { snap in
+                Button("切換", role: .destructive) { openCast(snap) }
+                Button("保留目前", role: .cancel) { castConflict = nil }
+            } message: { _ in
+                Text("iPhone 要把另一個訓練投影到手錶，切換會離開目前手錶上的訓練。")
+            }
         }
+    }
+
+    // MARK: - cast-session routing (投影 Watch)
+
+    /// Decide what to do with an inbound cast snapshot:
+    ///   - a session of the SAME id is already open → no-op (live-mirror keeps
+    ///     it synced; this also absorbs the dual-fire's second leg)
+    ///   - a DIFFERENT session is open → ask before replacing (conflict alert)
+    ///   - nothing open (idle / mid-drilldown) → open straight away
+    private func routeCast(_ snap: SessionSnapshot) {
+        if let open = openSessionId {
+            if open == snap.sessionId { return }
+            castConflict = snap
+        } else {
+            openCast(snap)
+        }
+    }
+
+    /// Replace the nav stack with the cast session's set logger.
+    private func openCast(_ snap: SessionSnapshot) {
+        castConflict = nil
+        openSessionId = snap.sessionId
+        path = [.castSession(snapshot: snap)]
     }
 
     // MARK: - Toolbar 🔄
@@ -260,6 +331,22 @@ struct PickerRootView: View {
                     // Pop back to the picker root + reset its scroll to the top
                     // by re-creating the List (listResetToken → `.id`).
                     path.removeAll()
+                    openSessionId = nil
+                    listResetToken += 1
+                }
+            )
+
+        case .castSession(let snapshot):
+            // 投影 Watch (2026-06-27) — adopt an iPhone-cast session directly.
+            // No PickerSetLoggerPlaceholderView wrapper → no startFromWatch /
+            // outbound TUI; the session already lives on iPhone. SetLoggerView's
+            // own `.task` starts the HK workout + registers reverseSyncApply so
+            // the iPhone live-mirror continues to stream onto this view.
+            SetLoggerView(
+                snapshot: snapshot,
+                onSessionEnd: {
+                    path.removeAll()
+                    openSessionId = nil
                     listResetToken += 1
                 }
             )

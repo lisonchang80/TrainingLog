@@ -508,6 +508,32 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     // ---------------------------------------------------------------
     @Published private(set) var lastIncomingEnd: String?
 
+    // ---------------------------------------------------------------
+    // cast-session inbound (2026-06-27, 投影 Watch).
+    //
+    // The iPhone's `pushCastToWatch` dual-fires a `cast-session` envelope
+    // (sendMessage instant + transferUserInfo backstop, SAME msgId) carrying
+    // the full session snapshot. We decode + publish here; `PickerRootView`
+    // subscribes via `.onChange(of: coordinator.pendingCast)` and routes:
+    //   idle → open the session / same-id → no-op / different-id → conflict
+    //   alert. The `token` makes every accepted cast a distinct value so
+    //   `.onChange` fires even when the same session is re-cast (snapshot may
+    //   compare equal). `lastCastMsgId` drops the dual-fire's second leg.
+    //
+    // Distinct from D29 `live-mirror` (only PROJECTS onto an already-open
+    // session) — this OPENS one. See `src/services/watchSessionCast.ts`.
+    // ---------------------------------------------------------------
+    @Published private(set) var pendingCast: CastRequest?
+
+    /// Last cast `msgId` published — dedups the dual-fire (instant + TUI
+    /// share one msgId). A fresh cast always carries a new msgId.
+    private var lastCastMsgId: String?
+
+    /// Monotonic token stamped onto each accepted `CastRequest` so re-casting
+    /// the same session (equal snapshot) still changes `pendingCast` → fires
+    /// the subscriber's `.onChange`.
+    private var castToken: Int = 0
+
     /// D31 wave 2 (2026-05-29 late) — cache of the most recently sent
     /// `start-from-watch` envelope, for the conflict-resolve resend
     /// path. When iPhone replies `start-reconcile{status:'conflict'}`
@@ -1200,6 +1226,40 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
         }
     }
 
+    // MARK: - cast-session inbound (2026-06-27, 投影 Watch)
+
+    /// Decode a `cast-session` envelope + publish a `CastRequest` for
+    /// `PickerRootView` to route. Shared by the instant (sendMessage) +
+    /// backstop (TUI) channels; dedups by `msgId` so the dual-fire only
+    /// routes once. The envelope payload is `{ sessionId, snapshot }`
+    /// (mirrors `StartFromIphonePayload`); the inner `snapshot` is the
+    /// start-from-watch wire tree (`snapshotToWire`) which decodes via the
+    /// same `SessionSnapshot.decodeInbound` the reverse mirror uses.
+    nonisolated func ingestCast(_ envelope: [String: Any]) {
+        guard
+            let payload = envelope["payload"] as? [String: Any],
+            let snapDict = payload["snapshot"] as? [String: Any]
+        else { return }
+        let msgId = (envelope["msgId"] as? String) ?? ""
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Drop the dual-fire's second leg (instant + TUI share one msgId).
+            if !msgId.isEmpty, self.lastCastMsgId == msgId {
+                self.lastInbound = "cast dup msgId drop"
+                return
+            }
+            guard let snap = SessionSnapshot.decodeInbound(snapDict) else {
+                self.lastInbound = "cast bad-payload"
+                return
+            }
+            self.lastCastMsgId = msgId
+            self.castToken &+= 1
+            self.pendingCast = CastRequest(snapshot: snap, token: self.castToken)
+            self.lastInbound =
+                "cast sess=\(self.prefix8(snap.sessionId)) ex=\(snap.exercises.count)"
+        }
+    }
+
     /// Inbound handler. Called on a WC-internal background thread.
     /// Per D7-Swift scope: only `end-session` with `side == 'iphone'`
     /// is honoured. Any other shape → reply non-ok and drop.
@@ -1220,6 +1280,16 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             if let payload = message["payload"] as? [String: Any] {
                 ingestReverseMirror(payload)
             }
+            replyHandler(["ok": true])
+            return
+        }
+        // cast-session fast lane (2026-06-27, 投影 Watch). Ack {ok:true}
+        // immediately so iPhone's pushCastToWatch flips is_watch_tracked +
+        // toasts「已投影至手錶」(and iOS doesn't 7016-time-out the leg); the
+        // actual idle/conflict routing happens async in PickerRootView. The
+        // TUI backstop (same msgId) is deduped in ingestCast.
+        if message["kind"] as? String == "cast-session" {
+            ingestCast(message)
             replyHandler(["ok": true])
             return
         }
@@ -1292,6 +1362,15 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
         // Synchronous envelope shape validation; bail before MainActor hop
         // if it's noise (e.g. lib housekeeping payload).
         guard let kind = userInfo["kind"] as? String else { return }
+        // cast-session TUI backstop (2026-06-27, 投影 Watch). Same envelope the
+        // instant sendMessage leg carries; `ingestCast` dedups by msgId so
+        // whichever leg lands second is dropped. When iPhone is unreachable at
+        // cast time ONLY this leg arrives — on the Watch's next wake — which is
+        // what makes「已送出，手錶開啟後帶入」literally true.
+        if kind == "cast-session" {
+            ingestCast(userInfo)
+            return
+        }
         guard kind == "start-reconcile" else {
             // Unknown / not-our-business envelope kind. Logged on main
             // actor for diagnostic visibility.
@@ -1323,6 +1402,18 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             }
         }
     }
+}
+
+// MARK: - cast-session request (2026-06-27, 投影 Watch)
+
+/// Published by `WatchConnectivityCoordinator.pendingCast` when an inbound
+/// `cast-session` envelope decodes. `PickerRootView` observes it and routes
+/// (idle → open / same-id → no-op / different-id → conflict alert). `token`
+/// is monotonic so re-casting the same session (equal snapshot) still changes
+/// the published value → `.onChange` fires.
+struct CastRequest: Equatable {
+    let snapshot: SessionSnapshot
+    let token: Int
 }
 
 // MARK: - NEW-Q50 D30 — start-reconcile envelope payload
