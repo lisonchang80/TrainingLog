@@ -73,7 +73,19 @@ enum LiveMirror {
             visibleBase.map { ($0, rankOverrides[$0.setId] ?? Double($0.ordinal)) }
         ranked += addedHere.map { ($0.asSnapshotSet(), rankOverrides[$0.id] ?? $0.displayRank) }
         return ranked
-            .sorted { $0.rank < $1.rank }
+            // STABLE total order — break rank ties on `(ordinal, setId)` so two
+            // rows sharing a `rank` value can NEVER permute non-deterministically
+            // across re-renders/ticks. `Swift.sorted` is NOT guaranteed stable,
+            // and a non-deterministic permutation of equal-rank rows is what lets
+            // a dropset follower drift away from its head (`SetRowGroup.group`
+            // folds by array-adjacency → cluster split) and a superset side's
+            // index-paired working-# jump (the「1,3,3,4」signature). When ranks are
+            // already distinct (the common case) this is identical to `rank <`.
+            .sorted {
+                if $0.rank != $1.rank { return $0.rank < $1.rank }
+                if $0.set.ordinal != $1.set.ordinal { return $0.set.ordinal < $1.set.ordinal }
+                return $0.set.setId < $1.set.setId
+            }
             // Stamp the effective sort `rank` onto each set as `displayRank`
             // so the iPhone can render the Watch's display ORDER (#1/#2). The
             // wire `ordinal` stays glued to set identity (reconcile key); this
