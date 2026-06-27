@@ -94,13 +94,18 @@ effective is_logged.
   (`fix/achievement-pr-is-logged-2026-06-25`): added `AND s.is_logged = 1`.
   Note `loadAchievementPanelData`'s `if (!r.is_logged) continue` did NOT
   protect — it read the same stale proxy.
-- ⚠️ **UNVERIFIED suspect**: `achievementRepository.countLoggedSessions`
-  (`:475`) — still `is_skipped = 0 AND weight_kg/reps NOT NULL`, **no
-  `is_logged = 1`**. Feeds `totalSessionCount` for the session_count ladder, so
-  a session of only-planned sets may count. BUT the backfill docblock
-  deliberately discusses this count's "any non-skipped set incl. warmup-only"
-  semantics (the `hasLogged` working-set gate in `evaluate()` is the
-  compensator). Needs verify-rootcause before touching — may be intentional.
+- ✅ `achievementRepository.countLoggedSessions` (feeds `totalSessionCount` for
+  the session_count ladder + the `evaluate()` / backfill unlock path) — **this
+  fix** (2026-06-28): added `AND s.is_logged = 1`. Verify-rootcause cleared the
+  "may be intentional" doubt: (a) the function's own docstring already promised
+  "≥1 logged set" — the SQL had silently drifted off it; (b) the backfill
+  docblock's warmup-only / progressive-vs-final reasoning is **orthogonal** to
+  planned-vs-performed — it feeds the *final* `countLoggedSessions` total to
+  dodge a progressive warmup-only edge, and `is_logged = 1` keeps it the final
+  total (warmup sets still count *when ✓-tapped*), so the `hasLogged` working-set
+  gate in `evaluate()` is untouched. A planned-only ended session (never
+  ✓-tapped, real weight/reps, is_logged=0) was the genuine inflation bug.
+  Regression: `tests/db/countLoggedSessionsIsLogged.test.ts`.
 - ➖ `setRepository.ts` prefill / "load last session" paths (707/739/851/1475…)
   — **intentionally** filter only `is_skipped = 0` (they pull the *planned*
   shape of the last session, which includes unchecked sets). `dropset-chain-semantics`

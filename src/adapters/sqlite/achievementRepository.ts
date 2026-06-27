@@ -486,8 +486,21 @@ export async function backfillAchievementsIfNeeded(
 }
 
 /**
- * Count of sessions where ended_at IS NOT NULL AND at least one logged set.
+ * Count of ended sessions that have at least one *performed* set.
  * Used as `totalSessionCount` for the session_count ladder.
+ *
+ * `AND s.is_logged = 1` is load-bearing (is-logged-surfaces / F3 class): a
+ * session opened from a plan/template and ended WITHOUT ✓-tapping any set still
+ * carries set rows with real weight_kg/reps and `is_logged = 0` (endSession
+ * never purges planned sets — see sessionRepository.endSession). Without this
+ * filter those never-performed sets pass the `is_skipped = 0 AND weight/reps
+ * NOT NULL` guard and wrongly count the abandoned session toward the milestone,
+ * inflating the displayed/unlock total. The function's stated contract was
+ * always "≥1 logged set"; the SQL had drifted off it. Mirrors the sibling
+ * `loadReplayRecords` filter (added 2026-06-25) and the canonical
+ * `exerciseHistoryRepository.listExercisePRSetRows`. Plain `is_logged = 1` (NOT
+ * chain-aware) is correct here — this is an aggregate "did a session happen"
+ * count, per is-logged-surfaces (vs dropset-chain-semantics' effective-logged).
  */
 async function countLoggedSessions(db: Database): Promise<number> {
   const row = await db.getFirstAsync<{ n: number }>(
@@ -496,6 +509,7 @@ async function countLoggedSessions(db: Database): Promise<number> {
        JOIN "set" s ON s.session_id = ss.id
       WHERE ss.ended_at IS NOT NULL
         AND s.is_skipped = 0
+        AND s.is_logged = 1
         AND s.weight_kg IS NOT NULL
         AND s.reps IS NOT NULL`
   );
