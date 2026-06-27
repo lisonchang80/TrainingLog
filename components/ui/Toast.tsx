@@ -120,7 +120,9 @@ export function ToastHost({ controller }: { controller: ToastController }) {
           style={styles.toastInner}
           accessibilityRole="alert">
           {state.icon != null && <ToastIconView icon={state.icon} tokens={tokens} />}
-          <Text style={styles.toastText} numberOfLines={2}>
+          {/* 3 lines: longer zh messages (e.g. 投影「已送出，手錶開啟後同步」)
+              were truncated at 2 lines once Dynamic Type scaled the font up. */}
+          <Text style={styles.toastText} numberOfLines={3}>
             {state.message ?? ''}
           </Text>
         </Pressable>
