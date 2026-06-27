@@ -435,10 +435,10 @@ export const strings = {
       // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block
       // (section header / row label / a11y label / mini-sheet heading).
       bodyweightSection: '體重',
-      recordBodyweight: '紀錄體重',
+      recordBodyweight: '紀錄身體數據',
       recordBodyData: '紀錄身體數據',
       recordDateLabel: '日期',
-      recordBodyweightRow: '＋ 紀錄體重',
+      recordBodyweightRow: '＋ 紀錄身體數據',
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: '新計畫',
       newExerciseNavTitle: '新動作',
@@ -1475,10 +1475,10 @@ export const strings = {
       restoreGateTitle: 'iCloud Backup Found',
       // i18n leak sweep (2026-06-04) — Settings 體重 quick-capture block.
       bodyweightSection: 'Bodyweight',
-      recordBodyweight: 'Record bodyweight',
+      recordBodyweight: 'Record body data',
       recordBodyData: 'Record body data',
       recordDateLabel: 'Date',
-      recordBodyweightRow: '＋ Record bodyweight',
+      recordBodyweightRow: '＋ Record body data',
       // i18n leak sweep (2026-06-04) — root Stack.Screen nav titles (app/_layout).
       newProgramNavTitle: 'New Program',
       newExerciseNavTitle: 'New Exercise',

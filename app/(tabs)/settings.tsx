@@ -5,10 +5,8 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Linking,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -927,17 +925,15 @@ export default function SettingsScreen() {
       </ScrollView>
 
       {/* ADR-0024 § 5 → 2026-06-27 — 身體數據 mini sheet (modal). Date picker
-          on top + 體重/PBF/SMM 三輸入格 (一致 with BodyDataSheet). KAV lifts the
-          centered card above the keyboard. */}
+          on top + 體重/PBF/SMM 三輸入格 (一致 with BodyDataSheet). No KAV — the
+          card stays centered and is not lifted when the keyboard opens
+          (2026-06-27 ③ device-feedback: position fine, don't lift). */}
       <Modal
         visible={bwSheetOpen}
         transparent
         animationType="fade"
         onRequestClose={() => setBwSheetOpen(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalAvoider}>
-          <View style={styles.modalBackdrop}>
+        <View style={styles.modalBackdrop}>
             <View style={styles.modalSheet}>
               <Text style={styles.modalHeading}>{t('page', 'recordBodyData')}</Text>
 
@@ -1021,7 +1017,6 @@ export default function SettingsScreen() {
               </View>
             </View>
           </View>
-        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1325,7 +1320,6 @@ function makeStyles(tokens: ThemeTokens) {
       color: tokens.text.primary,
     },
     modalActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-    modalAvoider: { flex: 1 },
     modalDateRow: {
       flexDirection: 'row',
       alignItems: 'center',
