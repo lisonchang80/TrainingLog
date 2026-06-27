@@ -95,6 +95,77 @@ describe('insertDropsetFollower', () => {
     expect(f1.session_exercise_id).toBe(seId);
   });
 
+  it('NON-LAST middle insert shifts EVERY subsequent ordinal by +1 (reverse-sync root cause)', async () => {
+    // This is the exact mechanic the 2026-06-28 Swift id-first reverse-apply
+    // fix exists to tolerate. The iPhone `insertDropsetFollower` does
+    //   UPDATE "set" SET ordering = ordering + 1 WHERE ordering >= newOrd
+    // and the wire `ordinal = ordering`, so inserting a follower in the
+    // MIDDLE of a session shifts the ordinal of every set AFTER it. A
+    // Watch reverse-apply that matched by ordinal (not setId) would then
+    // mis-align — hence the Swift fix matches setId-first. Lock the shift
+    // so a future TS refactor can't silently stop producing it (which would
+    // make the Swift id-first path look unnecessary and invite a regression).
+    //
+    // Layout BEFORE: [head(1, exA), tailA(2, exA), tailB(3, exB), tailC(4, exB)]
+    // Insert a follower under `head` → it lands at ordering 2; tailA→3,
+    // tailB→4, tailC→5 ALL shift (three rows, two of them a DIFFERENT
+    // exercise — the shift is session-global, not card-scoped).
+    await seedSet('head', 1, exId, 'dropset', seId);
+    await seedSet('tailA', 2, exId, 'working', seId);
+    await seedSet('tailB', 3, otherExId, 'working', 'se-other');
+    await seedSet('tailC', 4, otherExId, 'working', 'se-other');
+
+    await insertDropsetFollower(db, {
+      session_id: sessionId,
+      parent_set_id: 'head',
+      exercise_id: exId,
+      weight_kg: 60,
+      reps: 8,
+      new_set_id: 'f1',
+      now: () => now,
+    });
+
+    const rows = await listSetsBySession(db, sessionId);
+    expect(rows.map((r) => [r.id, r.ordering])).toEqual([
+      ['head', 1],
+      ['f1', 2],
+      ['tailA', 3],
+      ['tailB', 4],
+      ['tailC', 5],
+    ]);
+  });
+
+  it('display_rank lands the follower IMMEDIATELY after its parent head (renumberCardAfterInsert)', async () => {
+    // The follower must sort directly under its head on the card, not at the
+    // bottom — even when the card was previously Watch-reordered (per-card
+    // display_rank space, distinct from the session-global `ordering`). Seed a
+    // card whose two existing sets carry explicit display_rank 0,1, then insert
+    // a follower under the head: the head keeps rank 0, the new follower takes
+    // rank 1, and the old second row is pushed to rank 2.
+    await seedSet('head', 1, exId, 'dropset', seId);
+    await seedSet('second', 2, exId, 'working', seId);
+    await db.runAsync(`UPDATE "set" SET display_rank = 0 WHERE id = 'head'`);
+    await db.runAsync(`UPDATE "set" SET display_rank = 1 WHERE id = 'second'`);
+
+    await insertDropsetFollower(db, {
+      session_id: sessionId,
+      parent_set_id: 'head',
+      exercise_id: exId,
+      weight_kg: 60,
+      reps: 8,
+      new_set_id: 'f1',
+      now: () => now,
+    });
+
+    const byId = new Map(
+      (await listSetsBySession(db, sessionId)).map((r) => [r.id, r] as const),
+    );
+    // Render order (display_rank): head(0) → f1(1) → second(2).
+    expect(byId.get('head')!.display_rank).toBe(0);
+    expect(byId.get('f1')!.display_rank).toBe(1);
+    expect(byId.get('second')!.display_rank).toBe(2);
+  });
+
   it('passes through null weight/reps from the op', async () => {
     await seedSet('head', 1, exId, 'dropset', seId);
 
