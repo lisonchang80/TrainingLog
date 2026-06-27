@@ -235,6 +235,21 @@ final class SessionInteractionState: ObservableObject {
     /// Not @Published — pure bookkeeping, no view observes it.
     private var remoteAddedSetIds: Set<String> = []
 
+    /// PROVENANCE for the `setRankOverrides` clear (2026-06-28 F5 rank hygiene).
+    /// The ids whose `setRankOverrides` entry was written by `applyRemoteSnapshot`
+    /// from an iPhone `display_rank` — as opposed to a Watch-LOCAL `applyReorder`
+    /// / mid-insert rank. `setRankOverrides` is a persistent overlay that was
+    /// only ever WRITTEN, never cleared, so a stale rank from a prior tick could
+    /// survive a later tick that omits `display_rank` for that set → `mergeSets`
+    /// keeps sorting it by the OLD rank instead of falling back to `ordinal`,
+    /// drifting a dropset follower off its head (cluster split) or colliding two
+    /// ranks (the「1,3,3,4」superset jump). The matched branch now REMOVES an
+    /// iPhone-provenance rank when the wire stops carrying its `display_rank`.
+    /// Gating the clear on THIS set means a Watch-local reorder (whose rank the
+    /// iPhone never sent) is never stomped by an iPhone tick that omits ranks.
+    /// Not @Published — pure bookkeeping, no view observes it.
+    private var remoteRankedSetIds: Set<String> = []
+
     /// Goal 3b (2026-06-26) — the setId whose per-set note is shown in the top
     /// overlay box (covering the HR/time pane) WHILE its row is in long-press
     /// (orange / reorder) mode. nil ⇒ no overlay. `ReorderableRow` pushes the
@@ -724,6 +739,7 @@ final class SessionInteractionState: ObservableObject {
         var newRankOverrides = setRankOverrides
         var newKindOverrides = setKindOverrides
         var newRemoteAddedSetIds = remoteAddedSetIds
+        var newRemoteRankedSetIds = remoteRankedSetIds
 
         for (i, ex) in snap.exercises.enumerated() {
             guard let baseEx = matchedBase[i] else {
@@ -733,7 +749,10 @@ final class SessionInteractionState: ObservableObject {
                 for s in ex.sets {
                     if s.isLogged { newLogged.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
-                    if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
+                    if let dr = s.displayRank {
+                        newRankOverrides[s.setId] = dr
+                        newRemoteRankedSetIds.insert(s.setId)
+                    }
                 }
                 continue
             }
@@ -802,7 +821,21 @@ final class SessionInteractionState: ObservableObject {
                         newEdited[EditedValueKey(setId: id, field: .reps)] = Double(r)
                     }
                     if let n = s.notes { newNotes[id] = n }
-                    if let dr = s.displayRank { newRankOverrides[id] = dr }
+                    // display_rank sync with ADD/REMOVE symmetry (2026-06-28 F5
+                    // rank hygiene). Mirror the `set_kind` below + the `logged`
+                    // pattern: write the override when the iPhone sends a rank,
+                    // CLEAR it when the wire stops carrying one — but only for an
+                    // iPhone-PROVENANCE rank (`remoteRankedSetIds`), so a stale
+                    // rank from a prior tick can't survive to drift a follower off
+                    // its head / collide two ranks. A Watch-LOCAL `applyReorder`
+                    // rank (not in the provenance set) is left untouched.
+                    if let dr = s.displayRank {
+                        newRankOverrides[id] = dr
+                        newRemoteRankedSetIds.insert(id)
+                    } else if newRemoteRankedSetIds.contains(id) {
+                        newRankOverrides.removeValue(forKey: id)
+                        newRemoteRankedSetIds.remove(id)
+                    }
                     // set_kind sync (2026-06-27 device bug — iPhone「#/熱/D#」切換
                     // 沒反映到手錶). The matched branch synced logged / weight /
                     // reps / notes / display_rank but OMITTED set_kind, so an
@@ -839,7 +872,10 @@ final class SessionInteractionState: ObservableObject {
                     newRemoteAddedSetIds.insert(s.setId)
                     if s.isLogged { newLogged.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
-                    if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
+                    if let dr = s.displayRank {
+                        newRankOverrides[s.setId] = dr
+                        newRemoteRankedSetIds.insert(s.setId)
+                    }
                 }
             }
         }
@@ -847,6 +883,10 @@ final class SessionInteractionState: ObservableObject {
         // `newAddedSets` (drop tags for pruned / vanished ids) so it can't grow
         // unbounded across applies.
         newRemoteAddedSetIds.formIntersection(Set(newAddedSets.map(\.id)))
+        // Same hygiene for the rank-provenance tag: keep it to the ids that
+        // still HAVE a rank override, so a cleared/vanished id drops its tag and
+        // the set can't grow unbounded across applies.
+        newRemoteRankedSetIds.formIntersection(Set(newRankOverrides.keys))
         // Assign once each → ≤ one @Published willSet per field per apply.
         loggedSetIds = newLogged
         editedValues = newEdited
@@ -856,6 +896,7 @@ final class SessionInteractionState: ObservableObject {
         setRankOverrides = newRankOverrides
         setKindOverrides = newKindOverrides
         remoteAddedSetIds = newRemoteAddedSetIds
+        remoteRankedSetIds = newRemoteRankedSetIds
     }
 
     // MARK: - Display value
