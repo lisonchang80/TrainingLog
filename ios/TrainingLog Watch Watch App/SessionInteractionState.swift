@@ -225,6 +225,16 @@ final class SessionInteractionState: ObservableObject {
     /// smoke: ④ title was not syncing because there was no override field.)
     @Published var titleOverride: String? = nil
 
+    /// PROVENANCE for the `addedSets` prune (2026-06-28 dropset reverse-sync).
+    /// The ids of `AddedSet`s that were appended by `applyRemoteSnapshot`
+    /// (iPhone-originated, e.g. a dropset follower the iPhone inserted), as
+    /// opposed to Watch-LOCAL adds. When the iPhone later REMOVES such a set
+    /// (e.g. D→工作 revert), it vanishes from the snapshot and must be pruned
+    /// or it lingers as a ghost row; a Watch-local add that simply hasn't
+    /// round-tripped yet must NOT be pruned. This set is the discriminator.
+    /// Not @Published — pure bookkeeping, no view observes it.
+    private var remoteAddedSetIds: Set<String> = []
+
     /// Goal 3b (2026-06-26) — the setId whose per-set note is shown in the top
     /// overlay box (covering the HR/time pane) WHILE its row is in long-press
     /// (orange / reorder) mode. nil ⇒ no overlay. `ReorderableRow` pushes the
@@ -713,6 +723,7 @@ final class SessionInteractionState: ObservableObject {
         var newAddedSets = addedSets
         var newRankOverrides = setRankOverrides
         var newKindOverrides = setKindOverrides
+        var newRemoteAddedSetIds = remoteAddedSetIds
 
         for (i, ex) in snap.exercises.enumerated() {
             guard let baseEx = matchedBase[i] else {
@@ -726,19 +737,63 @@ final class SessionInteractionState: ObservableObject {
                 }
                 continue
             }
+            // Resolve each snap set to its base set: id-FIRST, ordinal-FALLBACK.
+            //
+            // The C-core default (ordinal-only) breaks when the iPhone SHIFTS
+            // ordinals: `insertDropsetFollower` (setRepository.ts) bumps the
+            // `ordering` of every set after a new follower, so on a NON-last
+            // dropset the follower's ordinal COLLIDES with a neighbour base set
+            // and corrupts it into a stray「D2」(the 2026-06-28 D1/D2/1/1 bug).
+            // For a cast / 投影 session the base carries the iPhone's REAL set
+            // ids, so an id match is stable ACROSS the shift — the follower
+            // (fresh id) has no base match → addedSet; the shifted working sets
+            // keep their ids → match by id regardless of the bumped ordinal.
+            // For a template-start session the iPhone re-keys ids (2026-06-26),
+            // so NO id ever matches → 100% ordinal fallback = the unchanged
+            // C-core behaviour (⑤③④ intact). id-match also fixes mid-list
+            // DELETE the same way (deleted set's id absent → unclaimed).
+            let baseById = Dictionary(
+                baseEx.sets.map { ($0.setId, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
             let baseByOrdinal = Dictionary(
                 baseEx.sets.map { ($0.ordinal, $0) },
                 uniquingKeysWith: { first, _ in first }
             )
-            let snapOrdinals = Set(ex.sets.map(\.ordinal))
-            // base sets the iPhone deleted (ordinal absent from snap).
-            for b in baseEx.sets where !snapOrdinals.contains(b.ordinal) {
+            var resolvedBaseSetId: [String: String] = [:]   // snap.setId → base.setId
+            var claimedBaseSetIds = Set<String>()
+            // Pass 1 — id match (cast / aligned-id sessions).
+            for s in ex.sets where baseById[s.setId] != nil {
+                resolvedBaseSetId[s.setId] = s.setId
+                claimedBaseSetIds.insert(s.setId)
+            }
+            // Pass 2 — ordinal fallback for the still-unmatched, among the base
+            // sets NOT already claimed by an id match.
+            for s in ex.sets where resolvedBaseSetId[s.setId] == nil {
+                if let b = baseByOrdinal[s.ordinal], !claimedBaseSetIds.contains(b.setId) {
+                    resolvedBaseSetId[s.setId] = b.setId
+                    claimedBaseSetIds.insert(b.setId)
+                }
+            }
+            // base sets the iPhone deleted = claimed by NEITHER pass.
+            for b in baseEx.sets where !claimedBaseSetIds.contains(b.setId) {
                 newDeletedSets.insert(b.setId)
             }
+            // Prune stale REMOTE-added followers: a dropset follower a prior
+            // reverse apply appended that the iPhone has since removed (D→工作
+            // revert) is gone from this snapshot → drop it so it doesn't linger
+            // as a ghost「D1」(the 1,2,2 residue). Only `remoteAddedSetIds`-tagged
+            // adds under THIS exercise are pruned — a Watch-LOCAL add still
+            // in-flight (absent from snap, not yet round-tripped) is preserved.
+            let snapSetIds = Set(ex.sets.map(\.setId))
+            newAddedSets.removeAll { a in
+                a.sessionExerciseId == baseEx.sessionExerciseId
+                    && newRemoteAddedSetIds.contains(a.id)
+                    && !snapSetIds.contains(a.id)
+            }
             for s in ex.sets {
-                if let b = baseByOrdinal[s.ordinal] {
+                if let id = resolvedBaseSetId[s.setId], let b = baseById[id] {
                     // resolve snap row → BASE setId → overlay key the renderer reads.
-                    let id = b.setId
                     if s.isLogged { newLogged.insert(id) } else { newLogged.remove(id) }
                     if let w = s.weight, w != b.weight {
                         newEdited[EditedValueKey(setId: id, field: .weight)] = w
@@ -779,12 +834,19 @@ final class SessionInteractionState: ObservableObject {
                         setKind: s.setKind,
                         parentSetId: s.parentSetId
                     ))
+                    // Tag as iPhone-originated so a later revert can prune it
+                    // (see the prune above) without touching Watch-local adds.
+                    newRemoteAddedSetIds.insert(s.setId)
                     if s.isLogged { newLogged.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
                     if let dr = s.displayRank { newRankOverrides[s.setId] = dr }
                 }
             }
         }
+        // Keep the provenance tag set in sync with what actually survived in
+        // `newAddedSets` (drop tags for pruned / vanished ids) so it can't grow
+        // unbounded across applies.
+        newRemoteAddedSetIds.formIntersection(Set(newAddedSets.map(\.id)))
         // Assign once each → ≤ one @Published willSet per field per apply.
         loggedSetIds = newLogged
         editedValues = newEdited
@@ -793,6 +855,7 @@ final class SessionInteractionState: ObservableObject {
         addedSets = newAddedSets
         setRankOverrides = newRankOverrides
         setKindOverrides = newKindOverrides
+        remoteAddedSetIds = newRemoteAddedSetIds
     }
 
     // MARK: - Display value
