@@ -16,6 +16,28 @@ Bundle id: `com.lisonchang.TrainingLog`. Get the booted udid with
 MCP tools (load via ToolSearch `select:...` if deferred):
 `mcp__ios-simulator__{launch_app, screenshot, ui_describe_all, ui_find_element, ui_tap, ui_type}`.
 
+## ⚠️ Launch the dev-client (`com.lisonchang.TrainingLog`), NOT Expo Go
+
+Since slice 13b (bare workflow) the app links native modules — HealthKit ships
+via **NitroModules**. Plain **Expo Go (`host.exp.Exponent`) CRASHES ON BOOT**:
+a red error `NitroModules are not supported in Expo Go!` at `index.tsx`'s
+HealthKit import — the app never mounts, no screen is reachable (verified
+2026-06-27, wasted ~6 screenshots reaching for Expo Go out of habit). Sim smoke
+must run the **dev-client build** `com.lisonchang.TrainingLog` (native modules
+compiled in). Check the sim home first: if there's no TrainingLog icon, no
+dev-client is installed → build + install a *simulator* dev-client before any
+tap work:
+```
+cd ios && xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
+  -configuration Debug -sdk iphonesimulator -derivedDataPath build-sim build
+xcrun simctl install booted "build-sim/Build/Products/Debug-iphonesimulator/TrainingLog.app"
+```
+Then `launch_app com.lisonchang.TrainingLog`. Metro still serves JS (reload
+picks up `.ts` edits), but the SHELL must be the dev-client, never Expo Go.
+(To smoke a fix that lives on another branch, Metro follows the **main
+worktree's checked-out branch** — detached-checkout that tree there first; it
+doesn't follow a symlinked-node_modules worktree.)
+
 ## ⭐ The #1 trap: tap coords are POINTS, the screenshot is SCALED
 
 `ui_tap {x,y}` takes **points** (same space as `ui_find_element` / `ui_describe_all`
