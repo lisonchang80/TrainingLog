@@ -296,13 +296,24 @@ can match by `(se_id, ordinal)` value. The iPhone DOES re-stamp on dropset inser
 so reverse ordinal-matching is broken by construction — the same class of bug as the
 2026-06-26 id-rekey one above, but on the ordinal axis instead of the id axis.
 
-**Deferred fix direction (next round, ≈C-core size, needs device iterations):**
-make `applyRemoteSnapshot` match **id-first, ordinal-fallback**. For a cast / 投影
-session the base carries the iPhone's REAL ids → a follower (fresh id) has no base
-match → routes to `addedSets` cleanly, and the shifted working sets keep their ids →
-match by id regardless of the bumped ordinal. For a template-start session ids
-diverge (the 2026-06-26 case) → no id ever matches → 100% ordinal fallback =
-unchanged, so ⑤③④ don't regress. Plus: PRUNE `addedSets` whose id is absent from a
-matched exercise's snapshot (provenance-aware, to avoid wiping in-flight Watch-local
-adds). Same round picks up the sibling report「超級組『新增1組』→ 手錶編號 1,3,3,4」
-(reverse-sync superset rank dup).
+**Fix (implemented `30dc919`, branch `slice/13d-reverse-dropset-idmatch`, pending
+device smoke):** `applyRemoteSnapshot` now matches **id-first, ordinal-fallback**.
+Two passes per matched exercise: pass 1 claims base sets whose `setId` is in the
+snapshot (cast / aligned-id); pass 2 ordinal-matches the rest among UNclaimed base.
+A follower (fresh id) has no base match → `addedSet`; the shifted working sets keep
+their ids → matched by id regardless of the bumped ordinal. Deletes = base sets
+claimed by NEITHER pass. Plus a provenance-aware PRUNE: a new `remoteAddedSetIds`
+set tags reverse-added followers, so one the iPhone later removes (D→工作 revert) is
+dropped from `addedSets` (kills the 1,2,2 residue) while a Watch-LOCAL in-flight add
+is preserved. `formIntersection` at the end keeps the tag set bounded.
+
+⚠️ **Coverage = CAST / 投影 sessions only** (base carries the iPhone's REAL ids). A
+**template-start (Watch-led)** session re-keys ids (2026-06-26) so NO id ever
+matches → 100% ordinal fallback = the unchanged broken-on-non-last behaviour. The
+ordinal fallback also keeps ⑤③④ byte-identical for template sessions (no
+regression). Fully fixing template-start dropset needs the IPHONE to stop shifting
+ordinals on insert (`insertDropsetFollower` → dense max+1 + display_rank, mirroring
+the Watch's added-set model) — a separate iPhone-side change touching
+set-ordering-surfaces, NOT yet done. The sibling report「超級組『新增1組』→ 手錶
+編號 1,3,3,4」is re-tested in the same smoke (id-first may or may not cover it; if a
+mid-list non-follower insert shifts ordinals it's the same iPhone-shift class).
