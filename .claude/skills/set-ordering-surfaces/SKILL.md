@@ -66,6 +66,33 @@ midpoint** (edit path is ended-session, no live Watch race).
   (`f44ce9c`) preserves `display_rank` across edit-discard — without it, Opt A's
   writes get nulled on discard.
 
+## The 2026-06-27 trap: "排序動作沒生效 / 跳回原狀" can be the reorder ENTRY, not a sort surface
+
+Before auditing any of the sort surfaces below for a "我排了序但沒變 / 跳回原順序"
+report, FIRST confirm the new order actually reaches the DB. The
+**exercise-card** reorder (long-press card header → `ReorderExercisesSheet` →
+完成 → `reorderSessionExercises`) had a bug where the sheet returned the
+**ORIGINAL** order — so nothing downstream (sort keys, sync, history) was even
+involved. Root cause: the sheet seeded its drag `draft` via
+`useEffect([visible, initialItems])`, and the parent (`app/(tabs)/index.tsx`)
+rebuilds `initialItems` (`buildSessionReorderRows(plan)`) fresh on EVERY render
+→ unstable reference → during a **Watch-synced session** (constant re-renders
+from live-mirror / HR ticks) the effect re-fired mid-drag and `setDraft` wiped
+the reorder back to original BEFORE 完成. Quiet screens rarely re-render, so it
+only reproduced **"同步時"**. Fix: seed the draft only on open (`deps [visible]`),
+`reorder-exercises-sheet.tsx` (`20eb8e4`). **General rule: a sheet/modal that
+seeds local draft state from a prop must key the reset on OPEN, not on the prop
+reference — an unstable parent prop will wipe the draft during background
+re-renders.**
+
+How it was found (reusable when the user can't see the Metro terminal / is on a
+real device): a temporary on-screen **ring-buffer + floating "DBG" button** that
+dumps the captured sequence into an `Alert` the user screenshots. Logging the
+ACTUAL `orderedIds` the sheet returned (mapped to names) is what proved the order
+was already original at the source — collapsing a suspected sync/DB-revert into a
+1-line component fix. Strip the diagnostics after (they live uncommitted in the
+working tree; Metro serves them on Reload JS).
+
 ## The surfaces (audit ALL when a sort key changes)
 
 | # | Surface | File | Sort site | Smoke |
