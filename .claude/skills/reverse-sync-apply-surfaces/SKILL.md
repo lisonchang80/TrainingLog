@@ -201,3 +201,46 @@ both do). If it does, any reverse-direction code that matches by id is broken by
 construction — mirror the forward reconcile's position/content key instead. The
 "base == render snapshot" check (both `SetLoggerView` bind `snapshotForRender`)
 killed the divergence-of-base theory and pinned it to id matching, statically.
+
+## Gotcha — handing a snapshot WITH state into SetLoggerView must seed the overlay (cast / 投影 Watch)
+
+The reverse path above APPLIES onto an already-mounted `SetLoggerView` via
+`applyRemoteSnapshot`. A different case — `cast-session` / 投影 Watch (2026-06-27)
+— OPENS a fresh `SetLoggerView(snapshot:)` from an iPhone session that already
+has state (some sets ✓'d). This hit a P0 data-loss bug:
+
+**Symptom**: cast an in-progress session with logged sets → Watch shows them ALL
+un-checked AND the iPhone's ✓s get cleared too ("兩邊都變未打勾").
+
+**Root cause**: `SessionInteractionState.loggedSetIds` (the ✓ overlay) is EMPTY
+on mount, and `isLogged(setId:)` reads ONLY the overlay — it NEVER consults the
+snapshot's own `isLogged`. That's correct for Watch-led (a fresh start has
+nothing logged), but a handed-over snapshot carries `isLogged=true` rows the
+overlay never picks up. Worse: `LiveMirrorProducer.run()` does an **initial
+full-tree push** on mount → it projects the empty overlay → Watch→iPhone forward
+mirror carries `is_logged=false` for every set → the iPhone reconcile clears its
+own ✓s. So an un-seeded overlay doesn't just mis-render, it round-trips the empty
+state back and destroys the source.
+
+**Fix (`b73e50b`)**: seed the overlay from the snapshot BEFORE the producer binds
+its `$loggedSetIds` sink + does the initial push. `SessionInteractionState.
+seedLoggedFromSnapshot(snap)` = `loggedSetIds = Set(snap.exercises.flatMap(\.sets)
+.filter(\.isLogged).map(\.setId))`, called at the TOP of SetLoggerView's
+live-mirror `.task` (before `liveMirror.configure(...)`). Seeding before the sink
+binds → no spurious `markDirty`; the initial push then carries the CORRECT logged
+state → iPhone reconcile = no-op (same state) instead of a clear. No-op for
+Watch-led (all `isLogged=false` → empty set), so it's safe on every mount.
+
+**Generalisation**: `loggedSetIds` is the ONLY pure-overlay-that-starts-empty
+field — weight/reps/set_kind/notes all fall back to the base snapshot via
+`displayValue(...)`, so they render correctly without seeding. If you add another
+pure-overlay state (no base fallback), it needs the same seed-on-handover.
+
+**Cold-launch route gotcha (`e02eff2`)**: the cast routes via `.onChange(of:
+coordinator.pendingCast)` in `PickerRootView`. When the Watch app was CLOSED the
+cast rides the TUI backstop, delivered DURING cold launch — often BEFORE the view
+registers `.onChange` (which never fires for an already-set value). Add a `.task`
+that ALSO reads `coordinator.pendingCast` on appear, deduped against `.onChange`
+by the `CastRequest.token` (monotonic), so a queued cast routes exactly once on
+next app open. (iOS has NO remote foreground-launch API — "open even when closed"
+is impossible; the achievable half is "lands when the user opens the app".)
