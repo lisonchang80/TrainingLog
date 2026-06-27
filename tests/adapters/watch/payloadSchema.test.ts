@@ -126,6 +126,18 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         rev: 1_700_000_000_500,
         originator: 'watch',
       } as unknown as WCPayloadMap[K];
+    case 'cast-session':
+      // 投影 Watch (2026-06-27) — iPhone→Watch "open this session NOW".
+      // {sessionId, snapshot} mirroring StartFromIphonePayload.
+      return {
+        sessionId: 'sess-1',
+        snapshot: {
+          sessionId: 'sess-1',
+          title: 'Push day',
+          startedAt: 1_700_000_000_000,
+          exercises: [],
+        },
+      } as unknown as WCPayloadMap[K];
     case 'end-session':
       return {
         sessionId: 'sess-1',

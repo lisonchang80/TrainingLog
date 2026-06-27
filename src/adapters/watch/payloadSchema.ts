@@ -61,6 +61,7 @@ export type WCMessageKind =
   | 'hr-tick'
   | 'kcal-tick'
   | 'live-mirror'
+  | 'cast-session'
   | 'end-session'
   | 'discard-session'
   | 'settings-sync'
@@ -107,6 +108,7 @@ export const WC_MESSAGE_KINDS = [
   'hr-tick',
   'kcal-tick',
   'live-mirror',
+  'cast-session',
   'end-session',
   'discard-session',
   'settings-sync',
@@ -210,6 +212,28 @@ export interface StartFromIphonePayload {
    * as opaque JSON — the protocol layer only commits to
    * "JSON-primitive-clean object", not field-level structure.
    */
+  snapshot: Record<string, JsonValue>;
+}
+
+/**
+ * `cast-session` — iPhone → Watch "投影 Watch / open this session NOW"
+ * (2026-06-27). The user is mid-session on the iPhone and presses 投影 Watch
+ * to push the running session onto the wrist. Distinct from
+ * `start-from-iphone` (which was the never-wired D6/D8 aspiration) and from
+ * `live-mirror` (which only PROJECTS onto an already-open Watch session): a
+ * `cast-session` tells an idle/picker Watch to NAVIGATE INTO the session,
+ * hydrated from `snapshot`. Dual-fired by `pushCastToWatch` over
+ * `sendMessage` (instant + ack when reachable → flip is_watch_tracked) AND
+ * `sendUserInfo`/TUI (queued backstop — delivered when the Watch app next
+ * wakes, so "已送出，手錶開啟後帶入" is literally true). Same wide snapshot
+ * shape as `StartFromIphonePayload` so the Watch can reuse its
+ * start-from-watch → `SetLoggerView(snapshot:)` swap.
+ */
+export interface CastSessionPayload {
+  sessionId: string;
+  /** Full session-tree snapshot (opaque JSON at the protocol layer; concrete
+   *  `SessionSnapshot` lives in `handshake.ts`). Mirrors
+   *  `StartFromIphonePayload.snapshot`. */
   snapshot: Record<string, JsonValue>;
 }
 
@@ -580,6 +604,7 @@ export type WCMessage =
   | WCEnvelope<'hr-tick', HrTickPayload>
   | WCEnvelope<'kcal-tick', KcalTickPayload>
   | WCEnvelope<'live-mirror', LiveMirrorPayload>
+  | WCEnvelope<'cast-session', CastSessionPayload>
   | WCEnvelope<'end-session', EndSessionPayload>
   | WCEnvelope<'discard-session', DiscardSessionPayload>
   | WCEnvelope<'settings-sync', SettingsSyncPayload>
@@ -609,6 +634,7 @@ export interface WCPayloadMap {
   'hr-tick': HrTickPayload;
   'kcal-tick': KcalTickPayload;
   'live-mirror': LiveMirrorPayload;
+  'cast-session': CastSessionPayload;
   'end-session': EndSessionPayload;
   'discard-session': DiscardSessionPayload;
   'settings-sync': SettingsSyncPayload;
