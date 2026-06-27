@@ -71,6 +71,12 @@ struct PickerRootView: View {
     /// presents the conflict alert. nil dismisses it.
     @State private var castConflict: SessionSnapshot?
 
+    /// Token of the last cast we routed — dedups the two entry points
+    /// (`.onChange` for casts arriving while shown + `.task` for a cast already
+    /// queued at cold launch). Each `CastRequest` carries a monotonic token, so
+    /// a cast routes exactly once regardless of which fires first.
+    @State private var lastCastToken: Int?
+
     /// Bumped on session-end return so the carousel List re-creates and resets
     /// its scroll to the TOP (user 2026-06-01: 完成/放棄後回第一頁、捲到最上層).
     /// `.id(listResetToken)` on the List drives the reset — a LOOP-SAFE
@@ -132,10 +138,22 @@ struct PickerRootView: View {
             // Re-create the List (→ scroll resets to top) on session-end
             // return. Stable at all other times so there's no render loop.
             .id(listResetToken)
-            // 投影 Watch (2026-06-27) — route an inbound cast-session.
+            // 投影 Watch (2026-06-27) — route an inbound cast-session that
+            // arrived WHILE the picker is showing (instant sendMessage leg, or
+            // a TUI delivered after mount).
             .onChange(of: coordinator.pendingCast) { _, newValue in
-                guard let req = newValue else { return }
-                routeCast(req.snapshot)
+                routeCastIfNew(newValue)
+            }
+            // 投影 Watch — ALSO check on appear. When the Watch app was CLOSED,
+            // the cast rides the TUI backstop and iOS delivers it DURING cold
+            // launch, often BEFORE this view's `.onChange` registers (which
+            // never fires for an already-set value). Reading `pendingCast` here
+            // is what makes「開啟手錶 app 後自動帶入」work — the achievable half
+            // of "launch even when closed" (iOS has no remote foreground-launch
+            // API, so the user still opens the app once). `routeCastIfNew`
+            // dedups against `.onChange` via the request token.
+            .task {
+                routeCastIfNew(coordinator.pendingCast)
             }
             // Track the Watch-LED session id so a later cast of a DIFFERENT
             // session is detected as a conflict (a cast of the SAME id no-ops).
@@ -163,6 +181,15 @@ struct PickerRootView: View {
     }
 
     // MARK: - cast-session routing (投影 Watch)
+
+    /// Route a cast request exactly once (token-deduped across the `.onChange`
+    /// live path + the `.task` cold-launch-queued path). nil / already-routed
+    /// tokens are ignored.
+    private func routeCastIfNew(_ req: CastRequest?) {
+        guard let req, req.token != lastCastToken else { return }
+        lastCastToken = req.token
+        routeCast(req.snapshot)
+    }
 
     /// Decide what to do with an inbound cast snapshot:
     ///   - a session of the SAME id is already open → no-op (live-mirror keeps
