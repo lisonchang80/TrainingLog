@@ -24,8 +24,7 @@
  *     asleep / unreachable right now (iOS cannot force-launch the Watch app).
  *   - `sendMessage` — the instant channel when the Watch is reachable. An
  *     explicit `{ok:true}` ack means the Watch adopted + navigated into the
- *     session NOW → flip `is_watch_tracked` so the detail-page 5-tile predicate
- *     lights up.
+ *     session NOW (→ `acked:true`, drives the success toast).
  * Both fire the SAME envelope (one `msgId`) so the Watch dedupes the duplicate
  * delivery via `seenMsgId` (same pattern as the D29 live-mirror dual-fire and
  * the connectivity ring-buffer dedup comment).
@@ -35,13 +34,20 @@
  *   - Session row missing / snapshot unbuildable → `{acked:false, queued:false,
  *     code:'NO_SNAPSHOT'}`. (Should not happen for a genuine in-progress
  *     session; caller may toast a generic error.)
- *   - Reachable + `{ok:true}` ack within timeout → flip `is_watch_tracked` true,
- *     `{acked:true, queued:true}`.
+ *   - Reachable + `{ok:true}` ack within timeout → `{acked:true, queued:true}`.
  *   - Reachable but no positive `{ok:true}` ack → `{acked:false, queued:true,
  *     code:'ACK_NO_OK'}` (TUI backstop still queued).
  *   - Unreachable / unpaired / timeout / bridge error → `{acked:false,
  *     queued:true, code:<SendResult.code>}` (TUI backstop still queued — the
  *     cast will land when the Watch app next opens).
+ *   - is_watch_tracked: flipped true whenever the cast is QUEUED (snapshot built
+ *     + dual-fired), regardless of reachability — the durable cast WILL be
+ *     adopted on the Watch's next wake, so the iPhone→Watch live-mirror gate
+ *     (`index.tsx` refresh push, gated on the DB column) must open NOW. The ONLY
+ *     exception is an explicit `{ok:false}` reply (Watch busy with another
+ *     session). Decouples `acked` (synchronous adoption) from tracking (intent +
+ *     durable queue). [2026-06-27 ⑤⑥ fix: queued/cold-launch cast opened the
+ *     session on the wrist but never received subsequent iPhone edits.]
  */
 
 import type { Database } from '../db/types';
@@ -127,25 +133,48 @@ export async function pushCastToWatch(
   sendUserInfo(env);
 
   // 3. Instant channel — sendMessage when reachable. A positive `{ok:true}` ack
-  //    means the Watch navigated into the session NOW → flip is_watch_tracked.
+  //    means the Watch navigated into the session NOW (→ `acked`).
   const result = await sendMessage(env, {
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
-  if (result.ok && result.reply?.ok === true) {
+  const adopted = result.ok && result.reply?.ok === true;
+  // An explicit `{ok:false}` is the Watch saying "busy with another session" —
+  // the ONE case we honour as "not tracking this one" (the ④ conflict path).
+  const explicitlyRejected = result.ok && result.reply?.ok === false;
+
+  // 4. Flip is_watch_tracked unless the Watch explicitly rejected. The cast is
+  //    durably QUEUED (TUI backstop), so an unreachable / asleep / cold-
+  //    launching Watch WILL adopt it on its next wake — we must open the
+  //    iPhone→Watch live-mirror gate NOW (the `app/(tabs)/index.tsx` refresh →
+  //    `scheduleLiveMirrorPush` is gated on the DB `is_watch_tracked`). Without
+  //    this, the queued / cold-launch path opens the session on the wrist but
+  //    never receives subsequent iPhone edits — the Watch's reverse-apply
+  //    receiver IS wired on mount, but the iPhone never pushes (the 2026-06-27
+  //    ⑤⑥ device bug). This mirrors the prior reachable-ack semantics, which
+  //    already flipped optimistically on RECEIPT (the Swift cast handler replies
+  //    `{ok:true}` the moment it receives, before any conflict resolution), so
+  //    it's consistent — just extended to the durable transports. Decouples
+  //    `acked` (synchronous adoption, for the toast) from tracking (user intent
+  //    + durable queue). Idempotent; silent no-op on a missing id (Q11).
+  if (!explicitlyRejected) {
     try {
       await setIsWatchTracked(db, { id: sessionId, value: true });
     } catch {
-      // Setter is silent no-op on missing id; swallow rare sqlite errors to
-      // keep the Q11 silent contract.
+      // Swallow rare sqlite errors to keep the Q11 silent contract.
     }
+  }
+
+  if (adopted) {
     return { acked: true, queued: true, code: null, raw: result, startedAt };
   }
   if (result.ok) {
-    // Reachable + replied, but no positive adoption — backstop still queued.
+    // Reachable + replied, but no positive `{ok:true}` adoption — backstop
+    // still queued (tracked flipped above unless explicitly rejected).
     return { acked: false, queued: true, code: 'ACK_NO_OK', raw: result, startedAt };
   }
   // Unreachable / unpaired / timeout / bridge error — TUI backstop queued, so
-  // the cast lands on next Watch wake. Leave is_watch_tracked as-is.
+  // the cast lands on next Watch wake; tracked flipped above so the live-mirror
+  // gate is already open when it does.
   return { acked: false, queued: true, code: result.code, raw: result, startedAt };
 }

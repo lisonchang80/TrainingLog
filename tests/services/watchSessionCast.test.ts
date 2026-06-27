@@ -7,9 +7,13 @@
  *   - dual-fire: sendUserInfo (TUI backstop) AND sendMessage every cast
  *   - wire payload carries the REAL session snapshot (the fix — old path sent
  *     an empty `{}`), kind === 'cast-session'
- *   - NO_SNAPSHOT: missing session row → no envelope sent at all, queued:false
- *   - unreachable / timeout / {ok:false} / empty-reply → backstop still queued,
- *     flag NOT flipped
+ *   - NO_SNAPSHOT: missing session row → no envelope sent at all, queued:false,
+ *     flag untouched
+ *   - is_watch_tracked flipped true whenever the cast is QUEUED — unreachable /
+ *     timeout / empty-reply included (the durable cast adopts on next Watch
+ *     wake, so the iPhone→Watch live-mirror gate must open now; 2026-06-27 ⑤⑥
+ *     fix). The ONE exception is an explicit {ok:false} (Watch busy with another
+ *     session → not tracking this one).
  *
  * Real DB via better-sqlite3 in-memory; WC bridge mocked per-test via
  * jest.doMock with jest.resetModules() (same harness as watchSessionStart).
@@ -173,7 +177,7 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect(bridge.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('unreachable — Watch off → backstop still queued, flag stays false', async () => {
+  it('unreachable — Watch off → backstop queued, flag flipped (⑤⑥ fix)', async () => {
     const bridge = makeBridge({
       getReachability: jest.fn().mockResolvedValue(false),
       sendMessage: jest.fn(),
@@ -191,10 +195,13 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     // TUI backstop fires regardless of reachability — that's the whole point
     // of 「已送出，手錶開啟後帶入」.
     expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
-    expect((await getSession(db, 'sess-cast-unreach'))?.is_watch_tracked).toBe(false);
+    // ⑤⑥ fix: the durable cast WILL be adopted on the Watch's next wake, so
+    // open the iPhone→Watch live-mirror gate NOW (was the bug: queued cast
+    // opened on the wrist but never received later iPhone edits).
+    expect((await getSession(db, 'sess-cast-unreach'))?.is_watch_tracked).toBe(true);
   });
 
-  it('ack timeout — Watch never replies → queued, code TIMEOUT, flag false', async () => {
+  it('ack timeout — Watch never replies → queued, code TIMEOUT, flag flipped', async () => {
     const bridge = makeBridge({
       sendMessage: jest.fn(() => {
         // never call replyCb / errCb
@@ -211,10 +218,11 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect(result.queued).toBe(true);
     expect(result.code).toBe('TIMEOUT');
     expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
-    expect((await getSession(db, 'sess-cast-timeout'))?.is_watch_tracked).toBe(false);
+    // No explicit rejection (silent timeout) → still queued → flag flipped.
+    expect((await getSession(db, 'sess-cast-timeout'))?.is_watch_tracked).toBe(true);
   });
 
-  it('Watch replies {ok:false} → ACK_NO_OK, queued, flag NOT flipped', async () => {
+  it('Watch replies {ok:false} → ACK_NO_OK, queued, flag NOT flipped (the ONE exception)', async () => {
     const bridge = makeBridge({
       sendMessage: jest.fn((_msg, replyCb) => {
         replyCb?.({ ok: false, reason: 'busy_other_session' });
@@ -230,12 +238,17 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect(result.acked).toBe(false);
     expect(result.queued).toBe(true);
     expect(result.code).toBe('ACK_NO_OK');
+    // The ONLY queued path that does NOT flip the flag: an explicit {ok:false}
+    // is the Watch saying "busy with another session", so it is genuinely NOT
+    // tracking this one (the ④ conflict path). Contrast with timeout/unreachable
+    // /empty-reply above, which all flip.
     expect((await getSession(db, 'sess-cast-nook'))?.is_watch_tracked).toBe(false);
   });
 
-  it('empty reply {} (no {ok:true}) → ACK_NO_OK, flag NOT flipped', async () => {
+  it('empty reply {} (no {ok:true}) → ACK_NO_OK (not acked), but flag flipped', async () => {
     // Mirror the watchSessionStart E3 guard: a delivered-but-empty reply must
-    // NOT be treated as adoption.
+    // NOT be treated as ADOPTION (acked stays false). But it is NOT an explicit
+    // rejection either, so the durable cast still flips the tracking flag.
     const bridge = makeBridge({
       sendMessage: jest.fn((_msg, replyCb) => {
         replyCb?.({});
@@ -250,7 +263,7 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
 
     expect(result.acked).toBe(false);
     expect(result.code).toBe('ACK_NO_OK');
-    expect((await getSession(db, 'sess-cast-empty'))?.is_watch_tracked).toBe(false);
+    expect((await getSession(db, 'sess-cast-empty'))?.is_watch_tracked).toBe(true);
   });
 
   it('bridge errCb fires → swallowed, queued, code BRIDGE_ERROR', async () => {
@@ -270,6 +283,7 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect(result.queued).toBe(true);
     expect(result.code).toBe('BRIDGE_ERROR');
     expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
-    expect((await getSession(db, 'sess-cast-err'))?.is_watch_tracked).toBe(false);
+    // Bridge error is not an explicit Watch rejection → still queued → flipped.
+    expect((await getSession(db, 'sess-cast-err'))?.is_watch_tracked).toBe(true);
   });
 });
