@@ -133,6 +133,17 @@ and made `完成` tappable. So: bottom action-bar / tab-bar buttons MAY be hit-t
 their frame, but full-width bottom-confirm bars usually are NOT — reach for the ✕ dismiss
 by default for those.
 
+⚠️ **You CAN'T screenshot-verify the app's OWN bottom-anchored toast in dev-client** —
+the in-app `ToastHost` (`components/ui/Toast.tsx`, `SafeAreaView edges={['bottom']}`)
+renders at the very bottom, exactly where the dev "Open debugger" banner sits, so a
+success toast (e.g. 投影 Watch's queued/ok toast, 儲存模板 success) is OBSCURED by the
+banner AND auto-dismisses in ~2-3s — `ui_find_element` / screenshots come up empty even
+when the toast fired correctly. Don't open a "toast not rendering / ToastHost mis-wired"
+investigation (2026-06-27, ~5 wasted attempts): confirm the wiring is identical to a
+proven `ToastHost` caller (the session-detail page) + tsc-clean + handler runs without
+crash, and verify the toast VISUALLY on a release build / real device (no dev banner)
+instead. This is a dev-overlay artifact, not a bug.
+
 ⚠️ **Tab-switch taps silently fail when this toast is up** — the #1 time-waster
 (2026-06-24: ~10 wasted round-trips). Symptom: you `ui_tap` a tab's exact AXFrame
 center and the screen DOESN'T switch (you stay on / bounce back to the current tab),
