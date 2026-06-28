@@ -193,10 +193,27 @@ func reduceEditLock(_ state: EditLockState, _ event: EditLockEvent) -> EditLockR
         ])
 
     case let .recvLockRequest(epoch):
+        // UNPAIRED = not (yet) in this pairing — typically a holder mid-restart
+        // whose async lock restore hasn't run. Do NOT demote here: a lock-request
+        // expects US to be the holder and grant it; demoting to LOCKED leaves
+        // NOBODY able to grant → both sides locked-out forever (the device "對方沒
+        // 回應 → iPhone 重開 → 卡死 / force-take 對方不降級 / 雙鎖死" class). Ignore
+        // it; restore (re-announce lock-sync) or a re-cast establishes our real role.
+        guard state.status != .unpaired else { return done(state, []) }
         // A higher epoch than mine means I'm already superseded — demote.
         if epoch > state.epoch { return demote(state, epoch) }
-        // Only a holder can grant.
-        guard state.status == .holder else { return done(state, []) }
+        // Holder grants; OFFERING re-grants. A requester that lost a grant (it hit
+        // the request-timeout, chose 保留鎖定, then re-pressed 解除鎖定) sends a
+        // fresh lock-request@epoch while we're still parked in `offering` awaiting
+        // an ack that will never come (its first grant was dropped because it had
+        // already gone back to `locked`). Without re-granting we'd silently drop
+        // the new request and the requester times out AGAIN (對方沒回應) even
+        // though we're alive — re-send the grant + restart the ack timer so the
+        // handover completes. (Idempotent: a duplicate grant at the same epoch is
+        // dropped by a requester that already became holder.)
+        guard state.status == .holder || state.status == .offering else {
+            return done(state, [])
+        }
         if epoch < state.epoch {
             // Stale requester — re-lock it at the current generation, don't grant.
             return done(state, [

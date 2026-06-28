@@ -442,6 +442,14 @@ struct SetLoggerView: View {
                         sessionId: snapshotForRender.sessionId,
                         epoch: castEpoch
                     )
+                } else {
+                    // Watch-led — this Watch STARTED the session, so it is the
+                    // holder. Become HOLDER (epoch ≥ 1) BEFORE run()'s initial
+                    // force-push so that push is stamped with our epoch → the
+                    // iPhone auto-LOCKS on receipt (手錶啟動訓練 → 手機自動成為
+                    // 鎖定). castReceived (cast = locked) and castInitiated
+                    // (Watch-led = holder) are mutually exclusive.
+                    editLock.castInitiated(sessionId: snapshotForRender.sessionId)
                 }
                 await liveMirror.run()
             }

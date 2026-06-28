@@ -35,6 +35,12 @@ final class CastEditLock: ObservableObject {
     private static let requestTimeoutNanos: UInt64 = 6_000_000_000
     /// No ack within this window after granting → reclaim the token (transfer aborted).
     private static let ackTimeoutNanos: UInt64 = 4_000_000_000
+    /// While `requesting`, re-send the lock-request on this cadence (ADR-0028
+    /// self-heal). A single request is lost if the holder was asleep / mid-restart
+    /// when sent → the requester sticks in `requesting` (對方沒回應) and never
+    /// recovers even after the holder returns. Re-sending keeps trying so the holder
+    /// grants the moment it's reachable → the requester auto-becomes holder.
+    private static let requestRetryNanos: UInt64 = 2_000_000_000
 
     @Published private(set) var state: EditLockState = initialEditLockState(.watch)
 
@@ -56,6 +62,7 @@ final class CastEditLock: ObservableObject {
     private weak var producer: LiveMirrorProducer?
 
     private var requestTimer: Task<Void, Never>?
+    private var requestRetry: Task<Void, Never>?
     private var ackTimer: Task<Void, Never>?
 
     /// msgId dedup — the dual-fire (sendMessage + transferUserInfo) delivers the
@@ -85,6 +92,17 @@ final class CastEditLock: ObservableObject {
     /// suppressed (INV-3 — the locked side never emits).
     func castReceived(sessionId: String, epoch: Int) {
         dispatch(.castReceived(sessionId: sessionId, epoch: epoch))
+    }
+
+    /// This Watch STARTED the session itself (Watch-led) → become HOLDER, bump
+    /// the epoch. Mirrors the iPhone's 投影 Watch `castInitiated`. Stamps the
+    /// producer's `holderEpoch` (via `commit`) so our live-mirror carries
+    /// epoch ≥ 1 → the iPhone adopts LOCKED on the first mirror (its
+    /// `noteMirrorEpoch` divergence guard). Without this a Watch-led session
+    /// stayed UNPAIRED (epoch 0) → the iPhone never locked → both sides could
+    /// edit at once (the bug: 手錶啟動訓練、手機沒有自動鎖定).
+    func castInitiated(sessionId: String) {
+        dispatch(.castInitiated(sessionId: sessionId))
     }
 
     /// User tapped 解除鎖定 on the locked Watch.
@@ -178,6 +196,7 @@ final class CastEditLock: ObservableObject {
                 startRequestTimer()
             case .cancelRequestTimer:
                 requestTimer?.cancel(); requestTimer = nil
+                requestRetry?.cancel(); requestRetry = nil
             case .startAckTimer:
                 startAckTimer()
             case .cancelAckTimer:
@@ -203,6 +222,18 @@ final class CastEditLock: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.dispatch(.requestTimeout)
         }
+        // ADR-0028 self-heal — keep re-sending the request while requesting so a
+        // holder that was asleep / restarting grants it once reachable. Stops the
+        // moment we leave `requesting` (cancelRequestTimer cancels this too).
+        requestRetry?.cancel()
+        requestRetry = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.requestRetryNanos)
+                guard !Task.isCancelled, let self else { return }
+                guard self.state.status == .requesting else { return }
+                self.send(kind: .request, epoch: self.state.epoch, withSnapshot: false)
+            }
+        }
     }
 
     private func startAckTimer() {
@@ -216,6 +247,7 @@ final class CastEditLock: ObservableObject {
 
     deinit {
         requestTimer?.cancel()
+        requestRetry?.cancel()
         ackTimer?.cancel()
     }
 }

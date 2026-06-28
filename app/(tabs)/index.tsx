@@ -790,7 +790,10 @@ export default function TodayScreen() {
     const unsubLiveMirror = addAppContextListener(async (ctx) => {
       // ADR-0028 — feed the holder's epoch into the lock machine (demote if the
       // Watch has superseded us; no-op when we're already locked).
-      editLockRef.current.noteMirrorEpoch((ctx as { epoch?: number }).epoch);
+      editLockRef.current.noteMirrorEpoch(
+        (ctx as { epoch?: number }).epoch,
+        (ctx as { sessionId?: string }).sessionId,
+      );
       // Phase C-core (2026-06-26): wrap the inbound apply so the refresh it
       // triggers (which now tail-calls scheduleLiveMirrorPush) is no-op'd by
       // the producer's applyDepth gate — a Watch snapshot must not bounce back.
@@ -809,7 +812,7 @@ export default function TodayScreen() {
     // applicationContext alone was the "又慢、又亂、時有時無（尤其遞減組）"
     // regression — sendMessage is the real-time channel.
     const unsubLiveMirrorMsg = addMessageListener('live-mirror', async (env) => {
-      editLockRef.current.noteMirrorEpoch(env.payload.epoch); // ADR-0028
+      editLockRef.current.noteMirrorEpoch(env.payload.epoch, env.payload.sessionId); // ADR-0028
       await runWhileApplyingRemoteSnapshot(async () => {
         await onLiveMirror(db, env.payload);
         refreshRef.current?.();
@@ -2387,6 +2390,12 @@ export default function TodayScreen() {
         // vanished). Report honestly rather than a false "已送出".
         toastRef.current?.show(t('status', 'castToWatchFailed'), { icon: 'error' });
       }
+      // 2026-06-28 — pushCastToWatch flips `is_watch_tracked` true in the DB (the
+      // Watch is now the HR/kcal source), but the React `sessionState` snapshot is
+      // stale until something refreshes it. Without this the 5-tile ❤️/🔥 panel
+      // only appeared once the Watch pushed its first mirror (i.e. after 解除鎖定).
+      // Refresh now so casting alone surfaces the HR/kcal tiles immediately.
+      refreshRef.current?.();
     })();
   }, [db, sessionState]);
 

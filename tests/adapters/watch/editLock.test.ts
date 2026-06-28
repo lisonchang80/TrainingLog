@@ -215,6 +215,110 @@ describe('editLock — stale requester + ack-timeout recovery', () => {
   });
 });
 
+describe('editLock — offering re-grants a re-pressed lock-request (issue 2 fix)', () => {
+  // Device repro: holder asleep → Watch unlock times out (對方沒回應) → Watch
+  // 保留鎖定 → holder wakes + processes the queued request → offering (grant
+  // dropped by the now-locked Watch) → Watch re-presses unlock. The 2nd request
+  // must NOT be silently dropped while we sit in offering, or the Watch times out
+  // again even though the holder is alive.
+  it('a second lock-request@epoch while offering re-sends the grant + restarts ack timer', () => {
+    let s = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'cast-initiated',
+      sessionId: SID,
+    }).state; // holder@1
+    const r1 = reduceEditLock(s, { type: 'recv-lock-request', epoch: 1 });
+    expect(r1.state.status).toBe('offering');
+    expect(r1.state.epoch).toBe(1);
+    expect(sendEff(r1.effects, 'lock-grant')?.epoch).toBe(2);
+    s = r1.state; // offering@1
+
+    const r2 = reduceEditLock(s, { type: 'recv-lock-request', epoch: 1 });
+    expect(r2.state.status).toBe('offering'); // stays offering
+    expect(r2.state.epoch).toBe(1);
+    expect(sendEff(r2.effects, 'lock-grant')?.epoch).toBe(2); // re-granted, NOT dropped
+    expect(eff(r2.effects, 'start-ack-timer')).toBeDefined(); // ack timer restarted
+  });
+
+  it('a STALE re-request (epoch < mine) from offering re-locks via lock-sync, not grant', () => {
+    let s = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'cast-initiated',
+      sessionId: SID,
+    }).state; // holder@1
+    s = reduceEditLock(s, { type: 'cast-initiated', sessionId: SID }).state; // holder@2
+    s = reduceEditLock(s, { type: 'recv-lock-request', epoch: 2 }).state; // offering@2
+    const r = reduceEditLock(s, { type: 'recv-lock-request', epoch: 1 });
+    expect(sendEff(r.effects, 'lock-sync')?.epoch).toBe(2);
+    expect(sendEff(r.effects, 'lock-grant')).toBeUndefined();
+  });
+
+  it('a SUPERSEDING request (epoch > mine) from offering still demotes', () => {
+    const offering = reduceEditLock(
+      reduceEditLock(initialEditLockState('iphone'), {
+        type: 'cast-initiated',
+        sessionId: SID,
+      }).state,
+      { type: 'recv-lock-request', epoch: 1 },
+    ).state; // offering@1
+    const { state } = reduceEditLock(offering, { type: 'recv-lock-request', epoch: 5 });
+    expect(state.status).toBe('locked');
+    expect(state.epoch).toBe(5);
+  });
+
+  it('UNPAIRED ignores a lock-request — no demote (holder-mid-restart deadlock guard)', () => {
+    // iPhone just relaunched: editLock is unpaired@0 while the async holder
+    // restore is still in flight. A Watch (retried) request@3 must NOT demote it
+    // to locked — that would leave nobody to grant → permanent dual-lockout.
+    const { state, effects } = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'recv-lock-request',
+      epoch: 3,
+    });
+    expect(state.status).toBe('unpaired'); // stayed unpaired, NOT demoted
+    expect(state.epoch).toBe(0);
+    expect(effects).toHaveLength(0);
+  });
+
+  it('reclaim-holder from UNPAIRED → holder at the given epoch (restart recovery)', () => {
+    // iPhone relaunched unpaired (restore missed); a request for its active
+    // session reclaims the token at the requester's epoch so it can then grant.
+    const { state } = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'reclaim-holder',
+      sessionId: SID,
+      epoch: 4,
+    });
+    expect(state.status).toBe('holder');
+    expect(state.epoch).toBe(4);
+    expect(state.sessionId).toBe(SID);
+  });
+
+  it('reclaim-holder is a no-op when already paired (never overwrites a live side)', () => {
+    const locked = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'cast-received',
+      sessionId: SID,
+      epoch: 3,
+    }).state; // locked@3
+    const { state } = reduceEditLock(locked, {
+      type: 'reclaim-holder',
+      sessionId: SID,
+      epoch: 9,
+    });
+    expect(state.status).toBe('locked');
+    expect(state.epoch).toBe(3);
+  });
+
+  it('reclaim → request → grant: unpaired iPhone recovers and hands the token to the requester', () => {
+    // Full restart-recovery chain on the iPhone side: reclaim holder@E, then the
+    // same request grants @E+1, so the Watch (requesting@E) can become holder.
+    let s = reduceEditLock(initialEditLockState('iphone'), {
+      type: 'reclaim-holder',
+      sessionId: SID,
+      epoch: 5,
+    }).state; // holder@5
+    const r = reduceEditLock(s, { type: 'recv-lock-request', epoch: 5 });
+    expect(r.state.status).toBe('offering');
+    expect(sendEff(r.effects, 'lock-grant')?.epoch).toBe(6);
+  });
+});
+
 describe('editLock — request timeout dialog → force-take / keep-lock (Q2)', () => {
   function requesting(epoch = 1): EditLockState {
     return reduceEditLock(

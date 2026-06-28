@@ -91,6 +91,15 @@ export type EditLockEvent =
   | { type: 'cast-initiated'; sessionId: string }
   /** This (Watch) side received a cast-session at `epoch` → becomes locked. */
   | { type: 'cast-received'; sessionId: string; epoch: number }
+  /**
+   * Restart recovery — this side reclaims the token as HOLDER at a GIVEN epoch
+   * (no bump), used only from UNPAIRED. After an app restart the persisted-lock
+   * restore can miss (stays unpaired), so when a lock-request arrives for THIS
+   * side's active session the host adopts holder at the requester's epoch so the
+   * subsequent recv-lock-request grants instead of being ignored. The host gates
+   * this on sessionId match (the reducer can't see the session).
+   */
+  | { type: 'reclaim-holder'; sessionId: string; epoch: number }
   /** User tapped 解除鎖定 on the locked side. */
   | { type: 'unlock-pressed' }
   | { type: 'recv-lock-request'; epoch: number }
@@ -183,6 +192,25 @@ export function reduceEditLock(
       );
     }
 
+    case 'reclaim-holder': {
+      // Restart recovery — adopt holder at the GIVEN epoch (no bump). Only from
+      // UNPAIRED (a live holder/locked/offering side must not be silently
+      // overwritten). The host fires this just before recv-lock-request when an
+      // unpaired side gets a request for its active session, so the request then
+      // grants (holder path) instead of being ignored (unpaired guard).
+      if (state.status !== 'unpaired') return done(state, []);
+      return done(
+        {
+          ...state,
+          status: 'holder',
+          epoch: event.epoch,
+          sessionId: event.sessionId,
+          requestTimedOut: false,
+        },
+        [],
+      );
+    }
+
     case 'unlock-pressed': {
       // Only meaningful from a locked state.
       if (state.status !== 'locked') return done(state, []);
@@ -193,10 +221,31 @@ export function reduceEditLock(
     }
 
     case 'recv-lock-request': {
+      // UNPAIRED = not (yet) in this pairing — typically a holder mid-restart
+      // whose async lock restore hasn't run. Do NOT demote here: a lock-request
+      // expects US to be the holder and grant it; demoting to LOCKED leaves
+      // NOBODY able to grant → both sides locked-out forever. This is the root of
+      // the device "對方沒回應 → iPhone 重開 → 卡死 / force-take 對方不降級 / 雙鎖
+      // 死" class: the iPhone restarts (unpaired@0), the Watch's (retried) request
+      // lands before the async holder-restore runs, demote flips iPhone to LOCKED,
+      // and restore then SKIPS (status already advanced past unpaired). Ignore it;
+      // the restore's re-announce (lock-sync) — or a re-cast — establishes our real
+      // role, and the requester's retry is granted once we're holder again.
+      if (state.status === 'unpaired') return done(state, []);
       // A higher epoch than mine means I'm already superseded — demote.
       if (event.epoch > state.epoch) return demote(state, event.epoch);
-      // Only a holder can grant.
-      if (state.status !== 'holder') return done(state, []);
+      // Holder grants; OFFERING re-grants. A requester that lost a grant (it hit
+      // the request-timeout, chose 保留鎖定, then re-pressed 解除鎖定) sends a
+      // fresh lock-request@epoch while we're still parked in `offering` awaiting
+      // an ack that will never come (its first grant was dropped because it had
+      // already gone back to `locked`). Without re-granting we'd silently drop
+      // the new request and the requester times out AGAIN (對方沒回應) even
+      // though we're alive — re-send the grant + restart the ack timer so the
+      // handover completes. (Idempotent: a duplicate grant at the same epoch is
+      // dropped by a requester that already became holder.)
+      if (state.status !== 'holder' && state.status !== 'offering') {
+        return done(state, []);
+      }
       if (event.epoch < state.epoch) {
         // Stale requester — re-lock it at the current generation, don't grant.
         return done(state, [

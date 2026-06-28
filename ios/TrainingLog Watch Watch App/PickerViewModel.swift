@@ -150,7 +150,30 @@ final class PickerViewModel: ObservableObject {
     func bootstrap() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
-        await refresh()
+        guard let coordinator else {
+            // Preview / no-coordinator — mirror refresh()'s cosmetic spin.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            return
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        // Cold-start RETRY (2026-06-28). On a Watch reopen the WCSession isn't
+        // `.activated` and the iPhone isn't `isReachable` yet at this first
+        // `.task` tick, so `requestHandshake` self-skips → returns nil → the
+        // iPhone never gets the handshake → never RE-CASTS its active session →
+        // the Watch sits on the picker until the user taps 🔄. Those two guards
+        // return INSTANTLY while not-ready, so retry until the handshake actually
+        // lands (a successful reply means the iPhone also fired its re-cast in the
+        // same listener → the cast arrives → PickerRootView auto-routes into the
+        // session). Bounded; once it succeeds we stop (one re-cast only). A truly
+        // asleep iPhone exhausts the budget → picker stays, 🔄 still available.
+        for _ in 0..<8 {
+            if let reply = await coordinator.requestHandshake() {
+                applyStage1Reply(reply)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s between tries
+        }
     }
 
     /// Force a fresh handshake regardless of `hasBootstrapped` state.

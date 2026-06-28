@@ -46,6 +46,16 @@ import {
 const REQUEST_TIMEOUT_MS = 6000;
 /** No ack within this window after granting → reclaim the token (transfer aborted). */
 const ACK_TIMEOUT_MS = 4000;
+/**
+ * While `requesting`, re-send the lock-request on this cadence (ADR-0028 self-heal,
+ * 2026-06-28). A single request is lost if the holder is asleep / mid-restart when
+ * it's sent → the requester sticks in `requesting` (對方沒回應) and never recovers
+ * even after the holder returns (pressing 解除鎖定 again is a no-op from
+ * `requesting`). Re-sending keeps trying so the moment the holder is reachable it
+ * grants → the requester auto-becomes holder. Stops the instant we leave
+ * `requesting` (grant / keep-lock / force-take all cancel the request timer).
+ */
+const REQUEST_RETRY_MS = 2000;
 
 export interface UseCastEditLockArgs {
   db: Database;
@@ -75,8 +85,13 @@ export interface CastEditLock {
   keepLock: () => void;
   /** Dispatch an inbound lock-* envelope into the machine. */
   handleLockEnvelope: (env: WCMessage) => void;
-  /** Feed an inbound live-mirror's epoch (for supersede / self-heal detection). */
-  noteMirrorEpoch: (epoch: number | undefined) => void;
+  /**
+   * Feed an inbound live-mirror's epoch (for supersede / self-heal detection).
+   * `mirrorSessionId` is the snapshot's session — used by the restart-resilience
+   * divergence guard to confirm a stray holder is mirroring OUR active session
+   * before adopting LOCKED (see impl).
+   */
+  noteMirrorEpoch: (epoch: number | undefined, mirrorSessionId?: string) => void;
   /** The cast session ended / was discarded → tear the lock down. */
   notifyEnded: () => void;
 }
@@ -95,12 +110,17 @@ export function useCastEditLock({
   lockRef.current = lock;
 
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestRetry = useRef<ReturnType<typeof setInterval> | null>(null);
   const ackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearRequestTimer = useCallback(() => {
     if (requestTimer.current) {
       clearTimeout(requestTimer.current);
       requestTimer.current = null;
+    }
+    if (requestRetry.current) {
+      clearInterval(requestRetry.current);
+      requestRetry.current = null;
     }
   }, []);
   const clearAckTimer = useCallback(() => {
@@ -159,6 +179,19 @@ export function useCastEditLock({
             requestTimer.current = setTimeout(() => {
               dispatchRef.current({ type: 'request-timeout' });
             }, REQUEST_TIMEOUT_MS);
+            // ADR-0028 self-heal — keep re-sending the request while requesting so
+            // a holder that was asleep / restarting grants it once reachable.
+            requestRetry.current = setInterval(() => {
+              const s = lockRef.current;
+              if (s.status !== 'requesting') {
+                if (requestRetry.current) {
+                  clearInterval(requestRetry.current);
+                  requestRetry.current = null;
+                }
+                return;
+              }
+              void sendLock('lock-request', s.epoch, false);
+            }, REQUEST_RETRY_MS);
             break;
           case 'cancel-request-timer':
             clearRequestTimer();
@@ -212,19 +245,56 @@ export function useCastEditLock({
   const notifyEnded = useCallback(() => dispatch({ type: 'ended' }), [dispatch]);
 
   const noteMirrorEpoch = useCallback(
-    (epoch: number | undefined) => {
+    (epoch: number | undefined, mirrorSessionId?: string) => {
       if (epoch == null) return;
+      // ADR-0028 restart-resilience (重啟復原 re-plan 2026-06-28) — divergence
+      // guard. If our lock state was LOST on restart (persisted snapshot missing
+      // → restored as UNPAIRED) but a holder is actively mirroring OUR session
+      // (epoch > 0 + sessionId matches the active one), then we are NOT the
+      // holder and must NOT edit freely → adopt LOCKED via cast-received.
+      // Without this both sides could edit at once (INV-1 breach, scenario 4
+      // with a failed persist). sessionId-gated so a stale post-session mirror
+      // (onLiveMirror drops its data, but the epoch still reaches us here) can't
+      // wrongly lock us into a session that already ended.
+      if (
+        epoch > 0 &&
+        lockRef.current.status === 'unpaired' &&
+        mirrorSessionId != null &&
+        mirrorSessionId === sessionId
+      ) {
+        dispatch({ type: 'cast-received', sessionId: mirrorSessionId, epoch });
+        return;
+      }
       dispatch({ type: 'recv-mirror', epoch });
     },
-    [dispatch],
+    [dispatch, sessionId],
   );
 
   const handleLockEnvelope = useCallback(
     (env: WCMessage) => {
       switch (env.kind) {
-        case 'lock-request':
+        case 'lock-request': {
+          // Restart recovery (ADR-0028) — if we're UNPAIRED (the persisted-lock
+          // restore missed after an app relaunch, device-confirmed `unpaired e0`)
+          // but this request is for OUR active session, the requester thinks we're
+          // the holder. Reclaim the token at its epoch FIRST so the request grants
+          // instead of being ignored by recv-lock-request's unpaired guard. This
+          // makes recovery independent of the flaky persist/restore: the Watch's
+          // retried request is what re-establishes us as holder → it then grants.
+          if (
+            lockRef.current.status === 'unpaired' &&
+            sessionId &&
+            env.payload.sessionId === sessionId
+          ) {
+            dispatch({
+              type: 'reclaim-holder',
+              sessionId,
+              epoch: env.payload.epoch,
+            });
+          }
           dispatch({ type: 'recv-lock-request', epoch: env.payload.epoch });
           break;
+        }
         case 'lock-grant':
           dispatch(
             { type: 'recv-lock-grant', epoch: env.payload.epoch },
@@ -247,7 +317,7 @@ export function useCastEditLock({
           break;
       }
     },
-    [dispatch],
+    [dispatch, sessionId],
   );
 
   // Reset the lock when the active session changes (new session = clean slate).
@@ -300,11 +370,24 @@ export function useCastEditLock({
       lockRef.current = restored;
       setLock(restored);
       setLiveMirrorEpoch(persisted.sessionId, persisted.epoch);
+      // ADR-0028 restart-resilience (重啟復原 re-plan 2026-06-28) — a passive
+      // re-seed isn't enough when the Watch is STILL in the session (it didn't
+      // restart, so it never sends a picker handshake to trigger the re-cast
+      // path in index.tsx). If we restored as HOLDER, proactively re-announce
+      // with a lock-sync: any in-session Watch (locked / requesting / 對方沒
+      // 回應 dialog) is cleanly pulled back to LOCKED at our epoch + re-applies
+      // our snapshot, so 解除鎖定 works again (device bug: iPhone restart →
+      // 手錶連不上/解鎖無回應). restored-as-LOCKED stays passive — the Watch
+      // holder's next mirror re-syncs us; sending anything here would wrongly
+      // begin an unlock.
+      if (restored.status === 'holder') {
+        void sendLock('lock-sync', restored.epoch, true);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, db]);
+  }, [sessionId, db, sendLock]);
 
   // Tear down timers on unmount.
   useEffect(
