@@ -11,6 +11,37 @@ User wants to push the latest `ios/TrainingLog Watch Watch App/*.swift` to their
 
 If only iPhone-side TS changes (no Watch Swift touched), Metro packager + Reload JS is enough — skip this skill.
 
+## Cheap compile-verify BEFORE the device build (no clean, no wrist)
+
+To prove a Watch `.swift` change actually COMPILES before paying the full
+clean-install + sync-to-wrist cost (5–10 min), build JUST the Watch target for
+the simulator SDK:
+
+```bash
+cd ios
+xcodebuild -project TrainingLog.xcodeproj \
+  -target "TrainingLog Watch Watch App" \
+  -sdk watchsimulator -configuration Debug build 2>&1 \
+  | grep -E "BUILD SUCCEEDED|BUILD FAILED|error:"
+```
+
+`** BUILD SUCCEEDED **` = it compiles. Validated 2026-06-29 (`SetLoggerView.swift`
+音樂頁 `NowPlayingView()` wire + ⚙ page-gate — caught a clean compile, warm build
+< 60s each).
+
+**Gotcha — do NOT use `-scheme TrainingLog -destination 'platform=watchOS
+Simulator,…'`.** The host `TrainingLog` scheme's run target is the iOS app, so
+xcodebuild rejects a watchOS destination with `Unable to find a destination
+matching the provided destination specifier`. There is no standalone Watch
+scheme (`-list` shows only `TrainingLog` + `Pods-TrainingLog`). You MUST go
+`-project … -target "TrainingLog Watch Watch App"` to hit the Watch app
+directly — it has only system-framework deps (SwiftUI / WatchKit / HealthKit /
+WatchConnectivity) so it builds standalone against the `.xcodeproj`, no Pods /
+no workspace needed.
+
+This proves COMPILE only — it puts nothing on the wrist. Follow with the full
+device recipe below for the actual smoke.
+
 ## The booby traps (validated 2026-05-29 morning, ~45 min lost; Trap 4 added 2026-05-29 afternoon)
 
 ### Trap 1 — `xcodebuild ... install` does NOT push to device
@@ -77,6 +108,18 @@ Confirm via `xcrun devicectl device info apps --device <iphone-udid> | grep -i t
 > If you can't find the symbol in the main binary, see Trap 4 — debug builds split it out.
 
 If the iPhone host target has no new `.ts/.tsx/.m/.swift` touched, `xcodebuild install` decides the cached host app is fine and **never invokes Watch target compile** — even when `ios/TrainingLog Watch Watch App/*.swift` was just cherry-picked.
+
+**2026-06-29 refinement — a FRESH in-place edit to one Watch `.swift` IS usually
+picked up by a plain `install` (no clean needed).** This skip bites hardest
+after a `cherry-pick` / branch-switch (mtimes confuse incremental state). But
+when you edit a Watch `.swift` in place (Edit tool → fresh mtime) and run a
+plain `xcodebuild … install`, the dependency graph normally recompiles just that
+file. Validated 2026-06-29: edited `SetLoggerView.swift`, ran a NON-clean
+`install` → log showed `SwiftCompile … SetLoggerView.swift` + `** INSTALL
+SUCCEEDED **`, no clean required. **Efficient path**: run plain `install` first,
+then `grep -aE "SwiftCompile.*<YourFile>" build.log` — if your file is there,
+skip the clean and go straight to `devicectl install`. Only fall back to `clean
+install` when your file is ABSENT from the log (true Trap-2 skip).
 
 Symptom: `grep -E "(SwiftCompile|Watch Watch App)" build.log` → **0 matches**. The embedded `.app/Watch/TrainingLog Watch Watch App.app/TrainingLog Watch Watch App` binary timestamp may update from codesign step, but `nm -arch arm64 <binary> | grep PickerRootView` shows only `_Preview` symbols → production ContentView still references old `dev_smoke` UI from previous build.
 
