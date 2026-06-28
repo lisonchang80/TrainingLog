@@ -523,6 +523,38 @@ export async function reconcileSessionTree(
         }
       }
 
+      // ----- dropset-chain integrity heal (2026-06-28 cast rapid-tap race) -----
+      // Enforce the invariant "a dropset FOLLOWER's parent must itself be a
+      // dropset row". A rapid working↔dropset cycle on the Watch during sync can
+      // land the head's working flip and the follower's row in DIFFERENT ticks
+      // (head + follower are written by independent pass-2 branches), leaving an
+      // ORPHAN follower (set_kind='dropset', parent → a row that is now
+      // 'working' / was deleted). `setLabels.ts` then renders it as a BLANK kind
+      // box (dropset + non-null parent → '') with no head before it, while the
+      // Watch — which decides head/follower by `parentSetId == nil` — keeps
+      // showing it as a "D1" head → the device-observed role SPLIT.
+      //
+      // Demote each such orphan to working + clear its parent. Data-safe: only
+      // the kind/parent columns change, the row (and its weight/reps) survive.
+      // The `NOT IN (… dropset …)` test reads the FINAL DB state, so a legit
+      // follower whose head is merely ABSENT-from-this-snapshot but still a
+      // dropset row in the DB is LEFT ALONE (its parent id IS in the subquery) —
+      // only a genuinely headless follower (head turned working / deleted) is
+      // demoted. Runs BEFORE the purge so a demoted row is counted as kept.
+      if (exSetIds.length > 0) {
+        const healPlaceholders = exSetIds.map(() => '?').join(', ');
+        await db.runAsync(
+          `UPDATE "set"
+              SET set_kind = 'working', parent_set_id = NULL
+            WHERE id IN (${healPlaceholders})
+              AND set_kind = 'dropset'
+              AND parent_set_id IS NOT NULL
+              AND parent_set_id NOT IN
+                  (SELECT id FROM "set" WHERE set_kind = 'dropset')`,
+          ...exSetIds,
+        );
+      }
+
       // ----- live per-exercise SET purge -----
       // Keep the live mirror's per-exercise set list in lockstep with the
       // Watch so dropset structure edits don't leave orphan rows mid-session
