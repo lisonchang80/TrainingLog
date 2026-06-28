@@ -317,3 +317,61 @@ the Watch's added-set model) — a separate iPhone-side change touching
 set-ordering-surfaces, NOT yet done. The sibling report「超級組『新增1組』→ 手錶
 編號 1,3,3,4」is re-tested in the same smoke (id-first may or may not cover it; if a
 mid-list non-follower insert shifts ordinals it's the same iPhone-shift class).
+
+---
+
+## ⭐ 2026-06-28 — cast 雙向同時編輯本質脆弱 → 轉向「編輯鎖」(impl pending)
+
+A cast / 投影 session runs FORWARD (Watch→iPhone) + REVERSE (iPhone→Watch)
+**simultaneously**, so any Watch-initiated STRUCTURAL edit (set_kind / add / reorder)
+while the iPhone is also live races against the echo. Device smoke (cast dropset)
+surfaced a CASCADE of races, fixed in sequence, then the user **abandoned
+simultaneous bidirectional editing entirely**. Read this before touching cast sync.
+
+### Root causes + fixes shipped this round (integration/dropset-cast-smoke-2026-06-28)
+- **Added-set apply was INSERT-only** (`SessionInteractionState.applyRemoteSnapshot`
+  matched-exercise branch): an iPhone-added set (footer / +1) made into a dropset
+  then reverted left the head frozen at `dropset` → lone「單行 D#」on Watch only
+  (base sets fine — matched branch syncs them). Fix `c6476d5`: update an existing
+  addedSet's fields in place (mirror matched per-field sync).
+- **Watch add ids `ADD-<counter>` reset on relaunch** → cross-session collision →
+  iPhone `localizeSetId` namespaces the INSERT (`replaceLiveMirror.ts:373`) → reverse
+  echo carries a different id → Watch added-set dedup (by id) misses → DUPLICATE row
+  (Watch 2, iPhone 1). Fix `8eb26d2`: mint `ADD-<UUID>` (collision-proof, iPhone
+  adopts verbatim, no divert).
+- **set_kind had NO provenance guard** (rank has `remoteRankedSetIds`, adds have
+  `remoteAddedSetIds`, kind had nothing): a Watch-local working→warmup got stomped
+  back to # by the next equal-base reverse push. Fix `8eb26d2`: add `remoteKindSetIds`
+  — only clear an iPhone-provenance kind, never a Watch-local one. **The provenance
+  trio is now rank + added + kind.**
+- **Rapid working↔dropset cycling during sync** → head's working-flip + follower's
+  row land in different ticks → ORPHAN dropset follower (kind=dropset, parent now
+  working) → `setLabels.ts:41-46` renders BLANK box (iPhone) while Watch shows D1
+  head = role SPLIT. Two-sided convergent fix: (ii) `replaceLiveMirror.ts` post-pass-2
+  heal — demote a dropset row whose parent is NOT a dropset (`NOT IN (SELECT id …
+  dropset)`, reads final DB state so an absent-but-in-DB head is left alone)
+  `4c6c5de` +3 jest; (iii-a) `SessionInteractionState.swift` matched branch — when
+  iPhone says working AND a Watch-local follower points at this head = invalid local
+  chain the iPhone healed → clear the head override (converge) `b53cca2`. Follower
+  converges via the added-set update branch.
+
+### ⭐ The verdict: STOP fixing simultaneous-bidirectional, use an EDIT TOKEN
+Even after all the above, **rapid taps still jump/flicker** — the overlay+echo model
+is race-prone by construction. User decision 2026-06-28: **abandon simultaneous
+bidirectional; one device edits at a time via a mutual-exclusion EDIT TOKEN.**
+Grilled & 拍板'd (impl pending, Watch lock UI design delegated — no reference):
+- ONE **edit token**; holder edits, the other = **read-only live mirror + lock
+  overlay + 解鎖 button**. Sync stays **one-way** (holder→locked, live); unlock flips it.
+- Initial holder = initiator (Watch-led→Watch; cast→iPhone, other locked).
+- Transfer = locked side taps 解鎖 (never auto): 3-step handshake (request → holder
+  flush final + release + ACK → taker apply + hold, holder locks). Timeout ~4s →
+  user picks「強制取得控制權／保留鎖定」. Monotonic **token epoch** resolves
+  offline-reconnect split-brain (stale holder sees newer epoch → self-locks).
+- Lock scope = ALL interactions (even ✓ needs the token). Only when both devices
+  have the session open (cast); single device = implicit holder, no overlay.
+- The dropset/apply-correctness fixes above STAY (the one-way mirror still applies the
+  holder's snapshot on the locked side — that's exactly the apply path). The
+  ping-pong / rapid-tap fixes become belt-and-suspenders (no simultaneous edit can
+  trigger them) but are harmless.
+- Design captured in memory [[project-traininglog-name-notes-watch-batch]]; ADR to be
+  written (new ADR superseding ADR-0019's simultaneous-bidirectional section).
