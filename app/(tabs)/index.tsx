@@ -164,6 +164,14 @@ import { pushStartToWatch } from '@/src/services/watchSessionStart';
 import { pushCastToWatch } from '@/src/services/watchSessionCast';
 import { useCastEditLock } from '@/app/hooks/useCastEditLock';
 import { CastLockOverlay } from '@/components/session/cast-lock-overlay';
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { todayHelp } from '@/components/help/content/today';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -218,7 +226,7 @@ import {
  * recompute SessionState via `sessionManager.fromRow`. UI only ever holds
  * derived state — no risk of drifting from persisted reality.
  */
-export default function TodayScreen() {
+function TodayScreen() {
   // `'use no memo'` + `useLocale()`: opt this screen out of React Compiler
   // memoization and subscribe to language changes so its many INLINE `t()` /
   // `tExercise()` calls re-evaluate fresh on a `setLocale()`. Tab screens stay
@@ -240,6 +248,14 @@ export default function TodayScreen() {
   // 切換即時 re-render。gate 首頁三塊計劃面 + 開始模板直接帶 (null,null) 解析。
   const { isMinimal } = useAppMode();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  // Page help overlay (pilot — page-help-overlay skill). Resolves todayHelp to
+  // the active locale + auto-opens the InfoModal once on first visit. The 3
+  // coach targets tag the idle 三區; in-session gestures are a deferred
+  // follow-up. CoachMarkProvider wraps this screen via the default export below.
+  const help = usePageHelp('today', todayHelp, { autoShowOnce: true });
+  const planTarget = useCoachMarkTarget('today.planPanel');
+  const templateTarget = useCoachMarkTarget('today.templateList');
+  const blankTarget = useCoachMarkTarget('today.blankStart');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SessionSetWithExercise[]>([]);
@@ -2749,7 +2765,10 @@ export default function TodayScreen() {
         <ScrollView
           contentContainerStyle={styles.idleScroll}
           keyboardShouldPersistTaps="handled">
-          <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+          <View style={styles.helpHeaderRow}>
+            <Text style={styles.heading}>{t('tabs', 'training')}</Text>
+            <HelpButton onPress={help.open} />
+          </View>
           {/* Slice 15 C5 — backup failure escalation banner (Q14-B in-app
               only). Self-contained: renders null until the 3/7-day streak
               threshold, idle home screen only (in-session UI stays clean). */}
@@ -2767,7 +2786,7 @@ export default function TodayScreen() {
               ADR-0026 極簡模式：整個「計劃訓練」section（今日計劃 / 休息日 /
               無計劃 CTA）= 純計劃概念 → 整段藏掉。 */}
           {!isMinimal && (
-            <View style={styles.section}>
+            <View ref={planTarget.ref} style={styles.section}>
               <Text style={styles.sectionHeading}>
                 {t('page', 'plannedTraining')}
               </Text>
@@ -2837,17 +2856,19 @@ export default function TodayScreen() {
             TemplateListSection so the section component stays a pure list
             (its `onPickTemplate` contract unchanged for reuse).
           */}
-          <TemplateListSection
-            heading={t('page', 'templateTraining')}
-            onPickTemplate={onPickTemplate}
-          />
+          <View ref={templateTarget.ref}>
+            <TemplateListSection
+              heading={t('page', 'templateTraining')}
+              onPickTemplate={onPickTemplate}
+            />
+          </View>
 
           {/* (c) 空白訓練 — ADR-0024 § 2.b (renumbered, moved to bottom)
               2026-05-29 polish: lowest prominence per user — use
               styles.freestyleBtn (ghost / secondary) instead of the
               old styles.startBtn (filled primary CTA). 計劃 takes
               the filled-primary spot now. */}
-          <View style={styles.section}>
+          <View ref={blankTarget.ref} style={styles.section}>
             <Text style={styles.sectionHeading}>
               {t('page', 'freestyleTraining')}
             </Text>
@@ -2877,6 +2898,7 @@ export default function TodayScreen() {
           onStart={onSheetStart}
           onCancel={closeSheet}
         />
+        <PageHelpHost help={help} />
       </SafeAreaView>
     );
   }
@@ -4105,6 +4127,11 @@ function makeStyles(tokens: ThemeTokens) {
   },
   scrollBody: { padding: 24, gap: 12, paddingBottom: 48 },
   heading: { fontSize: 28, fontWeight: '700', color: tokens.text.primary },
+  helpHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   label: {
     fontSize: 14,
     fontWeight: '500',
@@ -4488,4 +4515,18 @@ function makeStyles(tokens: ThemeTokens) {
     color: tokens.action.warning,
   },
   });
+}
+
+/**
+ * Default export wraps the screen in CoachMarkProvider so the in-component
+ * `useCoachMarkTarget` hooks (idle 三區 help tour) can register their nodes —
+ * a context consumer must live BELOW the provider. page-help-overlay pilot
+ * (2026-06-29).
+ */
+export default function TodayScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <TodayScreen />
+    </CoachMarkProvider>
+  );
 }
