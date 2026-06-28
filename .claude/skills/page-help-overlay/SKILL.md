@@ -51,6 +51,16 @@ to every page from now on:
    arrow (the rounded ring + bubble point at the target). Content/wirer agents
    CONSUME this; they never touch `components/help/*`. If a page needs a new look,
    STOP and report — the integrator changes infra in one place.
+6. **Coach can't show the flow → fall back to a screenshot+text flow diagram.**
+   When a procedure genuinely can't be conveyed by the spotlight tour — a gesture
+   the ring can't highlight (mid-drag, swipe, long-press), or a sequence that
+   spans screens/states the overlay can't hold — use an `info` (or `mixed`)
+   diagram instead of forcing it into coach steps: an ordered set of screenshots,
+   one per step, in `images[]`. **Each image's caption ≤ 2 lines** (same rule as
+   captions; write short, don't truncate). Number the steps in the caption text
+   (`1.` / `2.` …) since it's a real procedure. This is the one case that still
+   needs screenshots on an otherwise coach-led app — capture per the pipeline
+   below.
 
 Page recommendations (2026-06-29 survey, by line count / complexity):
 

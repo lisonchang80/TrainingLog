@@ -28,6 +28,12 @@ the `LocalizedPageHelp` shape; copy `components/help/content/_example.ts`.
      heatmap's colours, a number's formula) → `'info'`.
    - Avoid `'mixed'` (text-first then tour) — the user dropped text-only
      explanation for operations pages. Only use it if a page genuinely needs both.
+   - **Coach can't show the flow → screenshot+text flow diagram.** If a procedure
+     can't be conveyed by the spotlight (a gesture the ring can't highlight —
+     mid-drag/swipe/long-press — or a cross-screen sequence), use `'info'`/`'mixed'`
+     with an ORDERED set of screenshots in `images[]`, one per step, each caption
+     numbered (`1.`/`2.`) and **≤ 2 lines**. This is the only case that still needs
+     screenshots on a coach-led page; leave `// TODO(screenshot)` per step.
 3. Write `components/help/content/<pageId>.ts` exporting `<camelPageId>Help:
    LocalizedPageHelp`. Requirements:
    - `zh` and `en` present, SAME `style`.

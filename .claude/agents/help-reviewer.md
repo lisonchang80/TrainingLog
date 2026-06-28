@@ -42,7 +42,8 @@ findings, never edit. Read the `page-help-overlay` skill for the contract.
    intentional) — any edit to it from a page rollout is a **blocker**.
 9. **Design constraints (2026-06-29)** — (a) operations pages use `'coach'`, not
    text-first `'mixed'`/`'info'` (interpretation-only pages may use `'info'`);
-   (b) every caption ≤ 2 lines; (c) content explains ONLY the current mode — a page
+   (b) every caption ≤ 2 lines — coach bodies AND image captions in a
+   screenshot+text flow diagram; (c) content explains ONLY the current mode — a page
    with modes has per-mode files and no cross-mode prose (a step describing a mode
    the user isn't in is a **warning**); (d) `coachNumbered` is set only for ordered
    procedures, not parallel choices.
