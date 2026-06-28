@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -278,6 +278,10 @@ export default function LibraryScreen() {
       muscleId: selectedMuscleId,
       equipment: selectedEquipment,
       search,
+      // Match the LOCALIZED display name too — many rows store an English
+      // canonical name (v028 import) but render as 中文 via tExercise, so a
+      // Chinese search must compare against tExercise(name), not just name.
+      localize: tExercise,
     }),
     [isSupersetTab, selectedMgId, selectedMuscleId, selectedEquipment, search]
   );
@@ -492,6 +496,7 @@ function Sidebar(props: SidebarProps) {
               </Text>
             </Pressable>
             {isActive &&
+              subMuscles.length > 1 &&
               subMuscles.map((m) => (
                 <Pressable
                   key={m.id}
@@ -592,7 +597,7 @@ function EquipmentFilterDropdown({
         <Text
           style={[
             styles.equipDropdownChevron,
-            { color: value !== null ? tokens.action.success : tokens.text.secondary },
+            { color: value !== null ? tokens.action.primary : tokens.text.secondary },
           ]}>
           ▾
         </Text>
@@ -644,48 +649,76 @@ function ExerciseGrid({
       </View>
     );
   }
+  // Group by equipment in canonical EQUIPMENT_VALUES order, with a small
+  // section header per group (user request — cards bucket under「槓鈴 / 啞鈴 /
+  // …」). Defensive trailing bucket catches any row whose equipment isn't a
+  // known enum value so nothing silently disappears (EQUIPMENT_VALUES already
+  // has '其他', so this normally stays empty).
+  const groups: { equipment: Equipment; items: Exercise[] }[] = [];
+  for (const eq of EQUIPMENT_VALUES) {
+    const items = exercises.filter((e) => e.equipment === eq);
+    if (items.length > 0) groups.push({ equipment: eq, items });
+  }
+  const orphans = exercises.filter(
+    (e) => !EQUIPMENT_VALUES.includes(e.equipment)
+  );
+  if (orphans.length > 0) {
+    groups.push({ equipment: '其他' as Equipment, items: orphans });
+  }
+
   // Manual row-pair rendering with explicit pixel sizing — sidesteps
   // FlatList numColumns + aspectRatio + flex measurement quirks in
   // RN 0.74+ on iPhone 17 simulator.
-  const rows: Exercise[][] = [];
-  for (let i = 0; i < exercises.length; i += 2) {
-    rows.push(exercises.slice(i, i + 2));
-  }
+  const renderPair = (pair: Exercise[], key: string) => (
+    <View key={key} style={styles.gridRow}>
+      <ExerciseCard
+        exercise={pair[0]}
+        sessionCount={sessionCounts.get(pair[0].id) ?? 0}
+        width={cardWidth}
+        height={cardHeight}
+        onPress={() => onTap(pair[0])}
+        selected={selection ? isSelected(selection, pair[0].id) : false}
+        rank={selection ? selectionRank(selection, pair[0].id) : -1}
+        disabled={disabledIds.has(pair[0].id)}
+        onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
+      />
+      {pair[1] ? (
+        <ExerciseCard
+          exercise={pair[1]}
+          sessionCount={sessionCounts.get(pair[1].id) ?? 0}
+          width={cardWidth}
+          height={cardHeight}
+          onPress={() => onTap(pair[1])}
+          selected={selection ? isSelected(selection, pair[1].id) : false}
+          rank={selection ? selectionRank(selection, pair[1].id) : -1}
+          disabled={disabledIds.has(pair[1].id)}
+          onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
+        />
+      ) : (
+        <View style={{ width: cardWidth, height: cardHeight }} />
+      )}
+    </View>
+  );
+
   return (
     <ScrollView
       style={styles.gridList}
       contentContainerStyle={styles.gridContent}
       showsVerticalScrollIndicator={false}>
-      {rows.map((pair, i) => (
-        <View key={i} style={styles.gridRow}>
-          <ExerciseCard
-            exercise={pair[0]}
-            sessionCount={sessionCounts.get(pair[0].id) ?? 0}
-            width={cardWidth}
-            height={cardHeight}
-            onPress={() => onTap(pair[0])}
-            selected={selection ? isSelected(selection, pair[0].id) : false}
-            rank={selection ? selectionRank(selection, pair[0].id) : -1}
-            disabled={disabledIds.has(pair[0].id)}
-            onInfoPress={onInfoPress ? () => onInfoPress(pair[0]) : null}
-          />
-          {pair[1] ? (
-            <ExerciseCard
-              exercise={pair[1]}
-              sessionCount={sessionCounts.get(pair[1].id) ?? 0}
-              width={cardWidth}
-              height={cardHeight}
-              onPress={() => onTap(pair[1])}
-              selected={selection ? isSelected(selection, pair[1].id) : false}
-              rank={selection ? selectionRank(selection, pair[1].id) : -1}
-              disabled={disabledIds.has(pair[1].id)}
-              onInfoPress={onInfoPress ? () => onInfoPress(pair[1]!) : null}
-            />
-          ) : (
-            <View style={{ width: cardWidth, height: cardHeight }} />
-          )}
-        </View>
-      ))}
+      {groups.map((g) => {
+        const rows: Exercise[][] = [];
+        for (let i = 0; i < g.items.length; i += 2) {
+          rows.push(g.items.slice(i, i + 2));
+        }
+        return (
+          <Fragment key={g.equipment}>
+            <Text style={styles.equipSectionHeader}>
+              {tEquipment(g.equipment)}
+            </Text>
+            {rows.map((pair, i) => renderPair(pair, `${g.equipment}-${i}`))}
+          </Fragment>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -1045,9 +1078,13 @@ const CONTENT_H_PADDING = 12;
 /**
  * ADR-0025 — library.tsx was originally built dark-only (#fff text + #000 bg
  * + green #34C759 accent everywhere). Every color now flows from tokens.
- * The green accent maps to `action.success` (semantic "selected / add" in
- * the library context — picker-mode selection badge, sidebar active rail,
- * add-exercise FAB).
+ * 2026-06-28: the library's "selected / active" accent (sidebar active rail,
+ * sub-muscle active, equipment-filter active, picker selection badge/border,
+ * selected-card tint) maps to `action.primary` (iOS blue #007AFF) so it
+ * matches the app's blue brand + the rest of the app's selected states. It is
+ * deliberately NOT `action.success` (green) — green stays reserved for genuine
+ * success semantics (completed set ✓, PR badge) elsewhere in the app, which
+ * this change does NOT touch (library-only per user scope).
  *
  * The two `#fff` circle backgrounds (thumb + miniThumb) map to bg.surface
  * — in dark mode that becomes a slightly elevated dark circle that hosts
@@ -1087,7 +1124,7 @@ function makeStyles(tokens: ThemeTokens) {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: tokens.action.success,
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1129,7 +1166,7 @@ function makeStyles(tokens: ThemeTokens) {
     top: 8,
     bottom: 8,
     width: 3,
-    backgroundColor: tokens.action.success,
+    backgroundColor: tokens.action.primary,
     borderRadius: 2,
   },
   sidebarText: {
@@ -1144,7 +1181,7 @@ function makeStyles(tokens: ThemeTokens) {
     justifyContent: 'center',
   },
   sidebarSubText: { color: tokens.text.tertiary, fontSize: 15 },
-  sidebarSubTextActive: { color: tokens.action.success, fontWeight: '600' },
+  sidebarSubTextActive: { color: tokens.action.primary, fontWeight: '600' },
 
   content: { flex: 1, flexDirection: 'column', minWidth: 0 },
   equipRowOuter: {
@@ -1169,14 +1206,14 @@ function makeStyles(tokens: ThemeTokens) {
   // Semitransparent success tint (success token at 18% alpha) so an active
   // filter reads as "selected" against the page base in both themes — mirrors
   // the old active-chip treatment.
-  equipDropdownBtnActive: { backgroundColor: 'rgba(52,199,89,0.18)' },
+  equipDropdownBtnActive: { backgroundColor: 'rgba(0,122,255,0.18)' },
   equipDropdownText: {
     color: tokens.text.secondary,
     fontSize: 14,
     fontWeight: '500',
     maxWidth: 180,
   },
-  equipDropdownTextActive: { color: tokens.action.success, fontWeight: '600' },
+  equipDropdownTextActive: { color: tokens.action.primary, fontWeight: '600' },
   equipDropdownChevron: { fontSize: 11, lineHeight: 14 },
 
   gridList: { flex: 1, alignSelf: 'stretch', width: '100%' },
@@ -1190,6 +1227,16 @@ function makeStyles(tokens: ThemeTokens) {
     flexDirection: 'row',
     alignSelf: 'stretch',
     gap: CARD_GAP,
+  },
+  // Equipment bucket header inside the card grid (槓鈴 / 啞鈴 / …). marginTop
+  // adds breathing room above each group on top of the gridContent gap.
+  equipSectionHeader: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: tokens.text.secondary,
+    marginTop: 8,
+    marginLeft: 2,
+    letterSpacing: 0.3,
   },
   card: {
     flexShrink: 0,
@@ -1207,8 +1254,8 @@ function makeStyles(tokens: ThemeTokens) {
   // Same rationale as equipChipActive — semitransparent success accent for
   // a clear "selected" affordance independent of theme.
   cardSelected: {
-    borderColor: tokens.action.success,
-    backgroundColor: 'rgba(52,199,89,0.15)',
+    borderColor: tokens.action.primary,
+    backgroundColor: 'rgba(0,122,255,0.15)',
   },
   /** Slice 10c #20 — exercise/RS already in the in-progress session. Dim
    *  the whole card so the user sees it but can't tap to add a duplicate.
@@ -1225,7 +1272,7 @@ function makeStyles(tokens: ThemeTokens) {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: tokens.action.success,
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1250,7 +1297,7 @@ function makeStyles(tokens: ThemeTokens) {
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: tokens.action.success,
+    backgroundColor: tokens.action.primary,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -1384,7 +1431,7 @@ function makeStyles(tokens: ThemeTokens) {
   pickerDoneBtn: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: tokens.action.success,
+    backgroundColor: tokens.action.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
