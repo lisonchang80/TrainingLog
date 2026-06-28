@@ -38,6 +38,15 @@ struct SetLoggerView: View {
     /// inside a NavigationStack; user observed "回到強度" sheet
     /// instead of root).
     ///
+    /// ADR-0028 — when this session was CAST from the iPhone (投影 Watch), the
+    /// iPhone-seeded edit-token epoch. nil ⇒ a Watch-LED (or preview) session →
+    /// no lock (UNPAIRED, edits never gated, INV-4 cast-only). Non-nil ⇒ mount
+    /// LOCKED at this epoch (the iPhone holds the token; 發起方初握) and show the
+    /// lock overlay until the user 解除鎖定 → acquires the token. Declared BEFORE
+    /// `onSessionEnd` so the synthesized memberwise init keeps callers that omit
+    /// it (Watch-led path) valid (init args must follow declaration order).
+    var castEpoch: Int? = nil
+
     /// Caller (PickerRootView) wires this to `path.removeAll()`.
     /// Optional with `nil` default for #Preview back-compat (preview
     /// instances mount outside a NavigationStack anyway).
@@ -61,6 +70,14 @@ struct SetLoggerView: View {
     /// (Q6=a). Configured + driven in `.task` below; force-flushed on the
     /// [完成] keep-path (NOT on discard/abort). See LiveMirrorProducer.swift.
     @StateObject private var liveMirror = LiveMirrorProducer()
+
+    /// ADR-0028 — cast edit-token lock. Owns the per-session lock state machine
+    /// + its timers; drives the lock overlay (read-only 鎖定視窗) and, via the
+    /// live-mirror producer, the forward-pause / holder-epoch. UNPAIRED (no
+    /// `castEpoch`) ⇒ inert (a Watch-led session edits freely). Configured in the
+    /// live-mirror `.task` below, BEFORE the producer's initial push so a cast
+    /// mount pauses the producer first (no echo of the cast back to the iPhone).
+    @StateObject private var editLock = CastEditLock()
 
     /// point2 live-sync (2026-06-12) — hr/kcal tick producer. Observes
     /// `sessionController.$streamedStats` (D17 delegate stream) via its
@@ -288,8 +305,26 @@ struct SetLoggerView: View {
                 // Keypad slides up from bottom; crown shows a centered modal
                 // with dim backdrop (per spec line 1422-1446).
                 CellEditOverlay(state: interactionState)
+
+                // ADR-0028 — cast edit-token lock overlay (鎖定視窗). The TOPMOST
+                // element so its touch-capturing scrim is the single choke point
+                // that blocks EVERY edit interaction at once (全互動鎖) — taps,
+                // swipes, the ⋯ menu, AND the finish page's [完成] (結束需 holder).
+                // The live read-only mirror dims through (Q3); only this card's
+                // own buttons are interactive. Shown while LOCKED / REQUESTING /
+                // OFFERING (isLockedOut); never for a Watch-led (UNPAIRED) session.
+                if editLock.isLockedOut {
+                    CastLockOverlayWatch(
+                        lock: editLock.state,
+                        onUnlock: { editLock.requestUnlock() },
+                        onForceTake: { editLock.forceTake() },
+                        onKeepLock: { editLock.keepLock() }
+                    )
+                }
             }
             .animation(.easeInOut(duration: 0.18), value: interactionState.activeCell)
+            .animation(.easeInOut(duration: 0.18), value: editLock.isLockedOut)
+            .animation(.easeInOut(duration: 0.18), value: editLock.state.requestTimedOut)
             // TODO: D10 — move this toolbar entry into top bar Row 2 最右
             // (NEW-Q32). Once D10 in-session shell lands, the ⚙ icon
             // belongs next to ♥/🔥 on Row 2, not as a nav-bar trailing
@@ -393,6 +428,21 @@ struct SetLoggerView: View {
                 // the coordinator keeps a weak ref, so it auto-nils when this
                 // view unmounts (producer @StateObject deallocs).
                 coordinator.reverseSyncApply = liveMirror.reverseSyncApply
+                // ADR-0028 — bind the edit-lock to the producer (forward-pause +
+                // holder-epoch + flush snapshot) + coordinator (sends), register
+                // it for inbound lock-* routing, and — for a CAST session — adopt
+                // the iPhone-seeded epoch + go LOCKED. This MUST precede the
+                // producer's initial force-push (`run()`): castReceived sets the
+                // producer's forwardPaused true, so the cast isn't echoed back to
+                // the iPhone holder (INV-3).
+                editLock.configure(coordinator: coordinator, producer: liveMirror)
+                coordinator.editLock = editLock
+                if let castEpoch {
+                    editLock.castReceived(
+                        sessionId: snapshotForRender.sessionId,
+                        epoch: castEpoch
+                    )
+                }
                 await liveMirror.run()
             }
             // point2 live-sync (2026-06-12) — start the hr/kcal tick
@@ -875,6 +925,91 @@ private struct LongPressNoteOverlay: View {
                 .fill(Color.orange)
                 .frame(height: 1)
         }
+    }
+}
+
+// MARK: - Cast edit-token lock overlay (ADR-0028 鎖定視窗)
+
+/// The Watch "鎖定視窗" for the cast edit-token lock. SWIFT MIRROR of the iPhone
+/// `components/session/cast-lock-overlay.tsx`. Rendered over the in-session
+/// content while this side is LOCKED / REQUESTING / OFFERING. A touch-capturing
+/// scrim is the single choke point that blocks every edit interaction at once
+/// (taps, swipes, ⋯, 結束) — the live read-only mirror dims through; the only
+/// interactive control is the card's button. Three states:
+///   - locked      → 🔒 iPhone 編輯中 + [解除鎖定]
+///   - requesting  → ⏳ 取得編輯權中… + spinner (offering shares this view)
+///   - timed out   → 對方沒有回應 + [強制取得控制權] / [保留鎖定]
+private struct CastLockOverlayWatch: View {
+    let lock: EditLockState
+    let onUnlock: () -> Void
+    let onForceTake: () -> Void
+    let onKeepLock: () -> Void
+
+    private var requesting: Bool {
+        lock.status == .requesting || lock.status == .offering
+    }
+
+    var body: some View {
+        ZStack {
+            // Touch-capturing scrim. A hit-testable Color on TOP of the TabView
+            // consumes the whole touch sequence → blocks taps AND page swipes
+            // underneath; `onTapGesture {}` swallows the tap so nothing falls
+            // through. ~0.6 opacity so the read-only mirror still shows through.
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {}
+            card
+                .padding(.horizontal, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var card: some View {
+        VStack(spacing: 10) {
+            if lock.requestTimedOut {
+                Text("對方沒有回應")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                Text("強制取得可能遺失對方最新編輯")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button(role: .destructive, action: onForceTake) {
+                    Text("強制取得控制權")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Button(action: onKeepLock) {
+                    Text("保留鎖定")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            } else if requesting {
+                ProgressView()
+                Text("取得編輯權中…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Image(systemName: "lock.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                Text("iPhone 編輯中")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                Button(action: onUnlock) {
+                    Text("解除鎖定")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

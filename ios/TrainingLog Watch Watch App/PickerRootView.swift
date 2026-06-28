@@ -51,7 +51,9 @@ enum PickerDestination: Hashable {
     /// through `PickerSetLoggerPlaceholderView` — so it never fires
     /// `startFromWatch` (the session already exists on iPhone; the Watch is
     /// adopting it, not creating one). Live-mirror keeps it synced after mount.
-    case castSession(snapshot: SessionSnapshot)
+    /// `epoch` (ADR-0028) is the iPhone's seeded edit-token generation → the
+    /// Watch mounts LOCKED at it (the iPhone holds the token, 發起方初握).
+    case castSession(snapshot: SessionSnapshot, epoch: Int)
 }
 
 struct PickerRootView: View {
@@ -68,8 +70,9 @@ struct PickerRootView: View {
     @State private var openSessionId: String?
 
     /// Set when a `cast-session` arrives while a DIFFERENT session is open →
-    /// presents the conflict alert. nil dismisses it.
-    @State private var castConflict: SessionSnapshot?
+    /// presents the conflict alert. nil dismisses it. Holds the full request
+    /// (snapshot + ADR-0028 epoch) so a「切換」carries the epoch into the cast.
+    @State private var castConflict: CastRequest?
 
     /// Token of the last cast we routed — dedups the two entry points
     /// (`.onChange` for casts arriving while shown + `.task` for a cast already
@@ -171,8 +174,8 @@ struct PickerRootView: View {
                     set: { if !$0 { castConflict = nil } }
                 ),
                 presenting: castConflict
-            ) { snap in
-                Button("切換", role: .destructive) { openCast(snap) }
+            ) { req in
+                Button("切換", role: .destructive) { openCast(req) }
                 Button("保留目前", role: .cancel) { castConflict = nil }
             } message: { _ in
                 Text("iPhone 要把另一個訓練投影到手錶，切換會離開目前手錶上的訓練。")
@@ -188,7 +191,7 @@ struct PickerRootView: View {
     private func routeCastIfNew(_ req: CastRequest?) {
         guard let req, req.token != lastCastToken else { return }
         lastCastToken = req.token
-        routeCast(req.snapshot)
+        routeCast(req)
     }
 
     /// Decide what to do with an inbound cast snapshot:
@@ -196,20 +199,21 @@ struct PickerRootView: View {
     ///     it synced; this also absorbs the dual-fire's second leg)
     ///   - a DIFFERENT session is open → ask before replacing (conflict alert)
     ///   - nothing open (idle / mid-drilldown) → open straight away
-    private func routeCast(_ snap: SessionSnapshot) {
+    private func routeCast(_ req: CastRequest) {
         if let open = openSessionId {
-            if open == snap.sessionId { return }
-            castConflict = snap
+            if open == req.snapshot.sessionId { return }
+            castConflict = req
         } else {
-            openCast(snap)
+            openCast(req)
         }
     }
 
-    /// Replace the nav stack with the cast session's set logger.
-    private func openCast(_ snap: SessionSnapshot) {
+    /// Replace the nav stack with the cast session's set logger (carrying the
+    /// ADR-0028 edit-token epoch so the Watch mounts LOCKED).
+    private func openCast(_ req: CastRequest) {
         castConflict = nil
-        openSessionId = snap.sessionId
-        path = [.castSession(snapshot: snap)]
+        openSessionId = req.snapshot.sessionId
+        path = [.castSession(snapshot: req.snapshot, epoch: req.epoch)]
     }
 
     // MARK: - Toolbar 🔄
@@ -363,14 +367,17 @@ struct PickerRootView: View {
                 }
             )
 
-        case .castSession(let snapshot):
+        case .castSession(let snapshot, let epoch):
             // 投影 Watch (2026-06-27) — adopt an iPhone-cast session directly.
             // No PickerSetLoggerPlaceholderView wrapper → no startFromWatch /
             // outbound TUI; the session already lives on iPhone. SetLoggerView's
             // own `.task` starts the HK workout + registers reverseSyncApply so
             // the iPhone live-mirror continues to stream onto this view.
+            // ADR-0028 — `castEpoch` makes SetLoggerView mount LOCKED at the
+            // iPhone-seeded epoch (the iPhone holds the token, 發起方初握).
             SetLoggerView(
                 snapshot: snapshot,
+                castEpoch: epoch,
                 onSessionEnd: {
                     path.removeAll()
                     openSessionId = nil

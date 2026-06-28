@@ -280,6 +280,21 @@ final class LiveMirrorProducer: ObservableObject {
     /// wall clock on each emit but forced strictly increasing (see `nextRev`).
     private var revCounter: Int64 = 0
 
+    /// ADR-0028 edit-token lock — INV-3 (only the HOLDER emits live-mirror).
+    /// `CastEditLock` drives this true whenever the Watch is LOCKED / REQUESTING
+    /// / OFFERING (locked-out) and false on HOLDER / UNPAIRED. `emit` short-
+    /// circuits while paused — including the `run()` initial force-push, so a
+    /// CAST session (Watch mounts LOCKED) never echoes the just-received state
+    /// straight back to the iPhone holder. UNPAIRED (Watch-led solo session)
+    /// keeps the default false → unchanged forward behaviour.
+    private var forwardPaused = false
+
+    /// ADR-0028 — the current edit-token epoch this side is editing under (set by
+    /// `CastEditLock` on every transition). Stamped onto each outbound mirror so
+    /// the iPhone's lock machine can arbitrate it (apply at ==, demote at >, drop
+    /// at <). 0 ⇒ no cast pairing → omitted on the wire (pre-lock byte-compat).
+    private var holderEpoch: Int = 0
+
     /// Coalesce window — at most one push per 0.5s. Was 15s (NEW-Q50 Q6=a);
     /// lowered + paired with immediate emit-on-mutation (`markDirty`) so the
     /// iPhone live mirror reflects a Watch edit in well under 1s (user request
@@ -436,9 +451,22 @@ final class LiveMirrorProducer: ObservableObject {
     /// (see `applyingRemote` doc — `markDirty` short-circuits at its top).
     func endApplyingRemote() { applyingRemote = false }
 
+    // MARK: - ADR-0028 edit-token lock hooks
+
+    /// INV-3 — pause/resume forward emission. `true` while the Watch is locked-
+    /// out (locked / requesting / offering); `false` on holder / unpaired.
+    func setForwardPaused(_ paused: Bool) { forwardPaused = paused }
+
+    /// Stamp the current holder epoch onto subsequent outbound mirrors.
+    func setHolderEpoch(_ epoch: Int) { holderEpoch = epoch }
+
     private func emit(force: Bool) {
         // Phase C-core gate — never push out the overlay we're mid-applying.
         if applyingRemote { return }
+        // ADR-0028 INV-3 — a locked-out side (locked / requesting / offering)
+        // never emits; the holder does. Also suppresses the cast-mount initial
+        // force-push so the just-received cast isn't echoed back to the holder.
+        if forwardPaused { return }
         guard let base, let interaction, let coordinator else { return }
         if !force && !dirty { return }
         let projected = LiveMirror.project(
@@ -466,7 +494,7 @@ final class LiveMirrorProducer: ObservableObject {
             rev: nextRev(),
             originator: "watch"
         )
-        coordinator.updateLiveMirror(live)
+        coordinator.updateLiveMirror(live, epoch: holderEpoch)
         dirty = false
         lastEmit = Date()
     }

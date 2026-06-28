@@ -92,6 +92,14 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// apply onto).
     weak var reverseSyncApply: ReverseSyncApply?
 
+    /// ADR-0028 — cast edit-token lock, injected by `SetLoggerView`'s `.task`
+    /// (mirror of `reverseSyncApply`). `nil` until a SetLoggerView mounts. The WC
+    /// delegate routes inbound lock-* envelopes here (`handleLockEnvelope`) and
+    /// feeds the holder epoch on each inbound live-mirror (`noteMirrorEpoch`,
+    /// which also gates the reverse-mirror apply). Cast-only — a Watch-led session
+    /// keeps the lock UNPAIRED so editing is never gated (INV-4).
+    weak var editLock: CastEditLock?
+
     /// Per-session high-water mark for the iPhone producer's `rev` (Phase
     /// C-core). SEPARATE from any forward counter — the Watch tracks the
     /// iPhone's rev, not its own. Drops stale / duplicate reverse deliveries
@@ -296,15 +304,21 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// iPhone `parseLiveMirrorSnapshot` normalises absent → null. Encoding
     /// uses the `SessionSnapshot` CodingKeys (snake_case rest_sec/set_kind/
     /// is_logged), matching the iPhone wire contract exactly.
-    func updateLiveMirror(_ snapshot: SessionSnapshot) {
+    func updateLiveMirror(_ snapshot: SessionSnapshot, epoch: Int = 0) {
         guard let session, session.activationState == .activated else {
             lastOutbound = "live-mirror skip: not activated"
             return
         }
-        guard let dict = snapshotToWireDict(snapshot) else {
+        guard var dict = snapshotToWireDict(snapshot) else {
             lastOutbound = "live-mirror skip: encode failed"
             return
         }
+        // ADR-0028 — stamp the holder's token epoch (sibling key of the snapshot
+        // fields, mirroring iphoneLiveMirrorProducer's `LiveMirrorPayload.epoch`).
+        // Omit when 0/unpaired so a non-cast (Watch-led) session keeps the
+        // pre-lock byte-compat wire shape. The iPhone's lock machine reads it via
+        // `noteMirrorEpoch` to arbitrate (apply ==, demote >, drop <).
+        if epoch > 0 { dict["epoch"] = epoch }
 
         // Backstop — applicationContext (always, latest-state-replace).
         var status = "ctx"
@@ -840,6 +854,64 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         lastOutbound = "discard-session \(status) sent sess=\(prefix8(sessionId))"
     }
 
+    // MARK: - Outbound: lock-* (ADR-0028 cast edit-token lock)
+
+    /// Send a lock-* envelope to iPhone, DUAL-FIRED (instant `sendMessage` +
+    /// durable `transferUserInfo`), mirroring `sendStartResolveToiPhone`. The
+    /// receiver dedupes by msgId; the pure state machine's epoch guards make a
+    /// double-delivery idempotent. `snapshot` is the holder's flushed final tree
+    /// (grant / sync) — nil for request / ack / takeover. Called by `CastEditLock`
+    /// when the state machine emits a `.send` effect.
+    func sendLock(
+        kind: LockMessageKind,
+        sessionId: String,
+        epoch: Int,
+        snapshot: SessionSnapshot?
+    ) {
+        guard let session, session.activationState == .activated else {
+            lastOutbound = "\(kind.rawValue) skip: not activated"
+            return
+        }
+        guard !sessionId.isEmpty else {
+            lastOutbound = "\(kind.rawValue) skip: empty sessionId"
+            return
+        }
+        var payload: [String: Any] = [
+            "sessionId": sessionId,
+            "epoch": epoch,
+        ]
+        // grant / sync carry the holder's flushed snapshot so the new holder is
+        // guaranteed up-to-date before editing (確保已經更新). Encoding omits nil
+        // optionals (no NSNull); the iPhone normalises absent → null.
+        if let snapshot, let snapDict = snapshotToWireDict(snapshot) {
+            payload["snapshot"] = snapDict
+        }
+        let envelope: [String: Any] = [
+            "msgId": UUID().uuidString,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+            "kind": kind.rawValue,
+            "payload": payload,
+        ]
+
+        session.transferUserInfo(envelope)
+        var status = "tui"
+        if session.isReachable {
+            session.sendMessage(
+                envelope,
+                replyHandler: nil,
+                errorHandler: { [weak self] err in
+                    Task { @MainActor [weak self] in
+                        let ns = err as NSError
+                        self?.lastOutbound =
+                            "\(kind.rawValue) msg ERR code=\(ns.code) \(err.localizedDescription)"
+                    }
+                }
+            )
+            status = "tui+msg"
+        }
+        lastOutbound = "\(kind.rawValue) \(status) sent e\(epoch) sess=\(prefix8(sessionId))"
+    }
+
     /// Send the `handshake` envelope to iPhone and await the Stage 1
     /// reply. Updates `lastOutbound` / `lastInbound` for debug
     /// readout. Idempotent: safe to call from multiple sites (e.g.
@@ -862,6 +934,13 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
             "payload": [
                 "requestId": requestId,
                 "clientVersion": clientVersion,
+                // ADR-0028 restart-resilience — the handshake only ever fires from
+                // the picker (PickerViewModel bootstrap/refresh), never from inside
+                // a live session, so the Watch has NO local session here. The
+                // iPhone uses this to decide whether to re-cast an active session
+                // (投影 Watch restore) without yanking a Watch that's merely
+                // background→foregrounded mid-session.
+                "hasLocalSession": false,
             ],
         ]
 
@@ -1219,6 +1298,19 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
                 self.lastInbound = "rev-mirror no-session (drop)"
                 return
             }
+            // ADR-0028 — feed the holder epoch into the lock machine AND let it
+            // gate the apply. Cast session: apply only when this side is LOCKED /
+            // REQUESTING at == (or a strictly-greater epoch that demotes us);
+            // ignore a same-epoch echo once we're the HOLDER; drop a stale lower
+            // epoch — this defends a Watch holder against a stray reverse-mirror
+            // from a still-locked iPhone. Watch-led (UNPAIRED) / no lock bound →
+            // always apply (unchanged C-core behaviour).
+            let epoch = unboxWCInt(dict["epoch"])
+            let shouldApply = self.editLock?.noteMirrorEpoch(epoch) ?? true
+            guard shouldApply else {
+                self.lastInbound = "rev-mirror lock-gated drop e=\(epoch.map(String.init) ?? "nil")"
+                return
+            }
             apply.applyRemote(snap)
             let revStr = snap.rev.map(String.init) ?? "nil"
             self.lastInbound =
@@ -1241,6 +1333,10 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             let snapDict = payload["snapshot"] as? [String: Any]
         else { return }
         let msgId = (envelope["msgId"] as? String) ?? ""
+        // ADR-0028 — the initial edit-token epoch the iPhone (cast initiator +
+        // holder, 發起方初握) seeded. The Watch adopts it + goes LOCKED on mount.
+        // Absent (pre-0028 cast) → 0 → the Watch falls back to locked at epoch 0.
+        let epoch = unboxWCInt(payload["epoch"]) ?? 0
         Task { @MainActor [weak self] in
             guard let self else { return }
             // Drop the dual-fire's second leg (instant + TUI share one msgId).
@@ -1254,9 +1350,9 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             }
             self.lastCastMsgId = msgId
             self.castToken &+= 1
-            self.pendingCast = CastRequest(snapshot: snap, token: self.castToken)
+            self.pendingCast = CastRequest(snapshot: snap, epoch: epoch, token: self.castToken)
             self.lastInbound =
-                "cast sess=\(self.prefix8(snap.sessionId)) ex=\(snap.exercises.count)"
+                "cast sess=\(self.prefix8(snap.sessionId)) ex=\(snap.exercises.count) e\(epoch)"
         }
     }
 
@@ -1290,6 +1386,16 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
         // TUI backstop (same msgId) is deduped in ingestCast.
         if message["kind"] as? String == "cast-session" {
             ingestCast(message)
+            replyHandler(["ok": true])
+            return
+        }
+        // ADR-0028 lock-* fast lane (cast edit-token handshake). Ack {ok:true}
+        // immediately so iOS doesn't 7016-time-out the leg, then route to the
+        // edit-lock state machine on the MainActor. The dual-fire's TUI leg
+        // (same msgId) lands in didReceiveUserInfo; CastEditLock dedups by msgId.
+        if let k = message["kind"] as? String, k.hasPrefix("lock-") {
+            let env = message
+            Task { @MainActor [weak self] in self?.editLock?.handleLockEnvelope(env) }
             replyHandler(["ok": true])
             return
         }
@@ -1371,6 +1477,14 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             ingestCast(userInfo)
             return
         }
+        // ADR-0028 lock-* TUI backstop. Same envelope the instant sendMessage leg
+        // carries; CastEditLock dedups by msgId so whichever leg lands second is
+        // dropped. When iPhone is unreachable at send time ONLY this leg arrives.
+        if kind.hasPrefix("lock-") {
+            let env = userInfo
+            Task { @MainActor [weak self] in self?.editLock?.handleLockEnvelope(env) }
+            return
+        }
         guard kind == "start-reconcile" else {
             // Unknown / not-our-business envelope kind. Logged on main
             // actor for diagnostic visibility.
@@ -1413,7 +1527,21 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
 /// the published value → `.onChange` fires.
 struct CastRequest: Equatable {
     let snapshot: SessionSnapshot
+    /// ADR-0028 — the initial edit-token epoch seeded by the iPhone (cast
+    /// initiator + holder). `PickerRootView` threads it to `SetLoggerView` so the
+    /// Watch adopts it + mounts LOCKED. 0 ⇒ pre-0028 cast (locked at epoch 0).
+    let epoch: Int
     let token: Int
+}
+
+/// Tolerant WC integer unbox — JSON numbers arrive as Int / Int64 / NSNumber
+/// inconsistently across iOS versions (same pattern as the `rev` / reconcile
+/// unboxers). `nonisolated`-safe (pure). Returns nil for a missing / non-numeric.
+nonisolated func unboxWCInt(_ raw: Any?) -> Int? {
+    if let i = raw as? Int { return i }
+    if let i64 = raw as? Int64 { return Int(i64) }
+    if let n = raw as? NSNumber { return n.intValue }
+    return nil
 }
 
 // MARK: - NEW-Q50 D30 — start-reconcile envelope payload
