@@ -70,6 +70,17 @@ export const strings = {
       exercisePlaceholder: '(動作)',
     },
 
+    /**
+     * 頁面說明 overlay 的介面 chrome（ⓘ 按鈕 a11y / 視窗關閉 / 引導教學鈕）。
+     * 各頁的「說明文案 / 引導步驟」內容不放這裡，放 components/help/content/<pageId>.ts。
+     * coach 控制鈕（上一步/下一步/略過/完成）沿用 common.back/next/skip/done。
+     */
+    help: {
+      button: '說明',
+      gotIt: '了解',
+      startTour: '操作教學',
+    },
+
     /** 領域核心術語 — 計畫 / 模板 / 週期 / 強度 / chip 縮寫等。鎖定 ADR-0004/0021。 */
     domain: {
       program: '計畫',
@@ -1134,6 +1145,12 @@ export const strings = {
       retry: 'Try again',
       // i18n leak sweep (2026-06-04) — fallback when an exercise has no name.
       exercisePlaceholder: '(exercise)',
+    },
+
+    help: {
+      button: 'Help',
+      gotIt: 'Got it',
+      startTour: 'Show me',
     },
 
     domain: {
