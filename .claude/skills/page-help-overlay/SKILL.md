@@ -1,0 +1,154 @@
+---
+name: page-help-overlay
+description: Add a right-corner ⓘ help button to a difficult TrainingLog page that opens either a 說明視窗 (InfoModal — screenshot + text, for "how to read this") or a 引導遮罩 (CoachMarkOverlay — spotlight tour, for "what hidden gestures live here"). Covers the decision rubric (info vs coach), the shared `components/help/` infra contract, per-page wiring, the screenshot capture/refresh pipeline, and the 3-subagent parallel fan-out (help-content-author → help-overlay-wirer → help-reviewer). Trigger words: 說明 icon / 說明視窗 / 引導遮罩 / coach mark / help overlay / onboarding tooltip / 頁面說明.
+---
+
+# Page help overlay — TrainingLog
+
+Add per-page help that a user opens from a ⓘ button in the page's top-right.
+Two styles, one shared infra layer (`components/help/`), and a parallel
+fan-out for rolling it across many pages.
+
+## Decision rubric — 說明視窗 vs 引導遮罩
+
+One line: **要「解讀畫面」用說明視窗；要「教操作」用引導遮罩。**
+
+| | `style: 'info'` 說明視窗 | `style: 'coach'` 引導遮罩 |
+|---|---|---|
+| Pain it solves | interpretation ("what am I looking at / how is this number computed") | discoverability of interaction ("what hidden gestures, what multi-step flow") |
+| Form | one static modal: screenshot(s) + text sections | spotlight tour: highlight one element per step + arrow + caption |
+| Pick when | charts, legends, data definitions, rules | hidden gestures (long-press / swipe / drag), wizards, dense interaction |
+| `style: 'mixed'` | both — InfoModal first, with a「操作教學」button that hands off to the tour |
+
+Page recommendations (2026-06-29 survey, by line count / complexity):
+
+| Page | Recommend |
+|---|---|
+| `app/(tabs)/index.tsx` 訓練/今日 | mixed (idle 概念=info, in-session 手勢=coach) |
+| `components/template-editor/*` (`template/[id]` is a thin wrapper) | coach |
+| `app/session/[id].tsx` 詳情/編輯 | coach |
+| `app/program-wizard/new.tsx` | coach |
+| `app/superset/new.tsx` | coach |
+| `app/exercise-chart/[id].tsx` | info |
+| `app/exercise-history/[id].tsx` | info (+chip coach optional) |
+| `app/(tabs)/library.tsx` | mixed |
+| `app/(tabs)/programs.tsx` | mixed |
+| `app/(tabs)/history.tsx` | info |
+| `components/body-heatmap.tsx` legend | info |
+| `app/exercise/[id].tsx`, `app/body.tsx` | info |
+| settings / small `[id]` pages | usually none |
+
+## Shared infra contract (already built — do NOT rebuild)
+
+Everything is under `components/help/` and exported from `components/help/index.ts`:
+
+- `HelpButton` — the ⓘ. `<HelpButton onPress={help.open} />`. SF Symbol
+  `info.circle`, 44pt tap target, theme-tokened. a11y label = `t('help','button')`.
+- `usePageHelp(pageId, localized, { autoShowOnce? })` → `PageHelpHandle`
+  `{ content, visible, open, close }`. Resolves `localized[locale]` via
+  `useLocale()` (re-renders on language switch); with `autoShowOnce` it opens
+  once on first visit and persists `help_seen:<pageId>` in `app_settings`.
+- `PageHelpHost` — `<PageHelpHost help={help} />` renders the correct overlay
+  for `content.style`.
+- `CoachMarkProvider` + `useCoachMarkTarget(id)` — only for coach/mixed pages.
+  Wrap the page in `<CoachMarkProvider>`; tag each highlighted element:
+  `const tgt = useCoachMarkTarget('today.checkmark'); <View ref={tgt.ref}>`.
+- Content types in `components/help/types.ts`; pure caption-placement maths in
+  `coachMarkLayout.ts` (unit-tested in `tests/help/`).
+- i18n chrome lives in `strings.ts` namespace `help` (`button`/`gotIt`/`startTour`);
+  coach controls reuse `common.back/next/skip/done`. Page CONTENT is NOT in
+  `strings.ts` — see below.
+
+## Per-page wiring recipe
+
+1. **Author content** → `components/help/content/<pageId>.ts` exporting a
+   `LocalizedPageHelp` (`{ zh, en }`, same `style` on both). Copy the shape from
+   `components/help/content/_example.ts`. Page content stays OUT of the 106 KB
+   `src/i18n/strings.ts` (type-locked, and a merge-collision hotspot for parallel
+   agents — see overnight-parallel-agents #17/#18). Each page owns its own file.
+2. **Import + hook** in the page:
+   ```tsx
+   import { HelpButton, PageHelpHost, usePageHelp, CoachMarkProvider, useCoachMarkTarget } from '@/components/help';
+   import { todayHelp } from '@/components/help/content/today';
+   const help = usePageHelp('today', todayHelp, { autoShowOnce: true });
+   ```
+3. **Place the ⓘ** in the existing header / `Stack.Screen` `headerRight`, or
+   absolutely over a custom header: `<HelpButton onPress={help.open} />`.
+4. **Drop the host** at the page root: `<PageHelpHost help={help} />`.
+5. **(coach/mixed only)** the page must be a DESCENDANT of `<CoachMarkProvider>`
+   so its in-component `useCoachMarkTarget` hooks see the context. A context
+   consumer can't sit beside its own provider, so DON'T just wrap the JSX inside
+   the component's `return` — wrap from OUTSIDE via the default export:
+   ```tsx
+   function TodayScreen() { /* calls usePageHelp + useCoachMarkTarget */ }
+   export default function TodayScreenWithHelp() {
+     return (<CoachMarkProvider><TodayScreen /></CoachMarkProvider>);
+   }
+   ```
+   (Validated 2026-06-29 on the Today pilot — wrapping inside `return` makes the
+   refs silently no-op.) Then tag each `step.targetId` element with
+   `useCoachMarkTarget(id).ref` (call the hook at the top of the component, not in
+   JSX). Custom child components don't forward `ref` — wrap them in a thin
+   `<View ref={tgt.ref}>`. Missing targets degrade to a centred caption — never
+   crash, but the tour is weaker, so verify every target is reachable in the
+   state the tour runs in.
+6. **(info/mixed with screenshots)** add PNGs under `assets/help/<pageId>/` and
+   `require()` them in the content file. See `assets/help/README.md`.
+
+## Screenshot pipeline (real screenshots — chosen default; they go stale)
+
+Capture with the iOS dev-client sim (`com.lisonchang.TrainingLog`, NOT Expo Go):
+`xcrun simctl io booted screenshot` → crop → `sips --resampleWidth 1200` into
+`assets/help/<pageId>/`. NEVER `require()` a not-yet-existing path (breaks Metro).
+When you change a page's UI, recapture its stale shots in the same commit.
+Full steps + caveats: `assets/help/README.md`.
+
+## Parallel fan-out (the automation)
+
+Foundation is a hard dependency for every page — build it once (done), THEN
+fan out one pipeline per page. Use the 3 subagents in `.claude/agents/`.
+(Gotcha: a freshly-added `.claude/agents/*.md` isn't selectable as
+`subagent_type` until the session restarts — to dogfood it in the same session,
+spawn a `general-purpose` agent and tell it to `Read` the agent's `.md` + the
+skill, then act in that role. Validated 2026-06-29.)
+
+- `help-content-author` — writes `components/help/content/<pageId>.ts` (zh+en)
+  by reading the page + applying the rubric. Picks style, drafts copy, lists the
+  `targetId`s a coach tour needs (so the wirer knows what to tag).
+- `help-overlay-wirer` — wires the page: import + `usePageHelp` + `HelpButton` +
+  `PageHelpHost` (+ `CoachMarkProvider`/`useCoachMarkTarget` for coach). Runs with
+  `isolation: 'worktree'` so parallel page edits don't collide.
+- `help-reviewer` — adversarial check: copy accuracy vs actual UI, every
+  `targetId` is tagged + reachable, tsc/jest green, a11y label present, no
+  `require()` of a missing asset.
+
+Pipeline per page (pipeline(), not a barrier — each page is independent):
+
+```
+author(page) → wire(page, worktree) → review(page)
+```
+
+Discipline (from overnight-parallel-agents):
+- **File-disjoint**: each page agent edits only its own page file +
+  `content/<pageId>.ts` + its own `assets/help/<pageId>/`. Give each a
+  positive allow-list AND a DO-NOT-TOUCH list (every other page + `strings.ts` +
+  `components/help/*` infra + `tests/`).
+- **Infra is frozen** during fan-out — agents consume `components/help/*`, never
+  edit it. If a page genuinely needs a new infra capability, STOP and report;
+  the integrator extends infra in one place, then resumes.
+- **Screenshots are device/sim work** — an agent can author text + wire the
+  component, but capturing real screenshots needs the running sim. Either run the
+  capture inline (host) per `assets/help/README.md`, or leave the `images:` array
+  empty + a `// TODO(screenshot): …` and capture in a follow-up pass. Never ship a
+  `require()` to a missing file.
+
+Scale to the ask: one page → just do it inline. "rolling out help across the app"
+→ pipeline the P0–P2 pages; only invoke a Workflow / overnight wave on explicit
+user opt-in (it spawns many agents).
+
+## Verify
+
+- `npx tsc --noEmit` + `npm test` (the pure `coachMarkLayout` test must stay green).
+- Sim smoke (ios-simulator-smoke): ⓘ visible top-right; tap → correct overlay;
+  info reads right; coach highlights the real elements with arrows; auto-show-once
+  fires on a fresh `help_seen:` key then never again.
