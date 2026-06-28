@@ -66,7 +66,12 @@ export type WCMessageKind =
   | 'discard-session'
   | 'settings-sync'
   | 'history-request'
-  | 'notes-request';
+  | 'notes-request'
+  | 'lock-request'
+  | 'lock-grant'
+  | 'lock-ack'
+  | 'lock-takeover'
+  | 'lock-sync';
 
 /**
  * All 19 kinds as a frozen tuple — used by the type guard, jest
@@ -114,6 +119,11 @@ export const WC_MESSAGE_KINDS = [
   'settings-sync',
   'history-request',
   'notes-request',
+  'lock-request',
+  'lock-grant',
+  'lock-ack',
+  'lock-takeover',
+  'lock-sync',
 ] as const satisfies readonly WCMessageKind[];
 
 // ---------------------------------------------------------------------
@@ -235,6 +245,13 @@ export interface CastSessionPayload {
    *  `SessionSnapshot` lives in `handshake.ts`). Mirrors
    *  `StartFromIphonePayload.snapshot`. */
   snapshot: Record<string, JsonValue>;
+  /**
+   * ADR-0028 — initial edit-token epoch seed (E0). The iPhone is the cast
+   * initiator and holds the token (發起方初握); the Watch adopts this epoch and
+   * goes LOCKED on receipt. Optional for forward-compat with pre-0028 casts
+   * (the Watch falls back to epoch 0 + locked).
+   */
+  epoch?: number;
 }
 
 /**
@@ -272,6 +289,15 @@ export interface LiveMirrorPayload {
   exercises: JsonValue[];
   /** Monotonic revision (ms-since-epoch at emit) — anti-reorder. */
   rev?: number;
+  /**
+   * ADR-0028 edit-token epoch the SENDER (the current holder) is editing
+   * under. Only the holder emits live-mirror, so this stamps every projection
+   * with the world-generation that produced it. The receiver applies only when
+   * `epoch >= its own`; a STRICTLY-greater epoch means "I've been superseded"
+   * → demote to locked + adopt (universal self-heal / force-take detection).
+   * Optional for forward-compat with pre-0028 senders (treated as epoch 0).
+   */
+  epoch?: number;
   /** Which side produced it (echo suppression / forward-compat). */
   originator?: 'watch' | 'iphone';
   /** Tombstones (Phase D precise-purge). */
@@ -550,6 +576,87 @@ export interface SettingsSyncPayload {
 }
 
 // ---------------------------------------------------------------------
+// Section 2b — Edit-token lock kinds (ADR-0028)
+// ---------------------------------------------------------------------
+//
+// Cast pairing mutual-exclusion lock. Exactly one side holds the edit token
+// at a time (the holder edits + pushes one-way live-mirror); the other is a
+// read-only mirror with a lock overlay + unlock button. A monotonic `epoch`
+// arbitrates every transfer. Transfer = 3-step handshake
+// (lock-request → lock-grant → lock-ack); an unreachable holder is resolved by
+// the requester's REQUEST timeout (force-take → lock-takeover, or keep-lock).
+// A stale requester (epoch behind) gets re-locked at the current epoch via
+// lock-sync. See ADR-0028 for the full state machine + invariants.
+
+/**
+ * `lock-request` — locked side → holder. "I want the edit token." Carries the
+ * requester's currently-known `epoch` so the holder can detect a stale request
+ * (request.epoch < holder.epoch → reply lock-sync instead of granting).
+ */
+export interface LockRequestPayload {
+  sessionId: string;
+  /** Requester's currently-known token epoch. */
+  epoch: number;
+}
+
+/**
+ * `lock-grant` — holder → requester. "You may have it; here is my final state;
+ * I'm handing over." `epoch` is the NEW generation (old + 1) the requester
+ * adopts on becoming holder. `snapshot` is the holder's flushed final state so
+ * the new holder is guaranteed up-to-date before editing (確保已經更新). The
+ * granter goes LOCKED only after it receives the matching lock-ack.
+ */
+export interface LockGrantPayload {
+  sessionId: string;
+  /** New epoch (previous + 1) the requester adopts. */
+  epoch: number;
+  /** Holder's flushed final session-tree snapshot (opaque JSON; concrete
+   *  `SessionSnapshot` in `handshake.ts`). Mirrors `CastSessionPayload.snapshot`. */
+  snapshot: Record<string, JsonValue>;
+}
+
+/**
+ * `lock-ack` — requester (now holder) → granter. "Got it, I'm holder at
+ * `epoch` now." On receipt the granter transitions to LOCKED. If the granter
+ * never receives an ack it stays in OFFERING until its ack-timeout, then
+ * reverts to HOLDER (transfer failed); the epoch rule self-heals any transient
+ * double-holder on the next message.
+ */
+export interface LockAckPayload {
+  sessionId: string;
+  /** The epoch the new holder adopted (echoes the grant). */
+  epoch: number;
+}
+
+/**
+ * `lock-takeover` — new holder → old (unreachable) holder. Best-effort notice
+ * that the requester force-took the token at `epoch` after the holder failed to
+ * grant within the REQUEST timeout. The old holder demotes to LOCKED on receipt
+ * (or on the next live-mirror, which also carries the higher epoch). Carries no
+ * snapshot — the force-taker could not obtain the holder's final state (the
+ * accepted data-loss cost of force-take).
+ */
+export interface LockTakeoverPayload {
+  sessionId: string;
+  /** The new epoch the force-taker claimed. */
+  epoch: number;
+}
+
+/**
+ * `lock-sync` — holder → a stale requester. Sent when a lock-request arrives
+ * with `epoch < holder.epoch` (the requester missed a prior transfer). Re-locks
+ * the requester at the current generation with the holder's current snapshot,
+ * instead of granting. Keeps both ends converged without an extra round-trip.
+ */
+export interface LockSyncPayload {
+  sessionId: string;
+  /** Holder's current token epoch. */
+  epoch: number;
+  /** Holder's current session-tree snapshot (opaque JSON). */
+  snapshot: Record<string, JsonValue>;
+}
+
+// ---------------------------------------------------------------------
 // Section 3 — JSON-value helpers (Q6 wire-format constraint)
 // ---------------------------------------------------------------------
 
@@ -609,7 +716,12 @@ export type WCMessage =
   | WCEnvelope<'discard-session', DiscardSessionPayload>
   | WCEnvelope<'settings-sync', SettingsSyncPayload>
   | WCEnvelope<'history-request', HistoryRequestPayload>
-  | WCEnvelope<'notes-request', NotesRequestPayload>;
+  | WCEnvelope<'notes-request', NotesRequestPayload>
+  | WCEnvelope<'lock-request', LockRequestPayload>
+  | WCEnvelope<'lock-grant', LockGrantPayload>
+  | WCEnvelope<'lock-ack', LockAckPayload>
+  | WCEnvelope<'lock-takeover', LockTakeoverPayload>
+  | WCEnvelope<'lock-sync', LockSyncPayload>;
 
 // ---------------------------------------------------------------------
 // Section 5 — Per-kind payload lookup (compile-time, used by factory)
@@ -640,6 +752,11 @@ export interface WCPayloadMap {
   'settings-sync': SettingsSyncPayload;
   'history-request': HistoryRequestPayload;
   'notes-request': NotesRequestPayload;
+  'lock-request': LockRequestPayload;
+  'lock-grant': LockGrantPayload;
+  'lock-ack': LockAckPayload;
+  'lock-takeover': LockTakeoverPayload;
+  'lock-sync': LockSyncPayload;
 }
 
 // ---------------------------------------------------------------------

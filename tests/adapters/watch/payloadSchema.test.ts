@@ -170,6 +170,25 @@ function sampleFor<K extends WCMessageKind>(kind: K): WCPayloadMap[K] {
         requestId: 'req-notes-1',
         exerciseId: 'ex-1',
       } as unknown as WCPayloadMap[K];
+    // ADR-0028 — cast edit-token lock kinds.
+    case 'lock-request':
+      return { sessionId: 'sess-1', epoch: 2 } as unknown as WCPayloadMap[K];
+    case 'lock-grant':
+      return {
+        sessionId: 'sess-1',
+        epoch: 3,
+        snapshot: { sessionId: 'sess-1', title: '', startedAt: 1000, exercises: [] },
+      } as unknown as WCPayloadMap[K];
+    case 'lock-ack':
+      return { sessionId: 'sess-1', epoch: 3 } as unknown as WCPayloadMap[K];
+    case 'lock-takeover':
+      return { sessionId: 'sess-1', epoch: 4 } as unknown as WCPayloadMap[K];
+    case 'lock-sync':
+      return {
+        sessionId: 'sess-1',
+        epoch: 5,
+        snapshot: { sessionId: 'sess-1', title: '', startedAt: 1000, exercises: [] },
+      } as unknown as WCPayloadMap[K];
   }
   // Exhaustiveness sentinel — if a new kind is added without a sample,
   // TypeScript treats the absence as `never` and the test grows red.

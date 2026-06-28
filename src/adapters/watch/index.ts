@@ -37,10 +37,33 @@ export type {
   HrTickPayload,
   KcalTickPayload,
   LiveMirrorPayload,
+  CastSessionPayload,
   EndSessionPayload,
   DiscardSessionPayload,
   SettingsSyncPayload,
+  LockRequestPayload,
+  LockGrantPayload,
+  LockAckPayload,
+  LockTakeoverPayload,
+  LockSyncPayload,
 } from './payloadSchema';
+
+// ADR-0028 — cast edit-token mutual-exclusion lock (pure state machine).
+export {
+  initialEditLockState,
+  reduceEditLock,
+  canEdit,
+  isLockedOut,
+} from './editLock';
+export type {
+  EditLockRole,
+  EditLockStatus,
+  EditLockState,
+  EditLockEvent,
+  EditLockEffect,
+  EditLockResult,
+  LockMessageKind,
+} from './editLock';
 
 // NEW-Q50 (2026-05-29) — removed by D19-C: per-field LWW (`admitDiff` /
 // `createLwwMap` / `clearLwwMap` / `LwwMap` / `AdmitDiffResult` /
