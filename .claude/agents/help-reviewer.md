@@ -37,8 +37,15 @@ findings, never edit. Read the `page-help-overlay` skill for the contract.
 7. **Green** — if `node_modules` present, run `npx tsc --noEmit` and
    `npx jest tests/help` (the pure `coachMarkLayout` test). Report results; if
    absent, review statically and say so.
-8. **a11y / token hygiene** — overlay text uses theme tokens (no hard-coded
-   colors beyond the documented rgba scrim); tap targets reasonable.
+8. **a11y / token hygiene** — the page/wiring doesn't restyle the overlay.
+   `components/help/*` is infra-frozen (theme scrim + black bubble + no arrow are
+   intentional) — any edit to it from a page rollout is a **blocker**.
+9. **Design constraints (2026-06-29)** — (a) operations pages use `'coach'`, not
+   text-first `'mixed'`/`'info'` (interpretation-only pages may use `'info'`);
+   (b) every caption ≤ 2 lines; (c) content explains ONLY the current mode — a page
+   with modes has per-mode files and no cross-mode prose (a step describing a mode
+   the user isn't in is a **warning**); (d) `coachNumbered` is set only for ordered
+   procedures, not parallel choices.
 
 ## Workflow
 1. Read content file + page (+ tagged child views).

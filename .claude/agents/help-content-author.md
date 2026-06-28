@@ -21,21 +21,34 @@ the `LocalizedPageHelp` shape; copy `components/help/content/_example.ts`.
    `[id].tsx` wrapper that mounts a `components/.../view.tsx`). Grep for the real
    interaction surfaces: gestures (long-press / swipe / drag), menus, charts,
    chips, hidden controls.
-2. Apply the rubric:
-   - difficulty = **interpretation** (reading data) → `'info'`
-   - difficulty = **discoverability of interaction** (hidden gestures, multi-step)
-     → `'coach'`
-   - genuinely both → `'mixed'`
+2. Apply the rubric (2026-06-29: **coach-first**):
+   - The page is about *doing* (start / edit / a flow / hidden gestures) → `'coach'`.
+     This is the default — prefer it whenever the user interacts.
+   - Difficulty is purely *interpretation with nothing to tap* (a chart legend, a
+     heatmap's colours, a number's formula) → `'info'`.
+   - Avoid `'mixed'` (text-first then tour) — the user dropped text-only
+     explanation for operations pages. Only use it if a page genuinely needs both.
 3. Write `components/help/content/<pageId>.ts` exporting `<camelPageId>Help:
    LocalizedPageHelp`. Requirements:
    - `zh` and `en` present, SAME `style`.
-   - `info`: 1–3 tight sections (`heading` + `body`). Describe what the page is
-     for and the single most-misread thing. Do NOT narrate every control.
+   - **Per mode = separate file.** If the page renders differently by mode/variant
+     (e.g. 計劃 vs 極簡, ADR-0026), write ONE file per mode (`today-plan.ts` /
+     `today-minimal.ts` are the precedent) and explain ONLY the current mode —
+     never describe a mode the user isn't in. The page picks one via
+     `usePageHelp(cond ? 'idA' : 'idB', cond ? helpA : helpB, …)`; tell the wirer.
    - `coach`: one step per genuinely non-obvious element. Each `targetId` is a
-     stable dotted id (`<pageId>.<element>`, e.g. `today.checkmark`). Keep titles
-     ≤ ~8 words, bodies ≤ ~2 short sentences.
+     stable dotted id (`<pageId>.<element>`, e.g. `today.checkmark`). Title = one
+     short phrase; **body ≤ 2 lines** (one short sentence, two at most — write it
+     short, never rely on truncation).
+   - Set `coachNumbered: true` ONLY when the steps are an ordered 1→2→3 procedure
+     (wizard, superset builder). Parallel/alternative targets stay unnumbered.
+   - `info` (rare): 1–3 tight sections (`heading` + `body`), each body ≤ 2 lines.
+     Describe the single most-misread thing; do NOT narrate every control.
    - Do NOT add `images:` `require()`s unless the PNG already exists under
-     `assets/help/<pageId>/`. Instead leave `// TODO(screenshot): <what to shoot>`.
+     `assets/help/<pageId>/`. Coach-only pages need NO screenshots. For an `info`
+     page leave `// TODO(screenshot): <what to shoot>`.
+   - NEVER restyle the overlay — scrim/black-bubble/no-arrow are infra-fixed in
+     `CoachMarkOverlay`. You write content only.
 4. Ground every claim in the code. If you write「長按橘色條開備註」the page must
    actually do that — grep to confirm. Wrong copy is worse than no copy.
 

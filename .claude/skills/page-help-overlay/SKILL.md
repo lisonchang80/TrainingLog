@@ -20,6 +20,38 @@ One line: **要「解讀畫面」用說明視窗；要「教操作」用引導�
 | Pick when | charts, legends, data definitions, rules | hidden gestures (long-press / swipe / drag), wizards, dense interaction |
 | `style: 'mixed'` | both — InfoModal first, with a「操作教學」button that hands off to the tour |
 
+## Design constraints (2026-06-29 user feedback — these OVERRIDE the defaults)
+
+The Today pilot was reviewed on device and the direction sharpened. Apply these
+to every page from now on:
+
+1. **Coach-first; drop text-only explanation for operations pages.** If the page
+   is about *doing* (start a workout, edit a template, run a wizard), use
+   `'coach'` — NOT `'mixed'`/`'info'`. Reserve `'info'`/`'mixed'` for pages whose
+   difficulty is purely *interpretation with nothing to tap* (a chart's legend, a
+   heatmap's colours, a number's formula). When in doubt → `'coach'`.
+2. **Every caption ≤ 2 lines.** Achieve it by writing short copy, NOT by
+   `numberOfLines` truncation (that clips and fights the en-layout rule). Title is
+   one short phrase; body is one short sentence, two at the very most.
+3. **Explain only the current state; split per mode into separate files.** Don't
+   describe other modes the user isn't in. The Today pilot is the precedent:
+   `content/today-plan.ts` (計劃模式, 3 steps incl. `today.planPanel`) and
+   `content/today-minimal.ts` (極簡模式, 2 steps, no 計劃 concept) are separate
+   files; the page picks one via `usePageHelp(isMinimal ? 'today-minimal' :
+   'today-plan', isMinimal ? todayMinimalHelp : todayPlanHelp, …)` — a distinct
+   `pageId` per mode so each auto-shows once independently. Any page with a
+   mode/variant that changes what's on screen follows this.
+4. **Number steps only for real procedures.** Set `coachNumbered: true` on the
+   `PageHelpContent` ONLY when the steps are an ordered 1→2→3 flow (program
+   wizard, superset builder). Parallel/alternative targets (Today's three start
+   methods) stay unnumbered — the dots already show progress.
+5. **The overlay's look is infra-fixed — do NOT restyle it.** `CoachMarkOverlay`
+   already implements: theme-aware scrim (darker in dark mode), a fixed
+   near-black caption bubble with white text in BOTH modes (黑底白字), and NO
+   arrow (the rounded ring + bubble point at the target). Content/wirer agents
+   CONSUME this; they never touch `components/help/*`. If a page needs a new look,
+   STOP and report — the integrator changes infra in one place.
+
 Page recommendations (2026-06-29 survey, by line count / complexity):
 
 | Page | Recommend |
