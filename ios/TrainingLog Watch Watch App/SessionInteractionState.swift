@@ -250,6 +250,17 @@ final class SessionInteractionState: ObservableObject {
     /// Not @Published — pure bookkeeping, no view observes it.
     private var remoteRankedSetIds: Set<String> = []
 
+    /// PROVENANCE for the `setKindOverrides` clear (2026-06-28 cast forward/echo).
+    /// The ids whose `setKindOverrides` entry was written by `applyRemoteSnapshot`
+    /// from an iPhone `set_kind` — as opposed to a Watch-LOCAL `cycleSetKind`.
+    /// The matched branch's set_kind sync used to clear the override
+    /// UNCONDITIONALLY whenever the wire kind == base kind, so a Watch-local
+    /// working→warmup change got STOMPED by the next iPhone reverse push that
+    /// still said `working` (== base) → the row bounced back to # (device smoke).
+    /// Mirror the `remoteRankedSetIds` / `remoteAddedSetIds` pattern: only clear
+    /// an iPhone-PROVENANCE kind, never a Watch-local one. Not @Published.
+    private var remoteKindSetIds: Set<String> = []
+
     /// Goal 3b (2026-06-26) — the setId whose per-set note is shown in the top
     /// overlay box (covering the HR/time pane) WHILE its row is in long-press
     /// (orange / reorder) mode. nil ⇒ no overlay. `ReorderableRow` pushes the
@@ -258,10 +269,6 @@ final class SessionInteractionState: ObservableObject {
     /// (按住變橘→冒方塊、放手兩者一起消). Display-only: the box reads
     /// `notesOverride[setId]` and shows nothing when that set has no note.
     @Published var longPressNoteSetId: String? = nil
-
-    /// Monotonic counter for minting unique `AddedSet` ids within this
-    /// session. Survives view re-mounts (the state object outlives them).
-    private var addCounter = 0
 
     // MARK: - Active row (Phase B)
 
@@ -519,8 +526,15 @@ final class SessionInteractionState: ObservableObject {
             .max() ?? 0
         let nextOrdinal = max(baseMaxOrdinal, addedMaxOrdinal) + 1
 
-        addCounter += 1
-        let id = "ADD-\(addCounter)"
+        // Session-unique add id (2026-06-28 cast forward/echo). The old
+        // `ADD-<counter>` reset to 0 on relaunch → two sessions could mint the
+        // SAME id → the iPhone `localizeSetId` divert namespaced the INSERT
+        // (`${sessionId}::ADD-<n>`) → the reverse echo carried that namespaced id
+        // ≠ this local id → the Watch added-set dedup (by id) MISSED → a SECOND
+        // duplicate row on the Watch (iPhone had one). A UUID can't collide, so
+        // the iPhone adopts it verbatim (no divert) and the echo round-trips to
+        // the SAME id → the dedup hits → no dup.
+        let id = "ADD-\(UUID().uuidString)"
         addedSets.append(
             AddedSet(
                 id: id,
@@ -740,6 +754,7 @@ final class SessionInteractionState: ObservableObject {
         var newKindOverrides = setKindOverrides
         var newRemoteAddedSetIds = remoteAddedSetIds
         var newRemoteRankedSetIds = remoteRankedSetIds
+        var newRemoteKindSetIds = remoteKindSetIds
 
         for (i, ex) in snap.exercises.enumerated() {
             guard let baseEx = matchedBase[i] else {
@@ -849,10 +864,17 @@ final class SessionInteractionState: ObservableObject {
                     // flipped to「dropset」, `ExerciseCard` folds it + the follower
                     // into ONE cluster (the fold is array-adjacency by
                     // chain-head, so the follower needs no parent-id rewrite).
+                    // PROVENANCE (2026-06-28 cast forward/echo): only CLEAR an
+                    // iPhone-provenance kind. A Watch-LOCAL working→warmup (via
+                    // cycleSetKind, NOT in remoteKindSetIds) must survive a later
+                    // iPhone reverse push that still says kind == base, else it
+                    // bounces back to # (device-observed). Mirrors the rank guard.
                     if s.setKind != b.setKind {
                         newKindOverrides[id] = s.setKind
-                    } else {
+                        newRemoteKindSetIds.insert(id)
+                    } else if newRemoteKindSetIds.contains(id) {
                         newKindOverrides.removeValue(forKey: id)
+                        newRemoteKindSetIds.remove(id)
                     }
                 } else if let aIdx = newAddedSets.firstIndex(where: { $0.id == s.setId }) {
                     // EXISTING iPhone-added set whose mutable fields the iPhone has
@@ -919,6 +941,8 @@ final class SessionInteractionState: ObservableObject {
         // still HAVE a rank override, so a cleared/vanished id drops its tag and
         // the set can't grow unbounded across applies.
         newRemoteRankedSetIds.formIntersection(Set(newRankOverrides.keys))
+        // Same hygiene for the kind-provenance tag.
+        newRemoteKindSetIds.formIntersection(Set(newKindOverrides.keys))
         // Assign once each → ≤ one @Published willSet per field per apply.
         loggedSetIds = newLogged
         editedValues = newEdited
@@ -929,6 +953,7 @@ final class SessionInteractionState: ObservableObject {
         setKindOverrides = newKindOverrides
         remoteAddedSetIds = newRemoteAddedSetIds
         remoteRankedSetIds = newRemoteRankedSetIds
+        remoteKindSetIds = newRemoteKindSetIds
     }
 
     // MARK: - Display value
