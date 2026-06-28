@@ -875,6 +875,24 @@ final class SessionInteractionState: ObservableObject {
                     } else if newRemoteKindSetIds.contains(id) {
                         newKindOverrides.removeValue(forKey: id)
                         newRemoteKindSetIds.remove(id)
+                    } else if s.setKind != "dropset"
+                                && newKindOverrides[id] == "dropset"
+                                && newAddedSets.contains(where: { $0.parentSetId == id }) {
+                        // (iii-a) Convergence heal (2026-06-28 cast rapid-tap race).
+                        // The iPhone says this set is NOT a dropset, yet the Watch
+                        // holds a LOCAL dropset override for it AND a local follower
+                        // points at it = an INVALID local chain the iPhone has
+                        // already healed (it demoted the orphan follower in
+                        // replaceLiveMirror). The provenance guard above would KEEP
+                        // the Watch's stale dropset head → the two ends stay split
+                        // (iPhone working / Watch「D1」). Accept the iPhone's
+                        // dissolution: clear the head override so it converges to
+                        // working; the orphan follower converges separately via the
+                        // added-set update branch below (its echoed row now carries
+                        // working / parent-null). Distinct from the warmup-bounce
+                        // keep: warmup NEVER has a follower, so that case can't reach
+                        // here → no 8eb26d2 regression.
+                        newKindOverrides.removeValue(forKey: id)
                     }
                 } else if let aIdx = newAddedSets.firstIndex(where: { $0.id == s.setId }) {
                     // EXISTING iPhone-added set whose mutable fields the iPhone has
