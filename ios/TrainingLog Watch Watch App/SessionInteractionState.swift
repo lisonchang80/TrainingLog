@@ -854,7 +854,39 @@ final class SessionInteractionState: ObservableObject {
                     } else {
                         newKindOverrides.removeValue(forKey: id)
                     }
-                } else if !newAddedSets.contains(where: { $0.id == s.setId }) {
+                } else if let aIdx = newAddedSets.firstIndex(where: { $0.id == s.setId }) {
+                    // EXISTING iPhone-added set whose mutable fields the iPhone has
+                    // since changed across ticks (e.g. a footer /「+1」set turned
+                    // into a dropset then reverted to working). This branch used to
+                    // be insert-ONLY, so the stored entry FROZE at its first-seen
+                    // values → on a revert the follower was pruned but this HEAD
+                    // stayed `dropset`, rendering as a lone「單行 D#」(2026-06-28
+                    // device bug). Base sets stay correct because the matched branch
+                    // above already syncs every field; mirror that here so an added
+                    // set is a first-class, fully-updated row. (logged/notes stay
+                    // insert-only — same as the original add — to avoid un-checking a
+                    // Watch-local ✓ that hasn't round-tripped through the iPhone yet.)
+                    var a = newAddedSets[aIdx]
+                    a.setKind = s.setKind
+                    a.parentSetId = s.parentSetId
+                    a.ordinal = s.ordinal
+                    a.displayRank = s.displayRank ?? Double(s.ordinal)
+                    a.weight = s.weight
+                    a.reps = s.reps
+                    newAddedSets[aIdx] = a
+                    if s.isLogged { newLogged.insert(s.setId) }
+                    if let n = s.notes { newNotes[s.setId] = n }
+                    // rank: write when present, CLEAR a stale iPhone-provenance rank
+                    // when the wire stops carrying one, so a frozen override can't
+                    // win over the updated `displayRank` in `mergeSets`.
+                    if let dr = s.displayRank {
+                        newRankOverrides[s.setId] = dr
+                        newRemoteRankedSetIds.insert(s.setId)
+                    } else if newRemoteRankedSetIds.contains(s.setId) {
+                        newRankOverrides.removeValue(forKey: s.setId)
+                        newRemoteRankedSetIds.remove(s.setId)
+                    }
+                } else {
                     // snap set beyond base (iPhone added a set to this exercise) →
                     // addedSet under the BASE exercise's id so mergeSets folds it.
                     newAddedSets.append(AddedSet(
