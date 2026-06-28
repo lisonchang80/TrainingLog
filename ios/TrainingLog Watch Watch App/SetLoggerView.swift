@@ -347,11 +347,16 @@ struct SetLoggerView: View {
             // pure UX hazard.
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                // Hide the ⚙ while a cell is in `[]` Active — the 2026-05-31
-                // full-screen keypad owns the screen and the gear must not
-                // peek over it (per user「不需要齒輪」). Crown mode hides it
-                // too (harmless — you don't reach for settings mid-edit).
-                if interactionState.activeCell == nil {
+                // ⚙ belongs ONLY on the center session-card page (selectedPage
+                // == 1) per D10 spec (top bar Row 2). This `.toolbar` attaches to
+                // the shared nav bar of the whole SetLoggerView, so WITHOUT the
+                // page gate the gear bleeds onto the 音樂 (tag 2) and 完成頁
+                // (tag 0) pages too — user reported「音樂頁右上角不需要齒輪」
+                // (2026-06-29). Also hidden while a cell is in `[]` Active — the
+                // 2026-05-31 full-screen keypad owns the screen and the gear must
+                // not peek over it. Crown mode hides it too (harmless — you don't
+                // reach for settings mid-edit).
+                if interactionState.activeCell == nil && selectedPage == 1 {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showSettings = true
