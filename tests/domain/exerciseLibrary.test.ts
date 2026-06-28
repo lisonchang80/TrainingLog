@@ -104,6 +104,27 @@ describe('exerciseLibrary — filterExercises', () => {
     expect(got.map((e) => e.id)).toEqual(['e1']);
   });
 
+  it('search matches the LOCALIZED display name, not just the canonical name', () => {
+    // Repro: canonical name is English ("Bench Press") but the card renders
+    // 中文 via tExercise → a Chinese search must still find it.
+    const localize = (name: string) =>
+      name === 'Bench Press' ? '槓鈴臥推' : name;
+    const got = filterExercises(exercises, links, { search: '槓', localize });
+    expect(got.map((e) => e.id)).toEqual(['e1']);
+  });
+
+  it('without localize, a Chinese search misses an English-named row (baseline)', () => {
+    const got = filterExercises(exercises, links, { search: '槓' });
+    expect(got).toEqual([]);
+  });
+
+  it('localize search still matches the canonical name too', () => {
+    // A row already stored in 中文 stays findable; localize only ADDS a match.
+    const localize = (name: string) => name; // identity
+    const got = filterExercises(exercises, links, { search: 'bench', localize });
+    expect(got.map((e) => e.id)).toEqual(['e1']);
+  });
+
   it('excludes archived by default', () => {
     expect(filterExercises(exercises, links, {}).map((e) => e.id)).not.toContain('e5');
   });

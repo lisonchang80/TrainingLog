@@ -30,6 +30,16 @@ export interface ExerciseFilter {
   equipment?: Equipment | null;
   /** Free-text name match (case-insensitive substring). Empty/undefined = no search. */
   search?: string | null;
+  /**
+   * Resolve an exercise's DISPLAY name from its canonical `name`. The library
+   * stores many exercises with English canonical names (the v028 Free-Exercise-DB
+   * import) but renders them localized via `tExercise(name)`. Without this, a
+   * Chinese search ("槓") never matches an English-stored row ("Barbell Bench
+   * Press") even though the card shows「槓鈴臥推」. When provided, search matches
+   * EITHER the canonical name OR the localized name. Defaults to identity
+   * (canonical-only) so existing callers/tests are unaffected.
+   */
+  localize?: (name: string) => string;
   /** When true, hide rows whose `is_archived = 1`. Defaults to true. */
   excludeArchived?: boolean;
 }
@@ -48,6 +58,7 @@ export function filterExercises(
 ): Exercise[] {
   const excludeArchived = filter.excludeArchived ?? true;
   const search = filter.search?.trim().toLowerCase() ?? '';
+  const localize = filter.localize ?? ((n: string) => n);
   const muscleId = filter.muscleId ?? null;
 
   // Pre-compute a Set of exercise_ids that activate the muscleId — O(N) once
@@ -68,7 +79,13 @@ export function filterExercises(
     if (filter.loadType && ex.load_type !== filter.loadType) return false;
     if (filter.equipment && ex.equipment !== filter.equipment) return false;
     if (muscleHits && !muscleHits.has(ex.id)) return false;
-    if (search && !ex.name.toLowerCase().includes(search)) return false;
+    if (search) {
+      const canonical = ex.name.toLowerCase();
+      const localized = localize(ex.name).toLowerCase();
+      if (!canonical.includes(search) && !localized.includes(search)) {
+        return false;
+      }
+    }
     return true;
   });
 }
