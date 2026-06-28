@@ -206,6 +206,28 @@ git stash pop                              # 還原原 working state
 
 **對照**: 如果 build 本來就是從那個 worktree 跑 `npx expo run:ios` 出來、那從同 worktree 跑 Metro 就 OK（Gotcha #4 的原始情境）。Gotcha #4.5 專指「build 跟 Metro worktree 不同」的 mismatch。
 
+### Gotcha #4.6 — 驗證「JS 修正真的進到裝置載入的 bundle」(validated 2026-06-28)
+
+**情境**: 改了 `.ts/.tsx`、裝置 smoke 還是壞、使用者問「是否確定版本」。dev-client 從 Metro 抓 JS、reload 後到底有沒有載到新碼？要硬驗、不要猜。
+
+**做法 — curl Metro 服務的 bundle、grep 你的修正**:
+
+```bash
+# ⚠️ 這個 repo 是 Expo Router → entry 不是 /index.bundle！
+# /index.bundle?platform=ios → 回 ~5KB 的 {"type":"UnableToResolveError"... ./index}
+#   （那不是 bundle、是錯誤 JSON、別被騙）
+# 正確 entry：
+curl -s "http://localhost:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=true" \
+  -o /tmp/eb.js -w "http=%{http_code} size=%{size_download}\n"
+# 真 bundle ≈ 14-15 MB、http=200。dev=true → 非 minified、可直接 grep 原始碼
+grep -n -A 12 "case 'recv-lock-request':" /tmp/eb.js   # 看到你的新邏輯 = 確認版本對
+```
+
+**關鍵點**:
+- 小於 ~10KB 的回應幾乎都是 resolve error JSON、不是 bundle。
+- `dev=true` bundle 保留註解 + 原始識別字（非 minified）→ 可用原始碼字串直接 grep（連中文註解都在）。
+- 這是「丟 device smoke 前確認修正在裝置實際跑的那棵樹」(feedback_confirm-version-before-smoke) 對 JS 端的具體驗法；native (Swift) 端對照用 `nm`/`strings` 查 `.app` binary（見 `xcodebuild-watchos-realdevice-install` Trap 4）。
+
 ### Gotcha #5 — Build log warning "Pointer is missing a nullability type specifier"
 
 **症狀**: Xcode Issue Navigator 顯示 1000-2000 warnings、看起來像大爆炸
