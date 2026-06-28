@@ -8,7 +8,7 @@
 //  shell spec.
 //
 //  D10 spec (frozen 0f4a6e0) defines a 3-page TabView shell:
-//    page 1 (left)  — 音樂 (native NowPlaying placeholder)
+//    page 1 (left)  — 音樂 (native NowPlayingView — system Now Playing)
 //    page 2 (center) — Session card list (this is where D11 lives)
 //    page 3 (right) — 完成頁 (D14, frozen 9d522e7)
 //  per spec lines 1575-1576: 「Pages: 音樂 ← session card → 完成頁」.
@@ -23,6 +23,7 @@
 //
 
 import SwiftUI
+import WatchKit  // NowPlayingView — system Now Playing surface (watchOS 7+)
 
 struct SetLoggerView: View {
     /// SessionSnapshot received from iPhone via start-from-watch
@@ -295,7 +296,13 @@ struct SetLoggerView: View {
                     .tag(1)
 
                     // Page 2 — 音樂 (right). Reached via finger left-swipe.
-                    NowPlayingPlaceholderPage()
+                    // WatchKit's NowPlayingView surfaces the system's CURRENT
+                    // Now Playing source (Apple Music / Spotify / Podcasts /
+                    // paired-iPhone audio stream) with native transport +
+                    // Crown volume. Per ADR-0019 D10 spec「走原生 NowPlaying
+                    //（不自己 design）」. Shows the system "not playing" state
+                    // when nothing is active — that's native behavior, intended.
+                    NowPlayingView()
                         .tag(2)
                 }
                 .tabViewStyle(.page)
@@ -1018,27 +1025,6 @@ private struct CastLockOverlayWatch: View {
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-// MARK: - Page 0: 音樂 placeholder
-
-private struct NowPlayingPlaceholderPage: View {
-    var body: some View {
-        VStack(alignment: .center, spacing: 8) {
-            Spacer()
-            Image(systemName: "music.note")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            Text("音樂")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("(原生 NowPlaying — 後續接)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
