@@ -4,8 +4,21 @@
  * Persists each TrainingLog session as an HKWorkout sample so it surfaces in
  * Apple's Fitness app under「傳統肌力訓練」(traditionalStrengthTraining filter)
  * and contributes to 動態大卡 totals. Workout appears with TrainingLog's
- * session title (via HKWorkoutBrandName metadata) and the strength-training
- * dumbbell icon.
+ * session title (via HKWorkoutBrandName metadata).
+ *
+ * ⚠️ Fitness 訓練列的 ICON = 寫入這筆的「來源 App」圖示（= iPhone 主 App icon,
+ * 藍底白啞鈴）。This is the ONLY HKWorkout write point — the Watch's
+ * SessionController.end() calls discardWorkout() (no HKWorkout, trigger-only
+ * HR sampling per ADR-0019 Q28 Branch C), so the source is ALWAYS the iPhone
+ * host app. The earlier "appears with the strength-training dumbbell icon"
+ * note was imprecise: Apple's generic dumbbell glyph is only the FALLBACK when
+ * the system can't resolve the source app's icon. **On dev builds this happens
+ * a lot** — every build auto-bumps CFBundleVersion (Trap-3 mitigation) +
+ * re-install invalidates Fitness's per-source icon cache → newly-written
+ * workouts fall back to the generic glyph until the system re-resolves. On a
+ * STABLE TestFlight / App Store build (fixed version) the brand logo shows
+ * consistently — like 训记. Not a code/asset bug; verify at TestFlight stage
+ * (submission-readiness D7 #9), do NOT chase it on a churning dev build.
  *
  * Per ADR-0019 § Phase B Q6 / Q7 / Q8 grill (ratified 2026-05-26):
  *   - activityType = traditionalStrengthTraining (Apple HK enum; Kingstinct

@@ -150,6 +150,7 @@ Sheet follow-up:
 6. **escalation banner** (3-day auto / 7-day manual failure streak)
 7. **Watch envelope does not trip restore** (sync vs restore isolation)
 8. (+ Y-dup picker dedup smoke · + JSON-export button writes file / Share Sheet — R07 P4, deferred, `expo-sharing` not yet installed)
+9. **健身 App 訓練列顯示品牌 logo**（⚠️ **必須在穩定 TestFlight build 上驗，不能用 dev 重裝的 build**）— 新建 1 筆訓練 → 開 iPhone 健身 App → 該筆訓練列的 icon 應是藍底白啞鈴（不是 Apple 通用啞鈴 glyph）。原理：Fitness 訓練列 icon＝寫入它的「來源 App」圖示，我們唯一寫入點是 iPhone `saveTrainingLogWorkout`（手錶端 `discardWorkout` 不寫 HKWorkout），來源恆＝iPhone 主 App。dev build 反覆 rebuild+重裝會 churn Apple 的來源圖示快取（每 build 自動 bump `CFBundleVersion`＋重裝失效快取）→ 暫時 fallback 成通用啞鈴；**穩定版本號的 TestFlight build 會像「訓記」一樣穩定顯示 logo**。code/資產皆正確、非 bug——此項只是 ship 前確認。若 TestFlight 仍 fallback，才當真 bug 查（屆時版本固定可排除快取因素）。2026-06-28 device 觀察（dev build 重裝 churn）確立。
 
 > **Order rationale:** A1 makes the build reproducible; A2 must pass or nothing
 > installs; B3 lands the three packaging 🔴 + questionnaire (and is the archive
