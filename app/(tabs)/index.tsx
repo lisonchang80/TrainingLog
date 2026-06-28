@@ -55,6 +55,7 @@ import {
   onNotesRequest,
   onStartFromWatch,
   sendUserInfo,
+  type WCMessage,
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
 import {
@@ -161,6 +162,8 @@ import {
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
 import { pushStartToWatch } from '@/src/services/watchSessionStart';
 import { pushCastToWatch } from '@/src/services/watchSessionCast';
+import { useCastEditLock } from '@/app/hooks/useCastEditLock';
+import { CastLockOverlay } from '@/components/session/cast-lock-overlay';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -589,6 +592,26 @@ export default function TodayScreen() {
   const refreshRef = useRef<(() => void) | null>(null);
   refreshRef.current = refresh;
 
+  // ADR-0028 — cast edit-token lock. When this iPhone casts a session it holds
+  // the token; the paired Watch is locked. Editing is gated on `editLock.canEdit`
+  // (the lock overlay below blocks all interaction when locked), and inbound
+  // lock-* envelopes drive the handshake. `applyInboundSnapshot` applies a
+  // holder's flush (lock-grant / lock-sync) like a live-mirror, suppressing the
+  // producer so it can't bounce back.
+  const editLock = useCastEditLock({
+    db,
+    sessionId:
+      sessionState.status === 'in_progress' ? sessionState.id : null,
+    applyInboundSnapshot: async (snapshot) => {
+      await runWhileApplyingRemoteSnapshot(async () => {
+        await onLiveMirror(db, snapshot);
+        refreshRef.current?.();
+      });
+    },
+  });
+  const editLockRef = useRef(editLock);
+  editLockRef.current = editLock;
+
   // 2026-06-26 — the D32 interim "Watch-led ⇒ iPhone read-only + toast" guard
   // is RETIRED. iPhone edits during a Watch-led session now flow to the Watch
   // (reverse-sync Phase C-core): each edit writes the DB, `refresh()` runs, and
@@ -749,6 +772,9 @@ export default function TodayScreen() {
     // / db error) — we just refresh so the iPhone in-session UI reflects
     // the latest mirrored sets/exercises.
     const unsubLiveMirror = addAppContextListener(async (ctx) => {
+      // ADR-0028 — feed the holder's epoch into the lock machine (demote if the
+      // Watch has superseded us; no-op when we're already locked).
+      editLockRef.current.noteMirrorEpoch((ctx as { epoch?: number }).epoch);
       // Phase C-core (2026-06-26): wrap the inbound apply so the refresh it
       // triggers (which now tail-calls scheduleLiveMirrorPush) is no-op'd by
       // the producer's applyDepth gate — a Watch snapshot must not bounce back.
@@ -767,6 +793,7 @@ export default function TodayScreen() {
     // applicationContext alone was the "又慢、又亂、時有時無（尤其遞減組）"
     // regression — sendMessage is the real-time channel.
     const unsubLiveMirrorMsg = addMessageListener('live-mirror', async (env) => {
+      editLockRef.current.noteMirrorEpoch(env.payload.epoch); // ADR-0028
       await runWhileApplyingRemoteSnapshot(async () => {
         await onLiveMirror(db, env.payload);
         refreshRef.current?.();
@@ -782,6 +809,22 @@ export default function TodayScreen() {
     // panel's ❤️/🔥 tiles. The reducers runtime-validate + drop
     // stale/out-of-order ticks and return the SAME reference on reject,
     // so setState skips the re-render.
+    // ADR-0028 — cast edit-token lock handshake. Each lock-* kind is dual-fired
+    // by the sender (instant sendMessage + durable TUI); register both channels.
+    // The receiver dedupes by msgId, so a double-delivery is idempotent, and the
+    // pure state machine drops stale/duplicate epochs.
+    const lockHandler = (env: WCMessage) =>
+      editLockRef.current.handleLockEnvelope(env);
+    const unsubLockReqM = addMessageListener('lock-request', lockHandler);
+    const unsubLockReqT = addUserInfoListener('lock-request', lockHandler);
+    const unsubLockGrantM = addMessageListener('lock-grant', lockHandler);
+    const unsubLockGrantT = addUserInfoListener('lock-grant', lockHandler);
+    const unsubLockAckM = addMessageListener('lock-ack', lockHandler);
+    const unsubLockAckT = addUserInfoListener('lock-ack', lockHandler);
+    const unsubLockTakeM = addMessageListener('lock-takeover', lockHandler);
+    const unsubLockTakeT = addUserInfoListener('lock-takeover', lockHandler);
+    const unsubLockSyncM = addMessageListener('lock-sync', lockHandler);
+    const unsubLockSyncT = addUserInfoListener('lock-sync', lockHandler);
     const unsubHrTick = addMessageListener('hr-tick', (env) => {
       setWatchLiveTicks((prev) => applyHrTick(prev, env));
     });
@@ -798,6 +841,16 @@ export default function TodayScreen() {
       unsubDiscardSession();
       unsubLiveMirror();
       unsubLiveMirrorMsg();
+      unsubLockReqM();
+      unsubLockReqT();
+      unsubLockGrantM();
+      unsubLockGrantT();
+      unsubLockAckM();
+      unsubLockAckT();
+      unsubLockTakeM();
+      unsubLockTakeT();
+      unsubLockSyncM();
+      unsubLockSyncT();
       unsubHrTick();
       unsubKcalTick();
     };
@@ -2304,8 +2357,11 @@ export default function TodayScreen() {
   const handleCastToWatch = useCallback(() => {
     if (sessionState.status !== 'in_progress') return;
     const session_id = sessionState.id;
+    // ADR-0028 — iPhone becomes the edit-token holder (発起方初握) and seeds the
+    // Watch's epoch via the cast payload; the Watch goes LOCKED on receipt.
+    const epoch = editLockRef.current.castInitiated();
     void (async () => {
-      const res = await pushCastToWatch(db, session_id);
+      const res = await pushCastToWatch(db, session_id, { epoch });
       if (res.acked) {
         toastRef.current?.show(t('status', 'castToWatchOk'), { icon: 'success' });
       } else if (res.queued) {
@@ -2579,6 +2635,12 @@ export default function TodayScreen() {
   const onEndSession = async () => {
     const session_id = getSessionId(sessionState);
     if (!session_id) return;
+    // ADR-0028 — 結束訓練收進編輯鎖：只有 holder 能結束。鎖定方須先解鎖（解鎖會
+    // 先拉到對方最終狀態），故結束前一定拿到最終資料。蓋層已擋住此按鈕，這是防禦。
+    if (!editLockRef.current.canEdit) {
+      toastRef.current?.show(t('status', 'lockEditingOnWatch'), { icon: 'info' });
+      return;
+    }
 
     setBusy(true);
     try {
@@ -3275,6 +3337,18 @@ export default function TodayScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      {/* ADR-0028 — cast 編輯鎖「鎖定視窗」: a touch-capturing overlay over the
+          whole in-session view (header + content). Blocks every edit at one
+          choke point while the live read-only mirror shows through; the only
+          control is the unlock button. */}
+      {editLock.isLockedOut ? (
+        <CastLockOverlay
+          lock={editLock.lock}
+          onUnlock={editLock.requestUnlock}
+          onForceTake={editLock.forceTake}
+          onKeepLock={editLock.keepLock}
+        />
+      ) : null}
       <SetNoteSheet
         visible={noteSheetTarget !== null}
         initialValue={noteSheetTarget?.initial ?? null}

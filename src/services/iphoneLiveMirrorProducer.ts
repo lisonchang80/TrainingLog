@@ -98,6 +98,23 @@ function nextRev(sessionId: string): number {
 }
 
 /**
+ * ADR-0028 — per-session edit-token epoch the iPhone is currently editing
+ * under (the lock hook sets this whenever the local lock state's epoch changes).
+ * Every projection stamps it so the Watch's lock machine can arbitrate the
+ * mirror (apply at ==, demote at >, drop at <). 0 = no cast pairing.
+ */
+const lockEpoch = new Map<string, number>();
+
+/** Called by the iPhone edit-lock hook on every epoch change. */
+export function setLiveMirrorEpoch(sessionId: string, epoch: number): void {
+  lockEpoch.set(sessionId, epoch);
+}
+
+function epochFor(sessionId: string): number {
+  return lockEpoch.get(sessionId) ?? 0;
+}
+
+/**
  * In-flight "applying a remote snapshot" gate (拍板#7 ②). A DEPTH counter,
  * not a boolean, so nested / overlapping applies don't clear it early. The
  * inbound-apply path (Phase C wiring) brackets its whole apply + `refresh()`
@@ -200,12 +217,16 @@ function projectToWire(
     return wireEx;
   });
 
+  const epoch = epochFor(snap.sessionId);
   return {
     sessionId: snap.sessionId,
     title: snap.title,
     startedAt: snap.startedAt,
     originator: 'iphone',
     rev,
+    // ADR-0028 — stamp the holder's token epoch (omit when 0/unpaired so a
+    // pre-lock byte-compat shape is preserved for non-cast sessions).
+    ...(epoch > 0 ? { epoch } : {}),
     exercises,
   };
 }

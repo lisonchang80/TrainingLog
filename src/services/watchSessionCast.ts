@@ -100,6 +100,14 @@ interface PushCastOptions {
    *  Default 2000ms — 投影 Watch is a foreground action the user is watching,
    *  so resolve the toast quickly; the TUI backstop covers the async case. */
   timeoutMs?: number;
+  /**
+   * ADR-0028 — the initial edit-token epoch seed (E0). The iPhone is the cast
+   * initiator and holds the token; the Watch adopts this epoch and goes LOCKED
+   * on receipt. Supplied by the iPhone edit-lock hook (cast-initiated bumps the
+   * generation). Omitted only by pre-0028 callers (Watch falls back to locked
+   * at epoch 0).
+   */
+  epoch?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 2000;
@@ -125,6 +133,11 @@ export async function pushCastToWatch(
     return { acked: false, queued: false, code: 'NO_SNAPSHOT', raw: null, startedAt };
   }
   const payload = buildStartFromIphone(snapshot);
+  // ADR-0028 — seed the Watch's edit-token epoch so it goes LOCKED at the
+  // iPhone's current generation (発起方初握). Omitted by pre-0028 callers.
+  if (opts.epoch != null) {
+    (payload as typeof payload & { epoch?: number }).epoch = opts.epoch;
+  }
   const env: WCMessage = makeEnvelope('cast-session', payload);
 
   // 2. TUI backstop FIRST — durable queued delivery so the cast survives an
