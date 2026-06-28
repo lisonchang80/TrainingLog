@@ -144,6 +144,18 @@ export interface HandshakePayload {
   requestId: string;
   /** Watch app build identifier (e.g. `'13d.0'`); iPhone may reject older clients. */
   clientVersion: string;
+  /**
+   * ADR-0028 restart-resilience — `true` when the Watch is currently inside a
+   * session (set logger), `false`/absent when it's at the picker. The Watch only
+   * handshakes from the picker today (so it's effectively always false), but the
+   * field is the explicit contract: the iPhone RE-CASTS an active cast session
+   * (投影 Watch restore) only when this is NOT true, so a Watch that merely
+   * background→foregrounds mid-session can't have its in-progress session
+   * clobbered. Append-only; absent on a pre-0028 Watch → treated as false
+   * (re-cast), which is correct since such a Watch also only handshakes at the
+   * picker.
+   */
+  hasLocalSession?: boolean;
 }
 
 /**

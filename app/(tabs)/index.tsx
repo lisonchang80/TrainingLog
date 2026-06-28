@@ -620,6 +620,22 @@ export default function TodayScreen() {
   useEffect(() => {
     const unsubHandshake = addMessageListener('handshake', async (env, reply) => {
       await onHandshakeRequest(db, env, reply);
+      // ADR-0028 restart-resilience — the Watch only handshakes from the picker
+      // (hasLocalSession !== true). If the iPhone is mid-cast (lock paired), the
+      // Watch must have lost its session (restart) → RE-CAST so it re-enters the
+      // set logger. castInitiated() bumps the epoch + makes iPhone the holder
+      // (拍板: Watch-was-holder restart 翻回 iPhone); pushCastToWatch re-projects.
+      // Gated on hasLocalSession so a mere background→foreground (still in-session)
+      // can't yank the Watch's edit token.
+      const lock = editLockRef.current.lock;
+      if (
+        env.payload.hasLocalSession !== true &&
+        lock.status !== 'unpaired' &&
+        lock.sessionId
+      ) {
+        const epoch = editLockRef.current.castInitiated();
+        void pushCastToWatch(db, lock.sessionId, { epoch });
+      }
     });
     // #311-A (2026-06-09 grill) — Watch 📊 查看歷史 pull-on-tap. Same
     // request-reply shape as handshake: the Watch sends

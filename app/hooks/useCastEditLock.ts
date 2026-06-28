@@ -36,6 +36,11 @@ import {
   buildLiveMirrorPayload,
   setLiveMirrorEpoch,
 } from '@/src/services/iphoneLiveMirrorProducer';
+import {
+  persistCastLock,
+  loadCastLock,
+  clearCastLock,
+} from '@/src/services/castLockPersistence';
 
 /** No grant within this window after pressing 解除鎖定 → show the timeout dialog. */
 const REQUEST_TIMEOUT_MS = 6000;
@@ -185,9 +190,12 @@ export function useCastEditLock({
       lockRef.current = state;
       setLock(state);
       setLiveMirrorEpoch(state.sessionId ?? '', state.epoch);
+      // ADR-0028 restart-resilience — persist the (collapsed) lock snapshot so an
+      // iPhone relaunch can re-seed it (UNPAIRED clears the row). Fire-and-forget.
+      void persistCastLock(db, state);
       runEffects(effects, inboundSnapshot);
     },
-    [runEffects],
+    [runEffects, db],
   );
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
@@ -244,6 +252,9 @@ export function useCastEditLock({
 
   // Reset the lock when the active session changes (new session = clean slate).
   const prevSessionId = useRef<string | null>(sessionId);
+  // ADR-0028 restart-resilience — which sessionId we've already attempted a
+  // persisted-state restore for (avoid double-restoring / stomping live state).
+  const restoredFor = useRef<string | null>(null);
   useEffect(() => {
     if (prevSessionId.current !== sessionId) {
       prevSessionId.current = sessionId;
@@ -253,8 +264,47 @@ export function useCastEditLock({
       lockRef.current = fresh;
       setLock(fresh);
       setLiveMirrorEpoch(sessionId ?? '', 0);
+      // Session ended → drop the persisted snapshot + re-arm restore for any
+      // future session. (A brand-new session's restore is no-op'd by the
+      // sessionId mismatch in the restore effect below.)
+      if (!sessionId) {
+        restoredFor.current = null;
+        void clearCastLock(db);
+      }
     }
-  }, [sessionId, clearRequestTimer, clearAckTimer]);
+  }, [sessionId, clearRequestTimer, clearAckTimer, db]);
+
+  // ADR-0028 restart-resilience — on mount into an EXISTING in-progress session
+  // (iPhone app relaunch), re-seed the lock from the persisted snapshot so the
+  // iPhone resumes as holder (or locked) instead of UNPAIRED. Without this a
+  // relaunched iPhone reads a Watch lock-request as "epoch > mine" and demotes
+  // instead of granting → 解除鎖定 deadlocks (device smoke ①). Skips a brand-new
+  // session (persisted sessionId won't match) and never stomps a lock that has
+  // already advanced past UNPAIRED before the async load resolves.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (restoredFor.current === sessionId) return;
+    restoredFor.current = sessionId;
+    let cancelled = false;
+    void (async () => {
+      const persisted = await loadCastLock(db);
+      if (cancelled || !persisted || persisted.sessionId !== sessionId) return;
+      if (lockRef.current.status !== 'unpaired') return; // already live, don't stomp
+      const restored: EditLockState = {
+        role: 'iphone',
+        status: persisted.status,
+        epoch: persisted.epoch,
+        sessionId: persisted.sessionId,
+        requestTimedOut: false,
+      };
+      lockRef.current = restored;
+      setLock(restored);
+      setLiveMirrorEpoch(persisted.sessionId, persisted.epoch);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, db]);
 
   // Tear down timers on unmount.
   useEffect(
