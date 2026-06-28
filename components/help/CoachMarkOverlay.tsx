@@ -10,38 +10,56 @@ import {
 } from 'react-native';
 
 import { t } from '@/src/i18n';
-import { useTheme, type ThemeTokens } from '@/src/theme';
+import { useTheme, type ResolvedTheme, type ThemeTokens } from '@/src/theme';
 
 import { pickCoachPlacement } from './coachMarkLayout';
 import { useCoachMarkMeasure } from './CoachMarkProvider';
 import type { CoachStep, Rect } from './types';
 
-const SCRIM = 'rgba(0,0,0,0.62)';
+// 遮罩 (scrim) always darkens toward black, never a theme surface token. Dark
+// mode goes deeper (user feedback 2026-06-29) so the spotlight reads against a
+// dim OLED page; light mode keeps the lighter dim.
+const SCRIM_DARK = 'rgba(0,0,0,0.82)';
+const SCRIM_LIGHT = 'rgba(0,0,0,0.62)';
+
+// 字卡 (caption bubble) is a fixed near-black card with white text in BOTH
+// modes — the coach-mark convention (a dark bubble floats clearly over any
+// page) and the user's「黑底白字」ask. Self-contained palette so contrast never
+// depends on the resolved theme; only the accent stays on-brand via tokens.
+const BUBBLE_BG = '#15171C';
+const BUBBLE_TITLE = '#FFFFFF';
+const BUBBLE_BODY = 'rgba(255,255,255,0.84)';
+const BUBBLE_MUTED = 'rgba(255,255,255,0.55)';
+const DOT_IDLE = 'rgba(255,255,255,0.28)';
+
 const RING_PAD = 6; // px the highlight ring grows past the target
-const GAP = 10; // px between target and the caption arrow
-const ARROW = 9; // half-width / height of the caption arrow
+const GAP = 12; // px between the target and the caption bubble
 
 /**
  * 引導遮罩 — a step-by-step spotlight tour. For each step it measures the
  * element registered under `step.targetId` (via `useCoachMarkTarget`), dims
- * everything except that element with four scrim rectangles, draws a
- * highlight ring around it, and floats a caption bubble (with an arrow) above
- * or below it per `pickCoachPlacement`.
+ * everything except that element with four scrim rectangles, draws a rounded
+ * highlight ring around it, and floats a rounded dark caption bubble just above
+ * or below it per `pickCoachPlacement`. No arrow (per 2026-06-29 feedback — the
+ * triangle was the only sharp 銳角; the ring already points at the target).
  *
  * Requires a `<CoachMarkProvider>` ancestor. If a step's target isn't mounted
  * the step degrades to a full-dim screen with a centred caption — never a
- * crash. Tapping the dim area advances to the next step.
+ * crash. Tapping the dim area advances to the next step. Set `numbered` for
+ * procedural 1→2→3 flows; leave it off for parallel/alternative targets.
  */
 interface CoachMarkOverlayProps {
   visible: boolean;
   steps: CoachStep[];
+  /** Number each step with a badge (procedural flows only). */
+  numbered?: boolean;
   /** Called when the user finishes the last step or taps 略過. */
   onClose: () => void;
 }
 
-export function CoachMarkOverlay({ visible, steps, onClose }: CoachMarkOverlayProps) {
-  const { tokens } = useTheme();
-  const styles = useMemo(() => makeStyles(tokens), [tokens]);
+export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMarkOverlayProps) {
+  const { tokens, resolved } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens, resolved), [tokens, resolved]);
   const measure = useCoachMarkMeasure();
 
   const [index, setIndex] = useState(0);
@@ -96,33 +114,13 @@ export function CoachMarkOverlay({ visible, steps, onClose }: CoachMarkOverlayPr
       }
     : null;
 
-  // Caption bubble + arrow absolute positions.
+  // Caption bubble position — no arrow, the rounded card sits just past the
+  // spotlight with a small gap.
   let bubbleStyle: ViewStyle;
-  let arrowStyle: ViewStyle | null = null;
   if (hole && placement.placement === 'below') {
-    bubbleStyle = { top: hole.y + hole.h + GAP + ARROW, left: 16, right: 16 };
-    arrowStyle = {
-      top: hole.y + hole.h + GAP,
-      left: placement.arrowCenterX - ARROW,
-      borderLeftWidth: ARROW,
-      borderRightWidth: ARROW,
-      borderBottomWidth: ARROW,
-      borderBottomColor: tokens.bg.modal,
-    };
+    bubbleStyle = { top: hole.y + hole.h + GAP, left: 16, right: 16 };
   } else if (hole && placement.placement === 'above') {
-    bubbleStyle = {
-      bottom: screen.height - (hole.y - GAP - ARROW),
-      left: 16,
-      right: 16,
-    };
-    arrowStyle = {
-      top: hole.y - GAP - ARROW,
-      left: placement.arrowCenterX - ARROW,
-      borderLeftWidth: ARROW,
-      borderRightWidth: ARROW,
-      borderTopWidth: ARROW,
-      borderTopColor: tokens.bg.modal,
-    };
+    bubbleStyle = { bottom: screen.height - (hole.y - GAP), left: 16, right: 16 };
   } else {
     bubbleStyle = { top: screen.height * 0.4, left: 16, right: 16 };
   }
@@ -164,11 +162,16 @@ export function CoachMarkOverlay({ visible, steps, onClose }: CoachMarkOverlayPr
           <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
         )}
 
-        {arrowStyle ? <View pointerEvents="none" style={[styles.arrow, arrowStyle]} /> : null}
-
         {/* Bubble swallows taps so its buttons work without advancing. */}
         <Pressable style={[styles.bubble, bubbleStyle]} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.bubbleTitle}>{step.title}</Text>
+          <View style={styles.titleRow}>
+            {numbered ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{index + 1}</Text>
+              </View>
+            ) : null}
+            <Text style={styles.bubbleTitle}>{step.title}</Text>
+          </View>
           <Text style={styles.bubbleBody}>{step.body}</Text>
 
           <View style={styles.controls}>
@@ -207,14 +210,14 @@ export function CoachMarkOverlay({ visible, steps, onClose }: CoachMarkOverlayPr
   );
 }
 
-function makeStyles(tokens: ThemeTokens) {
+function makeStyles(tokens: ThemeTokens, resolved: ResolvedTheme) {
   return StyleSheet.create({
     fill: {
       flex: 1,
     },
     scrim: {
       position: 'absolute',
-      backgroundColor: SCRIM,
+      backgroundColor: resolved === 'dark' ? SCRIM_DARK : SCRIM_LIGHT,
     },
     ring: {
       position: 'absolute',
@@ -222,29 +225,41 @@ function makeStyles(tokens: ThemeTokens) {
       borderWidth: 2,
       borderColor: tokens.action.primary,
     },
-    arrow: {
-      position: 'absolute',
-      width: 0,
-      height: 0,
-      borderLeftColor: 'transparent',
-      borderRightColor: 'transparent',
-    },
     bubble: {
       position: 'absolute',
-      backgroundColor: tokens.bg.modal,
-      borderRadius: 14,
+      backgroundColor: BUBBLE_BG,
+      borderRadius: 16,
       padding: 16,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 6,
+    },
+    badge: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: tokens.action.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    badgeText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: tokens.action.onPrimary,
     },
     bubbleTitle: {
       fontSize: 16,
       fontWeight: '700',
-      color: tokens.text.primary,
-      marginBottom: 6,
+      color: BUBBLE_TITLE,
+      flexShrink: 1,
     },
     bubbleBody: {
       fontSize: 14,
       lineHeight: 20,
-      color: tokens.text.secondary,
+      color: BUBBLE_BODY,
     },
     controls: {
       flexDirection: 'row',
@@ -254,7 +269,7 @@ function makeStyles(tokens: ThemeTokens) {
     },
     skip: {
       fontSize: 14,
-      color: tokens.text.tertiary,
+      color: BUBBLE_MUTED,
     },
     dots: {
       flexDirection: 'row',
@@ -264,7 +279,7 @@ function makeStyles(tokens: ThemeTokens) {
       width: 6,
       height: 6,
       borderRadius: 3,
-      backgroundColor: tokens.border.default,
+      backgroundColor: DOT_IDLE,
     },
     dotActive: {
       backgroundColor: tokens.action.primary,
@@ -276,7 +291,7 @@ function makeStyles(tokens: ThemeTokens) {
     },
     navText: {
       fontSize: 14,
-      color: tokens.action.primary,
+      color: '#FFFFFF',
     },
     nextBtn: {
       backgroundColor: tokens.action.primary,

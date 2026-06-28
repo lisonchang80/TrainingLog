@@ -24,7 +24,12 @@ export function PageHelpHost({ help }: { help: PageHelpHandle }) {
 
   if (content.style === 'coach') {
     return content.coach ? (
-      <CoachMarkOverlay visible={visible} steps={content.coach} onClose={close} />
+      <CoachMarkOverlay
+        visible={visible}
+        steps={content.coach}
+        numbered={content.coachNumbered}
+        onClose={close}
+      />
     ) : null;
   }
 
@@ -49,6 +54,7 @@ export function PageHelpHost({ help }: { help: PageHelpHandle }) {
         <CoachMarkOverlay
           visible={visible && tour}
           steps={content.coach}
+          numbered={content.coachNumbered}
           onClose={() => {
             setTour(false);
             close();

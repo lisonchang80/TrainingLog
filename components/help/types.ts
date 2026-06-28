@@ -85,6 +85,13 @@ export interface PageHelpContent {
   info?: InfoContent;
   /** Present when style is 'coach' or 'mixed'. */
   coach?: CoachStep[];
+  /**
+   * When the coach steps form a sequential procedure (do 1 → 2 → 3), set this
+   * so the overlay numbers each step with a badge. Leave unset for parallel /
+   * alternative targets (e.g. the Today tab's three independent start methods,
+   * which are choices, not ordered steps).
+   */
+  coachNumbered?: boolean;
 }
 
 /** Per-page help content, both locales. Resolved by `usePageHelp` via `useLocale()`. */

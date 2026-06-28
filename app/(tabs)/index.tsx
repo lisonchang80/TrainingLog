@@ -171,7 +171,8 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { todayHelp } from '@/components/help/content/today';
+import { todayMinimalHelp } from '@/components/help/content/today-minimal';
+import { todayPlanHelp } from '@/components/help/content/today-plan';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -248,11 +249,17 @@ function TodayScreen() {
   // 切換即時 re-render。gate 首頁三塊計劃面 + 開始模板直接帶 (null,null) 解析。
   const { isMinimal } = useAppMode();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  // Page help overlay (pilot — page-help-overlay skill). Resolves todayHelp to
-  // the active locale + auto-opens the InfoModal once on first visit. The 3
-  // coach targets tag the idle 三區; in-session gestures are a deferred
-  // follow-up. CoachMarkProvider wraps this screen via the default export below.
-  const help = usePageHelp('today', todayHelp, { autoShowOnce: true });
+  // Page help overlay (pilot — page-help-overlay skill). Coach-only 引導遮罩
+  // (no text-only modal). 計劃 vs 極簡 are two separate content files so the tour
+  // explains only the current mode — minimal mode drops the 計劃訓練 step. Each
+  // mode owns its own `help_seen:` flag (auto-shows once per mode). The coach
+  // targets tag the idle 三區; in-session gestures are a deferred follow-up.
+  // CoachMarkProvider wraps this screen via the default export below.
+  const help = usePageHelp(
+    isMinimal ? 'today-minimal' : 'today-plan',
+    isMinimal ? todayMinimalHelp : todayPlanHelp,
+    { autoShowOnce: true },
+  );
   const planTarget = useCoachMarkTarget('today.planPanel');
   const templateTarget = useCoachMarkTarget('today.templateList');
   const blankTarget = useCoachMarkTarget('today.blankStart');
