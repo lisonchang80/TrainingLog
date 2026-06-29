@@ -24,6 +24,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase } from '@/components/database-provider';
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { sessionDetailHelp } from '@/components/help/content/session-detail';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -232,7 +240,7 @@ function useSessionStyles() {
  * zone chart placeholder so the structure is ready for Phase B HealthKit
  * ingest — both tile and chart render NULL/empty state in Phase A.
  */
-export default function SessionDetailScreen() {
+function SessionDetailScreen() {
   // 2026-05-20 overnight #58 — ADR-0015 § Tap 日格行為: history calendar tap
   // emits ?sameDayIds=<csv> so the detail page can show ← N/M → switcher
   // between sessions sharing the same date. Absent param (e.g. opened from
@@ -258,6 +266,17 @@ export default function SessionDetailScreen() {
   const { isMinimal } = useAppMode();
   // ADR-0025 — token-driven styles for this screen.
   const styles = useSessionStyles();
+
+  // 頁面說明 — 引導遮罩 tour (mirrors the template editor; this is its editing
+  // twin). Auto-shows once. The spotlight steps target VIEW-mode action-bar
+  // buttons (the state the tour runs in); the edit-mode-only ⚙️ menu and set-row
+  // gestures are screenshot cards in the same tour (page-help-overlay #6).
+  const help = usePageHelp('session-detail', sessionDetailHelp, {
+    autoShowOnce: true,
+  });
+  const editTarget = useCoachMarkTarget('session.edit');
+  const saveTemplateTarget = useCoachMarkTarget('session.saveTemplate');
+  const deleteTarget = useCoachMarkTarget('session.delete');
 
   const navState = useMemo(
     () =>
@@ -1938,6 +1957,7 @@ export default function SessionDetailScreen() {
             </Text>
           ) : null}
         </View>
+        <HelpButton onPress={help.open} />
         {editMode ? (
           <Pressable
             onPress={() => {
@@ -2235,6 +2255,7 @@ export default function SessionDetailScreen() {
           </Pressable>
         ) : (
           <Pressable
+            ref={editTarget.ref}
             style={styles.actionBtn}
             onPress={() => {
               titleRef.current?.blur();
@@ -2257,6 +2278,7 @@ export default function SessionDetailScreen() {
           </Text>
         </Pressable>
         <Pressable
+          ref={saveTemplateTarget.ref}
           style={styles.actionBtn}
           onPress={() => {
             titleRef.current?.blur();
@@ -2267,6 +2289,7 @@ export default function SessionDetailScreen() {
           </Text>
         </Pressable>
         <Pressable
+          ref={deleteTarget.ref}
           style={styles.actionBtn}
           onPress={() => {
             titleRef.current?.blur();
@@ -2431,7 +2454,22 @@ export default function SessionDetailScreen() {
       />
       {/* Round F Q2 — bottom toast (replaces Alert.alert on [儲存模板]). */}
       <ToastHost controller={toastRef.current!} />
+
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the in-component
+ * useCoachMarkTarget hooks (session-detail orientation tour) register
+ * correctly — a context consumer can't sit beside its own provider.
+ */
+export default function SessionDetailScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <SessionDetailScreen />
+    </CoachMarkProvider>
   );
 }
 
