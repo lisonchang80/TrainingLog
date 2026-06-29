@@ -38,6 +38,15 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { exerciseDetailHelp } from '@/components/help/content/exercise-detail';
+
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that share the
  * memoised style sheet. Each sub-component calls `useExerciseStyles()`
@@ -65,12 +74,17 @@ const LOAD_TYPE_KEY: Record<string, 'weighted' | 'bodyweight' | 'assisted'> = {
  * Per ADR-0010 acceptance criterion #4: 19 muscle individual highlight,
  * primary in warm color, secondary in cool color.
  */
-export default function ExerciseDetailScreen() {
+function ExerciseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
   const styles = useExerciseStyles();
+  const help = usePageHelp('exercise-detail', exerciseDetailHelp, {
+    autoShowOnce: true,
+  });
+  const diagramTarget = useCoachMarkTarget('exercise.diagram');
+  const footerTarget = useCoachMarkTarget('exercise.footer');
   const [data, setData] = useState<ExerciseWithMuscles | null>(null);
   const [highlight, setHighlight] = useState<Map<string, MuscleRole>>(new Map());
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
@@ -121,9 +135,9 @@ export default function ExerciseDetailScreen() {
       title: t('page', 'exerciseDetail'),
       headerBackVisible: false,
       headerLeft: renderHeaderLeft,
-      headerRight: undefined,
+      headerRight: () => <HelpButton onPress={help.open} />,
     });
-  }, [navigation, renderHeaderLeft]);
+  }, [navigation, renderHeaderLeft, help.open]);
 
   if (!data) {
     return (
@@ -159,7 +173,10 @@ export default function ExerciseDetailScreen() {
         )}
 
         {highlight.size > 0 && (
-          <View style={styles.diagramCard}>
+          <View
+            style={styles.diagramCard}
+            ref={diagramTarget.ref}
+            collapsable={false}>
             <MuscleBodyTagger highlight={highlight} mode="readonly" />
           </View>
         )}
@@ -172,7 +189,7 @@ export default function ExerciseDetailScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={styles.footer} ref={footerTarget.ref} collapsable={false}>
         <FooterButton
           label={t('domain', 'history')}
           onPress={() => router.push(`/exercise-history/${id}`)}
@@ -250,7 +267,20 @@ export default function ExerciseDetailScreen() {
         }}
         onCancel={() => setNoteSheetOpen(false)}
       />
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so ExerciseDetailScreen's
+ * useCoachMarkTarget anchors (diagram / footer) register against the provider.
+ */
+export default function ExerciseDetailScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <ExerciseDetailScreen />
+    </CoachMarkProvider>
   );
 }
 

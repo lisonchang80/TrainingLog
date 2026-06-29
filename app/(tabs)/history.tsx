@@ -10,6 +10,15 @@ import { useAchievementsEnabled } from '@/src/achievements-enabled';
 import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { historyHelp } from '@/components/help/content/history';
+
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryMode = 'calendar' | 'list';
 
@@ -47,7 +56,7 @@ function historyModeLabel(m: HistoryMode): string {
  * The previous flat list (`HistoryListPanel`) is gone — Agent B's
  * `ListView` carries the dense escape-hatch table now.
  */
-export default function HistoryScreen() {
+function HistoryScreen() {
   // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
   // subscribe to language changes so the heading + the inline subTabLabel() /
   // historyModeLabel() t() calls re-evaluate fresh on a `setLocale()` while the
@@ -56,6 +65,10 @@ export default function HistoryScreen() {
   useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  const help = usePageHelp('history', historyHelp, { autoShowOnce: true });
+  const subTabsTarget = useCoachMarkTarget('history.subtabs');
+  const modeTarget = useCoachMarkTarget('history.mode');
+  const calendarTarget = useCoachMarkTarget('history.calendar');
   const [tab, setTab] = useState<SubTab>('history');
   const [mode, setMode] = useState<HistoryMode>('calendar');
 
@@ -75,8 +88,19 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.heading}>{t('page', 'history')}</Text>
-        <View style={styles.subTabRow}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+          <Text style={styles.heading}>{t('page', 'history')}</Text>
+          <HelpButton onPress={help.open} />
+        </View>
+        <View
+          style={styles.subTabRow}
+          ref={subTabsTarget.ref}
+          collapsable={false}>
           {visibleTabs.map((sub) => (
             <Pressable
               key={sub.key}
@@ -93,7 +117,7 @@ export default function HistoryScreen() {
           ))}
         </View>
         {effectiveTab === 'history' ? (
-          <View style={styles.modeRow}>
+          <View style={styles.modeRow} ref={modeTarget.ref} collapsable={false}>
             {HISTORY_MODES.map((m) => (
               <Pressable
                 key={m.key}
@@ -112,11 +136,30 @@ export default function HistoryScreen() {
         ) : null}
       </View>
       {effectiveTab === 'history' ? (
-        mode === 'calendar' ? <MonthGridView /> : <ListView />
+        mode === 'calendar' ? (
+          <View ref={calendarTarget.ref} collapsable={false} style={{ flex: 1 }}>
+            <MonthGridView />
+          </View>
+        ) : (
+          <ListView />
+        )
       ) : null}
       {effectiveTab === 'stats' ? <StatsPanel /> : null}
       {effectiveTab === 'achievements' ? <AchievementsPanel /> : null}
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so HistoryScreen's useCoachMarkTarget
+ * anchors (subtabs / mode / calendar) register against the provider.
+ */
+export default function HistoryScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <HistoryScreen />
+    </CoachMarkProvider>
   );
 }
 

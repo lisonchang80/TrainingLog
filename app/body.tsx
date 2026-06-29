@@ -46,6 +46,15 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { bodyHelp } from '@/components/help/content/body';
+
 /**
  * Body tab — slice 7.
  *
@@ -71,10 +80,14 @@ function useBodyStyles() {
   return useMemo(() => makeStyles(tokens), [tokens]);
 }
 
-export default function BodyScreen() {
+function BodyScreen() {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useBodyStyles();
+  const help = usePageHelp('body', bodyHelp, { autoShowOnce: true });
+  const inputTarget = useCoachMarkTarget('body.input');
+  const chartTarget = useCoachMarkTarget('body.chart');
+  const legendTarget = useCoachMarkTarget('body.legend');
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [bwInput, setBwInput] = useState('');
@@ -140,7 +153,15 @@ export default function BodyScreen() {
         <ScrollView
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled">
-          <Text style={styles.heading}>{t('page', 'bodyMetrics')}</Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+            <Text style={styles.heading}>{t('page', 'bodyMetrics')}</Text>
+            <HelpButton onPress={help.open} />
+          </View>
 
           {/* Latest readings */}
           <View style={styles.statsRow}>
@@ -169,7 +190,7 @@ export default function BodyScreen() {
 
           {/* Input form */}
           <Text style={styles.section}>{t('button', 'addRecord')}</Text>
-          <View style={styles.inputRow}>
+          <View style={styles.inputRow} ref={inputTarget.ref} collapsable={false}>
             <Field
               label={tBodyweightWithUnit(unit)}
               value={bwInput}
@@ -215,8 +236,10 @@ export default function BodyScreen() {
 
           {/* Chart */}
           <Text style={styles.section}>{t('domain', 'trend')}</Text>
-          <BodyTrendChart metrics={metrics} visibility={visibility} unit={unit} />
-          <View style={styles.legendRow}>
+          <View ref={chartTarget.ref} collapsable={false}>
+            <BodyTrendChart metrics={metrics} visibility={visibility} unit={unit} />
+          </View>
+          <View style={styles.legendRow} ref={legendTarget.ref} collapsable={false}>
             <LegendChip
               label={t('domain', 'bodyweight')}
               color={SERIES_COLORS.bodyweight}
@@ -259,7 +282,20 @@ export default function BodyScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so BodyScreen's useCoachMarkTarget
+ * anchors (input / chart / legend) register against the provider.
+ */
+export default function BodyScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <BodyScreen />
+    </CoachMarkProvider>
   );
 }
 

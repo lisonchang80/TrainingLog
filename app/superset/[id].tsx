@@ -35,6 +35,15 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { supersetDetailHelp } from '@/components/help/content/superset-detail';
+
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that share one
  * memoised style sheet.
@@ -59,12 +68,17 @@ function useSupersetStyles() {
  * 9.8a scope disables 歷史 / 圖表 (no session data possible without explode
  * integration shipped in 9.8b). 9.8c will enable them once data exists.
  */
-export default function SupersetDetailScreen() {
+function SupersetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
   const styles = useSupersetStyles();
+  const help = usePageHelp('superset-detail', supersetDetailHelp, {
+    autoShowOnce: true,
+  });
+  const pairTarget = useCoachMarkTarget('superset.pair');
+  const footerTarget = useCoachMarkTarget('superset.footer');
   const [data, setData] = useState<ReusableSupersetWithExercises | null>(null);
   // Slice 10c #24 — dynamic session count (replaces `superset.use_count`,
   // which only bumps on Template explode and under-counts real usage).
@@ -104,9 +118,9 @@ export default function SupersetDetailScreen() {
       title: t('page', 'supersetDetails'),
       headerBackVisible: false,
       headerLeft: renderHeaderLeft,
-      headerRight: undefined,
+      headerRight: () => <HelpButton onPress={help.open} />,
     });
-  }, [navigation, renderHeaderLeft]);
+  }, [navigation, renderHeaderLeft, help.open]);
 
   if (!data) {
     return (
@@ -160,7 +174,10 @@ export default function SupersetDetailScreen() {
           {sessionCount > 0 ? ' ' + tUsedNSessions(sessionCount) : ''}
         </Text>
 
-        <View style={styles.exercisesRow}>
+        <View
+          style={styles.exercisesRow}
+          ref={pairTarget.ref}
+          collapsable={false}>
           <ExerciseTile
             exercise={exA}
             onPress={
@@ -177,7 +194,7 @@ export default function SupersetDetailScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={styles.footer} ref={footerTarget.ref} collapsable={false}>
         {/* Slice 10c — independent superset history/chart pages were dropped
             in favor of the 3-段 cluster filter on the per-exercise pages.
             We funnel "歷史" / "圖表" to the A-side exercise pre-set to
@@ -213,7 +230,20 @@ export default function SupersetDetailScreen() {
         />
         <FooterButton label={t('common', 'delete')} destructive onPress={onDelete} />
       </View>
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so SupersetDetailScreen's
+ * useCoachMarkTarget anchors (pair / footer) register against the provider.
+ */
+export default function SupersetDetailScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <SupersetDetailScreen />
+    </CoachMarkProvider>
   );
 }
 
