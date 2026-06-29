@@ -80,6 +80,67 @@ Page recommendations (2026-06-29 survey, by line count / complexity):
 | `app/exercise/[id].tsx`, `app/body.tsx` | info |
 | settings / small `[id]` pages | usually none |
 
+## Third style — `coach-interactive` (互動引導 / Interactive walkthrough) — PLANNED, infra NOT built
+
+A third style proposed 2026-06-29. It differs from the two shipped styles by ONE
+axis: **the user actually performs each step**, instead of watching.
+
+| Style | Interactivity | One line | Infra |
+|---|---|---|---|
+| `coach` (引導遮罩 / Coach marks) | **passive** | Ring + caption on an element; tap anywhere to advance; the element is NOT operated | ✅ built |
+| `info` + `images[]` (截圖流程圖 / Onboarding carousel) | none | Static screenshots, one per step, read straight through | ✅ built |
+| `coach-interactive` (互動引導 / Interactive walkthrough) | **active** | The mask has a REAL hole; the user taps the live control THROUGH it and the tour advances only when the real action completes — walking the whole creation flow | ❌ not built |
+
+### Root cause — why `coach` can't just be upgraded in place
+
+Read `CoachMarkOverlay.tsx` (verified 2026-06-29). Three hard-wired behaviours
+block interactivity:
+
+1. The whole screen is one full-screen `<Pressable onPress={next}>` (`:129-131`)
+   → a tap anywhere = "next"; touches never reach the real button beneath.
+2. The hole is visual-only — four scrim rects + a `pointerEvents="none"` ring
+   (`:132-160`). The source says so: `:107` "visual only — the Modal intercepts
+   touches".
+3. Advance = tap the dim area → `next()` (`:99-102`); it never listens for "the
+   user actually did the action".
+
+### 可/不可 table
+
+| Capability | Now | Root cause | To build it |
+|---|---|---|---|
+| Highlight an element + caption (passive) | ✅ | full-screen Pressable + scrim + ring | — |
+| Let the user really tap the control UNDER the hole | ❌ | `<Modal>`'s full-screen Pressable intercepts; hole is cosmetic | drop `<Modal>`; render as a root portal with `pointerEvents="box-none"`; each scrim rect `auto`; leave the hole empty so touches pass through |
+| Advance only when the step's real action completes (event-driven) | ❌ | advance = tap-anywhere → `next()` | overlay subscribes to app-state events (row added / navigation succeeded) to advance, not its own `onPress` |
+| Walk a creation flow ACROSS screens | ❌ | each step measures one `targetId`; the tour doesn't follow navigation | lift tour state above navigation; survive across screens |
+
+**Verdict**: a NEW overlay variant (≈ `react-native-copilot` / `rn-tourguide`
+tap-through tour). It can REUSE the existing `measure`/Provider/scrim maths, but
+the Modal-intercept model and the advance model must be rewritten — ~1 isolated
+infra commit, medium risk, must device-verify touch pass-through. **Status:
+documented backlog, infra NOT implemented.** Schedule the infra BEFORE rolling
+this style onto any page; until then `coach-interactive` is NOT a selectable
+`HelpStyle` (content authors must not emit it — `tsc` would reject it anyway).
+
+### Which pages / features suit `coach-interactive`
+
+Criterion: the page has a **sequential build/setup flow** worth hand-holding the
+user through ONCE, doing it for real. Parallel choices (no order), pure
+interpretation (charts), and one-off single gestures do NOT qualify.
+
+| Page / feature | Fit | Why | Fallback (until infra exists) |
+|---|---|---|---|
+| 課表精靈 `app/program-wizard/new.tsx` | ⭐⭐⭐ best | already a multi-step wizard; strong order; first run is where users stall | 截圖流程圖 |
+| 超級組建立 `app/superset/new.tsx` | ⭐⭐⭐ | pick exercises → order → save; sequential creation | 截圖流程圖 |
+| 模板編輯器 `components/template-editor/*` | ⭐⭐ | add exercise → add sets → (form cluster / superset) → save; flow is freer, not strictly linear | passive `coach` + 截圖 |
+| Today first in-session logging (打勾 / 長按遞減 / 左滑投影) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating* | 截圖流程圖 (constraint #6) |
+| First-run 身體數據 / 備份設定 | ⭐ | short setup flow; optional | `info`, or no help |
+
+Stay on their current style (do NOT force interactive):
+- Today idle three entry points (計劃 / 模板 / 空白) = **parallel choices**, not a
+  sequence → keep passive `coach`, unnumbered.
+- exercise-chart / exercise-history / history / body-heatmap / 動作詳情 = pure
+  interpretation → `info`.
+
 ## Shared infra contract (already built — do NOT rebuild)
 
 Everything is under `components/help/` and exported from `components/help/index.ts`:
