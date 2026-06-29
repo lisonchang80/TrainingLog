@@ -65,15 +65,6 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
-import {
-  CoachMarkProvider,
-  HelpButton,
-  PageHelpHost,
-  useCoachMarkTarget,
-  usePageHelp,
-} from '@/components/help';
-import { programWizardHelp } from '@/components/help/content/program-wizard';
-
 /**
  * ADR-0025 — DRY helper. The wizard's many sub-component functions
  * (NameAndTagPanel, CycleConfigPanel, …) each call this instead of
@@ -93,7 +84,7 @@ function useWizStyles() {
  *   - on Confirm, expands the draft into cells and persists Program + cells +
  *     attaches each picked template to the new program
  */
-function ProgramWizardScreen() {
+export default function ProgramWizardScreen() {
   const db = useDatabase();
   const router = useRouter();
   const { tokens } = useTheme();
@@ -103,12 +94,6 @@ function ProgramWizardScreen() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [busy, setBusy] = useState(false);
-
-  const help = usePageHelp('program-wizard', programWizardHelp, {
-    autoShowOnce: true,
-  });
-  const stepHeaderTarget = useCoachMarkTarget('wizard.stepHeader');
-  const panelTarget = useCoachMarkTarget('wizard.panel');
 
   // Wave 18g (Phase 6, smoke-revision) — same-name overwrite UX is
   // **inline**, not modal: as the user types the name, we detect a
@@ -455,7 +440,6 @@ function ProgramWizardScreen() {
           ),
           headerRight: () => (
             <View style={styles.headerRightRow}>
-              <HelpButton onPress={help.open} />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={rightLabel}
@@ -477,11 +461,8 @@ function ProgramWizardScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <View ref={stepHeaderTarget.ref} collapsable={false}>
-            <StepHeader step={state.step} />
-          </View>
+          <StepHeader step={state.step} />
 
-          <View ref={panelTarget.ref} collapsable={false}>
           {state.step === 'NameAndTag' && (
             <NameAndTagPanel
               state={state}
@@ -515,24 +496,9 @@ function ProgramWizardScreen() {
           {state.step === 'Confirm' && (
             <ConfirmPanel state={state} overwriteTarget={overwriteTarget} />
           )}
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <PageHelpHost help={help} />
     </SafeAreaView>
-  );
-}
-
-/**
- * Wrap from OUTSIDE in CoachMarkProvider so the in-component
- * useCoachMarkTarget hooks (wizard orientation tour) register correctly.
- */
-export default function ProgramWizardScreenWithHelp() {
-  return (
-    <CoachMarkProvider>
-      <ProgramWizardScreen />
-    </CoachMarkProvider>
   );
 }
 
