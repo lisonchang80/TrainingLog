@@ -1,3 +1,4 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useDatabase } from '@/components/database-provider';
@@ -50,6 +51,15 @@ export function usePageHelp(
       cancelled = true;
     };
   }, [db, pageId, opts?.autoShowOnce]);
+
+  // Dismiss the overlay when the host screen blurs (deep-link / tab switch /
+  // back). The RN <Modal> floats on the navigation stack, so without this it
+  // stays presented on top of the next screen until manually skipped.
+  useFocusEffect(
+    useCallback(() => {
+      return () => setVisible(false);
+    }, []),
+  );
 
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
