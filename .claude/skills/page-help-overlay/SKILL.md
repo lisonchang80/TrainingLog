@@ -51,16 +51,11 @@ to every page from now on:
    arrow (the rounded ring + bubble point at the target). Content/wirer agents
    CONSUME this; they never touch `components/help/*`. If a page needs a new look,
    STOP and report — the integrator changes infra in one place.
-6. **Coach can't show the flow → fall back to a screenshot+text flow diagram.**
-   When a procedure genuinely can't be conveyed by the spotlight tour — a gesture
-   the ring can't highlight (mid-drag, swipe, long-press), or a sequence that
-   spans screens/states the overlay can't hold — use an `info` (or `mixed`)
-   diagram instead of forcing it into coach steps: an ordered set of screenshots,
-   one per step, in `images[]`. **Each image's caption ≤ 2 lines** (same rule as
-   captions; write short, don't truncate). Number the steps in the caption text
-   (`1.` / `2.` …) since it's a real procedure. This is the one case that still
-   needs screenshots on an otherwise coach-led app — capture per the pipeline
-   below.
+6. **A coach tour mixes spotlight steps and screenshot-card steps — weave gestures/menus INTO the tour, don't split them into a separate `info` window.** (Built 2026-06-29.) A `CoachStep` is EITHER a spotlight (`targetId`) OR a screenshot card (`image` = a `require()`'d PNG; omit `targetId`). `CoachMarkOverlay` spotlights real elements and, for the steps a ring can't frame — a pop-up ActionSheet, swipe / long-press / tap-cycle gestures, anything needing the page in another state — shows a centred card with the FULL screenshot + caption, **interleaved in the SAME numbered sequence**. So a page's whole flow stays ONE 引導遮罩. Keep screenshot-card steps to **≤3 per tour**; captions still ≤2 lines.
+   - **Template editor is the precedent (shipped):** 5 steps = 加入動作🔦 → 動作卡🔦 → ⚙️選單🖼️ → 設定每一組🖼️ → 儲存/開始🔦 (`content/template-editor.ts`).
+   - The earlier idea of falling back to a *standalone* `info`/`mixed` window for these gestures was tried for the template editor and **rejected by the user — "步驟能用遮罩就用遮罩；不能用遮罩再用截圖＋文字，穿插在遮罩的步驟中；不要獨立出來."** A long standalone info window also hit a real bug (see InfoModal note in the infra section). `info`/`mixed` is now ONLY for pure-interpretation pages that have NO tour at all (a chart legend, a heatmap's colours).
+
+7. **Verify EVERY operation against source before writing it — never infer from a handler name** (user directive 2026-06-29, "請確定是否有這些功能再寫，之後功能也一樣"). Open the component, read the actual config. Real catches this session, all initially wrong from prop-name guessing: the template ⚙️ menu is 備註 / 休息時間 / 移動動作 / 設為常設·一般 / 刪除 — there is **NO「改器材」** (a draft fabricated it; truth in `openGearMenu`); tapping a set's label is a **3-way cycle 正式→熱身→遞減組** (`cycleSetKind` → `templateOps.ts`), not a 2-way warm-up/working toggle; set swipe = **左滑刪除 / 右滑複製·備註** (the earlier draft listed only 左滑). Cite the source file + line in the content file's header comment so the next author can re-verify against drift.
 
 Page recommendations (2026-06-29 survey, by line count / complexity):
 
@@ -131,7 +126,7 @@ interpretation (charts), and one-off single gestures do NOT qualify.
 |---|---|---|---|
 | 課表精靈 `app/program-wizard/new.tsx` | ⭐⭐⭐ best | already a multi-step wizard; strong order; first run is where users stall | 截圖流程圖 |
 | 超級組建立 `app/superset/new.tsx` | ⭐⭐⭐ | pick exercises → order → save; sequential creation | 截圖流程圖 |
-| 模板編輯器 `components/template-editor/*` | ⭐⭐ | add exercise → add sets → (form cluster / superset) → save; flow is freer, not strictly linear | passive `coach` + 截圖 |
+| 模板編輯器 `components/template-editor/*` | ⭐⭐ | add exercise → add sets → (form cluster / superset) → save; flow is freer, not strictly linear | ✅ **SHIPPED** as a 5-step hybrid coach tour (3 spotlight + 2 screenshot cards, `content/template-editor.ts`). The passive-`coach`+screenshot-card mix (constraint #6) is the chosen ship, not a stopgap — only upgrade to tap-through `coach-interactive` if the user later asks. |
 | Today first in-session logging (打勾完成 / 左滑刪除 / 右滑加組·備註 / 長按拖曳排序) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating*. (Gestures verified against `cluster-card.tsx` + `SwipeableSetRow` 2026-06-29 — NOT the earlier guess of 長按=遞減 / 左滑=投影; 投影 is a ⋯-menu item.) | 截圖流程圖 (constraint #6). ⚠️ **DO NOT host the help here as a plain `<Modal>` (InfoModal/coach).** The in-session view (`(tabs)/index.tsx`) is a rapidly-re-rendering, Modal-heavy mega-component whose branch UNMOUNTS on a **Watch-led session end**. A help Modal left open across that unmount leaves a stuck full-screen overlay → page "無法動" (hit 2026-06-29, in-session help reverted). Re-add only via an always-mounted host outside the idle/in-session branch split, or close the help synchronously in every session-end path first. `content/today-session.ts` is kept (orphaned) for that future re-add. |
 | First-run 身體數據 / 備份設定 | ⭐ | short setup flow; optional | `info`, or no help |
 
@@ -157,7 +152,14 @@ Everything is under `components/help/` and exported from `components/help/index.
   Wrap the page in `<CoachMarkProvider>`; tag each highlighted element:
   `const tgt = useCoachMarkTarget('today.checkmark'); <View ref={tgt.ref}>`.
 - Content types in `components/help/types.ts`; pure caption-placement maths in
-  `coachMarkLayout.ts` (unit-tested in `tests/help/`).
+  `coachMarkLayout.ts` (unit-tested in `tests/help/`). Two capabilities added
+  2026-06-29: (a) `CoachStep.image` — a coach step can be a screenshot card
+  instead of a spotlight (constraint #6); (b) `InfoContent.blocks` — interleaved
+  text+image blocks for an `info` page that needs a heading right next to its
+  shot (the `sections`-then-`images` default can't interleave). **`InfoModal`
+  scroll bug fixed same day**: its `ScrollView` needed `flexShrink: 1` or tall
+  content overflowed the card's `maxHeight` and was clipped, not scrollable —
+  any new long `info` content relies on that fix.
 - i18n chrome lives in `strings.ts` namespace `help` (`button`/`gotIt`/`startTour`);
   coach controls reuse `common.back/next/skip/done`. Page CONTENT is NOT in
   `strings.ts` — see below.
@@ -198,12 +200,33 @@ Everything is under `components/help/` and exported from `components/help/index.
 6. **(info/mixed with screenshots)** add PNGs under `assets/help/<pageId>/` and
    `require()` them in the content file. See `assets/help/README.md`.
 
-## Screenshot pipeline (real screenshots — chosen default; they go stale)
+## Screenshot pipeline (real screenshots — they go stale)
 
 Capture with the iOS dev-client sim (`com.lisonchang.TrainingLog`, NOT Expo Go):
-`xcrun simctl io booted screenshot` → crop → `sips --resampleWidth 1200` into
+`xcrun simctl io booted screenshot` → crop → `sips --resampleWidth N` into
 `assets/help/<pageId>/`. NEVER `require()` a not-yet-existing path (breaks Metro).
-When you change a page's UI, recapture its stale shots in the same commit.
+Recapture stale shots in the same commit. To get a populated page (e.g. a demo
+template) use `sim-db-seed-smoke` + deep-link `traininglog://template/<id>`; set
+`help_seen:<pageId>=true` in `app_settings` first so the auto-show doesn't cover
+the page while you shoot. New/changed assets need an app reload to re-bundle.
+
+**Crop gotchas (validated 2026-06-29 — the ⚙️-menu shot took 3 tries):**
+- **macOS has no ImageMagick/PIL by default, and `sips` only centre-crops (no
+  offset).** For an OFFSET crop use the session's stdlib-only `pngcrop.py` (zlib +
+  manual PNG un/re-filter, RGBA/RGB 8-bit): `pngcrop.py in out x y w h`; then
+  `sips --resampleWidth N` to downscale. (Don't install tools — feedback_workflow.)
+- **Don't eyeball crop bounds — scan the pixels for them.** A tight guess clips one
+  side; a loose guess leaks the dimmed page behind (the「(無常設動作)」placeholder
+  bled into the ⚙️ shot's left). For a pop-up card (ActionSheet), read pixels, find
+  the card's bright-region centre x + widest extent, and crop SYMMETRICALLY around
+  the centre, just inside the leak. Verify by re-reading the crop, not by eye.
+- **The content file's `aspectRatio` MUST equal the cropped PNG's `width/height`** —
+  `contentFit:'contain'` then shows it whole; a wrong ratio letterboxes or visually
+  crops. Recompute it whenever you re-crop.
+- **Tall portrait shots need image-`maxHeight` headroom** (`CoachMarkOverlay`
+  cardImage `maxHeight` is 520; `InfoModal` caps its own) or they letterbox; the
+  card still fits the screen.
+
 Full steps + caveats: `assets/help/README.md`.
 
 ## Parallel fan-out (the automation)
