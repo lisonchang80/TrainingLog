@@ -76,7 +76,7 @@ Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 | `app/exercise-chart/[id].tsx` | coach ✅ **(4-step feature-explainer, `coachNumbered:false`: rep buckets/cluster/advanced/metric)** |
 | `app/exercise-history/[id].tsx` | coach ✅ **(4-step: same filters + first SessionRow expand/超/replay)** |
 | `app/(tabs)/library.tsx` | coach ✅ **(3-step: MG tree / equipment dropdown / card meta)** |
-| `app/(tabs)/programs.tsx` | coach ✅ **(3-step: grid is READ-ONLY in idle — copy says "press 編輯 first" / edit / manage row)** |
+| `app/(tabs)/programs.tsx` | coach ✅ **(6-step hybrid: grid spotlight (idle, read-only — "press 編輯 first") → 4 edit-mode screenshot cards 下拉/▼縱列/▶橫列/拖曳 → manage-row spotlight (idle))** |
 | `app/(tabs)/history.tsx` | coach ✅ **(3-step: subtabs / 月曆·表列 / calendar colour+N)** |
 | `app/exercise/[id].tsx` | coach ✅ **(2-step: muscle figure orange=primary blue=secondary / footer)** |
 | `app/superset/[id].tsx` | coach ✅ **(2-step: locked A+B pair / footer 歷史·圖表 open A-side filtered)** |
