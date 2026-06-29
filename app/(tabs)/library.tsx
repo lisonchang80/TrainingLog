@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -389,18 +389,22 @@ function LibraryScreen() {
       </View>
 
       <View style={styles.body}>
-        <View ref={sidebarTarget.ref} collapsable={false}>
-          <Sidebar
-            muscleGroups={muscleGroups}
-            selectedMgId={isSupersetTab ? null : selectedMgId}
-            isSupersetTab={isSupersetTab}
-            subMuscles={subMuscles}
-            selectedMuscleId={selectedMuscleId}
-            onSelectMg={selectMg}
-            onSelectSuperset={selectSuperset}
-            onSelectMuscle={setSelectedMuscleId}
-          />
-        </View>
+        {/* The coach ref is forwarded onto Sidebar's OWN root view — do NOT wrap
+            it in a bare <View>. The sidebar relies on being a direct child of
+            this row (align-items:stretch) to fill the full height so its inner
+            flex:1 ScrollView has height; an unstyled wrapper collapses that
+            chain and the sidebar vanishes (2026-06-29 regression). */}
+        <Sidebar
+          ref={sidebarTarget.ref}
+          muscleGroups={muscleGroups}
+          selectedMgId={isSupersetTab ? null : selectedMgId}
+          isSupersetTab={isSupersetTab}
+          subMuscles={subMuscles}
+          selectedMuscleId={selectedMuscleId}
+          onSelectMg={selectMg}
+          onSelectSuperset={selectSuperset}
+          onSelectMuscle={setSelectedMuscleId}
+        />
         <View style={styles.content}>
           {isSupersetTab ? (
             <SupersetGrid
@@ -496,7 +500,7 @@ interface SidebarProps {
   onSelectMuscle: (id: string | null) => void;
 }
 
-function Sidebar(props: SidebarProps) {
+const Sidebar = forwardRef<View, SidebarProps>(function Sidebar(props, ref) {
   const styles = useLibStyles();
   const {
     muscleGroups,
@@ -509,7 +513,9 @@ function Sidebar(props: SidebarProps) {
     onSelectMuscle,
   } = props;
   return (
-    <View style={styles.sidebarWrap}>
+    // `ref` is the coach-mark target; it must sit on this root so measureInWindow
+    // sees the full-height sidebar. `collapsable={false}` keeps the node real.
+    <View ref={ref} collapsable={false} style={styles.sidebarWrap}>
     <ScrollView
       style={styles.sidebar}
       contentContainerStyle={styles.sidebarContent}
@@ -569,7 +575,7 @@ function Sidebar(props: SidebarProps) {
     </ScrollView>
     </View>
   );
-}
+});
 
 // ---------- Equipment filter dropdown ----------
 

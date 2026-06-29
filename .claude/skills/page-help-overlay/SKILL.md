@@ -206,23 +206,28 @@ Everything is under `components/help/` and exported from `components/help/index.
    (Validated 2026-06-29 on the Today pilot — wrapping inside `return` makes the
    refs silently no-op.) Then tag each `step.targetId` element with
    `useCoachMarkTarget(id).ref` (call the hook at the top of the component, not in
-   JSX). Custom child components don't forward `ref` — wrap them in a thin
-   `<View ref={tgt.ref}>`. **⚠️ But a bare wrapper `<View>` can BREAK a
-   layout-sensitive child's size** (regression hit 2026-06-29, library `<Sidebar>`):
-   the Sidebar (`sidebarWrap` fixed `width:92`, no height) relied on being a
-   DIRECT child of the row `body` so the row's `align-items:stretch` gave it full
-   height → its inner `flex:1` ScrollView filled. Wrapping it in a plain
-   (column-default) `<View>` interrupted that stretch chain → the ScrollView
-   collapsed to 0 height → **the whole sidebar vanished**, and the now-full-height
-   wrapper made the spotlight a tall left strip that pushed the caption off the top
-   of the screen. Fix: forward the ref into the component's OWN root view
-   (`React.forwardRef` → put it on `sidebarWrap`), or give the wrapper the same
-   layout role the child had (`style={{ width, alignSelf:'stretch' }}` won't fix an
-   inner `flex:1` that needs a defined height — forward-ref is the safe move). And
-   **don't spotlight a full-height element** — the caption has nowhere to go and
-   overflows the status bar; spotlight a representative sub-region or use a card.
-   Missing targets degrade to a centred caption — never crash, but the tour is
-   weaker, so verify every target is reachable in the state the tour runs in.
+   JSX). Custom child components don't forward `ref` — the SAFE move is
+   `React.forwardRef` so the ref lands on the component's OWN root view. **⚠️ Do
+   NOT wrap a layout-sensitive child in a bare `<View ref>`** — it can BREAK the
+   child's size (regression hit + FIXED 2026-06-29, library `<Sidebar>`): the
+   Sidebar (`sidebarWrap` fixed `width:92`, no height) relied on being a DIRECT
+   child of the row `body` so the row's `align-items:stretch` gave it full height →
+   its inner `flex:1` ScrollView filled. Wrapping it in a plain (column-default)
+   `<View>` interrupted that stretch chain → the ScrollView collapsed to 0 height →
+   **the whole sidebar vanished**. Fix shipped: `Sidebar = forwardRef(...)` with
+   `ref` on `sidebarWrap` (no wrapper). A wrapper-style hack (`{ width,
+   alignSelf:'stretch' }`) won't fix an inner `flex:1` that needs a defined height
+   — forward-ref is the move. Missing targets degrade to a centred caption — never
+   crash, but the tour is weaker, so verify every target is reachable in the state
+   the tour runs in.
+   - **Full-height / edge-hugging targets are now SAFE to spotlight** (2026-06-29):
+     `CoachMarkOverlay` positions the caption via `resolveCoachBubbleAnchor`
+     (pure, in `coachMarkLayout.ts`, unit-tested). When the natural side (above a
+     bottom target / below a top target) has no room, it OVERLAYS the caption on a
+     safe band instead of pushing it past the status bar. So you no longer have to
+     avoid spotlighting a tall column (e.g. the library sidebar) — but a card is
+     still clearer for very tall targets if the caption would cover the thing it
+     describes.
 6. **(info/mixed with screenshots)** add PNGs under `assets/help/<pageId>/` and
    `require()` them in the content file. See `assets/help/README.md`.
 

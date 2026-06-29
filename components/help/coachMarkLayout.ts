@@ -62,3 +62,68 @@ export function pickCoachPlacement(
   );
   return { placement, arrowCenterX };
 }
+
+/** Vertical anchor for the caption bubble — exactly one of `top` / `bottom`. */
+export interface CoachBubbleAnchor {
+  /** px from the top edge (mutually exclusive with `bottom`). */
+  top?: number;
+  /** px from the bottom edge (mutually exclusive with `top`). */
+  bottom?: number;
+}
+
+/**
+ * Resolve the caption bubble's vertical anchor so it stays fully on-screen even
+ * when the spotlight target is very tall or hugs a screen edge.
+ *
+ * Normal case (small control, room on the chosen side): anchor the bubble just
+ * past the spotlight — `below` → `top`, `above` → `bottom` — identical to the
+ * previous inline maths.
+ *
+ * Edge case (the library left-sidebar regression, 2026-06-29): a full-height
+ * target — or one starting right under the status bar — leaves no room on the
+ * chosen side, so the naive anchor pushes the bubble off-screen (its top
+ * crossed the status bar). When that happens we OVERLAY the bubble, pinning it
+ * to the OPPOSITE safe band so it never overflows.
+ *
+ * The bubble height is dynamic and never measured; `minBubbleH` is a
+ * conservative estimate used only to detect "no room on this side". The check
+ * is insensitive to its exact value — real overflow cases miss by hundreds of
+ * px — so a normal target is never falsely overlaid.
+ *
+ * @param hole       padded spotlight rect (y/height in window coords), or null
+ * @param placement  the side `pickCoachPlacement` chose
+ * @param screen     window dimensions
+ */
+export function resolveCoachBubbleAnchor(
+  hole: { y: number; h: number } | null,
+  placement: CoachPlacement['placement'],
+  screen: Screen,
+  opts: {
+    gap?: number;
+    safeTop?: number;
+    safeBottom?: number;
+    minBubbleH?: number;
+  } = {},
+): CoachBubbleAnchor {
+  const gap = opts.gap ?? 12;
+  const safeTop = opts.safeTop ?? 56;
+  const safeBottom = opts.safeBottom ?? 56;
+  const minBubbleH = opts.minBubbleH ?? 150;
+
+  if (!hole || placement === 'center') {
+    return { top: Math.round(screen.height * 0.4) };
+  }
+
+  if (placement === 'below') {
+    const top = hole.y + hole.h + gap;
+    // No room below the spotlight → overlay near the top-safe band.
+    if (top + minBubbleH > screen.height - safeBottom) return { top: safeTop };
+    return { top };
+  }
+
+  // 'above'
+  const bottom = screen.height - (hole.y - gap);
+  // No room above the spotlight → overlay near the bottom-safe band.
+  if (bottom + minBubbleH > screen.height - safeTop) return { bottom: safeBottom };
+  return { bottom };
+}

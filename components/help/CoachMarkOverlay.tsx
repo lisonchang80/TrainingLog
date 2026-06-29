@@ -13,7 +13,7 @@ import {
 import { t } from '@/src/i18n';
 import { useTheme, type ResolvedTheme, type ThemeTokens } from '@/src/theme';
 
-import { pickCoachPlacement } from './coachMarkLayout';
+import { pickCoachPlacement, resolveCoachBubbleAnchor } from './coachMarkLayout';
 import { useCoachMarkMeasure } from './CoachMarkProvider';
 import type { CoachStep, Rect } from './types';
 
@@ -118,15 +118,14 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
     : null;
 
   // Caption bubble position — no arrow, the rounded card sits just past the
-  // spotlight with a small gap.
-  let bubbleStyle: ViewStyle;
-  if (hole && placement.placement === 'below') {
-    bubbleStyle = { top: hole.y + hole.h + GAP, left: 16, right: 16 };
-  } else if (hole && placement.placement === 'above') {
-    bubbleStyle = { bottom: screen.height - (hole.y - GAP), left: 16, right: 16 };
-  } else {
-    bubbleStyle = { top: screen.height * 0.4, left: 16, right: 16 };
-  }
+  // spotlight with a small gap. resolveCoachBubbleAnchor keeps it on-screen when
+  // the target is tall or edge-hugging (e.g. the full-height library sidebar):
+  // it overlays a safe band instead of pushing the bubble off the top/bottom.
+  const bubbleStyle: ViewStyle = {
+    ...resolveCoachBubbleAnchor(hole, placement.placement, screen, { gap: GAP }),
+    left: 16,
+    right: 16,
+  };
 
   const isImageStep = step.image != null;
 

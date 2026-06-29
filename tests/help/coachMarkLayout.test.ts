@@ -1,6 +1,7 @@
 import {
   clamp,
   pickCoachPlacement,
+  resolveCoachBubbleAnchor,
 } from '../../components/help/coachMarkLayout';
 import type { Rect, Screen } from '../../components/help/types';
 
@@ -59,5 +60,56 @@ describe('pickCoachPlacement', () => {
     // centre Y exactly at screen.height/2 (422) is NOT < 422 → above
     const mid: Rect = { x: 100, y: 402, width: 50, height: 40 };
     expect(pickCoachPlacement(mid, SCREEN).placement).toBe('above');
+  });
+});
+
+describe('resolveCoachBubbleAnchor', () => {
+  it('centres (top ~ 0.4h) when there is no target hole', () => {
+    expect(resolveCoachBubbleAnchor(null, 'center', SCREEN)).toEqual({
+      top: Math.round(SCREEN.height * 0.4),
+    });
+  });
+
+  it('anchors just BELOW a short top target (room exists → unchanged maths)', () => {
+    // hole at y=80 h=44 → top = 80 + 44 + 12 = 136
+    const a = resolveCoachBubbleAnchor({ y: 80, h: 44 }, 'below', SCREEN, {
+      gap: 12,
+    });
+    expect(a).toEqual({ top: 136 });
+  });
+
+  it('anchors just ABOVE a short bottom target (room exists → unchanged maths)', () => {
+    // hole at y=700 h=40 → bottom = 844 - (700 - 12) = 156
+    const a = resolveCoachBubbleAnchor({ y: 700, h: 40 }, 'above', SCREEN, {
+      gap: 12,
+    });
+    expect(a).toEqual({ bottom: 156 });
+  });
+
+  it('OVERLAYS to the bottom-safe band when an "above" target hugs the top (the sidebar regression)', () => {
+    // Full-height left sidebar: starts ~y=88, spans almost the whole screen.
+    // Naive bottom = 844 - (88 - 12) = 768 → bubble top crosses the status bar.
+    const anchor = resolveCoachBubbleAnchor({ y: 88, h: 660 }, 'above', SCREEN, {
+      gap: 12,
+      safeBottom: 56,
+    });
+    expect(anchor).toEqual({ bottom: 56 });
+  });
+
+  it('OVERLAYS to the top-safe band when a "below" target reaches the bottom', () => {
+    // Tall target whose bottom is near the screen floor: naive top would push
+    // the bubble off the bottom edge.
+    const anchor = resolveCoachBubbleAnchor({ y: 120, h: 680 }, 'below', SCREEN, {
+      gap: 12,
+      safeTop: 56,
+    });
+    expect(anchor).toEqual({ top: 56 });
+  });
+
+  it('never returns both top and bottom', () => {
+    for (const placement of ['above', 'below', 'center'] as const) {
+      const a = resolveCoachBubbleAnchor({ y: 200, h: 100 }, placement, SCREEN);
+      expect(a.top != null && a.bottom != null).toBe(false);
+    }
   });
 });
