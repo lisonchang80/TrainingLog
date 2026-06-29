@@ -132,7 +132,7 @@ interpretation (charts), and one-off single gestures do NOT qualify.
 | 課表精靈 `app/program-wizard/new.tsx` | ⭐⭐⭐ best | already a multi-step wizard; strong order; first run is where users stall | 截圖流程圖 |
 | 超級組建立 `app/superset/new.tsx` | ⭐⭐⭐ | pick exercises → order → save; sequential creation | 截圖流程圖 |
 | 模板編輯器 `components/template-editor/*` | ⭐⭐ | add exercise → add sets → (form cluster / superset) → save; flow is freer, not strictly linear | passive `coach` + 截圖 |
-| Today first in-session logging (打勾 / 長按遞減 / 左滑投影) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating* | 截圖流程圖 (constraint #6) |
+| Today first in-session logging (打勾完成 / 左滑刪除 / 右滑加組·備註 / 長按拖曳排序) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating*. (Gestures verified against `cluster-card.tsx` + `SwipeableSetRow` 2026-06-29 — NOT the earlier guess of 長按=遞減 / 左滑=投影; 投影 is a ⋯-menu item.) | 截圖流程圖 (constraint #6). ⚠️ **DO NOT host the help here as a plain `<Modal>` (InfoModal/coach).** The in-session view (`(tabs)/index.tsx`) is a rapidly-re-rendering, Modal-heavy mega-component whose branch UNMOUNTS on a **Watch-led session end**. A help Modal left open across that unmount leaves a stuck full-screen overlay → page "無法動" (hit 2026-06-29, in-session help reverted). Re-add only via an always-mounted host outside the idle/in-session branch split, or close the help synchronously in every session-end path first. `content/today-session.ts` is kept (orphaned) for that future re-add. |
 | First-run 身體數據 / 備份設定 | ⭐ | short setup flow; optional | `info`, or no help |
 
 Stay on their current style (do NOT force interactive):
