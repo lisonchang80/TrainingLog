@@ -57,15 +57,22 @@ to every page from now on:
 
 7. **Verify EVERY operation against source before writing it — never infer from a handler name** (user directive 2026-06-29, "請確定是否有這些功能再寫，之後功能也一樣"). Open the component, read the actual config. Real catches this session, all initially wrong from prop-name guessing: the template ⚙️ menu is 備註 / 休息時間 / 移動動作 / 設為常設·一般 / 刪除 — there is **NO「改器材」** (a draft fabricated it; truth in `openGearMenu`); tapping a set's label is a **3-way cycle 正式→熱身→遞減組** (`cycleSetKind` → `templateOps.ts`), not a 2-way warm-up/working toggle; set swipe = **左滑刪除 / 右滑複製·備註** (the earlier draft listed only 左滑). Cite the source file + line in the content file's header comment so the next author can re-verify against drift.
 
-Page recommendations (2026-06-29 survey, by line count / complexity):
+**嚮導/精靈式流程頁不加 ⓘ** (user directive 2026-06-29): if the page IS a
+step-by-step guided flow that already walks the user (a `Step N of M` wizard),
+it self-guides — do NOT bolt a help overlay on top. The program wizard had a
+2-step coach + auto-show; the user had it **fully removed** ("計劃精靈不用ⓘ，
+因為精靈本身就是引導，後面再優化看看"). So skip help for wizards even though
+they're "operation pages". Other complex pages still get the ⓘ.
+
+Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 
 | Page | Recommend |
 |---|---|
-| `app/(tabs)/index.tsx` 訓練/今日 | mixed (idle 概念=info, in-session 手勢=coach) |
-| `components/template-editor/*` (`template/[id]` is a thin wrapper) | coach |
-| `app/session/[id].tsx` 詳情/編輯 | coach |
-| `app/program-wizard/new.tsx` | coach |
-| `app/superset/new.tsx` | coach |
+| `app/(tabs)/index.tsx` 訓練/今日 | mixed (idle 概念=info, in-session 手勢=coach) — idle ✅ |
+| `components/template-editor/*` (`template/[id]` is a thin wrapper) | coach ✅ (5-step hybrid) |
+| `app/session/[id].tsx` 詳情/編輯 | coach ✅ **(5-step: 3 spotlight + 2 cards — gear-menu / sets; the template-editor's editing twin)** |
+| `app/program-wizard/new.tsx` | ~~coach~~ **NONE — wizard self-guides, ⓘ removed 2026-06-29** |
+| `app/superset/new.tsx` | coach ✅ **(3-step all-spotlight; happy path has no pop-up/gesture → genuinely 0 screenshot cards, and that's faithful — don't force a card)** |
 | `app/exercise-chart/[id].tsx` | info |
 | `app/exercise-history/[id].tsx` | info (+chip coach optional) |
 | `app/(tabs)/library.tsx` | mixed |
@@ -220,6 +227,10 @@ the page while you shoot. New/changed assets need an app reload to re-bundle.
   bled into the ⚙️ shot's left). For a pop-up card (ActionSheet), read pixels, find
   the card's bright-region centre x + widest extent, and crop SYMMETRICALLY around
   the centre, just inside the leak. Verify by re-reading the crop, not by eye.
+  Beware false positives: a bright-luminance scan over a *whole screenshot* also
+  hits white stat-tile text / toggles, not just the card — band the scan to the
+  card's vertical region (validated 2026-06-29: the session ⚙️ scan's `miny=606`
+  was the「1 hr 0' 00"」tile text, the card actually started ~y=870).
 - **The content file's `aspectRatio` MUST equal the cropped PNG's `width/height`** —
   `contentFit:'contain'` then shows it whole; a wrong ratio letterboxes or visually
   crops. Recompute it whenever you re-crop.
