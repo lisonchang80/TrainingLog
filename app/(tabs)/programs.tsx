@@ -2021,7 +2021,10 @@ function makeStyles(tokens: ThemeTokens) {
       paddingTop: 12,
       paddingBottom: 8,
     },
-    headerButtons: { flexDirection: 'row', gap: 8 },
+    // alignItems:'center' so the ⓘ HelpButton (44pt min-height) doesn't
+    // stretch the pill buttons (editBtn/cancelBtn/newBtn) to its height and
+    // round them into ovals — keep each at its natural height, centred.
+    headerButtons: { flexDirection: 'row', gap: 8, alignItems: 'center' },
     newBtn: {
       width: 36,
       height: 36,
