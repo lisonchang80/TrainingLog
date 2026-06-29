@@ -73,14 +73,20 @@ Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 | `app/session/[id].tsx` 詳情/編輯 | coach ✅ **(5-step: 3 spotlight + 2 cards — gear-menu / sets; the template-editor's editing twin)** |
 | `app/program-wizard/new.tsx` | ~~coach~~ **NONE — wizard self-guides, ⓘ removed 2026-06-29** |
 | `app/superset/new.tsx` | coach ✅ **(3-step all-spotlight; happy path has no pop-up/gesture → genuinely 0 screenshot cards, and that's faithful — don't force a card)** |
-| `app/exercise-chart/[id].tsx` | info |
-| `app/exercise-history/[id].tsx` | info (+chip coach optional) |
-| `app/(tabs)/library.tsx` | mixed |
-| `app/(tabs)/programs.tsx` | mixed |
-| `app/(tabs)/history.tsx` | info |
-| `components/body-heatmap.tsx` legend | info |
-| `app/exercise/[id].tsx`, `app/body.tsx` | info |
-| settings / small `[id]` pages | usually none |
+| `app/exercise-chart/[id].tsx` | coach ✅ **(4-step feature-explainer, `coachNumbered:false`: rep buckets/cluster/advanced/metric)** |
+| `app/exercise-history/[id].tsx` | coach ✅ **(4-step: same filters + first SessionRow expand/超/replay)** |
+| `app/(tabs)/library.tsx` | coach ✅ **(3-step: MG tree / equipment dropdown / card meta)** |
+| `app/(tabs)/programs.tsx` | coach ✅ **(3-step: grid is READ-ONLY in idle — copy says "press 編輯 first" / edit / manage row)** |
+| `app/(tabs)/history.tsx` | coach ✅ **(3-step: subtabs / 月曆·表列 / calendar colour+N)** |
+| `app/exercise/[id].tsx` | coach ✅ **(2-step: muscle figure orange=primary blue=secondary / footer)** |
+| `app/superset/[id].tsx` | coach ✅ **(2-step: locked A+B pair / footer 歷史·圖表 open A-side filtered)** |
+| `app/body.tsx` | coach ✅ **(3-step: input placeholder=hint / dual-Y chart / legend toggles)** |
+| `components/body-heatmap.tsx` legend | info (interpretation-only, no tour) |
+| `program/[id]` · `exercise-picker` · `exercise/new` · `exercise/edit` · `superset/edit` · settings | NONE — pure forms / read-only / self-evident; nothing counter-intuitive to teach |
+
+**Feature-explainer pattern (2026-06-29, the 8 ✅ above):** for non-wizard, non-procedure pages (analytics, browse, detail), a coach tour with `coachNumbered:false` is the right shape — each step spotlights ONE *counter-intuitive* control and says what it does (not "do 1 → 2 → 3"). User directive: 「沒辦法寫流程的話，就用遮罩說明功能、反直覺的東西」. **Author captions ONLY from verified source** — this round 2 captions would have been wrong if guessed (exercise muscle figure uses orange/blue COLOUR not depth; the media card auto-crossfades, it's not swipeable, so it gets NO step). A conditional target (a control only shown in some state, e.g. chart cluster segmented) degrades to a centred caption — that's fine; write the copy to read either way. Tab pages / header-less stack pages with no native `headerRight` slot get the `<HelpButton>` in an in-page title row next to the heading.
+
+**Gotcha — overlay does NOT dismiss on navigation.** `PageHelpHost` is a plain `<Modal>`; if you navigate away (deep-link, switcher) while it's open, the Modal stays presented over the next screen (hit repeatedly while sim-deep-link-testing between pages 2026-06-29). Real users finish/skip before navigating so it's low-impact, but to sim-verify each page cleanly, relaunch the app fresh per page rather than deep-linking page→page with an overlay still open. (A real fix = close help in a `useFocusEffect` cleanup; not done.)
 
 ## Third style — `coach-interactive` (互動引導 / Interactive walkthrough) — PLANNED, infra NOT built
 
