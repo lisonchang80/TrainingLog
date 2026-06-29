@@ -10,15 +10,26 @@
  *   - Mode row `styles.modeRow` (:95-112): 月曆 / 表列, only rendered in the
  *     歷史 tab (`effectiveTab === 'history'`).
  *   - Calendar `<MonthGridView>` (:115) cell semantics (component header
- *     comment :13-16 + DayCell): each day tinted with its template colour
- *     (`color_hex`, freestyle = grey); top-right「+N」shown ONLY when
+ *     comment :13-16 + DayCell render :345-385): each populated day shows THREE
+ *     rows — Row 1 容量合計 (systemGreen chip, kg int), Row 2 模板名稱 chip
+ *     tinted with the template `color_hex` (freestyle = grey), Row 3 主場強度
+ *     `sub_tag` grey caption (freestyle / no sub_tag → 「—」, and HIDDEN entirely
+ *     in 極簡模式 per ADR-0026 :325-326). Top-right「+N」shown ONLY when
  *     sessionCount > 1; tap a day → open that session (:186), tap an empty
  *     in-month day → 補訓練 back-fill box (:252).
+ *
+ * The calendar gets TWO coach steps: a grid-level spotlight (tinting / +N / tap)
+ * and a screenshot-CARD that zooms ONE real day cell to label the three rows
+ * (user request 2026-06-29 — a single day is too small to read in the spotlight).
+ * Card asset: `assets/help/history/day-cell.png` (a templated day, 拉拉 / T1-1).
+ * Recapture if the DayCell layout changes.
  *
  * Spotlight targets (useCoachMarkTarget, in HistoryScreen):
  *   history.subtabs / history.mode / history.calendar.
  */
 import type { LocalizedPageHelp } from '../types';
+
+const CELL_AR = 173 / 224; // day-cell.png (single zoomed calendar day, portrait)
 
 export const historyHelp: LocalizedPageHelp = {
   zh: {
@@ -40,6 +51,12 @@ export const historyHelp: LocalizedPageHelp = {
         title: '月曆怎麼看',
         body: '每天用該訓練模板的顏色標示；右上「+N」表示當天有超過一筆訓練。點一天看當天紀錄，點空白日可補登訓練。',
       },
+      {
+        image: require('@/assets/help/history/day-cell.png'),
+        aspectRatio: CELL_AR,
+        title: '放大看一天',
+        body: '一個格子分三行：①綠色塊＝當天訓練總容量（kg）②中間色塊＝訓練模板（顏色就是該模板的代表色，自由訓練為灰）③最下灰字＝主場訓練強度（自由訓練顯示「—」；極簡模式會整行隱藏）。',
+      },
     ],
   },
   en: {
@@ -60,6 +77,12 @@ export const historyHelp: LocalizedPageHelp = {
         targetId: 'history.calendar',
         title: 'Reading the calendar',
         body: 'Each day is tinted with its template’s colour; a “+N” top-right means more than one session that day. Tap a day to view it, or an empty day to back-fill a session.',
+      },
+      {
+        image: require('@/assets/help/history/day-cell.png'),
+        aspectRatio: CELL_AR,
+        title: 'One day, zoomed in',
+        body: 'A cell has three rows: 1) green chip = that day’s total volume (kg); 2) middle chip = the training template (its colour is the template’s colour; freestyle = grey); 3) grey caption = the session’s main intensity (freestyle shows “—”; hidden entirely in Minimal mode).',
       },
     ],
   },
