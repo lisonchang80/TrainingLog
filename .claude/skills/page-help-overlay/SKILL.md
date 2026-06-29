@@ -77,7 +77,7 @@ Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 | `app/exercise-history/[id].tsx` | coach ✅ **(4-step: same filters + first SessionRow expand/超/replay)** |
 | `app/(tabs)/library.tsx` | coach ✅ **(3-step: MG tree / equipment dropdown / card meta)** |
 | `app/(tabs)/programs.tsx` | coach ✅ **(6-step hybrid: grid spotlight (idle, read-only — "press 編輯 first") → 4 edit-mode screenshot cards 下拉/▼縱列/▶橫列/拖曳 → manage-row spotlight (idle))** |
-| `app/(tabs)/history.tsx` | coach ✅ **(3-step: subtabs / 月曆·表列 / calendar colour+N)** |
+| `app/(tabs)/history.tsx` | coach ✅ **(4-step: subtabs / 月曆·表列 / calendar colour+N / 🖼️ zoomed day-cell card labelling the 3 rows 容量·模板色·強度)** |
 | `app/exercise/[id].tsx` | coach ✅ **(2-step: muscle figure orange=primary blue=secondary / footer)** |
 | `app/superset/[id].tsx` | coach ✅ **(2-step: locked A+B pair / footer 歷史·圖表 open A-side filtered)** |
 | `app/body.tsx` | coach ✅ **(3-step: input placeholder=hint / dual-Y chart / legend toggles)** |
@@ -243,9 +243,16 @@ the page while you shoot. New/changed assets need an app reload to re-bundle.
 
 **Crop gotchas (validated 2026-06-29 — the ⚙️-menu shot took 3 tries):**
 - **macOS has no ImageMagick/PIL by default, and `sips` only centre-crops (no
-  offset).** For an OFFSET crop use the session's stdlib-only `pngcrop.py` (zlib +
-  manual PNG un/re-filter, RGBA/RGB 8-bit): `pngcrop.py in out x y w h`; then
+  offset).** For an OFFSET crop use a stdlib-only `pngcrop.py` (zlib + manual PNG
+  un/re-filter, RGBA/RGB 8-bit): `pngcrop.py in out x y w h`; then
   `sips --resampleWidth N` to downscale. (Don't install tools — feedback_workflow.)
+  **`pngcrop.py` is a scratchpad throwaway — it is NOT committed, so re-author it
+  from this recipe each session** (validated again 2026-06-29 for the history
+  day-cell card). It must handle PNG color type 6 (RGBA, simctl screenshots) AND 2.
+- **A tab page may be unreachable by tapping its tab** — the RN dev LogBox toast
+  ("Open debugger to view warnings") sits over the bottom tab bar, so a tab tap
+  lands on the toast. Navigate via deep-link instead: `xcrun simctl openurl <UDID>
+  traininglog:///library` (or `/history`, etc.). The `ⓘ`/coach are reachable from there.
 - **Don't eyeball crop bounds — scan the pixels for them.** A tight guess clips one
   side; a loose guess leaks the dimmed page behind (the「(無常設動作)」placeholder
   bled into the ⚙️ shot's left). For a pop-up card (ActionSheet), read pixels, find
