@@ -51,25 +51,51 @@ export function InfoModal({ visible, content, onClose, onStartTour }: InfoModalP
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}>
-            {content.sections.map((s, i) => (
-              <View key={`s${i}`} style={styles.section}>
-                {s.heading ? <Text style={styles.heading}>{s.heading}</Text> : null}
-                <Text style={styles.body}>{s.body}</Text>
-              </View>
-            ))}
+            {content.blocks?.length ? (
+              // Interleaved: render text + image blocks in author order so a
+              // screenshot stays adjacent to the heading it illustrates.
+              content.blocks.map((b, i) =>
+                b.kind === 'image' ? (
+                  <View key={`b${i}`} style={styles.imageBlock}>
+                    <Image
+                      source={b.source}
+                      style={[styles.image, { aspectRatio: b.aspectRatio ?? 16 / 9 }]}
+                      contentFit="contain"
+                      transition={120}
+                      accessibilityIgnoresInvertColors
+                    />
+                    {b.caption ? <Text style={styles.caption}>{b.caption}</Text> : null}
+                  </View>
+                ) : (
+                  <View key={`b${i}`} style={styles.section}>
+                    {b.heading ? <Text style={styles.heading}>{b.heading}</Text> : null}
+                    <Text style={styles.body}>{b.body}</Text>
+                  </View>
+                ),
+              )
+            ) : (
+              <>
+                {content.sections?.map((s, i) => (
+                  <View key={`s${i}`} style={styles.section}>
+                    {s.heading ? <Text style={styles.heading}>{s.heading}</Text> : null}
+                    <Text style={styles.body}>{s.body}</Text>
+                  </View>
+                ))}
 
-            {content.images?.map((img, i) => (
-              <View key={`img${i}`} style={styles.imageBlock}>
-                <Image
-                  source={img.source}
-                  style={[styles.image, { aspectRatio: img.aspectRatio ?? 16 / 9 }]}
-                  contentFit="contain"
-                  transition={120}
-                  accessibilityIgnoresInvertColors
-                />
-                {img.caption ? <Text style={styles.caption}>{img.caption}</Text> : null}
-              </View>
-            ))}
+                {content.images?.map((img, i) => (
+                  <View key={`img${i}`} style={styles.imageBlock}>
+                    <Image
+                      source={img.source}
+                      style={[styles.image, { aspectRatio: img.aspectRatio ?? 16 / 9 }]}
+                      contentFit="contain"
+                      transition={120}
+                      accessibilityIgnoresInvertColors
+                    />
+                    {img.caption ? <Text style={styles.caption}>{img.caption}</Text> : null}
+                  </View>
+                ))}
+              </>
+            )}
           </ScrollView>
 
           <View style={styles.actions}>
@@ -129,7 +155,12 @@ function makeStyles(tokens: ThemeTokens) {
       marginBottom: 12,
     },
     scroll: {
+      // flexGrow:0 keeps the card compact for short content; flexShrink:1 lets
+      // the ScrollView shrink within the card's maxHeight so TALL content (long
+      // `blocks` flows / big screenshots) actually scrolls instead of being
+      // clipped (RN's default flexShrink is 0 — without this it overflows).
       flexGrow: 0,
+      flexShrink: 1,
     },
     scrollContent: {
       paddingBottom: 4,

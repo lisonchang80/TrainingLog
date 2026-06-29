@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
@@ -78,13 +79,15 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
   // Re-measure on a microtask delay so a freshly-opened Modal has laid out.
   useEffect(() => {
     let cancelled = false;
-    if (!visible || !step) {
+    // Screenshot-card steps (step.image) have no target to measure.
+    if (!visible || !step || !step.targetId) {
       setRect(null);
       return;
     }
+    const targetId = step.targetId;
     setRect(null);
     const id = setTimeout(() => {
-      void measure(step.targetId).then((r) => {
+      void measure(targetId).then((r) => {
         if (!cancelled) setRect(r);
       });
     }, 60);
@@ -125,86 +128,118 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
     bubbleStyle = { top: screen.height * 0.4, left: 16, right: 16 };
   }
 
+  const isImageStep = step.image != null;
+
+  // Title row (numbered badge + title) and the footer controls (skip / dots /
+  // back+next) are identical for spotlight and screenshot-card steps.
+  const titleRow = (
+    <View style={styles.titleRow}>
+      {numbered ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{index + 1}</Text>
+        </View>
+      ) : null}
+      <Text style={styles.bubbleTitle}>{step.title}</Text>
+    </View>
+  );
+
+  const controls = (
+    <View style={styles.controls}>
+      <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
+        <Text style={styles.skip}>{t('common', 'skip')}</Text>
+      </Pressable>
+
+      <View style={styles.dots}>
+        {steps.map((_, i) => (
+          <View key={i} style={[styles.dot, i === index ? styles.dotActive : null]} />
+        ))}
+      </View>
+
+      <View style={styles.navBtns}>
+        {index > 0 ? (
+          <Pressable onPress={prev} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.navText}>{t('common', 'back')}</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={next}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.nextBtn, pressed && styles.pressed]}>
+          <Text style={styles.nextText}>
+            {isLast ? t('common', 'done') : t('common', 'next')}
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       {/* Tapping the dim area advances. */}
       <Pressable style={styles.fill} onPress={next} accessibilityLabel={step.title}>
-        {hole ? (
+        {isImageStep ? (
+          // Screenshot-card step — full dim + a centred card holding the COMPLETE
+          // image (contain, never cropped) with the caption below it. Used for
+          // pop-up menus / gestures a spotlight ring can't frame.
           <>
-            <View style={[styles.scrim, { top: 0, left: 0, right: 0, height: hole.y }]} />
-            <View
-              style={[
-                styles.scrim,
-                { top: hole.y + hole.h, left: 0, right: 0, bottom: 0 },
-              ]}
-            />
-            <View
-              style={[
-                styles.scrim,
-                { top: hole.y, left: 0, width: hole.x, height: hole.h },
-              ]}
-            />
-            <View
-              style={[
-                styles.scrim,
-                { top: hole.y, left: hole.x + hole.w, right: 0, height: hole.h },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.ring,
-                { top: hole.y, left: hole.x, width: hole.w, height: hole.h },
-              ]}
-            />
+            <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
+            <Pressable style={styles.imageCard} onPress={(e) => e.stopPropagation()}>
+              {titleRow}
+              <Image
+                source={step.image!}
+                style={[styles.cardImage, { aspectRatio: step.aspectRatio ?? 16 / 9 }]}
+                contentFit="contain"
+                transition={120}
+                accessibilityIgnoresInvertColors
+              />
+              <Text style={styles.bubbleBody}>{step.body}</Text>
+              {controls}
+            </Pressable>
           </>
         ) : (
-          <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
-        )}
-
-        {/* Bubble swallows taps so its buttons work without advancing. */}
-        <Pressable style={[styles.bubble, bubbleStyle]} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.titleRow}>
-            {numbered ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{index + 1}</Text>
-              </View>
-            ) : null}
-            <Text style={styles.bubbleTitle}>{step.title}</Text>
-          </View>
-          <Text style={styles.bubbleBody}>{step.body}</Text>
-
-          <View style={styles.controls}>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
-              <Text style={styles.skip}>{t('common', 'skip')}</Text>
-            </Pressable>
-
-            <View style={styles.dots}>
-              {steps.map((_, i) => (
+          // Spotlight step.
+          <>
+            {hole ? (
+              <>
+                <View style={[styles.scrim, { top: 0, left: 0, right: 0, height: hole.y }]} />
                 <View
-                  key={i}
-                  style={[styles.dot, i === index ? styles.dotActive : null]}
+                  style={[
+                    styles.scrim,
+                    { top: hole.y + hole.h, left: 0, right: 0, bottom: 0 },
+                  ]}
                 />
-              ))}
-            </View>
+                <View
+                  style={[
+                    styles.scrim,
+                    { top: hole.y, left: 0, width: hole.x, height: hole.h },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.scrim,
+                    { top: hole.y, left: hole.x + hole.w, right: 0, height: hole.h },
+                  ]}
+                />
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.ring,
+                    { top: hole.y, left: hole.x, width: hole.w, height: hole.h },
+                  ]}
+                />
+              </>
+            ) : (
+              <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
+            )}
 
-            <View style={styles.navBtns}>
-              {index > 0 ? (
-                <Pressable onPress={prev} hitSlop={8} accessibilityRole="button">
-                  <Text style={styles.navText}>{t('common', 'back')}</Text>
-                </Pressable>
-              ) : null}
-              <Pressable
-                onPress={next}
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.nextBtn, pressed && styles.pressed]}>
-                <Text style={styles.nextText}>
-                  {isLast ? t('common', 'done') : t('common', 'next')}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </Pressable>
+            {/* Bubble swallows taps so its buttons work without advancing. */}
+            <Pressable style={[styles.bubble, bubbleStyle]} onPress={(e) => e.stopPropagation()}>
+              {titleRow}
+              <Text style={styles.bubbleBody}>{step.body}</Text>
+              {controls}
+            </Pressable>
+          </>
+        )}
       </Pressable>
     </Modal>
   );
@@ -214,10 +249,29 @@ function makeStyles(tokens: ThemeTokens, resolved: ResolvedTheme) {
   return StyleSheet.create({
     fill: {
       flex: 1,
+      // Centres a screenshot-card step; absolute scrim/ring/bubble ignore this.
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     scrim: {
       position: 'absolute',
       backgroundColor: resolved === 'dark' ? SCRIM_DARK : SCRIM_LIGHT,
+    },
+    imageCard: {
+      width: '90%',
+      maxWidth: 360,
+      backgroundColor: BUBBLE_BG,
+      borderRadius: 16,
+      padding: 16,
+    },
+    cardImage: {
+      width: '100%',
+      // Tall portrait shots (e.g. an ActionSheet) need headroom so they show
+      // full-width instead of letterboxing; the card still fits on screen.
+      maxHeight: 520,
+      borderRadius: 10,
+      marginVertical: 12,
+      backgroundColor: 'rgba(255,255,255,0.04)',
     },
     ring: {
       position: 'absolute',
