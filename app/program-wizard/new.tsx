@@ -65,6 +65,15 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { programWizardHelp } from '@/components/help/content/program-wizard';
+
 /**
  * ADR-0025 — DRY helper. The wizard's many sub-component functions
  * (NameAndTagPanel, CycleConfigPanel, …) each call this instead of
@@ -84,7 +93,7 @@ function useWizStyles() {
  *   - on Confirm, expands the draft into cells and persists Program + cells +
  *     attaches each picked template to the new program
  */
-export default function ProgramWizardScreen() {
+function ProgramWizardScreen() {
   const db = useDatabase();
   const router = useRouter();
   const { tokens } = useTheme();
@@ -94,6 +103,12 @@ export default function ProgramWizardScreen() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const help = usePageHelp('program-wizard', programWizardHelp, {
+    autoShowOnce: true,
+  });
+  const stepHeaderTarget = useCoachMarkTarget('wizard.stepHeader');
+  const panelTarget = useCoachMarkTarget('wizard.panel');
 
   // Wave 18g (Phase 6, smoke-revision) — same-name overwrite UX is
   // **inline**, not modal: as the user types the name, we detect a
@@ -439,19 +454,22 @@ export default function ProgramWizardScreen() {
             </Pressable>
           ),
           headerRight: () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={rightLabel}
-              onPress={isLastStep(state.step) ? onConfirm : onNext}
-              disabled={rightDisabled}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.headerBtn,
-                rightDisabled && styles.btnDisabled,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.headerBtnPrimary}>{rightLabel}</Text>
-            </Pressable>
+            <View style={styles.headerRightRow}>
+              <HelpButton onPress={help.open} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={rightLabel}
+                onPress={isLastStep(state.step) ? onConfirm : onNext}
+                disabled={rightDisabled}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.headerBtn,
+                  rightDisabled && styles.btnDisabled,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.headerBtnPrimary}>{rightLabel}</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -459,8 +477,11 @@ export default function ProgramWizardScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <StepHeader step={state.step} />
+          <View ref={stepHeaderTarget.ref} collapsable={false}>
+            <StepHeader step={state.step} />
+          </View>
 
+          <View ref={panelTarget.ref} collapsable={false}>
           {state.step === 'NameAndTag' && (
             <NameAndTagPanel
               state={state}
@@ -494,9 +515,24 @@ export default function ProgramWizardScreen() {
           {state.step === 'Confirm' && (
             <ConfirmPanel state={state} overwriteTarget={overwriteTarget} />
           )}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the in-component
+ * useCoachMarkTarget hooks (wizard orientation tour) register correctly.
+ */
+export default function ProgramWizardScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <ProgramWizardScreen />
+    </CoachMarkProvider>
   );
 }
 
@@ -1516,6 +1552,11 @@ function makeStyles(tokens: ThemeTokens) {
     },
     summaryLine: { fontSize: 14, color: tokens.text.primary },
     errorLine: { color: tokens.action.destructive, fontSize: 14, marginTop: 8 },
+    headerRightRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+    },
     headerBtn: {
       paddingHorizontal: 8,
       paddingVertical: 6,

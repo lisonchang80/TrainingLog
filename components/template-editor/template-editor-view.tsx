@@ -65,6 +65,14 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDatabase } from '@/components/database-provider';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { templateEditorHelp } from '@/components/help/content/template-editor';
 import { listExercises } from '@/src/adapters/sqlite/exerciseRepository';
 import { listPrograms, type ProgramSummary } from '@/src/adapters/sqlite/programRepository';
 import { startSessionFromTemplate } from '@/src/adapters/sqlite/sessionFromTemplate';
@@ -234,7 +242,7 @@ function colorForTemplate(t: Template): string {
   return hashColor(t.name || 'unnamed');
 }
 
-export default function TemplateEditorView() {
+function TemplateEditorView() {
   // `dpid` / `dst` = display program_id / display sub_tag (#50 C1):
   // 用戶當初在 start-template-sheet 選的 (P, S)；fallback 路徑下 editor 載入
   // representative 但 header 仍顯示 user's pick。sentinel `__none__` 表
@@ -296,6 +304,13 @@ export default function TemplateEditorView() {
   // ADR-0026 D1 — 極簡模式：⋯選單藏「另存強度」（無計劃就無強度可言）。
   // 「儲存」/「另存模板」走 TemplateMetaSheet（已 minimal-aware），不動。
   const { isMinimal } = useAppMode();
+
+  const help = usePageHelp('template-editor', templateEditorHelp, {
+    autoShowOnce: true,
+  });
+  const addExerciseTarget = useCoachMarkTarget('template.addExercise');
+  const listTarget = useCoachMarkTarget('template.list');
+  const startTarget = useCoachMarkTarget('template.start');
   // Program-wizard「新建模板」pre-creates the template row on entry
   // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
   // saving (取消 / swipe-back / discard), that row is an orphan — the
@@ -2680,6 +2695,7 @@ export default function TemplateEditorView() {
               </Text>
             )}
           </View>
+          <HelpButton onPress={help.open} />
           {/*
             Import mode (programs tab "+ 建立新模板"): top-right action becomes
             「建立並導入」 + always enabled (even when !dirty) — user may keep
@@ -2712,7 +2728,9 @@ export default function TemplateEditorView() {
           session app/(tabs)/index.tsx:1648).
         */}
         <NestableScrollContainer contentContainerStyle={styles.body}>
-          <SectionHeader label={getSectionLabel('general')} />
+          <View ref={listTarget.ref} collapsable={false}>
+            <SectionHeader label={getSectionLabel('general')} />
+          </View>
           {renderSection('general', tt('status', 'noGeneralExercises'))}
 
           <SectionHeader label={getSectionLabel('evergreen')} />
@@ -2725,6 +2743,7 @@ export default function TemplateEditorView() {
             { paddingBottom: Math.max(insets.bottom, 10) },
           ]}>
           <Pressable
+            ref={addExerciseTarget.ref}
             style={styles.actionBtn}
             onPress={() => {
               // #2 dim layer: tell the picker which exercises / reusable
@@ -2751,6 +2770,7 @@ export default function TemplateEditorView() {
             <Text style={styles.actionBtnText}>{tt('button', 'addExercise')}</Text>
           </Pressable>
           <Pressable
+            ref={startTarget.ref}
             style={[styles.actionBtn, styles.actionBtnPrimary]}
             onPress={onStartSession}
             disabled={busy}>
@@ -3082,8 +3102,22 @@ export default function TemplateEditorView() {
 
         {/* 2026-06-04 redesign — 儲存「完成儲存」/ 另存成功 toast host. */}
         <ToastHost controller={toastRef.current!} />
+
+        <PageHelpHost help={help} />
       </SafeAreaView>
     </GestureHandlerRootView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the in-component
+ * useCoachMarkTarget hooks (editor orientation tour) register correctly.
+ */
+export default function TemplateEditorViewWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <TemplateEditorView />
+    </CoachMarkProvider>
   );
 }
 

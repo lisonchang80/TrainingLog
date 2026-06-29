@@ -44,6 +44,15 @@ import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
 import { t, tEquipment, tExercise, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { supersetNewHelp } from '@/components/help/content/superset-new';
+
 /**
  * ADR-0025 — DRY hook shared by 7 components in this file.
  */
@@ -64,7 +73,7 @@ function useNewSupersetStyles() {
  * FIFO replacement on 3rd selection (ADR L165): when the user taps a
  * third distinct exercise, the oldest selected one is dropped.
  */
-export default function NewSupersetScreen() {
+function NewSupersetScreen() {
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
@@ -86,6 +95,13 @@ export default function NewSupersetScreen() {
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  const help = usePageHelp('superset-new', supersetNewHelp, {
+    autoShowOnce: true,
+  });
+  const gridTarget = useCoachMarkTarget('superset.grid');
+  const selectedTarget = useCoachMarkTarget('superset.selected');
+  const combineTarget = useCoachMarkTarget('superset.combine');
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -224,12 +240,15 @@ export default function NewSupersetScreen() {
             autoCorrect={false}
           />
         </View>
+        <HelpButton onPress={help.open} />
       </View>
 
-      <SelectedChipRow
-        selected={selectedExercises}
-        onRemove={removeFromSelection}
-      />
+      <View ref={selectedTarget.ref} collapsable={false}>
+        <SelectedChipRow
+          selected={selectedExercises}
+          onRemove={removeFromSelection}
+        />
+      </View>
 
       <View style={styles.body}>
         <MgSidebar
@@ -237,7 +256,7 @@ export default function NewSupersetScreen() {
           selectedMgId={selectedMgId}
           onSelectMg={setSelectedMgId}
         />
-        <View style={styles.content}>
+        <View style={styles.content} ref={gridTarget.ref} collapsable={false}>
           <EquipmentChipRow
             value={selectedEquipment}
             onChange={setSelectedEquipment}
@@ -252,7 +271,7 @@ export default function NewSupersetScreen() {
         </View>
       </View>
 
-      <View style={styles.footer}>
+      <View style={styles.footer} ref={combineTarget.ref} collapsable={false}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('button', 'combine')}
@@ -268,7 +287,22 @@ export default function NewSupersetScreen() {
           </Text>
         </Pressable>
       </View>
+
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the in-component
+ * useCoachMarkTarget hooks (build-flow coach tour) register correctly —
+ * a context consumer can't sit beside its own provider.
+ */
+export default function NewSupersetScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <NewSupersetScreen />
+    </CoachMarkProvider>
   );
 }
 
