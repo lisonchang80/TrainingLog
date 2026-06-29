@@ -68,6 +68,15 @@ import {
 } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { programsHelp } from '@/components/help/content/programs';
+
 /**
  * ADR-0025 — DRY helper. Programs tab has many sub-component functions
  * (ProgramGrid, CellWrapper, DropdownButton, PickerModal, TemplatePicker,
@@ -153,7 +162,7 @@ type PickerState =
   | SubTagPickerKind
   | DeletePickerKind;
 
-export default function ProgramsScreen() {
+function ProgramsScreen() {
   // `'use no memo'` + `useLocale()`: opt out of React Compiler memoization and
   // subscribe to language changes so this screen's INLINE `t()` calls (heading,
   // meta labels, alerts) re-evaluate fresh on a `setLocale()` while the tab
@@ -164,6 +173,10 @@ export default function ProgramsScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useProgramsStyles();
+  const help = usePageHelp('programs', programsHelp, { autoShowOnce: true });
+  const gridTarget = useCoachMarkTarget('programs.grid');
+  const editTarget = useCoachMarkTarget('programs.edit');
+  const manageTarget = useCoachMarkTarget('programs.manage');
   const [shown, setShown] = useState<ProgramWithCells | null>(null);
   const [allPrograms, setAllPrograms] = useState<ProgramSummary[]>([]);
   const [allTemplates, setAllTemplates] = useState<TemplateSummary[]>([]);
@@ -872,6 +885,7 @@ export default function ProgramsScreen() {
             // 閒置模式：[編輯][＋新建]
             <>
               <Pressable
+                ref={editTarget.ref}
                 accessibilityRole="button"
                 onPress={onToggleEdit}
                 style={({ pressed }) => [
@@ -892,11 +906,15 @@ export default function ProgramsScreen() {
               </Pressable>
             </>
           )}
+          <HelpButton onPress={help.open} />
         </View>
       </View>
       {/* 閒置常駐管理列：刪除計劃 / 刪除強度（點了跳出選擇）。編輯模式隱藏。 */}
       {!editing ? (
-        <View style={styles.manageRow}>
+        <View
+          style={styles.manageRow}
+          ref={manageTarget.ref}
+          collapsable={false}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('button', 'deleteProgramCta')}
@@ -961,27 +979,29 @@ export default function ProgramsScreen() {
           </View>
         ) : null}
 
-        <ProgramGrid
-          program={shown}
-          templatesById={templatesById}
-          editing={editing}
-          isDragging={isDragging}
-          draggedSrc={draggedSrc}
-          hoverTarget={hoverTarget}
-          registerCellLayout={registerCellLayout}
-          onDragStart={onDragStart}
-          onDragUpdate={onDragUpdate}
-          onDragEnd={onDragEnd}
-          onColumnApply={(d) =>
-            setPicker({ kind: 'template_for_column', day_index: d })
-          }
-          onRowApply={(c) =>
-            setPicker({ kind: 'sub_tag_for_row', cycle_index: c })
-          }
-          onTapCellTemplate={onTapCellTemplate}
-          onTapCellSubTag={onTapCellSubTag}
-          onTapRestCell={onTapRestCell}
-        />
+        <View ref={gridTarget.ref} collapsable={false}>
+          <ProgramGrid
+            program={shown}
+            templatesById={templatesById}
+            editing={editing}
+            isDragging={isDragging}
+            draggedSrc={draggedSrc}
+            hoverTarget={hoverTarget}
+            registerCellLayout={registerCellLayout}
+            onDragStart={onDragStart}
+            onDragUpdate={onDragUpdate}
+            onDragEnd={onDragEnd}
+            onColumnApply={(d) =>
+              setPicker({ kind: 'template_for_column', day_index: d })
+            }
+            onRowApply={(c) =>
+              setPicker({ kind: 'sub_tag_for_row', cycle_index: c })
+            }
+            onTapCellTemplate={onTapCellTemplate}
+            onTapCellSubTag={onTapCellSubTag}
+            onTapRestCell={onTapRestCell}
+          />
+        </View>
       </ScrollView>
 
       {/* Wave 17 — floating drag preview (above ScrollView so scrolling
@@ -1244,7 +1264,20 @@ export default function ProgramsScreen() {
         }}
         onClose={closePicker}
       />
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so ProgramsScreen's useCoachMarkTarget
+ * anchors (grid / edit / manage) register against the provider.
+ */
+export default function ProgramsScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <ProgramsScreen />
+    </CoachMarkProvider>
   );
 }
 

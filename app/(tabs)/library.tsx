@@ -64,6 +64,15 @@ import {
 import { t, tEquipment, tExercise, tMuscleGroup, tNSessions, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { libraryHelp } from '@/components/help/content/library';
+
 /**
  * ADR-0025 — DRY helper for the 10 components in this file that all need
  * the same memoised style sheet. Each sub-component calls `useLibStyles()`
@@ -86,7 +95,7 @@ function useLibStyles() {
  *   - default / browse: from tab bar; tap a card → /exercise/[id]
  *   - picker: not yet wired here (L2 step) — multi-select + 完成 footer
  */
-export default function LibraryScreen() {
+function LibraryScreen() {
   // `'use no memo'`: opt this screen out of React Compiler memoization so that
   // on a language switch its INLINE `t()` calls (search placeholder, the「全部」
   // equipment chip label, the「超級組」sidebar entry, section headers) re-evaluate
@@ -110,6 +119,10 @@ export default function LibraryScreen() {
   // `placeholderTextColor` (inline prop, not in StyleSheet).
   const { tokens } = useTheme();
   const styles = useLibStyles();
+  const help = usePageHelp('library', libraryHelp, { autoShowOnce: true });
+  const sidebarTarget = useCoachMarkTarget('library.sidebar');
+  const equipmentTarget = useCoachMarkTarget('library.equipment');
+  const gridTarget = useCoachMarkTarget('library.grid');
   const params = useLocalSearchParams<{ mode?: string; sessionId?: string }>();
   const isPickerMode = params.mode === 'picker';
   // 2026-05-20 edit-parity audit: when picker is opened from session detail
@@ -372,19 +385,22 @@ export default function LibraryScreen() {
           style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}>
           <Text style={styles.addBtnText}>+</Text>
         </Pressable>
+        <HelpButton onPress={help.open} />
       </View>
 
       <View style={styles.body}>
-        <Sidebar
-          muscleGroups={muscleGroups}
-          selectedMgId={isSupersetTab ? null : selectedMgId}
-          isSupersetTab={isSupersetTab}
-          subMuscles={subMuscles}
-          selectedMuscleId={selectedMuscleId}
-          onSelectMg={selectMg}
-          onSelectSuperset={selectSuperset}
-          onSelectMuscle={setSelectedMuscleId}
-        />
+        <View ref={sidebarTarget.ref} collapsable={false}>
+          <Sidebar
+            muscleGroups={muscleGroups}
+            selectedMgId={isSupersetTab ? null : selectedMgId}
+            isSupersetTab={isSupersetTab}
+            subMuscles={subMuscles}
+            selectedMuscleId={selectedMuscleId}
+            onSelectMg={selectMg}
+            onSelectSuperset={selectSuperset}
+            onSelectMuscle={setSelectedMuscleId}
+          />
+        </View>
         <View style={styles.content}>
           {isSupersetTab ? (
             <SupersetGrid
@@ -403,24 +419,31 @@ export default function LibraryScreen() {
             />
           ) : (
             <>
-              <EquipmentFilterDropdown
-                value={selectedEquipment}
-                onChange={setSelectedEquipment}
-              />
-              <ExerciseGrid
-                exercises={visible}
-                sessionCounts={sessionCounts}
-                cardWidth={cardWidth}
-                cardHeight={cardHeight}
-                onTap={onCardTap}
-                selection={isPickerMode ? selection : null}
-                disabledIds={disabledExerciseIds}
-                onInfoPress={
-                  isPickerMode
-                    ? (ex) => router.push(`/exercise/${ex.id}`)
-                    : null
-                }
-              />
+              <View ref={equipmentTarget.ref} collapsable={false}>
+                <EquipmentFilterDropdown
+                  value={selectedEquipment}
+                  onChange={setSelectedEquipment}
+                />
+              </View>
+              <View
+                ref={gridTarget.ref}
+                collapsable={false}
+                style={{ flex: 1 }}>
+                <ExerciseGrid
+                  exercises={visible}
+                  sessionCounts={sessionCounts}
+                  cardWidth={cardWidth}
+                  cardHeight={cardHeight}
+                  onTap={onCardTap}
+                  selection={isPickerMode ? selection : null}
+                  disabledIds={disabledExerciseIds}
+                  onInfoPress={
+                    isPickerMode
+                      ? (ex) => router.push(`/exercise/${ex.id}`)
+                      : null
+                  }
+                />
+              </View>
             </>
           )}
         </View>
@@ -443,7 +466,20 @@ export default function LibraryScreen() {
           </Pressable>
         </View>
       )}
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so LibraryScreen's useCoachMarkTarget
+ * anchors (sidebar / equipment / grid) register against the provider.
+ */
+export default function LibraryScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <LibraryScreen />
+    </CoachMarkProvider>
   );
 }
 

@@ -55,6 +55,15 @@ import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
 import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { exerciseHistoryHelp } from '@/components/help/content/exercise-history';
+
 /**
  * ADR-0025 — DRY hook for the many sub-components in this file.
  */
@@ -179,7 +188,7 @@ import {
  * gestures and the body-title arrow taps both route through scrollTo,
  * not router.replace, so the whole page doesn't re-mount on swap.
  */
-export default function ExerciseHistoryScreen() {
+function ExerciseHistoryScreen() {
   const {
     id: idParam,
     clusterMode: clusterModeParam,
@@ -219,6 +228,9 @@ export default function ExerciseHistoryScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useHistoryStyles();
+  const help = usePageHelp('exercise-history', exerciseHistoryHelp, {
+    autoShowOnce: true,
+  });
   const initialClusterMode = useMemo(
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
@@ -274,8 +286,9 @@ export default function ExerciseHistoryScreen() {
           <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
         </Pressable>
       ),
+      headerRight: () => <HelpButton onPress={help.open} />,
     }),
-    [router, styles.headerBack]
+    [router, styles.headerBack, help.open]
   );
 
   // Paging mode: caller wired up a cluster partner and asked for
@@ -317,7 +330,20 @@ export default function ExerciseHistoryScreen() {
           currentSeIdB={currentSeIdBParam ?? null}
         />
       )}
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the useCoachMarkTarget hooks in
+ * HistoryPageContent (the spotlight anchors) register against the provider.
+ */
+export default function ExerciseHistoryScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <ExerciseHistoryScreen />
+    </CoachMarkProvider>
   );
 }
 
@@ -502,6 +528,10 @@ function HistoryPageContent({
 }) {
   const router = useRouter();
   const styles = useHistoryStyles();
+  const bucketsTarget = useCoachMarkTarget('history.buckets');
+  const clusterTarget = useCoachMarkTarget('history.cluster');
+  const advancedTarget = useCoachMarkTarget('history.advanced');
+  const rowTarget = useCoachMarkTarget('history.row');
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [hasClusterRows, setHasClusterRows] = useState(false);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
@@ -885,7 +915,10 @@ function HistoryPageContent({
             />
 
             {/* Bucket multi-select chips */}
-            <View style={styles.filterRow}>
+            <View
+              style={styles.filterRow}
+              ref={bucketsTarget.ref}
+              collapsable={false}>
               {REP_BUCKET_CHIPS.map((chip) => {
                 const active =
                   chip === 'all'
@@ -904,10 +937,15 @@ function HistoryPageContent({
             </View>
 
             {hasClusterRows ? (
-              <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+              <View ref={clusterTarget.ref} collapsable={false}>
+                <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+              </View>
             ) : null}
 
-            <View style={styles.advancedWrap}>
+            <View
+              style={styles.advancedWrap}
+              ref={advancedTarget.ref}
+              collapsable={false}>
               <Pressable
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
@@ -982,23 +1020,30 @@ function HistoryPageContent({
               {filteredSessions.length === 0 ? (
                 <Text style={styles.empty}>{t('status', 'noRecordsUnderFilter')}</Text>
               ) : (
-                filteredSessions.map((sess) => {
+                filteredSessions.map((sess, index) => {
                   const rowShape = classifyRowClusterShape(sess.sets);
                   const rowIsCluster =
                     rowShape.kind === 'cluster' || rowShape.kind === 'cluster_mixed';
                   const rowCanReplay = canReplayRow(rowShape, replayTarget);
+                  // Spotlight anchor on the FIRST row so the help tour can
+                  // point at one real session row (per-set expand + 超 chip +
+                  // ▶ replay). Wrapper View is style-less → no layout change.
                   return (
-                    <SessionRow
+                    <View
                       key={sess.session_id}
-                      session={sess}
-                      expanded={expanded.has(sess.session_id)}
-                      onToggle={() => toggleExpand(sess.session_id)}
-                      loadType={header.load_type}
-                      unit={unit}
-                      canReplay={rowCanReplay}
-                      rowIsCluster={rowIsCluster}
-                      onReplay={() => onReplay(sess)}
-                    />
+                      ref={index === 0 ? rowTarget.ref : undefined}
+                      collapsable={false}>
+                      <SessionRow
+                        session={sess}
+                        expanded={expanded.has(sess.session_id)}
+                        onToggle={() => toggleExpand(sess.session_id)}
+                        loadType={header.load_type}
+                        unit={unit}
+                        canReplay={rowCanReplay}
+                        rowIsCluster={rowIsCluster}
+                        onReplay={() => onReplay(sess)}
+                      />
+                    </View>
                   );
                 })
               )}

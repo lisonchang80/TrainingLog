@@ -65,6 +65,15 @@ import {
 import { t, tExercise, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
+import {
+  CoachMarkProvider,
+  HelpButton,
+  PageHelpHost,
+  useCoachMarkTarget,
+  usePageHelp,
+} from '@/components/help';
+import { exerciseChartHelp } from '@/components/help/content/exercise-chart';
+
 /**
  * ADR-0025 — DRY hook for the many components in this file that share
  * one memoised StyleSheet.
@@ -128,7 +137,7 @@ function chartToggleLabel(toggle: ChartToggle): string {
  * aggregation per metric), so per-side isolated state matters even
  * more than on the history page.
  */
-export default function ExerciseChartScreen() {
+function ExerciseChartScreen() {
   const {
     id: idParam,
     clusterMode: clusterModeParam,
@@ -153,6 +162,9 @@ export default function ExerciseChartScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useChartStyles();
+  const help = usePageHelp('exercise-chart', exerciseChartHelp, {
+    autoShowOnce: true,
+  });
   const initialClusterMode = useMemo(
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
@@ -193,8 +205,9 @@ export default function ExerciseChartScreen() {
           <Text style={styles.headerBack}>{t('common', 'backArrow')}</Text>
         </Pressable>
       ),
+      headerRight: () => <HelpButton onPress={help.open} />,
     }),
-    [router, styles.headerBack]
+    [router, styles.headerBack, help.open]
   );
 
   const pagingEnabled =
@@ -226,7 +239,20 @@ export default function ExerciseChartScreen() {
           onRequestSwap={undefined}
         />
       )}
+      <PageHelpHost help={help} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * Wrap from OUTSIDE in CoachMarkProvider so the useCoachMarkTarget hooks in
+ * ChartPageContent (the spotlight anchors) register against the provider.
+ */
+export default function ExerciseChartScreenWithHelp() {
+  return (
+    <CoachMarkProvider>
+      <ExerciseChartScreen />
+    </CoachMarkProvider>
   );
 }
 
@@ -363,6 +389,10 @@ function ChartPageContent({
 }) {
   const router = useRouter();
   const styles = useChartStyles();
+  const bucketsTarget = useCoachMarkTarget('chart.buckets');
+  const clusterTarget = useCoachMarkTarget('chart.cluster');
+  const advancedTarget = useCoachMarkTarget('chart.advanced');
+  const metricTarget = useCoachMarkTarget('chart.metric');
   const [header, setHeader] = useState<ExerciseHistoryHeader | null>(null);
   const [hasClusterRows, setHasClusterRows] = useState(false);
   const [sessions, setSessions] = useState<ExerciseHistorySession[]>([]);
@@ -563,7 +593,10 @@ function ChartPageContent({
               <Text style={styles.headerName}>{tExercise(header.exercise_name)}</Text>
             )}
 
-            <View style={styles.filterRow}>
+            <View
+              style={styles.filterRow}
+              ref={bucketsTarget.ref}
+              collapsable={false}>
               {REP_BUCKET_CHIPS.map((chip) => {
                 const active =
                   chip === 'all'
@@ -582,10 +615,15 @@ function ChartPageContent({
             </View>
 
             {hasClusterRows ? (
-              <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+              <View ref={clusterTarget.ref} collapsable={false}>
+                <ClusterModeSegmented value={clusterMode} onChange={onClusterModeTap} />
+              </View>
             ) : null}
 
-            <View style={styles.advancedWrap}>
+            <View
+              style={styles.advancedWrap}
+              ref={advancedTarget.ref}
+              collapsable={false}>
               <Pressable
                 onPress={() => setAdvancedOpen((v) => !v)}
                 style={styles.advancedHeader}>
@@ -666,7 +704,10 @@ function ChartPageContent({
               yearFilter={yearFilter}
             />
 
-            <View style={styles.metricToggle}>
+            <View
+              style={styles.metricToggle}
+              ref={metricTarget.ref}
+              collapsable={false}>
               {(['weight', 'volume', 'e1rm', 'parallel'] as const).map((tog) => (
                 <Pressable
                   key={tog}
