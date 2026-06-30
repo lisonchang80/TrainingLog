@@ -24,6 +24,7 @@ import { useFocusEffect } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useDatabase } from '@/components/database-provider';
+import { useCoachMarkTarget } from '@/components/help';
 import { TierProgressCard } from '@/components/achievements/tier-progress-card';
 import {
   loadAchievementPanelData,
@@ -74,6 +75,9 @@ export function AchievementsPanel() {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  // ⓘ coach spotlight anchors (history ▸ 獎章). Content: components/help/content/history-achievements.ts.
+  const filtersTarget = useCoachMarkTarget('ach.filters');
+  const cardsTarget = useCoachMarkTarget('ach.cards');
   const [data, setData] = useState<AchievementPanelData>(EMPTY_DATA);
   const [mgNames, setMgNames] = useState<Map<string, string>>(new Map());
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -112,7 +116,7 @@ export function AchievementsPanel() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.filterRow}>
+      <View style={styles.filterRow} ref={filtersTarget.ref} collapsable={false}>
         {FILTERS.map((f) => (
           <Pressable
             key={f.key}
@@ -126,17 +130,19 @@ export function AchievementsPanel() {
         ))}
       </View>
 
-      <FlatList
-        data={cards}
-        keyExtractor={(item) => item.key}
-        contentContainerStyle={styles.listContainer}
-        renderItem={({ item }) => (
-          <TierProgressCard card={item} resolveGroupLabel={resolveGroupLabel} />
-        )}
-        ListEmptyComponent={
-          <Text style={styles.empty}>{t('status', 'achievementNoTouched')}</Text>
-        }
-      />
+      <View style={styles.listWrap} ref={cardsTarget.ref} collapsable={false}>
+        <FlatList
+          data={cards}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={styles.listContainer}
+          renderItem={({ item }) => (
+            <TierProgressCard card={item} resolveGroupLabel={resolveGroupLabel} />
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>{t('status', 'achievementNoTouched')}</Text>
+          }
+        />
+      </View>
     </View>
   );
 }
@@ -144,6 +150,7 @@ export function AchievementsPanel() {
 function makeStyles(tokens: ThemeTokens) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: tokens.bg.base },
+    listWrap: { flex: 1 },
     filterRow: {
       flexDirection: 'row',
       gap: 6,
