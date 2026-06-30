@@ -374,6 +374,57 @@ Scale to the ask: one page → just do it inline. "rolling out help across the a
 → pipeline the P0–P2 pages; only invoke a Workflow / overnight wave on explicit
 user opt-in (it spawns many agents).
 
+## App-mode-aware coach pages (極簡 / 計劃, ADR-0026)
+
+When a page's UI changes with `useAppMode()` (極簡 hides the 計劃/強度 concept), its
+coach must change too — else it teaches / spotlights elements that aren't there in
+極簡. Validated 2026-06-30 on history / exercise-chart / exercise-history.
+
+**Mechanism by how different the two modes are:**
+- **Same screen, minor delta** (drop one step, or reword one step) → keep the SAME
+  `pageId`, derive the minimal variant from the plan content with `.map/.filter`
+  (plan = single source of truth, no duplicated bilingual blob):
+  ```ts
+  export const xHelpMinimal: LocalizedPageHelp = {
+    zh: { ...xHelp.zh, coach: (xHelp.zh.coach ?? [])
+      .filter((s) => s.targetId != null)            // drop screenshot-card steps
+      .map((s) => s.targetId === 'x.advanced' ? { ...s, body: '…' } : s) },
+    en: { ... },
+  };
+  ```
+  Call site: `usePageHelp('x', isMinimal ? xHelpMinimal : xHelp, …)` (isMinimal from
+  `useAppMode()`). Same pageId → seen-once flag shared; minimal is a subset so nothing
+  is lost if they switch after seeing one.
+- **Genuinely different screens** (Today plan = 3 start methods vs minimal = 2) →
+  split files + separate pageIds (`today-plan` / `today-minimal`). Heavier; only when
+  the screens really differ.
+
+**Page-side gating (non-obvious):**
+- Gate ONLY the mode-specific controls; keep the spotlight target's WRAPPER mounted.
+  The `useCoachMarkTarget` ref sits on the outer wrap (e.g. `advancedWrap`), so hiding
+  the inner 計劃/強度 dropdown+chips leaves the ref alive → the step still frames the
+  section, never goes null. (Unmount the whole target and the step degrades to a
+  centred caption — usually not wanted.)
+- Keep useful non-mode controls inside the gated section (chart/history 進階篩選: hide
+  program+intensity, KEEP the action row 看歷史·切換圖表 / 取消·清除).
+- **Hydration guard**: if the page hydrates a persisted filter carrying the mode
+  concept (programId/sub_tag from a mailbox), wrap the setState in `if (!isMinimal)`
+  + add `isMinimal` to the effect deps — else a filter set in 計劃 silently narrows
+  data in 極簡 with no control to clear it.
+
+**Which pages needed it / didn't (read the bodies, don't assume):**
+- Needed: `history` (drop the zoomed day-cell card — 極簡 cell is 2 rows, fold a 2-row
+  note into the calendar step), `exercise-chart` / `exercise-history` (gate 進階篩選
+  program/intensity, reword the advanced step).
+- NOT needed: `session-detail` / `template-editor` — copy already program-agnostic;
+  the hidden subtitle / 另存強度 menu item are not coach targets. `programs` —
+  unreachable in 極簡 (tab `href:null`). library/body/exercise-detail/superset-* — no
+  計劃/強度 concept.
+
+**Sim-verify**: Settings → 訓練模式 → toggle. `history` ⓘ = 4 steps (with day-cell
+card) in 計劃 / 3 (no card) in 極簡; chart·history-detail expand 進階篩選 → only the
+action row, advanced step reworded, spotlight still framing the section.
+
 ## Verify
 
 - `npx tsc --noEmit` + `npm test` (the pure `coachMarkLayout` test must stay green).
