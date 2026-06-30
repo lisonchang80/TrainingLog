@@ -455,21 +455,29 @@ const coachScroll = useCoachScroller();   // from @/components/help
             scrollEventThrottle={coachScroll.scrollEventThrottle}> … </ScrollView>
 ```
 Infra (CoachMarkProvider): `registerScroller` + `scrollIntoView(id)` (measures window
-y; if off-screen scrolls target top to ~26% screen height, waits 340ms) + `scrollToTop()`
-(overlay's `handleClose` calls it so 完成/略過/back returns the page to the top).
-CoachMarkOverlay `await`s `scrollIntoView(targetId)` before each measure. Pages that
-don't register a scroller no-op — zero impact on the other ~12 coach pages.
+y; if off-screen scrolls target top to ~26% screen height with `animated:false` + a
+short settle) + `scrollToTop(animated?)` (overlay calls it INSTANT on tour open, SMOOTH
+on close via `handleClose`). CoachMarkOverlay resets to top on step 1, then `await`s
+`scrollIntoView(targetId)` before each measure. The scroll-offset maths is the pure,
+unit-tested `computeCoachScrollOffset` in `coachMarkLayout.ts`. Pages that don't register
+a scroller no-op — zero impact on the other ~12 coach pages.
 
-**⚠ KNOWN BUG (2026-07-01 — fix next time): step-1 莫名滑動 → 遮罩跑位.** If the stats
-page is already scrolled when ⓘ is opened (or on first open), step 1 (period selector,
-which should NOT scroll) triggers a scroll AND the spotlight ring/bubble end up
-mis-positioned. Likely root cause: the fixed 340ms settle in `scrollIntoView` is shorter
-than the iOS `scrollTo({animated:true})` animation, so the follow-up `measureInWindow`
-reads a MID-animation y → ring drawn at the wrong place. Candidate fixes: (a) await
-scroll-end (`onMomentumScrollEnd`) instead of a fixed delay, or bump the delay; (b)
-`scrollTo({animated:false})`; (c) skip scrollIntoView when the computed delta is tiny
-(the period card is always already visible). Reproduce: scroll stats page down → tap ⓘ
-→ watch step 1.
+**✅ FIXED (2026-07-01): step-1 莫名滑動 → 遮罩跑位.** Symptom: a tour opened on an
+already-scrolled stats page made step 1 (period selector, near content-top) yank the
+page to re-centre it, and the spotlight ring/bubble landed off-target. **The earlier
+"340ms settle / coordinate mix" hypotheses were both wrong** — `computeCoachScrollOffset`
+is correct (the ScrollView's window-top cancels out of `offset + (windowY − desiredTop)`,
+proved by derivation + the unit tests). The real causes were in the PROVIDER flow:
+(1) the tour started from wherever the page was scrolled, so a near-top target above the
+top-safe band triggered an auto-scroll (the「莫名滑動」); (2) step scrolls used
+`animated:true`, so the fixed 340+60ms measure could read a MID-animation y → ring
+mis-position (the「遮罩跑位」). Fix (maths untouched): step 1 instantly resets the
+scroller to the top (`scrollToTop(false)`), so its near-top target needs no scroll; per-
+step scrolls use `animated:false` so the follow-up measure reads the settled position.
+Sim-verified: pre-scrolled stats page → ⓘ → step 1 ring on the period selector with no
+surprise scroll; steps 2–4 still auto-scroll heatmap/capacity/duration into view with
+correct rings. **Lesson: don't trust an audit's root-cause label — derive the maths
+yourself before patching** (this one sent two notes down the wrong path).
 
 ## Verify
 
