@@ -94,13 +94,25 @@ effective is_logged.
   (`fix/achievement-pr-is-logged-2026-06-25`): added `AND s.is_logged = 1`.
   Note `loadAchievementPanelData`'s `if (!r.is_logged) continue` did NOT
   protect — it read the same stale proxy.
-- ⚠️ **UNVERIFIED suspect**: `achievementRepository.countLoggedSessions`
-  (`:475`) — still `is_skipped = 0 AND weight_kg/reps NOT NULL`, **no
-  `is_logged = 1`**. Feeds `totalSessionCount` for the session_count ladder, so
-  a session of only-planned sets may count. BUT the backfill docblock
-  deliberately discusses this count's "any non-skipped set incl. warmup-only"
-  semantics (the `hasLogged` working-set gate in `evaluate()` is the
-  compensator). Needs verify-rootcause before touching — may be intentional.
+- ✅ `achievementRepository.countLoggedSessions` — **FIXED** (`226b004`,
+  2026-06-28): added `AND s.is_logged = 1`. Feeds `totalSessionCount` for the
+  session_count ladder. The prior proxy (`is_skipped = 0 AND weight_kg/reps NOT
+  NULL`) over-counted a session opened from a template / 動作記憶 default and
+  ended WITHOUT ✓-tapping any set (real weight·reps, is_logged=0, is_skipped=0,
+  never purged by `endSession`), inflating the total so a session_count
+  milestone unlocked one (or more) sessions early on the next genuinely-logged
+  session. Verify-rootcause (per the backfill docblock @ `backfillAchievementsIfNeeded`)
+  confirmed the warmup-only handling is **NOT** regressed: the count is fed as
+  the FINAL total (not progressive) and `evaluate()` still gates each unlock on
+  the current session's working-set `hasLogged`.
+  **Deliberately NOT `set_kind = 'working'`** (ADR-0009 §D3): warmup-only
+  sessions are intentionally counted (compensated by the `hasLogged` gate), and a
+  dropset HEAD carries `set_kind='dropset'` — a working-only filter would wrongly
+  drop a pure-dropset session that the user really performed. So the plain
+  `is_logged = 1` (this skill's canonical aggregate rule) is exactly right here.
+  Regression: live path in `achievementsAndStats.test.ts`
+  (`evaluateAndPersistAchievements` + `loadAchievementPanelData`), backfill path
+  in `achievementBackfill.test.ts`.
 - ➖ `setRepository.ts` prefill / "load last session" paths (707/739/851/1475…)
   — **intentionally** filter only `is_skipped = 0` (they pull the *planned*
   shape of the last session, which includes unchecked sets). `dropset-chain-semantics`

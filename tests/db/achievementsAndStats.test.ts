@@ -31,6 +31,7 @@ import {
   listAchievementDefinitions,
   listUnlockedDefinitionIds,
   listUnlocks,
+  loadAchievementPanelData,
 } from '../../src/adapters/sqlite/achievementRepository';
 import { loadStatsSetRecords } from '../../src/adapters/sqlite/statsRepository';
 import { mgFrequencyOverPeriod } from '../../src/domain/stats/statsEngine';
@@ -337,5 +338,141 @@ describe('Slice 9 — Achievement + Stats integration via SQLite', () => {
     expect(await listUnlocks(db)).not.toContainEqual(
       expect.objectContaining({ set_id: unchecked!.id })
     );
+  });
+});
+
+// --- session_count ladder: LIVE path (evaluate + panel) ----------------------
+// Companion to the backfill-path regression in achievementBackfill.test.ts
+// ('session_count ladder excludes planned-but-never-tapped sessions'). The src
+// fix lives in `countLoggedSessions` (`AND s.is_logged = 1`, 226b004). This
+// pins the two LIVE surfaces that also read that count — `loadAchievementPanelData`
+// (the achievements-panel `totalSessionCount`) and `evaluateAndPersistAchievements`
+// (the end-of-session unlock) — so a session opened from a template / 動作記憶
+// default and ended WITHOUT ✓-tapping any set ("ghost": real weight·reps,
+// is_logged=0, is_skipped=0, never purged by `endSession`) can never inflate the
+// 「完成 N 次訓練」ladder there either.
+//
+// NB: `set_kind = 'working'` is deliberately NOT part of the fix (ADR-0009 §D3):
+// warmup-only sessions are intentionally counted (compensated by `evaluate()`'s
+// working-set `hasLogged` gate + the FINAL-total feed), and a dropset HEAD is
+// `set_kind='dropset'` so a working-only filter would wrongly drop pure-dropset
+// sessions. These tests therefore only exercise the planned-vs-performed axis.
+describe('session_count ladder — live path excludes planned-but-never-tapped sessions', () => {
+  let db: BetterSqliteDatabase;
+
+  beforeEach(async () => {
+    db = new BetterSqliteDatabase(':memory:');
+    await migrate(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  // A "ghost" session: sets carry real weight·reps but were NEVER ✓-tapped.
+  // `recordSetInSession` (via recSet) writes is_logged=0 and we deliberately
+  // skip the ✓-tap UPDATE — modelling a template / 動作記憶 plan the user opened
+  // and ended without ticking. `endSession` only writes ended_at, so the
+  // unchecked rows persist (is_logged=0, is_skipped=0, real weight·reps).
+  const seedGhostSession = async (args: {
+    id: string;
+    exercise_id: string;
+    started_at: number;
+    uuid: () => string;
+  }) => {
+    await createSession(db, { id: args.id, started_at: args.started_at });
+    await recSet(db, {
+      session_id: args.id,
+      exercise_id: args.exercise_id,
+      weight_kg: 100,
+      reps: 5,
+      ordering: 0,
+      now: () => args.started_at + 1000,
+      uuid: args.uuid,
+    });
+    // NO is_logged=1 UPDATE — typed but never ticked.
+    await endSession(db, { id: args.id, ended_at: args.started_at + 60_000 });
+  };
+
+  it('a ghost (zero-✓) session does NOT increment totalSessionCount; a real ✓ one does', async () => {
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const t0 = 1_700_000_000_000;
+    let nextId = 0;
+    const uuid = () => `set-${nextId++}`;
+
+    // Ghost session first — the user performed nothing.
+    await seedGhostSession({ id: 'ghost', exercise_id: bench.id, started_at: t0, uuid });
+
+    // The panel's session count must still be 0 (pre-fix it was 1).
+    expect((await loadAchievementPanelData(db)).totalSessionCount).toBe(0);
+
+    // Real session: the user ✓-tapped a working set.
+    await createSession(db, { id: 'real', started_at: t0 + dayMs });
+    const realSet = await recSet(db, {
+      session_id: 'real',
+      exercise_id: bench.id,
+      weight_kg: 60,
+      reps: 8,
+      ordering: 0,
+      now: () => t0 + dayMs + 1000,
+      uuid,
+    });
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, realSet.set_id);
+    await endSession(db, { id: 'real', ended_at: t0 + dayMs + 60_000 });
+
+    // Only the real session counts — the ghost never increments the ladder
+    // (pre-fix this would read 2).
+    expect((await loadAchievementPanelData(db)).totalSessionCount).toBe(1);
+  });
+
+  it('4 ghost sessions do NOT let a later real session cross session_count(5) early', async () => {
+    const bench = (await listExercises(db)).find((e) => e.name === 'Bench Press')!;
+    const t0 = 1_700_000_000_000;
+    let nextId = 0;
+    const uuid = () => `set-${nextId++}`;
+
+    // 4 ghost (template-started, zero-✓, ended) sessions. Pre-fix these inflated
+    // countLoggedSessions to 4.
+    for (let i = 0; i < 4; i++) {
+      await seedGhostSession({
+        id: `ghost-${i}`,
+        exercise_id: bench.id,
+        started_at: t0 + i * dayMs,
+        uuid,
+      });
+    }
+
+    // 1 genuinely-performed (✓-tapped) session, evaluated via the live
+    // end-of-session path.
+    const realId = 'real';
+    await createSession(db, { id: realId, started_at: t0 + 5 * dayMs });
+    const realSet = await recSet(db, {
+      session_id: realId,
+      exercise_id: bench.id,
+      weight_kg: 60,
+      reps: 8,
+      ordering: 0,
+      now: () => t0 + 5 * dayMs + 1000,
+      uuid,
+    });
+    await db.runAsync(`UPDATE "set" SET is_logged = 1 WHERE id = ?`, realSet.set_id);
+    await endSession(db, { id: realId, ended_at: t0 + 5 * dayMs + 60_000 });
+
+    const outcome = await evaluateAndPersistAchievements(db, {
+      ended_session_id: realId,
+      unlocked_at: t0 + 5 * dayMs + 60_000,
+    });
+    const codes = outcome.newDefinitions.map((d) => d.code);
+
+    // Real performed count = 1: only the 1-session milestone unlocks. Pre-fix
+    // totalSessionCount = 4 ghosts + 1 real = 5, so session_count__5 fired one
+    // session early off sets the user only typed.
+    expect(codes).toContain('session_count__1');
+    expect(codes).not.toContain('session_count__5');
+
+    // The panel count agrees — just the 1 real session.
+    expect((await loadAchievementPanelData(db)).totalSessionCount).toBe(1);
   });
 });
