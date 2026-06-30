@@ -228,21 +228,30 @@ Everything is under `components/help/` and exported from `components/help/index.
      avoid spotlighting a tall column (e.g. the library sidebar) — but a card is
      still clearer for very tall targets if the caption would cover the thing it
      describes.
-   - **⚠️ Spotlight measure is offset by the top safe-area inset — FIXED in the
-     overlay (2026-06-30, ~3h to root-cause; don't re-debug from scratch).**
-     Symptom: a spotlight rings the WRONG element — most visibly a thin target near
-     the top (the 超級組「選 2 個」selected-chip row spotlight ringed the search bar
-     ~62px above it). Root cause: `CoachMarkOverlay` renders inside a full-screen
-     `<Modal>` and measures the underlying page's targets WHILE the modal is open;
-     on a notched device BOTH `measureInWindow` AND `measure(pageY)` under-report
-     the target's window-Y by the screen's top safe-area inset (the page sits below
-     a reserved safe area the modal's measurement space excludes). It hits EVERY
-     coach page — large targets (grid/footer/calendar) just hide the ~62px error.
-     Fix (already shipped): `CoachMarkOverlay` adds `useSafeAreaInsets().top` back
-     to `rect.y` before building the spotlight `hole`/placement (`adjustedRect`).
-     **So this is solved for new pages — you don't need to do anything.** Dead ends
-     that DON'T fix it (don't repeat): `forwardRef` onto the target's styled root,
-     giving the target a real `backgroundColor`, switching the provider
+   - **⚠️ Spotlight measure inset is PRESENTATION-DEPENDENT — only modal-presented
+     hosts need compensation (root-caused 2026-06-30 over two rounds; don't
+     re-debug from scratch).** `CoachMarkOverlay` renders inside a full-screen
+     `<Modal>` and measures the underlying page's targets WHILE the modal is open.
+     - On a **`presentation: 'modal'` route** (e.g. `superset/new` — check
+       `app/_layout.tsx`), `measureInWindow` under-reports the target's window-Y by
+       the top safe-area inset (~62pt): the modal sheet's content lives in a
+       container the overlay Modal's window space excludes. Symptom: a thin near-top
+       target rings the wrong element (超級組「選 2 個」row ringed the search bar above).
+     - On a **card-presented route** (the DEFAULT — template editor, session, the
+       tabs, every exercise/history/chart/body/superset-detail page), `measureInWindow`
+       returns TRUE window coords — NO compensation needed.
+     Fix (shipped): the compensation is gated by a `modalHost` flag —
+     `usePageHelp(pageId, content, { modalHost: true })` → `PageHelpHost` →
+     `CoachMarkOverlay`, which adds `useSafeAreaInsets().top` to `rect.y` ONLY when
+     `modalHost`. **So for a NEW coach page: pass `modalHost: true` IFF its route is
+     `presentation: 'modal'`; otherwise do nothing.**
+     - ⛔ **Round-1 trap (do NOT redo): an UNCONDITIONAL `+insets.top`.** That fixed
+       superset (the one modal host) but shoved every card page's spotlight ~62pt too
+       low — the template editor「加入動作」ring (bottom action bar, real y≈800) landed
+       off-screen showing no ring. "It hits every coach page" was the WRONG diagnosis;
+       only modal hosts under-report.
+     Dead ends that DON'T fix it (don't repeat): `forwardRef` onto the target's styled
+     root, giving the target a real `backgroundColor`, switching the provider
      `measureInWindow`↔`measure(pageY)`, wrapping the page in an extra flex `<View>`,
      or `<SafeAreaView edges={['top']}>`→`<View paddingTop={insets.top}>` (that
      DOUBLE-pads — the parent Stack already reserves the inset). And do NOT "fix" a
