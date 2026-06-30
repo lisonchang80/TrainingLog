@@ -172,7 +172,11 @@ export function CalendarGrid({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={goPrev} style={styles.navBtn}>
+        <Pressable
+          onPress={goPrev}
+          style={styles.navBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('button', 'a11yPrevMonth')}>
           <Text style={styles.navBtnText}>‹</Text>
         </Pressable>
         <Pressable onPress={openPicker} style={styles.titleBtn}>
@@ -181,7 +185,9 @@ export function CalendarGrid({
         <Pressable
           onPress={goNext}
           style={[styles.navBtn, !canGoNext && styles.navBtnDisabled]}
-          disabled={!canGoNext}>
+          disabled={!canGoNext}
+          accessibilityRole="button"
+          accessibilityLabel={t('button', 'a11yNextMonth')}>
           <Text
             style={[styles.navBtnText, !canGoNext && styles.navBtnTextDisabled]}>
             ›

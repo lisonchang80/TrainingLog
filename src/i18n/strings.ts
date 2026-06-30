@@ -296,6 +296,9 @@ export const strings = {
       a11yTierProgress: '進度',
       a11yDecrease: '減少',
       a11yIncrease: '增加',
+      // 2026-07-01 a11y sweep — 歷史月曆 ‹ / › 月份切換箭頭。
+      a11yPrevMonth: '上個月',
+      a11yNextMonth: '下個月',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -1361,6 +1364,9 @@ export const strings = {
       a11yTierProgress: 'Progress',
       a11yDecrease: 'Decrease',
       a11yIncrease: 'Increase',
+      // 2026-07-01 a11y sweep — history calendar ‹ / › month-nav arrows.
+      a11yPrevMonth: 'Previous month',
+      a11yNextMonth: 'Next month',
     },
 
     page: {
