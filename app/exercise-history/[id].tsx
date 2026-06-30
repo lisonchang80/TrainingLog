@@ -52,7 +52,7 @@ import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
-import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tNSubTags, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -973,7 +973,10 @@ function HistoryPageContent({
                 </Text>
                 {!isMinimal && (programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
-                    {[programId ? '1 Program' : null, subTagFilters.size > 0 ? `${subTagFilters.size} 副` : null]
+                    {[
+                      programId ? t('domain', 'program') : null,
+                      subTagFilters.size > 0 ? tNSubTags(subTagFilters.size) : null,
+                    ]
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>

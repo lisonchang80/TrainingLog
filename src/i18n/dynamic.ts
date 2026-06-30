@@ -564,6 +564,30 @@ export function tNExerciseCount(n: number): string {
 }
 
 /**
+ * Advanced-filter badge (exercise-history / exercise-chart) — count of active
+ * sub-tag (強度 / intensity) filters. `2 副` / `2 intensities`.
+ */
+export function tNSubTags(n: number): string {
+  return isEn() ? `${n} ${n === 1 ? 'intensity' : 'intensities'}` : `${n} 副`;
+}
+
+/**
+ * Program detail header meta line (app/program/[id].tsx). Localizes the
+ * cycle-count × cycle-length and start date. `4 × 7 天 · 起始 2026-01-01` /
+ * `4 × 7 days · starts 2026-01-01`. The ACTIVE status is appended separately
+ * via `t('status','active')` at the call site.
+ */
+export function tProgramMeta(
+  cycleCount: number,
+  cycleLength: number,
+  startDate: string,
+): string {
+  return isEn()
+    ? `${cycleCount} × ${cycleLength} days · starts ${startDate}`
+    : `${cycleCount} × ${cycleLength} 天 · 起始 ${startDate}`;
+}
+
+/**
  * Phase 4.5 final sweep — Calendar grid header title.
  * `2026年5月` / `May 2026`. Uses tMonthOfYear under the hood for EN month names.
  */

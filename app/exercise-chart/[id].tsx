@@ -62,7 +62,7 @@ import {
   switcherArrowDisabled,
   type ClusterSide,
 } from '@/src/domain/exercise/clusterSwitcher';
-import { t, tExercise, tSwitchToPartner } from '@/src/i18n';
+import { t, tExercise, tNSubTags, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -652,8 +652,8 @@ function ChartPageContent({
                 {!isMinimal && (programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
                     {[
-                      programId ? '1 Program' : null,
-                      subTagFilters.size > 0 ? `${subTagFilters.size} 副` : null,
+                      programId ? t('domain', 'program') : null,
+                      subTagFilters.size > 0 ? tNSubTags(subTagFilters.size) : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')}

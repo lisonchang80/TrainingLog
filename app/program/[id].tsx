@@ -7,7 +7,7 @@ import { useDatabase } from '@/components/database-provider';
 import { getProgram } from '@/src/adapters/sqlite/programRepository';
 import { listTemplates, type TemplateSummary } from '@/src/adapters/sqlite/templateRepository';
 import type { ProgramWithCells } from '@/src/domain/program/types';
-import { t, tMainTagLine, tWeekdayLabels } from '@/src/i18n';
+import { t, tMainTagLine, tProgramMeta, tWeekdayLabels } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 /**
@@ -61,8 +61,8 @@ export default function ProgramDetailScreen() {
           <Text style={styles.tag}>{tMainTagLine(program.main_tag)}</Text>
         ) : null}
         <Text style={styles.meta}>
-          {program.cycle_count} × {program.cycle_length} days · starts {program.start_date}
-          {program.is_active === 1 ? ' · ACTIVE' : ''}
+          {tProgramMeta(program.cycle_count, program.cycle_length, program.start_date)}
+          {program.is_active === 1 ? ` ${t('status', 'active')}` : ''}
         </Text>
 
         {/* Header row */}
