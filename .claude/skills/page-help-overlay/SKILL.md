@@ -265,6 +265,29 @@ Everything is under `components/help/` and exported from `components/help/index.
      spotlight uses. (Here: width/height correct, y=60 vs real ~122 → "off by the
      inset" was obvious in one shot.) console.log is useless (goes to the Metro
      terminal you can't read from the sim). Remove the debug Text before shipping.
+     **Also print `modalHost` in the DBG line** (`modalHost=${!!modalHost} raw=…
+     adj=…`) — for a card page you want `modalHost=false` + `raw==adj`; only the
+     modal host (superset/new) should show `adj.y = raw.y + ~62`.
+   - **Verify ALL overlay positions in one sweep (after any coach-infra change).**
+     The inset compensation is a per-PRESENTATION constant, so confirming one
+     card page + the one modal page logically covers everything — but to *see* it,
+     deep-link each coach host, open ⓘ, screenshot the step-1 spotlight, read the
+     DBG line. Recipe per page: `xcrun simctl openurl <UDID> "<route>"` → sleep 4
+     → `ui_find_element ["說明"]` for the ⓘ frame (tap its centre) → screenshot.
+     **⚠️ `ui_find_element ["說明"]` intermittently returns `[]` on the
+     exercise-detail / exercise-history / exercise-chart / superset-detail routes
+     (idb flakiness, not a real absence)** — fall back to tapping the visible
+     top-right ⓘ (~pt x=366,y=86 on a 402-wide screen). Coach-host deep-links
+     (2026-06-30): tabs `traininglog:///` (today) `/history` `/library` `/programs`
+     `/body`; stack `/template/<id>` `/session/<id>` `/exercise/<id>`
+     `/exercise-history/<id>` `/exercise-chart/<id>` `/superset/<id>`
+     `/superset/new` (the lone modal). exercise-history/chart need an exercise
+     that HAS logged sets or the bucket/row targets don't render (empty state) —
+     query `SELECT se.exercise_id FROM "set" s JOIN session_exercise se … WHERE
+     s.is_logged=1 GROUP BY … ORDER BY COUNT(*) DESC`. The dev LogBox toast
+     ("Open debugger to view warnings") floats over the overlay at the bottom and
+     can occlude a bottom-anchored spotlight; tap its ✕ (it's above the coach
+     Modal, so the tap dismisses the toast without advancing the step).
 6. **(info/mixed with screenshots)** add PNGs under `assets/help/<pageId>/` and
    `require()` them in the content file. See `assets/help/README.md`.
 
