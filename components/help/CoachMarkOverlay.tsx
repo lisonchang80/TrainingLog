@@ -16,7 +16,7 @@ import { t } from '@/src/i18n';
 import { useTheme, type ResolvedTheme, type ThemeTokens } from '@/src/theme';
 
 import { pickCoachPlacement, resolveCoachBubbleAnchor } from './coachMarkLayout';
-import { useCoachMarkMeasure } from './CoachMarkProvider';
+import { useCoachMarkMeasure, useCoachMarkScrollIntoView } from './CoachMarkProvider';
 import type { CoachStep, Rect } from './types';
 
 // 遮罩 (scrim) always darkens toward black, never a theme surface token. Dark
@@ -83,6 +83,7 @@ export function CoachMarkOverlay({
   const { tokens, resolved } = useTheme();
   const styles = useMemo(() => makeStyles(tokens, resolved), [tokens, resolved]);
   const measure = useCoachMarkMeasure();
+  const scrollIntoView = useCoachMarkScrollIntoView();
   const insets = useSafeAreaInsets();
 
   const [index, setIndex] = useState(0);
@@ -98,7 +99,10 @@ export function CoachMarkOverlay({
   }, [visible]);
 
   // Measure the current step's target whenever the step or visibility changes.
-  // Re-measure on a microtask delay so a freshly-opened Modal has laid out.
+  // First scroll a below-the-fold target into view (no-op when the page didn't
+  // register a scroller, or the target is already visible — see
+  // CoachMarkProvider.scrollIntoView), THEN measure on a short delay so the
+  // freshly-scrolled / freshly-opened Modal has laid out.
   useEffect(() => {
     let cancelled = false;
     // Screenshot-card steps (step.image) have no target to measure.
@@ -108,16 +112,18 @@ export function CoachMarkOverlay({
     }
     const targetId = step.targetId;
     setRect(null);
-    const id = setTimeout(() => {
-      void measure(targetId).then((r) => {
-        if (!cancelled) setRect(r);
-      });
-    }, 60);
+    void (async () => {
+      await scrollIntoView(targetId);
+      if (cancelled) return;
+      await new Promise<void>((r) => setTimeout(r, 60));
+      if (cancelled) return;
+      const r = await measure(targetId);
+      if (!cancelled) setRect(r);
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(id);
     };
-  }, [visible, step, measure]);
+  }, [visible, step, measure, scrollIntoView]);
 
   if (!step) return null;
 

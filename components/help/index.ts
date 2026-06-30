@@ -9,7 +9,7 @@
 export { HelpButton } from './HelpButton';
 export { InfoModal } from './InfoModal';
 export { CoachMarkOverlay } from './CoachMarkOverlay';
-export { CoachMarkProvider, useCoachMarkTarget } from './CoachMarkProvider';
+export { CoachMarkProvider, useCoachMarkTarget, useCoachScroller } from './CoachMarkProvider';
 export { PageHelpHost } from './PageHelpHost';
 export { usePageHelp, type PageHelpHandle } from './usePageHelp';
 export { getHelpSeen, markHelpSeen, helpSeenKey } from './helpFlags';
