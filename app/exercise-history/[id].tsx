@@ -52,7 +52,7 @@ import type { LoadType } from '@/src/domain/exercise/types';
 import { computeHistorySetLabels } from '@/src/domain/set/historySetLabel';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
-import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
+import { getLocale, t, tAssistedEffective, tExercise, tLoadType, tNSubTags, tReplaySoloPrompt, tReplayClusterPrompt, tSwitchToPartner } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -62,7 +62,11 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { exerciseHistoryHelp } from '@/components/help/content/exercise-history';
+import {
+  exerciseHistoryHelp,
+  exerciseHistoryHelpMinimal,
+} from '@/components/help/content/exercise-history';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * ADR-0025 — DRY hook for the many sub-components in this file.
@@ -228,7 +232,12 @@ function ExerciseHistoryScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useHistoryStyles();
-  const help = usePageHelp('exercise-history', exerciseHistoryHelp, {
+  // ADR-0026 — 極簡模式藏「進階篩選」的 計劃/強度 控制，ⓘ 換 minimal 變體。
+  const { isMinimal } = useAppMode();
+  const help = usePageHelp(
+    'exercise-history',
+    isMinimal ? exerciseHistoryHelpMinimal : exerciseHistoryHelp,
+    {
     autoShowOnce: true,
   });
   const initialClusterMode = useMemo(
@@ -528,6 +537,9 @@ function HistoryPageContent({
 }) {
   const router = useRouter();
   const styles = useHistoryStyles();
+  // ADR-0026 — 極簡模式藏「進階篩選」的 計劃/強度（保留 header + 切換圖表/清除
+  // action row）；hydration 也忽略殘留的 program filter，避免在極簡靜默過濾。
+  const { isMinimal } = useAppMode();
   const bucketsTarget = useCoachMarkTarget('history.buckets');
   const clusterTarget = useCoachMarkTarget('history.cluster');
   const advancedTarget = useCoachMarkTarget('history.advanced');
@@ -590,19 +602,26 @@ function HistoryPageContent({
       const f = peekFilter();
       if (f) {
         setBucketFilters(new Set(f.buckets));
-        setProgramId(f.programId);
-        setSubTagFilters(new Set(f.subTags));
+        // 極簡模式不採用 計劃/強度 過濾（控制已隱藏）——否則殘留的 program
+        // filter 會靜默縮小資料、又沒有控制可清除。
+        if (!isMinimal) {
+          setProgramId(f.programId);
+          setSubTagFilters(new Set(f.subTags));
+        }
         if (!hasExplicitClusterMode) {
           setClusterMode(f.clusterMode);
         }
-        if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
+        if (
+          f.buckets.size > 0 ||
+          (!isMinimal && (f.programId != null || f.subTags.size > 0))
+        ) {
           setAdvancedOpen(true);
         }
       }
       return () => {
         cancelled = true;
       };
-    }, [refresh, hasExplicitClusterMode])
+    }, [refresh, hasExplicitClusterMode, isMinimal])
   );
 
   const persistFilter = useCallback(
@@ -952,9 +971,12 @@ function HistoryPageContent({
                 <Text style={styles.advancedHeaderText}>
                   {t('page', 'advancedFilter')} {advancedOpen ? '▲' : '▼'}
                 </Text>
-                {(programId != null || subTagFilters.size > 0) && (
+                {!isMinimal && (programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
-                    {[programId ? '1 Program' : null, subTagFilters.size > 0 ? `${subTagFilters.size} 副` : null]
+                    {[
+                      programId ? t('domain', 'program') : null,
+                      subTagFilters.size > 0 ? tNSubTags(subTagFilters.size) : null,
+                    ]
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
@@ -962,34 +984,39 @@ function HistoryPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>{t('domain', 'program')}</Text>
-                  <Pressable
-                    style={styles.dropdown}
-                    onPress={() => setProgramPickerOpen(true)}>
-                    <Text style={styles.dropdownText}>
-                      {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
-                    </Text>
-                    <Text style={styles.dropdownChevron}>▾</Text>
-                  </Pressable>
+                  {/* ADR-0026 — 極簡模式藏 計劃/強度，只留下方 action row。 */}
+                  {!isMinimal && (
+                    <>
+                      <Text style={styles.advancedLabel}>{t('domain', 'program')}</Text>
+                      <Pressable
+                        style={styles.dropdown}
+                        onPress={() => setProgramPickerOpen(true)}>
+                        <Text style={styles.dropdownText}>
+                          {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
+                        </Text>
+                        <Text style={styles.dropdownChevron}>▾</Text>
+                      </Pressable>
 
-                  {programId != null && (
-                    <View>
-                      <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
-                      {subTagOptions.length === 0 ? (
-                        <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
-                      ) : (
-                        <View style={styles.filterRow}>
-                          {subTagOptions.map((tag) => (
-                            <SubTagChip
-                              key={tag}
-                              label={tag}
-                              active={subTagFilters.has(tag)}
-                              onPress={() => onSubTagTap(tag)}
-                            />
-                          ))}
+                      {programId != null && (
+                        <View>
+                          <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
+                          {subTagOptions.length === 0 ? (
+                            <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
+                          ) : (
+                            <View style={styles.filterRow}>
+                              {subTagOptions.map((tag) => (
+                                <SubTagChip
+                                  key={tag}
+                                  label={tag}
+                                  active={subTagFilters.has(tag)}
+                                  onPress={() => onSubTagTap(tag)}
+                                />
+                              ))}
+                            </View>
+                          )}
                         </View>
                       )}
-                    </View>
+                    </>
                   )}
 
                   <View style={styles.actionRow}>

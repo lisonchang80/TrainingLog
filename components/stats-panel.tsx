@@ -18,6 +18,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
 import { useDatabase } from '@/components/database-provider';
+import { useCoachMarkTarget, useCoachScroller } from '@/components/help';
 import { BodyHeatmap, BodyHeatmapLegend, type Quintile } from '@/components/body-heatmap';
 import { MiniBarChart } from '@/components/mini-bar-chart';
 import { loadStatsSetRecords } from '@/src/adapters/sqlite/statsRepository';
@@ -105,6 +106,15 @@ export function StatsPanel() {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
+  // ⓘ coach spotlight anchors (history ▸ 統計). The capacity & duration cards sit
+  // below the fold; `useCoachScroller` registers this ScrollView so the overlay
+  // auto-scrolls each target into view before spotlighting it (user report
+  // 2026-06-30 → auto-scroll 2026-07-01). See history-stats.ts.
+  const coachScroll = useCoachScroller();
+  const periodTarget = useCoachMarkTarget('stats.period');
+  const heatmapTarget = useCoachMarkTarget('stats.heatmap');
+  const capacityTarget = useCoachMarkTarget('stats.capacity');
+  const durationTarget = useCoachMarkTarget('stats.duration');
   const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
   // Anchor date drives the histogram X-axis. Default = today at 00:00 local.
@@ -246,9 +256,13 @@ export function StatsPanel() {
   );
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll}>
+    <ScrollView
+      ref={coachScroll.ref}
+      onScroll={coachScroll.onScroll}
+      scrollEventThrottle={coachScroll.scrollEventThrottle}
+      contentContainerStyle={styles.scroll}>
       {/* Period selector */}
-      <View style={styles.periodRow}>
+      <View style={styles.periodRow} ref={periodTarget.ref} collapsable={false}>
         {PERIOD_CHOICES.map((p) => (
           <Pressable
             key={p.key}
@@ -298,7 +312,7 @@ export function StatsPanel() {
       ) : null}
 
       {/* Body heatmap */}
-      <View style={styles.card}>
+      <View style={styles.card} ref={heatmapTarget.ref} collapsable={false}>
         <Text style={styles.cardTitle}>{t('page', 'bodyOverview')} · {currentBucket.label}</Text>
         <Text style={styles.cardSubtitle}>{t('status', 'heatmapSubtitle')}</Text>
         {/* P1 (overnight 5/23 anatomy M-level): BodyHeatmap props rename
@@ -314,7 +328,7 @@ export function StatsPanel() {
       </View>
 
       {/* Per-MG capacity histograms */}
-      <View style={styles.card}>
+      <View style={styles.card} ref={capacityTarget.ref} collapsable={false}>
         <Text style={styles.cardTitle}>{t('page', 'capacityByMg')}</Text>
         <Text style={styles.cardSubtitle}>
           {t('status', 'capacityMgSubtitle')}
@@ -349,7 +363,7 @@ export function StatsPanel() {
       </View>
 
       {/* Duration histogram */}
-      <View style={styles.card}>
+      <View style={styles.card} ref={durationTarget.ref} collapsable={false}>
         <Text style={styles.cardTitle}>{t('page', 'durationOverPeriod')}</Text>
         <Text style={styles.cardSubtitle}>
           {t('status', 'durationSubtitle')}

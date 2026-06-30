@@ -17,7 +17,10 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { historyHelp } from '@/components/help/content/history';
+import { historyHelp, historyHelpMinimal } from '@/components/help/content/history';
+import { statsHelp } from '@/components/help/content/history-stats';
+import { achievementsHelp } from '@/components/help/content/history-achievements';
+import { useAppMode } from '@/src/app-mode';
 
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryMode = 'calendar' | 'list';
@@ -65,7 +68,20 @@ function HistoryScreen() {
   useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const help = usePageHelp('history', historyHelp, { autoShowOnce: true });
+  // ADR-0026 — 極簡模式月曆 cell 藏第 3 行（強度），所以 history ⓘ 也換成不含
+  // 「放大看一天」截圖卡的 minimal 變體。同 pageId（同畫面微差）。
+  const { isMinimal } = useAppMode();
+  // Each sub-tab has its OWN help (stable pageId per tab). The single header ⓘ
+  // opens whichever matches the active tab — see `help` below (after
+  // effectiveTab). Only the default 歷史 tab auto-shows once; 統計 / 獎章 are
+  // manual-ⓘ only — their usePageHelp effect runs on mount while you're still on
+  // 歷史, so an autoShowOnce there would be consumed unseen (the host renders the
+  // active handle only). statsHelp / achievementsHelp are mode-agnostic.
+  const historyHelpH = usePageHelp('history', isMinimal ? historyHelpMinimal : historyHelp, {
+    autoShowOnce: true,
+  });
+  const statsHelpH = usePageHelp('history-stats', statsHelp);
+  const achievementsHelpH = usePageHelp('history-achievements', achievementsHelp);
   const subTabsTarget = useCoachMarkTarget('history.subtabs');
   const modeTarget = useCoachMarkTarget('history.mode');
   const calendarTarget = useCoachMarkTarget('history.calendar');
@@ -84,6 +100,14 @@ function HistoryScreen() {
   // the hidden panel never shows. Derived rather than effect-driven so it stays
   // correct on the same render the toggle changes.
   const effectiveTab: SubTab = tab === 'achievements' && !achievementsEnabled ? 'history' : tab;
+
+  // The header ⓘ opens the active sub-tab's help.
+  const help =
+    effectiveTab === 'stats'
+      ? statsHelpH
+      : effectiveTab === 'achievements'
+        ? achievementsHelpH
+        : historyHelpH;
 
   return (
     <SafeAreaView style={styles.container}>

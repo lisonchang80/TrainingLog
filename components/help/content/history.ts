@@ -89,3 +89,35 @@ export const historyHelp: LocalizedPageHelp = {
     ],
   },
 };
+
+/**
+ * 極簡模式變體 (ADR-0026). 極簡模式月曆 cell 隱藏第 3 行（主場強度 sub_tag,
+ * `MonthGridView` :325-326），所以「放大看一天」截圖卡（標示三行）在極簡無效——
+ * 改為丟掉該截圖卡、把「分兩行」的說明折進「月曆怎麼看」那一步。
+ *
+ * 沿用同 pageId 'history'（同畫面微差），不像 Today 的 plan/minimal 是兩個
+ * 不同起始畫面才各自拆 pageId。衍生自 historyHelp（plan 版為唯一真相）。
+ */
+const minimalCalendarBodyZh =
+  '每天用該訓練模板的顏色標示；右上「+N」表示當天有超過一筆訓練。點一天看當天紀錄，點空白日可補登訓練。每個格子分兩行：上＝當天總容量（綠字，kg），下＝訓練模板色塊（自由訓練為灰）。';
+const minimalCalendarBodyEn =
+  'Each day is tinted with its template’s colour; a “+N” top-right means more than one session that day. Tap a day to view it, or an empty day to back-fill. Each cell has two rows: top = that day’s total volume (green, kg); bottom = the template colour block (freestyle = grey).';
+
+export const historyHelpMinimal: LocalizedPageHelp = {
+  zh: {
+    ...historyHelp.zh,
+    coach: (historyHelp.zh.coach ?? [])
+      .filter((s) => s.targetId != null) // drop the day-cell screenshot card
+      .map((s) =>
+        s.targetId === 'history.calendar' ? { ...s, body: minimalCalendarBodyZh } : s,
+      ),
+  },
+  en: {
+    ...historyHelp.en,
+    coach: (historyHelp.en.coach ?? [])
+      .filter((s) => s.targetId != null)
+      .map((s) =>
+        s.targetId === 'history.calendar' ? { ...s, body: minimalCalendarBodyEn } : s,
+      ),
+  },
+};

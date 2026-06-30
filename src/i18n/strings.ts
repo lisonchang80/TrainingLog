@@ -296,6 +296,9 @@ export const strings = {
       a11yTierProgress: '進度',
       a11yDecrease: '減少',
       a11yIncrease: '增加',
+      // 2026-07-01 a11y sweep — 歷史月曆 ‹ / › 月份切換箭頭。
+      a11yPrevMonth: '上個月',
+      a11yNextMonth: '下個月',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -613,6 +616,7 @@ export const strings = {
       noRecordsUnderFilter: '篩選條件下沒有紀錄。',
       freestyle: '空白訓練',
       restDay: '休息日',
+      active: '· 啟用中',
       inProgress: '· 進行中',
       todayOutsideProgram: '今天不在 Program 範圍內',
       // ADR-0024 § 2.a — 訓練 tab 計劃訓練 區塊狀態文案。
@@ -1360,6 +1364,9 @@ export const strings = {
       a11yTierProgress: 'Progress',
       a11yDecrease: 'Decrease',
       a11yIncrease: 'Increase',
+      // 2026-07-01 a11y sweep — history calendar ‹ / › month-nav arrows.
+      a11yPrevMonth: 'Previous month',
+      a11yNextMonth: 'Next month',
     },
 
     page: {
@@ -1671,6 +1678,7 @@ export const strings = {
       noRecordsUnderFilter: 'No records under current filters.',
       freestyle: 'Freestyle',
       restDay: 'Rest Day',
+      active: '· Active',
       inProgress: '· In progress',
       todayOutsideProgram: 'Today is outside the Program range',
       // ADR-0024 § 2.a — Training tab planned-training section state copy.

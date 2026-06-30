@@ -374,6 +374,103 @@ Scale to the ask: one page → just do it inline. "rolling out help across the a
 → pipeline the P0–P2 pages; only invoke a Workflow / overnight wave on explicit
 user opt-in (it spawns many agents).
 
+## App-mode-aware coach pages (極簡 / 計劃, ADR-0026)
+
+When a page's UI changes with `useAppMode()` (極簡 hides the 計劃/強度 concept), its
+coach must change too — else it teaches / spotlights elements that aren't there in
+極簡. Validated 2026-06-30 on history / exercise-chart / exercise-history.
+
+**Mechanism by how different the two modes are:**
+- **Same screen, minor delta** (drop one step, or reword one step) → keep the SAME
+  `pageId`, derive the minimal variant from the plan content with `.map/.filter`
+  (plan = single source of truth, no duplicated bilingual blob):
+  ```ts
+  export const xHelpMinimal: LocalizedPageHelp = {
+    zh: { ...xHelp.zh, coach: (xHelp.zh.coach ?? [])
+      .filter((s) => s.targetId != null)            // drop screenshot-card steps
+      .map((s) => s.targetId === 'x.advanced' ? { ...s, body: '…' } : s) },
+    en: { ... },
+  };
+  ```
+  Call site: `usePageHelp('x', isMinimal ? xHelpMinimal : xHelp, …)` (isMinimal from
+  `useAppMode()`). Same pageId → seen-once flag shared; minimal is a subset so nothing
+  is lost if they switch after seeing one.
+- **Genuinely different screens** (Today plan = 3 start methods vs minimal = 2) →
+  split files + separate pageIds (`today-plan` / `today-minimal`). Heavier; only when
+  the screens really differ.
+
+**Page-side gating (non-obvious):**
+- Gate ONLY the mode-specific controls; keep the spotlight target's WRAPPER mounted.
+  The `useCoachMarkTarget` ref sits on the outer wrap (e.g. `advancedWrap`), so hiding
+  the inner 計劃/強度 dropdown+chips leaves the ref alive → the step still frames the
+  section, never goes null. (Unmount the whole target and the step degrades to a
+  centred caption — usually not wanted.)
+- Keep useful non-mode controls inside the gated section (chart/history 進階篩選: hide
+  program+intensity, KEEP the action row 看歷史·切換圖表 / 取消·清除).
+- **Hydration guard**: if the page hydrates a persisted filter carrying the mode
+  concept (programId/sub_tag from a mailbox), wrap the setState in `if (!isMinimal)`
+  + add `isMinimal` to the effect deps — else a filter set in 計劃 silently narrows
+  data in 極簡 with no control to clear it.
+
+**Which pages needed it / didn't (read the bodies, don't assume):**
+- Needed: `history` (drop the zoomed day-cell card — 極簡 cell is 2 rows, fold a 2-row
+  note into the calendar step), `exercise-chart` / `exercise-history` (gate 進階篩選
+  program/intensity, reword the advanced step).
+- NOT needed: `session-detail` / `template-editor` — copy already program-agnostic;
+  the hidden subtitle / 另存強度 menu item are not coach targets. `programs` —
+  unreachable in 極簡 (tab `href:null`). library/body/exercise-detail/superset-* — no
+  計劃/強度 concept.
+
+**Sim-verify**: Settings → 訓練模式 → toggle. `history` ⓘ = 4 steps (with day-cell
+card) in 計劃 / 3 (no card) in 極簡; chart·history-detail expand 進階篩選 → only the
+action row, advanced step reworded, spotlight still framing the section.
+
+## Long ScrollView coach pages — auto-scroll + per-sub-tab ⓘ (2026-07-01)
+
+Two capabilities added for History ▸ 統計 / 獎章 (`feat/history-subtab-help`):
+
+**1. One header ⓘ, per-sub-tab content.** A tab screen with inner sub-tabs
+(history.tsx: 歷史/統計/獎章) calls `usePageHelp` ONCE PER sub-tab (stable pageIds
+`history` / `history-stats` / `history-achievements`), then the single header ⓘ
+opens whichever matches `effectiveTab`:
+```ts
+const h = usePageHelp('history', ..., { autoShowOnce: true });
+const s = usePageHelp('history-stats', statsHelp);
+const a = usePageHelp('history-achievements', achHelp);
+const help = effectiveTab === 'stats' ? s : effectiveTab === 'achievements' ? a : h;
+// <HelpButton onPress={help.open}/> + <PageHelpHost help={help}/>
+```
+Only the default landing sub-tab gets `autoShowOnce` — the others' effect runs on
+mount while you're still on the default tab, so an autoShow there is consumed unseen.
+Per-panel coach targets live IN the panels (stats-panel / achievements-panel via
+`useCoachMarkTarget`), always under the History tab's `CoachMarkProvider`.
+
+**2. Auto-scroll below-the-fold targets.** A long ScrollView page's targets can sit
+below the fold; `measureInWindow` then reports an off-screen y and the spotlight/bubble
+land off-screen. Fix = the page registers its ScrollView so the overlay scrolls each
+target into view before measuring:
+```ts
+const coachScroll = useCoachScroller();   // from @/components/help
+<ScrollView ref={coachScroll.ref} onScroll={coachScroll.onScroll}
+            scrollEventThrottle={coachScroll.scrollEventThrottle}> … </ScrollView>
+```
+Infra (CoachMarkProvider): `registerScroller` + `scrollIntoView(id)` (measures window
+y; if off-screen scrolls target top to ~26% screen height, waits 340ms) + `scrollToTop()`
+(overlay's `handleClose` calls it so 完成/略過/back returns the page to the top).
+CoachMarkOverlay `await`s `scrollIntoView(targetId)` before each measure. Pages that
+don't register a scroller no-op — zero impact on the other ~12 coach pages.
+
+**⚠ KNOWN BUG (2026-07-01 — fix next time): step-1 莫名滑動 → 遮罩跑位.** If the stats
+page is already scrolled when ⓘ is opened (or on first open), step 1 (period selector,
+which should NOT scroll) triggers a scroll AND the spotlight ring/bubble end up
+mis-positioned. Likely root cause: the fixed 340ms settle in `scrollIntoView` is shorter
+than the iOS `scrollTo({animated:true})` animation, so the follow-up `measureInWindow`
+reads a MID-animation y → ring drawn at the wrong place. Candidate fixes: (a) await
+scroll-end (`onMomentumScrollEnd`) instead of a fixed delay, or bump the delay; (b)
+`scrollTo({animated:false})`; (c) skip scrollIntoView when the computed delta is tiny
+(the period card is always already visible). Reproduce: scroll stats page down → tap ⓘ
+→ watch step 1.
+
 ## Verify
 
 - `npx tsc --noEmit` + `npm test` (the pure `coachMarkLayout` test must stay green).
