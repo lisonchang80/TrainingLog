@@ -52,6 +52,8 @@ interface CoachMarkContextValue {
   registerScroller: (s: Scroller | null) => void;
   /** Scroll the registered container so `id`'s target is comfortably visible. */
   scrollIntoView: (id: string) => Promise<void>;
+  /** Scroll the registered container back to the top (e.g. when the tour ends). */
+  scrollToTop: () => void;
 }
 
 const CoachMarkContext = createContext<CoachMarkContextValue | null>(null);
@@ -124,9 +126,15 @@ export function CoachMarkProvider({ children }: { children: ReactNode }) {
     [measure],
   );
 
+  // Return the container to the top — called when a tour that auto-scrolled the
+  // page closes, so the user isn't left stranded at the bottom.
+  const scrollToTop = useCallback(() => {
+    scrollerRef.current?.scrollTo(0);
+  }, []);
+
   const value = useMemo<CoachMarkContextValue>(
-    () => ({ registerNode, measure, registerScroller, scrollIntoView }),
-    [registerNode, measure, registerScroller, scrollIntoView],
+    () => ({ registerNode, measure, registerScroller, scrollIntoView, scrollToTop }),
+    [registerNode, measure, registerScroller, scrollIntoView, scrollToTop],
   );
 
   return (
@@ -217,4 +225,10 @@ export function useCoachMarkScrollIntoView(): (id: string) => Promise<void> {
     (id: string) => registry?.scrollIntoView(id) ?? Promise.resolve(),
     [registry],
   );
+}
+
+/** Internal — used by CoachMarkOverlay to reset the page to the top on close. */
+export function useCoachMarkScrollToTop(): () => void {
+  const registry = useCoachMarkRegistry();
+  return useCallback(() => registry?.scrollToTop(), [registry]);
 }

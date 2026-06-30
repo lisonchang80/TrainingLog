@@ -16,7 +16,11 @@ import { t } from '@/src/i18n';
 import { useTheme, type ResolvedTheme, type ThemeTokens } from '@/src/theme';
 
 import { pickCoachPlacement, resolveCoachBubbleAnchor } from './coachMarkLayout';
-import { useCoachMarkMeasure, useCoachMarkScrollIntoView } from './CoachMarkProvider';
+import {
+  useCoachMarkMeasure,
+  useCoachMarkScrollIntoView,
+  useCoachMarkScrollToTop,
+} from './CoachMarkProvider';
 import type { CoachStep, Rect } from './types';
 
 // 遮罩 (scrim) always darkens toward black, never a theme surface token. Dark
@@ -84,6 +88,7 @@ export function CoachMarkOverlay({
   const styles = useMemo(() => makeStyles(tokens, resolved), [tokens, resolved]);
   const measure = useCoachMarkMeasure();
   const scrollIntoView = useCoachMarkScrollIntoView();
+  const scrollToTop = useCoachMarkScrollToTop();
   const insets = useSafeAreaInsets();
 
   const [index, setIndex] = useState(0);
@@ -127,8 +132,14 @@ export function CoachMarkOverlay({
 
   if (!step) return null;
 
+  // Reset the page to the top when the tour ends — it may have auto-scrolled
+  // down to a below-the-fold target (e.g. the stats panel's duration card).
+  const handleClose = () => {
+    scrollToTop();
+    onClose();
+  };
   const next = () => {
-    if (isLast) onClose();
+    if (isLast) handleClose();
     else setIndex((i) => i + 1);
   };
   const prev = () => setIndex((i) => Math.max(0, i - 1));
@@ -186,7 +197,7 @@ export function CoachMarkOverlay({
 
   const controls = (
     <View style={styles.controls}>
-      <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
+      <Pressable onPress={handleClose} hitSlop={8} accessibilityRole="button">
         <Text style={styles.skip}>{t('common', 'skip')}</Text>
       </Pressable>
 
@@ -215,7 +226,7 @@ export function CoachMarkOverlay({
   );
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={handleClose}>
       {/* Tapping the dim area advances. */}
       <Pressable style={styles.fill} onPress={next} accessibilityLabel={step.title}>
         {isImageStep ? (
