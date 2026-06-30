@@ -69,4 +69,44 @@ describe('findLastSessionWithExercises', () => {
     });
     expect(await findLastSessionWithExercises(db)).toBe('s2');
   });
+
+  it('breaks a started_at tie deterministically by id DESC', async () => {
+    // Two sessions share the same started_at; the ORDER BY ... s.id DESC
+    // tiebreak must pick the larger id deterministically (no DB-order luck).
+    await seedSession('s-aaa', 5000);
+    await appendSessionExercise(db, {
+      id: uuid(),
+      session_id: 's-aaa',
+      exercise_id: BENCH,
+    });
+    await seedSession('s-zzz', 5000);
+    await appendSessionExercise(db, {
+      id: uuid(),
+      session_id: 's-zzz',
+      exercise_id: SQUAT,
+    });
+    expect(await findLastSessionWithExercises(db)).toBe('s-zzz');
+  });
+
+  it('ignores a session whose exercises were all removed (no session_exercise rows left)', async () => {
+    // A session that briefly had an exercise but now has none must not win over
+    // an older session that still has one — the EXISTS subquery is live, not a
+    // historical "ever had" flag.
+    await seedSession('s-old', 1000);
+    await appendSessionExercise(db, {
+      id: uuid(),
+      session_id: 's-old',
+      exercise_id: BENCH,
+    });
+    await seedSession('s-new', 2000);
+    const exId = uuid();
+    await appendSessionExercise(db, {
+      id: exId,
+      session_id: 's-new',
+      exercise_id: SQUAT,
+    });
+    // Remove the newer session's only exercise.
+    await db.runAsync(`DELETE FROM session_exercise WHERE id = ?`, exId);
+    expect(await findLastSessionWithExercises(db)).toBe('s-old');
+  });
 });

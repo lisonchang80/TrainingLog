@@ -136,6 +136,14 @@ export function resolveCoachBubbleAnchor(
  * maths is unit-testable in node without a ScrollView. The provider keeps the
  * async measure + scroll plumbing; this helper is the pure decision.
  *
+ * CAVEAT (coordinate systems): the caller currently passes `rect.y` from
+ * `measureInWindow` (a WINDOW-relative y) and adds it to a CONTENT offset. That
+ * mix is a known latent bug behind the "step-1 jump" report; this helper is a
+ * faithful extraction of the existing math, NOT a fix. When the coordinate
+ * mixing is fixed, change the call site to feed a single coordinate system
+ * (e.g. a scroll-view-relative y, or a `scrollViewWindowY` to subtract) and
+ * update these tests alongside.
+ *
  * Rule:
  *   - Target already comfortably on-screen (top below the header band AND bottom
  *     above the caption band) → return `null`, meaning "don't scroll".
