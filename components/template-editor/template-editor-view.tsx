@@ -2230,7 +2230,11 @@ function TemplateEditorView() {
       <SafeAreaView style={styles.container}>
         <View style={styles.empty}>
           <Text style={styles.emptyText}>{tt('alert', 'templateNotFound')}</Text>
-          <Pressable style={styles.backBtn} onPress={onExit}>
+          <Pressable
+            style={styles.backBtn}
+            onPress={onExit}
+            accessibilityRole="button"
+            accessibilityLabel={tt('common', 'backPlain')}>
             <Text style={styles.backBtnText}>{tt('common', 'backArrow')}</Text>
           </Pressable>
         </View>
@@ -2353,14 +2357,18 @@ function TemplateEditorView() {
               <Pressable
                 onPress={() => openExerciseNoteEditor(parent)}
                 style={styles.exNoteIndicator}
-                hitSlop={8}>
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={tt('button', 'a11yOpenNote')}>
                 <Text style={styles.exNoteIndicatorText}>📝</Text>
               </Pressable>
             ) : null}
             <Pressable
               onPress={() => openGearMenu(parent)}
               style={styles.exGearBtn}
-              hitSlop={8}>
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={tt('button', 'a11yExerciseSettings')}>
               <Text style={styles.exGear}>⚙</Text>
             </Pressable>
           </View>
@@ -3333,7 +3341,9 @@ function ExerciseBody({
             <Pressable
               onPress={onShowExerciseNote}
               style={styles.exNoteIndicator}
-              hitSlop={8}>
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={tt('button', 'a11yOpenNote')}>
               <Text style={styles.exNoteIndicatorText}>📝</Text>
             </Pressable>
           ) : null}
@@ -3343,7 +3353,12 @@ function ExerciseBody({
           </Text>
           {expanded ? <Text style={styles.exChevron}>▼</Text> : null}
         </Pressable>
-        <Pressable onPress={onGearTap} style={styles.exGearBtn} hitSlop={8}>
+        <Pressable
+          onPress={onGearTap}
+          style={styles.exGearBtn}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={tt('button', 'a11yExerciseSettings')}>
           <Text style={styles.exGear}>⚙</Text>
         </Pressable>
       </View>
