@@ -12,8 +12,9 @@
  *     (:568-571); `onBucketChipTap('all')` clears the set (:481-495). NOT
  *     additive — this is the non-obvious bit worth teaching.
  *   - Cluster segmented `ClusterModeSegmented` (:584-586) renders ONLY when
- *     `hasClusterRows` (this move has dropset/superset history). 3 modes:
- *     all / exclude-cluster / cluster-only (`ClusterFilterMode`). When absent
+ *     `hasClusterRows` (this move has SUPERSET history — `hasClusterHistory`
+ *     keys on `session_exercise.parent_id`, NOT dropset `parent_set_id`).
+ *     3 modes, labels 不含/包含/只含超級組 (`ClusterFilterMode`). When absent
  *     the spotlight degrades to a centred caption — copy is written to read
  *     fine either way.
  *   - 進階篩選 `styles.advancedWrap` (:588-660): collapsible, opens Program
@@ -38,8 +39,8 @@ export const exerciseChartHelp: LocalizedPageHelp = {
       },
       {
         targetId: 'chart.cluster',
-        title: '組合篩選',
-        body: '若這個動作有遞減組／超級組的紀錄，這裡會出現切換：全部 / 排除組合 / 只看組合。',
+        title: '超級組切換',
+        body: '若這個動作做過超級組，這裡會出現切換：不含超級組（只看單獨做的）／包含超級組（全部）／只含超級組。',
       },
       {
         targetId: 'chart.advanced',
@@ -64,8 +65,8 @@ export const exerciseChartHelp: LocalizedPageHelp = {
       },
       {
         targetId: 'chart.cluster',
-        title: 'Cluster filter',
-        body: 'When this move has dropset / superset history, a toggle appears: All / Exclude clusters / Clusters only.',
+        title: 'Superset toggle',
+        body: 'When this move has superset history, a toggle appears: exclude supersets (solo sets only) / include supersets (all) / supersets only.',
       },
       {
         targetId: 'chart.advanced',

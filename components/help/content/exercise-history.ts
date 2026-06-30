@@ -37,8 +37,8 @@ export const exerciseHistoryHelp: LocalizedPageHelp = {
       },
       {
         targetId: 'history.cluster',
-        title: '組合篩選',
-        body: '若這個動作有遞減組／超級組的紀錄，這裡會出現切換：全部 / 排除組合 / 只看組合。',
+        title: '超級組切換',
+        body: '若這個動作做過超級組，這裡會出現切換：不含超級組（只看單獨做的）／包含超級組（全部）／只含超級組。',
       },
       {
         targetId: 'history.advanced',
@@ -63,8 +63,8 @@ export const exerciseHistoryHelp: LocalizedPageHelp = {
       },
       {
         targetId: 'history.cluster',
-        title: 'Cluster filter',
-        body: 'When this move has dropset / superset history, a toggle appears: All / Exclude clusters / Clusters only.',
+        title: 'Superset toggle',
+        body: 'When this move has superset history, a toggle appears: exclude supersets (solo sets only) / include supersets (all) / supersets only.',
       },
       {
         targetId: 'history.advanced',
