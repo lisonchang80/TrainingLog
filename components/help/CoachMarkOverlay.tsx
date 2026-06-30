@@ -56,11 +56,30 @@ interface CoachMarkOverlayProps {
   steps: CoachStep[];
   /** Number each step with a badge (procedural flows only). */
   numbered?: boolean;
+  /**
+   * Set when the host page is presented as an iOS `presentation: 'modal'`
+   * route (e.g. `superset/new`). Such a route's content sits inside the modal
+   * sheet's container, so `measureInWindow` on its targets reports Y relative
+   * to that container — short of true window Y by the top safe-area inset.
+   * This overlay's own Modal IS window-anchored (origin at the device top), so
+   * for a modal host we add the inset back. Card-presented routes (the default
+   * — template editor, session, the tabs, every exercise/history/chart page)
+   * already measure in true window coords, so they must NOT be compensated or
+   * the spotlight is pushed `insets.top` (~62pt) too low. See 2026-06-30 note
+   * below. Default false.
+   */
+  modalHost?: boolean;
   /** Called when the user finishes the last step or taps 略過. */
   onClose: () => void;
 }
 
-export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMarkOverlayProps) {
+export function CoachMarkOverlay({
+  visible,
+  steps,
+  numbered,
+  modalHost,
+  onClose,
+}: CoachMarkOverlayProps) {
   const { tokens, resolved } = useTheme();
   const styles = useMemo(() => makeStyles(tokens, resolved), [tokens, resolved]);
   const measure = useCoachMarkMeasure();
@@ -108,13 +127,18 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
   };
   const prev = () => setIndex((i) => Math.max(0, i - 1));
 
-  // 2026-06-30: while this overlay's Modal is open, measure()/measureInWindow on
-  // the underlying page's targets under-report Y by the screen's top safe-area
-  // inset — the page sits below a reserved safe area the Modal's measurement
-  // space doesn't include, so e.g. the 超級組「選 2 個」row (real y≈122) measured
-  // y≈60 and the spotlight ringed the search bar. Add the inset back.
+  // 2026-06-30: for a `modalHost` page (an iOS `presentation: 'modal'` route),
+  // measureInWindow on the underlying page's targets under-reports Y by the top
+  // safe-area inset — the modal sheet's content sits in a container the overlay
+  // Modal's window space doesn't include, so e.g. the 超級組「選 2 個」row (real
+  // y≈122) measured y≈60 and the spotlight ringed the search bar. Add the inset
+  // back ONLY for modal hosts. Card-presented routes (the default — template
+  // editor, session, every exercise/history/chart page, the tabs) already
+  // measure in true window coords; compensating them pushes the spotlight
+  // insets.top (~62pt) too low (template editor「加入動作」regression 2026-06-30).
+  const measureInsetFix = modalHost ? insets.top : 0;
   const adjustedRect: Rect | null = rect
-    ? { ...rect, y: rect.y + insets.top }
+    ? { ...rect, y: rect.y + measureInsetFix }
     : null;
 
   const placement = pickCoachPlacement(adjustedRect, screen);

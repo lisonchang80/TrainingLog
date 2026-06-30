@@ -98,6 +98,10 @@ function NewSupersetScreen() {
 
   const help = usePageHelp('superset-new', supersetNewHelp, {
     autoShowOnce: true,
+    // This route is presented as `presentation: 'modal'` (app/_layout.tsx),
+    // so the coach overlay must add back the safe-area inset measureInWindow
+    // drops on modal hosts. See CoachMarkOverlay's `modalHost` prop.
+    modalHost: true,
   });
   const gridTarget = useCoachMarkTarget('superset.grid');
   const selectedTarget = useCoachMarkTarget('superset.selected');

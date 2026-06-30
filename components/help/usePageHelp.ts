@@ -23,6 +23,13 @@ export interface PageHelpHandle {
   pageId: string;
   content: PageHelpContent;
   visible: boolean;
+  /**
+   * True when the host route is presented as an iOS `presentation: 'modal'`
+   * route (e.g. `superset/new`). Threaded to the CoachMarkOverlay so it can
+   * compensate measureInWindow's safe-area-inset under-report on modal hosts
+   * (see CoachMarkOverlay's `modalHost` prop). Card routes leave this false.
+   */
+  modalHost: boolean;
   open: () => void;
   close: () => void;
 }
@@ -30,7 +37,7 @@ export interface PageHelpHandle {
 export function usePageHelp(
   pageId: string,
   localized: LocalizedPageHelp,
-  opts?: { autoShowOnce?: boolean },
+  opts?: { autoShowOnce?: boolean; modalHost?: boolean },
 ): PageHelpHandle {
   const db = useDatabase();
   const locale = useLocale();
@@ -64,5 +71,5 @@ export function usePageHelp(
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
 
-  return { pageId, content, visible, open, close };
+  return { pageId, content, visible, modalHost: opts?.modalHost ?? false, open, close };
 }

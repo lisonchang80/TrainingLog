@@ -14,7 +14,7 @@ import type { PageHelpHandle } from './usePageHelp';
  * Drop one `<PageHelpHost help={help} />` at the page root.
  */
 export function PageHelpHost({ help }: { help: PageHelpHandle }) {
-  const { content, visible, close } = help;
+  const { content, visible, modalHost, close } = help;
   const [tour, setTour] = useState(false);
 
   // Reset the mixed-mode sub-state whenever the help closes.
@@ -28,6 +28,7 @@ export function PageHelpHost({ help }: { help: PageHelpHandle }) {
         visible={visible}
         steps={content.coach}
         numbered={content.coachNumbered}
+        modalHost={modalHost}
         onClose={close}
       />
     ) : null;
@@ -55,6 +56,7 @@ export function PageHelpHost({ help }: { help: PageHelpHandle }) {
           visible={visible && tour}
           steps={content.coach}
           numbered={content.coachNumbered}
+          modalHost={modalHost}
           onClose={() => {
             setTour(false);
             close();
