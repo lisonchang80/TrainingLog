@@ -106,11 +106,12 @@ export function StatsPanel() {
   const db = useDatabase();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  // ⓘ coach spotlight anchors (history ▸ 統計). Content: components/help/content/history-stats.ts.
+  // ⓘ coach spotlight anchors (history ▸ 統計). Only the two above-the-fold
+  // cards get spotlights; the capacity & duration histograms sit BELOW the fold,
+  // so spotlighting them put the ring/bubble off-screen (user report 2026-06-30).
+  // They're covered by a centred caption instead — see history-stats.ts.
   const periodTarget = useCoachMarkTarget('stats.period');
   const heatmapTarget = useCoachMarkTarget('stats.heatmap');
-  const capacityTarget = useCoachMarkTarget('stats.capacity');
-  const durationTarget = useCoachMarkTarget('stats.duration');
   const [period, setPeriod] = useState<PeriodScale>('week');
   const [records, setRecords] = useState<StatsSetRecord[]>([]);
   // Anchor date drives the histogram X-axis. Default = today at 00:00 local.
@@ -320,7 +321,7 @@ export function StatsPanel() {
       </View>
 
       {/* Per-MG capacity histograms */}
-      <View style={styles.card} ref={capacityTarget.ref} collapsable={false}>
+      <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('page', 'capacityByMg')}</Text>
         <Text style={styles.cardSubtitle}>
           {t('status', 'capacityMgSubtitle')}
@@ -355,7 +356,7 @@ export function StatsPanel() {
       </View>
 
       {/* Duration histogram */}
-      <View style={styles.card} ref={durationTarget.ref} collapsable={false}>
+      <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('page', 'durationOverPeriod')}</Text>
         <Text style={styles.cardSubtitle}>
           {t('status', 'durationSubtitle')}
