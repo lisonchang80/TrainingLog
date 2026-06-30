@@ -425,6 +425,52 @@ coach must change too — else it teaches / spotlights elements that aren't ther
 card) in 計劃 / 3 (no card) in 極簡; chart·history-detail expand 進階篩選 → only the
 action row, advanced step reworded, spotlight still framing the section.
 
+## Long ScrollView coach pages — auto-scroll + per-sub-tab ⓘ (2026-07-01)
+
+Two capabilities added for History ▸ 統計 / 獎章 (`feat/history-subtab-help`):
+
+**1. One header ⓘ, per-sub-tab content.** A tab screen with inner sub-tabs
+(history.tsx: 歷史/統計/獎章) calls `usePageHelp` ONCE PER sub-tab (stable pageIds
+`history` / `history-stats` / `history-achievements`), then the single header ⓘ
+opens whichever matches `effectiveTab`:
+```ts
+const h = usePageHelp('history', ..., { autoShowOnce: true });
+const s = usePageHelp('history-stats', statsHelp);
+const a = usePageHelp('history-achievements', achHelp);
+const help = effectiveTab === 'stats' ? s : effectiveTab === 'achievements' ? a : h;
+// <HelpButton onPress={help.open}/> + <PageHelpHost help={help}/>
+```
+Only the default landing sub-tab gets `autoShowOnce` — the others' effect runs on
+mount while you're still on the default tab, so an autoShow there is consumed unseen.
+Per-panel coach targets live IN the panels (stats-panel / achievements-panel via
+`useCoachMarkTarget`), always under the History tab's `CoachMarkProvider`.
+
+**2. Auto-scroll below-the-fold targets.** A long ScrollView page's targets can sit
+below the fold; `measureInWindow` then reports an off-screen y and the spotlight/bubble
+land off-screen. Fix = the page registers its ScrollView so the overlay scrolls each
+target into view before measuring:
+```ts
+const coachScroll = useCoachScroller();   // from @/components/help
+<ScrollView ref={coachScroll.ref} onScroll={coachScroll.onScroll}
+            scrollEventThrottle={coachScroll.scrollEventThrottle}> … </ScrollView>
+```
+Infra (CoachMarkProvider): `registerScroller` + `scrollIntoView(id)` (measures window
+y; if off-screen scrolls target top to ~26% screen height, waits 340ms) + `scrollToTop()`
+(overlay's `handleClose` calls it so 完成/略過/back returns the page to the top).
+CoachMarkOverlay `await`s `scrollIntoView(targetId)` before each measure. Pages that
+don't register a scroller no-op — zero impact on the other ~12 coach pages.
+
+**⚠ KNOWN BUG (2026-07-01 — fix next time): step-1 莫名滑動 → 遮罩跑位.** If the stats
+page is already scrolled when ⓘ is opened (or on first open), step 1 (period selector,
+which should NOT scroll) triggers a scroll AND the spotlight ring/bubble end up
+mis-positioned. Likely root cause: the fixed 340ms settle in `scrollIntoView` is shorter
+than the iOS `scrollTo({animated:true})` animation, so the follow-up `measureInWindow`
+reads a MID-animation y → ring drawn at the wrong place. Candidate fixes: (a) await
+scroll-end (`onMomentumScrollEnd`) instead of a fixed delay, or bump the delay; (b)
+`scrollTo({animated:false})`; (c) skip scrollIntoView when the computed delta is tiny
+(the period card is always already visible). Reproduce: scroll stats page down → tap ⓘ
+→ watch step 1.
+
 ## Verify
 
 - `npx tsc --noEmit` + `npm test` (the pure `coachMarkLayout` test must stay green).
