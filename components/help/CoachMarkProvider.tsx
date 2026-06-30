@@ -15,6 +15,7 @@ import {
   type View,
 } from 'react-native';
 
+import { computeCoachScrollOffset } from './coachMarkLayout';
 import type { Rect } from './types';
 
 /**
@@ -111,15 +112,10 @@ export function CoachMarkProvider({ children }: { children: ReactNode }) {
       const rect = await measure(id);
       if (!rect) return;
       const screenH = Dimensions.get('window').height;
-      const TOP_SAFE = 96; // header / status-bar band to stay clear of
-      const BOTTOM_SAFE = 170; // room for the caption bubble below the target
-      const targetTop = rect.y;
-      const targetBottom = rect.y + rect.height;
-      // Already comfortably on-screen → don't scroll.
-      if (targetTop >= TOP_SAFE && targetBottom <= screenH - BOTTOM_SAFE) return;
-      // Park the target's top ~26% down the screen (leaves room for the bubble).
-      const desiredTop = screenH * 0.26;
-      const next = Math.max(0, scroller.getOffset() + (targetTop - desiredTop));
+      // Pure decision (TOP_SAFE=96 / BOTTOM_SAFE=170 / park top ~26% down) lives
+      // in coachMarkLayout so it's unit-testable; null → already visible, no scroll.
+      const next = computeCoachScrollOffset(rect, scroller.getOffset(), screenH);
+      if (next == null) return;
       scroller.scrollTo(next);
       await new Promise<void>((resolve) => setTimeout(resolve, 340));
     },

@@ -127,3 +127,52 @@ export function resolveCoachBubbleAnchor(
   if (bottom + minBubbleH > screen.height - safeTop) return { bottom: safeBottom };
   return { bottom };
 }
+
+/**
+ * Decide whether (and how far) to scroll the page so a coach step's target is
+ * comfortably visible before the overlay measures + spotlights it.
+ *
+ * Extracted verbatim from `CoachMarkProvider.scrollIntoView` so the position
+ * maths is unit-testable in node without a ScrollView. The provider keeps the
+ * async measure + scroll plumbing; this helper is the pure decision.
+ *
+ * CAVEAT (coordinate systems): the caller currently passes `rect.y` from
+ * `measureInWindow` (a WINDOW-relative y) and adds it to a CONTENT offset. That
+ * mix is a known latent bug behind the "step-1 jump" report; this helper is a
+ * faithful extraction of the existing math, NOT a fix. When the coordinate
+ * mixing is fixed, change the call site to feed a single coordinate system
+ * (e.g. a scroll-view-relative y, or a `scrollViewWindowY` to subtract) and
+ * update these tests alongside.
+ *
+ * Rule:
+ *   - Target already comfortably on-screen (top below the header band AND bottom
+ *     above the caption band) → return `null`, meaning "don't scroll".
+ *   - Otherwise park the target's top ~26 % down the screen and return the new
+ *     absolute content offset, never below 0.
+ *
+ * @param rect           measured target rect in window coords
+ * @param currentOffset  the ScrollView's current content offset (y)
+ * @param screenH        window height
+ * @param opts.topSafe     header / status-bar band to keep the target clear of (default 96)
+ * @param opts.bottomSafe  room reserved below the target for the caption bubble (default 170)
+ * @param opts.desiredRatio fraction of screen height to park the target's top at (default 0.26)
+ * @returns the new absolute scroll offset, or `null` when no scroll is needed
+ */
+export function computeCoachScrollOffset(
+  rect: { y: number; height: number },
+  currentOffset: number,
+  screenH: number,
+  opts: { topSafe?: number; bottomSafe?: number; desiredRatio?: number } = {},
+): number | null {
+  const topSafe = opts.topSafe ?? 96;
+  const bottomSafe = opts.bottomSafe ?? 170;
+  const desiredRatio = opts.desiredRatio ?? 0.26;
+
+  const targetTop = rect.y;
+  const targetBottom = rect.y + rect.height;
+  // Already comfortably on-screen → don't scroll.
+  if (targetTop >= topSafe && targetBottom <= screenH - bottomSafe) return null;
+  // Park the target's top ~26% down the screen (leaves room for the bubble).
+  const desiredTop = screenH * desiredRatio;
+  return Math.max(0, currentOffset + (targetTop - desiredTop));
+}
