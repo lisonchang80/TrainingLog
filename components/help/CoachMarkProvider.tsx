@@ -18,6 +18,11 @@ import {
 import { computeCoachScrollOffset } from './coachMarkLayout';
 import type { Rect } from './types';
 
+// Settle after an instant (animated:false) step scroll: just enough for layout +
+// the ScrollView's onScroll to update the tracked offset before the next read /
+// the overlay measures. No animation to wait out, so this is short.
+const SCROLL_SETTLE_MS = 120;
+
 /**
  * Registry that lets a CoachMarkOverlay locate the on-screen elements its
  * steps point at. Each highlightable element calls `useCoachMarkTarget(id)`
@@ -41,8 +46,13 @@ import type { Rect } from './types';
  * use 'info' help don't need it.
  */
 interface Scroller {
-  /** Scroll the container to this absolute content offset (y), animated. */
-  scrollTo: (y: number) => void;
+  /**
+   * Scroll the container to this absolute content offset (y). `animated`
+   * defaults to true; the coach overlay passes false for step scrolls so its
+   * follow-up measure can't read a mid-animation frame (the 2026-07-01
+   * "step-1 jump → ring mis-position" fix).
+   */
+  scrollTo: (y: number, animated?: boolean) => void;
   /** Current content offset (y), tracked via the ScrollView's onScroll. */
   getOffset: () => number;
 }
@@ -53,8 +63,13 @@ interface CoachMarkContextValue {
   registerScroller: (s: Scroller | null) => void;
   /** Scroll the registered container so `id`'s target is comfortably visible. */
   scrollIntoView: (id: string) => Promise<void>;
-  /** Scroll the registered container back to the top (e.g. when the tour ends). */
-  scrollToTop: () => void;
+  /**
+   * Scroll the registered container back to the top. `animated` defaults to
+   * true (smooth reset when the tour ends); the overlay passes false to reset
+   * INSTANTLY when the tour opens, so step 1's near-top target starts from a
+   * known position and never triggers a surprise auto-scroll.
+   */
+  scrollToTop: (animated?: boolean) => void;
 }
 
 const CoachMarkContext = createContext<CoachMarkContextValue | null>(null);
@@ -116,16 +131,20 @@ export function CoachMarkProvider({ children }: { children: ReactNode }) {
       // in coachMarkLayout so it's unit-testable; null → already visible, no scroll.
       const next = computeCoachScrollOffset(rect, scroller.getOffset(), screenH);
       if (next == null) return;
-      scroller.scrollTo(next);
-      await new Promise<void>((resolve) => setTimeout(resolve, 340));
+      // animated:false → the scroll applies in a single frame, so the overlay's
+      // follow-up measure reads the settled (final) position instead of a
+      // mid-animation y that left the spotlight ring off the target.
+      scroller.scrollTo(next, false);
+      await new Promise<void>((resolve) => setTimeout(resolve, SCROLL_SETTLE_MS));
     },
     [measure],
   );
 
-  // Return the container to the top — called when a tour that auto-scrolled the
-  // page closes, so the user isn't left stranded at the bottom.
-  const scrollToTop = useCallback(() => {
-    scrollerRef.current?.scrollTo(0);
+  // Return the container to the top. Called on tour OPEN (instant — so step 1's
+  // near-top target needs no surprise scroll) and on tour CLOSE (smooth — so a
+  // tour that auto-scrolled down doesn't leave the user stranded at the bottom).
+  const scrollToTop = useCallback((animated = true) => {
+    scrollerRef.current?.scrollTo(0, animated);
   }, []);
 
   const value = useMemo<CoachMarkContextValue>(
@@ -196,7 +215,8 @@ export function useCoachScroller() {
   useEffect(() => {
     if (!registry) return;
     registry.registerScroller({
-      scrollTo: (y: number) => ref.current?.scrollTo({ y, animated: true }),
+      scrollTo: (y: number, animated = true) =>
+        ref.current?.scrollTo({ y, animated }),
       getOffset: () => offsetRef.current,
     });
     return () => registry.registerScroller(null);
@@ -223,8 +243,12 @@ export function useCoachMarkScrollIntoView(): (id: string) => Promise<void> {
   );
 }
 
-/** Internal — used by CoachMarkOverlay to reset the page to the top on close. */
-export function useCoachMarkScrollToTop(): () => void {
+/** Internal — used by CoachMarkOverlay to reset the page to the top (instant on
+ * tour open, smooth on close). */
+export function useCoachMarkScrollToTop(): (animated?: boolean) => void {
   const registry = useCoachMarkRegistry();
-  return useCallback(() => registry?.scrollToTop(), [registry]);
+  return useCallback(
+    (animated?: boolean) => registry?.scrollToTop(animated),
+    [registry],
+  );
 }

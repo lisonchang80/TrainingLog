@@ -118,6 +118,17 @@ export function CoachMarkOverlay({
     const targetId = step.targetId;
     setRect(null);
     void (async () => {
+      // On the FIRST step, snap a registered scroller back to the top FIRST
+      // (instant) so a tour opened on an already-scrolled page starts from a
+      // known position — step 1's near-top target then sits within the visible
+      // band and `scrollIntoView` is a no-op, instead of yanking the page to
+      // re-centre it (the 2026-07-01「step-1 莫名滑動→遮罩跑位」fix). Instant so
+      // the measure below doesn't race a top-scroll animation.
+      if (index === 0) {
+        scrollToTop(false);
+        await new Promise<void>((r) => setTimeout(r, 80));
+        if (cancelled) return;
+      }
       await scrollIntoView(targetId);
       if (cancelled) return;
       await new Promise<void>((r) => setTimeout(r, 60));
@@ -128,7 +139,7 @@ export function CoachMarkOverlay({
     return () => {
       cancelled = true;
     };
-  }, [visible, step, measure, scrollIntoView]);
+  }, [visible, step, index, measure, scrollIntoView, scrollToTop]);
 
   if (!step) return null;
 

@@ -136,13 +136,18 @@ export function resolveCoachBubbleAnchor(
  * maths is unit-testable in node without a ScrollView. The provider keeps the
  * async measure + scroll plumbing; this helper is the pure decision.
  *
- * CAVEAT (coordinate systems): the caller currently passes `rect.y` from
- * `measureInWindow` (a WINDOW-relative y) and adds it to a CONTENT offset. That
- * mix is a known latent bug behind the "step-1 jump" report; this helper is a
- * faithful extraction of the existing math, NOT a fix. When the coordinate
- * mixing is fixed, change the call site to feed a single coordinate system
- * (e.g. a scroll-view-relative y, or a `scrollViewWindowY` to subtract) and
- * update these tests alongside.
+ * NOTE (coordinate systems): the caller passes `rect.y` from `measureInWindow`
+ * (window-relative) and adds the window-space delta `(targetTop − desiredTop)`
+ * to the CONTENT offset. This is CORRECT no matter where the ScrollView sits in
+ * the window — the ScrollView's window-top term cancels out
+ * (windowY = contentY − offset + scrollViewTop ⇒
+ *  newOffset = offset + (windowY − desiredTop), with no scrollViewTop left).
+ * An earlier note here claimed a "coordinate-space mix" bug; that was WRONG
+ * (verified 2026-07-01). The real「step-1 莫名滑動→遮罩跑位」cause lived in the
+ * PROVIDER flow, not this maths: an `animated:true` step scroll measured mid-
+ * animation, plus no scroll-reset when the tour opened on an already-scrolled
+ * page. Fixed there (instant `animated:false` scroll + top-reset on step 1);
+ * this helper is unchanged.
  *
  * Rule:
  *   - Target already comfortably on-screen (top below the header band AND bottom
