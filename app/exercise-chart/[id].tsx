@@ -72,7 +72,11 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { exerciseChartHelp } from '@/components/help/content/exercise-chart';
+import {
+  exerciseChartHelp,
+  exerciseChartHelpMinimal,
+} from '@/components/help/content/exercise-chart';
+import { useAppMode } from '@/src/app-mode';
 
 /**
  * ADR-0025 — DRY hook for the many components in this file that share
@@ -162,9 +166,13 @@ function ExerciseChartScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useChartStyles();
-  const help = usePageHelp('exercise-chart', exerciseChartHelp, {
-    autoShowOnce: true,
-  });
+  // ADR-0026 — 極簡模式藏「進階篩選」的 計劃/強度 控制，ⓘ 換 minimal 變體。
+  const { isMinimal } = useAppMode();
+  const help = usePageHelp(
+    'exercise-chart',
+    isMinimal ? exerciseChartHelpMinimal : exerciseChartHelp,
+    { autoShowOnce: true },
+  );
   const initialClusterMode = useMemo(
     () => parseClusterMode(clusterModeParam),
     [clusterModeParam]
@@ -389,6 +397,10 @@ function ChartPageContent({
 }) {
   const router = useRouter();
   const styles = useChartStyles();
+  // ADR-0026 — 極簡模式藏「進階篩選」的 計劃週期/強度（保留 header + 看歷史/取消
+  // 篩選 action row）；hydration 也忽略沿用計劃模式殘留的 program filter，避免
+  // 在極簡靜默過濾。
+  const { isMinimal } = useAppMode();
   const bucketsTarget = useCoachMarkTarget('chart.buckets');
   const clusterTarget = useCoachMarkTarget('chart.cluster');
   const advancedTarget = useCoachMarkTarget('chart.advanced');
@@ -445,17 +457,24 @@ function ChartPageContent({
       const f = peekFilter();
       if (f) {
         setBucketFilters(new Set(f.buckets));
-        setProgramId(f.programId);
-        setSubTagFilters(new Set(f.subTags));
+        // 極簡模式不採用 計劃/強度 過濾（控制已隱藏）——否則殘留的 program
+        // filter 會靜默縮小資料、又沒有控制可清除。
+        if (!isMinimal) {
+          setProgramId(f.programId);
+          setSubTagFilters(new Set(f.subTags));
+        }
         setClusterMode(f.clusterMode);
-        if (f.buckets.size > 0 || f.programId != null || f.subTags.size > 0) {
+        if (
+          f.buckets.size > 0 ||
+          (!isMinimal && (f.programId != null || f.subTags.size > 0))
+        ) {
           setAdvancedOpen(true);
         }
       }
       return () => {
         cancelled = true;
       };
-    }, [refresh])
+    }, [refresh, isMinimal])
   );
 
   const persistFilter = useCallback(
@@ -630,7 +649,7 @@ function ChartPageContent({
                 <Text style={styles.advancedHeaderText}>
                   {t('page', 'advancedFilter')} {advancedOpen ? '▲' : '▼'}
                 </Text>
-                {(programId != null || subTagFilters.size > 0) && (
+                {!isMinimal && (programId != null || subTagFilters.size > 0) && (
                   <Text style={styles.advancedHeaderBadge}>
                     {[
                       programId ? '1 Program' : null,
@@ -643,34 +662,39 @@ function ChartPageContent({
               </Pressable>
               {advancedOpen ? (
                 <View style={styles.advancedBody}>
-                  <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
-                  <Pressable
-                    style={styles.dropdown}
-                    onPress={() => setProgramPickerOpen(true)}>
-                    <Text style={styles.dropdownText}>
-                      {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
-                    </Text>
-                    <Text style={styles.dropdownChevron}>▾</Text>
-                  </Pressable>
+                  {/* ADR-0026 — 極簡模式藏 計劃週期/強度，只留下方 action row。 */}
+                  {!isMinimal && (
+                    <>
+                      <Text style={styles.advancedLabel}>{t('domain', 'cycle')}</Text>
+                      <Pressable
+                        style={styles.dropdown}
+                        onPress={() => setProgramPickerOpen(true)}>
+                        <Text style={styles.dropdownText}>
+                          {selectedProgram ? selectedProgram.name : t('common', 'notSelected')}
+                        </Text>
+                        <Text style={styles.dropdownChevron}>▾</Text>
+                      </Pressable>
 
-                  {programId != null && (
-                    <View>
-                      <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
-                      {subTagOptions.length === 0 ? (
-                        <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
-                      ) : (
-                        <View style={styles.filterRow}>
-                          {subTagOptions.map((tag) => (
-                            <SubTagChip
-                              key={tag}
-                              label={tag}
-                              active={subTagFilters.has(tag)}
-                              onPress={() => onSubTagTap(tag)}
-                            />
-                          ))}
+                      {programId != null && (
+                        <View>
+                          <Text style={styles.advancedLabel}>{t('domain', 'intensity')}</Text>
+                          {subTagOptions.length === 0 ? (
+                            <Text style={styles.empty}>{t('alert', 'programHasNoSubTag')}</Text>
+                          ) : (
+                            <View style={styles.filterRow}>
+                              {subTagOptions.map((tag) => (
+                                <SubTagChip
+                                  key={tag}
+                                  label={tag}
+                                  active={subTagFilters.has(tag)}
+                                  onPress={() => onSubTagTap(tag)}
+                                />
+                              ))}
+                            </View>
+                          )}
                         </View>
                       )}
-                    </View>
+                    </>
                   )}
 
                   <View style={styles.actionRow}>

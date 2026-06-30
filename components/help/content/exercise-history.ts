@@ -79,3 +79,28 @@ export const exerciseHistoryHelp: LocalizedPageHelp = {
     ],
   },
 };
+
+/**
+ * 極簡模式變體 (ADR-0026). 極簡模式隱藏「進階篩選」裡的 計劃 / 強度 控制
+ * （只留 action row — 切換到圖表 / 清除），所以 history.advanced 那步改寫文案、
+ * 不再提 計劃/強度。聚光環 ref 仍掛在外層 advancedWrap → 步驟不變 null。
+ * 沿用同 pageId 'exercise-history'；衍生自 exerciseHistoryHelp（plan 版為唯一真相）。
+ */
+const minimalAdvancedBodyZh = '展開可一鍵切換到「圖表」檢視，或清除目前的篩選。';
+const minimalAdvancedBodyEn =
+  'Expand to jump to the Chart view or clear the current filters.';
+
+export const exerciseHistoryHelpMinimal: LocalizedPageHelp = {
+  zh: {
+    ...exerciseHistoryHelp.zh,
+    coach: (exerciseHistoryHelp.zh.coach ?? []).map((s) =>
+      s.targetId === 'history.advanced' ? { ...s, body: minimalAdvancedBodyZh } : s,
+    ),
+  },
+  en: {
+    ...exerciseHistoryHelp.en,
+    coach: (exerciseHistoryHelp.en.coach ?? []).map((s) =>
+      s.targetId === 'history.advanced' ? { ...s, body: minimalAdvancedBodyEn } : s,
+    ),
+  },
+};

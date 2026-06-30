@@ -17,7 +17,8 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { historyHelp } from '@/components/help/content/history';
+import { historyHelp, historyHelpMinimal } from '@/components/help/content/history';
+import { useAppMode } from '@/src/app-mode';
 
 type SubTab = 'history' | 'stats' | 'achievements';
 type HistoryMode = 'calendar' | 'list';
@@ -65,7 +66,12 @@ function HistoryScreen() {
   useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const help = usePageHelp('history', historyHelp, { autoShowOnce: true });
+  // ADR-0026 — 極簡模式月曆 cell 藏第 3 行（強度），所以 ⓘ 也換成不含「放大看
+  // 一天」截圖卡的 minimal 變體。同 pageId（同畫面微差）。
+  const { isMinimal } = useAppMode();
+  const help = usePageHelp('history', isMinimal ? historyHelpMinimal : historyHelp, {
+    autoShowOnce: true,
+  });
   const subTabsTarget = useCoachMarkTarget('history.subtabs');
   const modeTarget = useCoachMarkTarget('history.mode');
   const calendarTarget = useCoachMarkTarget('history.calendar');
