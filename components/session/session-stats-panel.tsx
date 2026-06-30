@@ -7,7 +7,7 @@ import {
   formatVolumeShort,
   type SessionStatsSetInput,
 } from '@/src/domain/session/sessionStats';
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -101,6 +101,11 @@ export function SessionStatsPanel({
   avgHr = null,
   userAge = null,
 }: SessionStatsPanelProps) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline t() labels re-evaluate on language switch (rendered directly by the
+  // always-mounted Today tab → no remount to refresh it otherwise).
+  'use no memo';
+  useLocale();
   // Frozen mode skips the 1-second tick entirely. We still mount the hook
   // (rules of hooks), but bail out of setInterval when ended_at_ms is a
   // concrete number.

@@ -50,7 +50,7 @@ import {
   type TemplateSummary,
 } from '@/src/adapters/sqlite/templateRepository';
 import { listTemplateGroupsByName } from '@/src/domain/training/templateListGroups';
-import { getLocale, t as tt, tTemplateRowSubtitle, tUseTemplate } from '@/src/i18n';
+import { getLocale, t as tt, tTemplateRowSubtitle, tUseTemplate, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 interface Props {
@@ -69,6 +69,11 @@ export function TemplateListSection({
   onPickTemplate,
   heading = tt('page', 'templateTraining'),
 }: Props): React.ReactElement {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline tt()/tTemplateRowSubtitle()/tUseTemplate() re-evaluate on language
+  // switch (rendered directly by the always-mounted Today tab → no remount).
+  'use no memo';
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   // ADR-0026 D1 — 極簡模式：刪除同名 alert 省略 (計劃·強度) 變體預覽（計劃概念

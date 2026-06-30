@@ -25,7 +25,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { t } from '@/src/i18n';
+import { t, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 import { displayToKg, displayWeight } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
@@ -111,6 +111,11 @@ export function SetRowContent<S extends SetRowItem>({
   onAddDropsetRow,
   onCycleLabel,
 }: SetRowContentProps<S>) {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline t() re-evaluates on language switch (rendered directly by the
+  // always-mounted Today tab → no remount to refresh it otherwise).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const hasNote =

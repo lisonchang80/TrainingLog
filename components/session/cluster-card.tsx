@@ -64,7 +64,7 @@ import {
 import type { SessionExerciseRowWithName } from '@/src/adapters/sqlite/sessionRepository';
 import type { SessionSetWithExercise } from '@/src/adapters/sqlite/setRepository';
 import type { UnitPreference } from '@/src/domain/body/types';
-import { t, tExercise } from '@/src/i18n';
+import { t, tExercise, useLocale } from '@/src/i18n';
 import {
   useTheme,
   dragActiveRowStyle,
@@ -167,6 +167,11 @@ export function ClusterCard({
   onConfirmReorderCycles,
   unit = 'kg',
 }: ClusterCardProps): React.ReactElement {
+  // React Compiler i18n gotcha: opt out of memoization + subscribe to locale so
+  // inline t()/tExercise() re-evaluate on language switch (rendered directly by
+  // the always-mounted Today tab → no remount to refresh it otherwise).
+  'use no memo';
+  useLocale();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const swipeColors = swipeActionColors(tokens);
