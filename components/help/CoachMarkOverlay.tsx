@@ -10,6 +10,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { t } from '@/src/i18n';
 import { useTheme, type ResolvedTheme, type ThemeTokens } from '@/src/theme';
 
@@ -62,6 +64,7 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
   const { tokens, resolved } = useTheme();
   const styles = useMemo(() => makeStyles(tokens, resolved), [tokens, resolved]);
   const measure = useCoachMarkMeasure();
+  const insets = useSafeAreaInsets();
 
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
@@ -105,15 +108,24 @@ export function CoachMarkOverlay({ visible, steps, numbered, onClose }: CoachMar
   };
   const prev = () => setIndex((i) => Math.max(0, i - 1));
 
-  const placement = pickCoachPlacement(rect, screen);
+  // 2026-06-30: while this overlay's Modal is open, measure()/measureInWindow on
+  // the underlying page's targets under-report Y by the screen's top safe-area
+  // inset — the page sits below a reserved safe area the Modal's measurement
+  // space doesn't include, so e.g. the 超級組「選 2 個」row (real y≈122) measured
+  // y≈60 and the spotlight ringed the search bar. Add the inset back.
+  const adjustedRect: Rect | null = rect
+    ? { ...rect, y: rect.y + insets.top }
+    : null;
+
+  const placement = pickCoachPlacement(adjustedRect, screen);
 
   // Padded hole around the target (visual only — the Modal intercepts touches).
-  const hole = rect
+  const hole = adjustedRect
     ? {
-        x: rect.x - RING_PAD,
-        y: rect.y - RING_PAD,
-        w: rect.width + RING_PAD * 2,
-        h: rect.height + RING_PAD * 2,
+        x: adjustedRect.x - RING_PAD,
+        y: adjustedRect.y - RING_PAD,
+        w: adjustedRect.width + RING_PAD * 2,
+        h: adjustedRect.height + RING_PAD * 2,
       }
     : null;
 
