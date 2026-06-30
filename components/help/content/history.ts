@@ -21,7 +21,9 @@
  * The calendar gets TWO coach steps: a grid-level spotlight (tinting / +N / tap)
  * and a screenshot-CARD that zooms ONE real day cell to label the three rows
  * (user request 2026-06-29 — a single day is too small to read in the spotlight).
- * Card asset: `assets/help/history/day-cell.png` (a templated day, 拉拉 / T1-1).
+ * Card asset: `assets/help/history/day-cell.png` (a templated day, 拉日 / 重 —
+ * a normal template name with a real intensity sub-tag; user 2026-06-30 asked
+ * for a more ordinary-looking day than the previous 拉拉 / T1-1).
  * Recapture if the DayCell layout changes.
  *
  * Spotlight targets (useCoachMarkTarget, in HistoryScreen):
@@ -29,7 +31,7 @@
  */
 import type { LocalizedPageHelp } from '../types';
 
-const CELL_AR = 173 / 224; // day-cell.png (single zoomed calendar day, portrait)
+const CELL_AR = 172 / 214; // day-cell.png (single zoomed calendar day, portrait)
 
 export const historyHelp: LocalizedPageHelp = {
   zh: {
@@ -55,7 +57,7 @@ export const historyHelp: LocalizedPageHelp = {
         image: require('@/assets/help/history/day-cell.png'),
         aspectRatio: CELL_AR,
         title: '放大看一天',
-        body: '一個格子分三行：①綠色塊＝當天訓練總容量（kg）②中間色塊＝訓練模板（顏色就是該模板的代表色，自由訓練為灰）③最下灰字＝主場訓練強度（自由訓練顯示「—」；極簡模式會整行隱藏）。',
+        body: '一個格子分三行：①綠色塊＝當天訓練總容量（kg）②中間色塊＝訓練模板（顏色就是該模板的代表色，自由訓練為灰）③最下灰字＝主場訓練強度（自由訓練顯示「—」）。',
       },
     ],
   },
@@ -82,7 +84,7 @@ export const historyHelp: LocalizedPageHelp = {
         image: require('@/assets/help/history/day-cell.png'),
         aspectRatio: CELL_AR,
         title: 'One day, zoomed in',
-        body: 'A cell has three rows: 1) green chip = that day’s total volume (kg); 2) middle chip = the training template (its colour is the template’s colour; freestyle = grey); 3) grey caption = the session’s main intensity (freestyle shows “—”; hidden entirely in Minimal mode).',
+        body: 'A cell has three rows: 1) green chip = that day’s total volume (kg); 2) middle chip = the training template (its colour is the template’s colour; freestyle = grey); 3) grey caption = the session’s main intensity (freestyle shows “—”).',
       },
     ],
   },
