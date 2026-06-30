@@ -228,6 +228,34 @@ Everything is under `components/help/` and exported from `components/help/index.
      avoid spotlighting a tall column (e.g. the library sidebar) — but a card is
      still clearer for very tall targets if the caption would cover the thing it
      describes.
+   - **⚠️ Spotlight measure is offset by the top safe-area inset — FIXED in the
+     overlay (2026-06-30, ~3h to root-cause; don't re-debug from scratch).**
+     Symptom: a spotlight rings the WRONG element — most visibly a thin target near
+     the top (the 超級組「選 2 個」selected-chip row spotlight ringed the search bar
+     ~62px above it). Root cause: `CoachMarkOverlay` renders inside a full-screen
+     `<Modal>` and measures the underlying page's targets WHILE the modal is open;
+     on a notched device BOTH `measureInWindow` AND `measure(pageY)` under-report
+     the target's window-Y by the screen's top safe-area inset (the page sits below
+     a reserved safe area the modal's measurement space excludes). It hits EVERY
+     coach page — large targets (grid/footer/calendar) just hide the ~62px error.
+     Fix (already shipped): `CoachMarkOverlay` adds `useSafeAreaInsets().top` back
+     to `rect.y` before building the spotlight `hole`/placement (`adjustedRect`).
+     **So this is solved for new pages — you don't need to do anything.** Dead ends
+     that DON'T fix it (don't repeat): `forwardRef` onto the target's styled root,
+     giving the target a real `backgroundColor`, switching the provider
+     `measureInWindow`↔`measure(pageY)`, wrapping the page in an extra flex `<View>`,
+     or `<SafeAreaView edges={['top']}>`→`<View paddingTop={insets.top}>` (that
+     DOUBLE-pads — the parent Stack already reserves the inset). And do NOT "fix" a
+     mis-placed spotlight by deleting/merging the step — the user wants the step
+     placed right, not gone.
+   - **Debug technique that cracked it: render the measured rect ON SCREEN.** When
+     a spotlight lands wrong and you can't tell why, temporarily drop an
+     absolute-positioned `<Text style={{position:'absolute',top:150,zIndex:99999}}>
+     DBG {step.targetId} {JSON.stringify(rect)}</Text>` inside the overlay's
+     `<Pressable>`, reload, screenshot — you SEE the raw `{x,y,width,height}` the
+     spotlight uses. (Here: width/height correct, y=60 vs real ~122 → "off by the
+     inset" was obvious in one shot.) console.log is useless (goes to the Metro
+     terminal you can't read from the sim). Remove the debug Text before shipping.
 6. **(info/mixed with screenshots)** add PNGs under `assets/help/<pageId>/` and
    `require()` them in the content file. See `assets/help/README.md`.
 
