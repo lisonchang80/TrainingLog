@@ -76,7 +76,7 @@ export const strings = {
      * coach 控制鈕（上一步/下一步/略過/完成）沿用 common.back/next/skip/done。
      */
     help: {
-      button: '說明',
+      button: '頁面說明',
       gotIt: '了解',
       startTour: '操作教學',
     },
@@ -1149,7 +1149,7 @@ export const strings = {
     },
 
     help: {
-      button: 'Help',
+      button: 'Page help',
       gotIt: 'Got it',
       startTour: 'Show me',
     },
