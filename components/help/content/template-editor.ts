@@ -19,11 +19,19 @@
  *   - 點標籤 = 3-way cycle 正式→熱身→遞減組; 點數字格 = inline 直接輸入
  *   - 左滑=刪除 (red) / 右滑=加一組·備註 (green「加」+ blue「備註」) / 長按=拖曳排序
  *
- * Spotlight targets (useCoachMarkTarget):
- *   template.addExercise / template.card / template.start
+ * 2026-07-01 (b) — 動作卡 step 2 spotlight → screenshot card (user request「建立模板，
+ * 2 動作卡，用截圖」). The card lives in the ScrollView body, so a spotlight ring
+ * measured the below-fold section and「沒切到」(missed the card). A real-capture card
+ * (`template-editor/card.png`) dodges it — same rule as session-detail/today-session.
+ * The now-dead `template.card` useCoachMarkTarget + its firstCardRef wiring in
+ * `template-editor-view.tsx` were removed.
+ *
+ * Spotlight targets (useCoachMarkTarget, FIXED chrome only):
+ *   template.addExercise / template.start
  */
 import type { LocalizedPageHelp } from '../types';
 
+const CARD_AR = 1140 / 168; // template-editor/card.png (collapsed 動作卡 row — tap / long-press / ⚙️)
 const GEAR_AR = 720 / 1057; // gear-menu.png
 const SETS_AR = 1000 / 673; // sets.png (tap ops)
 const SWIPE_LEFT_AR = 1030 / 190;
@@ -41,7 +49,8 @@ export const templateEditorHelp: LocalizedPageHelp = {
         body: '點這裡，從動作庫挑動作加進模板。',
       },
       {
-        targetId: 'template.card',
+        image: require('@/assets/help/template-editor/card.png'),
+        aspectRatio: CARD_AR,
         title: '動作卡',
         body: '點卡片展開看組；長按換順序；點右側 ⚙️ 開更多。',
       },
@@ -92,7 +101,8 @@ export const templateEditorHelp: LocalizedPageHelp = {
         body: 'Tap here to pick moves from the library.',
       },
       {
-        targetId: 'template.card',
+        image: require('@/assets/help/template-editor/card.png'),
+        aspectRatio: CARD_AR,
         title: 'Exercise card',
         body: 'Tap to expand; long-press to reorder; tap ⚙️ for more.',
       },
