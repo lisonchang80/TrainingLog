@@ -1,18 +1,15 @@
 import Constants from 'expo-constants';
-import { randomUUID } from 'expo-crypto';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -37,7 +34,6 @@ import {
   requestHKAuthorization,
   type HKPermissionState,
 } from '@/src/adapters/healthkit';
-import { insertBodyMetric } from '@/src/adapters/sqlite/bodyMetricRepository';
 import { getActiveSession } from '@/src/adapters/sqlite/sessionRepository';
 import {
   discoverBackupCandidates,
@@ -51,11 +47,9 @@ import {
 import {
   getAutoPopupRestTimer,
   getBucketRanges,
-  getUnitPreference,
   setAutoPopupRestTimer,
   setBackupMode,
   setBucketRanges,
-  setUnitPreference,
 } from '@/src/adapters/sqlite/settingsRepository';
 import { useAchievementsEnabled } from '@/src/achievements-enabled';
 import {
@@ -73,10 +67,8 @@ import { buildJsonExport, writeJsonExport } from '@/src/services/jsonExport';
 import { getLatestCloudBackup } from '@/src/adapters/backup/icloudBackupAdapter';
 import type { ICloudBackupItem } from '@/modules/icloud-backup';
 import type { UnitPreference } from '@/src/domain/body/types';
-import { validateBodyMetric } from '@/src/domain/body/bodyMetricManager';
-import { parseWeightInput } from '@/src/domain/body/unitConversion';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { t, tBodyweightUnitHint, tSaveOrSaving, useLocale } from '@/src/i18n';
+import { useUnit } from '@/src/unit';
+import { t, useLocale } from '@/src/i18n';
 import {
   loadStoredLocale,
   resolveLocale,
@@ -145,7 +137,10 @@ export default function SettingsScreen() {
     getBucketBoundaries()
   );
 
-  const [unit, setUnit] = useState<UnitPreference>('kg');
+  // ADR — display unit lives in the app-wide UnitProvider (SQLite-backed),
+  // so a toggle here re-renders every weight-showing surface live. Settings no
+  // longer keeps its own copy / re-reads on focus.
+  const { unit, setUnit } = useUnit();
   /**
    * Rest timer auto-popup toggle (ADR-0019 § slice 10d S1).
    *
@@ -168,21 +163,6 @@ export default function SettingsScreen() {
    * `locale-persist.ts`. `null` while loading (renders a default snapshot).
    */
   const [localePref, setLocalePref] = useState<StoredLocaleValue | null>(null);
-  /**
-   * ADR-0024 § 5 — 體重 row mini sheet state.
-   *   - `bwSheetOpen`: modal visibility
-   *   - `bwInput`: current TextInput value (raw string, parsed on save)
-   *   - `bwBusy`: insert-in-flight guard
-   */
-  const [bwSheetOpen, setBwSheetOpen] = useState(false);
-  const [bwInput, setBwInput] = useState('');
-  const [pbfInput, setPbfInput] = useState('');
-  const [smmInput, setSmmInput] = useState('');
-  // 2026-06-27 — settings 身體數據 modal now records all three metrics
-  // (體重/PBF/SMM, consistent with BodyDataSheet) + a chosen date, so past
-  // entries can be backfilled. recordedAt defaults to now.
-  const [recordedAt, setRecordedAt] = useState(() => Date.now());
-  const [bwBusy, setBwBusy] = useState(false);
   /**
    * Slice 15 C4 — minimal restore entry (grill Q8-C entry B; the full
    * backup section — auto-backup toggle / 立即備份 / status readout — is
@@ -209,15 +189,13 @@ export default function SettingsScreen() {
   const [exportBusy, setExportBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [u, popup, loc, hkState, activeSession, ranges] = await Promise.all([
-      getUnitPreference(db),
+    const [popup, loc, hkState, activeSession, ranges] = await Promise.all([
       getAutoPopupRestTimer(db),
       loadStoredLocale(),
       getAuthorizationState(db),
       getActiveSession(db),
       getBucketRanges(db),
     ]);
-    setUnit(u);
     setAutoPopup(popup);
     setLocalePref(loc);
     setHkAuthState(hkState);
@@ -254,9 +232,8 @@ export default function SettingsScreen() {
   );
 
   const onSet = async (next: UnitPreference) => {
-    if (next === unit) return;
-    setUnit(next);
-    await setUnitPreference(db, next);
+    // UnitProvider guards no-op + persists + re-renders every unit surface.
+    await setUnit(next);
   };
 
   const onToggleAutoPopup = async (next: boolean) => {
@@ -443,45 +420,6 @@ export default function SettingsScreen() {
     await setAppModePref(next);
   };
 
-  // ADR-0024 § 5 — 體重 mini sheet handlers.
-  const onOpenBwSheet = () => {
-    setBwInput('');
-    setPbfInput('');
-    setSmmInput('');
-    setRecordedAt(Date.now());
-    setBwSheetOpen(true);
-  };
-
-  const onSaveBw = async () => {
-    // weight fields are unit-aware (→ kg); PBF is a plain percent.
-    const parseField = (raw: string, kind: 'weight' | 'pct'): number | null => {
-      const s = raw.trim();
-      if (s === '') return null;
-      if (kind === 'weight') return parseWeightInput(s, unit);
-      const n = Number(s);
-      return Number.isFinite(n) ? n : NaN;
-    };
-    const draft = {
-      recorded_at: recordedAt,
-      bodyweight_kg: parseField(bwInput, 'weight'),
-      pbf: parseField(pbfInput, 'pct'),
-      smm_kg: parseField(smmInput, 'weight'),
-    };
-    if (validateBodyMetric(draft) != null) {
-      Alert.alert(t('alert', 'invalidBodyweightTitle'), t('alert', 'invalidBodyweightRange'));
-      return;
-    }
-    setBwBusy(true);
-    try {
-      await insertBodyMetric(db, draft, randomUUID);
-      setBwSheetOpen(false);
-    } catch (e) {
-      Alert.alert(t('alert', 'saveFailed'), e instanceof Error ? e.message : String(e));
-    } finally {
-      setBwBusy(false);
-    }
-  };
-
   /**
    * Slice 15 C4 — run the swap inside the provider's suspend-runner
    * (Q12-A): the consumer tree (this screen included) unmounts while the
@@ -605,22 +543,6 @@ export default function SettingsScreen() {
           />
         </View>
         <Text style={styles.hint}>{t('page', 'unitPreferenceHint')}</Text>
-
-        {/* ADR-0024 § 5 — 體重 row。位於單位偏好之下、訓練偏好之上。
-            Quick capture via mini sheet → insertBodyMetric. History list /
-            chart 仍走既有「資料 → 體重資料」路徑（下方 linkRow）。 */}
-        <Text style={styles.section}>{t('page', 'bodyweightSection')}</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('page', 'recordBodyweight')}
-          onPress={onOpenBwSheet}
-          style={({ pressed }) => [
-            styles.bwRow,
-            pressed && styles.btnPressed,
-          ]}>
-          <Text style={styles.bwRowLabel}>{t('page', 'recordBodyweightRow')}</Text>
-          <Text style={styles.bwRowHint}>{tBodyweightUnitHint(unit)}</Text>
-        </Pressable>
 
         <Text style={styles.section}>{t('domain', 'trainingPreferences')}</Text>
         <View style={styles.switchRow}>
@@ -924,102 +846,6 @@ export default function SettingsScreen() {
 
       </ScrollView>
 
-      {/* ADR-0024 § 5 → 2026-06-27 — 身體數據 mini sheet (modal). Date picker
-          on top + 體重/PBF/SMM 三輸入格 (一致 with BodyDataSheet). No KAV — the
-          card stays centered and is not lifted when the keyboard opens
-          (2026-06-27 ③ device-feedback: position fine, don't lift). */}
-      <Modal
-        visible={bwSheetOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setBwSheetOpen(false)}>
-        <View style={styles.modalBackdrop}>
-            <View style={styles.modalSheet} accessibilityViewIsModal>
-              <Text style={styles.modalHeading}>{t('page', 'recordBodyData')}</Text>
-
-              <View style={styles.modalDateRow}>
-                <Text style={styles.modalLabel}>{t('page', 'recordDateLabel')}</Text>
-                <DateTimePicker
-                  value={new Date(recordedAt)}
-                  mode="date"
-                  display="compact"
-                  maximumDate={new Date()}
-                  onChange={(_e, d) => {
-                    if (d) setRecordedAt(d.getTime());
-                  }}
-                />
-              </View>
-
-              <View style={styles.modalFieldRow}>
-                <View style={styles.modalField}>
-                  <Text style={styles.modalFieldLabel}>
-                    {`${t('domain', 'bodyweight')} (${unit})`}
-                  </Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    keyboardType="decimal-pad"
-                    selectTextOnFocus
-                    value={bwInput}
-                    onChangeText={setBwInput}
-                    placeholder="—"
-                    placeholderTextColor={tokens.text.tertiary}
-                  />
-                </View>
-                <View style={styles.modalField}>
-                  <Text style={styles.modalFieldLabel}>PBF (%)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    keyboardType="decimal-pad"
-                    selectTextOnFocus
-                    value={pbfInput}
-                    onChangeText={setPbfInput}
-                    placeholder="—"
-                    placeholderTextColor={tokens.text.tertiary}
-                  />
-                </View>
-                <View style={styles.modalField}>
-                  <Text style={styles.modalFieldLabel}>{`SMM (${unit})`}</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    keyboardType="decimal-pad"
-                    selectTextOnFocus
-                    value={smmInput}
-                    onChangeText={setSmmInput}
-                    placeholder="—"
-                    placeholderTextColor={tokens.text.tertiary}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.modalActions}>
-                <Pressable
-                  onPress={() => setBwSheetOpen(false)}
-                  disabled={bwBusy}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [
-                    styles.modalSecondaryBtn,
-                    bwBusy && styles.btnDisabled,
-                    pressed && styles.btnPressed,
-                  ]}>
-                  <Text style={styles.modalSecondaryText}>{t('common', 'cancel')}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={onSaveBw}
-                  disabled={bwBusy}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [
-                    styles.modalPrimaryBtn,
-                    bwBusy && styles.btnDisabled,
-                    pressed && styles.btnPressed,
-                  ]}>
-                  <Text style={styles.modalPrimaryText}>
-                    {tSaveOrSaving(bwBusy)}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-      </Modal>
     </SafeAreaView>
   );
 }
