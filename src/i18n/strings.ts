@@ -378,7 +378,7 @@ export const strings = {
         '打✓ 完成一組後自動跳出 60 秒倒數視窗（可手動關閉視窗或跳過）。',
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       autoBackupHint: '訓練結束、App 進入背景時自動備份到 iCloud。',
-      bodyMetricsHint: '體重 / PBF / SMM 趨勢與歷史記錄。快速輸入仍可從 Today 頁進入。',
+      bodyMetricsHint: '體重 / PBF / SMM 趨勢與歷史記錄。在此頁即可輸入新增一筆。',
       // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
       wizardStep3Hint:
         '每天選擇一個模板（可留白為休息日）。週期 1 的選擇會 fan-out 到每個週期；強度在下一步逐週期選擇。',
@@ -494,11 +494,11 @@ export const strings = {
       cannotStartSession: '無法開始訓練',
       cannotCreateTemplate: '無法建立模板',
       failed: '失敗',
-      noActiveSession: '找不到進行中的訓練。請先回 Today 頁開始一次訓練後再試。',
+      noActiveSession: '找不到進行中的訓練。請先到「訓練」分頁開始一次訓練後再試。',
       sessionAlreadyInProgress: '已有進行中的訓練',
-      endActiveSessionFirst: '請先在「今日」分頁結束目前的訓練再開始新的。',
+      endActiveSessionFirst: '請先在「訓練」分頁結束目前的訓練再開始新的。',
       templateInUseByActiveSession:
-        '目前進行中的訓練是從這個模板開始的，無法刪除。請先在「今日」分頁結束或放棄該訓練再刪除。',
+        '目前進行中的訓練是從這個模板開始的，無法刪除。請先在「訓練」分頁結束或放棄該訓練再刪除。',
       exerciseNotFound: '找不到此動作。',
       exerciseNotFoundOrArchived: '動作不存在或已封存。',
       sourceCardNotFound: '找不到該動作來源卡。',
@@ -721,7 +721,7 @@ export const strings = {
       bwSnapshotFrozenHint: '此次訓練的 bw_snapshot 不會被改寫。',
       muscleRolePrimary: '主要',
       muscleRoleSecondary: '次要',
-      noSessionsYetHint: '尚無訓練 — 到 Today 分頁開始第一次訓練。',
+      noSessionsYetHint: '尚無訓練 — 到「訓練」分頁開始第一次訓練。',
       // Slice 13 Phase A (2026-05-25) — HR chart + kcal placeholder hints
       // shown when HealthKit / Apple Watch data is unavailable (pre-Phase B).
       hrChartEmptyHint: '需 Apple Watch 同步心率資料',
@@ -1444,7 +1444,7 @@ export const strings = {
       // Slice 15 C3 (2026-06-13) — Settings backup section.
       autoBackupHint: 'Backs up to iCloud when a session ends or the app goes to the background.',
       bodyMetricsHint:
-        'Bodyweight / PBF / SMM trends and history. Quick input is still available from the Today tab.',
+        'Bodyweight / PBF / SMM trends and history. Add a new entry right on this page.',
       // Phase 4.5 batch 1 — wizard Step 3 / Step 4 hint paragraphs.
       wizardStep3Hint:
         'Pick a template for each day (leave blank for a rest day). Cycle 1 picks fan out to every cycle; per-cycle intensities come next.',
@@ -1556,11 +1556,11 @@ export const strings = {
       cannotStartSession: 'Cannot start session',
       cannotCreateTemplate: 'Cannot create template',
       failed: 'Failed',
-      noActiveSession: 'No active session found. Return to Today and start a session, then try again.',
+      noActiveSession: 'No active session found. Go to the Training tab and start a session, then try again.',
       sessionAlreadyInProgress: 'A session is already in progress',
-      endActiveSessionFirst: 'End the current session in the "Today" tab before starting a new one.',
+      endActiveSessionFirst: 'End the current session in the Training tab before starting a new one.',
       templateInUseByActiveSession:
-        'The active session was started from this template, so it cannot be deleted. End or discard that session in the "Today" tab first.',
+        'The active session was started from this template, so it cannot be deleted. End or discard that session in the Training tab first.',
       exerciseNotFound: 'Exercise not found.',
       exerciseNotFoundOrArchived: 'Exercise does not exist or has been archived.',
       sourceCardNotFound: 'Source card for this exercise not found.',
@@ -1778,7 +1778,7 @@ export const strings = {
       bwSnapshotFrozenHint: "This session's bw_snapshot will not be overwritten.",
       muscleRolePrimary: 'Primary',
       muscleRoleSecondary: 'Secondary',
-      noSessionsYetHint: 'No sessions yet — start one in the Today tab.',
+      noSessionsYetHint: 'No sessions yet — start one in the Training tab.',
       // Slice 13 Phase A (2026-05-25) — HR chart + kcal placeholder hints
       // shown when HealthKit / Apple Watch data is unavailable (pre-Phase B).
       hrChartEmptyHint: 'Apple Watch HR sync required',
