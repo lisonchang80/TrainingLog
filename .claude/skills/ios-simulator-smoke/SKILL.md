@@ -78,6 +78,15 @@ rebuild**. Metro serves whatever's on disk in the **primary worktree**, so:
 - To smoke a branch: `git switch` the **primary** checkout to it first (real
   `node_modules`). A *symlinked* git-worktree breaks Metro entry resolution (red
   screen) — see `overnight-parallel-agents` gotcha #14. Switch back when done.
+- **Alt — serve a worktree directly** (e.g. an integration/overnight branch you
+  don't want to disturb the primary checkout for): give THAT worktree REAL
+  `node_modules` — `rm node_modules` (removes the symlink only; the target/main
+  install is safe) → `npm install` (~3-5 min) — then `kill` the primary's Metro
+  (`lsof -ti :8081 | xargs kill`) and `npx expo start --dev-client [--clear]`
+  from the worktree dir. Symptom if you skip the install: red screen `Unable to
+  resolve ./<repo>/node_modules/expo-router/entry`. `tsc`/`jest` are happy with
+  the symlink; only Metro's bundler isn't. Validated 2026-07-01 (integration-
+  overnight-0701 coach-scroll fix smoke). Restart the primary's Metro after.
 - Confirm Metro is alive: `ps aux | grep "expo start"`. If dead:
   `npx expo start --dev-client` from the repo root.
 - **`CI=1` disables Metro's file watcher** — a Metro started with `CI=1 npx expo
