@@ -78,3 +78,4 @@ For each branch in stacking order (oldest → newest):
 
 - `ship-slice` for the actual code-shipping per branch (this skill is the cross-slice orchestration on top)
 - `overnight-parallel-agents` (user-level) for the case where the BRANCHES themselves were built by autonomous agents and now need shipping
+- **`merge-stack-to-main`** for the OTHER integration model — when the user is under the「先合不推」hold and wants a PR-LESS local merge (FF + `--no-ff`) directly onto main then push, NOT a per-PR review chain. Pick that skill when there are no PRs and the branches are local; pick THIS skill when each branch needs its own reviewable PR.
