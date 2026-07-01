@@ -76,7 +76,7 @@ Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 | `app/exercise-chart/[id].tsx` | coach ✅ **(4-step feature-explainer, `coachNumbered:false`: rep buckets/cluster/advanced/metric)** |
 | `app/exercise-history/[id].tsx` | coach ✅ **(4-step: same filters + first SessionRow expand/超/replay)** |
 | `app/(tabs)/library.tsx` | coach ✅ **(3-step: MG tree / equipment dropdown / card meta)** |
-| `app/(tabs)/programs.tsx` | coach ✅ **(6-step hybrid: grid spotlight (idle, read-only — "press 編輯 first") → 4 edit-mode screenshot cards 下拉/▼縱列/▶橫列/拖曳 → manage-row spotlight (idle))** |
+| `app/(tabs)/programs.tsx` | coach ✅ **mode-aware (2026-07-02): `editing ? programsEditHelp : programsViewHelp`. VIEW = 3 spotlights, pure layout (grid〔列=週期/欄=天〕 / 編輯 button / manage row), 0 cards. EDIT = grid intro spotlight + 4 grid-op cards (下拉/▼/▶/拖曳). Was a single 6-step hybrid.** |
 | `app/(tabs)/history.tsx` | coach ✅ **(4-step: subtabs / 月曆·表列 / calendar colour+N / 🖼️ zoomed day-cell card labelling the 3 rows 容量·模板色·強度)** |
 | `app/exercise/[id].tsx` | coach ✅ **(2-step: muscle figure orange=primary blue=secondary / footer)** |
 | `app/superset/[id].tsx` | coach ✅ **(2-step: locked A+B pair / footer 歷史·圖表 open A-side filtered)** |
@@ -539,9 +539,21 @@ landmine — see KNOWN BUG above):
   header ⋯ ActionSheet), per-set gestures (swipe/long-press), AND scroll-body READING
   features you'd otherwise scroll to (HR-zone chart, a 隱藏未打勾 toggle). Making these
   cards means the tour registers NO scroller → dodges the step-1 mis-position bug.
-- A menu you spotlit before can be DOWNGRADED to a card (in-session ⋯ was a spotlight →
-  became a `dots-menu.png` card, matching the template editor). Remember to remove the
-  now-unused `useCoachMarkTarget` + its `ref=`.
+- The real discriminator is the TRIGGER's position, not "is it a menu". A menu whose
+  trigger is FIXED chrome → SPOTLIGHT it (body text lists the items); a menu/gesture whose
+  trigger lives in the scroll body → card. ⚠ **2026-07-02 REVERSAL**: the in-session ⋯ was
+  briefly downgraded to a `dots-menu.png` card, then put BACK to a spotlight — ⋯ is a fixed
+  header button, spotlightable, so a card there was the wrong call ("沒切到" was the user's
+  word for a card that felt like it missed). The per-card ⚙️ stays a card (its trigger is
+  in the scrolling exercise list). When flipping direction, add/remove the
+  `useCoachMarkTarget` + `ref=` AND delete the now-orphan screenshot (`git rm`).
+- **Scroll-body targets can't be spotlit reliably** ("沒切到"). The template editor 動作卡
+  was a `template.card` spotlight whose `ref` sat on a `renderSection` card inside the
+  ScrollView — the ring measured a below-fold section and missed. Fix = screenshot card
+  (`template-editor/card.png`), and rip out the dead `useCoachMarkTarget('template.card')`
+  + the `firstCardRef` param it threaded through `renderSection`. (Grids/cards that are
+  ABOVE the fold, like `programs.grid`, spotlight fine — the bar is measurability, not
+  "is it in a ScrollView".)
 
 **Reuse identical menu screenshots across pages.** The in-session per-card ⚙️ ActionSheet
 and session-detail's ⚙️ have the SAME options (verified via `index.tsx` `menuOptions` +
@@ -553,6 +565,27 @@ you'll estimate from the rendered thumbnail — first `--cropOffset` grabbed the
 instead. The sheet's top is ~37% down (px ≈ 0.37×screenH at 3× scale), bottom ~67%. Crop,
 `Read` the PNG, re-crop if it's the wrong region (the displayed thumbnail's apparent height
 ≠ the real 2622-px height). Set `aspectRatio` from the FINAL `sips -g pixelWidth/Height`.
+
+**Mode-aware pages so far** (2026-07-02): `session/[id]` (`editMode?edit:view`), Today
+in-session vs idle plan/極簡, and **`programs`** (`editing ? 'programs-edit' : 'programs'`
+→ `programsEditHelp`/`programsViewHelp`). Programs view = 3 spotlights, pure layout
+(grid〔列=週期/欄=天〕 / 編輯 button `programs.edit` / manage row `programs.manage`), 0
+cards; edit = the 4 grid-op cards (下拉/▼/▶/拖曳). Its ⓘ is ALWAYS rendered (outside the
+`editing` conditional), so both modes are reachable. User rule (repeat of session-detail):
+**"(非編輯) 簡化，只需遮罩說明佈局"** → the idle/view ⓘ is a light layout coach, the detailed
+ops move to the edit-mode tour.
+
+**Sim-verifying a coach tour (gotchas, validated 2026-07-02).**
+- Sim screenshots are ~1206×2622 → too big for the image reader. Downscale first:
+  `xcrun simctl io <UDID> screenshot out.png; sips -Z 760 out.png --out out-s.png`, Read the `-s`.
+- The `CoachMarkOverlay` is a full-screen `<Modal>` that collapses to ONE flat AXElement
+  (`ui_describe_point` anywhere inside returns that one "…選單"-labelled element) — the
+  「下一步 / 略過 / 上一步」buttons are NOT exposed to AX. You must tap them by pixel coords.
+- **下一步 Y shifts with card height**: tall screenshot-card steps put it low (~y688 on a
+  874pt screen), short spotlight cards higher (~y585); a TOP-anchored card (target near the
+  top → bubble below it) puts the button row ~y190. Re-read each screenshot and re-aim.
+- To reach the **計畫 (programs) tab** you need PLAN mode (5 tabs); 極簡 mode hides it —
+  toggle app mode in Settings first (ADR-0026).
 
 ## Verify
 
