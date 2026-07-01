@@ -51,6 +51,7 @@ import {
   HelpButton,
   PageHelpHost,
   useCoachMarkTarget,
+  useCoachScroller,
   usePageHelp,
 } from '@/components/help';
 import { bodyHelp } from '@/components/help/content/body';
@@ -88,6 +89,9 @@ function BodyScreen() {
   const inputTarget = useCoachMarkTarget('body.input');
   const chartTarget = useCoachMarkTarget('body.chart');
   const legendTarget = useCoachMarkTarget('body.legend');
+  // Coach auto-scroll — chart + legend steps sit below the fold on this long
+  // page; the overlay scrolls each spotlight target into view per step.
+  const coachScroll = useCoachScroller();
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [unit, setUnit] = useState<UnitPreference>('kg');
   const [bwInput, setBwInput] = useState('');
@@ -151,6 +155,9 @@ function BodyScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <ScrollView
+          ref={coachScroll.ref}
+          onScroll={coachScroll.onScroll}
+          scrollEventThrottle={coachScroll.scrollEventThrottle}
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled">
           <View

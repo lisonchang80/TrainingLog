@@ -169,6 +169,7 @@ import {
   HelpButton,
   PageHelpHost,
   useCoachMarkTarget,
+  useCoachScroller,
   usePageHelp,
 } from '@/components/help';
 import { todayMinimalHelp } from '@/components/help/content/today-minimal';
@@ -271,6 +272,9 @@ function TodayScreen() {
   const planTarget = useCoachMarkTarget('today.planPanel');
   const templateTarget = useCoachMarkTarget('today.templateList');
   const blankTarget = useCoachMarkTarget('today.blankStart');
+  // Idle-view coach auto-scroll — with a long saved-template list the 空白訓練
+  // step target sits below the fold; the overlay scrolls it into view per step.
+  const coachScroll = useCoachScroller();
   // In-session coach tour spotlight targets (today-session.ts). All sit on
   // FIXED chrome (header ⋯ / 完成, bottom sticky [加入動作]) → no scroller needed.
   const sessionAddTarget = useCoachMarkTarget('today.session.add');
@@ -2829,6 +2833,9 @@ function TodayScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView
+          ref={coachScroll.ref}
+          onScroll={coachScroll.onScroll}
+          scrollEventThrottle={coachScroll.scrollEventThrottle}
           contentContainerStyle={styles.idleScroll}
           keyboardShouldPersistTaps="handled">
           <View style={styles.helpHeaderRow}>
