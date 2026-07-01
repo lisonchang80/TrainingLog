@@ -137,7 +137,6 @@ import {
 import {
   deleteSetting,
   getSetting,
-  getUnitPreference,
   setSetting,
 } from '@/src/adapters/sqlite/settingsRepository';
 import {
@@ -145,6 +144,7 @@ import {
   displayWeight,
 } from '@/src/domain/body/unitConversion';
 import type { UnitPreference } from '@/src/domain/body/types';
+import { useUnit } from '@/src/unit';
 import { computeSessionSetLayout } from '@/src/domain/set/sessionSetLayout';
 import { cycleSessionSetKindClusterAware } from '@/src/domain/set/cycleSessionSetKind';
 import { filterUncheckedSolo, filterUncheckedClusterPair } from '@/src/domain/set/hideUncheckedFilter';
@@ -355,7 +355,10 @@ function SessionDetailScreen() {
     Map<string, ReusableSupersetWithExercises>
   >(new Map());
   const [loading, setLoading] = useState(true);
-  const [unit, setUnit] = useState<UnitPreference>('kg'); // F4 — set weight display/entry unit
+  // F4 — set weight display/entry unit. Sourced from the app-wide UnitProvider
+  // so a toggle in Settings re-renders this page live (fixes the old mount-only
+  // read that never refreshed an already-open detail page).
+  const { unit } = useUnit();
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   // mode-aware 頁面說明 handle (targets declared above). Switching pageId re-arms
@@ -480,12 +483,11 @@ function SessionDetailScreen() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, ss, ses, hk, u] = await Promise.all([
+      const [s, ss, ses, hk] = await Promise.all([
         getSession(db, id),
         listSetsBySession(db, id),
         listSessionExercisesWithName(db, id),
         loadSessionHealthKitColumns(db, id),
-        getUnitPreference(db),
       ]);
       if (!s) {
         setError('Session not found.');
@@ -495,7 +497,6 @@ function SessionDetailScreen() {
       setSession({ ...s, kcal: hk.kcal, avg_hr_bpm: hk.avg_hr_bpm });
       setSets(ss);
       setSessionExercises(ses);
-      setUnit(u);
 
       // Hydrate RS rows for any cluster that carries an rs_id (I6).
       const rsIds = new Set<string>();

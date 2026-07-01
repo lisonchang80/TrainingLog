@@ -148,6 +148,7 @@ import {
   sharedLabelBtnPressedStyle,
 } from '@/src/theme';
 import { useAppMode } from '@/src/app-mode';
+import { useUnit } from '@/src/unit';
 
 /**
  * ADR-0025 — DRY hook for the 3 components in this file that all read
@@ -304,6 +305,9 @@ function TemplateEditorView() {
   // ADR-0026 D1 — 極簡模式：⋯選單藏「另存強度」（無計劃就無強度可言）。
   // 「儲存」/「另存模板」走 TemplateMetaSheet（已 minimal-aware），不動。
   const { isMinimal } = useAppMode();
+  // F4 — display unit (kg/lb) from the app-wide UnitProvider so template set
+  // weights follow the Settings toggle live (previously hardcoded kg).
+  const { unit } = useUnit();
 
   const help = usePageHelp('template-editor', templateEditorHelp, {
     autoShowOnce: true,
@@ -2429,6 +2433,7 @@ function TemplateEditorView() {
                     return (
                       <SetRowContent
                         set={s}
+                        unit={unit}
                         setLabel={meta.setLabels[i]}
                         compact
                         hideLabel
@@ -3226,6 +3231,8 @@ function ExerciseBody({
 }: ExerciseBodyProps) {
   const { tokens } = useTheme();
   const styles = useEditorStyles();
+  // F4 — display unit for set-weight cells (follows Settings toggle live).
+  const { unit } = useUnit();
   // 「{warmup}熱+{working}組」— 對齊 wave 12 (2026-05-20) 的「1 chain = 1
   // unit」進度條規則：每個 working row 算 1 組、每條 dropset chain HEAD 算
   // 1 組、follower row 不另計（被 head 吸收）。pre-fix 用 `kind !== 'warmup'`
@@ -3408,6 +3415,7 @@ function ExerciseBody({
                         ]}>
                         <SetRowContent
                           set={head}
+                          unit={unit}
                           setLabel={setLabels[g.headIdx]}
                           compact={compact}
                           isDropsetFollower={false}
@@ -3423,6 +3431,7 @@ function ExerciseBody({
                           <SetRowContent
                             key={fset.id}
                             set={fset}
+                            unit={unit}
                             setLabel={setLabels[g.followerIndices[fIdx]]}
                             compact={compact}
                             isDropsetFollower
@@ -3473,6 +3482,7 @@ function ExerciseBody({
                       ]}>
                       <SetRowContent
                         set={head}
+                        unit={unit}
                         setLabel={setLabels[g.headIdx]}
                         compact={compact}
                         isDropsetFollower={false}
