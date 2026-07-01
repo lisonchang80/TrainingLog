@@ -74,7 +74,7 @@ export const exerciseHistoryHelp: LocalizedPageHelp = {
       {
         targetId: 'history.row',
         title: 'Expand a session · Replay',
-        body: 'Tap a row to expand its per-set detail; cluster rows carry a「超」chip. The ▶ on a row replays those sets onto your in-progress session (needs an active session first).',
+        body: 'Tap a row to expand its per-set detail; cluster rows carry an “SS” chip. The ▶ on a row replays those sets onto your in-progress session (needs an active session first).',
       },
     ],
   },
