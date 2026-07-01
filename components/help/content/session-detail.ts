@@ -2,38 +2,37 @@
  * Help content — 訓練詳情/編輯頁 (`app/session/[id].tsx`).
  *
  * style: 'coach' — ONE numbered 引導遮罩 tour. This page is the EDITING TWIN of
- * the template editor, so the tour mirrors it (5 steps, 3 spotlight + 2
- * screenshot cards). The tour auto-shows in VIEW mode (the state the page opens
- * in after a session ends / from history), so the spotlight steps target
- * VIEW-mode action-bar buttons. The page's editing operations — the ⚙️ menu and
- * the per-set gestures — only exist in EDIT mode, which the tour isn't in, so
- * they are screenshot-card steps interleaved in the same tour
- * (page-help-overlay constraint #6), exactly like the template editor.
+ * the template editor, so the tour mirrors it. The tour auto-shows in VIEW mode
+ * (the state the page opens in after a session ends / from history), so the
+ * spotlight steps target VIEW-mode action-bar buttons. The page's editing
+ * operations — the ⚙️ menu and the per-set gestures — only exist in EDIT mode,
+ * which the tour isn't in, so they are screenshot-card steps interleaved in the
+ * same tour (page-help-overlay constraint #6).
  *
- * EVERY operation verified against source on 2026-06-29 (not inferred from
- * handler names — user directive):
- *   - Bottom 4-button bar: 編輯訓練 (enterEditMode, view-mode slot 1
- *     `app/session/[id].tsx:2237-2246`) / 儲存模板 (update, slot 2, disabled when
- *     freestyle) / 另存模板 (create, slot 3 :2259) / 刪除 (discardSession, slot 4
- *     :2269). In edit mode slot 1 becomes 「+ 動作」.
- *   - The card ⚙️ menu (EDIT mode only) is built in `onSettingsPress` :1442-1477:
- *     SOLO = 編輯備註 · 休息秒數 · 刪除動作 · 排序動作 (the gear-menu.png shot is a
- *     solo card); CLUSTER also inserts 動作歷史 (A)/(B). NO「改器材」, NO「設為常設」.
- *   - EDIT-mode set row (sets.png): tap label cycles 正式→熱身→遞減組
- *     (`set-row-content.tsx:170-192`); tap a number cell opens the keypad
- *     (:194-225); swipe LEFT = 刪除 (:2909-2916), swipe RIGHT = +1·備註
- *     (:2917-2930); long-press = drag-reorder (:2907-2908); ○/✓ toggles logged
- *     (:2971-2992). View-mode rows are READ-ONLY.
+ * 2026-07-01 — per-gesture split (user request「set 編輯的 i 補一頁，左滑/右滑/
+ * 長按各一張小截圖」): the single combined sets card became a tap-only card +
+ * three real-capture gesture cards (左滑刪除 / 右滑加組·備註 / 長按排序). The
+ * swipe/long-press shots are SHARED across session-detail + today-session +
+ * template-editor (same `SwipeableSetRow`) and live in `assets/help/gestures/`.
  *
- * Spotlight targets (useCoachMarkTarget, attached to the view-mode action-bar
- * Pressables): session.edit / session.saveTemplate / session.delete.
- * Screenshot cards live in `assets/help/session-detail/` — recapture (with a
- * session opened in EDIT mode) if the ⚙️ menu or set-row layout changes.
+ * EVERY operation verified against source + live sim on 2026-07-01 (not inferred
+ * from handler names — user directive):
+ *   - Bottom 4-button bar: 編輯訓練 (enterEditMode, view-mode slot 1) / 儲存模板
+ *     (update, disabled when freestyle) / 另存模板 (create) / 刪除 (discardSession).
+ *   - EDIT-mode set row: tap label cycles 正式→熱身→遞減組; tap a number cell opens
+ *     the keypad; ○/✓ toggles logged. swipe LEFT = 刪除 (red); swipe RIGHT = ＋1·備註
+ *     (green ＋1 + blue 備註); long-press = drag-reorder. (Session 右滑綠鈕＝「＋1」,
+ *     vs template editor's「加」— both add a set; sim-verified 2026-07-01.)
+ *
+ * Spotlight targets (useCoachMarkTarget, view-mode action-bar Pressables):
+ * session.edit / session.saveTemplate / session.delete.
  */
 import type { LocalizedPageHelp } from '../types';
 
 const GEAR_AR = 640 / 808; // gear-menu.png (solo ⚙️ ActionSheet)
-const SETS_AR = 820 / 563; // sets.png (expanded edit-mode card)
+const SETS_AR = 820 / 563; // sets.png (expanded edit-mode card — tap ops)
+const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right (shared row strip)
+const DRAG_AR = 1030 / 350; // long-press (two rows)
 
 export const sessionDetailHelp: LocalizedPageHelp = {
   zh: {
@@ -54,8 +53,26 @@ export const sessionDetailHelp: LocalizedPageHelp = {
       {
         image: require('@/assets/help/session-detail/sets.png'),
         aspectRatio: SETS_AR,
-        title: '改每一組',
-        body: '點標籤切換 正式/熱身/遞減；點數字改重量次數；左滑刪、右滑加組；長按排序。',
+        title: '點一下改',
+        body: '點標籤切換 正式/熱身/遞減；點數字格改重量次數；點 ○ 標記完成。',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-left.png"),
+        aspectRatio: SWIPE_AR,
+        title: '左滑刪除',
+        body: '在一組上向左滑，出現紅色「刪除」，放開即刪掉這組。',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-right.png"),
+        aspectRatio: SWIPE_AR,
+        title: '右滑加組・備註',
+        body: '向右滑，綠色「＋1」加一組、藍色「備註」寫這組的筆記。',
+      },
+      {
+        image: require("@/assets/help/gestures/long-press.png"),
+        aspectRatio: DRAG_AR,
+        title: '長按排序',
+        body: '長按一組拖曳，可調整這個動作內各組的順序。',
       },
       {
         targetId: 'session.saveTemplate',
@@ -87,8 +104,26 @@ export const sessionDetailHelp: LocalizedPageHelp = {
       {
         image: require('@/assets/help/session-detail/sets.png'),
         aspectRatio: SETS_AR,
-        title: 'Edit each set',
-        body: 'Tap label to cycle kind; tap cells to edit; swipe to delete / add; long-press to reorder.',
+        title: 'Tap to edit',
+        body: 'Tap the label to cycle kind; tap a number cell to edit; tap ○ to mark done.',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-left.png"),
+        aspectRatio: SWIPE_AR,
+        title: 'Swipe left to delete',
+        body: 'Swipe a set left to reveal the red “Delete”, then release to remove it.',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-right.png"),
+        aspectRatio: SWIPE_AR,
+        title: 'Swipe right to add / note',
+        body: 'Swipe right: green “＋1” adds a set, blue “Note” jots a note for it.',
+      },
+      {
+        image: require("@/assets/help/gestures/long-press.png"),
+        aspectRatio: DRAG_AR,
+        title: 'Long-press to reorder',
+        body: 'Long-press a set and drag to reorder the sets within this move.',
       },
       {
         targetId: 'session.saveTemplate',
