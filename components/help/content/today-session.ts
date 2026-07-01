@@ -17,7 +17,9 @@
  * editor). In-session 右滑 green button reads「＋1」(matches session-detail).
  *
  * Spotlight targets (useCoachMarkTarget, in-session chrome):
- *   today.session.add / today.session.menu / today.session.finish
+ *   today.session.add / today.session.finish
+ * The per-card ⚙️ menu (reuses session-detail/gear-menu.png — same options) and the
+ * header ⋯ menu (today-session/dots-menu.png) are screenshot cards, not spotlights.
  *
  * ⚠ HOST SAFETY unchanged: the in-session branch UNMOUNTS on a Watch-led session
  * end. `inSessionHelp.close()` fires synchronously at the top of
@@ -27,6 +29,8 @@
 import type { LocalizedPageHelp } from '../types';
 
 const SETS_AR = 1092 / 735; // today-session/sets.png (live-logging set row — tap ops)
+const GEAR_AR = 640 / 808; // session-detail/gear-menu.png (per-card ⚙️ ActionSheet — SHARED, same options)
+const DOTS_AR = 860 / 830; // today-session/dots-menu.png (header ⋯ ActionSheet)
 const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right row strip
 const DRAG_AR = 1030 / 350; // long-press (two rows)
 
@@ -47,6 +51,12 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: '點 ✓ 標記完成一組（休息計時自動跳出）；點數字格改重量·次數。',
       },
       {
+        image: require('@/assets/help/session-detail/gear-menu.png'),
+        aspectRatio: GEAR_AR,
+        title: '⚙️ 動作卡選單',
+        body: '點動作卡右側 ⚙️：編輯備註、休息秒數、刪除動作、排序動作。',
+      },
+      {
         image: require('@/assets/help/gestures/swipe-left.png'),
         aspectRatio: SWIPE_AR,
         title: '左滑刪除',
@@ -65,9 +75,10 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: '長按一組拖曳，可調整這個動作內各組的順序。',
       },
       {
-        targetId: 'today.session.menu',
+        image: require('@/assets/help/today-session/dots-menu.png'),
+        aspectRatio: DOTS_AR,
         title: '⋯ 選單',
-        body: '儲存/另存模板、投影到手錶、身體數據、捨棄這次訓練。',
+        body: '點右上角 ⋯：儲存/另存模板、投影到手錶、身體數據、捨棄這次訓練。',
       },
       {
         targetId: 'today.session.finish',
@@ -92,6 +103,12 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: "Tap ✓ to finish a set (the rest timer pops up); tap a number cell to edit weight / reps.",
       },
       {
+        image: require('@/assets/help/session-detail/gear-menu.png'),
+        aspectRatio: GEAR_AR,
+        title: '⚙️ exercise-card menu',
+        body: "Tap the ⚙️ on an exercise card: edit note, rest seconds, delete move, reorder moves.",
+      },
+      {
         image: require('@/assets/help/gestures/swipe-left.png'),
         aspectRatio: SWIPE_AR,
         title: 'Swipe left to delete',
@@ -110,9 +127,10 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: 'Long-press a set and drag to reorder the sets within this move.',
       },
       {
-        targetId: 'today.session.menu',
+        image: require('@/assets/help/today-session/dots-menu.png'),
+        aspectRatio: DOTS_AR,
         title: '⋯ menu',
-        body: 'Save / save-as template, cast to Watch, body data, discard this workout.',
+        body: 'Tap the top-right ⋯: save / save-as template, cast to Watch, body data, discard.',
       },
       {
         targetId: 'today.session.finish',
