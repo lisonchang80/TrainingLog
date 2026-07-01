@@ -514,6 +514,46 @@ scroll-end (`onMomentumScrollEnd`) instead of a fixed delay, or bump the delay; 
 (the period card is always already visible). Reproduce: scroll stats page down → tap ⓘ
 → watch step 1.
 
+## Mode-aware coach + card-vs-spotlight rules (2026-07-01)
+
+**Mode-aware dispatch.** When one page runs two states with different help (session
+detail view vs edit; Today idle plan vs 極簡), DON'T cram both into one tour. Split into
+two content files and dispatch on the state flag, mirroring the Today tab's
+`isMinimal ? todayMinimalHelp : todayPlanHelp`:
+```ts
+const help = usePageHelp(
+  editMode ? 'session-detail-edit' : 'session-detail-view',
+  editMode ? sessionDetailEditHelp : sessionDetailViewHelp,
+  { autoShowOnce: true });   // pageId change re-arms autoShowOnce per mode
+```
+⚠ TDZ: the handle must be declared AFTER the state var (`editMode`/`isMinimal`) — move
+the `usePageHelp` call below the `useState`, it's still an unconditional hook so order
+is fine (validated session/[id].tsx 2026-07-01, `help` used at :1963/:2461 both below).
+
+**What gets a spotlight vs a card** (the decision that keeps you off the step-1 scroll
+landmine — see KNOWN BUG above):
+- **Spotlight (`targetId`)** ONLY fixed / above-fold chrome — header buttons, a fixed
+  bottom action bar (`session.edit/saveTemplate/delete`, in-session `today.session.add/
+  finish`). These never need `useCoachScroller`.
+- **Screenshot card (`image`)** for everything else: pop-up menus (⚙️ per-card ActionSheet,
+  header ⋯ ActionSheet), per-set gestures (swipe/long-press), AND scroll-body READING
+  features you'd otherwise scroll to (HR-zone chart, a 隱藏未打勾 toggle). Making these
+  cards means the tour registers NO scroller → dodges the step-1 mis-position bug.
+- A menu you spotlit before can be DOWNGRADED to a card (in-session ⋯ was a spotlight →
+  became a `dots-menu.png` card, matching the template editor). Remember to remove the
+  now-unused `useCoachMarkTarget` + its `ref=`.
+
+**Reuse identical menu screenshots across pages.** The in-session per-card ⚙️ ActionSheet
+and session-detail's ⚙️ have the SAME options (verified via `index.tsx` `menuOptions` +
+`onHeaderMenuPress` — 備註/休息秒數/刪除動作/排序動作) → the in-session ⚙️ card `require`s the
+existing `session-detail/gear-menu.png`, no re-capture. Verify options in source first.
+
+**Native ActionSheet capture gotcha.** An `ActionSheetIOS` sheet sits LOWER on screen than
+you'll estimate from the rendered thumbnail — first `--cropOffset` grabbed the stats panel
+instead. The sheet's top is ~37% down (px ≈ 0.37×screenH at 3× scale), bottom ~67%. Crop,
+`Read` the PNG, re-crop if it's the wrong region (the displayed thumbnail's apparent height
+≠ the real 2622-px height). Set `aspectRatio` from the FINAL `sips -g pixelWidth/Height`.
+
 ## Verify
 
 - `npx tsc --noEmit` + `npm test` (the pure `coachMarkLayout` test must stay green).
