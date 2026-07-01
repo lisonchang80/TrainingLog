@@ -75,7 +75,10 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { programsHelp } from '@/components/help/content/programs';
+import {
+  programsEditHelp,
+  programsViewHelp,
+} from '@/components/help/content/programs';
 
 /**
  * ADR-0025 — DRY helper. Programs tab has many sub-component functions
@@ -173,7 +176,6 @@ function ProgramsScreen() {
   const db = useDatabase();
   const router = useRouter();
   const styles = useProgramsStyles();
-  const help = usePageHelp('programs', programsHelp, { autoShowOnce: true });
   const gridTarget = useCoachMarkTarget('programs.grid');
   const editTarget = useCoachMarkTarget('programs.edit');
   const manageTarget = useCoachMarkTarget('programs.manage');
@@ -184,6 +186,14 @@ function ProgramsScreen() {
     Record<string, TemplateSummary>
   >({});
   const [editing, setEditing] = useState(false);
+  // 計劃頁 ⓘ mode-aware：非編輯＝純佈局遮罩(programsViewHelp)、編輯＝4 卡明細
+  // (programsEditHelp)。切 pageId 讓 autoShowOnce 各模式各自 arm。宣告在 editing
+  // 之後避 TDZ（handle 於本 return 尾端 <HelpButton onPress={help.open}> 使用）。
+  const help = usePageHelp(
+    editing ? 'programs-edit' : 'programs',
+    editing ? programsEditHelp : programsViewHelp,
+    { autoShowOnce: true },
+  );
   // 刪除強度流程：使用者選計劃後載入的該計劃強度清單。
   const [deleteSubTagOptions, setDeleteSubTagOptions] = useState<string[]>([]);
   const [picker, setPicker] = useState<PickerState>(null);

@@ -309,7 +309,6 @@ function TemplateEditorView() {
     autoShowOnce: true,
   });
   const addExerciseTarget = useCoachMarkTarget('template.addExercise');
-  const cardTarget = useCoachMarkTarget('template.card');
   const startTarget = useCoachMarkTarget('template.start');
   // Program-wizard「新建模板」pre-creates the template row on entry
   // (program-wizard/new.tsx onCreateNewTemplate). If the user leaves WITHOUT
@@ -2242,27 +2241,19 @@ function TemplateEditorView() {
     );
   }
 
-  const renderSection = (
-    section: ExerciseSection,
-    emptyText: string,
-    // Coach-mark target attached to the FIRST card only (help tour step 2).
-    firstCardRef?: (node: View | null) => void,
-  ) => {
+  const renderSection = (section: ExerciseSection, emptyText: string) => {
     if (!draft) return null;
     const inSection = draft.exercises.filter((e) => e.section === section);
     const parents = inSection.filter((e) => e.parent_id == null);
     if (parents.length === 0) {
       return <Text style={styles.emptySection}>{emptyText}</Text>;
     }
-    return parents.map((parent, parentIdx) => {
+    return parents.map((parent) => {
       const children = inSection.filter((c) => c.parent_id === parent.id);
       const isSuper = children.length > 0;
       if (!isSuper) {
         return (
-          <View
-          key={parent.id}
-          ref={parentIdx === 0 ? firstCardRef : null}
-          style={styles.exCard}>
+          <View key={parent.id} style={styles.exCard}>
             <ExerciseBody
               exercise={parent}
               expanded={expandedExId === parent.id}
@@ -2314,10 +2305,7 @@ function TemplateEditorView() {
       // — 「超」chip 獨佔行 1 + 標題分行（兩動作名 + 「 + 」連接）獨佔行 2。
       // template 無 progress bar 概念，故只兩行（session 是三行 — chip / 標題 / progress）。
       return (
-        <View
-          key={parent.id}
-          ref={parentIdx === 0 ? firstCardRef : null}
-          style={styles.exCard}>
+        <View key={parent.id} style={styles.exCard}>
           <View style={styles.exHeader}>
             <Pressable
               onPress={() => toggleExpanded(parent.id)}
@@ -2748,7 +2736,7 @@ function TemplateEditorView() {
         */}
         <NestableScrollContainer contentContainerStyle={styles.body}>
           <SectionHeader label={getSectionLabel('general')} />
-          {renderSection('general', tt('status', 'noGeneralExercises'), cardTarget.ref)}
+          {renderSection('general', tt('status', 'noGeneralExercises'))}
 
           <SectionHeader label={getSectionLabel('evergreen')} />
           {renderSection('evergreen', tt('status', 'noEvergreenExercises'))}

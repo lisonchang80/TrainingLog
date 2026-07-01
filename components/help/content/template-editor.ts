@@ -4,26 +4,39 @@
  * style: 'coach' — ONE numbered 引導遮罩 tour. Steps that point at a real
  * on-screen element use a spotlight; steps a ring can't frame (the ⚙️ pop-up
  * menu, the per-set gestures) use a screenshot card interleaved in the same
- * sequence (CoachStep.image). 2 of the 5 steps are screenshot cards (≤3).
+ * sequence (CoachStep.image).
  *
- * EVERY operation was verified against source on 2026-06-29 (not inferred from
- * handler names — user directive):
- *   - ⚙️ menu = 備註 · 休息時間 · 移動動作 · 設為常設/一般 · 刪除
- *       (`openGearMenu` template-editor-view.tsx:1928 — there is NO「改器材」)
- *   - 點標籤 = 3-way cycle 正式→熱身→遞減組 (`cycleSetKind` templateOps.ts:209)
- *   - 左滑=刪除 / 右滑=複製一組·備註 (ExerciseBody swipe arrays :3430-3451)
- *   - 點數字格 = inline 直接輸入；長按組 = 拖曳排序；底部 = 新增 1 組 / 動作歷史
+ * 2026-07-01 — per-gesture split (user request「set 編輯的 i 補一頁，左滑/右滑/
+ * 長按各一張小截圖」): the single combined sets card became a tap-only card +
+ * three real-capture gesture cards. swipe-left / long-press shots are SHARED with
+ * session-detail + today-session; the RIGHT-swipe uses a template-specific shot
+ * because the editor's green button reads「加」(add a set) not「＋1」— ⚠ the old
+ * docstring claimed「複製」, which the live UI DISPROVED on 2026-07-01 (sim-verified:
+ * the green reveal is「加」). All gesture assets live in `assets/help/gestures/`.
  *
- * Spotlight targets (useCoachMarkTarget):
- *   template.addExercise (加入動作鈕) / template.card (第一張動作卡) /
- *   template.start (開始訓練鈕)
- * Screenshot cards live in `assets/help/template-editor/` — recapture if the
- * editor's ⚙️ menu / set row layout changes (see that folder's README).
+ * Verified against source + live sim on 2026-07-01:
+ *   - ⚙️ menu = 備註 · 休息時間 · 移動動作 · 設為常設/一般 · 刪除 (NO「改器材」)
+ *   - 點標籤 = 3-way cycle 正式→熱身→遞減組; 點數字格 = inline 直接輸入
+ *   - 左滑=刪除 (red) / 右滑=加一組·備註 (green「加」+ blue「備註」) / 長按=拖曳排序
+ *
+ * 2026-07-01 (b) — 動作卡 step 2 spotlight → screenshot card (user request「建立模板，
+ * 2 動作卡，用截圖」). The card lives in the ScrollView body, so a spotlight ring
+ * measured the below-fold section and「沒切到」(missed the card). A real-capture card
+ * (`template-editor/card.png`) dodges it — same rule as session-detail/today-session.
+ * The now-dead `template.card` useCoachMarkTarget + its firstCardRef wiring in
+ * `template-editor-view.tsx` were removed.
+ *
+ * Spotlight targets (useCoachMarkTarget, FIXED chrome only):
+ *   template.addExercise / template.start
  */
 import type { LocalizedPageHelp } from '../types';
 
+const CARD_AR = 1140 / 168; // template-editor/card.png (collapsed 動作卡 row — tap / long-press / ⚙️)
 const GEAR_AR = 720 / 1057; // gear-menu.png
-const SETS_AR = 1000 / 673; // sets.png
+const SETS_AR = 1000 / 673; // sets.png (tap ops)
+const SWIPE_LEFT_AR = 1030 / 190;
+const SWIPE_RIGHT_AR = 1030 / 175; // template「加」variant
+const DRAG_AR = 1030 / 350;
 
 export const templateEditorHelp: LocalizedPageHelp = {
   zh: {
@@ -36,7 +49,8 @@ export const templateEditorHelp: LocalizedPageHelp = {
         body: '點這裡，從動作庫挑動作加進模板。',
       },
       {
-        targetId: 'template.card',
+        image: require('@/assets/help/template-editor/card.png'),
+        aspectRatio: CARD_AR,
         title: '動作卡',
         body: '點卡片展開看組；長按換順序；點右側 ⚙️ 開更多。',
       },
@@ -49,8 +63,26 @@ export const templateEditorHelp: LocalizedPageHelp = {
       {
         image: require('@/assets/help/template-editor/sets.png'),
         aspectRatio: SETS_AR,
-        title: '設定每一組',
-        body: '點標籤循環 正式→熱身→遞減；點數字改重量·次數；左滑刪、右滑複製；長按排序。',
+        title: '點一下改',
+        body: '點標籤循環 正式→熱身→遞減；點數字格改重量·次數。',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-left.png"),
+        aspectRatio: SWIPE_LEFT_AR,
+        title: '左滑刪除',
+        body: '在一組上向左滑，出現紅色「刪除」，放開即刪掉這組。',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-right-template.png"),
+        aspectRatio: SWIPE_RIGHT_AR,
+        title: '右滑加組・備註',
+        body: '向右滑，綠色「加」加一組、藍色「備註」寫這組的筆記。',
+      },
+      {
+        image: require("@/assets/help/gestures/long-press.png"),
+        aspectRatio: DRAG_AR,
+        title: '長按排序',
+        body: '長按一組拖曳，可調整這個動作內各組的順序。',
       },
       {
         targetId: 'template.start',
@@ -69,7 +101,8 @@ export const templateEditorHelp: LocalizedPageHelp = {
         body: 'Tap here to pick moves from the library.',
       },
       {
-        targetId: 'template.card',
+        image: require('@/assets/help/template-editor/card.png'),
+        aspectRatio: CARD_AR,
         title: 'Exercise card',
         body: 'Tap to expand; long-press to reorder; tap ⚙️ for more.',
       },
@@ -82,8 +115,26 @@ export const templateEditorHelp: LocalizedPageHelp = {
       {
         image: require('@/assets/help/template-editor/sets.png'),
         aspectRatio: SETS_AR,
-        title: 'Set up each set',
-        body: 'Tap label to cycle working→warm-up→drop; tap cells to edit; swipe left to delete, right to clone; long-press to reorder.',
+        title: 'Tap to edit',
+        body: 'Tap the label to cycle working→warm-up→drop; tap a number cell to edit.',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-left.png"),
+        aspectRatio: SWIPE_LEFT_AR,
+        title: 'Swipe left to delete',
+        body: 'Swipe a set left to reveal the red “Delete”, then release to remove it.',
+      },
+      {
+        image: require("@/assets/help/gestures/swipe-right-template.png"),
+        aspectRatio: SWIPE_RIGHT_AR,
+        title: 'Swipe right to add / note',
+        body: 'Swipe right: green “Add” adds a set, blue “Note” jots a note for it.',
+      },
+      {
+        image: require("@/assets/help/gestures/long-press.png"),
+        aspectRatio: DRAG_AR,
+        title: 'Long-press to reorder',
+        body: 'Long-press a set and drag to reorder the sets within this move.',
       },
       {
         targetId: 'template.start',

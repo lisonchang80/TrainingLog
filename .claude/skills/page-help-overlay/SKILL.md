@@ -76,7 +76,7 @@ Page recommendations (2026-06-29 survey; ✅ = shipped this round):
 | `app/exercise-chart/[id].tsx` | coach ✅ **(4-step feature-explainer, `coachNumbered:false`: rep buckets/cluster/advanced/metric)** |
 | `app/exercise-history/[id].tsx` | coach ✅ **(4-step: same filters + first SessionRow expand/超/replay)** |
 | `app/(tabs)/library.tsx` | coach ✅ **(3-step: MG tree / equipment dropdown / card meta)** |
-| `app/(tabs)/programs.tsx` | coach ✅ **(6-step hybrid: grid spotlight (idle, read-only — "press 編輯 first") → 4 edit-mode screenshot cards 下拉/▼縱列/▶橫列/拖曳 → manage-row spotlight (idle))** |
+| `app/(tabs)/programs.tsx` | coach ✅ **mode-aware (2026-07-02): `editing ? programsEditHelp : programsViewHelp`. VIEW = 3 spotlights, pure layout (grid〔列=週期/欄=天〕 / 編輯 button / manage row), 0 cards. EDIT = grid intro spotlight + 4 grid-op cards (下拉/▼/▶/拖曳). Was a single 6-step hybrid.** |
 | `app/(tabs)/history.tsx` | coach ✅ **(4-step: subtabs / 月曆·表列 / calendar colour+N / 🖼️ zoomed day-cell card labelling the 3 rows 容量·模板色·強度)** |
 | `app/exercise/[id].tsx` | coach ✅ **(2-step: muscle figure orange=primary blue=secondary / footer)** |
 | `app/superset/[id].tsx` | coach ✅ **(2-step: locked A+B pair / footer 歷史·圖表 open A-side filtered)** |
@@ -140,7 +140,7 @@ interpretation (charts), and one-off single gestures do NOT qualify.
 | 課表精靈 `app/program-wizard/new.tsx` | ⭐⭐⭐ best | already a multi-step wizard; strong order; first run is where users stall | 截圖流程圖 |
 | 超級組建立 `app/superset/new.tsx` | ⭐⭐⭐ | pick exercises → order → save; sequential creation | 截圖流程圖 |
 | 模板編輯器 `components/template-editor/*` | ⭐⭐ | add exercise → add sets → (form cluster / superset) → save; flow is freer, not strictly linear | ✅ **SHIPPED** as a 5-step hybrid coach tour (3 spotlight + 2 screenshot cards, `content/template-editor.ts`). The passive-`coach`+screenshot-card mix (constraint #6) is the chosen ship, not a stopgap — only upgrade to tap-through `coach-interactive` if the user later asks. |
-| Today first in-session logging (打勾完成 / 左滑刪除 / 右滑加組·備註 / 長按拖曳排序) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating*. (Gestures verified against `cluster-card.tsx` + `SwipeableSetRow` 2026-06-29 — NOT the earlier guess of 長按=遞減 / 左滑=投影; 投影 is a ⋯-menu item.) | 截圖流程圖 (constraint #6). ⚠️ **DO NOT host the help here as a plain `<Modal>` (InfoModal/coach).** The in-session view (`(tabs)/index.tsx`) is a rapidly-re-rendering, Modal-heavy mega-component whose branch UNMOUNTS on a **Watch-led session end**. A help Modal left open across that unmount leaves a stuck full-screen overlay → page "無法動" (hit 2026-06-29, in-session help reverted). Re-add only via an always-mounted host outside the idle/in-session branch split, or close the help synchronously in every session-end path first. `content/today-session.ts` is kept (orphaned) for that future re-add. |
+| Today first in-session logging (打勾完成 / 左滑刪除 / 右滑加組·備註 / 長按拖曳排序) | ⭐⭐ | real gestures the ring can't show; you only learn them by doing — but it's *logging*, not *creating*. (Gestures verified against `cluster-card.tsx` + `SwipeableSetRow` + live sim 2026-07-01 — NOT the earlier guess of 長按=遞減 / 左滑=投影; 投影 is a ⋯-menu item.) | ✅ **SHIPPED 2026-07-01** as `info` + `blocks` (interleaved text + real-capture gesture images), NOT coach (ring can't frame the memoized set-row subtree). ⚠️ **The orphan hazard is real** — the in-session view (`(tabs)/index.tsx`) branch UNMOUNTS on a **Watch-led session end**; a `<Modal>` left open across that unmount = stuck overlay (hit 2026-06-29). **Sanctioned wiring** (now shipped): a dedicated `inSessionHelp = usePageHelp('today-session', …)` handle whose host lives in the in-session `return`, PLUS `inSessionHelp.close()` called **synchronously at the top of `finalizeEndAndRoute`** (both iPhone-led + Watch-inbound end paths route through it → the Modal renders invisible BEFORE any status flip/unmount), PLUS a `useEffect([sessionState.status])` backstop that closes it whenever status leaves `in_progress`. Sim-verified: end session → detail page clean, no residual overlay. |
 | First-run 身體數據 / 備份設定 | ⭐ | short setup flow; optional | `info`, or no help |
 
 Stay on their current style (do NOT force interactive):
@@ -302,13 +302,20 @@ template) use `sim-db-seed-smoke` + deep-link `traininglog://template/<id>`; set
 the page while you shoot. New/changed assets need an app reload to re-bundle.
 
 **Crop gotchas (validated 2026-06-29 — the ⚙️-menu shot took 3 tries):**
-- **macOS has no ImageMagick/PIL by default, and `sips` only centre-crops (no
-  offset).** For an OFFSET crop use a stdlib-only `pngcrop.py` (zlib + manual PNG
-  un/re-filter, RGBA/RGB 8-bit): `pngcrop.py in out x y w h`; then
-  `sips --resampleWidth N` to downscale. (Don't install tools — feedback_workflow.)
-  **`pngcrop.py` is a scratchpad throwaway — it is NOT committed, so re-author it
-  from this recipe each session** (validated again 2026-06-29 for the history
-  day-cell card). It must handle PNG color type 6 (RGBA, simctl screenshots) AND 2.
+- **`sips` CAN offset-crop — use it, skip the throwaway script** (corrected
+  2026-07-01; the old "sips only centre-crops" claim was WRONG). One built-in
+  command: `sips -c <H> <W> --cropOffset <offsetY> <offsetX> in.png --out out.png`
+  (order is offsetY then offsetX). Verify with `sips -g pixelWidth -g pixelHeight
+  out.png`, then Read the PNG to eyeball. No ImageMagick/PIL needed (macOS has
+  neither by default; don't install — feedback_workflow). The old stdlib
+  `pngcrop.py` throwaway is only a fallback if sips ever chokes on a color type.
+- **⚠️ simctl screenshots are 3× (px), not 1.5× — crop offsets are in PX.** iPhone
+  17 sim = **1206×2622 px** for a **402×874 pt** screen (Retina @3×). So a target at
+  pt `(x,y)` sits at px `(3x, 3y)`; a set row centred at pt y≈394 → px ≈1182. Compute
+  `--cropOffset`/`-c` in PX (× 3 of the pt coords from `ui_find_element` AXFrames).
+  Getting this wrong crops the wrong region (first attempt at 1.5× grabbed the stats
+  tile). `Read` returns the PNG scaled-down for display — always trust the real
+  `pixelWidth/Height`, not the displayed size.
 - **A tab page may be unreachable by tapping its tab** — the RN dev LogBox toast
   ("Open debugger to view warnings") sits over the bottom tab bar, so a tab tap
   lands on the toast. Navigate via deep-link instead: `xcrun simctl openurl <UDID>
@@ -328,6 +335,42 @@ the page while you shoot. New/changed assets need an app reload to re-bundle.
 - **Tall portrait shots need image-`maxHeight` headroom** (`CoachMarkOverlay`
   cardImage `maxHeight` is 520; `InfoModal` caps its own) or they letterbox; the
   card still fits the screen.
+
+**Set-row gesture cards (左滑/右滑/長按) — capture recipe (validated 2026-07-01):**
+- **Reach a real set row**: start/open a session → expand an exercise card (tap it)
+  → the `SwipeableSetRow`s appear (`1  20 kg × 8  ○`). Get the row's pt-Y from
+  `ui_find_element ["切換組別"]` / `["編輯重量"]` AXFrame (row ≈ 49pt tall).
+- **Swipe reveals STAY OPEN** (react-native-gesture-handler `Swipeable`): `ui_swipe`
+  the row → the action buttons stay revealed until you tap/swipe elsewhere → then
+  `screenshot`. **Left-swipe** (x large→small) reveals red 刪除 on the right;
+  **right-swipe** (x small→large) reveals the add/note buttons on the left. To flip
+  from a left-open row to a right reveal, swipe right ONCE to close, then a SECOND
+  clean right-swipe on the now-closed row opens the left actions (one big swipe just
+  closes).
+- **長按 (drag-reorder) CANNOT be captured** — the "lifted" state exists only DURING
+  the active gesture, and `ui_tap duration=…` releases before the screenshot fires;
+  idb has no hold-then-screenshot. So the 長按 card uses a NEUTRAL multi-row shot
+  (add a 2nd set via 新增1組 so reorder is meaningful) + a caption; you show WHERE to
+  long-press, not the lift. Honest and accepted.
+- **⚠️ Verify the reveal LABELS against the live UI, not the docstring.** The green
+  add button differs by page: session-detail + today-session = **「＋1」**, but the
+  **template editor = 「加」** (the old docstring's「複製」was WRONG — sim disproved it
+  2026-07-01). So a shared image is fine for 左滑/長按, but capture the 右滑 per
+  green-label variant. Crop each to the row strip (`sips --cropOffset`, PX = pt×3);
+  the swipe strip AR ≈ 1030/190 ≈ 5.4, two-row 長按 ≈ 1030/350 ≈ 2.9.
+- **Shared gesture assets** live in `assets/help/gestures/` (`swipe-left`,
+  `swipe-right`, `swipe-right-template`, `long-press`) — reused by session-detail,
+  template-editor, and today-session content files, so re-cropping one updates all
+  three cards.
+
+**⚠️ Metro stale-bundle after a multi-step content edit**: if you Write a content
+file then `perl`/Edit it again (e.g. add top-level `const X = require(...)`, then
+inline the requires + delete the const), Metro's HMR can cache the INTERMEDIATE
+broken state → the app runtime throws `ReferenceError: Property 'X' doesn't exist`
+even though `tsc` + `grep` show the source is clean. Fix = restart Metro with
+`--clear` (kill the :8081 PID, relaunch `npx expo start --dev-client --clear`) +
+relaunch the app. Don't chase a phantom source bug; confirm source is clean, then
+bust the cache.
 
 Full steps + caveats: `assets/help/README.md`.
 
@@ -478,6 +521,79 @@ Sim-verified: pre-scrolled stats page → ⓘ → step 1 ring on the period sele
 surprise scroll; steps 2–4 still auto-scroll heatmap/capacity/duration into view with
 correct rings. **Lesson: don't trust an audit's root-cause label — derive the maths
 yourself before patching** (this one sent two notes down the wrong path).
+
+## Mode-aware coach + card-vs-spotlight rules (2026-07-01)
+
+**Mode-aware dispatch.** When one page runs two states with different help (session
+detail view vs edit; Today idle plan vs 極簡), DON'T cram both into one tour. Split into
+two content files and dispatch on the state flag, mirroring the Today tab's
+`isMinimal ? todayMinimalHelp : todayPlanHelp`:
+```ts
+const help = usePageHelp(
+  editMode ? 'session-detail-edit' : 'session-detail-view',
+  editMode ? sessionDetailEditHelp : sessionDetailViewHelp,
+  { autoShowOnce: true });   // pageId change re-arms autoShowOnce per mode
+```
+⚠ TDZ: the handle must be declared AFTER the state var (`editMode`/`isMinimal`) — move
+the `usePageHelp` call below the `useState`, it's still an unconditional hook so order
+is fine (validated session/[id].tsx 2026-07-01, `help` used at :1963/:2461 both below).
+
+**What gets a spotlight vs a card** (the decision that keeps you off the step-1 scroll
+landmine — see KNOWN BUG above):
+- **Spotlight (`targetId`)** ONLY fixed / above-fold chrome — header buttons, a fixed
+  bottom action bar (`session.edit/saveTemplate/delete`, in-session `today.session.add/
+  finish`). These never need `useCoachScroller`.
+- **Screenshot card (`image`)** for everything else: pop-up menus (⚙️ per-card ActionSheet,
+  header ⋯ ActionSheet), per-set gestures (swipe/long-press), AND scroll-body READING
+  features you'd otherwise scroll to (HR-zone chart, a 隱藏未打勾 toggle). Making these
+  cards means the tour registers NO scroller → dodges the step-1 mis-position bug.
+- The real discriminator is the TRIGGER's position, not "is it a menu". A menu whose
+  trigger is FIXED chrome → SPOTLIGHT it (body text lists the items); a menu/gesture whose
+  trigger lives in the scroll body → card. ⚠ **2026-07-02 REVERSAL**: the in-session ⋯ was
+  briefly downgraded to a `dots-menu.png` card, then put BACK to a spotlight — ⋯ is a fixed
+  header button, spotlightable, so a card there was the wrong call ("沒切到" was the user's
+  word for a card that felt like it missed). The per-card ⚙️ stays a card (its trigger is
+  in the scrolling exercise list). When flipping direction, add/remove the
+  `useCoachMarkTarget` + `ref=` AND delete the now-orphan screenshot (`git rm`).
+- **Scroll-body targets can't be spotlit reliably** ("沒切到"). The template editor 動作卡
+  was a `template.card` spotlight whose `ref` sat on a `renderSection` card inside the
+  ScrollView — the ring measured a below-fold section and missed. Fix = screenshot card
+  (`template-editor/card.png`), and rip out the dead `useCoachMarkTarget('template.card')`
+  + the `firstCardRef` param it threaded through `renderSection`. (Grids/cards that are
+  ABOVE the fold, like `programs.grid`, spotlight fine — the bar is measurability, not
+  "is it in a ScrollView".)
+
+**Reuse identical menu screenshots across pages.** The in-session per-card ⚙️ ActionSheet
+and session-detail's ⚙️ have the SAME options (verified via `index.tsx` `menuOptions` +
+`onHeaderMenuPress` — 備註/休息秒數/刪除動作/排序動作) → the in-session ⚙️ card `require`s the
+existing `session-detail/gear-menu.png`, no re-capture. Verify options in source first.
+
+**Native ActionSheet capture gotcha.** An `ActionSheetIOS` sheet sits LOWER on screen than
+you'll estimate from the rendered thumbnail — first `--cropOffset` grabbed the stats panel
+instead. The sheet's top is ~37% down (px ≈ 0.37×screenH at 3× scale), bottom ~67%. Crop,
+`Read` the PNG, re-crop if it's the wrong region (the displayed thumbnail's apparent height
+≠ the real 2622-px height). Set `aspectRatio` from the FINAL `sips -g pixelWidth/Height`.
+
+**Mode-aware pages so far** (2026-07-02): `session/[id]` (`editMode?edit:view`), Today
+in-session vs idle plan/極簡, and **`programs`** (`editing ? 'programs-edit' : 'programs'`
+→ `programsEditHelp`/`programsViewHelp`). Programs view = 3 spotlights, pure layout
+(grid〔列=週期/欄=天〕 / 編輯 button `programs.edit` / manage row `programs.manage`), 0
+cards; edit = the 4 grid-op cards (下拉/▼/▶/拖曳). Its ⓘ is ALWAYS rendered (outside the
+`editing` conditional), so both modes are reachable. User rule (repeat of session-detail):
+**"(非編輯) 簡化，只需遮罩說明佈局"** → the idle/view ⓘ is a light layout coach, the detailed
+ops move to the edit-mode tour.
+
+**Sim-verifying a coach tour (gotchas, validated 2026-07-02).**
+- Sim screenshots are ~1206×2622 → too big for the image reader. Downscale first:
+  `xcrun simctl io <UDID> screenshot out.png; sips -Z 760 out.png --out out-s.png`, Read the `-s`.
+- The `CoachMarkOverlay` is a full-screen `<Modal>` that collapses to ONE flat AXElement
+  (`ui_describe_point` anywhere inside returns that one "…選單"-labelled element) — the
+  「下一步 / 略過 / 上一步」buttons are NOT exposed to AX. You must tap them by pixel coords.
+- **下一步 Y shifts with card height**: tall screenshot-card steps put it low (~y688 on a
+  874pt screen), short spotlight cards higher (~y585); a TOP-anchored card (target near the
+  top → bubble below it) puts the button row ~y190. Re-read each screenshot and re-aim.
+- To reach the **計畫 (programs) tab** you need PLAN mode (5 tabs); 極簡 mode hides it —
+  toggle app mode in Settings first (ADR-0026).
 
 ## Verify
 

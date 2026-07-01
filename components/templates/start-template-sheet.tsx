@@ -115,6 +115,13 @@ type StartTemplateSheetProps = {
    */
   lockProgram?: boolean;
   /**
+   * 極簡模式 (ADR-0026, 2026-07-01) — 極簡沒有「計劃／強度」概念，所以 BOTH
+   * pickers 隱藏，selection 永遠鎖在 (通用, null)。sheet 退化成純「編輯模板 vs
+   * 開始訓練」二選一，保留頂欄模板名 + 兩顆動作按鈕。caller 端 onEdit/onStart
+   * 需自行走通用-variant 解析（見 index.tsx onSheetEdit 的 isMinimal 分支）。
+   */
+  hidePickers?: boolean;
+  /**
    * iOS — fires once the sheet's Modal has FULLY dismissed. Used by the
    * backfill flow to navigate ONLY after the modal is gone (avoids a stuck
    * modal over the pushed screen).
@@ -151,6 +158,7 @@ export function StartTemplateSheet({
   hideEdit = false,
   startLabel,
   lockProgram = false,
+  hidePickers = false,
   onDismiss,
 }: StartTemplateSheetProps) {
   const db = useDatabase();
@@ -190,6 +198,13 @@ export function StartTemplateSheet({
   // immediately overwritten by the union effect.
   useEffect(() => {
     if (!visible) return;
+    // 極簡模式：無計劃/強度，鎖在 (通用, null)，跳過 sticky 解析。
+    if (hidePickers) {
+      setPeriodId(RESERVED_NONE_PROGRAM_ID);
+      setIntensityId(null);
+      setProgramSubTags([]);
+      return;
+    }
     const defaults = resolveProgramDefaults({
       programs: periodOptions,
       subTags: [],
@@ -203,7 +218,7 @@ export function StartTemplateSheet({
     // from deps to avoid resetting selection mid-edit. Identity is `visible`
     // + the underlying sticky values + the programs identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, lastUsedProgramId, lastUsedSubTag, programs.length]);
+  }, [visible, lastUsedProgramId, lastUsedSubTag, programs.length, hidePickers]);
 
   /**
    * Re-fetch per-program sub_tags whenever the user changes period selection
@@ -294,9 +309,16 @@ export function StartTemplateSheet({
                 改由編輯器「另存模板 / 另存強度」建立。sticky last-used 仍會被
                 預選（resolveProgramDefaults + per-program union effect），只是
                 拿掉了 hint label 以對齊外觀。 */}
+            {/* 極簡模式 (hidePickers) — 無計劃/強度，body 只放一行說明，
+                動作全靠底部兩顆按鈕。 */}
+            {hidePickers && (
+              <Text style={styles.minimalHint}>
+                {t('page', 'minimalTemplateHint')}
+              </Text>
+            )}
             {/* 計劃訓練 backfill (lockProgram) — program already chosen
                 upstream, so the 「選擇計畫」 picker is hidden; only 強度 shows. */}
-            {!lockProgram && (
+            {!lockProgram && !hidePickers && (
               <>
                 <Text style={styles.sectionLabel}>
                   {t('page', 'selectProgramAlt')}
@@ -474,6 +496,13 @@ function makeStyles(tokens: ThemeTokens) {
       fontWeight: '600',
       color: tokens.text.primary,
       marginBottom: 6,
+    },
+    // 極簡模式 body 的單行說明（無計劃/強度時取代兩個 picker 區）。
+    minimalHint: {
+      fontSize: 14,
+      color: tokens.text.secondary,
+      textAlign: 'center',
+      paddingVertical: 8,
     },
     divider: {
       height: StyleSheet.hairlineWidth,

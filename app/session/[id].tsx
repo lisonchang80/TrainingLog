@@ -31,7 +31,8 @@ import {
   useCoachMarkTarget,
   usePageHelp,
 } from '@/components/help';
-import { sessionDetailHelp } from '@/components/help/content/session-detail';
+import { sessionDetailViewHelp } from '@/components/help/content/session-detail-view';
+import { sessionDetailEditHelp } from '@/components/help/content/session-detail-edit';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -267,16 +268,17 @@ function SessionDetailScreen() {
   // ADR-0025 — token-driven styles for this screen.
   const styles = useSessionStyles();
 
-  // 頁面說明 — 引導遮罩 tour (mirrors the template editor; this is its editing
-  // twin). Auto-shows once. The spotlight steps target VIEW-mode action-bar
-  // buttons (the state the tour runs in); the edit-mode-only ⚙️ menu and set-row
-  // gestures are screenshot cards in the same tour (page-help-overlay #6).
-  const help = usePageHelp('session-detail', sessionDetailHelp, {
-    autoShowOnce: true,
-  });
+  // 頁面說明 — mode-aware 引導遮罩 (2026-07-01, user request「詳情頁只說明佈局／
+  // 編輯訓練跟編輯模板參考」). VIEW mode = a light layout tour (session-detail-view);
+  // EDIT mode = the editing tour mirroring the template editor (session-detail-edit).
+  // The `help` handle itself is declared after `editMode` below so it can dispatch
+  // on it (same pattern as the Today tab's `isMinimal ? today-minimal : today-plan`).
+  // Coach targets tag the fixed action-bar buttons + the top stats panel (view) and
+  // the edit-mode [+ 動作] button (edit) — all fixed / near-top → no scroller needed.
   const editTarget = useCoachMarkTarget('session.edit');
   const saveTemplateTarget = useCoachMarkTarget('session.saveTemplate');
   const deleteTarget = useCoachMarkTarget('session.delete');
+  const addExerciseTarget = useCoachMarkTarget('session.addExercise');
 
   const navState = useMemo(
     () =>
@@ -356,6 +358,14 @@ function SessionDetailScreen() {
   const [unit, setUnit] = useState<UnitPreference>('kg'); // F4 — set weight display/entry unit
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  // mode-aware 頁面說明 handle (targets declared above). Switching pageId re-arms
+  // autoShowOnce per mode (mirrors the Today tab's isMinimal split), so the layout
+  // tour auto-shows on first view + the editing tour auto-shows on first edit.
+  const help = usePageHelp(
+    editMode ? 'session-detail-edit' : 'session-detail-view',
+    editMode ? sessionDetailEditHelp : sessionDetailViewHelp,
+    { autoShowOnce: true },
+  );
 
   // 2026-06-25 audit 🟡 — ref to the header SessionTitleEditor so any
   // pending title edit commits-on-blur BEFORE a secondary surface (action-bar
@@ -2235,6 +2245,7 @@ function SessionDetailScreen() {
       <View style={styles.actionBar}>
         {editMode ? (
           <Pressable
+            ref={addExerciseTarget.ref}
             accessibilityRole="button"
             onPress={() => {
               titleRef.current?.blur();
