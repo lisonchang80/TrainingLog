@@ -271,6 +271,11 @@ function TodayScreen() {
   const planTarget = useCoachMarkTarget('today.planPanel');
   const templateTarget = useCoachMarkTarget('today.templateList');
   const blankTarget = useCoachMarkTarget('today.blankStart');
+  // In-session coach tour spotlight targets (today-session.ts). All three sit on
+  // FIXED chrome (header ⋯ / 完成, bottom sticky [加入動作]) → no scroller needed.
+  const sessionAddTarget = useCoachMarkTarget('today.session.add');
+  const sessionMenuTarget = useCoachMarkTarget('today.session.menu');
+  const sessionFinishTarget = useCoachMarkTarget('today.session.finish');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
   const [setsInSession, setSetsInSession] = useState<SessionSetWithExercise[]>([]);
@@ -3022,6 +3027,7 @@ function TodayScreen() {
             {/* 訓練進行中隱藏手勢說明（今日 session ⓘ）。host 見本 return 尾端。 */}
             <HelpButton onPress={inSessionHelp.open} />
             <Pressable
+              ref={sessionMenuTarget.ref}
               accessibilityRole="button"
               accessibilityLabel={t('button', 'a11ySessionMenu')}
               onPress={onHeaderMenuPress}
@@ -3033,6 +3039,7 @@ function TodayScreen() {
               <Text style={styles.headerIconBtnText}>⋯</Text>
             </Pressable>
             <Pressable
+              ref={sessionFinishTarget.ref}
               accessibilityRole="button"
               onPress={onEndSession}
               disabled={busy}
@@ -3427,6 +3434,7 @@ function TodayScreen() {
         </NestableScrollContainer>
         <View style={styles.bottomStickyBar}>
           <Pressable
+            ref={sessionAddTarget.ref}
             accessibilityRole="button"
             onPress={() => router.push('/exercise-picker?mode=picker')}
             disabled={busy}
