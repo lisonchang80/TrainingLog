@@ -30,8 +30,9 @@ import { achievementsHelp } from '../../components/help/content/history-achievem
 import { statsHelp } from '../../components/help/content/history-stats';
 import { historyHelp, historyHelpMinimal } from '../../components/help/content/history';
 import { libraryHelp } from '../../components/help/content/library';
-import { programsHelp } from '../../components/help/content/programs';
-import { sessionDetailHelp } from '../../components/help/content/session-detail';
+import { programsEditHelp, programsViewHelp } from '../../components/help/content/programs';
+import { sessionDetailEditHelp } from '../../components/help/content/session-detail-edit';
+import { sessionDetailViewHelp } from '../../components/help/content/session-detail-view';
 import { supersetDetailHelp } from '../../components/help/content/superset-detail';
 import { supersetNewHelp } from '../../components/help/content/superset-new';
 import { templateEditorHelp } from '../../components/help/content/template-editor';
@@ -52,8 +53,10 @@ const ALL_CONTENT: ReadonlyArray<readonly [string, LocalizedPageHelp]> = [
   ['history', historyHelp],
   ['history (minimal)', historyHelpMinimal],
   ['library', libraryHelp],
-  ['programs', programsHelp],
-  ['session-detail', sessionDetailHelp],
+  ['programs (view)', programsViewHelp],
+  ['programs (edit)', programsEditHelp],
+  ['session-detail (view)', sessionDetailViewHelp],
+  ['session-detail (edit)', sessionDetailEditHelp],
   ['superset-detail', supersetDetailHelp],
   ['superset-new', supersetNewHelp],
   ['template-editor', templateEditorHelp],
