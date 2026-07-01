@@ -17,9 +17,11 @@
  * editor). In-session 右滑 green button reads「＋1」(matches session-detail).
  *
  * Spotlight targets (useCoachMarkTarget, in-session chrome):
- *   today.session.add / today.session.finish
- * The per-card ⚙️ menu (reuses session-detail/gear-menu.png — same options) and the
- * header ⋯ menu (today-session/dots-menu.png) are screenshot cards, not spotlights.
+ *   today.session.add / today.session.menu / today.session.finish
+ * The per-card ⚙️ menu (reuses session-detail/gear-menu.png — same options) is a
+ * screenshot card. The header ⋯ menu is a SPOTLIGHT on the fixed ⋯ button
+ * (2026-07-01 user request「⋯ 選單可以用遮罩」— ⋯ is fixed header chrome, so a ring
+ * lands on it cleanly; body text still lists what's inside the ActionSheet).
  *
  * ⚠ HOST SAFETY unchanged: the in-session branch UNMOUNTS on a Watch-led session
  * end. `inSessionHelp.close()` fires synchronously at the top of
@@ -30,7 +32,6 @@ import type { LocalizedPageHelp } from '../types';
 
 const SETS_AR = 1092 / 735; // today-session/sets.png (live-logging set row — tap ops)
 const GEAR_AR = 640 / 808; // session-detail/gear-menu.png (per-card ⚙️ ActionSheet — SHARED, same options)
-const DOTS_AR = 860 / 830; // today-session/dots-menu.png (header ⋯ ActionSheet)
 const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right row strip
 const DRAG_AR = 1030 / 350; // long-press (two rows)
 
@@ -75,8 +76,7 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: '長按一組拖曳，可調整這個動作內各組的順序。',
       },
       {
-        image: require('@/assets/help/today-session/dots-menu.png'),
-        aspectRatio: DOTS_AR,
+        targetId: 'today.session.menu',
         title: '⋯ 選單',
         body: '點右上角 ⋯：儲存/另存模板、投影到手錶、身體數據、捨棄這次訓練。',
       },
@@ -127,8 +127,7 @@ export const todaySessionHelp: LocalizedPageHelp = {
         body: 'Long-press a set and drag to reorder the sets within this move.',
       },
       {
-        image: require('@/assets/help/today-session/dots-menu.png'),
-        aspectRatio: DOTS_AR,
+        targetId: 'today.session.menu',
         title: '⋯ menu',
         body: 'Tap the top-right ⋯: save / save-as template, cast to Watch, body data, discard.',
       },

@@ -271,9 +271,10 @@ function TodayScreen() {
   const planTarget = useCoachMarkTarget('today.planPanel');
   const templateTarget = useCoachMarkTarget('today.templateList');
   const blankTarget = useCoachMarkTarget('today.blankStart');
-  // In-session coach tour spotlight targets (today-session.ts). All three sit on
+  // In-session coach tour spotlight targets (today-session.ts). All sit on
   // FIXED chrome (header ⋯ / 完成, bottom sticky [加入動作]) → no scroller needed.
   const sessionAddTarget = useCoachMarkTarget('today.session.add');
+  const sessionMenuTarget = useCoachMarkTarget('today.session.menu');
   const sessionFinishTarget = useCoachMarkTarget('today.session.finish');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessionState, setSessionState] = useState<SessionState>(IDLE);
@@ -3026,6 +3027,7 @@ function TodayScreen() {
             {/* 訓練進行中隱藏手勢說明（今日 session ⓘ）。host 見本 return 尾端。 */}
             <HelpButton onPress={inSessionHelp.open} />
             <Pressable
+              ref={sessionMenuTarget.ref}
               accessibilityRole="button"
               accessibilityLabel={t('button', 'a11ySessionMenu')}
               onPress={onHeaderMenuPress}
