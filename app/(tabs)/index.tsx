@@ -173,6 +173,7 @@ import {
 } from '@/components/help';
 import { todayMinimalHelp } from '@/components/help/content/today-minimal';
 import { todayPlanHelp } from '@/components/help/content/today-plan';
+import { todaySessionHelp } from '@/components/help/content/today-session';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
@@ -260,6 +261,13 @@ function TodayScreen() {
     isMinimal ? todayMinimalHelp : todayPlanHelp,
     { autoShowOnce: true },
   );
+  // In-session (訓練進行中) 隱藏手勢說明 — 獨立 handle + host，掛在 in-session
+  // return 內、ⓘ 在標題右側動作列。不 autoShowOnce（每次開練都彈很煩）。
+  // ⚠ 孤兒防護：in-session 分支會在「手錶結束 session」時 unmount，Modal 開著就
+  // 殘留蓋層（2026-06-29 血淚）。修法＝finalizeEndAndRoute 開頭同步 close 此
+  // handle（趁 status 還 in_progress、分支還 mounted，Modal 先 render 不可見再
+  // dismiss），另加 status-transition useEffect backstop。見 finalizeEndAndRoute。
+  const inSessionHelp = usePageHelp('today-session', todaySessionHelp);
   const planTarget = useCoachMarkTarget('today.planPanel');
   const templateTarget = useCoachMarkTarget('today.templateList');
   const blankTarget = useCoachMarkTarget('today.blankStart');
@@ -458,6 +466,15 @@ function TodayScreen() {
       scheduleLiveMirrorPush(db, s.activeSession.id);
     }
   }, [db]);
+
+  // In-session help 孤兒 backstop — 一旦 session 不再 in_progress（含 refresh 原地
+  // 翻 idle 這條不經 finalizeEndAndRoute 的路徑），關閉 in-session ⓘ，避免 Modal
+  // 隨 in-session 分支 unmount 殘留。主要保護在 finalizeEndAndRoute 開頭同步 close；
+  // 此 effect 為涵蓋任何其它退出路徑的補網。
+  const inSessionHelpClose = inSessionHelp.close;
+  useEffect(() => {
+    if (sessionState.status !== 'in_progress') inSessionHelpClose();
+  }, [sessionState.status, inSessionHelpClose]);
 
   // 5/19 polish #43 — banner mirror session linked template. Fetches the
   // (template_name, program_name, sub_tag) triple from the most-common
@@ -1098,7 +1115,10 @@ function TodayScreen() {
     // 與 onSheetStart 共用 resolveTargetTemplateId / startSessionFromTemplate /
     // WC push，唯一差異是 alert 靜音（D3）＋ 不寫 per-template sticky（計劃概念）。
     if (isMinimal) {
-      await onStartMinimalTemplate(item);
+      // 極簡模式：開精簡 sheet（hidePickers＝隱藏計劃/強度 picker），讓使用者
+      // 二選一「編輯模板 / 開始訓練」。兩顆按鈕都走通用-variant 解析
+      // （onEditMinimalTemplate / onStartMinimalTemplate），不碰 sticky（計劃概念）。
+      setSheetTemplate(item);
       return;
     }
     setBusy(true);
@@ -1356,12 +1376,41 @@ function TodayScreen() {
         program_id: undefined,
         sub_tag: null,
       });
+      closeSheet();
       await refresh();
       // D6 — fire WC `start-from-iphone` push to Watch（同 onSheetStart）。
       void pushStartToWatch(db, session_id, {});
     } catch (e) {
       Alert.alert(
         t('alert', 'cannotStartSession'),
+        e instanceof Error ? e.message : String(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * 極簡模式的「編輯模板」路徑 — 解析-或-建立通用變體（同 onStartMinimalTemplate
+   * 的 ensureTemplateVariantReady(name,null,null)），再開編輯器。刻意不用
+   * onSheetEdit 的 resolveTargetTemplateId：其 miss 會 fallback 到分類
+   * representative（帶計劃的模板）且不建通用（見 onStartMinimalTemplate 註解）。
+   * dpid/dst = __none__ 讓編輯器 header 顯示「通用 / 無強度」。
+   */
+  const onEditMinimalTemplate = async (item: TemplateSummary) => {
+    setBusy(true);
+    try {
+      const generalId = await ensureTemplateVariantReady(db, {
+        name: item.name,
+        program_id: null,
+        sub_tag: null,
+        uuid: randomUUID,
+      });
+      closeSheet();
+      router.push(`/template/${generalId}?dpid=__none__&dst=__none__`);
+    } catch (e) {
+      Alert.alert(
+        t('alert', 'cannotOpenEditor'),
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -2542,6 +2591,11 @@ function TodayScreen() {
       fromWatchInbound?: boolean;
     },
   ) => {
+    // In-session ⓘ 孤兒防護（2026-07-01）— 在任何 async / status 翻轉之前同步關閉
+    // in-session help。此時 status 仍 in_progress、in-session 分支仍 mounted，Modal
+    // 先 render 成不可見再 dismiss，之後 refresh/route 翻 idle 時分支 unmount 的已是
+    // 隱形 host，不會殘留蓋層。涵蓋 iPhone-led + Watch-inbound 兩路（皆經此）。
+    inSessionHelp.close();
     // 2026-06-11 — dual-fire 同時抵達擋板（見 endInFlightRef 宣告處）。
     // 重疊的第二發直接 return：第一發會完成 finalize + 路由。
     if (endInFlightRef.current.has(session_id)) return;
@@ -2901,8 +2955,21 @@ function TodayScreen() {
           programs={sheetPrograms}
           lastUsedProgramId={sheetLastProgramId}
           lastUsedSubTag={sheetLastSubTag}
-          onEdit={onSheetEdit}
-          onStart={onSheetStart}
+          hidePickers={isMinimal}
+          onEdit={
+            isMinimal
+              ? () => {
+                  if (sheetTemplate) void onEditMinimalTemplate(sheetTemplate);
+                }
+              : onSheetEdit
+          }
+          onStart={
+            isMinimal
+              ? () => {
+                  if (sheetTemplate) void onStartMinimalTemplate(sheetTemplate);
+                }
+              : onSheetStart
+          }
           onCancel={closeSheet}
         />
         <PageHelpHost help={help} />
@@ -2952,6 +3019,8 @@ function TodayScreen() {
             );
           })()}
           <View style={styles.sessionHeaderActions}>
+            {/* 訓練進行中隱藏手勢說明（今日 session ⓘ）。host 見本 return 尾端。 */}
+            <HelpButton onPress={inSessionHelp.open} />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t('button', 'a11ySessionMenu')}
@@ -3557,6 +3626,9 @@ function TodayScreen() {
       />
       {/* D32 interim — Watch-led read-only feedback toast. */}
       <ToastHost controller={toastRef.current!} />
+      {/* 訓練進行中隱藏手勢說明 host。孤兒防護見 inSessionHelp 宣告處 +
+          finalizeEndAndRoute 開頭的同步 close。 */}
+      <PageHelpHost help={inSessionHelp} />
     </SafeAreaView>
   );
 }
