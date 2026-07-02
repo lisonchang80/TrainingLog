@@ -11,6 +11,8 @@ User wants to push the latest `ios/TrainingLog Watch Watch App/*.swift` to their
 
 If only iPhone-side TS changes (no Watch Swift touched), Metro packager + Reload JS is enough — skip this skill.
 
+For **sim-only eyeball verification** (no device, no HR/kcal needed) use `watchos-simulator-smoke` instead — it builds the `WatchPreview` scheme onto a watch Simulator and drives it with `idb` (way faster; no devicectl dance). This skill is for pushing to the *physical wrist*.
+
 ## Cheap compile-verify BEFORE the device build (no clean, no wrist)
 
 To prove a Watch `.swift` change actually COMPILES before paying the full

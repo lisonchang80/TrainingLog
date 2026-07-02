@@ -1,0 +1,114 @@
+---
+name: watchos-simulator-smoke
+description: Live-verify TrainingLog's native watchOS UI on the watch Simulator — build the Watch-only target, install/launch on a watch sim, drive it with idb tap/swipe, screenshot, and read the shot. Use when eyeballing Watch SwiftUI (onboarding carousel, picker, set logger, finish page, ⚙ settings) after a Swift change. NOT for the iPhone/Expo RN app (that's ios-simulator-smoke) and NOT for real-device (that's xcodebuild-watchos-realdevice-install). Touches ios/TrainingLog Watch Watch App/*.swift.
+---
+
+# watchOS Simulator smoke (TrainingLog Watch)
+
+Validated 2026-07-02 iterating the Watch first-launch guide (ADR-0030) ~10 cycles.
+This is the FAST loop for eyeballing native Watch SwiftUI without a device.
+
+## When NOT to use
+- iPhone / Expo RN screens → `ios-simulator-smoke` (Metro + the ios-simulator MCP).
+- Real Apple Watch install → `xcodebuild-watchos-realdevice-install` (devicectl,
+  Trap 1-4). Only the device gives HR/kcal + a *populated* live session.
+- Headless logic → `npm test`; Swift compile only → the build step below then stop.
+
+## The build: `WatchPreview` scheme (no RN host = fast)
+
+The workspace has a **`WatchPreview`** scheme = the `TrainingLog Watch Watch App`
+target ALONE (watchOS SDK, NO React-Native host). It compiles in ~10-60s vs the
+full app's minutes, and covers every Watch `.swift` file.
+
+```bash
+cd /Users/hao800922/code/TrainingLog/ios
+xcodebuild -workspace TrainingLog.xcworkspace -scheme WatchPreview \
+  -configuration Debug -destination 'generic/platform=watchOS Simulator' \
+  build 2>&1 | grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" | head
+```
+
+- New `.swift` files in `ios/TrainingLog Watch Watch App/` are **auto-included**
+  (the folder is a `PBXFileSystemSynchronizedRootGroup` — pbxproj lists no Watch
+  file by name; `grep -c PBXFileSystemSynchronizedRootGroup project.pbxproj` = 3).
+  So: drop the file in the folder, no pbxproj edit needed.
+- Built product: `<DerivedData>/Build/Products/Debug-watchsimulator/TrainingLog Watch Watch App.app`
+  (find `<DerivedData>` = `~/Library/Developer/Xcode/DerivedData/TrainingLog-*`).
+- Bash `cd` does NOT persist reliably between tool calls — always `cd .../ios &&`
+  in the same command, or use absolute `-workspace` paths.
+
+## Install + launch on a watch sim
+
+```bash
+WATCH=<watch-udid>            # xcrun simctl list devices available | grep -i "apple watch"
+APP="<DerivedData>/Build/Products/Debug-watchsimulator/TrainingLog Watch Watch App.app"
+xcrun simctl boot "$WATCH" 2>/dev/null; xcrun simctl bootstatus "$WATCH" -b   # blocks until booted
+xcrun simctl install  "$WATCH" "$APP"
+xcrun simctl launch   "$WATCH" com.lisonchang.TrainingLog.watchkitapp
+xcrun simctl io "$WATCH" screenshot /tmp/w.png       # then Read /tmp/w.png
+```
+
+- Bundle id = `com.lisonchang.TrainingLog.watchkitapp`.
+- `bootstatus -b` is the clean boot wait (foreground `sleep` is blocked by the
+  harness; `bootstatus` blocks legitimately). Short `sleep N` inside a chained
+  `cmd; sleep 2; cmd` compound has worked in practice for post-launch settle.
+- **Reset seen-once `@AppStorage` flags** (first-launch flows): `simctl uninstall`
+  then `install` wipes the app container. Read current flags with
+  `xcrun simctl spawn "$WATCH" defaults read com.lisonchang.TrainingLog.watchkitapp | grep -i <key>`.
+
+## Driving the UI: `idb`, NOT the ios-simulator MCP
+
+The `mcp__ios-simulator__*` tools target the booted *iPhone* sim, not the watch.
+Use **`idb`** (already installed at `/opt/homebrew/bin/idb`) with the `--udid`:
+
+```bash
+idb ui tap   --udid "$WATCH" <x> <y>
+idb ui swipe --udid "$WATCH" <x1> <y1> <x2> <y2>
+idb ui describe-point --udid "$WATCH" <x> <y>     # what element is here (label/type/frame)
+```
+
+- **Coordinates are POINTS, not pixels.** `simctl io screenshot` outputs PIXELS.
+  40mm (SE 3) = **324×394 px → 162×197 pt** (scale 2.0). Divide screenshot px by 2
+  to get tap pt. e.g. a full-width button centred at image (162, 290) → tap (81, 145).
+  `idb ui describe-point` returns frames in pt — trust those over eyeballing.
+- **idb `tap` on a SwiftUI `Button` is UNRELIABLE on watchOS** — the synthetic tap's
+  hit-test often doesn't fire the action (confirmed: `describe-point` showed the tap
+  landed dead-centre on the button, yet it didn't advance). **Workaround: page a
+  `TabView` with `idb ui swipe`** (e.g. `130 90 30 90` = swipe left → next page).
+  Swipe reliably pages; tap the toolbar chrome (⚙/ⓘ at screen corners) is fine.
+- Vertical scroll inside a `ScrollView`: `idb ui swipe <x> <lowerY> <x> <upperY>`.
+
+## watchOS layout gotchas (validated)
+
+- **Present-cover-in-`.onAppear`-after-push is SWALLOWED.** Setting a
+  `@State` that drives `.fullScreenCover`/`.sheet` synchronously in `.onAppear`
+  right after a `navigationDestination` push → the cover never appears. **Fix:**
+  trigger from `.task { … try? await Task.sleep(nanoseconds: 500_000_000); show = true }`
+  so the push transition settles first. (ADR-0030 Part B trigger.)
+- **`.fullScreenCover` has a system ✕** (top-leading) — use `onDismiss:` to run
+  side-effects (e.g. set a seen flag) so the ✕ escape isn't missed, not just the
+  in-content "done" button.
+- **40mm is the tightest face** (~150pt usable width, ~110pt content height above a
+  bottom control). A faithful card + title + caption + CTA won't all fit → wrap
+  content in a `ScrollView` and add generous **bottom padding (~30pt)** so the last
+  line can scroll fully clear of the pinned button ("滑到底還是被蓋住" fix).
+- Shrink a `.borderedProminent` CTA with `.controlSize(.mini/.small)`; multi-line
+  zh `Text` needs `.fixedSize(horizontal:false, vertical:true)` or it truncates
+  with "…" instead of wrapping when squeezed by sibling Spacers.
+
+## Reaching the real set logger on sim = EMPTY session
+
+Tapping a picker template/plan row DOES reach `SetLoggerView` on the sim (the
+`#if targetEnvironment(simulator)` `PickerViewModel.mockDefault()` path), BUT the
+mock `startFromWatch` returns a snapshot with **no exercises** → you land on the
+empty state ("尚無動作 / 請至 iPhone 加動作"). So you **cannot screenshot populated
+set rows on the sim** — only the real device (or a SwiftUI `#Preview` with
+`SetLoggerMockData`, which isn't simctl-screenshottable) shows a full card. When a
+guide/mock must look "跟實際一樣", faithfully re-draw from source (read
+`ExerciseCard.swift` / `CellBox.swift`) rather than trying to capture it.
+
+## Loop summary
+1. `xcodebuild ... -scheme WatchPreview ... build` → grep for `BUILD SUCCEEDED`.
+2. `simctl uninstall` (if resetting flags) → `install` → `launch`.
+3. `idb ui swipe/tap --udid` to navigate (swipe to page; tap corners).
+4. `simctl io screenshot /tmp/x.png` → Read it.
+5. Repeat. Iterate builds are incremental (~15-30s) if only one file changed.
