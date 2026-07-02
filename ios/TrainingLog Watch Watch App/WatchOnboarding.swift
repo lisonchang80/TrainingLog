@@ -137,7 +137,12 @@ private struct WatchOnboardingCardView: View {
                     content
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+                .padding(.top, 4)
+                // Generous bottom slack so the LAST line (caption) can scroll
+                // fully clear of the pinned CTA — on 40mm a tall card otherwise
+                // leaves the caption stuck against the button even at max scroll
+                // (user 2026-07-02「滑到底還是被蓋住」).
+                .padding(.bottom, 32)
             }
             Button(action: onNext) {
                 Text(ctaLabel)
