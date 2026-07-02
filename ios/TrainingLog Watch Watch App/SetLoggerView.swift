@@ -107,6 +107,15 @@ struct SetLoggerView: View {
     @State private var showGesturesGuide = false
     @State private var gesturesGuideTriggered = false
 
+    /// Watch rest timer (2026-07-02). `restTimerMode` (⚙ 設定, default .popup)
+    /// gates it; when a set is ✓'d we start a full-screen countdown popup.
+    /// `restTimerArmed` flips true a beat after mount so the cast-session
+    /// ✓-seed (`seedLoggedFromSnapshot`) doesn't false-trigger the popup.
+    @StateObject private var restTimer = RestTimerController()
+    @AppStorage(WatchSettingsKey.restTimerMode)
+    private var restTimerModeRaw = WatchSettingsDefault.restTimerMode
+    @State private var restTimerArmed = false
+
     /// 2026-05-29 deep-night smoke fix (Bug 3 + Bug 4 wire):
     ///   - Bug 3 — subscribe `coordinator.$lastIncomingEnd`; when iPhone
     ///     initiates session end the coordinator publishes the sessionId
@@ -406,6 +415,26 @@ struct SetLoggerView: View {
                     showGesturesGuide = false
                 }
             }
+            // Watch rest timer — full-screen countdown popup, driven by
+            // RestTimerController; presented when a set is ✓'d (see .onChange
+            // below). Separate from the gestures cover above; the two never
+            // overlap (gestures shows once on the first mount, before any ✓).
+            .fullScreenCover(isPresented: $restTimer.isPresented) {
+                RestTimerView(controller: restTimer)
+            }
+            // Start / cancel the rest timer off ✓ (logged) set changes.
+            .onChange(of: interactionState.loggedSetIds) { oldValue, newValue in
+                handleLoggedChange(old: oldValue, new: newValue)
+            }
+            // Arm a beat after mount so the cast-session ✓-seed
+            // (seedLoggedFromSnapshot) doesn't false-fire the popup.
+            .onAppear {
+                guard !restTimerArmed else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    restTimerArmed = true
+                }
+            }
             .task {
                 // ADR-0030 — auto-present the gesture guide once on the first
                 // set-logger mount. Deferred via .task + a short sleep: presenting
@@ -678,6 +707,49 @@ struct SetLoggerView: View {
     // (which shows the same hint in the idle empty-session card).
     private var snapshotForRender: SessionSnapshot {
         return snapshot
+    }
+
+    // MARK: - Rest timer (2026-07-02)
+
+    /// React to ✓ (logged) set changes: start a rest countdown on a fresh ✓,
+    /// cancel it when the running set is un-logged. Only in `.popup` mode, only
+    /// after arming (skips the cast-session seed). Cluster followers
+    /// (`parentSetId != nil`) don't start a timer — ADR-0019 Q2 (C).
+    private func handleLoggedChange(old: Set<String>, new: Set<String>) {
+        guard restTimerArmed else { return }
+        guard (RestTimerMode(rawValue: restTimerModeRaw) ?? .popup) == .popup else { return }
+
+        // Un-log cancel: the running set left the logged set.
+        let removed = old.subtracting(new)
+        if let running = restTimer.runningSetId, removed.contains(running) {
+            restTimer.skip()
+        }
+
+        // Fresh ✓: start from the newly-added primary (head / solo / working /
+        // warmup — parentSetId == nil). A whole cluster ✓'d at once adds its
+        // head (nil parent) + followers; we start once, off the head.
+        let added = new.subtracting(old)
+        guard !added.isEmpty else { return }
+        let lookup = restTimerSetLookup()
+        guard let primary = added
+            .compactMap({ lookup[$0] })
+            .first(where: { $0.set.parentSetId == nil })
+        else { return }  // all added rows are cluster followers → no timer
+        restTimer.start(
+            setId: primary.set.setId,
+            restSec: primary.set.restSec,
+            exerciseName: primary.name,
+            ordinal: primary.set.ordinal
+        )
+    }
+
+    /// setId → (set, exercise name) over the live tree (snapshot + added).
+    private func restTimerSetLookup() -> [String: (set: SessionSnapshotSet, name: String)] {
+        var map: [String: (set: SessionSnapshotSet, name: String)] = [:]
+        for ex in snapshot.exercises + interactionState.addedExercises {
+            for s in ex.sets { map[s.setId] = (s, ex.exerciseName) }
+        }
+        return map
     }
 }
 
