@@ -127,9 +127,11 @@ final class RestTimerController: ObservableObject {
         tick?.invalidate()
         tick = nil
         fireFinishHaptic()
-        // Brief flash so the user registers 00:00, then auto-dismiss.
+        // Flash so the user registers 00:00, then auto-dismiss. 0.9s (was
+        // 0.4s) so BOTH double-buzz plays (0s + 0.5s) land while the popup is
+        // still up — see fireFinishHaptic.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
+            try? await Task.sleep(nanoseconds: 900_000_000)
             if self.finished { self.skip() }
         }
     }
@@ -147,12 +149,16 @@ final class RestTimerController: ObservableObject {
         case .heavy: type = .success
         }
         // Double buzz — second play off `self`-free locals so it still lands
-        // even after the 0.4s auto-dismiss unmounts the popup. The 0.22s gap
-        // reads as a distinct "buzz-buzz" (well inside the 0.4s dismiss window).
+        // even after the auto-dismiss unmounts the popup. 0.5s gap: a 0.22s gap
+        // read as a SINGLE buzz on-wrist (device smoke 2026-07-03) because
+        // watchOS coalesces closely-spaced haptics (esp. the multi-pulse
+        // `.notification`); 0.5s clearly separates them into "buzz — buzz".
+        // The finish auto-dismiss (checkFinish) waits 0.9s so both land while
+        // the popup is still up.
         let device = WKInterfaceDevice.current()
         device.play(type)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             device.play(type)
         }
     }
