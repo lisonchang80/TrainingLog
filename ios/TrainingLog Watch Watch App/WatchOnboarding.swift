@@ -210,7 +210,7 @@ private struct WatchOnboardingCardView: View {
 
         case .bSwipe:
             title("滑整列 ＝ 加 / 刪")
-            RealCardMock(border: .selected, reveal: .add)
+            RealCardMock(border: .selected, reveal: .both)
             hint("右滑露出綠 ＋ 加一組；左滑露出紅 🗑 刪這組")
 
         case .bLongPress:
@@ -299,7 +299,7 @@ private struct WatchOnboardingCardView: View {
 ///            unit size-8 top-trailing (widths 52 / 40 per CellMetrics).
 private struct RealCardMock: View {
     enum Border { case selected, reorder }
-    enum Reveal { case none, add, delete }
+    enum Reveal { case none, add, delete, both }
 
     var border: Border = .selected
     var logged: Bool = false
@@ -350,11 +350,6 @@ private struct RealCardMock: View {
 
     private var row: some View {
         HStack(spacing: 4) {
-            if reveal == .add {
-                Image(systemName: "plus.circle.fill")
-                    .font(.body)
-                    .foregroundStyle(.green)
-            }
             HStack(spacing: 4) {
                 Text("1")
                     .font(.caption)
@@ -374,22 +369,32 @@ private struct RealCardMock: View {
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(borderColor, lineWidth: border == .reorder ? 2.5 : 2.0)
             )
-            trailing
+            // Swipe-reveal actions ride ON the row's edges, mirroring the real
+            // swipe-to-reveal (green ＋ slides in from leading, 🗑 from trailing)
+            // so the demo never overflows the 40mm width.
+            .overlay(alignment: .leading) {
+                if reveal == .add || reveal == .both {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(.green)
+                        .padding(.leading, 3)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if reveal == .delete || reveal == .both {
+                    Image(systemName: "trash.fill")
+                        .font(.body)
+                        .foregroundStyle(.red)
+                        .padding(.trailing, 3)
+                }
+            }
+            if reveal == .none {
+                Image(systemName: logged ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .foregroundStyle(logged ? Color.green : Color.secondary)
+            }
         }
         .padding(.vertical, 1)
-    }
-
-    @ViewBuilder private var trailing: some View {
-        switch reveal {
-        case .delete:
-            Image(systemName: "trash.fill").font(.body).foregroundStyle(.red)
-        case .add:
-            EmptyView()
-        case .none:
-            Image(systemName: logged ? "checkmark.circle.fill" : "circle")
-                .font(.body)
-                .foregroundStyle(logged ? Color.green : Color.secondary)
-        }
     }
 
     private func cell(_ value: String, _ unit: String, width: CGFloat) -> some View {
