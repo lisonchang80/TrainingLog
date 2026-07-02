@@ -76,6 +76,7 @@ enum WatchOnboardingCard: Int, Identifiable, CaseIterable {
     // Part B — gesture guide
     case bSelect
     case bLogEdit
+    case bCycleType
     case bSwipe
     case bLongPress
     case bPages
@@ -84,7 +85,7 @@ enum WatchOnboardingCard: Int, Identifiable, CaseIterable {
     var id: Int { rawValue }
 
     static let partA: [WatchOnboardingCard] = [.aWelcome, .aHowToStart, .aWhereList]
-    static let partB: [WatchOnboardingCard] = [.bSelect, .bLogEdit, .bSwipe, .bLongPress, .bPages, .bFinish]
+    static let partB: [WatchOnboardingCard] = [.bSelect, .bLogEdit, .bCycleType, .bSwipe, .bLongPress, .bPages, .bFinish]
 }
 
 // MARK: - Carousel host
@@ -188,25 +189,29 @@ private struct WatchOnboardingCardView: View {
             hint("空的？先去手機建一個模板")
 
         case .bSelect:
-            title("先點一下 → 綠框")
-            mockRow(border: .green)
-            hint("綠框＝已選取，才能編輯")
+            title("點一下 → 綠框")
+            RealCardMock(border: .selected)
+            hint("綠色外框＝已選取，才能編輯")
 
         case .bLogEdit:
-            title("綠框狀態下…")
-            mockRow(border: .green)
-            keyLine("點圓圈", "◯ → ✓ 記錄")
-            keyLine("點 80 / 8", "跳鍵盤改值")
+            title("綠框下記錄 / 改值")
+            RealCardMock(border: .selected, logged: true)
+            hint("點 ◯ 打勾記錄；點 80 或 8 跳鍵盤改值")
+
+        case .bCycleType:
+            title("點號碼換組型")
+            RealCardMock(border: .selected, numberHighlight: true)
+            hint("點左側號碼循環：工作 → 暖身 → 遞減 D")
 
         case .bSwipe:
             title("滑整列 ＝ 加 / 刪")
-            swipeVisual(symbol: "plus", color: .green, onLeading: true, label: "右滑：加一組")
-            swipeVisual(symbol: "trash.fill", color: .red, onLeading: false, label: "左滑：刪這組")
+            RealCardMock(border: .selected, reveal: .add)
+            hint("右滑露出綠 ＋ 加一組；左滑露出紅 🗑 刪這組")
 
         case .bLongPress:
             title("長按 → 橘框")
-            mockRow(border: .orange, trailing: "⋮")
-            hint("長按已選的列 → 橘色可拖曳換順序；有備註會一起顯示")
+            RealCardMock(border: .reorder)
+            hint("橘色可上下拖曳換順序；有備註會一起顯示")
 
         case .bPages:
             title("這頁會左右滑換頁")
@@ -241,70 +246,6 @@ private struct WatchOnboardingCardView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func keyLine(_ lead: String, _ trail: String) -> some View {
-        HStack(spacing: 4) {
-            Text(lead).font(.caption).fontWeight(.semibold)
-            Text(trail).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    /// A miniature set-row with a coloured stroke to convey the select
-    /// (green) / drag (orange) frame states.
-    private func mockRow(border: Color, trailing: String = "◯") -> some View {
-        HStack(spacing: 5) {
-            Text("1").foregroundStyle(.secondary)
-            Text("胸推")
-            Spacer(minLength: 6)
-            Text("80")
-            Text("8")
-            Text(trailing)
-        }
-        .font(.caption2)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(border, lineWidth: 2)
-        )
-        .padding(.horizontal, 6)
-    }
-
-    /// A mini set-row with a coloured action chip revealed on one edge (green ＋
-    /// on the leading edge for 右滑 / red 🗑 on the trailing edge for 左滑) + a
-    /// caption below. Mirrors the real InteractiveSetRow swipe-to-reveal.
-    private func swipeVisual(symbol: String, color: Color, onLeading: Bool, label: String) -> some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 4) {
-                if onLeading { actionChip(symbol, color) }
-                HStack(spacing: 4) {
-                    Text("1").foregroundStyle(.secondary)
-                    Text("胸推")
-                    Spacer(minLength: 3)
-                    Text("80")
-                    Text("8")
-                }
-                .font(.caption2)
-                .lineLimit(1)   // keep on one line — never wrap 胸→推 on a narrow face
-                .padding(.vertical, 3)
-                .padding(.horizontal, 6)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.22)))
-                if !onLeading { actionChip(symbol, color) }
-            }
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-    }
-
-    private func actionChip(_ symbol: String, _ color: Color) -> some View {
-        Image(systemName: symbol)
-            .font(.caption2)
-            .frame(width: 24, height: 26)
-            .background(RoundedRectangle(cornerRadius: 6).fill(color))
-            .foregroundStyle(.white)
-    }
-
     /// 完成 ◀ 記錄 ▶ 音樂 three-page layout.
     private var pageDiagram: some View {
         HStack(spacing: 3) {
@@ -333,6 +274,138 @@ private struct WatchOnboardingCardView: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(highlight ? Color.blue : Color.gray.opacity(0.5),
                         lineWidth: highlight ? 2 : 1)
+        )
+    }
+}
+
+// MARK: - Faithful set-card replica (Part B)
+
+/// A miniature that mirrors the REAL `ExerciseCard` + `InteractiveSetRow` +
+/// `CellBox` so the gesture cards look like what the user actually sees in the
+/// set logger (per user 2026-07-02 "畫得跟實際一樣"). Verified against
+/// ExerciseCard.swift / CellBox.swift:
+///   card   = RoundedRectangle(10).fill(secondary.opacity(0.15)), pad v6/h4
+///   header = 動作名(.headline) + `ellipsis.circle`(.secondary)
+///   bar    = height-3 segments, green(filled) / secondary.opacity(0.3)
+///   row    = [號碼 20 .caption] [CellBox 重量 52] [CellBox 次數 40] [✓ .body],
+///            wrapped in a rounded-4 border: .green(selected) / .orange(reorder)
+///   reveal = `plus.circle.fill`(.green) leading / `trash.fill`(.red) trailing
+///   cell   = rounded-4 stroke secondary.opacity(0.5), value .body monospaced,
+///            unit size-8 top-trailing (widths 52 / 40 per CellMetrics).
+private struct RealCardMock: View {
+    enum Border { case selected, reorder }
+    enum Reveal { case none, add, delete }
+
+    var border: Border = .selected
+    var logged: Bool = false
+    var reveal: Reveal = .none
+    var numberHighlight: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            progressBar
+            row
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.15))
+        )
+    }
+
+    private var header: some View {
+        HStack(spacing: 4) {
+            Text("胸推").font(.headline).lineLimit(1)
+            Spacer(minLength: 0)
+            Image(systemName: "ellipsis.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 3)
+    }
+
+    private var progressBar: some View {
+        HStack(spacing: 1) {
+            Rectangle()
+                .fill(logged ? Color.green : Color.secondary.opacity(0.3))
+                .frame(height: 3)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(height: 3)
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 6)
+    }
+
+    private var borderColor: Color {
+        border == .reorder ? .orange : .green
+    }
+
+    private var row: some View {
+        HStack(spacing: 4) {
+            if reveal == .add {
+                Image(systemName: "plus.circle.fill")
+                    .font(.body)
+                    .foregroundStyle(.green)
+            }
+            HStack(spacing: 4) {
+                Text("1")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .frame(width: 20, alignment: .center)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(numberHighlight ? Color.green.opacity(0.35) : Color.clear)
+                    )
+                cell("80", "kg", width: 52)
+                cell("8", "次", width: 40)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(borderColor, lineWidth: border == .reorder ? 2.5 : 2.0)
+            )
+            trailing
+        }
+        .padding(.vertical, 1)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        switch reveal {
+        case .delete:
+            Image(systemName: "trash.fill").font(.body).foregroundStyle(.red)
+        case .add:
+            EmptyView()
+        case .none:
+            Image(systemName: logged ? "checkmark.circle.fill" : "circle")
+                .font(.body)
+                .foregroundStyle(logged ? Color.green : Color.secondary)
+        }
+    }
+
+    private func cell(_ value: String, _ unit: String, width: CGFloat) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Text(value)
+                .font(.body)
+                .monospacedDigit()
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity)
+            Text(unit)
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+                .padding(.trailing, 4)
+        }
+        .frame(width: width)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.secondary.opacity(0.5), lineWidth: 0.8)
         )
     }
 }

@@ -129,13 +129,14 @@ struct PickerRootView: View {
             .navigationTitle("選擇訓練")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // ADR-0030 — ⓘ re-run guide. Placed top-LEADING (the root has
-                // no back button) so it doesn't crowd the 🔄 in the top-trailing
-                // corner. Replays the FULL guide (A + B) — the in-session ⚙
-                // settings sheet can't host a re-run entry.
+                // ADR-0030 — ⓘ re-run the picker intro (Part A). Placed
+                // top-LEADING (root has no back button) so it doesn't crowd the
+                // 🔄 top-trailing. Only Part A (1-3) — the gesture steps (4+)
+                // live INSIDE 開始訓練 (auto on first set-logger mount), per
+                // user 2026-07-02「第4步到後面移到手錶開始訓練裡頭」.
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        guide = .full
+                        guide = .pickerIntro
                     } label: {
                         Image(systemName: "info.circle")
                     }

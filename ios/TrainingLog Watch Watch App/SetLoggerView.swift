@@ -392,11 +392,16 @@ struct SetLoggerView: View {
                     showGesturesGuide = false
                 }
             }
-            .onAppear {
-                if !gesturesGuideSeen, !gesturesGuideTriggered {
-                    gesturesGuideTriggered = true
-                    showGesturesGuide = true
-                }
+            .task {
+                // ADR-0030 — auto-present the gesture guide once on the first
+                // set-logger mount. Deferred via .task + a short sleep: presenting
+                // a fullScreenCover synchronously in .onAppear right after the
+                // navigation push gets swallowed on watchOS (the cover never
+                // shows). The delay lets the push transition settle first.
+                guard !gesturesGuideSeen, !gesturesGuideTriggered else { return }
+                gesturesGuideTriggered = true
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                showGesturesGuide = true
             }
             // 2026-05-29 deep-night smoke fix (Bug 3):
             // iPhone-initiated end-session arrives at the coordinator via
