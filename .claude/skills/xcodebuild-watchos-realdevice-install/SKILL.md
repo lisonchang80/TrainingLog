@@ -64,6 +64,20 @@ xcrun devicectl device install app \
   "<DerivedData>/Build/Intermediates.noindex/ArchiveIntermediates/TrainingLog/InstallationBuildProductsLocation/Applications/TrainingLog.app"
 ```
 
+**Resolve `<DerivedData>` from the build LOG, not `ls | head -1` (validated
+2026-07-02, ADR-0030 onboarding polish)**: there are usually SEVERAL
+`DerivedData/TrainingLog-*` dirs (one per Xcode session / scheme). Naïvely
+`ls -d ~/Library/Developer/Xcode/DerivedData/TrainingLog-* | head -1` picks the
+alphabetically-first, which is often NOT the one this build wrote to →
+`devicectl install` fails with `No provider was found` + `The file couldn't be
+opened because it doesn't exist` (the .app simply isn't at that path). Instead,
+grep the actual staged path out of the build log you tee'd:
+```bash
+APP=$(grep -oE "/Users/[^ ]*InstallationBuildProductsLocation/Applications/TrainingLog.app" /tmp/watch-build.log | sort -u | head -1)
+```
+(Interestingly the sim `WatchPreview` build and the device build can share ONE
+DerivedData dir — don't assume separate dirs per destination.)
+
 **Product path differs by verb (validated 2026-06-13, Y-dup Swift smoke)**: the
 path above is the `install` verb's staging dir. If you ran plain `xcodebuild
 … build` (NO `install` — common for a Swift-only compile-verify), there is NO
