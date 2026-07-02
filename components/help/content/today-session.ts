@@ -30,8 +30,8 @@
  */
 import type { LocalizedPageHelp } from '../types';
 
-const SETS_AR = 1092 / 735; // today-session/sets.png (live-logging set row — tap ops)
-const LABEL_AR = 820 / 563; // gestures/set-label-cycle.png (set-number label red-box)
+const SETS_AR = 1092 / 601; // today-session/sets.png (live-logging set row — tap ops; note banner cropped)
+const LABEL_AR = 820 / 459; // gestures/set-label-cycle.png (set-number label red-box; note banner cropped)
 const GEAR_AR = 640 / 808; // session-detail/gear-menu.png (per-card ⚙️ ActionSheet — SHARED, same options)
 const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right row strip
 const DRAG_AR = 1030 / 350; // long-press (two rows)

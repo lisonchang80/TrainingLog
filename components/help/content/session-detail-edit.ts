@@ -26,7 +26,7 @@
 import type { LocalizedPageHelp } from '../types';
 
 const GEAR_AR = 640 / 808; // gear-menu.png (solo ⚙️ ActionSheet)
-const SETS_AR = 820 / 563; // sets.png (expanded edit-mode card — tap ops)
+const SETS_AR = 820 / 459; // sets.png (expanded edit-mode card — tap ops; note banner cropped)
 const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right (shared row strip)
 const DRAG_AR = 1030 / 350; // long-press (two rows)
 
