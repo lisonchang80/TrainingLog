@@ -23,11 +23,12 @@ Status: accepted (2026-07-02、設計定案，實作待落地)
 ### D1 — 觸發 & 生命週期：新 `onboarding_completed` 旗標，掛在 RestoreGate 之後
 
 - 新增 `app_settings.onboarding_completed`（plain boolean，**無 migration**，讀不到時視為 `false`）。
-- 新增 `OnboardingGate` 元件，掛在 `DatabaseProvider` + `AppModeProvider` **內**（需讀寫 `app_mode` 與旗標）；旗標未設時整頁蓋掉 tab 導覽、**不進 expo-router history**（走不回去、也擋不掉，mirror RestoreGate 的 gate 模式但位置在 DB provider 內側）。
-- 在 RestoreGate「新建 DB／無備份／已拒還原」分支且旗標未設 → 跑 onboarding。**還原成功 → 直接設旗標跳過**（資料已存在，對齊 ADR-0011「restore-complete bypass」）。
-- 旗標**只在「完成」或「跳過」時寫**；中途崩潰/離開 → 下次重來（5 步成本低，**不做逐步進度持久化**）。
+- 新增 `OnboardingProvider` + `OnboardingGate`（`src/onboarding/` + `components/onboarding/`），掛在 `DatabaseProvider` + `AppModeProvider` + `ThemeProvider` **內**（需讀寫 `app_mode`/旗標、要主題）；`active` 時整頁蓋掉 tab 導覽、**不進 expo-router history**（mirror RestoreGate 的 replace-children 模式，但位置在 provider 內側；RestoreGate 仍在最外層負責「還原 vs 全新」）。
+- **觸發判定（純函式 `shouldShowOnboarding`）＝旗標未設 AND DB 無任何 session**。旗標**只在「完成」或「跳過」時寫**；中途崩潰/離開 → 下次重來（5 步成本低，**不做逐步進度持久化**）。
+- **`hasAnySession` guard（實作期對純旗標設計的修正）**：原設計「純旗標 + 還原路徑設旗標」有漏洞——(a) **既有使用者升級**到本版：有資料但沒旗標 → 會誤跳 onboarding；(b) 舊備份（本功能前）**還原**後同樣沒旗標。加一次性「DB 有無 session」檢查即可涵蓋兩者：provider 在旗標缺席時查一次 `hasAnySession`，有資料 → 判定 `done` 並**回填旗標 `true`**（之後開機純讀旗標、快、不再查 session），genuinely fresh（0 session）才顯示。
+- 這**不重蹈**被否決的「`session_count === 0` 當觸發」：旗標仍是權威（完成/跳過後持久化），清空資料**不會**重跳；session 檢查只在旗標缺席時查一次、當 bypass 用。
 
-REJECT「用 `session_count === 0` 推斷」：清空資料/刪光 session 會重跳，且無法區分「看過但略過」與「還沒建資料」。REJECT「單靠 RestoreGate 的『DB 本次才新建』信號」：該信號在後續 launch 就消失，仍需旗標避免中途崩潰重跳，等於旗標方案的不完整子集。
+REJECT「用 `session_count === 0` 當主觸發」：清空資料/刪光 session 會重跳，且無法區分「看過但略過」與「還沒建資料」。REJECT「單靠 RestoreGate 的『DB 本次才新建』信號」：該信號在後續 launch 就消失，仍需旗標避免中途崩潰重跳，等於旗標方案的不完整子集。
 
 ### D2 — 形態：專屬全螢幕多步精靈，本身即引導、不疊 coach
 

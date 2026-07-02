@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDatabase, useSuspendForRestore } from '@/components/database-provider';
 import { useAppMode, type AppMode } from '@/src/app-mode';
+import { useOnboarding } from '@/src/onboarding';
 import {
   tBackupErrorLine,
   tBackupEscalationLine,
@@ -126,6 +127,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { tokens, stored: themePref, setStored: setThemePref } = useTheme();
   const { mode: appMode, setMode: setAppModePref } = useAppMode();
+  const { restart: replayOnboarding } = useOnboarding();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
 
   /**
@@ -772,6 +774,17 @@ export default function SettingsScreen() {
           <Text style={styles.linkChevron}>›</Text>
         </Pressable>
         <Text style={styles.hint}>{t('page', 'bodyMetricsHint')}</Text>
+
+        {/* ADR-0029 — re-run the new-user onboarding wizard. Does NOT reset the
+            user's existing mode / HK / body data; just walks the flow again. */}
+        <Text style={styles.section}>{t('onboarding', 'sectionTitle')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => replayOnboarding()}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.btnPressed]}>
+          <Text style={styles.linkLabel}>{t('onboarding', 'rerunEntry')}</Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </Pressable>
 
         <Text style={styles.section}>{t('page', 'backupRestore')}</Text>
 
