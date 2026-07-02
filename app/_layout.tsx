@@ -23,6 +23,7 @@ import { ThemeProvider, useTheme } from '@/src/theme';
 import { AppModeProvider } from '@/src/app-mode';
 import { OnboardingProvider } from '@/src/onboarding';
 import { OnboardingGate } from '@/components/onboarding/onboarding-gate';
+import { UnitProvider } from '@/src/unit';
 import { initWatchBridge } from '@/src/adapters/watch';
 import { wireRestoreDeps } from '@/src/services/restoreDepsWiring';
 
@@ -165,6 +166,12 @@ export default function RootLayout() {
           live. No boot-order constraint: it only gates UI that renders after
           the DB is open, and defaults to 'plan' until hydrated. */}
       <AppModeProvider>
+      {/* Unit (kg/lb) — SQLite-backed like AppMode; wraps the UI tree so the
+          display-unit toggle re-renders every weight-showing surface live
+          (訓練中 / session 詳情 / 模板編輯器 / body / exercise history+chart).
+          Inside DatabaseProvider (reads app_settings via useDatabase); default
+          'kg' until hydrated. */}
+      <UnitProvider>
       <ThemeProvider>
         {/* Recovery-robustness audit (HIGH) — app-wide ErrorBoundary lives
             INSIDE <ThemeProvider> so its fallback can call useTheme() (which
@@ -278,6 +285,7 @@ export default function RootLayout() {
         </OnboardingProvider>
         </ErrorBoundary>
       </ThemeProvider>
+      </UnitProvider>
       </AppModeProvider>
       </AchievementsEnabledProvider>
     </DatabaseProvider>

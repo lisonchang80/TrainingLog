@@ -30,7 +30,8 @@
  */
 import type { LocalizedPageHelp } from '../types';
 
-const SETS_AR = 1092 / 735; // today-session/sets.png (live-logging set row — tap ops)
+const SETS_AR = 1092 / 601; // today-session/sets.png (live-logging set row — tap ops; note banner cropped)
+const LABEL_AR = 820 / 459; // gestures/set-label-cycle.png (set-number label red-box; note banner cropped)
 const GEAR_AR = 640 / 808; // session-detail/gear-menu.png (per-card ⚙️ ActionSheet — SHARED, same options)
 const SWIPE_AR = 1030 / 190; // swipe-left / swipe-right row strip
 const DRAG_AR = 1030 / 350; // long-press (two rows)
@@ -50,6 +51,12 @@ export const todaySessionHelp: LocalizedPageHelp = {
         aspectRatio: SETS_AR,
         title: '打勾完成・點格子改',
         body: '點 ✓ 標記完成一組（休息計時自動跳出）；點數字格改重量·次數。',
+      },
+      {
+        image: require('@/assets/help/gestures/set-label-cycle.png'),
+        aspectRatio: LABEL_AR,
+        title: '切換組別',
+        body: '點紅框內的編號標籤，可循環切換 正式組 / 熱身組 / 遞減組。',
       },
       {
         image: require('@/assets/help/session-detail/gear-menu.png'),
@@ -101,6 +108,12 @@ export const todaySessionHelp: LocalizedPageHelp = {
         aspectRatio: SETS_AR,
         title: 'Tick to finish / tap to edit',
         body: "Tap ✓ to finish a set (the rest timer pops up); tap a number cell to edit weight / reps.",
+      },
+      {
+        image: require('@/assets/help/gestures/set-label-cycle.png'),
+        aspectRatio: LABEL_AR,
+        title: 'Switch set type',
+        body: 'Tap the boxed set-number label to cycle working / warm-up / drop set.',
       },
       {
         image: require('@/assets/help/session-detail/gear-menu.png'),

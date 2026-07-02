@@ -64,7 +64,13 @@ export const templateEditorHelp: LocalizedPageHelp = {
         image: require('@/assets/help/template-editor/sets.png'),
         aspectRatio: SETS_AR,
         title: '點一下改',
-        body: '點標籤循環 正式→熱身→遞減；點數字格改重量·次數。',
+        body: '點數字格改重量·次數。',
+      },
+      {
+        image: require('@/assets/help/gestures/set-label-cycle-template.png'),
+        aspectRatio: SETS_AR,
+        title: '切換組別',
+        body: '點紅框內的編號標籤，可循環切換 正式組 / 熱身組 / 遞減組。',
       },
       {
         image: require("@/assets/help/gestures/swipe-left.png"),
@@ -116,7 +122,13 @@ export const templateEditorHelp: LocalizedPageHelp = {
         image: require('@/assets/help/template-editor/sets.png'),
         aspectRatio: SETS_AR,
         title: 'Tap to edit',
-        body: 'Tap the label to cycle working→warm-up→drop; tap a number cell to edit.',
+        body: 'Tap a number cell to edit weight / reps.',
+      },
+      {
+        image: require('@/assets/help/gestures/set-label-cycle-template.png'),
+        aspectRatio: SETS_AR,
+        title: 'Switch set type',
+        body: 'Tap the boxed set-number label to cycle working / warm-up / drop set.',
       },
       {
         image: require("@/assets/help/gestures/swipe-left.png"),

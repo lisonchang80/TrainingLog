@@ -336,6 +336,26 @@ the page while you shoot. New/changed assets need an app reload to re-bundle.
   cardImage `maxHeight` is 520; `InfoModal` caps its own) or they letterbox; the
   card still fits the screen.
 
+**Pixel-editing a shot (red box / crop out a banner) — use the project's `pngjs`,
+no ImageMagick/PIL (validated 2026-07-02):** macOS has neither and don't install
+(feedback_workflow); `sips` can crop/resize but can't DRAW. `pngjs` IS in
+`node_modules`. Run the node script from the REPO ROOT or `require` an ABSOLUTE
+path (`require('/…/TrainingLog/node_modules/pngjs')`) — a relative require from
+the scratchpad fails `MODULE_NOT_FOUND`. Read pixels with `PNG.sync.read`, mutate
+`png.data` (RGBA, `i=(width*y+x)*4`), write with `PNG.sync.write`.
+- **Red box round a control** (e.g. the set-number label → "tap to cycle 正式/熱身/遞減"):
+  draw a rectangle border (thickness ~7px, red `(255,45,45)`) at the control's px
+  bounds; `Read` the result to confirm it frames the right element. Made
+  `gestures/set-label-cycle{,-template}.png` this way onto the existing `sets.png`.
+- **Crop out a stray banner** (e.g. a leftover「Smoke note 0626」test note in a
+  set-logger shot): FIRST sample the banner's exact colour (`sets.png` note cream =
+  `(254,243,199)`, card bg `(28,28,30)`), detect the row-band where that colour
+  dominates (>30% of the width), then VERTICAL-SPLICE those rows out (copy rows
+  above + below into a shorter `PNG`) so content collapses with no gap — cleaner
+  than painting (a paint leaves a dark hole). Then **recompute every `aspectRatio`
+  that referenced the old height** (563→459, 735→601 here) and re-derive any
+  red-box shot from the CLEANED base.
+
 **Set-row gesture cards (左滑/右滑/長按) — capture recipe (validated 2026-07-01):**
 - **Reach a real set row**: start/open a session → expand an exercise card (tap it)
   → the `SwipeableSetRow`s appear (`1  20 kg × 8  ○`). Get the row's pt-Y from

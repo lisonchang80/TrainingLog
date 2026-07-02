@@ -23,6 +23,19 @@ the set logger → lb entry stored raw as kg, then history ×2.2'd it back.
 - `unit` = `UnitPreference` (`'kg' | 'lb'`) from `@/src/domain/body/types`; read via
   `getUnitPreference(db)` (`settingsRepository`), set via `setUnitPreference`.
 
+**2026-07-02 — app-wide `UnitProvider` / `useUnit()` (`src/unit/UnitContext.tsx`).**
+Unit is now a reactive context (mirrors `useAppMode` / `useTheme`, SQLite-backed,
+mounted in `app/_layout.tsx` inside DatabaseProvider). Replaced the old "every
+screen re-reads `getUnitPreference` into local `useState` on focus" model that
+silently froze surfaces which forgot to re-read (template editor was kg-only;
+session-detail read on mount only). **New unit surfaces should `const { unit } = useUnit()`** instead of a local read. Adopted: Settings (writes via `setUnit`
+— persists + re-renders all), `app/session/[id].tsx`, and the template editor
+(main component + `ExerciseBody` each call `useUnit()`, threading `unit` into all
+4 `SetRowContent` sites — this REVERSED the deliberate kg-only design per user
+request). Still on the focus-read model (Today `index.tsx`, `body.tsx`,
+exercise-history/chart) — consistent because they read the same DB row the context
+persists to; migrating them to `useUnit()` is the clean follow-up.
+
 ## Every surface (must thread `unit` to ALL of them)
 
 ### Shared leaf
