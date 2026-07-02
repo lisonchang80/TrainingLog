@@ -89,6 +89,14 @@ struct PickerRootView: View {
     /// the id is otherwise stable → no loop.
     @State private var listResetToken = 0
 
+    /// ADR-0030 — Watch 首啟引導. `pickerGuideSeen` gates the Part A
+    /// (picker intro) auto-present: false ⇒ show once on first appear, then
+    /// pin true. `guide` drives the full-screen carousel cover — set to
+    /// `.pickerIntro` by the first-appear trigger, or `.full` by the ⓘ
+    /// re-run button (which replays A + B as one review).
+    @AppStorage(WatchOnboardingKey.pickerSeen) private var pickerGuideSeen = false
+    @State private var guide: WatchGuideMode?
+
     /// Inject a view model. Default to .mockDefault() for production
     /// preview in Phase 1; Phase 2 caller passes a VM bound to the
     /// WatchConnectivityCoordinator.
@@ -121,6 +129,18 @@ struct PickerRootView: View {
             .navigationTitle("選擇訓練")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // ADR-0030 — ⓘ re-run guide. Placed top-LEADING (the root has
+                // no back button) so it doesn't crowd the 🔄 in the top-trailing
+                // corner. Replays the FULL guide (A + B) — the in-session ⚙
+                // settings sheet can't host a re-run entry.
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        guide = .full
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityLabel("重新查看教學")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     refreshButton
                 }
@@ -131,6 +151,15 @@ struct PickerRootView: View {
             .onAppear {
                 // Reset stale drill-down state on cold root present.
                 vm.resetSelection()
+                // ADR-0030 — auto-present Part A once on first picker appear.
+                // Guarded so a first-launch that ALSO receives an iPhone cast
+                // (which pushes straight to the set logger) doesn't flash the
+                // intro over the pushed session: only fire at the bare root
+                // (empty path) with no cast pending.
+                if !pickerGuideSeen, guide == nil,
+                   path.isEmpty, coordinator.pendingCast == nil {
+                    guide = .pickerIntro
+                }
             }
             .task {
                 // Fire the cold-launch handshake once per VM lifetime.
@@ -179,6 +208,20 @@ struct PickerRootView: View {
                 Button("保留目前", role: .cancel) { castConflict = nil }
             } message: { _ in
                 Text("iPhone 要把另一個訓練投影到手錶，切換會離開目前手錶上的訓練。")
+            }
+        }
+        // ADR-0030 — Watch 首啟引導 carousel. Presented over the whole
+        // NavigationStack so it covers the toolbar too. `.pickerIntro` (first
+        // appear) + `.full` (ⓘ re-run) both pin `pickerGuideSeen` on dismiss.
+        .fullScreenCover(item: $guide) { mode in
+            WatchOnboardingView(cards: mode.cards) {
+                switch mode {
+                case .pickerIntro, .full:
+                    pickerGuideSeen = true
+                case .gestures:
+                    break
+                }
+                guide = nil
             }
         }
     }

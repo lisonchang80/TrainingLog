@@ -98,6 +98,15 @@ struct SetLoggerView: View {
     /// Spec: ADR-0019 § D16 View 1 (line 2238-2252).
     @State private var showSettings: Bool = false
 
+    /// ADR-0030 — Watch 手勢導覽 (Part B). Auto-presented once the FIRST time
+    /// any set logger mounts (Watch-led OR iPhone cast). `gesturesGuideSeen`
+    /// pins the seen-once flag; `showGesturesGuide` drives the cover;
+    /// `gesturesGuideTriggered` guards against a re-fire on re-appear within
+    /// the same mount (e.g. returning from the ⚙ settings sheet).
+    @AppStorage(WatchOnboardingKey.gesturesSeen) private var gesturesGuideSeen = false
+    @State private var showGesturesGuide = false
+    @State private var gesturesGuideTriggered = false
+
     /// 2026-05-29 deep-night smoke fix (Bug 3 + Bug 4 wire):
     ///   - Bug 3 — subscribe `coordinator.$lastIncomingEnd`; when iPhone
     ///     initiates session end the coordinator publishes the sessionId
@@ -370,6 +379,21 @@ struct SetLoggerView: View {
             }
             .sheet(isPresented: $showSettings) {
                 WatchSettingsView()
+            }
+            // ADR-0030 — Part B gesture guide, auto-shown once on the first
+            // set logger mount. Fires from `.onAppear` (guarded by the
+            // seen-once flag + a per-mount latch); dismissal pins the flag.
+            .fullScreenCover(isPresented: $showGesturesGuide) {
+                WatchOnboardingView(cards: WatchOnboardingCard.partB) {
+                    gesturesGuideSeen = true
+                    showGesturesGuide = false
+                }
+            }
+            .onAppear {
+                if !gesturesGuideSeen, !gesturesGuideTriggered {
+                    gesturesGuideTriggered = true
+                    showGesturesGuide = true
+                }
             }
             // 2026-05-29 deep-night smoke fix (Bug 3):
             // iPhone-initiated end-session arrives at the coordinator via
