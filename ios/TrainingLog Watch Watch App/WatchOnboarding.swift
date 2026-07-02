@@ -144,6 +144,7 @@ private struct WatchOnboardingCardView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.small)   // shrink the tall default pill → more room for content
             .tint(.blue)
         }
         .multilineTextAlignment(.center)
@@ -170,7 +171,7 @@ private struct WatchOnboardingCardView: View {
     private var content: some View {
         switch card {
         case .aWelcome:
-            Text("💪").font(.system(size: 40))
+            Text("💪").font(.system(size: 34))
             Text("TrainingLog 手錶版").font(.headline)
             Text("在手腕上記錄每一組")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -199,9 +200,8 @@ private struct WatchOnboardingCardView: View {
 
         case .bSwipe:
             title("滑整列 ＝ 加 / 刪")
-            keyLine("→ 右滑", "＋ 加一組")
-            keyLine("← 左滑", "🗑 刪這組")
-            hint("先點成綠框，再滑")
+            swipeVisual(symbol: "plus", color: .green, onLeading: true, label: "右滑：加一組")
+            swipeVisual(symbol: "trash.fill", color: .red, onLeading: false, label: "左滑：刪這組")
 
         case .bLongPress:
             title("長按 → 橘框")
@@ -267,6 +267,42 @@ private struct WatchOnboardingCardView: View {
                 .stroke(border, lineWidth: 2)
         )
         .padding(.horizontal, 6)
+    }
+
+    /// A mini set-row with a coloured action chip revealed on one edge (green ＋
+    /// on the leading edge for 右滑 / red 🗑 on the trailing edge for 左滑) + a
+    /// caption below. Mirrors the real InteractiveSetRow swipe-to-reveal.
+    private func swipeVisual(symbol: String, color: Color, onLeading: Bool, label: String) -> some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 4) {
+                if onLeading { actionChip(symbol, color) }
+                HStack(spacing: 4) {
+                    Text("1").foregroundStyle(.secondary)
+                    Text("胸推")
+                    Spacer(minLength: 3)
+                    Text("80")
+                    Text("8")
+                }
+                .font(.caption2)
+                .lineLimit(1)   // keep on one line — never wrap 胸→推 on a narrow face
+                .padding(.vertical, 3)
+                .padding(.horizontal, 6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.22)))
+                if !onLeading { actionChip(symbol, color) }
+            }
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func actionChip(_ symbol: String, _ color: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.caption2)
+            .frame(width: 24, height: 26)
+            .background(RoundedRectangle(cornerRadius: 6).fill(color))
+            .foregroundStyle(.white)
     }
 
     /// 完成 ◀ 記錄 ▶ 音樂 three-page layout.

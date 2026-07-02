@@ -383,9 +383,12 @@ struct SetLoggerView: View {
             // ADR-0030 — Part B gesture guide, auto-shown once on the first
             // set logger mount. Fires from `.onAppear` (guarded by the
             // seen-once flag + a per-mount latch); dismissal pins the flag.
-            .fullScreenCover(isPresented: $showGesturesGuide) {
+            .fullScreenCover(isPresented: $showGesturesGuide, onDismiss: {
+                // Mark seen on ANY dismissal (last-card CTA or the watchOS ✕),
+                // so the gesture guide won't re-nag on the next session.
+                gesturesGuideSeen = true
+            }) {
                 WatchOnboardingView(cards: WatchOnboardingCard.partB) {
-                    gesturesGuideSeen = true
                     showGesturesGuide = false
                 }
             }

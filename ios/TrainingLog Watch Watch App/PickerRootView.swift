@@ -213,14 +213,13 @@ struct PickerRootView: View {
         // ADR-0030 — Watch 首啟引導 carousel. Presented over the whole
         // NavigationStack so it covers the toolbar too. `.pickerIntro` (first
         // appear) + `.full` (ⓘ re-run) both pin `pickerGuideSeen` on dismiss.
-        .fullScreenCover(item: $guide) { mode in
+        .fullScreenCover(item: $guide, onDismiss: {
+            // Any dismissal — completing the last card OR the watchOS ✕ escape —
+            // marks the picker guide seen so it won't auto-nag next launch.
+            // (A `.full` re-run just re-sets the already-true flag, harmless.)
+            pickerGuideSeen = true
+        }) { mode in
             WatchOnboardingView(cards: mode.cards) {
-                switch mode {
-                case .pickerIntro, .full:
-                    pickerGuideSeen = true
-                case .gestures:
-                    break
-                }
                 guide = nil
             }
         }
