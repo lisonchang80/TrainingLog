@@ -189,6 +189,16 @@ export interface Stage1TemplateExercise {
   /** Omitted when the source template_exercise leaves weight open (same F5 rule). */
   defaultWeightKg?: number;
   /**
+   * Per-exercise rest seconds (`template_exercise.rest_seconds`). The Watch's
+   * `buildSnapshotFromFatTree` denormalises this onto every built
+   * `SessionSnapshotSet.restSec`, so a Watch-LED session's rest timer uses the
+   * template's configured rest. Was MISSING from the Stage1 wire (2026-07-03
+   * fix): a Watch-started session always fell back to 60s, so an iPhone
+   * template rest-seconds edit never reached the Watch. Omitted when NULL
+   * (same F5 wire-null rule as the defaults above → Swift decode nil → 60).
+   */
+  restSec?: number;
+  /**
    * 2026-05-29 SetLogger sets[] fix — per-row `template_set` projection
    * ordered by `position ASC`. Empty array when the template_exercise
    * has no template_set rows (rare — v009 migration backfilled all
@@ -876,13 +886,15 @@ async function loadTemplateExerciseTree(
     default_sets: number;
     default_reps: number | null;
     default_weight_kg: number | null;
+    rest_seconds: number | null;
     parent_id: string | null;
     reusable_superset_id: string | null;
   };
   const rows = await db.getAllAsync<Row>(
     `SELECT te.id, te.exercise_id, e.name AS exercise_name,
             te.ordering, te.default_sets, te.default_reps,
-            te.default_weight_kg, te.parent_id, te.reusable_superset_id
+            te.default_weight_kg, te.rest_seconds,
+            te.parent_id, te.reusable_superset_id
        FROM template_exercise te
        LEFT JOIN exercise e ON e.id = te.exercise_id
       WHERE te.template_id = ?
@@ -959,6 +971,9 @@ async function loadTemplateExerciseTree(
     // the reply-null regression scan in handshake.test.ts.
     if (r.default_reps != null) ex.defaultReps = r.default_reps;
     if (r.default_weight_kg != null) ex.defaultWeightKg = r.default_weight_kg;
+    // Per-exercise rest seconds → travels so a Watch-LED session's rest timer
+    // uses the template's rest (F5 wire-null rule: omit when NULL → Swift nil).
+    if (r.rest_seconds != null) ex.restSec = r.rest_seconds;
     // D15 superset card — carry cluster linkage so the Watch can fold an
     // adjacent same-RS pair into a superset card when it builds the local
     // SessionSnapshot. Verbatim copy (foreign id → no remap).

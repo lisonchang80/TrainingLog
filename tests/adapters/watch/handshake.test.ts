@@ -655,6 +655,39 @@ describe('WC handshake — impure helpers (in-memory SQLite)', () => {
       expect(list[0].exercises[1].sets).toEqual([]);
     });
 
+    it('carries per-exercise restSec from template_exercise.rest_seconds (2026-07-03 — Watch-led rest timer)', async () => {
+      const now = 1_700_000_000_000;
+      await db.runAsync(
+        `INSERT INTO template (id, name, created_at, updated_at, program_id, sub_tag)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+        'tpl-rest',
+        'Rest Template',
+        now,
+        now,
+      );
+      // te-rest carries an explicit rest_seconds; te-norest leaves it NULL.
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, rest_seconds)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'te-rest', 'tpl-rest', BENCH, 1, 3, 8, 60, 120,
+      );
+      await db.runAsync(
+        `INSERT INTO template_exercise
+           (id, template_id, exercise_id, ordering, default_sets, default_reps,
+            default_weight_kg, rest_seconds)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+        'te-norest', 'tpl-rest', BENCH, 2, 3, 8, 60,
+      );
+      const list = await loadTemplatesFullTree(db);
+      const tpl = list.find((t) => t.templateId === 'tpl-rest')!;
+      // Explicit rest_seconds travels as restSec.
+      expect(tpl.exercises[0].restSec).toBe(120);
+      // NULL rest_seconds → key OMITTED per the F5 wire-null rule (Swift nil → 60).
+      expect(tpl.exercises[1].restSec).toBeUndefined();
+    });
+
     // D15 superset card — the fat tree must carry the cluster linkage
     // (reusable_superset_id + parent_id) so the Watch can fold an adjacent
     // same-RS pair into one superset card when it builds the local

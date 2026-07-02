@@ -99,6 +99,10 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
     let defaultReps: Int?
     /// May be null when the source template_exercise leaves weight open.
     let defaultWeightKg: Double?
+    /// Per-exercise rest seconds (`template_exercise.rest_seconds`), 2026-07-03.
+    /// Tolerant decode: missing key → nil. `buildSnapshotFromFatTree` denormalises
+    /// it onto every `SessionSnapshotSet.restSec` (nil → rest timer's 60s default).
+    let restSec: Int?
     /// 2026-05-29 SetLogger sets[] fix — per-row `template_set`
     /// projection ordered by `position ASC`. Decoded as `[]` on
     /// older iPhone payloads that don't include the field (tolerant
@@ -121,6 +125,7 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         case defaultSets
         case defaultReps
         case defaultWeightKg
+        case restSec
         case sets
         case parentId
         case reusableSupersetId
@@ -135,6 +140,7 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         self.defaultSets = try c.decode(Int.self, forKey: .defaultSets)
         self.defaultReps = try? c.decode(Int.self, forKey: .defaultReps)
         self.defaultWeightKg = try? c.decode(Double.self, forKey: .defaultWeightKg)
+        self.restSec = try? c.decode(Int.self, forKey: .restSec)
         // Tolerant: missing key → [] for back-compat with pre-fix wire.
         self.sets = (try? c.decode([Stage1TemplateSetDTO].self, forKey: .sets)) ?? []
         // Tolerant: missing key → nil (older payloads / solo rows).
@@ -150,6 +156,7 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         defaultSets: Int,
         defaultReps: Int?,
         defaultWeightKg: Double?,
+        restSec: Int? = nil,
         sets: [Stage1TemplateSetDTO] = [],
         parentId: String? = nil,
         reusableSupersetId: String? = nil
@@ -161,6 +168,7 @@ struct Stage1TemplateExerciseDTO: Codable, Equatable, Hashable {
         self.defaultSets = defaultSets
         self.defaultReps = defaultReps
         self.defaultWeightKg = defaultWeightKg
+        self.restSec = restSec
         self.sets = sets
         self.parentId = parentId
         self.reusableSupersetId = reusableSupersetId

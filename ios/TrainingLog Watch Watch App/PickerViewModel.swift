@@ -573,7 +573,10 @@ final class PickerViewModel: ObservableObject {
                         weight: s.weightKg,
                         reps: s.reps,
                         rpe: nil,
-                        restSec: nil,
+                        // Per-exercise rest (2026-07-03) — denormalised onto every
+                        // set so a Watch-LED session's rest timer uses the template's
+                        // rest_seconds (nil → the timer's 60s default).
+                        restSec: ex.restSec,
                         notes: nil,
                         setKind: s.setKind,
                         isLogged: false
@@ -591,7 +594,10 @@ final class PickerViewModel: ObservableObject {
                         weight: ex.defaultWeightKg,
                         reps: ex.defaultReps,
                         rpe: nil,
-                        restSec: nil,
+                        // Per-exercise rest (2026-07-03) — denormalised onto every
+                        // set so a Watch-LED session's rest timer uses the template's
+                        // rest_seconds (nil → the timer's 60s default).
+                        restSec: ex.restSec,
                         notes: nil,
                         setKind: "working",
                         isLogged: false
