@@ -106,6 +106,51 @@ set rows on the sim** — only the real device (or a SwiftUI `#Preview` with
 guide/mock must look "跟實際一樣", faithfully re-draw from source (read
 `ExerciseCard.swift` / `CellBox.swift`) rather than trying to capture it.
 
+## …UNLESS you inject a mock snapshot via a temp `@main` harness (2026-07-03)
+
+The "empty session" limit above is beatable when you need to screenshot a
+POPULATED set logger + drive its interactions (e.g. verifying the rest-timer
+popup fires on ✓). Temporarily point the app entry at a mock set logger:
+
+```swift
+// TrainingLog_WatchApp.swift — TEMP, revert to ContentView() after verify
+WindowGroup { RestTimerSimHarness() }
+
+private struct RestTimerSimHarness: View {
+    @StateObject private var hk: HealthKitController
+    @StateObject private var sc: SessionController
+    @StateObject private var wc: WatchConnectivityCoordinator
+    init() {
+        let h = HealthKitController(); let s = SessionController(healthKit: h)
+        _hk = .init(wrappedValue: h); _sc = .init(wrappedValue: s)
+        _wc = .init(wrappedValue: WatchConnectivityCoordinator(sessionController: s))
+    }
+    var body: some View {
+        NavigationStack { SetLoggerView(snapshot: SetLoggerMockData.mockSnapshot()) }
+            .environmentObject(wc).environmentObject(sc)   // ← REQUIRED
+    }
+}
+```
+
+⚠️ **Trap**: `SetLoggerView` declares `@EnvironmentObject coordinator` +
+`@EnvironmentObject sessionController`. Launching it BARE (just
+`SetLoggerView(snapshot:)`) crashes on first render — `EXC_BREAKPOINT` in
+`EnvironmentObject.error()` (grep the `.ips` in `~/Library/Logs/DiagnosticReports`,
+frame = `SetLoggerView.body.getter`). The harness must `.environmentObject(...)`
+BOTH, mirroring `ContentView`'s init. Then `SetLoggerMockData.mockSnapshot()`
+gives real 深蹲/臥推 cards with `restSec` 120/90 sets you can ✓-tap.
+`idb ui tap` a set-row's ◯ (right edge) → the ✓ logs + fires downstream UI.
+**REVERT the `@main` entry to `ContentView()` before committing.**
+
+## watchOS haptic: two `play()` closer than ~0.5s MERGE into one buzz
+
+`WKInterfaceDevice.current().play(type)` fired twice ~0.22s apart reads as a
+SINGLE buzz on the real wrist (device smoke 2026-07-03: user「感覺只有震一下」)
+— watchOS coalesces closely-spaced haptics, and `.notification` is itself a
+multi-pulse pattern that blurs. For a DISTINCT「buzz — buzz」double, gap the two
+plays **≥0.5s** and extend any auto-dismiss so both land while the view is up.
+Sim / `xcodebuild` can't verify haptics at all → device-smoke-only.
+
 ## Loop summary
 1. `xcodebuild ... -scheme WatchPreview ... build` → grep for `BUILD SUCCEEDED`.
 2. `simctl uninstall` (if resetting flags) → `install` → `launch`.
