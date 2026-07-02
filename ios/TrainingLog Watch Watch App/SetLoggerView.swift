@@ -366,6 +366,20 @@ struct SetLoggerView: View {
                 // not peek over it. Crown mode hides it too (harmless — you don't
                 // reach for settings mid-edit).
                 if interactionState.activeCell == nil && selectedPage == 1 {
+                    // ADR-0030 — ⓘ re-run the gesture guide (Part B) from inside
+                    // 開始訓練. Top-LEADING (no back button here) so it doesn't
+                    // crowd the ⚙ top-trailing. Reuses `showGesturesGuide` + the
+                    // Part B cover; lets the user re-review the set gestures any
+                    // time (the auto-show only fires once).
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showGesturesGuide = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .font(.body)
+                        }
+                        .accessibilityLabel("重新查看手勢說明")
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showSettings = true
