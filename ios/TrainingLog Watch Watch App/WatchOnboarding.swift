@@ -128,9 +128,9 @@ private struct WatchOnboardingCardView: View {
     let onNext: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 2) {
             // Content scrolls (crown) so multi-line copy never gets clipped on
-            // the smallest 40mm face; the CTA stays pinned below it.
+            // the smallest 40mm face; the CTA hugs the bottom below it.
             ScrollView {
                 VStack(spacing: 6) {
                     content
@@ -140,16 +140,16 @@ private struct WatchOnboardingCardView: View {
             }
             Button(action: onNext) {
                 Text(ctaLabel)
-                    .font(.footnote.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.small)   // shrink the tall default pill → more room for content
+            .controlSize(.mini)   // smallest pill; sits low so content gets the room
             .tint(.blue)
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 6)
-        .padding(.bottom, 2)
+        .padding(.bottom, 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -194,9 +194,9 @@ private struct WatchOnboardingCardView: View {
 
         case .bLogEdit:
             title("綠框狀態下…")
-            keyLine("點圓圈", "◯ → ✓ 記錄這組")
-            keyLine("點 80 或 8", "跳鍵盤改數字")
-            hint("沒選取時，點整列不會編輯")
+            mockRow(border: .green)
+            keyLine("點圓圈", "◯ → ✓ 記錄")
+            keyLine("點 80 / 8", "跳鍵盤改值")
 
         case .bSwipe:
             title("滑整列 ＝ 加 / 刪")
