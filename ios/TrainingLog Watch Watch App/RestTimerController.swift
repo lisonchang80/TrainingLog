@@ -135,6 +135,8 @@ final class RestTimerController: ObservableObject {
     }
 
     /// Finish haptic respects the `hapticStrength` setting (「震動即可」— no sound).
+    /// Fires TWICE (double buzz, ~0.22s apart) so the rest-done haptic is
+    /// distinguishable from every other single-haptic feedback in the app.
     private func fireFinishHaptic() {
         let raw = UserDefaults.standard.string(forKey: WatchSettingsKey.hapticStrength)
             ?? WatchSettingsDefault.hapticStrength
@@ -144,6 +146,14 @@ final class RestTimerController: ObservableObject {
         case .medium: type = .notification
         case .heavy: type = .success
         }
-        WKInterfaceDevice.current().play(type)
+        // Double buzz — second play off `self`-free locals so it still lands
+        // even after the 0.4s auto-dismiss unmounts the popup. The 0.22s gap
+        // reads as a distinct "buzz-buzz" (well inside the 0.4s dismiss window).
+        let device = WKInterfaceDevice.current()
+        device.play(type)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            device.play(type)
+        }
     }
 }
