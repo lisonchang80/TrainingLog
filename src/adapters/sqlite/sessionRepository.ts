@@ -308,6 +308,18 @@ export async function isTemplateLinkedToActiveSession(
   return row != null;
 }
 
+/**
+ * Cheap「has the user created ANY session?」probe (ADR-0029 onboarding gate).
+ * `SELECT 1 ... LIMIT 1` — no row mapping, no full scan. A `true` result means
+ * this DB is not a fresh install (existing/restored user) → skip onboarding.
+ */
+export async function hasAnySession(db: Database): Promise<boolean> {
+  const row = await db.getFirstAsync<{ one: number }>(
+    `SELECT 1 AS one FROM session LIMIT 1`
+  );
+  return row != null;
+}
+
 /** All sessions, newest first. Used by the History tab list. */
 export async function listSessions(db: Database): Promise<Session[]> {
   const rows = await db.getAllAsync<SessionRow>(

@@ -44,6 +44,13 @@ const APP_MODE_KEY = 'app_mode';
  */
 const HK_AUTHORIZATION_REQUESTED_KEY = 'hk_authorization_requested';
 
+/**
+ * ADR-0029 — has the new-user onboarding flow been completed (or skipped)?
+ * Written ONLY on onboarding finish/skip; a fresh install (no row) reads
+ * `false` and shows the wizard. See OnboardingProvider for the trigger logic.
+ */
+const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
+
 export async function getSetting<T>(
   db: Database,
   key: string
@@ -176,6 +183,25 @@ export async function setHKAuthorizationRequested(
   requested: boolean
 ): Promise<void> {
   await setSetting<number>(db, HK_AUTHORIZATION_REQUESTED_KEY, requested ? 1 : 0);
+}
+
+/**
+ * ADR-0029 — has the new-user onboarding wizard been completed or skipped?
+ * `false` (default / no row) → OnboardingProvider shows the wizard on a fresh
+ * install. Written `true` only on finish/skip (and back-filled `true` for
+ * existing/restored DBs that already have data — see the provider's one-time
+ * "has any session?" bypass). Stored as 0/1 like the other boolean settings.
+ */
+export async function getOnboardingCompleted(db: Database): Promise<boolean> {
+  const v = await getSetting<number | boolean>(db, ONBOARDING_COMPLETED_KEY);
+  return v === 1 || v === true;
+}
+
+export async function setOnboardingCompleted(
+  db: Database,
+  completed: boolean
+): Promise<void> {
+  await setSetting<number>(db, ONBOARDING_COMPLETED_KEY, completed ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

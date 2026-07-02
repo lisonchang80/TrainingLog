@@ -21,6 +21,8 @@ import { setLocale } from '@/src/i18n/strings';
 import { loadStoredLocale, resolveLocale } from '@/src/i18n/locale-persist';
 import { ThemeProvider, useTheme } from '@/src/theme';
 import { AppModeProvider } from '@/src/app-mode';
+import { OnboardingProvider } from '@/src/onboarding';
+import { OnboardingGate } from '@/components/onboarding/onboarding-gate';
 import { initWatchBridge } from '@/src/adapters/watch';
 import { wireRestoreDeps } from '@/src/services/restoreDepsWiring';
 
@@ -172,7 +174,13 @@ export default function RootLayout() {
             white-screening the app. Placed here at the provider-render root,
             well clear of the <Stack.Screen> nav-title block below. */}
         <ErrorBoundary>
+        {/* ADR-0029 — OnboardingProvider (needs the open DB) decides whether a
+            fresh install sees the wizard; OnboardingGate renders it in place of
+            the Stack until finished/skipped. Inside ThemeProvider + AppModeProvider
+            so the wizard can theme itself and set the app mode. */}
+        <OnboardingProvider>
         <NavThemeBridge>
+          <OnboardingGate>
           {/* `key={locale}` — remount the whole navigator on language switch so
               every screen (and every Stack.Screen `title`) re-renders in the new
               locale immediately. See the `useLocale()` call at the top of
@@ -265,7 +273,9 @@ export default function RootLayout() {
             options={{ title: t('page', 'bodyMetrics') }}
           />
           </Stack>
+          </OnboardingGate>
         </NavThemeBridge>
+        </OnboardingProvider>
         </ErrorBoundary>
       </ThemeProvider>
       </AppModeProvider>
