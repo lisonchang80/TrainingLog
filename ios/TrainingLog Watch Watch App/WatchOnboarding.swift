@@ -155,7 +155,12 @@ private struct WatchOnboardingCardView: View {
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 6)
-        .padding(.bottom, 1)
+        // Negative bottom padding lets the card bottom (and the CTA pinned to it)
+        // drop into the TabView's page-indicator reserve band, seating the button
+        // lower/closer to the dots — while keeping the dots visible
+        // (user 2026-07-02「按鈕往下擺多一些」×2). Tuned to sit just above the dots
+        // without overlapping them.
+        .padding(.bottom, -20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -290,8 +295,8 @@ private struct WatchOnboardingCardView: View {
 /// set logger (per user 2026-07-02 "畫得跟實際一樣"). Verified against
 /// ExerciseCard.swift / CellBox.swift:
 ///   card   = RoundedRectangle(10).fill(secondary.opacity(0.15)), pad v6/h4
-///   header = 動作名(.headline) + `ellipsis.circle`(.secondary)
-///   bar    = height-3 segments, green(filled) / secondary.opacity(0.3)
+///   (header 動作名 + progress bar were dropped 2026-07-02 to give the caption
+///    below the card more room — only the interactive `row` is shown now.)
 ///   row    = [號碼 20 .caption] [CellBox 重量 52] [CellBox 次數 40] [✓ .body],
 ///            wrapped in a rounded-4 border: .green(selected) / .orange(reorder)
 ///   reveal = `plus.circle.fill`(.green) leading / `trash.fill`(.red) trailing
@@ -307,9 +312,12 @@ private struct RealCardMock: View {
     var numberHighlight: Bool = false
 
     var body: some View {
+        // Onboarding gesture cards show ONLY the set row — the exercise-name
+        // header (胸推) and the progress bar are dropped so the caption below the
+        // card gets more room (user 2026-07-02「把胸推與進度條都切掉」). None of the
+        // gesture lessons (green/orange border, ✓, number highlight, ＋/🗑 reveal)
+        // depend on the header or bar; `logged` still drives the row's ✓.
         VStack(alignment: .leading, spacing: 0) {
-            header
-            progressBar
             row
         }
         .padding(.vertical, 6)
@@ -317,31 +325,6 @@ private struct RealCardMock: View {
         .background(
             RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.15))
         )
-    }
-
-    private var header: some View {
-        HStack(spacing: 4) {
-            Text("胸推").font(.headline).lineLimit(1)
-            Spacer(minLength: 0)
-            Image(systemName: "ellipsis.circle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 3)
-    }
-
-    private var progressBar: some View {
-        HStack(spacing: 1) {
-            Rectangle()
-                .fill(logged ? Color.green : Color.secondary.opacity(0.3))
-                .frame(height: 3)
-            Rectangle()
-                .fill(Color.secondary.opacity(0.3))
-                .frame(height: 3)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 6)
     }
 
     private var borderColor: Color {
