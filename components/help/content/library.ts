@@ -54,7 +54,7 @@ export const libraryHelp: LocalizedPageHelp = {
       {
         targetId: 'library.sidebar',
         title: 'Categories',
-        body: 'The left column groups moves by muscle; tap a group to expand its sub-muscles. The「超級組」tab at the bottom switches to your supersets.',
+        body: 'The left column groups moves by muscle; tap a group to expand its sub-muscles. The “Supersets” tab at the bottom switches to your supersets.',
       },
       {
         targetId: 'library.equipment',

@@ -1434,7 +1434,7 @@ export const strings = {
       // ADR-0026 (slice 16) — App Mode section header + hint (plan / minimal).
       appModeSection: 'Training Mode',
       appModeHint:
-        'Minimal mode: see only template names — programs and intensities are hidden, and every workout starts as 通用 (default). Applies to iPhone and Apple Watch.',
+        'Minimal mode: see only template names — programs and intensities are hidden, and every workout starts as Default. Applies to iPhone and Apple Watch.',
       // Phase 5 — settings section headers + hints (sweep TODO(i18n))
       unitPreferenceSection: 'Unit Preference',
       unitPreferenceHint:
