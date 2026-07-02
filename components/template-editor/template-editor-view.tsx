@@ -64,6 +64,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useDatabase } from '@/components/database-provider';
 import { TemplateMetaSheet } from '@/components/session/template-meta-sheet';
+import { NumericKeypad } from '@/components/shared/numeric-keypad';
 import { ToastController, ToastHost } from '@/components/ui/Toast';
 import {
   CoachMarkProvider,
@@ -1851,14 +1852,14 @@ function TemplateEditorView() {
     setRestEditing({ ex_id: ex.id, draft: ex.rest_seconds ?? 90 });
   };
 
-  const saveRest = () => {
+  const saveRest = (value: number) => {
     if (!restEditing || !draft) return;
     setDraft({
       ...draft,
       exercises: draft.exercises.map((ex) =>
         ex.id !== restEditing.ex_id
           ? ex
-          : { ...ex, rest_seconds: restEditing.draft },
+          : { ...ex, rest_seconds: value },
       ),
     });
     setRestEditing(null);
@@ -3042,73 +3043,17 @@ function TemplateEditorView() {
           onConfirm={onSaveAsConfirm}
         />
 
-        <Modal
+        {/* 2026-07-03 — rest editing 改用與 in-session 同一顆共用數字鍵盤
+            (NumericKeypad)，取代舊的 −15/+15 stepper + number-pad TextInput
+            Modal。反白取代、[取消]/[完成] top bar 與訓練中一致。 */}
+        <NumericKeypad
           visible={restEditing != null}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setRestEditing(null)}>
-          <Pressable
-            style={styles.sheetBackdrop}
-            onPress={() => setRestEditing(null)}>
-            <Pressable style={styles.sheet}>
-              <View style={styles.sheetHeader}>
-                <Pressable onPress={() => setRestEditing(null)}>
-                  <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>
-                </Pressable>
-                <Text style={styles.sheetTitle}>{tt('page', 'restTime')}</Text>
-                <Pressable onPress={saveRest}>
-                  <Text style={styles.sheetDone}>{tt('common', 'done')}</Text>
-                </Pressable>
-              </View>
-              <View style={styles.restEditorRow}>
-                <Pressable
-                  onPress={() =>
-                    setRestEditing(
-                      restEditing
-                        ? {
-                            ...restEditing,
-                            draft: Math.max(0, restEditing.draft - 15),
-                          }
-                        : null,
-                    )
-                  }
-                  style={styles.restStepBtn}>
-                  <Text style={styles.restStepBtnText}>−15s</Text>
-                </Pressable>
-                <View style={styles.restValueWrap}>
-                  <TextInput
-                    value={String(restEditing?.draft ?? 0)}
-                    onChangeText={(t) => {
-                      const cleaned = t.replace(/[^0-9]/g, '');
-                      const parsed = cleaned === '' ? 0 : Number(cleaned);
-                      setRestEditing(
-                        restEditing ? { ...restEditing, draft: parsed } : null,
-                      );
-                    }}
-                    keyboardType="number-pad"
-                    selectTextOnFocus
-                    style={styles.restValueInput}
-                  />
-                  <Text style={styles.restValueUnit}>{tt('status', 'secondsUnit')}</Text>
-                </View>
-                <Pressable
-                  onPress={() =>
-                    setRestEditing(
-                      restEditing
-                        ? { ...restEditing, draft: restEditing.draft + 15 }
-                        : null,
-                    )
-                  }
-                  style={styles.restStepBtn}>
-                  <Text style={styles.restStepBtnText}>+15s</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.sheetFootnote}>
-                {tt('status', 'restTimeFootnote')}
-              </Text>
-            </Pressable>
-          </Pressable>
-        </Modal>
+          initialValue={restEditing?.draft ?? 90}
+          label={tt('page', 'restTime')}
+          mode="integer"
+          onConfirm={saveRest}
+          onCancel={() => setRestEditing(null)}
+        />
 
         {/* 2026-06-04 redesign — 儲存「完成儲存」/ 另存成功 toast host. */}
         <ToastHost controller={toastRef.current!} />
