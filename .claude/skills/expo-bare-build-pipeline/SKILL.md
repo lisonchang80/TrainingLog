@@ -170,6 +170,12 @@ LAN IP 必須與 iPhone 同網段（personal hotspot / same WiFi）。
 
 從 iPhone 上 reload：搖晃手機 → "Reload" or 殺 app 重開。
 
+**症狀變體 2 (validated 2026-07-03，一次 device smoke 卡 ~40 分鐘)**: `No script URL provided … unsanitizedScriptURLString = (null)` — **空位址**（不是 404、是 app 根本沒拿到 URL）。兩個獨立肇因，會疊加：
+- **`clean` 重裝清掉 app 記住的 Metro 伺服器**。平常 Reload JS 能連是因為 app 記得「上次連哪台」；`xcodebuild clean install` / 重裝一顆全新 app 會清掉那筆 → 首啟就 null。裝置上 RN dev build 在真機**無法自行推導 Mac 的 LAN IP**（`RCTBundleURLProvider` 沒 stored jsLocation 就 null），所以必須**手動指一次**伺服器（之後又會記住，恢復正常 Reload 流程）。
+- **`xcrun devicectl device process launch` 會繞過 expo-dev-client 的 dev-launcher** → 直接進 RCTBridge、跳過「選伺服器」流程 → null。**修法：不要用 devicectl 啟動 dev build，叫使用者「手指點桌面圖示」開**（走 dev-launcher 正常連線；實測同一台機、devicectl launch=null、手點圖示=連上）。
+- 手動指伺服器的可靠管道（擇一）：dev-launcher 首頁「Enter URL manually」輸 `http://<lan-ip>:8081`；或 `expo start --dev-client` 顯示的 QR 用相機掃（QR 內含完整 URL、穿熱點、不靠區網自動偵測）。
+- ⚠️ `expo run:ios --device <udid>` 會 bake URL + 自動連（最省事），但**它最後「開啟」那步在有 Watch target 的專案會 ENOENT crash**（`getLaunchInfoForBinaryAsync` 去 `Debug-watchos/…Info.plist` 找、但 Watch app 內嵌在 `Debug-iphoneos/TrainingLog.app/Watch/`）——**BUILD + INSTALL 其實成功了**（app 已配置好自動連、CFBundleVersion 有 bump），只是它沒幫你開；手點圖示即連上。別被那個 crash 誤導以為沒裝成。
+
 **Gotcha #4.5 — Metro 必須在 native build 對應的 repo 路徑跑** (validated 2026-05-29 / PR #51 smoke)
 
 **症狀**: 上面 npx expo start 跑了、Metro return 200、app launch 卻紅屏 `Unable to resolve module ./TrainingLog/node_modules/expo-router/entry from /Users/.../<worktree>/.`、然後 list 一串 .ios.ts .ts .tsx .native.tsx ... 都找不到。
