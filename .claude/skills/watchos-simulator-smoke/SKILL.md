@@ -142,14 +142,29 @@ gives real 深蹲/臥推 cards with `restSec` 120/90 sets you can ✓-tap.
 `idb ui tap` a set-row's ◯ (right edge) → the ✓ logs + fires downstream UI.
 **REVERT the `@main` entry to `ContentView()` before committing.**
 
-## watchOS haptic: two `play()` closer than ~0.5s MERGE into one buzz
+## watchOS haptic: closely-spaced `play()` MERGE — a DOUBLE isn't enough, use ≥3
 
 `WKInterfaceDevice.current().play(type)` fired twice ~0.22s apart reads as a
 SINGLE buzz on the real wrist (device smoke 2026-07-03: user「感覺只有震一下」)
-— watchOS coalesces closely-spaced haptics, and `.notification` is itself a
-multi-pulse pattern that blurs. For a DISTINCT「buzz — buzz」double, gap the two
-plays **≥0.5s** and extend any auto-dismiss so both land while the view is up.
-Sim / `xcodebuild` can't verify haptics at all → device-smoke-only.
+— watchOS coalesces closely-spaced haptics, and `.notification` / `.success`
+are themselves multi-pulse patterns ~0.5s long that blur together.
+
+**Escalation ladder (device-validated, don't restart from the bottom):**
+- 0.22s double → felt as ONE (2026-07-03).
+- **0.5s double → STILL felt as ONE** (2026-07-04). A wider gap on a 2-pulse
+  count is NOT enough — the two multi-pulse patterns still smear.
+- **3 pulses at 0.6s → felt as ~TWO, user-accepted** (2026-07-04). Three
+  crossings the 「不只一下」threshold reliably; 0.6s exceeds the pattern's own
+  ~0.5s duration so there's real silence between plays.
+
+So for a rest-done / attention haptic that must read as「不只一下」: fire **≥3
+times at ≥0.6s spacing** (fire off `self`-free `let device`/`type` locals so
+they land even after the view auto-dismisses; extend the auto-dismiss so all
+pulses land while the view is up). Sim / `xcodebuild` can't verify haptics at
+all → device-smoke-only. Next lever if 3×0.6s ever proves insufficient: a
+distinct-pattern type (`.retry` = 3 discrete taps, `.failure` = long strong)
+rather than N copies of the same coalescing type; and check for HKWorkoutSession
+haptic throttling during an active workout.
 
 ## Loop summary
 1. `xcodebuild ... -scheme WatchPreview ... build` → grep for `BUILD SUCCEEDED`.
