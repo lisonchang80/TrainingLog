@@ -127,18 +127,18 @@ final class RestTimerController: ObservableObject {
         tick?.invalidate()
         tick = nil
         fireFinishHaptic()
-        // Flash so the user registers 00:00, then auto-dismiss. 0.9s (was
-        // 0.4s) so BOTH double-buzz plays (0s + 0.5s) land while the popup is
-        // still up — see fireFinishHaptic.
+        // Flash so the user registers 00:00, then auto-dismiss. 1.4s so ALL
+        // THREE finish buzzes (0s / 0.6s / 1.2s) land while the popup is still
+        // up — see fireFinishHaptic.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
             if self.finished { self.skip() }
         }
     }
 
     /// Finish haptic respects the `hapticStrength` setting (「震動即可」— no sound).
-    /// Fires TWICE (double buzz, ~0.22s apart) so the rest-done haptic is
-    /// distinguishable from every other single-haptic feedback in the app.
+    /// Fires THREE times so the rest-done haptic is unmistakably distinguishable
+    /// from every other single-haptic feedback in the app.
     private func fireFinishHaptic() {
         let raw = UserDefaults.standard.string(forKey: WatchSettingsKey.hapticStrength)
             ?? WatchSettingsDefault.hapticStrength
@@ -148,18 +148,24 @@ final class RestTimerController: ObservableObject {
         case .medium: type = .notification
         case .heavy: type = .success
         }
-        // Double buzz — second play off `self`-free locals so it still lands
-        // even after the auto-dismiss unmounts the popup. 0.5s gap: a 0.22s gap
-        // read as a SINGLE buzz on-wrist (device smoke 2026-07-03) because
-        // watchOS coalesces closely-spaced haptics (esp. the multi-pulse
-        // `.notification`); 0.5s clearly separates them into "buzz — buzz".
-        // The finish auto-dismiss (checkFinish) waits 0.9s so both land while
-        // the popup is still up.
+        // TRIPLE buzz at 0.6s spacing. Device smoke history: 0.22s read as a
+        // SINGLE buzz, and even 0.5s (a DOUBLE) still felt like one on-wrist
+        // (2026-07-03「只有震一下」). Root cause: watchOS coalesces closely-spaced
+        // haptics AND the strength-mapped types are themselves multi-pulse
+        // patterns ~0.5s long (`.notification` / `.success`), so two blur into
+        // one continuous buzz. 0.6s exceeds the pattern's own duration → a clear
+        // gap between pulses, and THREE makes "more than one" unmistakable even
+        // if one pair still partially overlaps. Fired off `self`-free locals so
+        // every pulse lands even after the popup auto-dismisses. `checkFinish`
+        // holds the popup 1.4s so all three land while it's up.
         let device = WKInterfaceDevice.current()
         device.play(type)
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            device.play(type)
+        for i in 1...2 {
+            let delayNanos = UInt64(i) * 600_000_000
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: delayNanos)
+                device.play(type)
+            }
         }
     }
 }
