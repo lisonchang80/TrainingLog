@@ -164,6 +164,24 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
     }
     if (!Array.isArray(sets)) return null;
 
+    // item 1 (2026-07-03) — EXERCISE-level `rest_sec` reverse-sync. A Watch ⋯
+    // menu「休息秒數」edit rides the forward snapshot's camelCase `restSec` (see
+    // LiveMirrorProducer.project). It is omit-null like the set nullables (Swift
+    // JSONEncoder drops nil → the key arrives ABSENT), so absent → undefined and
+    // `replaceLiveMirror`'s `!= null` guard skips the write (an older Watch build
+    // never NULL-clobbers). A PRESENT-but-malformed value fails closed (whole tick
+    // dropped → self-heals next snapshot). MUST be carried through here: before
+    // this fix the parser stripped it, so `ex.restSec` was always undefined at the
+    // reconcile and the Watch→iPhone rest edit never landed (device-bug ①).
+    const restSec = rawEx.restSec;
+    if (
+      restSec !== undefined &&
+      restSec !== null &&
+      (typeof restSec !== 'number' || !Number.isFinite(restSec))
+    ) {
+      return null;
+    }
+
     const parsedSets: SessionSnapshotSet[] = [];
     for (const rawSet of sets) {
       if (!isObject(rawSet)) return null;
@@ -235,6 +253,10 @@ export function parseLiveMirrorSnapshot(ctx: unknown): SessionSnapshot | null {
       ordering,
       plannedSets,
       sets: parsedSets,
+      // item 1 — carry the per-exercise rest override through to the reconcile.
+      // Omitted when absent/null so the `restSec?: number` optional stays truly
+      // absent and the reconcile's `!= null` guard skips (no NULL-clobber).
+      ...(typeof restSec === 'number' ? { restSec } : {}),
     });
   }
 

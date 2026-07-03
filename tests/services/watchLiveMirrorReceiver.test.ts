@@ -202,6 +202,83 @@ describe('Slice 13d D32 — onLiveMirror orchestrator', () => {
     expect(setCount?.n).toBe(1);
   });
 
+  it('item 1 (device-bug ①) — a Watch restSec edit reaches session_exercise.rest_sec end-to-end', async () => {
+    // FULL forward path: parser (now carries exercise-level restSec) →
+    // replaceLiveMirror reconcile (guarded write) → DB. Seed a CANONICAL
+    // (template-built) session_exercise with rest_sec NULL, then push a Watch
+    // snapshot whose exercise carries restSec 120 (a ⋯-menu「休息秒數」edit). The
+    // reconcile must UPDATE the canonical row's rest_sec IN PLACE (id preserved).
+    await seedLiveSession(db, 'sess-1');
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets)
+       VALUES (?, ?, ?, 0, 3)`,
+      'canon-se-1',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+    );
+
+    const withRest = snapshot({
+      exercises: [
+        {
+          sessionExerciseId: 'se-1', // Watch id — reconcile maps by exercise_id occurrence
+          exerciseId: BUILTIN_BENCH_PRESS_ID,
+          exerciseName: 'Bench Press',
+          ordering: 0,
+          plannedSets: 3,
+          restSec: 120,
+          sets: [
+            {
+              setId: 'set-1',
+              ordinal: 0,
+              weight: 80,
+              reps: 8,
+              rpe: null,
+              rest_sec: null,
+              notes: null,
+              set_kind: 'working',
+              is_logged: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await onLiveMirror(db, withRest);
+    expect(result.ok).toBe(true);
+
+    // Canonical row updated in place (id kept), rest_sec now 120 — NOT a
+    // duplicate freestyle row.
+    const rows = await db.getAllAsync<{ id: string; rest_sec: number | null }>(
+      'SELECT id, rest_sec FROM session_exercise WHERE session_id = ?',
+      'sess-1',
+    );
+    expect(rows).toEqual([{ id: 'canon-se-1', rest_sec: 120 }]);
+  });
+
+  it('item 1 — an OLDER Watch build (restSec ABSENT) does NOT NULL-clobber an existing rest_sec', async () => {
+    // Regression guard for the `!= null` reconcile guard: a legacy Watch build
+    // omits restSec entirely. A tick must leave a previously-set rest_sec alone.
+    await seedLiveSession(db, 'sess-1');
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets, rest_sec)
+       VALUES (?, ?, ?, 0, 3, 90)`,
+      'canon-se-1',
+      'sess-1',
+      BUILTIN_BENCH_PRESS_ID,
+    );
+
+    // snapshot() default exercise carries NO restSec → parser → undefined →
+    // reconcile skips the write.
+    const result = await onLiveMirror(db, snapshot());
+    expect(result.ok).toBe(true);
+
+    const row = await db.getFirstAsync<{ rest_sec: number | null }>(
+      'SELECT rest_sec FROM session_exercise WHERE id = ?',
+      'canon-se-1',
+    );
+    expect(row?.rest_sec).toBe(90); // preserved, not nulled
+  });
+
   it('echo-drop — an originator:iphone snapshot is dropped, not applied (reverse-sync 拍板#7)', async () => {
     await seedLiveSession(db, 'sess-1');
     // The iPhone's OWN push echoed back (originator 'iphone') must NOT be
@@ -690,6 +767,57 @@ describe('Slice 13d D29 — parser tolerates WC-omitted nil optionals (absent �
 
   it('rejects a present-but-malformed display_rank (string)', () => {
     expect(parseLiveMirrorSnapshot(snapWithSet({ display_rank: '1.5' }))).toBeNull();
+  });
+});
+
+describe('item 1 (2026-07-03) — parser carries EXERCISE-level restSec (device-bug ①)', () => {
+  // The forward Watch producer projects a ⋯-menu「休息秒數」edit onto the
+  // exercise's camelCase `restSec` (omit-null). Before this fix the parser
+  // stripped it, so `ex.restSec` was always undefined at the reconcile and the
+  // Watch→iPhone rest edit never landed. These pin the field round-trips through
+  // the parser with the same nullable-optional contract as the set fields.
+  function snapWithExercise(exExtra: Record<string, unknown>) {
+    return {
+      sessionId: 's',
+      title: 't',
+      startedAt: 1,
+      exercises: [
+        {
+          sessionExerciseId: 'se',
+          exerciseId: 'ex',
+          exerciseName: 'X',
+          ordering: 0,
+          plannedSets: 1,
+          sets: [{ setId: 'set', ordinal: 0, set_kind: 'working', is_logged: false }],
+          ...exExtra,
+        },
+      ],
+    };
+  }
+
+  it('carries a present restSec through to the parsed exercise', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithExercise({ restSec: 45 }));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.exercises[0]?.restSec).toBe(45);
+  });
+
+  it('absent restSec → undefined (older Watch build; reconcile skips → no NULL-clobber)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithExercise({}));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.exercises[0]?.restSec).toBeUndefined();
+  });
+
+  it('keeps a present 0 restSec (only null/undefined collapse)', () => {
+    const parsed = parseLiveMirrorSnapshot(snapWithExercise({ restSec: 0 }));
+    expect(parsed?.exercises[0]?.restSec).toBe(0);
+  });
+
+  it('rejects a present-but-malformed restSec (string) — fail closed', () => {
+    expect(parseLiveMirrorSnapshot(snapWithExercise({ restSec: '45' }))).toBeNull();
+  });
+
+  it('rejects a NaN restSec — fail closed', () => {
+    expect(parseLiveMirrorSnapshot(snapWithExercise({ restSec: NaN }))).toBeNull();
   });
 });
 
