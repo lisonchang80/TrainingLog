@@ -317,6 +317,22 @@ final class PickerViewModel: ObservableObject {
         // Falls back to SetLoggerMockData.mockSnapshot() when neither
         // source has exercises (pre-Q50 iPhone payload OR genuinely
         // empty template) so SetLoggerView still mounts.
+        // Freshness at start (2026-07-04 device-bug) — the tap path below
+        // builds the snapshot from the prefetch cached at the LAST handshake
+        // / 🔄 (`bootstrap` is once-only: `guard !hasBootstrapped`). An iPhone
+        // template edit made AFTER that cache (e.g. change rest 90→120, then
+        // immediately start on the wrist) is invisible → the Watch session
+        // used a STALE rest/reps/weight while the phone was correct (phone
+        // reads the DB fresh at start via sessionFromTemplate). Do ONE fresh
+        // handshake here so EVERY template field (rest_sec + reps + weight +
+        // sets) reflects the latest edit — the same start-time data path as
+        // all the other info, just made current. `isStartingSession` is
+        // already true so the 過場頁 syncing view covers this await. On an
+        // unreachable/asleep iPhone `requestHandshake` self-skips → nil → we
+        // fall through on the cached prefetch (offline-first tap preserved).
+        if let coordinator, let reply = await coordinator.requestHandshake() {
+            applyStage1Reply(reply)
+        }
         let (resolvedTitle, resolvedSubtitle, resolvedExercises, resolvedTemplateId, missed) = resolveSelectionExercises(selection)
         // Stage1 prefetch v3 (2026-06-13 Y-dup) — surface a one-line
         // 過場頁 notice when the (program, intensity) combo had no variant
@@ -419,7 +435,15 @@ final class PickerViewModel: ObservableObject {
         // placeholder "· Linear W3 · 中度日". Fall back to "通用" when
         // program / intensity are nil (user picked the 通用 row in the
         // 計劃 / 強度 sheets — bypass means no specific cycle/intensity).
-        if let template = selection.template {
+        if let selectedTemplate = selection.template {
+            // Freshness (2026-07-04) — `startFromWatch` re-handshakes before
+            // calling us, so prefer the freshly-loaded template from
+            // `self.templates` (matched by its stable id) over the selection's
+            // captured copy → a just-saved iPhone edit (rest_sec / reps /
+            // weight / sets, carried on the fat tree) is honoured. Fall back
+            // to the captured copy if the id vanished from the refreshed list
+            // (template deleted between fetch and start).
+            let template = templates.first { $0.id == selectedTemplate.id } ?? selectedTemplate
             let programName = selection.program?.name ?? "通用"
             let intensityName = selection.intensity?.name ?? "通用"
             // Q3=a — title always reflects the USER's selected (program,
