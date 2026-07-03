@@ -737,17 +737,21 @@ struct SetLoggerView: View {
         else { return }  // all added rows are cluster followers → no timer
         restTimer.start(
             setId: primary.set.setId,
-            restSec: primary.set.restSec,
+            // item 1 (2026-07-03) — a per-exercise rest edit (Watch ⋯ menu OR an
+            // iPhone edit reverse-synced into restOverride) wins over the
+            // immutable base set's denormalised rest.
+            restSec: interactionState.restOverride[primary.seId] ?? primary.set.restSec,
             exerciseName: primary.name,
             ordinal: primary.set.ordinal
         )
     }
 
-    /// setId → (set, exercise name) over the live tree (snapshot + added).
-    private func restTimerSetLookup() -> [String: (set: SessionSnapshotSet, name: String)] {
-        var map: [String: (set: SessionSnapshotSet, name: String)] = [:]
+    /// setId → (set, exercise name, sessionExerciseId) over the live tree
+    /// (snapshot + added). `seId` lets the rest timer consult `restOverride`.
+    private func restTimerSetLookup() -> [String: (set: SessionSnapshotSet, name: String, seId: String)] {
+        var map: [String: (set: SessionSnapshotSet, name: String, seId: String)] = [:]
         for ex in snapshot.exercises + interactionState.addedExercises {
-            for s in ex.sets { map[s.setId] = (s, ex.exerciseName) }
+            for s in ex.sets { map[s.setId] = (s, ex.exerciseName, ex.sessionExerciseId) }
         }
         return map
     }

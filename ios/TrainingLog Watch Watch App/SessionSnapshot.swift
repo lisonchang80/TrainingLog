@@ -159,10 +159,20 @@ struct SessionSnapshotExercise: Codable, Equatable, Hashable {
     let parentId: String?
     let reusableSupersetId: String?
 
-    /// Memberwise init with the cluster fields defaulted to nil so the existing
-    /// call sites (fat-tree build / mock / producer projection) stay unchanged;
-    /// only the superset-aware paths thread a real `reusableSupersetId` through.
-    /// (A custom init does NOT disable the synthesized Codable conformance.)
+    /// Per-exercise rest seconds (`session_exercise.rest_sec`) — item 1
+    /// (2026-07-03) authoritative bidirectional live-sync value. On the wire it
+    /// is CAMEL-cased (`restSec`, like the other exercise fields), OPTIONAL, and
+    /// omit-null: `JSONEncoder` drops nil (→ ABSENT on the forward wire),
+    /// synthesized `decodeIfPresent` tolerates absence on the reverse wire. The
+    /// Watch reads it into `SessionInteractionState.restOverride[seId]`; the
+    /// per-set `SessionSnapshotSet.restSec` denormalisation stays for the rest
+    /// timer's per-set lookup.
+    let restSec: Int?
+
+    /// Memberwise init with the cluster fields + `restSec` defaulted to nil so
+    /// the existing call sites (fat-tree build / mock / producer projection)
+    /// stay unchanged; only the superset-aware / rest-sync paths thread real
+    /// values through. (A custom init does NOT disable synthesized Codable.)
     init(
         sessionExerciseId: String,
         exerciseId: String,
@@ -171,7 +181,8 @@ struct SessionSnapshotExercise: Codable, Equatable, Hashable {
         plannedSets: Int,
         sets: [SessionSnapshotSet],
         parentId: String? = nil,
-        reusableSupersetId: String? = nil
+        reusableSupersetId: String? = nil,
+        restSec: Int? = nil
     ) {
         self.sessionExerciseId = sessionExerciseId
         self.exerciseId = exerciseId
@@ -181,6 +192,7 @@ struct SessionSnapshotExercise: Codable, Equatable, Hashable {
         self.sets = sets
         self.parentId = parentId
         self.reusableSupersetId = reusableSupersetId
+        self.restSec = restSec
     }
 }
 

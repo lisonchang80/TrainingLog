@@ -202,6 +202,20 @@ struct ExerciseCard: View {
                         // Show confirm dialog — gate the destructive
                         // action behind View 4 per spec line 2166.
                         pendingConfirm = true
+                    },
+                    onEditRest: {
+                        // item 1 — open the shared keypad (CellField.rest) keyed
+                        // by the sessionExerciseId, pre-filled with the current
+                        // rest (override ?? base ?? 60). Commit writes
+                        // restOverride[seId] → forward-syncs to iPhone.
+                        let current = state.restOverride[exercise.sessionExerciseId]
+                            ?? exercise.restSec
+                            ?? RestTimerLogic.defaultRestSec
+                        state.activateCell(
+                            setId: exercise.sessionExerciseId,
+                            field: .rest,
+                            currentValue: Double(current)
+                        )
                     }
                 )
                 // 📊 history push — value-based (see DotsMenuHistoryTarget).

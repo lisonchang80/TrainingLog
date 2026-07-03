@@ -165,9 +165,10 @@ private struct KeypadOverlay: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.secondary.opacity(0.18))
         )
-        // Hide the dot key for reps (integer-only).
-        .opacity(key == .dot && cell.field == .reps ? 0.25 : 1.0)
-        .disabled(key == .dot && cell.field == .reps)
+        // Hide the dot key for integer fields (reps + rest); only weight
+        // accepts a decimal point.
+        .opacity(key == .dot && cell.field != .weight ? 0.25 : 1.0)
+        .disabled(key == .dot && cell.field != .weight)
     }
 
     private func tap(_ key: KeypadKey) {

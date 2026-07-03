@@ -42,11 +42,17 @@ import Combine
 enum CellField: String, Equatable {
     case weight
     case reps
+    /// item 1 (2026-07-03) — per-EXERCISE rest edit. Reuses the shared keypad
+    /// (`CellEditOverlay`) but `ActiveCell.setId` carries the
+    /// `sessionExerciseId` (not a set id) and `commitActiveCell` routes it to
+    /// `restOverride[seId]` instead of `editedValues`. Integer, like reps.
+    case rest
 
     var unit: String {
         switch self {
         case .weight: return "kg"
         case .reps: return "次"
+        case .rest: return "秒"
         }
     }
 }
@@ -191,6 +197,17 @@ final class SessionInteractionState: ObservableObject {
     /// order, so the iPhone history follows WITHOUT introducing new ordinal
     /// values (delete-purge / add-INSERT value-match stays intact).
     @Published var setRankOverrides: [String: Double] = [:]
+
+    /// Per-EXERCISE rest-seconds override (item 1, 2026-07-03). Keyed by
+    /// `sessionExerciseId` (NOT a set id — rest is per-exercise). Written by
+    /// (a) a local ⋯ menu「休息秒數」edit (`commitActiveCell`'s `.rest` branch)
+    /// and (b) `applyRemoteSnapshot` from an iPhone `ex.restSec`. Read by the
+    /// rest timer (`SetLoggerView.handleLoggedChange`, override ?? base) and the
+    /// forward projection (`LiveMirror.project`, override ?? base) so a Watch
+    /// edit round-trips to iPhone. Bidirectional, mutually-excluded by the
+    /// ADR-0028 cast edit lock (the ⋯ menu sits under the lock scrim), so no
+    /// simultaneous-edit race. Base snapshot stays immutable.
+    @Published var restOverride: [String: Int] = [:]
 
     // MARK: - Phase C-core reverse-sync overlay (2026-06-26)
     //
@@ -436,8 +453,16 @@ final class SessionInteractionState: ObservableObject {
     func commitActiveCell() {
         guard let cell = activeCell else { return }
         if let value = parseBuffer(cell.buffer, field: cell.field) {
-            let key = EditedValueKey(setId: cell.setId, field: cell.field)
-            editedValues[key] = value
+            if cell.field == .rest {
+                // item 1 — per-exercise rest edit. `cell.setId` carries the
+                // sessionExerciseId (see CellField.rest). Route to the
+                // per-exercise overlay, NOT editedValues (which is per-set
+                // weight/reps). ≥ 0; a 0/blank → default handled downstream.
+                restOverride[cell.setId] = max(0, Int(value.rounded()))
+            } else {
+                let key = EditedValueKey(setId: cell.setId, field: cell.field)
+                editedValues[key] = value
+            }
         }
         activeCell = nil
     }
@@ -565,6 +590,8 @@ final class SessionInteractionState: ObservableObject {
     /// class holds no exercise→sets map of its own.
     func deleteExercise(sessionExerciseId: String, setIds: [String]) {
         deletedExerciseIds.insert(sessionExerciseId)
+        // item 1 — drop any per-exercise rest override for the removed exercise.
+        restOverride[sessionExerciseId] = nil
         for sid in setIds {
             deleteSet(setId: sid)
         }
@@ -755,6 +782,7 @@ final class SessionInteractionState: ObservableObject {
         var newRemoteAddedSetIds = remoteAddedSetIds
         var newRemoteRankedSetIds = remoteRankedSetIds
         var newRemoteKindSetIds = remoteKindSetIds
+        var newRestOverride = restOverride
 
         for (i, ex) in snap.exercises.enumerated() {
             guard let baseEx = matchedBase[i] else {
@@ -770,6 +798,13 @@ final class SessionInteractionState: ObservableObject {
                     }
                 }
                 continue
+            }
+            // item 1 — per-exercise rest: fold the iPhone's `ex.restSec` into
+            // the per-exercise overlay keyed by the BASE seId (what the rest
+            // timer + forward projection read). Only when the wire carries it
+            // (omit-null); an iPhone rest edit reaches the Watch through this.
+            if let rs = ex.restSec {
+                newRestOverride[baseEx.sessionExerciseId] = rs
             }
             // Resolve each snap set to its base set: id-FIRST, ordinal-FALLBACK.
             //
@@ -972,6 +1007,7 @@ final class SessionInteractionState: ObservableObject {
         remoteAddedSetIds = newRemoteAddedSetIds
         remoteRankedSetIds = newRemoteRankedSetIds
         remoteKindSetIds = newRemoteKindSetIds
+        restOverride = newRestOverride
     }
 
     // MARK: - Display value
@@ -997,7 +1033,7 @@ final class SessionInteractionState: ObservableObject {
     private func formatBuffer(_ v: Double?, field: CellField) -> String {
         guard let v else { return "" }
         switch field {
-        case .reps:
+        case .reps, .rest:
             return String(Int(v.rounded()))
         case .weight:
             if v == v.rounded() {
@@ -1012,7 +1048,7 @@ final class SessionInteractionState: ObservableObject {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != "." else { return nil }
         switch field {
-        case .reps:
+        case .reps, .rest:
             return Double(Int(trimmed) ?? 0)
         case .weight:
             return Double(trimmed)

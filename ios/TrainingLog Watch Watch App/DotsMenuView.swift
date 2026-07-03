@@ -89,6 +89,13 @@ struct DotsMenuView: View {
     /// before calling this. See `DotsMenuConfirmView`.
     let onDelete: () -> Void
 
+    /// ⏱ 編輯休息秒數 (item 1, 2026-07-03) — caller opens the shared numeric
+    /// keypad (`CellField.rest`) pre-filled with this exercise's current rest;
+    /// the committed value writes `restOverride[seId]` and forward-syncs to the
+    /// iPhone. For a superset it edits the A-side (parent) rest per ADR-0019
+    /// Q2 (C) (the cluster timer launches from the parent's rest_sec).
+    let onEditRest: () -> Void
+
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -105,6 +112,7 @@ struct DotsMenuView: View {
                 // Non-destructive items (in spec order).
                 resetButton
                 skipButton
+                restButton
 
                 if isCluster && historyTargets.count >= 2 {
                     historyLink(label: "查看\(historyTargets[0].exerciseName)歷史", value: historyTargets[0])
@@ -159,6 +167,16 @@ struct DotsMenuView: View {
         }
         return menuButton(systemImage: icon, label: label) {
             onSkip()
+            dismiss()
+        }
+    }
+
+    /// ⏱ 休息秒數 — non-destructive edit action (item 1). Opens the shared
+    /// numeric keypad via the caller's `onEditRest`, then dismisses so the
+    /// keypad (rendered under the sheet in `SessionCardListPage`) is revealed.
+    private var restButton: some View {
+        menuButton(systemImage: "timer", label: "休息秒數") {
+            onEditRest()
             dismiss()
         }
     }
@@ -259,7 +277,8 @@ struct DotsMenuView: View {
             ],
             onReset: {},
             onSkip: {},
-            onDelete: {}
+            onDelete: {},
+            onEditRest: {}
         )
     }
 }
@@ -278,7 +297,8 @@ struct DotsMenuView: View {
             ],
             onReset: {},
             onSkip: {},
-            onDelete: {}
+            onDelete: {},
+            onEditRest: {}
         )
     }
 }
@@ -299,7 +319,8 @@ struct DotsMenuView: View {
             ],
             onReset: {},
             onSkip: {},
-            onDelete: {}
+            onDelete: {},
+            onEditRest: {}
         )
     }
 }

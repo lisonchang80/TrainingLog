@@ -131,7 +131,11 @@ enum LiveMirror {
         // forward-only behaviour for any caller that doesn't supply them.
         addedExercises: [SessionSnapshotExercise] = [],
         notesOverride: [String: String] = [:],
-        exerciseOrderOverride: [String] = []
+        exerciseOrderOverride: [String] = [],
+        // item 1 (2026-07-03) — per-exercise rest override (Watch ⋯ menu edit).
+        // Projected onto the wire's `restSec` so a Watch rest edit round-trips
+        // to the iPhone reconcile. Default empty keeps forward-only callers OK.
+        restOverride: [String: Int] = [:]
     ) -> SessionSnapshot {
         // Phase F: drop exercises / sets the user deleted on the Watch and
         // MERGE in the sets they added. The projection is what reaches the
@@ -231,7 +235,11 @@ enum LiveMirror {
                 // mirror so it round-trips for forward-compat (the iPhone
                 // reconcile currently preserves the DB value either way).
                 parentId: ex.parentId,
-                reusableSupersetId: ex.reusableSupersetId
+                reusableSupersetId: ex.reusableSupersetId,
+                // item 1 — a Watch ⋯ menu「休息秒數」edit rides here so the iPhone
+                // reconcile lifts it to session_exercise.rest_sec. Override wins
+                // over the immutable base rest.
+                restSec: restOverride[ex.sessionExerciseId] ?? ex.restSec
             )
         }
         return SessionSnapshot(
@@ -362,6 +370,14 @@ final class LiveMirrorProducer: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.markDirty() }
             .store(in: &cancellables)
+        // item 1 (2026-07-03): a Watch ⋯ menu「休息秒數」edit changes
+        // restOverride → mark dirty so the new per-exercise rest reaches iPhone
+        // (the reconcile lifts it to session_exercise.rest_sec). The applyingRemote
+        // gate suppresses the bounce when restOverride is written by a reverse apply.
+        interaction.$restOverride
+            .dropFirst()
+            .sink { [weak self] _ in self?.markDirty() }
+            .store(in: &cancellables)
     }
 
     /// Drive from `.task { await producer.run() }` so the loop inherits the
@@ -400,7 +416,8 @@ final class LiveMirrorProducer: ObservableObject {
             rankOverrides: interaction.setRankOverrides,
             addedExercises: interaction.addedExercises,
             notesOverride: interaction.notesOverride,
-            exerciseOrderOverride: interaction.exerciseOrderOverride
+            exerciseOrderOverride: interaction.exerciseOrderOverride,
+            restOverride: interaction.restOverride
         )
     }
 
@@ -480,7 +497,8 @@ final class LiveMirrorProducer: ObservableObject {
             rankOverrides: interaction.setRankOverrides,
             addedExercises: interaction.addedExercises,
             notesOverride: interaction.notesOverride,
-            exerciseOrderOverride: interaction.exerciseOrderOverride
+            exerciseOrderOverride: interaction.exerciseOrderOverride,
+            restOverride: interaction.restOverride
         )
         // Stamp a monotonic rev + originator so the iPhone receiver can drop
         // out-of-order / stale redeliveries (the dual-fired sendMessage +

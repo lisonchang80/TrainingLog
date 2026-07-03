@@ -347,7 +347,19 @@ struct SupersetCard: View {
                 ],
                 onReset: { resetSupersetInMemory() },
                 onSkip: { isSkipped.toggle() },
-                onDelete: { pendingConfirm = true }
+                onDelete: { pendingConfirm = true },
+                onEditRest: {
+                    // item 1 — a superset's rest timer launches from the A-side
+                    // (parent) rest per ADR-0019 Q2 (C), so edit exerciseA's rest.
+                    let current = state.restOverride[exerciseA.sessionExerciseId]
+                        ?? exerciseA.restSec
+                        ?? RestTimerLogic.defaultRestSec
+                    state.activateCell(
+                        setId: exerciseA.sessionExerciseId,
+                        field: .rest,
+                        currentValue: Double(current)
+                    )
+                }
             )
             // 📊 history push — value-based (see DotsMenuHistoryTarget).
             .navigationDestination(for: DotsMenuHistoryTarget.self) { target in
