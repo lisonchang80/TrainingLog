@@ -335,6 +335,21 @@ export async function reconcileSessionTree(
         );
       }
       keptSeIds.push(seId);
+
+      // item 1 (2026-07-03) — per-exercise rest_sec reverse-sync. A Watch ⋯
+      // menu「休息秒數」edit rides the forward snapshot's `ex.restSec`; write it
+      // onto whichever row (canonical or freestyle-INSERTed) this occurrence
+      // resolved to. GUARDED on `!= null`: an OLDER Watch build omits the field
+      // → we must NOT NULL out an existing rest on every tick (that would be a
+      // regression). Mirrors the F5 wire-null tolerance rule. Idempotent —
+      // re-applying the same value is a no-op UPDATE.
+      if (ex.restSec != null) {
+        await db.runAsync(
+          `UPDATE session_exercise SET rest_sec = ? WHERE id = ?`,
+          ex.restSec,
+          seId,
+        );
+      }
       // Set ids touched for THIS exercise — drives the live per-exercise purge.
       const exSetIds: string[] = [];
 

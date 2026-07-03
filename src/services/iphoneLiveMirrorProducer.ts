@@ -209,6 +209,9 @@ function projectToWire(
         return wireSet;
       }),
     };
+    // item 1 (2026-07-03) — per-exercise rest for the bidirectional live-sync.
+    // Omit-null (plist-clean); the Watch apply maps it to `restOverride[seId]`.
+    if (ex.restSec != null) wireEx.restSec = ex.restSec;
     // Cluster linkage (D15 superset card) — omit when null, same rule.
     if (ex.parentId != null) wireEx.parentId = ex.parentId;
     if (ex.reusableSupersetId != null) {

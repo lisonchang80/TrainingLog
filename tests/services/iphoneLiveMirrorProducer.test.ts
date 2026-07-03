@@ -20,6 +20,7 @@ import { migrate } from '../../src/db/migrate';
 import {
   appendSessionExercise,
   createSession,
+  updateSessionExerciseRestSec,
 } from '../../src/adapters/sqlite/sessionRepository';
 import { insertSessionSet } from '../../src/adapters/sqlite/setRepository';
 import {
@@ -169,6 +170,21 @@ describe('buildLiveMirrorPayload', () => {
     // Required fields stay present.
     expect('ordinal' in warmup).toBe(true);
     expect('is_logged' in warmup).toBe(true);
+  });
+
+  it('item1 — carries per-exercise restSec on the wire, omit-null when unset', async () => {
+    const db = await makeDb();
+    await seedSession(db);
+    // Default: no rest set on the session_exercise → restSec ABSENT (omit-null).
+    let payload = await buildLiveMirrorPayload(db, 'sess-1');
+    let ex = payload!.exercises[0] as Record<string, unknown>;
+    expect('restSec' in ex).toBe(false);
+    // After an in-session rest edit (⚙️ menu ⏱️ keypad) → restSec rides the wire
+    // so the Watch apply can map it to `restOverride[seId]`.
+    await updateSessionExerciseRestSec(db, 'se-1', 120);
+    payload = await buildLiveMirrorPayload(db, 'sess-1');
+    ex = payload!.exercises[0] as Record<string, unknown>;
+    expect(ex.restSec).toBe(120);
   });
 
   it('returns null for an unknown session', async () => {

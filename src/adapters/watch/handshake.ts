@@ -584,6 +584,18 @@ export interface SessionSnapshotExercise {
    * card and route the ⋯ menu A/B history. OPTIONAL — see `parentId`.
    */
   reusableSupersetId?: string | null;
+  /**
+   * Per-exercise rest seconds (`session_exercise.rest_sec`). Bidirectionally
+   * live-synced (item 1, 2026-07-03) so an in-session rest edit on EITHER
+   * device reaches the other — the iPhone edits via the ⚙️ menu ⏱️ keypad,
+   * the Watch via the ⋯ menu「休息秒數」keypad. OPTIONAL + omit-null on the
+   * wire: an older Watch build that never sends it → the reconcile leaves the
+   * DB value untouched (no NULL-clobber), mirroring the F5 wire-null rule.
+   * The per-set `SessionSnapshotSet.rest_sec` denormalisation stays (it feeds
+   * the Watch rest-timer's per-set lookup); THIS field is the authoritative,
+   * unambiguous per-exercise sync value the reconcile writes back.
+   */
+  restSec?: number;
 }
 
 export interface SessionSnapshotSet {
@@ -1209,6 +1221,11 @@ export async function fetchSessionSnapshot(
       exerciseName: tExercise(se.exercise_name),
       ordering: se.ordering,
       plannedSets: se.planned_sets,
+      // item 1 (2026-07-03) — authoritative per-exercise rest for the
+      // bidirectional live-sync. Omit-null (undefined) so the producer drops
+      // it when absent; the per-set `rest_sec` below stays for the Watch
+      // rest-timer's per-set lookup.
+      restSec: se.rest_sec ?? undefined,
       // Cluster linkage (D15 superset card). listSessionExercisesWithName
       // already SELECTs these columns; pass them through so the Watch can
       // fold a parent+child pair into one superset card.

@@ -147,6 +147,86 @@ describe('replaceLiveMirror — NEW-Q50 snapshot-replace', () => {
     ]);
   });
 
+  it('item1 — per-exercise restSec is written to session_exercise.rest_sec (freestyle INSERT path)', async () => {
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-1',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            restSec: 120,
+            sets: [
+              {
+                setId: 'set-1',
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: 120,
+                notes: null,
+                set_kind: 'working',
+                is_logged: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const row = await db.getFirstAsync<{ rest_sec: number | null }>(
+      'SELECT rest_sec FROM session_exercise WHERE id = ?',
+      'se-1',
+    );
+    expect(row?.rest_sec).toBe(120);
+  });
+
+  it('item1 — restSec ABSENT does NOT clobber an existing canonical rest_sec (older-Watch forward-compat)', async () => {
+    // Canonical (template-built) row already carrying a rest_sec.
+    await db.runAsync(
+      `INSERT INTO session_exercise (id, session_id, exercise_id, ordering, planned_sets, rest_sec)
+       VALUES ('canon-1', 'sess-1', ?, 0, 3, 90)`,
+      BUILTIN_BENCH_PRESS_ID,
+    );
+    // A snapshot from an OLDER Watch build: same exercise, NO restSec field.
+    await replaceLiveMirror(
+      db,
+      snapshot({
+        exercises: [
+          {
+            sessionExerciseId: 'se-wire',
+            exerciseId: BUILTIN_BENCH_PRESS_ID,
+            exerciseName: 'Bench Press',
+            ordering: 0,
+            plannedSets: 3,
+            // restSec intentionally omitted (old wire shape)
+            sets: [
+              {
+                setId: 'set-1',
+                ordinal: 0,
+                weight: 80,
+                reps: 8,
+                rpe: null,
+                rest_sec: 90,
+                notes: null,
+                set_kind: 'working',
+                is_logged: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const row = await db.getFirstAsync<{ rest_sec: number | null }>(
+      'SELECT rest_sec FROM session_exercise WHERE id = ?',
+      'canon-1',
+    );
+    // Untouched — the guard skipped the UPDATE because ex.restSec was undefined.
+    expect(row?.rest_sec).toBe(90);
+  });
+
   it('dropset chain (freestyle) — head + follower both INSERT, follower keeps the wire head id', async () => {
     await replaceLiveMirror(
       db,
