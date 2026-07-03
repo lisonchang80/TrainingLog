@@ -642,7 +642,16 @@ final class PickerViewModel: ObservableObject {
                 // doesn't map to the freshly minted `SE-…` id, and grouping uses
                 // `reusableSupersetId` + `ordering`, so no remap is needed.
                 parentId: nil,
-                reusableSupersetId: ex.reusableSupersetId
+                reusableSupersetId: ex.reusableSupersetId,
+                // Per-exercise rest (2026-07-04 device-bug真修) — thread the
+                // template's rest onto the EXERCISE too, not just each set. The
+                // ⋯選單「休息秒數」editor reads `exercise.restSec` (ExerciseCard
+                // onEditRest); leaving it nil made the keypad pre-fill the 60s
+                // default even though the rest TIMER (which reads per-set
+                // `set.restSec`) was already correct. `SessionSnapshotExercise.
+                // init` defaults restSec to nil, so this call site had silently
+                // dropped it since the fat-tree path was written.
+                restSec: ex.restSec
             )
         }
         return SessionSnapshot(
