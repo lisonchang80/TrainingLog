@@ -1461,6 +1461,10 @@ export async function onStartFromWatch(
           now: () => env.ts,
           program_id: env.payload.programCycleId ?? undefined,
           sub_tag: env.payload.intensityId ?? undefined,
+          // Phase C-id — adopt the Watch-minted session_exercise / set ids
+          // (when the Watch sent them) so both devices share ids from the
+          // first frame; absent → iPhone mints its own (legacy).
+          supplied_id_tree: env.payload.idTree,
         });
       } else {
         // Freestyle fallback path — either templateId is null (Watch

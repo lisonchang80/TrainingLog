@@ -215,6 +215,31 @@ export interface StartFromWatchPayload {
   intensityId: string | null;
   /** NEW-Q50 — Watch-supplied session id (UUID v4). */
   sessionId: string;
+  /**
+   * Phase C-id (set-level id-adoption, 2026-07-05). The Watch mints REAL
+   * uuids for the session_exercise / session_set rows it builds offline
+   * (`buildSnapshotFromFatTree`) and ships them here so the iPhone adopts
+   * them VERBATIM instead of minting its own. Both devices then share ids
+   * from the first frame, so the reverse live-mirror matches by id
+   * everywhere — fixing the template-start non-last-dropset corruption
+   * (the `applyRemoteSnapshot` id-first path only worked for cast before)
+   * and making tombstone-by-id precise (see `SessionSnapshot.deletedIds`).
+   *
+   * Position-aligned to the template's exercises sorted by `ordering ASC`,
+   * and each exercise's sets sorted by `position ASC` — the SAME order
+   * `startSessionFromTemplate` / `snapshotForSession` walk. OPTIONAL +
+   * append-only: a pre-C-id Watch omits it → the iPhone falls back to
+   * minting its own ids (unchanged legacy behaviour). Extra / missing
+   * entries are tolerated per position (the iPhone mints for any position
+   * without a supplied id), so a template edited between the Stage-1
+   * prefetch and start never throws.
+   */
+  idTree?: {
+    /** session_exercise ids, one per template exercise (`ordering ASC`). */
+    seIds: string[];
+    /** session_set ids, `[exerciseIndex][setIndex]` (`position ASC`). */
+    setIds: string[][];
+  };
 }
 
 /**

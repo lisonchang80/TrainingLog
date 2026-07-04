@@ -90,6 +90,22 @@ export async function startSessionFromTemplate(
      * for the normal live-start path (session stays in progress).
      */
     ended_at?: number;
+    /**
+     * Phase C-id (set-level id-adoption, 2026-07-05). Watch-supplied
+     * session_exercise / session_set ids so the iPhone adopts them verbatim
+     * — both devices share ids from the first frame (see
+     * `StartFromWatchPayload.idTree`). Position-aligned: `seIds[i]` maps to
+     * the i-th template exercise (`ordering ASC`), `setIds[i][j]` to its
+     * j-th set (`position ASC`) — the same order this function walks.
+     * OPTIONAL — omitted → all ids minted via `args.uuid()` (legacy). A
+     * position without a supplied (or with an empty) id falls back to
+     * `uuid()`, so extra / missing entries never throw. The Watch-initiated
+     * template path (`onStartFromWatch`) is the only supplier today.
+     */
+    supplied_id_tree?: {
+      seIds: readonly string[];
+      setIds: readonly (readonly string[])[];
+    };
   }
 ): Promise<{ session_id: string; planned_count: number }> {
   if (!args.skip_active_guard) {
@@ -170,6 +186,10 @@ export async function startSessionFromTemplate(
     },
     session_id,
     uuid: args.uuid,
+    // Phase C-id — adopt the Watch's session_exercise ids (position-aligned
+    // to `ordering ASC`, the order snapshotForSession also sorts by) so both
+    // devices share exercise identity. Absent → mint per exercise (legacy).
+    suppliedIds: args.supplied_id_tree?.seIds,
   });
 
   // Pre-compute set rows to insert. Each snapshot.id maps back to a
@@ -207,10 +227,14 @@ export async function startSessionFromTemplate(
     // Sort template sets by position so ordering stays stable.
     const sortedTSets = [...tex.sets].sort((a, b) => a.position - b.position);
     // Allocate new ids first so parent_set_id remap can resolve forward refs.
+    // Phase C-id — adopt the Watch's session_set ids for this exercise
+    // (position-aligned); a position without a supplied (or empty) id falls
+    // back to `uuid()` so extra / missing entries never throw.
+    const suppliedSetIds = args.supplied_id_tree?.setIds[i];
     const setIdMap = new Map<string, string>();
-    for (const ts of sortedTSets) {
-      setIdMap.set(ts.id, args.uuid());
-    }
+    sortedTSets.forEach((tsRow, j) => {
+      setIdMap.set(tsRow.id, suppliedSetIds?.[j] || args.uuid());
+    });
     for (let j = 0; j < sortedTSets.length; j++) {
       const tset = sortedTSets[j];
       const newSetId = setIdMap.get(tset.id);
