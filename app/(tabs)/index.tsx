@@ -805,6 +805,24 @@ function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // #55 ② (2026-07-05) — message-channel leg for the SAME kind. The Watch's
+    // `sendStartResolveToiPhone` DUAL-FIRES (transferUserInfo + sendMessage,
+    // same msgId). Post-F4 the msgId ring is SHARED across both intakes and
+    // the 'message' intake claims the msgId BEFORE the handler-existence
+    // check, parking handler-less envelopes in the pre-handler buffer. With
+    // only the TUI listener registered, a sendMessage leg that wins intake
+    // (the common foreground case) is parked forever AND its msgId poisons
+    // the ring → the TUI leg is dropped as a dup → `onStartResolve` never
+    // runs. Registering both channels closes that hole; `discardSession` is
+    // a sequence of idempotent `DELETE WHERE`s so dual delivery is safe.
+    // (Same reasoning as the start-from-watch V1 listener above.)
+    const unsubStartResolveMsg = addMessageListener(
+      'start-resolve',
+      async (env) => {
+        await onStartResolve(db, env);
+        refreshRef.current?.();
+      },
+    );
     // D31 wave 2 (2026-05-29 late) — discard-session forward-TUI inbound.
     // Watch fires this when the user tapped [放棄] in FinishPageView.
     // iPhone hard-deletes the row via discardSession (cascades sets /
@@ -814,6 +832,20 @@ function TodayScreen() {
     // (sets ended_at); discard-session deletes it entirely. User explicit
     // intent.
     const unsubDiscardSession = addUserInfoListener(
+      'discard-session',
+      async (env) => {
+        await onDiscardSession(db, env);
+        refreshRef.current?.();
+      },
+    );
+    // #55 ② (2026-07-05) — message-channel leg for discard-session. The Watch's
+    // `sendDiscardToiPhone` DUAL-FIRES (TUI + sendMessage, same msgId); with
+    // only the TUI listener the sendMessage leg wins intake in foreground,
+    // claims the shared msgId ring, gets parked (no message-channel handler)
+    // and the TUI leg is then ring-dropped as a dup → `onDiscardSession`
+    // NEVER runs → 錶「放棄」手機不停 (sim-observed). `discardSession` is
+    // idempotent (DELETE WHERE no-ops) so dual delivery is safe.
+    const unsubDiscardSessionMsg = addMessageListener(
       'discard-session',
       async (env) => {
         await onDiscardSession(db, env);
@@ -906,7 +938,9 @@ function TodayScreen() {
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();
+      unsubStartResolveMsg();
       unsubDiscardSession();
+      unsubDiscardSessionMsg();
       unsubLiveMirror();
       unsubLiveMirrorMsg();
       unsubLockReqM();
