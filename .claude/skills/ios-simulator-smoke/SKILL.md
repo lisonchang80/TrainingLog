@@ -29,11 +29,16 @@ dev-client is installed → build + install a *simulator* dev-client before any
 tap work:
 ```
 cd ios && xcodebuild -workspace TrainingLog.xcworkspace -scheme TrainingLog \
-  -configuration Debug -sdk iphonesimulator -derivedDataPath build-sim build
-xcrun simctl install booted "build-sim/Build/Products/Debug-iphonesimulator/TrainingLog.app"
+  -configuration Debug -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath build/sim-phone build
+xcrun simctl install booted "build/sim-phone/Build/Products/Debug-iphonesimulator/TrainingLog.app"
 ```
 Then `launch_app com.lisonchang.TrainingLog`. Metro still serves JS (reload
 picks up `.ts` edits), but the SHELL must be the dev-client, never Expo Go.
+（2026-07-04：改用 `-destination`＋`build/sim-phone`——`-sdk iphonesimulator` 會把
+embedded Watch target 的 asset catalog 也用 iphone thinning 而 BUILD FAILED；
+derivedData 必須在 `ios/build/` 下，否則 RN post-install 的 plist 掃描會讓下次
+`pod install` 炸 UTF-8。）
 (To smoke a fix that lives on another branch, Metro follows the **main
 worktree's checked-out branch** — detached-checkout that tree there first; it
 doesn't follow a symlinked-node_modules worktree.)
