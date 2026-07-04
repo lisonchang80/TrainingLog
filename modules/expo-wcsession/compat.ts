@@ -148,10 +148,49 @@ function deliver(channel: WCSessionChannel, evt: WCSessionInboundEvent): void {
   }
 }
 
+/**
+ * audit B🟠-1 (2026-07-05) — live-lane seq continuity check.
+ *
+ * `deliver()` is a HIGH-watermark: an intermittent drop (seq N lost while
+ * seq N+1 arrives live) used to push `lastDeliveredSeq` straight past the
+ * hole, after which `reconcileNow()` saw no gap and seq N was permanently
+ * lost with zero signal — the exact loss class this module exists to make
+ * structurally impossible. So before delivering a live event that would
+ * jump the watermark by more than 1, pull the intervening journal entries
+ * and deliver them first (in order, same routes).
+ *
+ * Only entries with seq < the live event's are delivered here — the live
+ * event itself is delivered once by the caller, and anything journaled
+ * AFTER it has its own live delivery in flight (or the 5s poll). This
+ * keeps the fill from manufacturing duplicates; a true live/pull overlap
+ * remains absorbed by connectivity.ts's msgId ring as designed.
+ *
+ * LIVE PATH ONLY: the drain path replays pre-baseline history (seq ≤
+ * baseline is exactly-once native bookkeeping, not a hole), and the pull
+ * path already starts at `lastDeliveredSeq + 1` — neither may trigger
+ * this. Epoch mismatch (native process restart) is reconcileNow()'s
+ * baseline-reset job, not a fillable gap.
+ */
+function fillGapBeforeLive(evt: WCSessionInboundEvent): void {
+  if (!baselineInitialized || knownEpoch === null) return;
+  if (typeof evt.seq !== 'number') return;
+  if (typeof evt.epoch === 'string' && evt.epoch !== knownEpoch) return;
+  if (evt.seq <= lastDeliveredSeq + 1) return; // contiguous or stale — no hole
+  for (const gapEvt of getEventsSince(lastDeliveredSeq)) {
+    // Journal order is ascending seq — stop at the live event itself.
+    if (typeof gapEvt.seq === 'number' && gapEvt.seq >= evt.seq) break;
+    const gapChannel = gapEvt.channel;
+    if (gapChannel && gapChannel in routes) {
+      deliver(gapChannel, gapEvt);
+    }
+  }
+}
+
 function ensureNativeSubscription(channel: WCSessionChannel): void {
   if (nativeUnsubs[channel]) return;
   const onLive = (evt: WCSessionInboundEvent): void => {
     if (debugDropLiveEvents) return;
+    fillGapBeforeLive(evt);
     deliver(channel, evt);
   };
   if (channel === 'message') {

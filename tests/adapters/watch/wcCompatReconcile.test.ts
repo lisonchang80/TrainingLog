@@ -207,6 +207,54 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     expect(seen).toEqual([{ kind: 'c', msgId: 'm3' }]);
   });
 
+  it('intermittent single drop: the NEXT live event heals the hole in order — watermark never jumps it (audit B🟠-1)', () => {
+    const seen: unknown[] = [];
+    compat.watchEvents.addListener('message', (payload) => seen.push(payload));
+    emitLive('message', { kind: 'a', msgId: 'm1' });
+
+    // Drop exactly ONE event (journal keeps it), then the lane self-heals —
+    // the pre-fix high-watermark pushed straight past the hole here, making
+    // m2 permanently unpullable with zero signal.
+    compat.__setDebugDropLiveEventsForTests(true);
+    emitLive('message', { kind: 'b', msgId: 'm2' });
+    compat.__setDebugDropLiveEventsForTests(false);
+    emitLive('message', { kind: 'c', msgId: 'm3' });
+
+    // The hole (m2) was pulled and delivered BEFORE m3 — original order,
+    // no poll tick needed, no duplicate of m3.
+    expect(seen).toEqual([
+      { kind: 'a', msgId: 'm1' },
+      { kind: 'b', msgId: 'm2' },
+      { kind: 'c', msgId: 'm3' },
+    ]);
+    // Nothing left behind for the poll: the watermark advanced THROUGH the
+    // hole, not over it.
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(seen).toHaveLength(3);
+  });
+
+  it('cross-channel hole: a dropped user-info is healed by the next live message (global seq)', () => {
+    const messages: unknown[] = [];
+    const userInfos: unknown[] = [];
+    compat.watchEvents.addListener('message', (payload) => messages.push(payload));
+    compat.watchEvents.addListener('user-info', (payload) => userInfos.push(payload));
+    emitLive('message', { kind: 'a', msgId: 'm1' });
+
+    compat.__setDebugDropLiveEventsForTests(true);
+    emitLive('user-info', { kind: 'end', msgId: 'e1-tui' }); // the durable leg drops
+    compat.__setDebugDropLiveEventsForTests(false);
+    emitLive('message', { kind: 'c', msgId: 'm3' }); // unrelated channel arrives live
+
+    // Global seq means the message lane's continuity check catches the
+    // user-info hole — old-lib ARRAY contract preserved through the fill.
+    expect(userInfos).toEqual([[{ kind: 'end', msgId: 'e1-tui' }]]);
+    expect(messages).toEqual([
+      { kind: 'a', msgId: 'm1' },
+      { kind: 'c', msgId: 'm3' },
+    ]);
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+  });
+
   it('5s poll heals a deaf window without manual calls', () => {
     jest.useFakeTimers();
     const seen: unknown[] = [];
