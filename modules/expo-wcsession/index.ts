@@ -120,9 +120,15 @@ export async function getReachability(): Promise<boolean> {
 
 /**
  * Send an interactive message. With `wantsReply` the promise resolves with
- * the counterpart's reply dictionary; without, it resolves `{}` right after
- * hand-off to WCSession. Rejects with the underlying WCError on failure
- * (not reachable, session not activated, payload rejected, …).
+ * the counterpart's reply dictionary and rejects with the underlying WCError
+ * on failure (not reachable, session not activated, payload rejected, …).
+ *
+ * WITHOUT `wantsReply` (fire-and-forget) the promise resolves `{}` right
+ * after hand-off to WCSession — resolve means HAND-OFF, not delivery. The
+ * native errorHandler can still fire asynchronously after hand-off; the
+ * settle is first-wins (audit B🟡-3: never double-settles the promise), so
+ * an async post-hand-off error is usually NOT surfaced to this promise.
+ * Callers needing delivery semantics should pass `wantsReply: true`.
  */
 export async function sendMessage(
   message: Record<string, unknown>,

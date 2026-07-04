@@ -58,6 +58,10 @@ await WCSession.getReachability();
 
 // outbound
 await WCSession.sendMessage({ kind: 'ping' }, /* wantsReply */ true); // → reply dict
+// wantsReply: false = fire-and-forget — the promise resolves on HAND-OFF to
+// WCSession, not on delivery; a post-hand-off async error is usually not
+// surfaced (first-settle wins, never a double-settle). Use wantsReply: true
+// when you need delivery/error semantics.
 WCSession.transferUserInfo({ kind: 'durable' });   // OS-queued, survives unreachability
 WCSession.updateApplicationContext({ kind: 'latest-state' });
 

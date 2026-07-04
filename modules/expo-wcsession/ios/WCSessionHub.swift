@@ -150,11 +150,35 @@ final class WCSessionHub: NSObject {
     }
     let session = WCSession.default
     if wantsReply {
+      // Reply path settles exactly once by WCSession contract (either the
+      // replyHandler or the errorHandler fires, never both).
       session.sendMessage(message, replyHandler: { onReply($0) }, errorHandler: onError)
     } else {
-      session.sendMessage(message, replyHandler: nil, errorHandler: onError)
-      // Fire-and-forget: hand-off to WCSession succeeded; resolve now.
-      onReply([:])
+      // audit B🟡-3 (2026-07-05) — fire-and-forget settles the SAME promise
+      // from two racers: the immediate post-hand-off resolve below and the
+      // errorHandler, which WCSession may still fire asynchronously AFTER
+      // hand-off (e.g. counterpart not reachable). Double-settling an Expo
+      // Promise is version-dependent misbehaviour (at minimum a warning), so
+      // gate both on a first-wins flag. The error still mostly loses the
+      // race — see the README's honesty note: a fire-and-forget resolve
+      // means hand-off, not delivery.
+      let settleLock = NSLock()
+      var settled = false
+      let settleOnce: (@escaping () -> Void) -> Void = { action in
+        settleLock.lock()
+        let first = !settled
+        settled = true
+        settleLock.unlock()
+        if first { action() }
+      }
+      session.sendMessage(
+        message,
+        replyHandler: nil,
+        errorHandler: { error in settleOnce { onError(error) } }
+      )
+      // Hand-off to WCSession succeeded; resolve now (unless a synchronous
+      // errorHandler already settled).
+      settleOnce { onReply([:]) }
     }
   }
 
