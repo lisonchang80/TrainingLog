@@ -26,6 +26,7 @@ import {
   makeEnvelope,
   sendMessage,
   sendUserInfo,
+  shouldAdoptWatchLedLock,
   type EditLockState,
   type EditLockEvent,
   type EditLockEffect,
@@ -92,6 +93,13 @@ export interface CastEditLock {
    * before adopting LOCKED (see impl).
    */
   noteMirrorEpoch: (epoch: number | undefined, mirrorSessionId?: string) => void;
+  /**
+   * #55 ① — a Watch-led `start-from-watch` reconciled 'created' and its
+   * envelope carried the Watch's holder `lockEpoch`: adopt LOCKED at that
+   * epoch NOW (guarded against stale TUI redelivery via
+   * `shouldAdoptWatchLedLock`), instead of waiting for the first live-mirror.
+   */
+  seedWatchLedLock: (sessionId: string, epoch: number | undefined) => void;
   /** The cast session ended / was discarded → tear the lock down. */
   notifyEnded: () => void;
 }
@@ -270,6 +278,50 @@ export function useCastEditLock({
     [dispatch, sessionId],
   );
 
+  // #55 ① (2026-07-05, 拍板 A) — Watch-led start 直接鎖. Called by the
+  // start-from-watch listeners after `onStartFromWatch` reconciles 'created'
+  // and the envelope carried the Watch's holder `lockEpoch`. Dispatching
+  // `cast-received` adopts LOCKED at the Watch's generation immediately —
+  // closing the sim-visible window where the Watch's initial force-push
+  // mirror raced ahead of session creation and was dropped by the
+  // `recv-mirror` unpaired guard (leaving the iPhone editable until the
+  // first ✓'s mirror). The dispatch also persists (ADR-0028 restart row),
+  // so the session-change reset that follows `refresh()` re-seeds LOCKED via
+  // the existing restore effect rather than wiping the adoption.
+  //
+  // Guarded by `shouldAdoptWatchLedLock` against a stale TUI redelivery
+  // (post-restart replay carrying an old epoch must not rewind a persisted
+  // newer generation — INV-2). Fire-and-forget; failures degrade to the
+  // pre-#55① mirror-based adoption path.
+  const seedWatchLedLock = useCallback(
+    (sid: string, epoch: number | undefined) => {
+      void (async () => {
+        try {
+          const persisted = await loadCastLock(db);
+          if (
+            !shouldAdoptWatchLedLock({
+              current: lockRef.current,
+              persisted,
+              sessionId: sid,
+              lockEpoch: epoch,
+            })
+          ) {
+            return;
+          }
+          dispatch({
+            type: 'cast-received',
+            sessionId: sid,
+            epoch: epoch as number,
+          });
+        } catch {
+          // Degrade silently — the noteMirrorEpoch divergence guard still
+          // adopts LOCKED on the first mirror that lands post-creation.
+        }
+      })();
+    },
+    [db, dispatch],
+  );
+
   const handleLockEnvelope = useCallback(
     (env: WCMessage) => {
       switch (env.kind) {
@@ -408,6 +460,7 @@ export function useCastEditLock({
     keepLock,
     handleLockEnvelope,
     noteMirrorEpoch,
+    seedWatchLedLock,
     notifyEnded,
   };
 }

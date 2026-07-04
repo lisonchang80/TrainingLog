@@ -416,12 +416,28 @@ final class PickerViewModel: ObservableObject {
             "seIds": snapshot.exercises.map { $0.sessionExerciseId },
             "setIds": snapshot.exercises.map { ex in ex.sets.map { $0.setId } },
         ]
+        //
+        // #55 ① (ADR-0028, 2026-07-05) — carry the edit-token epoch this
+        // Watch WILL hold once SetLoggerView mounts and its fresh
+        // CastEditLock runs `castInitiated` (0 → 1 today). Computed through
+        // the pure reducer — not a hardcoded 1 — so the wire value can never
+        // drift from EditLockMachine's bump rule. The iPhone adopts LOCKED
+        // at this epoch right after reconcile, instead of waiting for our
+        // LiveMirrorProducer's initial force-push (which, on a fast
+        // transport, can arrive before the iPhone's session row exists and
+        // be dropped by its recv-mirror unpaired guard — sim-only today,
+        // but the packet makes the lock signal transport-order-independent).
+        let watchLedLockEpoch = reduceEditLock(
+            initialEditLockState(.watch),
+            .castInitiated(sessionId: localSessionId)
+        ).state.epoch
         coordinator.sendStartFromWatchTUI(
             sessionId: localSessionId,
             templateId: resolvedTemplateId,
             programCycleId: selection.program?.id,
             intensityId: selection.intensity?.id,
-            idTree: idTree
+            idTree: idTree,
+            lockEpoch: watchLedLockEpoch
         )
     }
 

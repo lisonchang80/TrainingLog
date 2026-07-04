@@ -55,6 +55,7 @@ import {
   onNotesRequest,
   onStartFromWatch,
   sendUserInfo,
+  type StartFromWatchReconcile,
   type WCMessage,
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
@@ -711,6 +712,25 @@ function TodayScreen() {
     // we wrap it in the `start-reconcile` envelope kind and ship back
     // via `sendUserInfo` (queued TUI — Watch picks it up next time it's
     // reachable). D30 Watch-side Swift handles the reverse-TUI receive.
+    // #55 ① (2026-07-05, 拍板 A) — Watch-led start 直接鎖. When the start
+    // envelope carries the Watch's holder `lockEpoch` AND the reconcile
+    // outcome is 'created', adopt LOCKED at that epoch right away instead of
+    // waiting for the Watch's first live-mirror (whose initial force-push can
+    // race ahead of session creation on fast transports and get dropped by
+    // the recv-mirror unpaired guard — the sim timing hole). 'conflict'
+    // outcomes must NOT lock (the iPhone keeps its own session; the Watch is
+    // showing the conflict alert). Pre-#55 Watch (no lockEpoch) → no-op, the
+    // mirror-based adoption path still owns it.
+    const seedLockFromStart = (
+      env: WCMessage & { kind: 'start-from-watch' },
+      outcome: StartFromWatchReconcile | null,
+    ) => {
+      if (outcome?.status !== 'created' || !outcome.sessionId) return;
+      editLockRef.current.seedWatchLedLock(
+        outcome.sessionId,
+        env.payload.lockEpoch,
+      );
+    };
     const unsubStartFromWatch = addUserInfoListener(
       'start-from-watch',
       async (env) => {
@@ -719,14 +739,17 @@ function TodayScreen() {
         // the Watch supplies a templateId. Without uuid injection the
         // orchestrator falls back to the empty-title freestyle path
         // (banner shows 「空白訓練」 even if Watch picked a template).
+        let outcome: StartFromWatchReconcile | null = null;
         await onStartFromWatch(
           db,
           env,
           (response) => {
+            outcome = response;
             sendUserInfo(makeEnvelope('start-reconcile', response));
           },
           randomUUID,
         );
+        seedLockFromStart(env, outcome);
         // Watch just created (or adopted) a session — refresh iPhone
         // state so the UI flips into in-session mode. Read latest
         // closure via ref.
@@ -766,6 +789,7 @@ function TodayScreen() {
         // 2026-05-29 deep-night smoke fix (B2): same uuid injection as
         // the TUI path above — Watch templates need to materialise
         // template_name + exercise tree, not collapse to freestyle.
+        let outcome: StartFromWatchReconcile | null = null;
         await onStartFromWatch(
           db,
           env,
@@ -777,10 +801,12 @@ function TodayScreen() {
             // 'conflict' reconcile (alert intermittently missing).
             // Watch dedupes start-reconcile via Equatable onChange, so
             // an ack per winning leg is safe.
+            outcome = response;
             sendUserInfo(makeEnvelope('start-reconcile', response));
           },
           randomUUID,
         );
+        seedLockFromStart(env, outcome); // #55 ① — msg-leg win locks too
         refreshRef.current?.();
       },
     );

@@ -240,6 +240,19 @@ export interface StartFromWatchPayload {
     /** session_set ids, `[exerciseIndex][setIndex]` (`position ASC`). */
     setIds: string[][];
   };
+  /**
+   * #55 ① (ADR-0028, 2026-07-05) — the edit-token epoch the Watch HOLDS for
+   * this Watch-led session (the fresh-machine castInitiated bump ⇒ 1 today;
+   * computed on the Watch via the pure reducer so the wire value can never
+   * drift from `EditLockMachine`). The iPhone adopts LOCKED at this epoch
+   * right after the start reconcile, instead of waiting for the Watch's
+   * first live-mirror — whose initial force-push can race ahead of session
+   * creation and be dropped by the `recv-mirror` unpaired guard (the sim
+   * timing hole; on-device the transport delay always loses that race).
+   * Append-only / optional — absent on a pre-#55 Watch → the mirror-based
+   * lock adoption (`noteMirrorEpoch` divergence guard) remains the path.
+   */
+  lockEpoch?: number;
 }
 
 /**

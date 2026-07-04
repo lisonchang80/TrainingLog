@@ -54,6 +54,9 @@ export {
   reduceEditLock,
   canEdit,
   isLockedOut,
+  // #55 ① (2026-07-05) — Watch-led start 直接鎖: adoption gate for the
+  // start-from-watch envelope's lockEpoch.
+  shouldAdoptWatchLedLock,
 } from './editLock';
 export type {
   EditLockRole,

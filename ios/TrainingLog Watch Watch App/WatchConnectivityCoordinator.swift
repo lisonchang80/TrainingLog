@@ -582,12 +582,21 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// already-seen original).
     private var lastStartFromWatchEnvelope: [String: Any]?
 
+    /// `lockEpoch` (#55 ①, ADR-0028, 2026-07-05 — ADDITIVE OPTIONAL, defaulted
+    /// so existing call sites are untouched): the edit-token epoch this Watch
+    /// will HOLD for the Watch-led session (fresh-machine castInitiated bump —
+    /// the caller computes it via the pure reducer so the wire value can't
+    /// drift from EditLockMachine). Rides the payload as its own independent
+    /// key; the iPhone adopts LOCKED at this epoch right after reconcile,
+    /// closing the sim-visible race where the initial force-push mirror beat
+    /// session creation and was dropped by the recv-mirror unpaired guard.
     func sendStartFromWatchTUI(
         sessionId: String,
         templateId: String?,
         programCycleId: String?,
         intensityId: String?,
-        idTree: [String: Any]? = nil
+        idTree: [String: Any]? = nil,
+        lockEpoch: Int? = nil
     ) {
         guard let session, session.activationState == .activated else {
             lastOutbound = "start-from-watch TUI skip: not activated"
@@ -629,6 +638,9 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         // (no NSNull), matching the omit-nil discipline above. Cached into
         // `lastStartFromWatchEnvelope` so a conflict-resolve resend carries it.
         if let idTree { payload["idTree"] = idTree }
+        // #55 ① — independent optional payload key (omit-when-nil per the B1
+        // NSNull lesson above). Pre-#55 iPhones ignore unknown keys.
+        if let lockEpoch { payload["lockEpoch"] = lockEpoch }
         let envelope: [String: Any] = [
             "msgId": UUID().uuidString,
             "ts": Int64(Date().timeIntervalSince1970 * 1000),
