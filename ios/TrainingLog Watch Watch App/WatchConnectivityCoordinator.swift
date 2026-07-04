@@ -138,6 +138,17 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
     /// WC framework times out internally. Updates `lastOutbound` for
     /// UI diagnostics.
     func sendEndToiPhone(sessionId: String, finalSnapshot: SessionSnapshot? = nil) async {
+        // 2026-07-04 — WC envelope goes out FIRST, HK teardown second.
+        // The old order (end() → sends) held the end-session envelope
+        // hostage to `builder.endCollection(at:)`, whose completion can
+        // stall indefinitely (observed: paired-sim smoke with degraded
+        // sim-HK, HR stuck "--" → envelope NEVER sent → iPhone zombie
+        // session; a device-side HK hiccup would eat the user's [完成]
+        // the same way). The envelope doesn't depend on teardown state,
+        // and its `endedAt` belongs at the [完成] tap anyway (Q4
+        // authoritative finish time).
+        sendEndEnvelope(sessionId: sessionId, finalSnapshot: finalSnapshot)
+
         // 2026-05-29 D11 HK lifecycle wire — Watch-led end path must
         // ALSO tear down the local HKWorkoutSession, otherwise the
         // workout-active state stays on the OS side after the user
@@ -145,15 +156,21 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         // indicator, screen stays awake forever, app never gets
         // suspended. The symmetric iPhone-led end path already does
         // this in `session(_:didReceiveMessage:replyHandler:)` for
-        // kind="end-session" (line ~586). We fire HK end FIRST and
-        // independently of the WC guards below: even if iPhone is
-        // unreachable / sessionId is empty, the user pressed [完成]
-        // — local HK lifecycle must terminate regardless. end() is
+        // kind="end-session" (line ~586). Runs UNCONDITIONALLY — even
+        // when the WC guards inside sendEndEnvelope bailed (iPhone
+        // unreachable / empty sessionId), the user pressed [完成] so
+        // local HK lifecycle must terminate regardless. end() is
         // idempotent (returns early when state is .idle/.ending/
         // .ended/.failed) so a duplicate call from a subsequent
         // iPhone-led broadcast is a safe no-op.
         await sessionController.end()
+    }
 
+    /// The WC half of a Watch-led end — envelope build + dual-lane send
+    /// (transferUserInfo durable backstop + sendMessage fast lane).
+    /// Split from `sendEndToiPhone` (2026-07-04) so the sends can never
+    /// be blocked behind HK teardown.
+    private func sendEndEnvelope(sessionId: String, finalSnapshot: SessionSnapshot?) {
         guard let session, session.activationState == .activated else {
             lastOutbound = "skip: not activated"
             return
