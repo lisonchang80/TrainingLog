@@ -36,6 +36,7 @@ iOS weight-training log app for personal use, with App Store as the long-term go
 |---|---|
 | Today tab / 進行中 session UI | `app/(tabs)/index.tsx`（⚠ god-file，見下） |
 | Rest timer | `components/session/rest-timer-modal.tsx` + `.behavior.ts` |
+| Watch rest timer | `ios/TrainingLog Watch Watch App/{RestTimerController,RestTimerView}.swift`；✓觸發自 `SetLoggerView`。⚠ rest 雙軌：per-set `set.restSec` 餵倒數、per-exercise `exercise.restSec` 餵 ⋯選單休息編輯 → 建 snapshot（`PickerViewModel.buildSnapshotFromFatTree`）兩軌都要填 |
 | Set row / 打勾 / dropset UI | `components/shared/{swipeable-set-row,set-row-content}.tsx`、`components/session/cluster-card.tsx` |
 | Session 歷史詳情 | `app/session/[id].tsx`（⚠ god-file） |
 | Template 編輯器 | `components/template-editor/template-editor-view.tsx`（in-memory draft = ADR-0016 決策）+ `src/domain/template/templateOps.ts` |
