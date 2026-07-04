@@ -173,6 +173,37 @@ describe('startSessionFromTemplate — Phase C-id id-adoption', () => {
     for (const s of sets) expect(s.session_exercise_id).toBe('watch-se-A');
   });
 
+  it('tolerates a malformed idTree missing setIds — adopts seIds, mints sets, never throws (audit A🟡-1)', async () => {
+    await seedOneExerciseThreeSets('tpl-malformed');
+
+    let n = 0;
+    // The wire is an untrusted boundary (`isWCEnvelope` is shallow): a
+    // malformed / future-version sender could ship `idTree: { seIds }` with
+    // no `setIds` key at all. Pre-fix this TypeError'd
+    // (`undefined[i]`) inside `onStartFromWatch`'s catch → session silently
+    // never created and no reverse-TUI 'created'. Post-fix it must degrade
+    // to the legacy mint path for sets while still adopting the se ids.
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-malformed',
+      uuid: () => `mint-${++n}`,
+      now: () => 1_000,
+      supplied_id_tree: {
+        seIds: ['watch-se-A'],
+        // setIds intentionally absent — malformed wire shape.
+      } as { seIds: string[]; setIds: string[][] },
+    });
+
+    const seIds = await fetchSessionExerciseIds(db, session_id);
+    expect(seIds).toEqual(['watch-se-A']);
+
+    const sets = await fetchSessionSets(db, session_id);
+    expect(sets).toHaveLength(3);
+    for (const s of sets) {
+      expect(s.id).toMatch(/^mint-/); // no setIds → all minted
+      expect(s.session_exercise_id).toBe('watch-se-A');
+    }
+  });
+
   it('remaps a dropset follower parent_set_id onto the ADOPTED head id', async () => {
     const exercises = await listExercises(db);
     const bench = exercises.find((e) => e.name === 'Bench Press')!;

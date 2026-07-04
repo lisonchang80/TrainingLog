@@ -230,7 +230,13 @@ export async function startSessionFromTemplate(
     // Phase C-id — adopt the Watch's session_set ids for this exercise
     // (position-aligned); a position without a supplied (or empty) id falls
     // back to `uuid()` so extra / missing entries never throw.
-    const suppliedSetIds = args.supplied_id_tree?.setIds[i];
+    //
+    // 2026-07-05 audit A🟡-1 — `setIds` gets its own `?.` too: the wire is an
+    // untrusted boundary (`isWCEnvelope` is shallow), so a malformed idTree
+    // carrying only `seIds` must NOT TypeError here — that would bubble into
+    // `onStartFromWatch`'s catch → session silently never created AND no
+    // reverse-TUI 'created' sent. Same "never throw" grill ruling as above.
+    const suppliedSetIds = args.supplied_id_tree?.setIds?.[i];
     const setIdMap = new Map<string, string>();
     sortedTSets.forEach((tsRow, j) => {
       setIdMap.set(tsRow.id, suppliedSetIds?.[j] || args.uuid());
