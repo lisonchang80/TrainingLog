@@ -73,12 +73,12 @@ function makeCapturingBridge() {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../../modules/expo-wcsession/compat', () => bridge);
 }
 
 describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   it('mounts all three native subscriptions BEFORE any handler is registered', () => {
@@ -118,7 +118,7 @@ describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
   });
 
   it('returns false (no throw) when the native lib is unavailable', () => {
-    jest.doMock('react-native-watch-connectivity', () => {
+    jest.doMock('../../../modules/expo-wcsession/compat', () => {
       throw new Error('TurboModuleRegistry.getEnforcing failed');
     });
     const mod = loadModule();

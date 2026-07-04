@@ -3,9 +3,15 @@
  *
  * Slice 13d D6 (ADR-0019 § Slice 13d Amendment Q5 + Q7 + NEW-Q42 +
  * NEW-Q50 — frozen 2026-05-29 evening). D3 shipped `payloadSchema.ts`
- * as the protocol-only slice; D6 lands this file as the actual bridge
- * to `react-native-watch-connectivity@2.0.0` (lib pinned per Q5 spike C
- * 2026-05-27 真機 PASS — see ADR-0019 shipped table D0 partial spike-C).
+ * as the protocol-only slice; D6 landed this file as the actual bridge
+ * to `react-native-watch-connectivity@2.0.0`.
+ *
+ * Issue #54 (2026-07-04 拍板): the native bridge is now our own local Expo
+ * Module `modules/expo-wcsession` — the old lib's RCTEventEmitter lane
+ * proved lossy under New Architecture (#287 deafness family; both fast and
+ * durable copies die when the JS runtime goes deaf). The compat shim
+ * (`modules/expo-wcsession/compat.ts`) reproduces the old lib's exact
+ * surface, so everything below this comment is behaviorally unchanged.
  *
  * NEW-Q50 (2026-05-29 evening grill) — transport翻盤 to TUI + applicationContext:
  *   - Q4 拍板: TUI is sole outbound channel; sendMessage path slated for
@@ -17,14 +23,13 @@
  *     in-session live mirror (D24 HR/kcal share this channel).
  *
  * Why lazy-require:
- *   - The lib loads via `TurboModuleRegistry.getEnforcing(...)` which
- *     throws sync under `testEnvironment: node` (no native module).
  *   - Top-level `import` would crash any test file that transitively
  *     pulls this module — even one that mocks it inline only takes
  *     effect after `require` returns.
- *   - Lazy-require pushes the load down to first use. Combined with
- *     the `__mocks__/react-native-watch-connectivity.ts` jest auto-mock,
- *     tests can run end-to-end without the bridge.
+ *   - Lazy-require pushes the load down to first use. The compat shim
+ *     itself degrades gracefully under `testEnvironment: node` (returns
+ *     false/no-op when the native module is absent), and WC-focused
+ *     tests re-mock the shim path via `jest.doMock` for real-ish behavior.
  *   - Same pattern as `src/adapters/healthkit/permission.ts` (L41-48).
  *
  * Public surface (v2 NEW-Q50 primary — D9 wire-in will adopt):
@@ -94,7 +99,7 @@ let cached: WCBridge | null = null;
 function bridge(): WCBridge {
   if (cached !== null) return cached;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  cached = require('react-native-watch-connectivity') as WCBridge;
+  cached = require('../../../modules/expo-wcsession/compat') as WCBridge;
   return cached;
 }
 

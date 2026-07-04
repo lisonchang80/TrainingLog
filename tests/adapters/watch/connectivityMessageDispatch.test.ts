@@ -75,12 +75,12 @@ function makeMessageBridge() {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../../modules/expo-wcsession/compat', () => bridge);
 }
 
 describe('connectivity.ts — legacy v1 inbound "message" dispatch', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   it('mounts exactly one "message" bridge listener even across multiple addMessageListener calls', () => {
@@ -254,7 +254,7 @@ describe('connectivity.ts — legacy v1 inbound "message" dispatch', () => {
 
 describe('connectivity.ts — seenMsgId ring buffer eviction', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   it('evicts the oldest id once the 256-slot cap is exceeded', () => {

@@ -52,12 +52,12 @@ function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../../modules/expo-wcsession/compat', () => bridge);
 }
 
 describe('Slice 13d D6 — connectivity.ts', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   // ─── Outbound sendMessage ──────────────────────────────────────────
@@ -276,7 +276,7 @@ describe('Slice 13d D6 — connectivity.ts', () => {
 
   it('sendUserInfo — WC bridge entirely unavailable → swallowed silently', () => {
     // Simulate transferUserInfo undefined (lib not loaded / partial mock).
-    jest.doMock('react-native-watch-connectivity', () => ({
+    jest.doMock('../../../modules/expo-wcsession/compat', () => ({
       getIsPaired: jest.fn().mockResolvedValue(false),
       getIsWatchAppInstalled: jest.fn().mockResolvedValue(false),
       getReachability: jest.fn().mockResolvedValue(false),
@@ -774,7 +774,7 @@ describe('Slice 13d D6 — connectivity.ts', () => {
 // ─────────────────────────────────────────────────────────────────────
 describe('connectivity.ts — F4 TUI intake msgId dedupe (shared ring)', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   /** Bridge mock capturing BOTH 'message' and 'user-info' callbacks so a

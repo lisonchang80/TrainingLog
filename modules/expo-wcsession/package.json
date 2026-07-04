@@ -1,0 +1,17 @@
+{
+  "name": "expo-wcsession",
+  "version": "0.1.0",
+  "description": "New Architecture-native WCSession (Watch Connectivity) bridge for Expo/React Native — sequence-numbered inbound events with a native ring buffer and pull reconciliation, so a deaf JS runtime can always self-heal",
+  "main": "index.ts",
+  "keywords": [
+    "expo",
+    "expo-module",
+    "watchos",
+    "apple-watch",
+    "watch-connectivity",
+    "wcsession",
+    "react-native"
+  ],
+  "license": "MIT",
+  "private": true
+}
