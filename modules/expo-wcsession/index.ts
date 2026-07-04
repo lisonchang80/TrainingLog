@@ -38,6 +38,15 @@ export interface WCSessionInboundEvent {
 export interface WCSessionSeqInfo {
   epoch: string;
   seq: number;
+  /**
+   * audit B🟡-2 (2026-07-05) — oldest journal entry still pullable (`seq + 1`
+   * when the ring is empty). `oldestSeq > watermark + 1` means the ring
+   * evicted part of a gap: `getEventsSince` can no longer recover it and the
+   * reconciler must report `gapUnrecoverable` instead of claiming a heal.
+   * Optional — an older native binary omits it (detection then falls back to
+   * inspecting the first pulled entry's seq).
+   */
+  oldestSeq?: number;
 }
 
 export type WCSessionChannel = 'message' | 'user-info' | 'application-context';

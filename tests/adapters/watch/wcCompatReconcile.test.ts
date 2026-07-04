@@ -57,6 +57,9 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
       getLatestSeq: jest.fn(() => ({
         epoch,
         seq: journal[journal.length - 1]?.seq ?? 0,
+        // audit B🟡-2 — mirrors the native contract: oldest still-buffered
+        // seq, `seq + 1` when the ring is empty.
+        oldestSeq: journal[0]?.seq ?? (journal[journal.length - 1]?.seq ?? 0) + 1,
       })),
       getEventsSince: jest.fn((after: number) => journal.filter((e) => e.seq > after)),
       drainPending: jest.fn(() => []),
@@ -79,7 +82,12 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
   // Loaded fresh per test via jest.resetModules so compat module state resets.
   let compat: {
     watchEvents: { addListener: (e: string, h: (...args: unknown[]) => void) => () => void };
-    reconcileNow: () => { pulled: number; epochChanged: boolean };
+    reconcileNow: () => { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean };
+    setReconcileAnomalyListener: (
+      cb:
+        | ((r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void)
+        | null,
+    ) => void;
     startReconcilePolling: (ms?: number) => void;
     stopReconcilePolling: () => void;
     __setDebugDropLiveEventsForTests: (d: boolean) => void;
@@ -111,7 +119,7 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     expect(seen).toEqual([{ kind: 'a', msgId: 'm1' }, { kind: 'b', msgId: 'm2' }]);
 
     const r = compat.reconcileNow();
-    expect(r).toEqual({ pulled: 0, epochChanged: false });
+    expect(r).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
     expect(seen).toHaveLength(2); // no double delivery
   });
 
@@ -126,7 +134,7 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     expect(seen).toHaveLength(1); // JS heard nothing
 
     const r = compat.reconcileNow();
-    expect(r).toEqual({ pulled: 2, epochChanged: false });
+    expect(r).toEqual({ pulled: 2, epochChanged: false, gapUnrecoverable: false });
     expect(seen).toEqual([
       { kind: 'a', msgId: 'm1' },
       { kind: 'b', msgId: 'm2' },
@@ -134,7 +142,7 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     ]);
 
     // Watermark advanced by the pull — a second reconcile is a no-op.
-    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
   });
 
   it('pull spans channels and preserves old-lib payload shapes', () => {
@@ -179,13 +187,13 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     journal = [{ seq: 5, epoch, payload: { kind: 'stale', msgId: 'old' }, channel: 'message' }];
 
     const r = compat.reconcileNow();
-    expect(r).toEqual({ pulled: 0, epochChanged: true });
+    expect(r).toEqual({ pulled: 0, epochChanged: true, gapUnrecoverable: false });
     expect(seen).toHaveLength(1); // stale history NOT replayed
 
     // New-epoch live traffic flows normally afterwards.
     emitLive('message', { kind: 'fresh', msgId: 'm2' });
     expect(seen).toHaveLength(2);
-    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
   });
 
   it('first contact baselines to the journal head (pre-JS history is drain\'s job)', () => {
@@ -197,13 +205,13 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     const seen: unknown[] = [];
     compat.watchEvents.addListener('message', (payload) => seen.push(payload));
 
-    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
     expect(seen).toHaveLength(0);
 
     // But anything AFTER the baseline that the live lane drops is pulled.
     compat.__setDebugDropLiveEventsForTests(true);
     emitLive('message', { kind: 'c', msgId: 'm3' });
-    expect(compat.reconcileNow()).toEqual({ pulled: 1, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 1, epochChanged: false, gapUnrecoverable: false });
     expect(seen).toEqual([{ kind: 'c', msgId: 'm3' }]);
   });
 
@@ -229,7 +237,7 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
     ]);
     // Nothing left behind for the poll: the watermark advanced THROUGH the
     // hole, not over it.
-    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
     expect(seen).toHaveLength(3);
   });
 
@@ -252,7 +260,59 @@ describe('expo-wcsession compat — seq-gap reconciliation (#54 Phase 2)', () =>
       { kind: 'a', msgId: 'm1' },
       { kind: 'c', msgId: 'm3' },
     ]);
-    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false });
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
+  });
+
+  it('ring overflow: pull past an evicted head reports gapUnrecoverable ONCE + fires the anomaly listener (audit B🟡-2)', () => {
+    const seen: unknown[] = [];
+    const anomalies: unknown[] = [];
+    compat.setReconcileAnomalyListener((r) => anomalies.push(r));
+    compat.watchEvents.addListener('message', (payload) => seen.push(payload));
+    emitLive('message', { kind: 'a', msgId: 'm1' }); // seq 1 — delivered
+
+    compat.__setDebugDropLiveEventsForTests(true);
+    emitLive('message', { kind: 'b', msgId: 'm2' }); // seq 2 — journaled, live lost
+    emitLive('message', { kind: 'c', msgId: 'm3' }); // seq 3 — journaled, live lost
+    // Ring overflow evicts the head of the gap (seq 2) before any pull.
+    journal = journal.filter((e) => e.seq !== 2);
+
+    const r = compat.reconcileNow();
+    // Pre-fix this claimed `pulled: 1` with no loss signal — "healed" while
+    // seq 2 (potentially an end-session TUI) was permanently gone.
+    expect(r).toEqual({ pulled: 1, epochChanged: false, gapUnrecoverable: true });
+    expect(seen).toEqual([{ kind: 'a', msgId: 'm1' }, { kind: 'c', msgId: 'm3' }]);
+    expect(anomalies).toEqual([r]);
+
+    // Watermark advanced PAST the unpullable hole: the signal fires once,
+    // not on every subsequent poll tick.
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
+    expect(anomalies).toHaveLength(1);
+  });
+
+  it('live-path fill over an evicted hole also signals gapUnrecoverable (audit B🟡-2 × B🟠-1)', () => {
+    const seen: unknown[] = [];
+    const anomalies: unknown[] = [];
+    compat.setReconcileAnomalyListener((r) => anomalies.push(r));
+    compat.watchEvents.addListener('message', (payload) => seen.push(payload));
+    emitLive('message', { kind: 'a', msgId: 'm1' }); // seq 1 — delivered
+
+    compat.__setDebugDropLiveEventsForTests(true);
+    emitLive('message', { kind: 'b', msgId: 'm2' }); // seq 2 — evicted below
+    emitLive('message', { kind: 'c', msgId: 'm3' }); // seq 3 — survives in ring
+    journal = journal.filter((e) => e.seq !== 2);
+    compat.__setDebugDropLiveEventsForTests(false);
+    emitLive('message', { kind: 'd', msgId: 'm4' }); // seq 4 — live, hole behind it
+
+    // The fill recovered what the ring still had (seq 3), delivered the live
+    // event, and reported the evicted head (seq 2) exactly once.
+    expect(seen).toEqual([
+      { kind: 'a', msgId: 'm1' },
+      { kind: 'c', msgId: 'm3' },
+      { kind: 'd', msgId: 'm4' },
+    ]);
+    expect(anomalies).toEqual([{ pulled: 1, epochChanged: false, gapUnrecoverable: true }]);
+    expect(compat.reconcileNow()).toEqual({ pulled: 0, epochChanged: false, gapUnrecoverable: false });
+    expect(anomalies).toHaveLength(1);
   });
 
   it('5s poll heals a deaf window without manual calls', () => {

@@ -176,13 +176,13 @@ function fillGapBeforeLive(evt: WCSessionInboundEvent): void {
   if (typeof evt.seq !== 'number') return;
   if (typeof evt.epoch === 'string' && evt.epoch !== knownEpoch) return;
   if (evt.seq <= lastDeliveredSeq + 1) return; // contiguous or stale — no hole
-  for (const gapEvt of getEventsSince(lastDeliveredSeq)) {
-    // Journal order is ascending seq — stop at the live event itself.
-    if (typeof gapEvt.seq === 'number' && gapEvt.seq >= evt.seq) break;
-    const gapChannel = gapEvt.channel;
-    if (gapChannel && gapChannel in routes) {
-      deliver(gapChannel, gapEvt);
-    }
+  const { pulled, headLost } = pullGap(evt.seq);
+  if (headLost) {
+    // audit B🟡-2 — part of the hole was already evicted from the ring; the
+    // live event about to be delivered advances the watermark past it, so
+    // report the loss once. (No watermark force-advance needed here — the
+    // hole sits BELOW evt.seq by construction.)
+    notifyAnomaly({ pulled, epochChanged: false, gapUnrecoverable: true });
   }
 }
 
@@ -273,6 +273,65 @@ export interface WCReconcileResult {
   /** True when the native process restarted since last contact (watermark
    *  reset, nothing pulled — cold-boot handshake owns that recovery). */
   epochChanged: boolean;
+  /**
+   * audit B🟡-2 (2026-07-05) — true when part of the missed range was already
+   * EVICTED from the native ring (ring256 overflow: a deaf window that
+   * outlived ~256 envelopes, e.g. deaf + poll both stopped for 4+ minutes of
+   * hr-tick traffic). The pull recovered what remained but the head of the
+   * gap is permanently gone — the caller must NOT treat `pulled > 0` as
+   * "healed". Reported in the same spirit as `epochChanged`: a signal for
+   * the app layer to run its full state resync instead of trusting the
+   * journal. The watermark is advanced past the hole so this fires ONCE per
+   * overflow, not every poll tick.
+   */
+  gapUnrecoverable: boolean;
+}
+
+/**
+ * audit B🟡-2 — anomaly hook so the standing 5s poll (whose result is
+ * otherwise discarded inside this module) can surface an unrecoverable gap
+ * to the app layer. One listener, module-scoped, mirroring the singleton
+ * nature of the journal itself; `connectivity.ts` fans out to app handlers.
+ */
+type ReconcileAnomalyListener = (result: WCReconcileResult) => void;
+let anomalyListener: ReconcileAnomalyListener | null = null;
+
+export function setReconcileAnomalyListener(cb: ReconcileAnomalyListener | null): void {
+  anomalyListener = cb;
+}
+
+function notifyAnomaly(result: WCReconcileResult): void {
+  if (!anomalyListener) return;
+  try {
+    anomalyListener(result);
+  } catch {
+    // listener errors must never break delivery / the poll
+  }
+}
+
+/**
+ * Pull journal entries in `(lastDeliveredSeq, beforeSeq)` — `beforeSeq`
+ * null = to the journal head — and deliver them in order through the same
+ * routes. Reports `headLost` when the earliest still-pullable entry is
+ * already beyond the first missing seq, i.e. the ring evicted part of the
+ * gap (audit B🟡-2). ONLY call when a gap is known to exist, otherwise an
+ * empty journal read would misreport `headLost`.
+ */
+function pullGap(beforeSeq: number | null): { pulled: number; headLost: boolean } {
+  const events = getEventsSince(lastDeliveredSeq);
+  const firstSeq = typeof events[0]?.seq === 'number' ? events[0].seq : null;
+  const headLost = firstSeq === null || firstSeq > lastDeliveredSeq + 1;
+  let pulled = 0;
+  for (const evt of events) {
+    // Journal order is ascending seq — stop at the exclusive upper bound.
+    if (beforeSeq !== null && typeof evt.seq === 'number' && evt.seq >= beforeSeq) break;
+    const channel = evt.channel;
+    if (channel && channel in routes) {
+      deliver(channel, evt);
+      pulled += 1;
+    }
+  }
+  return { pulled, headLost };
 }
 
 /**
@@ -283,35 +342,43 @@ export interface WCReconcileResult {
  */
 export function reconcileNow(): WCReconcileResult {
   const latest = getLatestSeq();
-  if (!latest) return { pulled: 0, epochChanged: false };
+  if (!latest) return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
 
   if (knownEpoch === null) {
     // First contact in this JS life. History before this point is the
     // drain path's job (exactly-once watermark) — baseline, don't pull.
     knownEpoch = latest.epoch;
     lastDeliveredSeq = Math.max(lastDeliveredSeq, latest.seq);
-    return { pulled: 0, epochChanged: false };
+    return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
   }
 
   if (latest.epoch !== knownEpoch) {
     knownEpoch = latest.epoch;
     lastDeliveredSeq = latest.seq;
-    return { pulled: 0, epochChanged: true };
+    return { pulled: 0, epochChanged: true, gapUnrecoverable: false };
   }
 
   if (latest.seq <= lastDeliveredSeq) {
-    return { pulled: 0, epochChanged: false };
+    return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
   }
 
-  let pulled = 0;
-  for (const evt of getEventsSince(lastDeliveredSeq)) {
-    const channel = evt.channel;
-    if (channel && channel in routes) {
-      deliver(channel, evt);
-      pulled += 1;
-    }
+  const watermarkAtEntry = lastDeliveredSeq;
+  const { pulled, headLost } = pullGap(null);
+  // audit B🟡-2 — belt-and-braces: newer native binaries also report the
+  // oldest still-buffered seq directly; cross-check it so a pull that raced
+  // fresh ingests still detects the eviction.
+  const gapUnrecoverable =
+    headLost ||
+    (typeof latest.oldestSeq === 'number' && latest.oldestSeq > watermarkAtEntry + 1);
+  if (gapUnrecoverable) {
+    // The evicted head can never be pulled — advance the watermark past the
+    // hole so the signal fires ONCE, instead of re-reporting every poll tick
+    // against a gap that can't heal.
+    lastDeliveredSeq = Math.max(lastDeliveredSeq, latest.seq);
   }
-  return { pulled, epochChanged: false };
+  const result = { pulled, epochChanged: false, gapUnrecoverable };
+  if (gapUnrecoverable) notifyAnomaly(result);
+  return result;
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -350,6 +417,7 @@ export function __resetCompatStateForTests(): void {
   baselineInitialized = false;
   lastDeliveredSeq = 0;
   knownEpoch = null;
+  anomalyListener = null;
   for (const set of Object.values(routes)) set.clear();
   for (const channel of Object.keys(nativeUnsubs) as WCSessionChannel[]) {
     try {

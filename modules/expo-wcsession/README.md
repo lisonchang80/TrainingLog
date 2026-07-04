@@ -27,11 +27,16 @@ WCSessionDelegate callback
 
 The JS event is now just a **hint**. The journal is the contract:
 
-- `getLatestSeq(): { epoch, seq }` — what the native side has actually received.
+- `getLatestSeq(): { epoch, seq, oldestSeq }` — what the native side has actually received, and the oldest entry still buffered.
 - `getEventsSince(seq)` — pure read; pull everything the event lane dropped.
 - `epoch` (per-process UUID) — a changed epoch means the phone process restarted and the ring is fresh; run your app-level full resync instead of a gap pull.
 
 A JS runtime that goes deaf detects it by polling one cheap native call, and self-heals in-band. No app restart, no manual recovery, no lost data while the process lives.
+
+Two loss classes remain detectable-but-not-healable, and the reconciler is honest about both instead of claiming a heal:
+
+- **Ring overflow** — a deaf window that outlives the 256-entry ring evicts the head of the gap. The reconciler reports `gapUnrecoverable: true` (and fires the anomaly listener the standing poll is wired to), pulls what remains, and advances the watermark past the hole so the signal fires once. Run your app-level full resync on it — same posture as `epochChanged`.
+- **Process restart** — `epochChanged: true`, nothing pulled; your cold-boot recovery owns it.
 
 ### Cold boot: `drainPending`
 

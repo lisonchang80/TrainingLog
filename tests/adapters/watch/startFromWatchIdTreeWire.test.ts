@@ -248,7 +248,7 @@ describe('start-from-watch idTree over expo-wcsession wire (C-id × #54)', () =>
 
     // Phase 2 heal — the pull re-injects through the SAME deliver() route.
     const r = connectivity.reconcileWatchInbound();
-    expect(r).toEqual({ pulled: 1, epochChanged: false });
+    expect(r).toEqual({ pulled: 1, epochChanged: false, gapUnrecoverable: false });
     expect(envs).toHaveLength(1);
     expect(envs[0].payload.idTree).toEqual(WATCH_ID_TREE);
 

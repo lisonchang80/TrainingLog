@@ -97,10 +97,24 @@ type WCBridge = {
   };
   // Issue #54 Phase 2 — seq-gap reconciliation (expo-wcsession compat only).
   // Optional so legacy-shaped jest doMock factories stay valid; all call
-  // sites runtime-guard before invoking.
-  reconcileNow?: () => { pulled: number; epochChanged: boolean };
+  // sites runtime-guard before invoking. `gapUnrecoverable` (audit B🟡-2) is
+  // optional in the BRIDGE shape for the same mock-compat reason — the
+  // app-facing `reconcileWatchInbound` normalises it to a hard boolean.
+  reconcileNow?: () => {
+    pulled: number;
+    epochChanged: boolean;
+    gapUnrecoverable?: boolean;
+  };
   startReconcilePolling?: (intervalMs?: number) => void;
   stopReconcilePolling?: () => void;
+  // audit B🟡-2 — compat fires this on anomalies the standing poll would
+  // otherwise swallow (ring256 overflow → unrecoverable gap). Optional for
+  // legacy-shaped mocks; wired in `startReconcileTriggers`.
+  setReconcileAnomalyListener?: (
+    cb:
+      | ((r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void)
+      | null,
+  ) => void;
 };
 
 let cached: WCBridge | null = null;
@@ -949,17 +963,52 @@ export function initWatchBridge(): boolean {
  * the msgId intake ring dedupes re-injection. No-op under legacy-shaped
  * test mocks and when the native module is absent.
  */
-export function reconcileWatchInbound(): { pulled: number; epochChanged: boolean } {
+export function reconcileWatchInbound(): {
+  pulled: number;
+  epochChanged: boolean;
+  /** audit B🟡-2 — true when the native ring evicted part of the missed
+   *  range (overflow): the pull could NOT recover everything and `pulled`
+   *  must not be read as "healed". */
+  gapUnrecoverable: boolean;
+} {
   try {
     const b = bridge();
     if (typeof b.reconcileNow !== 'function') {
-      return { pulled: 0, epochChanged: false };
+      return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
     }
-    return b.reconcileNow();
+    const r = b.reconcileNow();
+    return {
+      pulled: r.pulled,
+      epochChanged: r.epochChanged,
+      gapUnrecoverable: r.gapUnrecoverable === true,
+    };
   } catch {
-    return { pulled: 0, epochChanged: false };
+    return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
   }
 }
+
+/**
+ * audit B🟡-2 — app-layer surface for inbound-journal anomalies that the
+ * standing 5s poll would otherwise swallow (its result never leaves the
+ * compat module). Today the only anomaly kind is `gapUnrecoverable`: the
+ * native ring256 overflowed while JS was deaf, so one or more inbound
+ * envelopes are permanently gone — the app should run its full state
+ * resync (mirror state self-heals on the next ~1Hz live-mirror tick; the
+ * loss-sensitive kinds are one-shot TUIs like end-session, whose
+ * user-visible recovery remains the Watch-side ⏳ stuck indicator + retry).
+ * Handlers registered here receive every anomaly result exactly as compat
+ * reported it. Returns an unsubscribe.
+ */
+export function addWatchInboundAnomalyListener(
+  cb: (r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void,
+): () => void {
+  inboundAnomalyListeners.add(cb);
+  return () => inboundAnomalyListeners.delete(cb);
+}
+
+const inboundAnomalyListeners = new Set<
+  (r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void
+>();
 
 let reconcileTriggersStarted = false;
 
@@ -975,6 +1024,27 @@ function startReconcileTriggers(): void {
   if (typeof b.startReconcilePolling !== 'function') return; // legacy mock
   reconcileTriggersStarted = true;
   b.startReconcilePolling(5000);
+  // audit B🟡-2 — surface poll-detected anomalies (unrecoverable gap after a
+  // ring overflow) to the app layer; the poll's own result is discarded
+  // inside compat, so this hook is the only way the signal escapes.
+  if (typeof b.setReconcileAnomalyListener === 'function') {
+    b.setReconcileAnomalyListener((r) => {
+      if (r.gapUnrecoverable) {
+        // Always-on observability even before any app handler registers.
+        console.warn(
+          '[watch] inbound journal overflow — envelope(s) evicted before JS processed them; ' +
+            'mirror state self-heals via live-mirror, but a one-shot TUI in the hole is lost',
+        );
+      }
+      for (const cb of inboundAnomalyListeners) {
+        try {
+          cb(r);
+        } catch {
+          // app handler errors must not break the poll
+        }
+      }
+    });
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { AppState } = require('react-native') as {
@@ -991,6 +1061,7 @@ function startReconcileTriggers(): void {
 /** Test hook — reset the trigger latch so a re-init can be asserted. */
 export function __resetReconcileTriggersForTests(): void {
   reconcileTriggersStarted = false;
+  inboundAnomalyListeners.clear();
 }
 
 /**

@@ -128,6 +128,57 @@ describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
     expect(mod.__isBridgeMountedForTests()).toBe(false);
   });
 
+  // ─── audit B🟡-2 — inbound-journal anomaly surface ───────────────────
+
+  it('wires the compat anomaly listener and fans gapUnrecoverable out to app handlers', () => {
+    const { bridge } = makeCapturingBridge();
+    let compatListener:
+      | ((r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void)
+      | null = null;
+    const wired = Object.assign(bridge, {
+      startReconcilePolling: jest.fn(),
+      setReconcileAnomalyListener: jest.fn((cb) => {
+        compatListener = cb;
+      }),
+    });
+    installBridge(wired);
+    const mod = loadModule();
+
+    mod.initWatchBridge();
+    expect(wired.setReconcileAnomalyListener).toHaveBeenCalledTimes(1);
+    expect(compatListener).not.toBeNull();
+
+    const received: unknown[] = [];
+    const unsubscribe = mod.addWatchInboundAnomalyListener((r) => received.push(r));
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const anomaly = { pulled: 3, epochChanged: false, gapUnrecoverable: true };
+    compatListener!(anomaly);
+    expect(received).toEqual([anomaly]);
+    expect(warnSpy).toHaveBeenCalled(); // observability even with no handler
+    warnSpy.mockRestore();
+
+    // Unsubscribed handlers stop receiving.
+    unsubscribe();
+    compatListener!(anomaly);
+    expect(received).toHaveLength(1);
+  });
+
+  it('reconcileWatchInbound normalises a legacy bridge result (no gapUnrecoverable key) to false', () => {
+    const { bridge } = makeCapturingBridge();
+    const wired = Object.assign(bridge, {
+      reconcileNow: jest.fn(() => ({ pulled: 2, epochChanged: false })),
+    });
+    installBridge(wired);
+    const mod = loadModule();
+
+    expect(mod.reconcileWatchInbound()).toEqual({
+      pulled: 2,
+      epochChanged: false,
+      gapUnrecoverable: false,
+    });
+  });
+
   // ─── Pre-handler replay buffer (the cold-boot race window) ──────────
 
   it("replays a 'message' envelope that arrived before its handler registered", () => {

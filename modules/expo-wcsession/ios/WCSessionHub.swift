@@ -180,7 +180,18 @@ final class WCSessionHub: NSObject {
   // MARK: - Journal reads (JS: getLatestSeq / getEventsSince / drainPending)
 
   func latestSeqInfo() -> [String: Any] {
-    return queue.sync { ["epoch": epoch, "seq": seq] }
+    return queue.sync {
+      [
+        "epoch": epoch,
+        "seq": seq,
+        // audit B🟡-2 (2026-07-05) — the oldest journal entry still pullable.
+        // `seq + 1` when the ring is empty ("nothing below the next seq is
+        // available"), so JS can detect head-loss after a ring256 overflow
+        // (`oldestSeq > watermark + 1`) instead of silently pulling half a
+        // gap and believing it healed.
+        "oldestSeq": ring.first?.seq ?? (seq + 1),
+      ]
+    }
   }
 
   /// Pure read for gap reconciliation — does NOT touch the drain watermark.
