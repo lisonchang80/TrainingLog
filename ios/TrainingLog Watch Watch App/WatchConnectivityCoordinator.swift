@@ -586,7 +586,8 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         sessionId: String,
         templateId: String?,
         programCycleId: String?,
-        intensityId: String?
+        intensityId: String?,
+        idTree: [String: Any]? = nil
     ) {
         guard let session, session.activationState == .activated else {
             lastOutbound = "start-from-watch TUI skip: not activated"
@@ -621,6 +622,13 @@ final class WatchConnectivityCoordinator: NSObject, ObservableObject {
         if let templateId { payload["templateId"] = templateId }
         if let programCycleId { payload["programCycleId"] = programCycleId }
         if let intensityId { payload["intensityId"] = intensityId }
+        // Phase C-id (2026-07-05) — Watch-minted session_exercise / set id tree
+        // (`seIds` + `setIds[][]`) so the iPhone adopts ids verbatim (both
+        // devices share ids from the first frame). Omitted (nil) → iPhone mints
+        // its own (legacy). Pure String / [String] / [[String]] → WCSession-safe
+        // (no NSNull), matching the omit-nil discipline above. Cached into
+        // `lastStartFromWatchEnvelope` so a conflict-resolve resend carries it.
+        if let idTree { payload["idTree"] = idTree }
         let envelope: [String: Any] = [
             "msgId": UUID().uuidString,
             "ts": Int64(Date().timeIntervalSince1970 * 1000),
