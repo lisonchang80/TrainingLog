@@ -1,8 +1,23 @@
 diff --git a/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm b/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
-index 0085603..96b83e8 100644
+index 0085603..08beddf 100644
 --- a/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
 +++ b/node_modules/react-native-watch-connectivity/ios/WatchConnectivity.mm
-@@ -502,11 +502,20 @@ - (void)   session:(WCSession *)session
+@@ -486,7 +486,13 @@ - (void)dequeueUserInfo:(NSArray<NSString *> *)ids {
+ - (void)session:(WCSession *)session didFinishUserInfoTransfer:(WCSessionUserInfoTransfer *)userInfoTransfer error:(NSError *)error {
+   if (error) {
+     NSLog(@"User info transfer error: %@ %@", error, [error userInfo]);
+-    [self dispatchEventWithName:EVENT_WATCH_USER_INFO_ERROR body:@{@"userInfo": [userInfoTransfer userInfo], @"error": dictionaryFromError(error)}];
++    // TrainingLog patch — on the Simulator a failed transfer can hand back a
++    // transfer whose userInfo is nil; the @{} literal then throws
++    // NSInvalidArgumentException and aborts the app (SIGABRT via
++    // dictionaryWithObjects:forKeys:count:). Nil-coalesce to keep the error
++    // event flowing instead of crashing.
++    NSDictionary *transferInfo = [userInfoTransfer userInfo] ?: @{};
++    [self dispatchEventWithName:EVENT_WATCH_USER_INFO_ERROR body:@{@"userInfo": transferInfo, @"error": dictionaryFromError(error)}];
+   }
+ }
+ 
+@@ -502,11 +508,20 @@ - (void)   session:(WCSession *)session
  
  - (void)dispatchEventWithName:(NSString *)name
                           body:(NSDictionary<NSString *, id> *)body {
