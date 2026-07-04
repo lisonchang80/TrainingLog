@@ -29,25 +29,41 @@
  * delivery via `seenMsgId` (same pattern as the D29 live-mirror dual-fire and
  * the connectivity ring-buffer dedup comment).
  *
- * Contract (Q11 silent-skip — mirrors `pushStartToWatch` / `pushEndToWatch`):
+ * Contract (Q11 silent-skip — mirrors `pushStartToWatch` / `pushEndToWatch`;
+ * queued-honesty tightened 2026-07-05, #55 ④ — `queued:true` is only claimed
+ * when a durable copy actually exists somewhere):
  *   - Never throws. Catches at the bridge boundary; returns a structured result.
  *   - Session row missing / snapshot unbuildable → `{acked:false, queued:false,
  *     code:'NO_SNAPSHOT'}`. (Should not happen for a genuine in-progress
  *     session; caller may toast a generic error.)
+ *   - Unpaired / Watch app not installed → `{acked:false, queued:false,
+ *     code:'UNPAIRED' | 'NOT_INSTALLED'}` — NEITHER channel can ever deliver;
+ *     nothing is fired and the caller must toast an honest failure.
  *   - Reachable + `{ok:true}` ack within timeout → `{acked:true, queued:true}`.
+ *   - Explicit `{ok:false}` reply (Watch busy with another session) →
+ *     `{acked:false, queued:false, code:'REJECTED'}` — the TUI leg shares the
+ *     msgId so the Watch dedupes it away; the cast is dead, not pending.
  *   - Reachable but no positive `{ok:true}` ack → `{acked:false, queued:true,
  *     code:'ACK_NO_OK'}` (TUI backstop still queued).
- *   - Unreachable / unpaired / timeout / bridge error → `{acked:false,
- *     queued:true, code:<SendResult.code>}` (TUI backstop still queued — the
- *     cast will land when the Watch app next opens).
- *   - is_watch_tracked: flipped true whenever the cast is QUEUED (snapshot built
- *     + dual-fired), regardless of reachability — the durable cast WILL be
- *     adopted on the Watch's next wake, so the iPhone→Watch live-mirror gate
- *     (`index.tsx` refresh push, gated on the DB column) must open NOW. The ONLY
- *     exception is an explicit `{ok:false}` reply (Watch busy with another
- *     session). Decouples `acked` (synchronous adoption) from tracking (intent +
- *     durable queue). [2026-06-27 ⑤⑥ fix: queued/cold-launch cast opened the
- *     session on the wrist but never received subsequent iPhone edits.]
+ *   - Unreachable / timeout / bridge error → `{acked:false, queued:<tui
+ *     hand-off ok?>, code:<SendResult.code>}`. TUI hand-off ok = durably
+ *     queued (lands when the Watch app next opens — the normal real-device
+ *     unreachable case); TUI hand-off ALSO failed = `queued:false` (honest:
+ *     nothing exists that could ever arrive).
+ *   - Known limit: a TUI transfer that FAILS ASYNC after a successful hand-off
+ *     (`didFinish:error:`, e.g. sim 7006 環境病) still reports `queued:true` —
+ *     per-envelope attribution of that callback would require reading
+ *     `userInfoTransfer.userInfo` on the error path, the exact SIGABRT class
+ *     patched in the old lib. Log-only on the native side by design.
+ *   - is_watch_tracked: flipped true whenever the cast is delivered OR durably
+ *     queued — the durable cast WILL be adopted on the Watch's next wake, so
+ *     the iPhone→Watch live-mirror gate (`index.tsx` refresh push, gated on
+ *     the DB column) must open NOW. Exceptions: explicit `{ok:false}` reply
+ *     (Watch busy) and #55 ④ nothing-delivered (both hand-offs failed / hard
+ *     precheck) — no queue exists, the gate stays closed. Decouples `acked`
+ *     (synchronous adoption) from tracking (intent + durable queue).
+ *     [2026-06-27 ⑤⑥ fix: queued/cold-launch cast opened the session on the
+ *     wrist but never received subsequent iPhone edits.]
  */
 
 import type { Database } from '../db/types';
@@ -55,9 +71,11 @@ import { setIsWatchTracked } from '../adapters/sqlite/sessionRepository';
 import {
   buildStartFromIphone,
   fetchSessionSnapshot,
+  isPaired,
+  isWatchAppInstalled,
   makeEnvelope,
   sendMessage,
-  sendUserInfo,
+  sendUserInfoChecked,
   type SendResult,
   type WCMessage,
 } from '../adapters/watch';
@@ -79,15 +97,20 @@ export interface PushCastResult {
    *  `queued` is true the cast is durably queued for the next Watch wake. */
   queued: boolean;
   /** Diagnostic code. `'NO_SNAPSHOT'` = session / snapshot unbuildable;
+   *  `'NOT_INSTALLED'` = paired Watch has no TrainingLog app (#55 ④ — TUI can
+   *  never deliver); `'REJECTED'` = Watch explicitly replied `{ok:false}`
+   *  (busy with another session — its msgId dedupe also kills the TUI leg);
    *  `'ACK_NO_OK'` = reachable but Watch didn't positively adopt; the rest
    *  mirror `SendResult.code`. `null` when acked. */
   code:
     | 'NO_SNAPSHOT'
     | 'UNPAIRED'
+    | 'NOT_INSTALLED'
     | 'NOT_REACHABLE'
     | 'TIMEOUT'
     | 'BRIDGE_ERROR'
     | 'ACK_NO_OK'
+    | 'REJECTED'
     | null;
   /** Echo of the instant-channel send result; `null` when no snapshot. */
   raw: SendResult | null;
@@ -140,12 +163,28 @@ export async function pushCastToWatch(
   }
   const env: WCMessage = makeEnvelope('cast-session', payload);
 
-  // 2. TUI backstop FIRST — durable queued delivery so the cast survives an
+  // 2. Hard prechecks (#55 ④ 誠實 toast) — cases where NEITHER channel can
+  //    ever deliver, so claiming「已送出，手錶開啟後同步」would be a lie:
+  //    an unpaired iPhone has no TUI queue target, and a paired Watch without
+  //    the app never launches a receiver. Return queued:false BEFORE firing
+  //    anything (mirrors the NO_SNAPSHOT early-out: no envelope, no
+  //    is_watch_tracked flip → the live-mirror gate stays closed).
+  if (!(await isPaired())) {
+    return { acked: false, queued: false, code: 'UNPAIRED', raw: null, startedAt };
+  }
+  if (!(await isWatchAppInstalled())) {
+    return { acked: false, queued: false, code: 'NOT_INSTALLED', raw: null, startedAt };
+  }
+
+  // 3. TUI backstop FIRST — durable queued delivery so the cast survives an
   //    unreachable / asleep Watch (delivered on next wake). Same envelope /
   //    msgId as the instant channel → the Watch dedupes via `seenMsgId`.
-  sendUserInfo(env);
+  //    CHECKED (#55 ④): `false` = the envelope never reached a live bridge
+  //    (native module absent / bridge threw) — nothing is queued, and only
+  //    the instant channel below can still save this cast.
+  const tuiQueued = sendUserInfoChecked(env);
 
-  // 3. Instant channel — sendMessage when reachable. A positive `{ok:true}` ack
+  // 4. Instant channel — sendMessage when reachable. A positive `{ok:true}` ack
   //    means the Watch navigated into the session NOW (→ `acked`).
   const result = await sendMessage(env, {
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -156,21 +195,28 @@ export async function pushCastToWatch(
   // the ONE case we honour as "not tracking this one" (the ④ conflict path).
   const explicitlyRejected = result.ok && result.reply?.ok === false;
 
-  // 4. Flip is_watch_tracked unless the Watch explicitly rejected. The cast is
-  //    durably QUEUED (TUI backstop), so an unreachable / asleep / cold-
-  //    launching Watch WILL adopt it on its next wake — we must open the
-  //    iPhone→Watch live-mirror gate NOW (the `app/(tabs)/index.tsx` refresh →
-  //    `scheduleLiveMirrorPush` is gated on the DB `is_watch_tracked`). Without
-  //    this, the queued / cold-launch path opens the session on the wrist but
-  //    never receives subsequent iPhone edits — the Watch's reverse-apply
-  //    receiver IS wired on mount, but the iPhone never pushes (the 2026-06-27
-  //    ⑤⑥ device bug). This mirrors the prior reachable-ack semantics, which
-  //    already flipped optimistically on RECEIPT (the Swift cast handler replies
-  //    `{ok:true}` the moment it receives, before any conflict resolution), so
-  //    it's consistent — just extended to the durable transports. Decouples
-  //    `acked` (synchronous adoption, for the toast) from tracking (user intent
-  //    + durable queue). Idempotent; silent no-op on a missing id (Q11).
-  if (!explicitlyRejected) {
+  // 5. `delivered` (#55 ④) — true iff the cast reached (or is durably queued
+  //    toward) the Watch: the TUI hand-off succeeded, OR the instant channel
+  //    got a reply. When BOTH channels failed at hand-off, nothing exists
+  //    anywhere that could ever arrive — the honest answer is queued:false.
+  const delivered = tuiQueued || result.ok;
+
+  // 6. Flip is_watch_tracked when the cast was delivered/queued, unless the
+  //    Watch explicitly rejected. The durable TUI copy will be adopted on the
+  //    Watch's next wake — we must open the iPhone→Watch live-mirror gate NOW
+  //    (the `app/(tabs)/index.tsx` refresh → `scheduleLiveMirrorPush` is gated
+  //    on the DB `is_watch_tracked`). Without this, the queued / cold-launch
+  //    path opens the session on the wrist but never receives subsequent
+  //    iPhone edits — the Watch's reverse-apply receiver IS wired on mount,
+  //    but the iPhone never pushes (the 2026-06-27 ⑤⑥ device bug). This
+  //    mirrors the prior reachable-ack semantics, which already flipped
+  //    optimistically on RECEIPT (the Swift cast handler replies `{ok:true}`
+  //    the moment it receives, before any conflict resolution). Decouples
+  //    `acked` (synchronous adoption, for the toast) from tracking (user
+  //    intent + durable queue). #55 ④ addition: when NOTHING was handed off
+  //    (`!delivered`) there is no queue to honour — leave the gate closed.
+  //    Idempotent; silent no-op on a missing id (Q11).
+  if (!explicitlyRejected && delivered) {
     try {
       await setIsWatchTracked(db, { id: sessionId, value: true });
     } catch {
@@ -181,13 +227,22 @@ export async function pushCastToWatch(
   if (adopted) {
     return { acked: true, queued: true, code: null, raw: result, startedAt };
   }
+  if (explicitlyRejected) {
+    // #55 ④ — the Watch positively refused (busy with another session). The
+    // TUI leg shares the msgId, so the Watch's `ingestCast` dedupe will drop
+    // it too: this cast is DEAD, not pending. 「已送出，手錶開啟後同步」would
+    // be a lie — report an honest failure instead.
+    return { acked: false, queued: false, code: 'REJECTED', raw: result, startedAt };
+  }
   if (result.ok) {
     // Reachable + replied, but no positive `{ok:true}` adoption — backstop
-    // still queued (tracked flipped above unless explicitly rejected).
+    // still queued (tracked flipped above).
     return { acked: false, queued: true, code: 'ACK_NO_OK', raw: result, startedAt };
   }
-  // Unreachable / unpaired / timeout / bridge error — TUI backstop queued, so
-  // the cast lands on next Watch wake; tracked flipped above so the live-mirror
-  // gate is already open when it does.
-  return { acked: false, queued: true, code: result.code, raw: result, startedAt };
+  // Instant channel failed (unreachable / timeout / bridge error). Honest
+  // split (#55 ④): if the TUI hand-off succeeded the cast IS durably queued
+  // (lands on next Watch wake — the real-device unreachable case); if it
+  // ALSO failed, nothing was queued anywhere → queued:false so the caller
+  // toasts an honest failure instead of a phantom「已送出」.
+  return { acked: false, queued: tuiQueued, code: result.code, raw: result, startedAt };
 }

@@ -47,6 +47,7 @@ import {
   replyToMessage,
   sendMessage as wcSendMessage,
   transferUserInfo as wcTransferUserInfo,
+  transferUserInfoChecked as wcTransferUserInfoChecked,
   updateApplicationContext as wcUpdateApplicationContext,
   type WCSessionChannel,
   type WCSessionInboundEvent,
@@ -73,6 +74,12 @@ export function sendMessage(
 
 export function transferUserInfo(info: Record<string, unknown>): void {
   wcTransferUserInfo(info);
+}
+
+/** #55 ④ — checked TUI hand-off: `false` = native module absent, nothing
+ *  queued. See `transferUserInfoChecked` in ./index for the exact contract. */
+export function transferUserInfoChecked(info: Record<string, unknown>): boolean {
+  return wcTransferUserInfoChecked(info);
 }
 
 export function updateApplicationContext(ctx: Record<string, unknown>): void {

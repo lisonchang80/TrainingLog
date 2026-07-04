@@ -83,6 +83,9 @@ type WCBridge = {
   ) => void;
   // NEW-Q50 Q4 — TUI is primary outbound channel (fire-and-forget queue).
   transferUserInfo: (info: Record<string, unknown>) => void;
+  // #55 ④ — checked TUI hand-off (expo-wcsession compat only). Optional so
+  // legacy-shaped jest doMock factories stay valid; call sites runtime-guard.
+  transferUserInfoChecked?: (info: Record<string, unknown>) => boolean;
   // NEW-Q50 Q6 — applicationContext is throttled live-mirror channel
   // (latest-state-only replace semantics).
   updateApplicationContext: (ctx: Record<string, unknown>) => void;
@@ -405,6 +408,21 @@ export async function isPaired(): Promise<boolean> {
 }
 
 /**
+ * `true` iff the TrainingLog Watch app is installed on the paired Watch.
+ * `false` also covers "cannot determine" (bridge unavailable / threw) —
+ * callers use this as a hard "durable delivery is impossible" signal
+ * (#55 ④: a TUI queued toward a Watch with no app never delivers, so the
+ * cast toast must not claim「已送出」).
+ */
+export async function isWatchAppInstalled(): Promise<boolean> {
+  try {
+    return await bridge().getIsWatchAppInstalled();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `true` iff a live WC channel exists to the paired Watch *right now*.
  * `false` means the Watch is off-wrist / sleeping / out of Bluetooth
  * range. Lib may still queue messages via `transferUserInfo` /
@@ -569,6 +587,36 @@ export function sendUserInfo(env: WCMessage): void {
     bridge().transferUserInfo(toWireRecord(env));
   } catch {
     // swallow — TUI is best-effort fire-and-forget
+  }
+}
+
+/**
+ * #55 ④ — checked variant of `sendUserInfo` for callers that surface a
+ * "queued for later delivery" promise to the user (e.g. the cast toast
+ * 「已送出，手錶開啟後同步」). Returns `false` when the envelope was NOT
+ * handed to a live bridge (native module absent, or the bridge threw) —
+ * i.e. nothing is queued and the promise would be a lie.
+ *
+ * `true` = hand-off succeeded. The OS-level transfer can still fail later
+ * (`didFinish:error:`, e.g. sim 7006) — that async outcome is deliberately
+ * not attributed per-envelope (reading `userInfoTransfer.userInfo` on the
+ * error path is the SIGABRT class the old lib needed patching for), so
+ * `true` means "queued", not "delivered".
+ *
+ * Legacy-shaped bridges (jest doMock factories without
+ * `transferUserInfoChecked`) fall back to the unchecked call and report
+ * `true` on non-throw — same trust level those tests already assume.
+ */
+export function sendUserInfoChecked(env: WCMessage): boolean {
+  try {
+    const b = bridge();
+    if (typeof b.transferUserInfoChecked === 'function') {
+      return b.transferUserInfoChecked(toWireRecord(env));
+    }
+    b.transferUserInfo(toWireRecord(env));
+    return true;
+  } catch {
+    return false;
   }
 }
 

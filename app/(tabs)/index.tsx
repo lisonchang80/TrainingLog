@@ -2501,9 +2501,19 @@ function TodayScreen() {
       } else if (res.queued) {
         toastRef.current?.show(t('status', 'castToWatchQueued'), { icon: 'info' });
       } else {
-        // NO_SNAPSHOT — should not happen for an in-progress session (the row
-        // vanished). Report honestly rather than a false "已送出".
-        toastRef.current?.show(t('status', 'castToWatchFailed'), { icon: 'error' });
+        // #55 ④ 誠實 toast — queued:false means NO durable copy exists
+        // anywhere (hard precheck fail / both hand-offs failed / Watch
+        // explicitly rejected / NO_SNAPSHOT). Say WHY when we know it,
+        // rather than a false「已送出」or a mute failure.
+        const msg =
+          res.code === 'UNPAIRED'
+            ? t('status', 'castToWatchFailedUnpaired')
+            : res.code === 'NOT_INSTALLED'
+              ? t('status', 'castToWatchFailedNoApp')
+              : res.code === 'REJECTED'
+                ? t('status', 'castToWatchFailedBusy')
+                : t('status', 'castToWatchFailed');
+        toastRef.current?.show(msg, { icon: 'error' });
       }
       // 2026-06-28 — pushCastToWatch flips `is_watch_tracked` true in the DB (the
       // Watch is now the HR/kcal source), but the React `sessionState` snapshot is

@@ -116,6 +116,11 @@ export {
   addUserInfoListener,
   updateAppContext,
   addAppContextListener,
+  // #55 ④ (2026-07-05) — cast 誠實 toast: checked TUI hand-off + Watch-app
+  // install probe, so pushCastToWatch can distinguish "durably queued" from
+  // "nothing was queued / can never deliver".
+  sendUserInfoChecked,
+  isWatchAppInstalled,
   // #287 Fix C (2026-06-02) — eager bridge mount at app entry. Called once
   // from app/_layout.tsx so the singleton RCTEventEmitter has observers
   // (hasObservers=YES + pendingEvents flush) before the Watch's first

@@ -131,6 +131,23 @@ export function transferUserInfo(info: Record<string, unknown>): void {
   native()?.transferUserInfo(info);
 }
 
+/**
+ * Checked variant of `transferUserInfo` (#55 ④ cast 誠實 toast) — reports
+ * whether the envelope was actually handed to a live native bridge. `false`
+ * means NOTHING was queued (native module absent / degraded env): callers
+ * that promise the user "queued for later delivery" must not claim it.
+ * NOTE: `true` only means hand-off succeeded — WCSession's async transfer
+ * can still fail later (`didFinish:error:`), which is deliberately NOT
+ * surfaced per-envelope (reading `userInfoTransfer.userInfo` on the error
+ * path is the SIGABRT class patched in the old lib).
+ */
+export function transferUserInfoChecked(info: Record<string, unknown>): boolean {
+  const mod = native();
+  if (!mod) return false;
+  mod.transferUserInfo(info);
+  return true;
+}
+
 /** Latest-state-only context push (subsequent calls overwrite). */
 export function updateApplicationContext(context: Record<string, unknown>): void {
   native()?.updateApplicationContext(context);
