@@ -315,6 +315,19 @@ extension WCSessionHub: WCSessionDelegate {
     ingest(channel: .userInfo, payload: userInfo, replyHandler: nil)
   }
 
+  func session(
+    _ session: WCSession,
+    didFinish userInfoTransfer: WCSessionUserInfoTransfer,
+    error: Error?
+  ) {
+    // Log-only, and deliberately does NOT read `userInfoTransfer.userInfo`:
+    // on the error path (sim 7006 etc.) that payload can be nil — building
+    // an event body from it is exactly the SIGABRT we patched in the old lib.
+    if let error = error {
+      NSLog("[ExpoWCSession] transferUserInfo failed: %@", error.localizedDescription)
+    }
+  }
+
   func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
     ingest(channel: .applicationContext, payload: applicationContext, replyHandler: nil)
   }

@@ -92,6 +92,12 @@ type WCBridge = {
       handler: (...args: unknown[]) => void,
     ) => () => void;
   };
+  // Issue #54 Phase 2 — seq-gap reconciliation (expo-wcsession compat only).
+  // Optional so legacy-shaped jest doMock factories stay valid; all call
+  // sites runtime-guard before invoking.
+  reconcileNow?: () => { pulled: number; epochChanged: boolean };
+  startReconcilePolling?: (intervalMs?: number) => void;
+  stopReconcilePolling?: () => void;
 };
 
 let cached: WCBridge | null = null;
@@ -114,6 +120,7 @@ export function __resetBridgeForTests(): void {
   __clearListenersForTests();
   __clearUserInfoListenersForTests();
   __clearAppContextListenersForTests();
+  __resetReconcileTriggersForTests();
 }
 
 /**
@@ -181,7 +188,7 @@ function __clearMsgIdRingForTests(): void {
 // ---------------------------------------------------------------------
 
 /**
- * The native `react-native-watch-connectivity` lib delivers each inbound
+ * The native bridge (expo-wcsession compat surface) delivers each inbound
  * 'message' as `(payload, replyHandler)` where `replyHandler` is a callback
  * the iPhone-side handler can invoke synchronously OR asynchronously to
  * fulfil the Watch's `sendMessage(..., replyCb)` ack contract.
@@ -874,12 +881,68 @@ export function initWatchBridge(): boolean {
     ensureBridgeListenerMounted();
     ensureUserInfoBridgeListenerMounted();
     ensureAppContextBridgeListenerMounted();
+    startReconcileTriggers();
     return true;
   } catch {
     // Bridge/native lib unavailable — proceed without WC. This matches the
     // pre-fix behaviour where the lazy mount would have thrown/no-op'd too.
     return false;
   }
+}
+
+// ---------------------------------------------------------------------
+// Section 12 — Seq-gap reconciliation triggers (issue #54 Phase 2)
+// ---------------------------------------------------------------------
+
+/**
+ * Manually reconcile the native inbound journal against what JS has
+ * processed — pulls and re-injects anything the event lane dropped
+ * (the #287 deafness family's data-loss fix). Safe at any frequency:
+ * the msgId intake ring dedupes re-injection. No-op under legacy-shaped
+ * test mocks and when the native module is absent.
+ */
+export function reconcileWatchInbound(): { pulled: number; epochChanged: boolean } {
+  try {
+    const b = bridge();
+    if (typeof b.reconcileNow !== 'function') {
+      return { pulled: 0, epochChanged: false };
+    }
+    return b.reconcileNow();
+  } catch {
+    return { pulled: 0, epochChanged: false };
+  }
+}
+
+let reconcileTriggersStarted = false;
+
+/**
+ * Standing triggers (拍板 2026-07-04): a 5s always-on poll (one cheap
+ * native read per tick; pull only on gap) + an AppState foreground
+ * reconcile. Started once from `initWatchBridge`. `react-native` is
+ * lazy-required so this file stays importable under jest's node env.
+ */
+function startReconcileTriggers(): void {
+  if (reconcileTriggersStarted) return;
+  const b = bridge();
+  if (typeof b.startReconcilePolling !== 'function') return; // legacy mock
+  reconcileTriggersStarted = true;
+  b.startReconcilePolling(5000);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { AppState } = require('react-native') as {
+      AppState?: { addEventListener: (t: string, cb: (s: string) => void) => unknown };
+    };
+    AppState?.addEventListener('change', (state) => {
+      if (state === 'active') reconcileWatchInbound();
+    });
+  } catch {
+    // react-native unavailable (node env) — poll alone still covers gaps.
+  }
+}
+
+/** Test hook — reset the trigger latch so a re-init can be asserted. */
+export function __resetReconcileTriggersForTests(): void {
+  reconcileTriggersStarted = false;
 }
 
 /**
