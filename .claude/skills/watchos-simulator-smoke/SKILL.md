@@ -172,3 +172,73 @@ haptic throttling during an active workout.
 3. `idb ui swipe/tap --udid` to navigate (swipe to page; tap corners).
 4. `simctl io screenshot /tmp/x.png` → Read it.
 5. Repeat. Iterate builds are incremental (~15-30s) if only one file changed.
+
+## PAIRED-SIM real WCSession smoke（2026-07-04 validated：雙向全通）
+
+Watch↔iPhone 的**真 WCSession 流量可以在 paired simulators 上 smoke**（Xcode 14+
+支援；本機 Xcode 26.4 驗過雙向）。驗過的清單：Stage1 handshake（真模板列表）、
+Watch-led start（真 snapshot）、live-mirror set-logged / hr-tick（sim 會產生
+**假 HR ~55-62 bpm** 餵 HKWorkoutSession → iPhone tile 會跳）、✓→rest timer 彈窗、
+ADR-0028 編輯鎖整套（Watch-led 自動鎖、逾時 fallback、Take control、鎖鏡像、
+活體 3 步解鎖）、iPhone→Watch cast 投影 + 冷啟領養、durable(TUI) 車道。
+
+### Setup（順序是關鍵）
+1. `xcrun simctl pair <watch-udid> <phone-udid>`（一次性；`simctl list pairs`）。
+2. Watch build 加旗標，否則 sim 走 mock picker（`ContentView.swift` 的
+   `SIM_PAIRED_WC` 逃生門）：
+   ```bash
+   xcodebuild -workspace TrainingLog.xcworkspace -scheme WatchPreview \
+     -configuration Debug -destination 'generic/platform=watchOS Simulator' \
+     -derivedDataPath build/simsmoke-watch \
+     SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) SIM_PAIRED_WC' build
+   ```
+3. iPhone 端照舊（`ios-simulator-smoke` 的 dev-client + Metro）。
+4. ⭐ **裝錶 app → 關掉兩台 → 重開 pair → 再裝/啟 phone app**。錶 app 用
+   `simctl install` 直裝後，phone 端 wcd 的 counterpart 登記是舊的 →
+   `transferUserInfo` 全報 **WCErrorDomain 7006 "Watch app is not installed"**、
+   phone 發起的推送全死。**重開整組 pair 才會刷新登記**（`simctl install` 不會
+   做 Xcode 那種 embedded-Watch 傳播，7006 ≠ 程式 bug）。
+5. ⚠️ **絕不單獨重開 watch sim**——單邊 reboot 會把 phone 端 wcd 登記洗掉，
+   7006 復發且**之後光重開 pair 修不回來**（over-install 同版不觸發登記事件）。
+   症狀＝錶面出現 📵 紅圖示、start/HR（錶→機）照常但 unlock/cast（機→錶）全
+   timeout「No response」。**復原配方（2026-07-04 13:41 驗證）＝必須 uninstall
+   再 install 錶 app、兩台一起重開、錶 app 先啟動**：
+   ```bash
+   PHONE=<phone-udid>; WATCH=<watch-udid>; APP=".../Debug-watchsimulator/TrainingLog Watch Watch App.app"
+   xcrun simctl uninstall "$WATCH" com.lisonchang.TrainingLog.watchkitapp
+   xcrun simctl install "$WATCH" "$APP"
+   xcrun simctl shutdown "$PHONE"; xcrun simctl shutdown "$WATCH"
+   xcrun simctl boot "$PHONE"; xcrun simctl boot "$WATCH"
+   xcrun simctl launch "$WATCH" com.lisonchang.TrainingLog.watchkitapp
+   xcrun simctl launch "$PHONE" com.lisonchang.TrainingLog
+   ```
+   （uninstall 會洗掉錶端 seen-once 旗標 → 首啟導覽會再出，✕ 掉即可。）
+
+### Sim-only 陷阱
+- **7006 nil-crash（已 patch）**：`react-native-watch-connectivity` 的
+  `didFinishUserInfoTransfer` 在 error 時把 nil userInfo 塞進 `@{}` → SIGABRT。
+  patch-package 已加 nil-guard（`patches/react-native-watch-connectivity+2.0.0.patch`）。
+  同型地雷未修：同檔 L383（file transfer）、L431（app context）error path。
+- pair 剛 boot 會顯示 `(active, disconnected)` 幾十秒 → 等 `connected` 再測，
+  太早發的 handshake 只會 timeout（重啟錶 app 即重試）。
+- HealthKit 授權對話框在錶 sim 第一次 start 會出現 → idb 點得掉（檢視→全開
+  toggle→下一步→完成）；`simctl privacy` 管不到 HK。
+- 仍然 device-only：真 HR/kcal 數值、haptics（三連震）、腕勢/錶冠、效能。
+
+### 「手錶端結束 session 沒同步」二因（2026-07-04 下午 log 實證）
+- **A｜錶端 HK 退化 → end 封包根本沒送**（同一次 sim boot 反覆 start/discard
+  幾輪後 HK 壞掉，症狀＝logger 開著但 HR 一直 `--`）。此時 `stopAndDiscard()`
+  的 `await builder.endCollection(at:)` completion 永不回呼 →
+  `sendEndToiPhone` 卡在 `await sessionController.end()` → **envelope 從未
+  發出**（tap 時只會看到 emitFinal 的 live-mirror）。**復原＝重開 watch sim**
+  （`simctl shutdown/boot`）→ HR 恢復即 end() 秒回、全鏈路綠（13:15 驗證：
+  tap→native→JS→DB ended_at 3 秒內完成）。潛在 backlog：sendEndToiPhone
+  改先送 WC 再 await HK teardown（或 endCollection 包 timeout race）。
+- **B｜手機 JS 偶發聾（#287 族）**：end 封包 native `didReceiveMessage` 有到、
+  JS intake 無聲（同 process 稍早 handshake/live-mirror 都正常）。跨 lock
+  UI 轉換（Unlock/Take control）後的舊 process 觀察到兩次；phone app
+  terminate+launch 後消失。診斷法＝pod `didReceiveMessage`/`dispatchEvent`
+  加 NSLog + adapter intake 加 console.log 三層對照。**smoke SOP：驗 end
+  類 flow 前先重啟 phone app**；若 end 掉了，錶端重啟→領養→再 end 可救。
+- 判讀速查：只見 live-mirror 沒見 end-session ＝ A（錶沒送）；native 有
+  end-session 但 metro 無 ＝ B（JS 聾）；兩者 DB `ended_at` 都是 NULL。
