@@ -29,12 +29,15 @@ struct ContentView: View {
         let hk = HealthKitController()
         let sc = SessionController(healthKit: hk)
         let wc = WatchConnectivityCoordinator(sessionController: sc)
-        // On Sim there's no paired iPhone — handshake will time out and
-        // the picker stays empty. Use the mock-default VM so templates
-        // pre-load and the picker → set logger flow is fully testable.
-        // Real device + paired iPhone uses the production coordinator-
-        // bound VM.
-        #if targetEnvironment(simulator)
+        // On a STANDALONE Sim there's no paired iPhone — handshake would
+        // time out and the picker stays empty, so default to the mock VM
+        // (templates pre-load; picker → set logger flow testable alone).
+        // Real device uses the production coordinator-bound VM.
+        // SIM_PAIRED_WC: paired-simulator smoke builds
+        // (SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) SIM_PAIRED_WC')
+        // also take the production path so Watch↔iPhone WCSession traffic
+        // is exercised sim-to-sim.
+        #if targetEnvironment(simulator) && !SIM_PAIRED_WC
         let vm = PickerViewModel.mockDefault()
         #else
         let vm = PickerViewModel(coordinator: wc)
