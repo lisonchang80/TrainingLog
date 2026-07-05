@@ -3,9 +3,15 @@
  *
  * Slice 13d D6 (ADR-0019 § Slice 13d Amendment Q5 + Q7 + NEW-Q42 +
  * NEW-Q50 — frozen 2026-05-29 evening). D3 shipped `payloadSchema.ts`
- * as the protocol-only slice; D6 lands this file as the actual bridge
- * to `react-native-watch-connectivity@2.0.0` (lib pinned per Q5 spike C
- * 2026-05-27 真機 PASS — see ADR-0019 shipped table D0 partial spike-C).
+ * as the protocol-only slice; D6 landed this file as the actual bridge
+ * to `react-native-watch-connectivity@2.0.0`.
+ *
+ * Issue #54 (2026-07-04 拍板): the native bridge is now our own local Expo
+ * Module `modules/expo-wcsession` — the old lib's RCTEventEmitter lane
+ * proved lossy under New Architecture (#287 deafness family; both fast and
+ * durable copies die when the JS runtime goes deaf). The compat shim
+ * (`modules/expo-wcsession/compat.ts`) reproduces the old lib's exact
+ * surface, so everything below this comment is behaviorally unchanged.
  *
  * NEW-Q50 (2026-05-29 evening grill) — transport翻盤 to TUI + applicationContext:
  *   - Q4 拍板: TUI is sole outbound channel; sendMessage path slated for
@@ -17,14 +23,13 @@
  *     in-session live mirror (D24 HR/kcal share this channel).
  *
  * Why lazy-require:
- *   - The lib loads via `TurboModuleRegistry.getEnforcing(...)` which
- *     throws sync under `testEnvironment: node` (no native module).
  *   - Top-level `import` would crash any test file that transitively
  *     pulls this module — even one that mocks it inline only takes
  *     effect after `require` returns.
- *   - Lazy-require pushes the load down to first use. Combined with
- *     the `__mocks__/react-native-watch-connectivity.ts` jest auto-mock,
- *     tests can run end-to-end without the bridge.
+ *   - Lazy-require pushes the load down to first use. The compat shim
+ *     itself degrades gracefully under `testEnvironment: node` (returns
+ *     false/no-op when the native module is absent), and WC-focused
+ *     tests re-mock the shim path via `jest.doMock` for real-ish behavior.
  *   - Same pattern as `src/adapters/healthkit/permission.ts` (L41-48).
  *
  * Public surface (v2 NEW-Q50 primary — D9 wire-in will adopt):
@@ -78,6 +83,9 @@ type WCBridge = {
   ) => void;
   // NEW-Q50 Q4 — TUI is primary outbound channel (fire-and-forget queue).
   transferUserInfo: (info: Record<string, unknown>) => void;
+  // #55 ④ — checked TUI hand-off (expo-wcsession compat only). Optional so
+  // legacy-shaped jest doMock factories stay valid; call sites runtime-guard.
+  transferUserInfoChecked?: (info: Record<string, unknown>) => boolean;
   // NEW-Q50 Q6 — applicationContext is throttled live-mirror channel
   // (latest-state-only replace semantics).
   updateApplicationContext: (ctx: Record<string, unknown>) => void;
@@ -87,6 +95,26 @@ type WCBridge = {
       handler: (...args: unknown[]) => void,
     ) => () => void;
   };
+  // Issue #54 Phase 2 — seq-gap reconciliation (expo-wcsession compat only).
+  // Optional so legacy-shaped jest doMock factories stay valid; all call
+  // sites runtime-guard before invoking. `gapUnrecoverable` (audit B🟡-2) is
+  // optional in the BRIDGE shape for the same mock-compat reason — the
+  // app-facing `reconcileWatchInbound` normalises it to a hard boolean.
+  reconcileNow?: () => {
+    pulled: number;
+    epochChanged: boolean;
+    gapUnrecoverable?: boolean;
+  };
+  startReconcilePolling?: (intervalMs?: number) => void;
+  stopReconcilePolling?: () => void;
+  // audit B🟡-2 — compat fires this on anomalies the standing poll would
+  // otherwise swallow (ring256 overflow → unrecoverable gap). Optional for
+  // legacy-shaped mocks; wired in `startReconcileTriggers`.
+  setReconcileAnomalyListener?: (
+    cb:
+      | ((r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void)
+      | null,
+  ) => void;
 };
 
 let cached: WCBridge | null = null;
@@ -94,7 +122,7 @@ let cached: WCBridge | null = null;
 function bridge(): WCBridge {
   if (cached !== null) return cached;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  cached = require('react-native-watch-connectivity') as WCBridge;
+  cached = require('../../../modules/expo-wcsession/compat') as WCBridge;
   return cached;
 }
 
@@ -109,6 +137,7 @@ export function __resetBridgeForTests(): void {
   __clearListenersForTests();
   __clearUserInfoListenersForTests();
   __clearAppContextListenersForTests();
+  __resetReconcileTriggersForTests();
 }
 
 /**
@@ -176,7 +205,7 @@ function __clearMsgIdRingForTests(): void {
 // ---------------------------------------------------------------------
 
 /**
- * The native `react-native-watch-connectivity` lib delivers each inbound
+ * The native bridge (expo-wcsession compat surface) delivers each inbound
  * 'message' as `(payload, replyHandler)` where `replyHandler` is a callback
  * the iPhone-side handler can invoke synchronously OR asynchronously to
  * fulfil the Watch's `sendMessage(..., replyCb)` ack contract.
@@ -393,6 +422,21 @@ export async function isPaired(): Promise<boolean> {
 }
 
 /**
+ * `true` iff the TrainingLog Watch app is installed on the paired Watch.
+ * `false` also covers "cannot determine" (bridge unavailable / threw) —
+ * callers use this as a hard "durable delivery is impossible" signal
+ * (#55 ④: a TUI queued toward a Watch with no app never delivers, so the
+ * cast toast must not claim「已送出」).
+ */
+export async function isWatchAppInstalled(): Promise<boolean> {
+  try {
+    return await bridge().getIsWatchAppInstalled();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `true` iff a live WC channel exists to the paired Watch *right now*.
  * `false` means the Watch is off-wrist / sleeping / out of Bluetooth
  * range. Lib may still queue messages via `transferUserInfo` /
@@ -557,6 +601,36 @@ export function sendUserInfo(env: WCMessage): void {
     bridge().transferUserInfo(toWireRecord(env));
   } catch {
     // swallow — TUI is best-effort fire-and-forget
+  }
+}
+
+/**
+ * #55 ④ — checked variant of `sendUserInfo` for callers that surface a
+ * "queued for later delivery" promise to the user (e.g. the cast toast
+ * 「已送出，手錶開啟後同步」). Returns `false` when the envelope was NOT
+ * handed to a live bridge (native module absent, or the bridge threw) —
+ * i.e. nothing is queued and the promise would be a lie.
+ *
+ * `true` = hand-off succeeded. The OS-level transfer can still fail later
+ * (`didFinish:error:`, e.g. sim 7006) — that async outcome is deliberately
+ * not attributed per-envelope (reading `userInfoTransfer.userInfo` on the
+ * error path is the SIGABRT class the old lib needed patching for), so
+ * `true` means "queued", not "delivered".
+ *
+ * Legacy-shaped bridges (jest doMock factories without
+ * `transferUserInfoChecked`) fall back to the unchecked call and report
+ * `true` on non-throw — same trust level those tests already assume.
+ */
+export function sendUserInfoChecked(env: WCMessage): boolean {
+  try {
+    const b = bridge();
+    if (typeof b.transferUserInfoChecked === 'function') {
+      return b.transferUserInfoChecked(toWireRecord(env));
+    }
+    b.transferUserInfo(toWireRecord(env));
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -869,12 +943,125 @@ export function initWatchBridge(): boolean {
     ensureBridgeListenerMounted();
     ensureUserInfoBridgeListenerMounted();
     ensureAppContextBridgeListenerMounted();
+    startReconcileTriggers();
     return true;
   } catch {
     // Bridge/native lib unavailable — proceed without WC. This matches the
     // pre-fix behaviour where the lazy mount would have thrown/no-op'd too.
     return false;
   }
+}
+
+// ---------------------------------------------------------------------
+// Section 12 — Seq-gap reconciliation triggers (issue #54 Phase 2)
+// ---------------------------------------------------------------------
+
+/**
+ * Manually reconcile the native inbound journal against what JS has
+ * processed — pulls and re-injects anything the event lane dropped
+ * (the #287 deafness family's data-loss fix). Safe at any frequency:
+ * the msgId intake ring dedupes re-injection. No-op under legacy-shaped
+ * test mocks and when the native module is absent.
+ */
+export function reconcileWatchInbound(): {
+  pulled: number;
+  epochChanged: boolean;
+  /** audit B🟡-2 — true when the native ring evicted part of the missed
+   *  range (overflow): the pull could NOT recover everything and `pulled`
+   *  must not be read as "healed". */
+  gapUnrecoverable: boolean;
+} {
+  try {
+    const b = bridge();
+    if (typeof b.reconcileNow !== 'function') {
+      return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
+    }
+    const r = b.reconcileNow();
+    return {
+      pulled: r.pulled,
+      epochChanged: r.epochChanged,
+      gapUnrecoverable: r.gapUnrecoverable === true,
+    };
+  } catch {
+    return { pulled: 0, epochChanged: false, gapUnrecoverable: false };
+  }
+}
+
+/**
+ * audit B🟡-2 — app-layer surface for inbound-journal anomalies that the
+ * standing 5s poll would otherwise swallow (its result never leaves the
+ * compat module). Today the only anomaly kind is `gapUnrecoverable`: the
+ * native ring256 overflowed while JS was deaf, so one or more inbound
+ * envelopes are permanently gone — the app should run its full state
+ * resync (mirror state self-heals on the next ~1Hz live-mirror tick; the
+ * loss-sensitive kinds are one-shot TUIs like end-session, whose
+ * user-visible recovery remains the Watch-side ⏳ stuck indicator + retry).
+ * Handlers registered here receive every anomaly result exactly as compat
+ * reported it. Returns an unsubscribe.
+ */
+export function addWatchInboundAnomalyListener(
+  cb: (r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void,
+): () => void {
+  inboundAnomalyListeners.add(cb);
+  return () => inboundAnomalyListeners.delete(cb);
+}
+
+const inboundAnomalyListeners = new Set<
+  (r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void
+>();
+
+let reconcileTriggersStarted = false;
+
+/**
+ * Standing triggers (拍板 2026-07-04): a 5s always-on poll (one cheap
+ * native read per tick; pull only on gap) + an AppState foreground
+ * reconcile. Started once from `initWatchBridge`. `react-native` is
+ * lazy-required so this file stays importable under jest's node env.
+ */
+function startReconcileTriggers(): void {
+  if (reconcileTriggersStarted) return;
+  const b = bridge();
+  if (typeof b.startReconcilePolling !== 'function') return; // legacy mock
+  reconcileTriggersStarted = true;
+  b.startReconcilePolling(5000);
+  // audit B🟡-2 — surface poll-detected anomalies (unrecoverable gap after a
+  // ring overflow) to the app layer; the poll's own result is discarded
+  // inside compat, so this hook is the only way the signal escapes.
+  if (typeof b.setReconcileAnomalyListener === 'function') {
+    b.setReconcileAnomalyListener((r) => {
+      if (r.gapUnrecoverable) {
+        // Always-on observability even before any app handler registers.
+        console.warn(
+          '[watch] inbound journal overflow — envelope(s) evicted before JS processed them; ' +
+            'mirror state self-heals via live-mirror, but a one-shot TUI in the hole is lost',
+        );
+      }
+      for (const cb of inboundAnomalyListeners) {
+        try {
+          cb(r);
+        } catch {
+          // app handler errors must not break the poll
+        }
+      }
+    });
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { AppState } = require('react-native') as {
+      AppState?: { addEventListener: (t: string, cb: (s: string) => void) => unknown };
+    };
+    AppState?.addEventListener('change', (state) => {
+      if (state === 'active') reconcileWatchInbound();
+    });
+  } catch {
+    // react-native unavailable (node env) — poll alone still covers gaps.
+  }
+}
+
+/** Test hook — reset the trigger latch so a re-init can be asserted. */
+export function __resetReconcileTriggersForTests(): void {
+  reconcileTriggersStarted = false;
+  inboundAnomalyListeners.clear();
 }
 
 /**

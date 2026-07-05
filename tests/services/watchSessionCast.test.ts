@@ -58,7 +58,7 @@ function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../modules/expo-wcsession/compat', () => bridge);
 }
 
 function loadOrchestrator() {
@@ -104,7 +104,7 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
 
   afterEach(() => {
     db.close();
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../modules/expo-wcsession/compat');
   });
 
   it('happy path — reachable + {ok:true} → flag flipped + BOTH channels fire', async () => {
@@ -222,7 +222,7 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect((await getSession(db, 'sess-cast-timeout'))?.is_watch_tracked).toBe(true);
   });
 
-  it('Watch replies {ok:false} → ACK_NO_OK, queued, flag NOT flipped (the ONE exception)', async () => {
+  it('Watch replies {ok:false} → REJECTED, queued:false, flag NOT flipped (#55 ④ honest)', async () => {
     const bridge = makeBridge({
       sendMessage: jest.fn((_msg, replyCb) => {
         replyCb?.({ ok: false, reason: 'busy_other_session' });
@@ -236,12 +236,15 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     const result = await pushCastToWatch(db, 'sess-cast-nook');
 
     expect(result.acked).toBe(false);
-    expect(result.queued).toBe(true);
-    expect(result.code).toBe('ACK_NO_OK');
-    // The ONLY queued path that does NOT flip the flag: an explicit {ok:false}
-    // is the Watch saying "busy with another session", so it is genuinely NOT
-    // tracking this one (the ④ conflict path). Contrast with timeout/unreachable
-    // /empty-reply above, which all flip.
+    // #55 ④ — an explicit {ok:false} means the Watch REFUSED (busy with
+    // another session), and its ingestCast msgId dedupe drops the queued TUI
+    // leg too: this cast is DEAD, not pending. Pre-#55④ this reported
+    // queued:true/ACK_NO_OK → misleading「已送出，手錶開啟後同步」toast.
+    expect(result.queued).toBe(false);
+    expect(result.code).toBe('REJECTED');
+    // Explicit rejection is genuinely NOT tracking this session (the ④
+    // conflict path). Contrast with timeout/unreachable/empty-reply, which
+    // all flip.
     expect((await getSession(db, 'sess-cast-nook'))?.is_watch_tracked).toBe(false);
   });
 
@@ -285,5 +288,101 @@ describe('cast-session — pushCastToWatch orchestrator', () => {
     expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
     // Bridge error is not an explicit Watch rejection → still queued → flipped.
     expect((await getSession(db, 'sess-cast-err'))?.is_watch_tracked).toBe(true);
+  });
+
+  // -------------------------------------------------------------------
+  // #55 ④ (2026-07-05) — 誠實 toast: queued:true only when a durable copy
+  // actually exists somewhere.
+  // -------------------------------------------------------------------
+
+  it('#55 ④ unpaired → hard fail: queued:false, NOTHING fired, flag untouched', async () => {
+    const bridge = makeBridge({
+      getIsPaired: jest.fn().mockResolvedValue(false),
+    });
+    installBridge(bridge);
+    const { pushCastToWatch } = loadOrchestrator();
+
+    await seedSessionWithExercise(db, 'sess-cast-unpaired');
+
+    const result = await pushCastToWatch(db, 'sess-cast-unpaired');
+
+    expect(result.acked).toBe(false);
+    expect(result.queued).toBe(false);
+    expect(result.code).toBe('UNPAIRED');
+    // Neither channel can ever deliver from an unpaired phone — no envelope
+    // may leave, and the live-mirror gate must stay closed.
+    expect(bridge.transferUserInfo).not.toHaveBeenCalled();
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+    expect((await getSession(db, 'sess-cast-unpaired'))?.is_watch_tracked).toBe(false);
+  });
+
+  it('#55 ④ Watch app not installed → hard fail: queued:false, NOTHING fired, flag untouched', async () => {
+    const bridge = makeBridge({
+      getIsWatchAppInstalled: jest.fn().mockResolvedValue(false),
+    });
+    installBridge(bridge);
+    const { pushCastToWatch } = loadOrchestrator();
+
+    await seedSessionWithExercise(db, 'sess-cast-noapp');
+
+    const result = await pushCastToWatch(db, 'sess-cast-noapp');
+
+    expect(result.acked).toBe(false);
+    expect(result.queued).toBe(false);
+    expect(result.code).toBe('NOT_INSTALLED');
+    // A TUI queued toward a Watch with no app never delivers — honest fail.
+    expect(bridge.transferUserInfo).not.toHaveBeenCalled();
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+    expect((await getSession(db, 'sess-cast-noapp'))?.is_watch_tracked).toBe(false);
+  });
+
+  it('#55 ④ TUI hand-off throws + instant channel fails → queued:false, flag NOT flipped', async () => {
+    // Both hand-offs failed → no copy exists anywhere → the old queued:true
+    // (「已送出，手錶開啟後同步」) would promise a delivery that can never
+    // happen.
+    const bridge = makeBridge({
+      transferUserInfo: jest.fn(() => {
+        throw new Error('WCSession not activated');
+      }),
+      sendMessage: jest.fn((_msg, _replyCb, errCb) => {
+        errCb?.(new Error('WCSession not activated'));
+      }),
+    });
+    installBridge(bridge);
+    const { pushCastToWatch } = loadOrchestrator();
+
+    await seedSessionWithExercise(db, 'sess-cast-deadboth');
+
+    const result = await pushCastToWatch(db, 'sess-cast-deadboth');
+
+    expect(result.acked).toBe(false);
+    expect(result.queued).toBe(false);
+    expect(result.code).toBe('BRIDGE_ERROR');
+    // Nothing was delivered or queued → the live-mirror gate stays closed.
+    expect((await getSession(db, 'sess-cast-deadboth'))?.is_watch_tracked).toBe(false);
+  });
+
+  it('#55 ④ TUI hand-off throws but instant channel replies → still delivered (queued:true, ACK_NO_OK)', async () => {
+    const bridge = makeBridge({
+      transferUserInfo: jest.fn(() => {
+        throw new Error('TUI enqueue failed');
+      }),
+      sendMessage: jest.fn((_msg, replyCb) => {
+        replyCb?.({});
+      }),
+    });
+    installBridge(bridge);
+    const { pushCastToWatch } = loadOrchestrator();
+
+    await seedSessionWithExercise(db, 'sess-cast-msgonly');
+
+    const result = await pushCastToWatch(db, 'sess-cast-msgonly');
+
+    expect(result.acked).toBe(false);
+    // The instant leg reached the Watch NOW — delivery happened even though
+    // the durable leg never queued.
+    expect(result.queued).toBe(true);
+    expect(result.code).toBe('ACK_NO_OK');
+    expect((await getSession(db, 'sess-cast-msgonly'))?.is_watch_tracked).toBe(true);
   });
 });

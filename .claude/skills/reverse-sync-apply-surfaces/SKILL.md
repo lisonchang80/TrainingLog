@@ -307,16 +307,28 @@ set tags reverse-added followers, so one the iPhone later removes (D→工作 re
 dropped from `addedSets` (kills the 1,2,2 residue) while a Watch-LOCAL in-flight add
 is preserved. `formIntersection` at the end keeps the tag set bounded.
 
-⚠️ **Coverage = CAST / 投影 sessions only** (base carries the iPhone's REAL ids). A
-**template-start (Watch-led)** session re-keys ids (2026-06-26) so NO id ever
-matches → 100% ordinal fallback = the unchanged broken-on-non-last behaviour. The
-ordinal fallback also keeps ⑤③④ byte-identical for template sessions (no
-regression). Fully fixing template-start dropset needs the IPHONE to stop shifting
-ordinals on insert (`insertDropsetFollower` → dense max+1 + display_rank, mirroring
-the Watch's added-set model) — a separate iPhone-side change touching
-set-ordering-surfaces, NOT yet done. The sibling report「超級組『新增1組』→ 手錶
-編號 1,3,3,4」is re-tested in the same smoke (id-first may or may not cover it; if a
-mid-list non-follower insert shifts ordinals it's the same iPhone-shift class).
+⚠️ **Coverage of the `30dc919`/`f74da99` fix alone = CAST / 投影 sessions only**
+(base carries the iPhone's REAL ids). A **template-start (Watch-led)** session
+re-keyed ids (2026-06-26) so NO id matched → 100% ordinal fallback = the unchanged
+broken-on-non-last behaviour. The ordinal fallback also keeps ⑤③④ byte-identical
+for template sessions (no regression).
+
+✅ **RESOLVED for template-start by Phase C-id (2026-07-05, `e88bb1b` TS + `c2d4a26`
+Swift, branch `slice/13d-cid-set-id-adoption`).** Rather than stop the iPhone
+shifting ordinals, C-id kills the id divergence at the SOURCE: the Watch's
+`buildSnapshotFromFatTree` now mints REAL uuids (dropping the positional
+`SE-<idx>` / `SET-<idx>-<setIdx>`) and ships an `idTree` in
+`StartFromWatchPayload`; `sessionFromTemplate` / `snapshotForSession` ADOPT those
+ids verbatim (position-aligned, per-position `uuid()` fallback) instead of minting
+fresh ones. So a template-start session's base now carries ids that MATCH the
+iPhone → `applyRemoteSnapshot`'s pass-1 id match hits (exactly like cast) → the
+non-last dropset follower is claimed by id, immune to the ordinal shift. Also makes
+tombstone-by-id precise. Design + decision ledger: ADR-0019 § Phase C-id 落地拆解.
+**Scope = id-adoption only; set-level reorder reverse-sync stays deferred.** Pending
+paired-sim / device smoke (the sibling「超級組『新增1組』→ 手錶編號 1,3,3,4」mid-list
+insert case is re-tested there). The old "iPhone stop shifting ordinals
+(`insertDropsetFollower` → dense max+1)" route is now moot for the Watch mirror
+(C-id covers it) — only revisit it if an iPhone-LOCAL render ever needs it.
 
 ---
 

@@ -46,7 +46,7 @@ function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../modules/expo-wcsession/compat', () => bridge);
 }
 
 function loadOrchestrator() {
@@ -65,7 +65,7 @@ describe('Slice 13d D6 — pushStartToWatch orchestrator', () => {
 
   afterEach(() => {
     db.close();
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../modules/expo-wcsession/compat');
   });
 
   it('happy path — Watch acks → is_watch_tracked flipped to true', async () => {

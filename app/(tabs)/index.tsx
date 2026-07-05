@@ -55,6 +55,7 @@ import {
   onNotesRequest,
   onStartFromWatch,
   sendUserInfo,
+  type StartFromWatchReconcile,
   type WCMessage,
 } from '@/src/adapters/watch';
 import { onLiveMirror } from '@/src/services/watchLiveMirrorReceiver';
@@ -711,6 +712,25 @@ function TodayScreen() {
     // we wrap it in the `start-reconcile` envelope kind and ship back
     // via `sendUserInfo` (queued TUI — Watch picks it up next time it's
     // reachable). D30 Watch-side Swift handles the reverse-TUI receive.
+    // #55 ① (2026-07-05, 拍板 A) — Watch-led start 直接鎖. When the start
+    // envelope carries the Watch's holder `lockEpoch` AND the reconcile
+    // outcome is 'created', adopt LOCKED at that epoch right away instead of
+    // waiting for the Watch's first live-mirror (whose initial force-push can
+    // race ahead of session creation on fast transports and get dropped by
+    // the recv-mirror unpaired guard — the sim timing hole). 'conflict'
+    // outcomes must NOT lock (the iPhone keeps its own session; the Watch is
+    // showing the conflict alert). Pre-#55 Watch (no lockEpoch) → no-op, the
+    // mirror-based adoption path still owns it.
+    const seedLockFromStart = (
+      env: WCMessage & { kind: 'start-from-watch' },
+      outcome: StartFromWatchReconcile | null,
+    ) => {
+      if (outcome?.status !== 'created' || !outcome.sessionId) return;
+      editLockRef.current.seedWatchLedLock(
+        outcome.sessionId,
+        env.payload.lockEpoch,
+      );
+    };
     const unsubStartFromWatch = addUserInfoListener(
       'start-from-watch',
       async (env) => {
@@ -719,14 +739,17 @@ function TodayScreen() {
         // the Watch supplies a templateId. Without uuid injection the
         // orchestrator falls back to the empty-title freestyle path
         // (banner shows 「空白訓練」 even if Watch picked a template).
+        let outcome: StartFromWatchReconcile | null = null;
         await onStartFromWatch(
           db,
           env,
           (response) => {
+            outcome = response;
             sendUserInfo(makeEnvelope('start-reconcile', response));
           },
           randomUUID,
         );
+        seedLockFromStart(env, outcome);
         // Watch just created (or adopted) a session — refresh iPhone
         // state so the UI flips into in-session mode. Read latest
         // closure via ref.
@@ -766,6 +789,7 @@ function TodayScreen() {
         // 2026-05-29 deep-night smoke fix (B2): same uuid injection as
         // the TUI path above — Watch templates need to materialise
         // template_name + exercise tree, not collapse to freestyle.
+        let outcome: StartFromWatchReconcile | null = null;
         await onStartFromWatch(
           db,
           env,
@@ -777,10 +801,12 @@ function TodayScreen() {
             // 'conflict' reconcile (alert intermittently missing).
             // Watch dedupes start-reconcile via Equatable onChange, so
             // an ack per winning leg is safe.
+            outcome = response;
             sendUserInfo(makeEnvelope('start-reconcile', response));
           },
           randomUUID,
         );
+        seedLockFromStart(env, outcome); // #55 ① — msg-leg win locks too
         refreshRef.current?.();
       },
     );
@@ -805,6 +831,24 @@ function TodayScreen() {
         refreshRef.current?.();
       },
     );
+    // #55 ② (2026-07-05) — message-channel leg for the SAME kind. The Watch's
+    // `sendStartResolveToiPhone` DUAL-FIRES (transferUserInfo + sendMessage,
+    // same msgId). Post-F4 the msgId ring is SHARED across both intakes and
+    // the 'message' intake claims the msgId BEFORE the handler-existence
+    // check, parking handler-less envelopes in the pre-handler buffer. With
+    // only the TUI listener registered, a sendMessage leg that wins intake
+    // (the common foreground case) is parked forever AND its msgId poisons
+    // the ring → the TUI leg is dropped as a dup → `onStartResolve` never
+    // runs. Registering both channels closes that hole; `discardSession` is
+    // a sequence of idempotent `DELETE WHERE`s so dual delivery is safe.
+    // (Same reasoning as the start-from-watch V1 listener above.)
+    const unsubStartResolveMsg = addMessageListener(
+      'start-resolve',
+      async (env) => {
+        await onStartResolve(db, env);
+        refreshRef.current?.();
+      },
+    );
     // D31 wave 2 (2026-05-29 late) — discard-session forward-TUI inbound.
     // Watch fires this when the user tapped [放棄] in FinishPageView.
     // iPhone hard-deletes the row via discardSession (cascades sets /
@@ -814,6 +858,20 @@ function TodayScreen() {
     // (sets ended_at); discard-session deletes it entirely. User explicit
     // intent.
     const unsubDiscardSession = addUserInfoListener(
+      'discard-session',
+      async (env) => {
+        await onDiscardSession(db, env);
+        refreshRef.current?.();
+      },
+    );
+    // #55 ② (2026-07-05) — message-channel leg for discard-session. The Watch's
+    // `sendDiscardToiPhone` DUAL-FIRES (TUI + sendMessage, same msgId); with
+    // only the TUI listener the sendMessage leg wins intake in foreground,
+    // claims the shared msgId ring, gets parked (no message-channel handler)
+    // and the TUI leg is then ring-dropped as a dup → `onDiscardSession`
+    // NEVER runs → 錶「放棄」手機不停 (sim-observed). `discardSession` is
+    // idempotent (DELETE WHERE no-ops) so dual delivery is safe.
+    const unsubDiscardSessionMsg = addMessageListener(
       'discard-session',
       async (env) => {
         await onDiscardSession(db, env);
@@ -906,7 +964,9 @@ function TodayScreen() {
       unsubStartFromWatch();
       unsubStartFromWatchV1();
       unsubStartResolve();
+      unsubStartResolveMsg();
       unsubDiscardSession();
+      unsubDiscardSessionMsg();
       unsubLiveMirror();
       unsubLiveMirrorMsg();
       unsubLockReqM();
@@ -2467,9 +2527,19 @@ function TodayScreen() {
       } else if (res.queued) {
         toastRef.current?.show(t('status', 'castToWatchQueued'), { icon: 'info' });
       } else {
-        // NO_SNAPSHOT — should not happen for an in-progress session (the row
-        // vanished). Report honestly rather than a false "已送出".
-        toastRef.current?.show(t('status', 'castToWatchFailed'), { icon: 'error' });
+        // #55 ④ 誠實 toast — queued:false means NO durable copy exists
+        // anywhere (hard precheck fail / both hand-offs failed / Watch
+        // explicitly rejected / NO_SNAPSHOT). Say WHY when we know it,
+        // rather than a false「已送出」or a mute failure.
+        const msg =
+          res.code === 'UNPAIRED'
+            ? t('status', 'castToWatchFailedUnpaired')
+            : res.code === 'NOT_INSTALLED'
+              ? t('status', 'castToWatchFailedNoApp')
+              : res.code === 'REJECTED'
+                ? t('status', 'castToWatchFailedBusy')
+                : t('status', 'castToWatchFailed');
+        toastRef.current?.show(msg, { icon: 'error' });
       }
       // 2026-06-28 — pushCastToWatch flips `is_watch_tracked` true in the DB (the
       // Watch is now the HR/kcal source), but the React `sessionState` snapshot is

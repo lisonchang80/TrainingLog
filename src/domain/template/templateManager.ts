@@ -163,6 +163,18 @@ export function snapshotForSession(args: {
   template: TemplateData;
   session_id: string;
   uuid: () => string;
+  /**
+   * Phase C-id (2026-07-05) — optional caller-supplied session_exercise
+   * ids, position-aligned to `template.exercises` sorted by `ordering
+   * ASC`. When index `i` is a non-empty string it is adopted verbatim;
+   * when absent / null / undefined the id is minted via `uuid()` (legacy
+   * behaviour). Lets the Watch-initiated start honour the ids the Watch
+   * already minted so both devices share the session_exercise identity.
+   * The pass-2 `parent_id` remap resolves against whichever id was used
+   * (idMap is populated from `newId`), so superset linkage stays correct
+   * regardless of source.
+   */
+  suppliedIds?: readonly (string | null | undefined)[];
 }): SessionExerciseSnapshot[] {
   const sorted = [...args.template.exercises].sort(
     (a, b) => a.ordering - b.ordering
@@ -171,7 +183,7 @@ export function snapshotForSession(args: {
   // Pass 1: allocate new ids, build oldId → newId map, copy non-self-referencing fields.
   const idMap = new Map<string, string>();
   const out: SessionExerciseSnapshot[] = sorted.map((ex, i) => {
-    const newId = args.uuid();
+    const newId = args.suppliedIds?.[i] || args.uuid();
     if (ex.id) idMap.set(ex.id, newId);
     return {
       id: newId,

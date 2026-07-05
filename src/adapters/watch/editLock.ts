@@ -153,6 +153,65 @@ export function isLockedOut(state: EditLockState): boolean {
   );
 }
 
+/**
+ * #55 ① (ADR-0028, 2026-07-05) — gate for adopting LOCKED from a Watch-led
+ * `start-from-watch` envelope's `lockEpoch` (拍板 A: the start packet carries
+ * the Watch's holder epoch; the iPhone locks immediately after reconcile
+ * instead of waiting for the first live-mirror).
+ *
+ * Why a guard at all: the reducer's `cast-received` adopts UNCONDITIONALLY
+ * when the sessionId differs from the current state's (brand-new pairing) —
+ * correct for a genuine new cast, but a start envelope can be REDELIVERED
+ * long after the fact (TUI is an OS-durable at-least-once queue that survives
+ * an app restart, when the in-memory msgId ring is empty). Replaying a stale
+ * `lockEpoch=1` onto a fresh post-restart machine (unpaired, sessionId null)
+ * would bypass the same-session epoch check and regress a persisted
+ * holder@2 / locked@2 back to locked@1 → INV-2 violation → split-brain.
+ *
+ * So: adopt only when NEITHER the live state NOR the persisted snapshot
+ * (the restart-resilience row, which survives the in-memory reset) already
+ * knows a same-or-newer epoch for THIS session.
+ *
+ * Pure — `persisted` is the minimal shape of `PersistedCastLock` so this
+ * module doesn't import the services layer.
+ */
+export function shouldAdoptWatchLedLock(args: {
+  /** The live lock state at receive time. */
+  current: EditLockState;
+  /** The persisted (restart-resilient) snapshot, or null when none. */
+  persisted: { sessionId: string; epoch: number } | null;
+  /** The Watch-led session the envelope is starting. */
+  sessionId: string;
+  /** The envelope's `lockEpoch` (may be absent on a pre-#55 Watch). */
+  lockEpoch: number | undefined;
+}): boolean {
+  const { current, persisted, sessionId, lockEpoch } = args;
+  if (!sessionId) return false;
+  if (
+    typeof lockEpoch !== 'number' ||
+    !Number.isFinite(lockEpoch) ||
+    lockEpoch <= 0
+  ) {
+    return false; // absent / degenerate — pre-#55 Watch, mirror path owns it
+  }
+  // Live state already at (or past) this generation for this session —
+  // a redelivery must not rewind it. (Different-session live state is fine:
+  // the reducer's new-pairing adoption is exactly what we want then.)
+  if (current.sessionId === sessionId && current.epoch >= lockEpoch) {
+    return false;
+  }
+  // Persisted snapshot already at (or past) this generation — the restore
+  // effect owns re-seeding; a stale replay must not clobber it.
+  if (
+    persisted !== null &&
+    persisted.sessionId === sessionId &&
+    persisted.epoch >= lockEpoch
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /** Pure transition. Returns the next state + effects for the host to run. */
 export function reduceEditLock(
   state: EditLockState,

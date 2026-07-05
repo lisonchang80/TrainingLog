@@ -90,6 +90,22 @@ export async function startSessionFromTemplate(
      * for the normal live-start path (session stays in progress).
      */
     ended_at?: number;
+    /**
+     * Phase C-id (set-level id-adoption, 2026-07-05). Watch-supplied
+     * session_exercise / session_set ids so the iPhone adopts them verbatim
+     * — both devices share ids from the first frame (see
+     * `StartFromWatchPayload.idTree`). Position-aligned: `seIds[i]` maps to
+     * the i-th template exercise (`ordering ASC`), `setIds[i][j]` to its
+     * j-th set (`position ASC`) — the same order this function walks.
+     * OPTIONAL — omitted → all ids minted via `args.uuid()` (legacy). A
+     * position without a supplied (or with an empty) id falls back to
+     * `uuid()`, so extra / missing entries never throw. The Watch-initiated
+     * template path (`onStartFromWatch`) is the only supplier today.
+     */
+    supplied_id_tree?: {
+      seIds: readonly string[];
+      setIds: readonly (readonly string[])[];
+    };
   }
 ): Promise<{ session_id: string; planned_count: number }> {
   if (!args.skip_active_guard) {
@@ -141,6 +157,27 @@ export async function startSessionFromTemplate(
   const session_id = args.session_id ?? args.uuid();
   const started_at = (args.now ?? Date.now)();
   const nowFn = args.now ?? Date.now;
+
+  // 2026-07-05 audit A-1 — guarantee the Watch-supplied ids are UNIQUE before
+  // they reach INSERT. A malformed idTree carrying duplicate / colliding ids
+  // (two positions sharing an id, two equal seIds / setIds) would otherwise hit
+  // a UNIQUE violation on the TEXT PRIMARY KEY → the whole txn rolls back →
+  // `onStartFromWatch`'s catch swallows it → session silently never created AND
+  // no reverse-TUI 'created'. `dedupeSuppliedIds` drops each repeat to `null` so
+  // the downstream `|| uuid()` mints a fresh id — same "malformed idTree must
+  // never throw" invariant as the A🟡-1 `?.` guards. Adopted ids stay verbatim
+  // for the healthy, collision-free case (Bug-X id-adoption guard intact).
+  // seIds and setIds live in separate tables → separate used-sets. (A supplied
+  // id equal to a row from ANOTHER session stays at uuid()-collision parity: it
+  // needs cross-session id reuse from a corrupt wire, and defending it would
+  // push async DB reads into this hot path.)
+  const usedSeIds = new Set<string>();
+  const usedSetIds = new Set<string>();
+  const dedupedSeIds = dedupeSuppliedIds(
+    args.supplied_id_tree?.seIds,
+    usedSeIds,
+  );
+
   const snapshots = snapshotForSession({
     // snapshotForSession expects TemplateData shape (no sets field). Project
     // `getTemplateFull` rows into that shape; defaults come from the parallel
@@ -170,6 +207,11 @@ export async function startSessionFromTemplate(
     },
     session_id,
     uuid: args.uuid,
+    // Phase C-id — adopt the Watch's session_exercise ids (position-aligned
+    // to `ordering ASC`, the order snapshotForSession also sorts by) so both
+    // devices share exercise identity. Absent → mint per exercise (legacy).
+    // A-1 (2026-07-05): pre-deduped so duplicate/colliding seIds never throw.
+    suppliedIds: dedupedSeIds,
   });
 
   // Pre-compute set rows to insert. Each snapshot.id maps back to a
@@ -207,10 +249,28 @@ export async function startSessionFromTemplate(
     // Sort template sets by position so ordering stays stable.
     const sortedTSets = [...tex.sets].sort((a, b) => a.position - b.position);
     // Allocate new ids first so parent_set_id remap can resolve forward refs.
+    // Phase C-id — adopt the Watch's session_set ids for this exercise
+    // (position-aligned); a position without a supplied (or empty) id falls
+    // back to `uuid()` so extra / missing entries never throw.
+    //
+    // 2026-07-05 audit A🟡-1 — `setIds` gets its own `?.` too: the wire is an
+    // untrusted boundary (`isWCEnvelope` is shallow), so a malformed idTree
+    // carrying only `seIds` must NOT TypeError here — that would bubble into
+    // `onStartFromWatch`'s catch → session silently never created AND no
+    // reverse-TUI 'created' sent. Same "never throw" grill ruling as above.
+    //
+    // 2026-07-05 audit A-1 — dedupe against the tree-wide `usedSetIds` set so
+    // duplicate / colliding supplied set ids (across this OR any earlier
+    // exercise — the set PK is global) drop to `null` → minted below, never a
+    // UNIQUE violation on INSERT.
+    const suppliedSetIds = dedupeSuppliedIds(
+      args.supplied_id_tree?.setIds?.[i],
+      usedSetIds,
+    );
     const setIdMap = new Map<string, string>();
-    for (const ts of sortedTSets) {
-      setIdMap.set(ts.id, args.uuid());
-    }
+    sortedTSets.forEach((tsRow, j) => {
+      setIdMap.set(tsRow.id, suppliedSetIds?.[j] || args.uuid());
+    });
     for (let j = 0; j < sortedTSets.length; j++) {
       const tset = sortedTSets[j];
       const newSetId = setIdMap.get(tset.id);
@@ -269,4 +329,29 @@ export async function startSessionFromTemplate(
   });
 
   return { session_id, planned_count: snapshots.length };
+}
+
+/**
+ * De-duplicate a position-aligned array of Watch-supplied ids against a shared
+ * `used` set (2026-07-05 audit A-1). Adopts each entry only when it is a
+ * non-empty string not already claimed; every empty / duplicate / colliding
+ * entry becomes `null` so the caller's `|| uuid()` mints a fresh, unique id.
+ * Preserves the C-id id-adoption guarantee for healthy input while making a
+ * malformed idTree incapable of raising a UNIQUE violation on INSERT (which
+ * would roll back the whole start txn → session silently never created + no
+ * reverse-TUI 'created'). First-write-wins: the earliest position keeps a
+ * repeated id, later positions mint.
+ */
+function dedupeSuppliedIds(
+  supplied: readonly (string | null | undefined)[] | undefined,
+  used: Set<string>
+): (string | null)[] | undefined {
+  if (!supplied) return undefined;
+  return supplied.map((id) => {
+    if (id && !used.has(id)) {
+      used.add(id);
+      return id;
+    }
+    return null;
+  });
 }

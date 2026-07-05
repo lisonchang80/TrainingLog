@@ -73,12 +73,12 @@ function makeCapturingBridge() {
 }
 
 function installBridge(bridge: MockBridge): void {
-  jest.doMock('react-native-watch-connectivity', () => bridge);
+  jest.doMock('../../../modules/expo-wcsession/compat', () => bridge);
 }
 
 describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
   afterEach(() => {
-    jest.dontMock('react-native-watch-connectivity');
+    jest.dontMock('../../../modules/expo-wcsession/compat');
   });
 
   it('mounts all three native subscriptions BEFORE any handler is registered', () => {
@@ -118,7 +118,7 @@ describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
   });
 
   it('returns false (no throw) when the native lib is unavailable', () => {
-    jest.doMock('react-native-watch-connectivity', () => {
+    jest.doMock('../../../modules/expo-wcsession/compat', () => {
       throw new Error('TurboModuleRegistry.getEnforcing failed');
     });
     const mod = loadModule();
@@ -126,6 +126,57 @@ describe('#287 Fix C — initWatchBridge() eager mount at app entry', () => {
     expect(() => mod.initWatchBridge()).not.toThrow();
     expect(mod.initWatchBridge()).toBe(false);
     expect(mod.__isBridgeMountedForTests()).toBe(false);
+  });
+
+  // ─── audit B🟡-2 — inbound-journal anomaly surface ───────────────────
+
+  it('wires the compat anomaly listener and fans gapUnrecoverable out to app handlers', () => {
+    const { bridge } = makeCapturingBridge();
+    let compatListener:
+      | ((r: { pulled: number; epochChanged: boolean; gapUnrecoverable: boolean }) => void)
+      | null = null;
+    const wired = Object.assign(bridge, {
+      startReconcilePolling: jest.fn(),
+      setReconcileAnomalyListener: jest.fn((cb) => {
+        compatListener = cb;
+      }),
+    });
+    installBridge(wired);
+    const mod = loadModule();
+
+    mod.initWatchBridge();
+    expect(wired.setReconcileAnomalyListener).toHaveBeenCalledTimes(1);
+    expect(compatListener).not.toBeNull();
+
+    const received: unknown[] = [];
+    const unsubscribe = mod.addWatchInboundAnomalyListener((r) => received.push(r));
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const anomaly = { pulled: 3, epochChanged: false, gapUnrecoverable: true };
+    compatListener!(anomaly);
+    expect(received).toEqual([anomaly]);
+    expect(warnSpy).toHaveBeenCalled(); // observability even with no handler
+    warnSpy.mockRestore();
+
+    // Unsubscribed handlers stop receiving.
+    unsubscribe();
+    compatListener!(anomaly);
+    expect(received).toHaveLength(1);
+  });
+
+  it('reconcileWatchInbound normalises a legacy bridge result (no gapUnrecoverable key) to false', () => {
+    const { bridge } = makeCapturingBridge();
+    const wired = Object.assign(bridge, {
+      reconcileNow: jest.fn(() => ({ pulled: 2, epochChanged: false })),
+    });
+    installBridge(wired);
+    const mod = loadModule();
+
+    expect(mod.reconcileWatchInbound()).toEqual({
+      pulled: 2,
+      epochChanged: false,
+      gapUnrecoverable: false,
+    });
   });
 
   // ─── Pre-handler replay buffer (the cold-boot race window) ──────────

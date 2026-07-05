@@ -140,7 +140,7 @@ struct FinishPageView: View {
 
     private var headerRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text("Session 完成？")
+            Text("本次訓練完成？")
                 .font(.headline)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

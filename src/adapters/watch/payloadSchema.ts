@@ -215,6 +215,44 @@ export interface StartFromWatchPayload {
   intensityId: string | null;
   /** NEW-Q50 — Watch-supplied session id (UUID v4). */
   sessionId: string;
+  /**
+   * Phase C-id (set-level id-adoption, 2026-07-05). The Watch mints REAL
+   * uuids for the session_exercise / session_set rows it builds offline
+   * (`buildSnapshotFromFatTree`) and ships them here so the iPhone adopts
+   * them VERBATIM instead of minting its own. Both devices then share ids
+   * from the first frame, so the reverse live-mirror matches by id
+   * everywhere — fixing the template-start non-last-dropset corruption
+   * (the `applyRemoteSnapshot` id-first path only worked for cast before)
+   * and making tombstone-by-id precise (see `SessionSnapshot.deletedIds`).
+   *
+   * Position-aligned to the template's exercises sorted by `ordering ASC`,
+   * and each exercise's sets sorted by `position ASC` — the SAME order
+   * `startSessionFromTemplate` / `snapshotForSession` walk. OPTIONAL +
+   * append-only: a pre-C-id Watch omits it → the iPhone falls back to
+   * minting its own ids (unchanged legacy behaviour). Extra / missing
+   * entries are tolerated per position (the iPhone mints for any position
+   * without a supplied id), so a template edited between the Stage-1
+   * prefetch and start never throws.
+   */
+  idTree?: {
+    /** session_exercise ids, one per template exercise (`ordering ASC`). */
+    seIds: string[];
+    /** session_set ids, `[exerciseIndex][setIndex]` (`position ASC`). */
+    setIds: string[][];
+  };
+  /**
+   * #55 ① (ADR-0028, 2026-07-05) — the edit-token epoch the Watch HOLDS for
+   * this Watch-led session (the fresh-machine castInitiated bump ⇒ 1 today;
+   * computed on the Watch via the pure reducer so the wire value can never
+   * drift from `EditLockMachine`). The iPhone adopts LOCKED at this epoch
+   * right after the start reconcile, instead of waiting for the Watch's
+   * first live-mirror — whose initial force-push can race ahead of session
+   * creation and be dropped by the `recv-mirror` unpaired guard (the sim
+   * timing hole; on-device the transport delay always loses that race).
+   * Append-only / optional — absent on a pre-#55 Watch → the mirror-based
+   * lock adoption (`noteMirrorEpoch` divergence guard) remains the path.
+   */
+  lockEpoch?: number;
 }
 
 /**

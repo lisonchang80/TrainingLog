@@ -405,11 +405,39 @@ final class PickerViewModel: ObservableObject {
         // point of the fix: iPhone opens the session from the same variant
         // the Watch built its snapshot from, so the in-session 副標題 +
         // tree + live-mirror all line up.
+        // Phase C-id (2026-07-05) — ship the session_exercise / set ids the
+        // Watch just minted so the iPhone adopts them verbatim. Position-
+        // aligned to `ordering ASC` / `position ASC` (the order the snapshot
+        // was built in AND the order iPhone's startSessionFromTemplate walks).
+        // Derived from the SAME snapshot the Watch renders → guaranteed
+        // consistent with what the user sees. Absent (freestyle / no exercises)
+        // is harmless: an empty tree makes the iPhone mint its own ids.
+        let idTree: [String: Any] = [
+            "seIds": snapshot.exercises.map { $0.sessionExerciseId },
+            "setIds": snapshot.exercises.map { ex in ex.sets.map { $0.setId } },
+        ]
+        //
+        // #55 ① (ADR-0028, 2026-07-05) — carry the edit-token epoch this
+        // Watch WILL hold once SetLoggerView mounts and its fresh
+        // CastEditLock runs `castInitiated` (0 → 1 today). Computed through
+        // the pure reducer — not a hardcoded 1 — so the wire value can never
+        // drift from EditLockMachine's bump rule. The iPhone adopts LOCKED
+        // at this epoch right after reconcile, instead of waiting for our
+        // LiveMirrorProducer's initial force-push (which, on a fast
+        // transport, can arrive before the iPhone's session row exists and
+        // be dropped by its recv-mirror unpaired guard — sim-only today,
+        // but the packet makes the lock signal transport-order-independent).
+        let watchLedLockEpoch = reduceEditLock(
+            initialEditLockState(.watch),
+            .castInitiated(sessionId: localSessionId)
+        ).state.epoch
         coordinator.sendStartFromWatchTUI(
             sessionId: localSessionId,
             templateId: resolvedTemplateId,
             programCycleId: selection.program?.id,
-            intensityId: selection.intensity?.id
+            intensityId: selection.intensity?.id,
+            idTree: idTree,
+            lockEpoch: watchLedLockEpoch
         )
     }
 
@@ -576,19 +604,21 @@ final class PickerViewModel: ObservableObject {
         exercises: [Stage1TemplateExerciseDTO]
     ) -> SessionSnapshot {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let snapshotExercises: [SessionSnapshotExercise] = exercises.enumerated().map { (idx, ex) in
+        let snapshotExercises: [SessionSnapshotExercise] = exercises.map { ex in
             let snapshotSets: [SessionSnapshotSet]
             let plannedCount: Int
             if !ex.sets.isEmpty {
                 // Preferred path — fat-tree carried template_set rows.
                 snapshotSets = ex.sets.enumerated().map { (setIdx, s) in
                     SessionSnapshotSet(
-                        // 2026-05-29 SetLogger sets[] fix —
-                        // `s.position` was dropped from the wire to
-                        // save envelope bytes; setIdx (array index)
-                        // serves the same purpose because the
-                        // loader ORDER BYs position ASC.
-                        setId: "SET-\(idx)-\(setIdx)",
+                        // Phase C-id (2026-07-05) — mint a REAL uuid per set so
+                        // the iPhone can adopt it verbatim (both devices share
+                        // ids from the first frame → the reverse mirror matches
+                        // by id even for template starts). The idTree the VM
+                        // ships alongside is derived from these same ids in wire
+                        // order (position ASC); `setIdx + 1` is the display
+                        // ordinal (loader ORDER BYs position ASC).
+                        setId: UUID().uuidString,
                         ordinal: setIdx + 1,
                         // Pass `weightKg` / `reps` through verbatim;
                         // a literal `0` from the v009 migration is
@@ -613,7 +643,8 @@ final class PickerViewModel: ObservableObject {
                 // `defaultSets` empty rows; weight/reps may be nil.
                 snapshotSets = (0..<max(1, ex.defaultSets)).map { setIdx in
                     SessionSnapshotSet(
-                        setId: "SET-\(idx)-\(setIdx)",
+                        // Phase C-id — real uuid (see the preferred path above).
+                        setId: UUID().uuidString,
                         ordinal: setIdx + 1,
                         weight: ex.defaultWeightKg,
                         reps: ex.defaultReps,
@@ -630,7 +661,9 @@ final class PickerViewModel: ObservableObject {
                 plannedCount = ex.defaultSets
             }
             return SessionSnapshotExercise(
-                sessionExerciseId: "SE-\(idx)-\(ex.exerciseId)",
+                // Phase C-id — real uuid so the iPhone adopts the
+                // session_exercise id verbatim (position-aligned via idTree).
+                sessionExerciseId: UUID().uuidString,
                 exerciseId: ex.exerciseId,
                 exerciseName: ex.exerciseName,
                 ordering: ex.ordering,
