@@ -101,6 +101,42 @@ describe('startSessionFromTemplate — Phase C-id id-adoption', () => {
     return teId;
   }
 
+  // Two distinct exercises, each with two working sets — needed to exercise the
+  // A-1 cross-exercise collision cases (duplicate seId across exercises;
+  // duplicate setId across exercises, since the `set` PK is global).
+  async function seedTwoExercisesTwoSetsEach(
+    templateId: string,
+  ): Promise<void> {
+    const exercises = await listExercises(db);
+    const [exA, exB] = exercises; // first two library entries (always present)
+    let n = 0;
+    const uuid = () => `tpl2-uuid-${++n}`;
+    await createTemplate(db, { id: templateId, name: 'Full', now: () => 100 });
+    const exIds = [exA.id, exB.id];
+    for (let e = 0; e < 2; e++) {
+      const { id: teId } = await addTemplateExercise(db, {
+        template_id: templateId,
+        exercise_id: exIds[e],
+        default_sets: 0,
+        default_reps: 0,
+        default_weight_kg: 0,
+        uuid,
+        now: () => 100,
+      });
+      for (let i = 0; i < 2; i++) {
+        await db.runAsync(
+          `INSERT INTO template_set (id, template_exercise_id, position, set_kind, reps, weight)
+           VALUES (?, ?, ?, 'working', ?, ?)`,
+          `tpl2-set-${e}-${i}`,
+          teId,
+          i,
+          8,
+          80,
+        );
+      }
+    }
+  }
+
   it('adopts Watch-supplied session_exercise + session_set ids verbatim', async () => {
     await seedOneExerciseThreeSets('tpl-adopt');
 
@@ -299,5 +335,84 @@ describe('startSessionFromTemplate — Phase C-id id-adoption', () => {
     expect(snaps.map((s) => s.id)).toEqual(['watch-se-A', 'watch-se-B']);
     // The B-side child's parent_id resolves to the ADOPTED A id, not a mint.
     expect(snaps[1].parent_id).toBe('watch-se-A');
+  });
+
+  // ---- audit A-1 (2026-07-05): malformed idTree with DUPLICATE / COLLIDING
+  // supplied ids must never raise a UNIQUE violation on INSERT. Pre-fix each of
+  // these threw inside `startSessionFromTemplate` (the raw INSERT hit a dup
+  // TEXT PRIMARY KEY), which bubbled into `onStartFromWatch`'s catch → session
+  // silently never created + no reverse-TUI 'created'. Post-fix `dedupeSupplied
+  // Ids` keeps the FIRST occurrence verbatim and mints the rest. ----
+
+  it('dedupes duplicate supplied set ids within one exercise — first wins, rest minted, no UNIQUE throw (audit A-1)', async () => {
+    await seedOneExerciseThreeSets('tpl-a1-dupset');
+    let n = 0;
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-a1-dupset',
+      uuid: () => `mint-${++n}`,
+      now: () => 1_000,
+      supplied_id_tree: {
+        seIds: ['watch-se-A'],
+        // Two positions carry the SAME set id — the constructible malformed case.
+        setIds: [['dup-set', 'dup-set', 'watch-set-2']],
+      },
+    });
+
+    const sets = await fetchSessionSets(db, session_id);
+    expect(sets).toHaveLength(3); // session created, not silently dropped
+    const ids = sets.map((s) => s.id);
+    expect(ids).toContain('dup-set'); // first occurrence adopted verbatim
+    expect(ids).toContain('watch-set-2');
+    expect(ids.filter((id) => id === 'dup-set')).toHaveLength(1); // no dup PK
+    expect(ids.filter((id) => id.startsWith('mint-'))).toHaveLength(1); // 2nd minted
+    for (const s of sets) expect(s.session_exercise_id).toBe('watch-se-A');
+  });
+
+  it('dedupes duplicate supplied session_exercise ids across exercises — first wins, rest minted (audit A-1)', async () => {
+    await seedTwoExercisesTwoSetsEach('tpl-a1-dupse');
+    let n = 0;
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-a1-dupse',
+      uuid: () => `mint-${++n}`,
+      now: () => 1_000,
+      supplied_id_tree: {
+        seIds: ['dup-se', 'dup-se'], // both exercises claim the same se id
+        setIds: [
+          ['se0-set0', 'se0-set1'],
+          ['se1-set0', 'se1-set1'],
+        ],
+      },
+    });
+
+    const seIds = await fetchSessionExerciseIds(db, session_id);
+    expect(seIds).toHaveLength(2);
+    expect(seIds.filter((id) => id === 'dup-se')).toHaveLength(1); // no dup PK
+    expect(seIds.filter((id) => id.startsWith('mint-'))).toHaveLength(1);
+    // All four sets landed (both exercises kept a valid, distinct se id).
+    const sets = await fetchSessionSets(db, session_id);
+    expect(sets).toHaveLength(4);
+  });
+
+  it('dedupes a supplied set id that collides across two exercises — global set PK, first wins (audit A-1)', async () => {
+    await seedTwoExercisesTwoSetsEach('tpl-a1-crossset');
+    let n = 0;
+    const { session_id } = await startSessionFromTemplate(db, {
+      template_id: 'tpl-a1-crossset',
+      uuid: () => `mint-${++n}`,
+      now: () => 1_000,
+      supplied_id_tree: {
+        seIds: ['se-A', 'se-B'],
+        setIds: [
+          ['shared-set', 'se0-set1'],
+          ['shared-set', 'se1-set1'], // same id as exercise 0's first set
+        ],
+      },
+    });
+
+    const sets = await fetchSessionSets(db, session_id);
+    expect(sets).toHaveLength(4); // session created, not silently dropped
+    const ids = sets.map((s) => s.id);
+    expect(ids.filter((id) => id === 'shared-set')).toHaveLength(1); // no dup PK
+    expect(ids.filter((id) => id.startsWith('mint-'))).toHaveLength(1); // collision minted
   });
 });
