@@ -321,6 +321,15 @@ function pullGap(beforeSeq: number | null): { pulled: number; headLost: boolean 
   const events = getEventsSince(lastDeliveredSeq);
   const firstSeq = typeof events[0]?.seq === 'number' ? events[0].seq : null;
   const headLost = firstSeq === null || firstSeq > lastDeliveredSeq + 1;
+  // ⚠️ audit A-2 (2026-07-05, defense-in-depth — issue #56): `headLost` only
+  // validates the FIRST pulled entry. An INTERIOR hole (e.g. the slice is
+  // [2,4], seq 3 missing) is currently delivered as if contiguous with
+  // headLost=false. This is UNREACHABLE today because the native ring
+  // (`WCSessionHub.swift` getEventsSince) is strict FIFO and can never return a
+  // non-contiguous slice — do NOT rely on that silently. If the native journal
+  // ever gains selective eviction / out-of-order insert, this MUST be upgraded
+  // to assert contiguity across the whole slice (track expected next seq in the
+  // loop below). See #56.
   let pulled = 0;
   for (const evt of events) {
     // Journal order is ascending seq — stop at the exclusive upper bound.
