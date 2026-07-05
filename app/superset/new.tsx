@@ -1,6 +1,13 @@
 import * as Crypto from 'expo-crypto';
 import { useNavigation, useRouter } from 'expo-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   Alert,
   Image,
@@ -41,7 +48,7 @@ import {
   insertReusableSuperset,
 } from '@/src/adapters/sqlite/supersetRepository';
 import { submitNewlyCreatedSuperset } from '@/src/domain/exercise/pickerBridge';
-import { t, tEquipment, tExercise, tMuscleGroup, tRemoveExercise } from '@/src/i18n';
+import { t, tEquipment, tExercise, tMuscleGroup, tRemoveExercise, useLocale } from '@/src/i18n';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -74,6 +81,11 @@ function useNewSupersetStyles() {
  * third distinct exercise, the oldest selected one is dropped.
  */
 function NewSupersetScreen() {
+  // Live language switch — refresh this screen's inline text (selected-exercise
+  // list names, muscle-group headers) on setLocale(). Memoized leaf cards
+  // (ExercisePickerCard) carry their OWN useLocale() — see that card's header.
+  // Cf. project_traininglog_react_compiler_i18n_gotcha. (audit #4 2026-07-05)
+  useLocale();
   const db = useDatabase();
   const router = useRouter();
   const navigation = useNavigation();
@@ -461,39 +473,66 @@ function ExercisePickerGrid({
       </View>
     );
   }
-  const rows: Exercise[][] = [];
-  for (let i = 0; i < exercises.length; i += 2) {
-    rows.push(exercises.slice(i, i + 2));
+  // Group by equipment in canonical EQUIPMENT_VALUES order, with a small
+  // section header per group (user request — pairing cards bucket under
+  //「槓鈴 / 啞鈴 / …」exactly like app/(tabs)/library.tsx ExerciseGrid). The
+  // trailing 其他 bucket catches any row whose equipment isn't a known enum
+  // value so nothing silently disappears (EQUIPMENT_VALUES already has '其他',
+  // so this normally stays empty). audit #1 2026-07-05.
+  const groups: { equipment: Equipment; items: Exercise[] }[] = [];
+  for (const eq of EQUIPMENT_VALUES) {
+    const items = exercises.filter((e) => e.equipment === eq);
+    if (items.length > 0) groups.push({ equipment: eq, items });
   }
+  const orphans = exercises.filter(
+    (e) => !EQUIPMENT_VALUES.includes(e.equipment)
+  );
+  if (orphans.length > 0) {
+    groups.push({ equipment: '其他' as Equipment, items: orphans });
+  }
+
+  const renderPair = (pair: Exercise[], key: string) => (
+    <View key={key} style={styles.gridRow}>
+      <ExercisePickerCard
+        exercise={pair[0]}
+        width={cardWidth}
+        height={cardHeight}
+        selected={selection.includes(pair[0].id)}
+        rank={selection.indexOf(pair[0].id)}
+        onPress={() => onTap(pair[0].id)}
+      />
+      {pair[1] ? (
+        <ExercisePickerCard
+          exercise={pair[1]}
+          width={cardWidth}
+          height={cardHeight}
+          selected={selection.includes(pair[1].id)}
+          rank={selection.indexOf(pair[1].id)}
+          onPress={() => onTap(pair[1].id)}
+        />
+      ) : (
+        <View style={{ width: cardWidth, height: cardHeight }} />
+      )}
+    </View>
+  );
+
   return (
     <ScrollView
       style={styles.gridList}
       contentContainerStyle={styles.gridContent}
       showsVerticalScrollIndicator={false}>
-      {rows.map((pair, i) => (
-        <View key={i} style={styles.gridRow}>
-          <ExercisePickerCard
-            exercise={pair[0]}
-            width={cardWidth}
-            height={cardHeight}
-            selected={selection.includes(pair[0].id)}
-            rank={selection.indexOf(pair[0].id)}
-            onPress={() => onTap(pair[0].id)}
-          />
-          {pair[1] ? (
-            <ExercisePickerCard
-              exercise={pair[1]}
-              width={cardWidth}
-              height={cardHeight}
-              selected={selection.includes(pair[1].id)}
-              rank={selection.indexOf(pair[1].id)}
-              onPress={() => onTap(pair[1].id)}
-            />
-          ) : (
-            <View style={{ width: cardWidth, height: cardHeight }} />
-          )}
-        </View>
-      ))}
+      {groups.map((g) => {
+        const rows: Exercise[][] = [];
+        for (let i = 0; i < g.items.length; i += 2) {
+          rows.push(g.items.slice(i, i + 2));
+        }
+        return (
+          <Fragment key={g.equipment}>
+            <Text style={styles.sectionHeader}>{tEquipment(g.equipment)}</Text>
+            {rows.map((pair, i) => renderPair(pair, `${g.equipment}-${i}`))}
+          </Fragment>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -513,6 +552,13 @@ function ExercisePickerCard({
   rank: number;
   onPress: () => void;
 }) {
+  // React-Compiler-memoized leaf: cached on its stable `exercise` prop, so a
+  // mid-session zh⇄en flip would freeze the exercise name + equipment label in
+  // the boot language. `'use no memo'` + `useLocale()` force a fresh re-render
+  // that re-evaluates tExercise/tEquipment. (Mirrors app/(tabs)/library.tsx
+  // ExerciseCard.) audit #4 2026-07-05.
+  'use no memo';
+  useLocale();
   const styles = useNewSupersetStyles();
   // media_path is a require-map KEY into EXERCISE_MEDIA, NOT a uri. Resolve it
   // to [startFrame, endFrame]; show the start frame (poster). Falls back to the
@@ -528,11 +574,6 @@ function ExercisePickerCard({
         selected && styles.cardSelected,
         pressed && styles.pressed,
       ]}>
-      {selected && rank >= 0 && (
-        <View style={styles.selectedBadge}>
-          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
-        </View>
-      )}
       <View style={styles.thumbWrap}>
         {media ? (
           <Image source={media[0]} style={styles.thumbImage} />
@@ -543,6 +584,15 @@ function ExercisePickerCard({
       <Text style={styles.cardName} numberOfLines={2}>
         {tExercise(exercise.name)}
       </Text>
+      {/* Selection badge rendered AFTER the photo + name so it paints on the
+          TOP layer — RN paints later siblings above earlier ones; when it sat
+          before <thumbWrap> the photo covered the number. (Mirrors
+          app/(tabs)/library.tsx ExerciseCard.) audit #2 2026-07-05. */}
+      {selected && rank >= 0 && (
+        <View style={styles.selectedBadge}>
+          <Text style={styles.selectedBadgeText}>{rank + 1}</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -702,6 +752,17 @@ function makeStyles(tokens: ThemeTokens) {
       flexDirection: 'row',
       alignSelf: 'stretch',
       gap: CARD_GAP,
+    },
+    // Equipment bucket header inside the card grid (槓鈴 / 啞鈴 / …). marginTop
+    // adds breathing room above each group on top of the gridContent gap.
+    // (Mirrors app/(tabs)/library.tsx equipSectionHeader.) audit #1 2026-07-05.
+    sectionHeader: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: tokens.text.secondary,
+      marginTop: 8,
+      marginLeft: 2,
+      letterSpacing: 0.3,
     },
     card: {
       flexShrink: 0,
