@@ -32,7 +32,9 @@ import {
   tExercise,
   tUsedNSessions,
   tViewExerciseDetails,
+  useLocale,
 } from '@/src/i18n';
+import { localizeDefaultSupersetName } from '@/src/domain/superset/supersetManager';
 import { useTheme, type ThemeTokens } from '@/src/theme';
 
 import {
@@ -69,6 +71,10 @@ function useSupersetStyles() {
  * integration shipped in 9.8b). 9.8c will enable them once data exists.
  */
 function SupersetDetailScreen() {
+  // Live language switch — refresh the localized superset title (see
+  // `displayName` below) + the exercise-tile names on `setLocale()`. Cf.
+  // project_traininglog_react_compiler_i18n_gotcha.
+  useLocale();
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useDatabase();
   const router = useRouter();
@@ -136,6 +142,19 @@ function SupersetDetailScreen() {
   const barColor = superset.color_hex ?? hashColor(superset.name);
   const exA = exercises[0];
   const exB = exercises[1];
+  // audit #3 2026-07-05 — localize the auto-default (canonical/English) stored
+  // name at display time; user-renamed supersets pass through unchanged. Member
+  // names may be missing (deleted exercise) → fall back to the raw stored name.
+  const displayName =
+    exA && exB
+      ? localizeDefaultSupersetName(
+          superset.name,
+          exA.name,
+          exB.name,
+          tExercise(exA.name),
+          tExercise(exB.name)
+        )
+      : superset.name;
 
   const onDelete = () => {
     Alert.alert(
@@ -167,7 +186,7 @@ function SupersetDetailScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.titleRow}>
           <View style={[styles.colorDot, { backgroundColor: barColor }]} />
-          <Text style={styles.heading}>{superset.name}</Text>
+          <Text style={styles.heading}>{displayName}</Text>
         </View>
         <Text style={styles.subheading}>
           {t('domain', 'superset')}

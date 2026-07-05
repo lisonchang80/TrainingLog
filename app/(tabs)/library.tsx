@@ -45,6 +45,7 @@ import {
   getReusableSupersetSessionCounts,
   listReusableSupersetsWithExercises,
 } from '@/src/adapters/sqlite/supersetRepository';
+import { localizeDefaultSupersetName } from '@/src/domain/superset/supersetManager';
 import type { ReusableSupersetWithExercises } from '@/src/domain/superset/types';
 import {
   clearNewlyCreatedSuperset,
@@ -1040,6 +1041,20 @@ function SupersetCard({
   const barColor = superset.color_hex ?? hashColor(superset.name);
   const exA = exercises[0];
   const exB = exercises[1];
+  // audit #3 2026-07-05 — the stored name is the CANONICAL (English)
+  // defaultSupersetName when the user never renamed it, so localize it at
+  // display time. User-customized names pass through unchanged. Member names
+  // may be missing (deleted exercise) → fall back to raw stored name.
+  const displayName =
+    exA && exB
+      ? localizeDefaultSupersetName(
+          superset.name,
+          exA.name,
+          exB.name,
+          tExercise(exA.name),
+          tExercise(exB.name)
+        )
+      : superset.name;
   return (
     <Pressable
       accessibilityRole="button"
@@ -1067,7 +1082,7 @@ function SupersetCard({
         <SupersetMiniThumb exercise={exB} />
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
-        {softWrapName(superset.name)}
+        {softWrapName(displayName)}
       </Text>
       {onInfoPress && (
         <Pressable

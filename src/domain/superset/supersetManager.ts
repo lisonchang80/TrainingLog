@@ -40,6 +40,32 @@ export function defaultSupersetName(exA: Exercise, exB: Exercise): string {
 }
 
 /**
+ * Display-time localization for a stored superset name (ADR-0017 Q10, audit
+ * #3 option B). `superset.name` persists the CANONICAL (often English)
+ * `defaultSupersetName(exA, exB)` when the user never renamed it, so a zh
+ * user sees "Bench Press + Decline Bench Press". We can't localize at write
+ * time (schema-free, and a rename must survive), so we localize at render:
+ * if `storedName` still equals the auto default built from the members'
+ * CANONICAL names, swap in the localized member names; otherwise the user
+ * customized it and we return it verbatim.
+ *
+ * Pure — callers pass `tExercise(exA.name)` / `tExercise(exB.name)` for the
+ * localized args so this module stays i18n-free.
+ */
+export function localizeDefaultSupersetName(
+  storedName: string,
+  exAName: string,
+  exBName: string,
+  localizedAName: string,
+  localizedBName: string
+): string {
+  if (storedName === `${exAName} + ${exBName}`) {
+    return `${localizedAName} + ${localizedBName}`;
+  }
+  return storedName;
+}
+
+/**
  * Validate a Reusable Superset draft:
  *   - name required, ≤ 60 chars after trim (matches Custom Exercise rule)
  *   - color_hex may be null; if provided, must be 7-char "#rrggbb"
