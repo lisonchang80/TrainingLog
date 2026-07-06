@@ -143,17 +143,35 @@ struct ExerciseCard: View {
 
     /// Progress bar segments. Work sets + clusters each count as 1
     /// segment; warmup excluded per spec line 1567.
+    ///
+    /// #5 device-smoke follow-up (2026-07-06): COUNT-based left-fill to match
+    /// the iPhone, which feeds `SegmentedProgressBar` a scalar
+    /// `computeExerciseProgress().setsDone` and fills the leftmost `done`
+    /// segments. The bar answers "how many of N done", not "which specific
+    /// set" — so ✓-ing set #2 first lights the LEFTMOST segment on BOTH
+    /// platforms. Previously the Watch was positional (each segment filled iff
+    /// ITS OWN set was logged → ✓ set #2 lit the middle), which diverged from
+    /// the iPhone; user 拍板 2026-07-06 = unify on count, change the Watch.
     private var progressBarItems: [ProgressBarItem] {
-        rowGroups.compactMap { group in
+        // Ordered non-warmup segments + whether each's own set is logged
+        // (used only to COUNT, not to place the fill).
+        let segments: [(id: String, logged: Bool)] = rowGroups.compactMap { group in
             switch group {
             case .warmup:
                 return nil
             case .working(let set, _):
-                return ProgressBarItem(id: set.setId, filled: state.isLogged(setId: set.setId))
+                return (id: set.setId, logged: state.isLogged(setId: set.setId))
             case .cluster(let header, _, _):
-                // Cluster is filled iff its header is logged.
-                return ProgressBarItem(id: header.setId, filled: state.isLogged(setId: header.setId))
+                // Cluster is logged iff its header is logged.
+                return (id: header.setId, logged: state.isLogged(setId: header.setId))
             }
+        }
+        let loggedCount = segments.reduce(0) { $0 + ($1.logged ? 1 : 0) }
+        // Left-fill: the first `loggedCount` segments are green regardless of
+        // WHICH set ids are logged. Stable `id` (setId / cluster header) keeps
+        // ForEach identity + the fill animation intact.
+        return segments.enumerated().map { index, seg in
+            ProgressBarItem(id: seg.id, filled: index < loggedCount)
         }
     }
 
