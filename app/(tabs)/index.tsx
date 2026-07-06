@@ -181,6 +181,7 @@ import { ToastController, ToastHost } from '@/components/ui/Toast';
 import { useSessionTemplateSave } from '@/hooks/useSessionTemplateSave';
 import { formatLocalYmdFromMs } from '@/src/domain/date/localYmd';
 import { shouldFireFirstAddPush } from '@/src/services/freestyleFirstAddPush';
+import { decideFreestyleStart } from '@/src/services/startSessionGuard';
 import {
   IDLE,
   canRecordSet,
@@ -1125,6 +1126,20 @@ function TodayScreen() {
   const onStartFreestyle = async () => {
     setBusy(true);
     try {
+      // 🟠-B guard (2026-07-07) — mirror the template path
+      // (sessionFromTemplate.ts:111-118) + the Watch path (onStartFromWatch's
+      // 'conflict' branch): NEVER create a second live session. Re-query the DB
+      // (NOT the possibly-stale React `sessionState`) so a Watch-led session that
+      // landed while this tab was still `idle` is seen. If one exists, adopt it
+      // via `refresh()` instead of INSERTing a duplicate `ended_at IS NULL` row
+      // (which `getActiveSession`'s `LIMIT 1` would orphan). Fire-and-forget UX:
+      // the existing session simply surfaces in the in-progress card.
+      const existing = await getActiveSession(db);
+      if (decideFreestyleStart({ hasActiveSession: existing != null }).action ===
+        'adopt-existing') {
+        await refresh();
+        return;
+      }
       const id = randomUUID();
       const started_at = Date.now();
       await createSession(db, { id, started_at });
