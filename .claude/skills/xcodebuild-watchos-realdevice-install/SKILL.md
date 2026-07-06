@@ -13,6 +13,19 @@ If only iPhone-side TS changes (no Watch Swift touched), Metro packager + Reload
 
 For **sim-only eyeball verification** (no device, no HR/kcal needed) use `watchos-simulator-smoke` instead — it builds the `WatchPreview` scheme onto a watch Simulator and drives it with `idb` (way faster; no devicectl dance). This skill is for pushing to the *physical wrist*.
 
+### Compile-gate BEFORE the slow device build (cheap insurance vs a wasted ~10 min clean install)
+
+Before the `clean install` device dance below (~10 min), run the `WatchPreview` scheme against a watch Simulator as a fast (~2-3 min) Swift-compile gate — it compiles the WHOLE Watch target without codesign / devicectl:
+
+```bash
+cd ios
+xcodebuild -scheme WatchPreview -sdk watchsimulator \
+  -destination 'generic/platform=watchOS Simulator' build 2>&1 \
+  | grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" | tail
+```
+
+`** BUILD SUCCEEDED **` = Swift compiles → only THEN spend the 10 min on the real-device `clean install`. Discovering a typo 10 min into a device clean build is the tax this avoids. (`WatchPreview` is the same scheme `watchos-simulator-smoke` uses; here we only read the compile result, no idb.) Validated 2026-07-06 (device-smoke follow-up: 6-file Watch change, gate green in ~2 min before the device build).
+
 ## Cheap compile-verify BEFORE the device build (no clean, no wrist)
 
 To prove a Watch `.swift` change actually COMPILES before paying the full
