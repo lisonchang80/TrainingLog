@@ -25,6 +25,46 @@
 import SwiftUI
 import WatchKit  // NowPlayingView — system Now Playing surface (watchOS 7+)
 
+// MARK: - Superset folding (shared by SetLoggerView.resolveRestTarget +
+//         SessionCardListPage.cardUnits — file-level so both structs reach it)
+
+/// Two exercises form a superset pair when they share a non-nil
+/// `reusableSupersetId` OR are exercise-level parent-linked
+/// (`b.parentId == a.sessionExerciseId`, either direction). The parent_id fallback
+/// mirrors the iPhone (`groupClusterSides`) so a superset still folds into one card
+/// after its reusable-superset LIBRARY entity is deleted (which NULLs
+/// `reusableSupersetId` but leaves the session's `parent_id` intact). SAFE vs
+/// dropsets: dropsets link at the SET level (`parentSetId`), never at exercise
+/// `parentId` (`sessionRepository`: A parent_id=null / B parent_id=A.id). In the
+/// Stage1/template path `parentId` is a template id that never equals a session
+/// `sessionExerciseId`, so this fallback is inert there — RS id covers it.
+fileprivate func isSupersetPair(
+    _ a: SessionSnapshotExercise, _ b: SessionSnapshotExercise
+) -> Bool {
+    if let rs = a.reusableSupersetId, !rs.isEmpty, b.reusableSupersetId == rs {
+        return true
+    }
+    return b.parentId == a.sessionExerciseId || a.parentId == b.sessionExerciseId
+}
+
+/// The [A, B] members (sorted by `ordering`, A = lower) of the superset that
+/// `owner` belongs to — by shared RS id, else exercise-level parent_id. nil for a
+/// solo exercise. Used by `resolveRestTarget` to pin rest to the A side.
+fileprivate func supersetMembers(
+    of owner: SessionSnapshotExercise, in exercises: [SessionSnapshotExercise]
+) -> [SessionSnapshotExercise]? {
+    if let rs = owner.reusableSupersetId, !rs.isEmpty {
+        let m = exercises.filter { $0.reusableSupersetId == rs }
+        if m.count >= 2 { return m.sorted { $0.ordering < $1.ordering } }
+    }
+    if let partner = exercises.first(where: {
+        $0.sessionExerciseId != owner.sessionExerciseId && isSupersetPair(owner, $0)
+    }) {
+        return [owner, partner].sorted { $0.ordering < $1.ordering }
+    }
+    return nil
+}
+
 struct SetLoggerView: View {
     /// SessionSnapshot received from iPhone via start-from-watch
     /// reply. Phase A ignores the snapshot's content and renders
@@ -804,14 +844,6 @@ struct SetLoggerView: View {
                 exBySetId[s.setId] = ex
             }
         }
-        // Grouping by non-nil RS id finds superset PAIRS (a Reusable Superset is
-        // two consecutive exercises sharing the id — ADR-0018 / cardUnits).
-        var rsMembers: [String: [SessionSnapshotExercise]] = [:]
-        for ex in exercises {
-            if let rs = ex.reusableSupersetId, !rs.isEmpty {
-                rsMembers[rs, default: []].append(ex)
-            }
-        }
         // Candidate primaries (non-follower), in DETERMINISTIC order (ordinal
         // then setId) — never Set-iteration order, which is what made the pick
         // swing between A and B.
@@ -822,12 +854,14 @@ struct SetLoggerView: View {
         guard let firstPrimary = primaries.first else { return nil }
         let ownerEx = exBySetId[firstPrimary.setId]
 
-        // Superset? the owning exercise shares a non-nil RS id with a partner.
-        if let owner = ownerEx, let rs = owner.reusableSupersetId, !rs.isEmpty,
-           let members = rsMembers[rs], members.count >= 2 {
-            let sortedMembers = members.sorted { $0.ordering < $1.ordering }
-            let aEx = sortedMembers[0]
-            let bEx = sortedMembers[1]
+        // Superset? the owning exercise pairs with a partner by shared RS id OR
+        // exercise-level parent_id (the parent_id fallback survives a deleted
+        // reusable-superset library entity — mirrors the iPhone + cardUnits).
+        if let owner = ownerEx,
+           let members = supersetMembers(of: owner, in: exercises),
+           members.count >= 2 {
+            let aEx = members[0]
+            let bEx = members[1]
             // A-side set of THIS cycle: the added primary owned by aEx (else A's
             // first added set — covers an uneven-count cycle where only A logged).
             let aSet =
@@ -940,9 +974,7 @@ private struct SessionCardListPage: View {
         var i = 0
         while i < ex.count {
             let cur = ex[i]
-            if let rs = cur.reusableSupersetId, !rs.isEmpty,
-               i + 1 < ex.count,
-               ex[i + 1].reusableSupersetId == rs {
+            if i + 1 < ex.count, isSupersetPair(cur, ex[i + 1]) {
                 let next = ex[i + 1]
                 let a = cur.ordering <= next.ordering ? cur : next
                 let b = cur.ordering <= next.ordering ? next : cur
