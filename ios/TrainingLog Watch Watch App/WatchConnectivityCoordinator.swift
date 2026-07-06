@@ -1470,6 +1470,19 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
                 return
             }
             self.lastInbound = "end sess=\(self.prefix8(sessionId))… msgId=\(self.prefix8(msgId))…"
+            // #6 F1 (2026-07-06) — dual-fire dedup by sessionId. Both the
+            // interactive and the durable (transferUserInfo) legs carry the
+            // SAME sessionId; whichever lands SECOND is dropped here. Without
+            // this, a LATE durable leg (iOS may deliver transferUserInfo well
+            // after sendMessage) could call end() again AFTER the user started
+            // a NEW session — and end()'s state-only guard (.active → tears
+            // down) would kill that new session. A genuinely new end carries a
+            // different sessionId and is NOT skipped. Still ack so iPhone's 5s
+            // reconcile is satisfied.
+            if self.lastIncomingEnd == sessionId {
+                replyHandler(["ok": true])
+                return
+            }
             // SessionController.end() is idempotent — re-call on already-
             // ended state is a no-op (early return via State switch).
             // Same behaviour for Watch-led: when Watch initiates end()
@@ -1544,6 +1557,10 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.lastInbound = "end(TUI) sess=\(self.prefix8(sessionId))… msgId=\(self.prefix8(msgId))…"
+                // #6 F1 (2026-07-06) — dedup with the interactive leg (same
+                // sessionId). Prevents a LATE durable leg from ending a newer
+                // session the user started after this end was already handled.
+                if self.lastIncomingEnd == sessionId { return }
                 await self.sessionController.end()
                 self.lastIncomingEnd = sessionId
             }

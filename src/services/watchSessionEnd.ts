@@ -111,10 +111,15 @@ export async function pushEndToWatch(
   // delivers on the Watch's next wake (at-least-once), so an iPhone-led end
   // still reaches a backgrounded / asleep Watch. The interactive `sendMessage`
   // leg below stays for the instant ack + `is_watch_tracked` reconcile when
-  // the Watch IS reachable. Both legs carry the SAME msgId (same `env`), so
-  // the Watch's shared inbound msgId ring dispatches the end exactly once
-  // (foreground: both arrive, late leg deduped; background: only the durable
-  // leg lands on wake). This mirrors the cast-session / lock-* dual-fire that
+  // the Watch IS reachable. Both legs carry the SAME sessionId (same `env`);
+  // the Watch dedups on `lastIncomingEnd == sessionId` (WatchConnectivity-
+  // Coordinator, BOTH end handlers, #6 F1) so the end runs exactly once —
+  // foreground: both arrive, the second leg is dropped by the sessionId guard;
+  // background: only the durable leg lands on wake. NB there is NO msgId ring
+  // for end-session (unlike cast / lock-*); the sessionId guard is what stops a
+  // LATE durable leg from tearing down a NEWER session started meanwhile — a
+  // stale end carries the OLD sessionId, so it no-ops. This mirrors the
+  // cast-session / lock-* dual-fire that
   // already survive a backgrounded Watch. Root cause it closes: end-session was
   // `sendMessage`-only, and `sendMessage` reachability-prechecks → returns
   // NOT_REACHABLE in ~0ms for an asleep Watch and NEVER queues anything durable
