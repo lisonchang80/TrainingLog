@@ -32,6 +32,8 @@ interface MockBridge {
   getReachability: jest.Mock;
   getIsWatchAppInstalled: jest.Mock;
   sendMessage: jest.Mock;
+  // #6 (2026-07-06) — durable dual-fire leg of the end envelope.
+  transferUserInfo: jest.Mock;
   updateApplicationContext: jest.Mock;
   watchEvents: { addListener: jest.Mock };
 }
@@ -42,6 +44,7 @@ function makeBridge(overrides: Partial<MockBridge> = {}): MockBridge {
     getReachability: jest.fn().mockResolvedValue(true),
     getIsWatchAppInstalled: jest.fn().mockResolvedValue(true),
     sendMessage: jest.fn(),
+    transferUserInfo: jest.fn(),
     updateApplicationContext: jest.fn(),
     watchEvents: {
       addListener: jest.fn().mockReturnValue(() => {}),
@@ -153,6 +156,11 @@ describe('Slice 13d D7-TS — pushEndToWatch orchestrator', () => {
     expect(result.acked).toBe(false);
     expect(result.code).toBe('NOT_REACHABLE');
     expect(bridge.sendMessage).not.toHaveBeenCalled();
+    // #6 (2026-07-06) — the interactive leg short-circuits when the Watch is
+    // unreachable (backgrounded / asleep), but the DURABLE leg MUST still fire
+    // so the end is OS-queued and delivered on the Watch's next wake. This is
+    // the fix for "iPhone 結束 → 背景手錶前景後沒同步結束" (#6 downstream ①).
+    expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
     expect((await getSession(db, 'sess-4'))?.is_watch_tracked).toBe(false);
   });
 
@@ -192,5 +200,36 @@ describe('Slice 13d D7-TS — pushEndToWatch orchestrator', () => {
     expect(result.acked).toBe(true);
     expect(result.code).toBeNull();
     expect(await getSession(db, 'sess-not-in-db')).toBeNull();
+  });
+
+  it('#6 dual-fire — end also queued via durable transferUserInfo with the SAME msgId as sendMessage', async () => {
+    let sentMsg: Record<string, unknown> | undefined;
+    const bridge = makeBridge({
+      sendMessage: jest.fn((msg, replyCb) => {
+        sentMsg = msg as Record<string, unknown>;
+        replyCb?.({ ok: true });
+      }),
+    });
+    installBridge(bridge);
+    const { pushEndToWatch } = loadOrchestrator();
+
+    await createSession(db, { id: 'sess-6', started_at: 6_000 });
+    await setIsWatchTracked(db, { id: 'sess-6', value: true });
+
+    const result = await pushEndToWatch(db, 'sess-6', { timeoutMs: 500 });
+
+    expect(result.acked).toBe(true);
+    // Both legs fired exactly once — durable (TUI) alongside interactive.
+    expect(bridge.transferUserInfo).toHaveBeenCalledTimes(1);
+    expect(bridge.sendMessage).toHaveBeenCalledTimes(1);
+    // Same envelope on both legs → same msgId → Watch's shared inbound ring
+    // dispatches the end exactly once (no double end-session handling).
+    const tuiMsg = bridge.transferUserInfo.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(tuiMsg.kind).toBe('end-session');
+    expect(typeof tuiMsg.msgId).toBe('string');
+    expect(tuiMsg.msgId).toBe(sentMsg?.msgId);
   });
 });

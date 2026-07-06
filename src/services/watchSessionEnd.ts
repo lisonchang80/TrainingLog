@@ -52,6 +52,7 @@ import { setIsWatchTracked } from '../adapters/sqlite/sessionRepository';
 import {
   makeEnvelope,
   sendMessage,
+  sendUserInfo,
   type SendResult,
   type WCMessage,
 } from '../adapters/watch';
@@ -104,6 +105,22 @@ export async function pushEndToWatch(
     sessionId,
     side: 'iphone',
   });
+
+  // #6 device-smoke follow-up (2026-07-06) — DUAL-FIRE the end envelope.
+  // Fire the DURABLE `transferUserInfo` leg first: the OS queues it and
+  // delivers on the Watch's next wake (at-least-once), so an iPhone-led end
+  // still reaches a backgrounded / asleep Watch. The interactive `sendMessage`
+  // leg below stays for the instant ack + `is_watch_tracked` reconcile when
+  // the Watch IS reachable. Both legs carry the SAME msgId (same `env`), so
+  // the Watch's shared inbound msgId ring dispatches the end exactly once
+  // (foreground: both arrive, late leg deduped; background: only the durable
+  // leg lands on wake). This mirrors the cast-session / lock-* dual-fire that
+  // already survive a backgrounded Watch. Root cause it closes: end-session was
+  // `sendMessage`-only, and `sendMessage` reachability-prechecks → returns
+  // NOT_REACHABLE in ~0ms for an asleep Watch and NEVER queues anything durable
+  // → "iPhone 結束訓練 → 背景手錶前景後沒同步結束" (#6 downstream symptom ①).
+  // Per NEW-Q50 Q4 this also advances end-session onto its intended TUI channel.
+  sendUserInfo(env);
 
   const result = await sendMessage(env, {
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
