@@ -50,8 +50,9 @@ describe('exerciseLibraryRepository', () => {
 
   it('migrate seeds the full exercise library', async () => {
     const exercises = await listExercises(db);
-    // v028 grew the active built-in library 66 → 233 (206 new curated, 39 archived).
-    expect(exercises.length).toBe(233);
+    // v028 grew the active built-in library 66 → 233 (206 new curated, 39 archived);
+    // v030 added 跪姿滑輪下拉 → 234.
+    expect(exercises.length).toBe(234);
   });
 
   it('every seeded exercise has muscle_group_id backfilled (incl. v001/v002 rows)', async () => {
@@ -79,7 +80,7 @@ describe('exerciseLibraryRepository', () => {
 
   it('listExercisesWithLinks returns same dataset as separate calls', async () => {
     const { exercises, links } = await listExercisesWithLinks(db);
-    expect(exercises.length).toBe(233);
+    expect(exercises.length).toBe(234);
     expect(links.length).toBeGreaterThan(0);
   });
 
@@ -94,6 +95,18 @@ describe('exerciseLibraryRepository', () => {
     expect(primaryIds).toContain(M_TRICEP);
     const secondaryIds = got!.secondary.map((m) => m.id).sort();
     expect(secondaryIds).toContain(M_UPPER_CHEST);
+  });
+
+  it('v030 adds 跪姿滑輪下拉 as a placeholder back pulldown with m-back primary', async () => {
+    const KNEELING_ID = '00000000-0000-4000-8000-000000000111';
+    const got = await getExerciseWithMuscles(db, KNEELING_ID);
+    expect(got).not.toBeNull();
+    expect(got!.exercise.name).toBe('跪姿滑輪下拉');
+    expect(got!.exercise.muscle_group_id).toBe(MG_BACK);
+    expect(got!.exercise.equipment).toBe('滑輪');
+    expect(got!.exercise.media_path).toBeNull(); // placeholder → hash-color thumb
+    expect(got!.primary.map((m) => m.id)).toContain(M_BACK);
+    expect(got!.secondary.map((m) => m.id)).toContain(M_BICEP_LONG);
   });
 
   it('getExerciseWithMuscles returns null for unknown id', async () => {
@@ -271,7 +284,7 @@ describe('exerciseLibraryRepository', () => {
     const exercises = await listExercises(db);
     const muscles = await listMuscles(db);
     const mgs = await listMuscleGroups(db);
-    expect(exercises.length).toBe(233);
+    expect(exercises.length).toBe(234);
     expect(muscles).toHaveLength(19);
     expect(mgs).toHaveLength(11);
   });

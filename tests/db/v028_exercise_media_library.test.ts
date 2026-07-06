@@ -43,12 +43,12 @@ describe('v028 exercise media library migration', () => {
     expect(NEW_EXERCISE_SEEDS.filter((e) => e.media_key).length).toBe(143);
   });
 
-  it('lands 233 active built-ins (66 + 206 − 39 archived) and 272 total', async () => {
+  it('lands 234 active built-ins (66 + 206 + 1 − 39 archived) and 273 total', async () => {
     await migrate(db);
-    expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_builtin = 1`)).toBe(272);
+    expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_builtin = 1`)).toBe(273);
     expect(
       await count(`SELECT COUNT(*) n FROM exercise WHERE is_builtin = 1 AND is_archived = 0`),
-    ).toBe(233);
+    ).toBe(234);
     expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_archived = 1`)).toBe(39);
   });
 
@@ -137,7 +137,8 @@ describe('v028 exercise media library migration', () => {
     await migrate(db);
     await v028_exercise_media_library(db);
     await v028_exercise_media_library(db);
-    expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_builtin = 1`)).toBe(272);
+    // is_builtin includes the post-v028 addition 跪姿滑輪下拉 (v030) → 273.
+    expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_builtin = 1`)).toBe(273);
     expect(await count(`SELECT COUNT(*) n FROM exercise WHERE is_archived = 1`)).toBe(39);
     expect(
       await count(`SELECT COUNT(*) n FROM exercise WHERE media_path IS NOT NULL`),

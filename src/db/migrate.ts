@@ -28,6 +28,7 @@ import { v026_session_started_at_index } from './schema/v026_session_started_at_
 import { v027_session_exercise_parent_index } from './schema/v027_session_exercise_parent_index';
 import { v028_exercise_media_library } from './schema/v028_exercise_media_library';
 import { v029_exercise_muscle_links } from './schema/v029_exercise_muscle_links';
+import { v030_kneeling_cable_pulldown } from './schema/v030_kneeling_cable_pulldown';
 
 /**
  * Migration runner using PRAGMA user_version.
@@ -71,6 +72,7 @@ const migrations: Record<number, MigrationFn> = {
   27: v027_session_exercise_parent_index,
   28: v028_exercise_media_library,
   29: v029_exercise_muscle_links,
+  30: v030_kneeling_cable_pulldown,
 };
 
 /**
