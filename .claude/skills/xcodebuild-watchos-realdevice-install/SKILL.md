@@ -306,7 +306,7 @@ xcodebuild: error: Timed out waiting for all destinations matching the provided 
 xcrun devicectl device info details --device <iphone-udid> 2>/dev/null | grep -iE "ddiServicesAvailable|transportType|tunnelState|developerModeStatus"
 ```
 
-- `ddiServicesAvailable: false` + `transportType: localNetwork` → **iPhone on Wi-Fi; DDI mount over wireless is flaky. Fix = plug in the USB cable + unlock the phone.** Validated: DDI flipped `true` on the FIRST poll after cabling.
+- `ddiServicesAvailable: false` + `transportType: localNetwork` → **iPhone on Wi-Fi; DDI mount over wireless is flaky. Fix = plug in the USB cable + unlock the phone.** Validated: DDI flipped `true` on the FIRST poll after cabling. **Nuance (2026-07-06): a plain RETRY over the SAME wireless/hotspot often mounts it on the 2nd attempt** — a device build timed out on DDI, the identical `clean install` re-run over the same personal hotspot succeeded (`INSTALL SUCCEEDED`, SwiftCompile 92). So: retry-in-place is worth one shot before hassling the user for a cable; USB stays the reliable fix if retries keep failing. Also note the symptom pair: `devicectl list devices` shows the iPhone `available (paired)` while `xcodebuild -showdestinations` does NOT list it — that gap == DDI unmounted, not "device gone".
 - `tunnelState: unavailable` → device fully disconnected (cable pulled / out of range).
 - `developerModeStatus: enabled` rules out the Developer-Mode-off cause; locked screen is the other usual suspect.
 
