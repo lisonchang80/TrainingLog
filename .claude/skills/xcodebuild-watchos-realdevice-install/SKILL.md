@@ -26,6 +26,8 @@ xcodebuild -scheme WatchPreview -sdk watchsimulator \
 
 `** BUILD SUCCEEDED **` = Swift compiles → only THEN spend the 10 min on the real-device `clean install`. Discovering a typo 10 min into a device clean build is the tax this avoids. (`WatchPreview` is the same scheme `watchos-simulator-smoke` uses; here we only read the compile result, no idb.) Validated 2026-07-06 (device-smoke follow-up: 6-file Watch change, gate green in ~2 min before the device build).
 
+⚠️ **Run this gate BEFORE `git commit`, not after** — the pre-commit hook only runs `tsc + jest` and **skips entirely for a Swift-only change** (`no .ts/.tsx files staged — skipping`), so a Swift compile error sails straight into a commit (and a push). Validated the hard way 2026-07-06: committed + pushed a Swift-only change that failed `WatchPreview` (`type 'X' has no member 'Y'` — a helper added to the wrong struct); had to `--amend` + `--force-with-lease`. Sequence for Swift-only: edit → `WatchPreview` gate → **only if green** → commit → push. (Swift free-function trap that caused it: a helper called from two different structs must be file-level `fileprivate func`, not a `static func` on one struct — `Self.foo` in the other struct won't resolve it.)
+
 ## Cheap compile-verify BEFORE the device build (no clean, no wrist)
 
 To prove a Watch `.swift` change actually COMPILES before paying the full
