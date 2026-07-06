@@ -512,6 +512,16 @@ struct SetLoggerView: View {
                     Task { await sessionController.start() }
                 }
             }
+            // ADR-0028 (2026-07-06) — takeover ends the loser's rest. When THIS
+            // side loses the holder role (demoted holder→locked via the peer's
+            // 解除鎖定 grant, or a force-take), `isLockedOut` flips false→true.
+            // The taker never triggers this (it stays locked→requesting, both
+            // isLockedOut=true → no transition). End our running rest countdown so
+            // both sides land clean — the stale countdown would otherwise keep
+            // ticking under the lock overlay. `skip()` dismisses w/o finish haptic.
+            .onChange(of: editLock.isLockedOut) { _, lockedOut in
+                if lockedOut { restTimer.skip() }
+            }
             // D29 — start the live-mirror producer. Separate .task so its
             // 15s poll loop runs concurrently with (and independently of)
             // the HK lifecycle .task above; both auto-cancel on unmount.

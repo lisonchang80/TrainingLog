@@ -662,6 +662,15 @@ function TodayScreen() {
   const editLockRef = useRef(editLock);
   editLockRef.current = editLock;
 
+  // ADR-0028 (2026-07-06) — takeover ends the loser's rest (mirror of the Watch
+  // SetLoggerView hook). When THIS iPhone loses the holder role — the paired
+  // Watch took over via 解除鎖定 (grant) or a force-take — `isLockedOut` flips
+  // true; dismiss our running rest countdown so both sides land clean (the
+  // stale modal would otherwise sit behind the lock overlay).
+  useEffect(() => {
+    if (editLock.isLockedOut) setRestTimerTarget(null);
+  }, [editLock.isLockedOut]);
+
   // 2026-06-26 — the D32 interim "Watch-led ⇒ iPhone read-only + toast" guard
   // is RETIRED. iPhone edits during a Watch-led session now flow to the Watch
   // (reverse-sync Phase C-core): each edit writes the DB, `refresh()` runs, and
