@@ -1522,6 +1522,33 @@ extension WatchConnectivityCoordinator: WCSessionDelegate {
             Task { @MainActor [weak self] in self?.editLock?.handleLockEnvelope(env) }
             return
         }
+        // #6 (2026-07-06) — end-session DURABLE (TUI) backstop. The iPhone now
+        // dual-fires the end envelope (sendMessage + transferUserInfo, SAME
+        // msgId — `watchSessionEnd.ts`), so an iPhone-led end reaches a
+        // BACKGROUNDED / asleep Watch on its next wake via this durable leg.
+        // Previously end-session rode ONLY the interactive sendMessage lane
+        // (`didReceiveMessage` above), which iOS never delivers to a suspended
+        // Watch app → the mirror stayed "live" after the iPhone had ended it
+        // ("結束沒同步", #6 downstream ①). Mirror that handler's action; the TUI
+        // lane owes no reply. `SessionController.end()` is idempotent, so if the
+        // instant leg already ended this session in foreground, this durable
+        // leg is a harmless no-op.
+        if kind == "end-session" {
+            guard
+                let payload = userInfo["payload"] as? [String: Any],
+                let sessionId = payload["sessionId"] as? String,
+                let side = payload["side"] as? String,
+                side == "iphone"
+            else { return }
+            let msgId = (userInfo["msgId"] as? String) ?? "?"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.lastInbound = "end(TUI) sess=\(self.prefix8(sessionId))… msgId=\(self.prefix8(msgId))…"
+                await self.sessionController.end()
+                self.lastIncomingEnd = sessionId
+            }
+            return
+        }
         guard kind == "start-reconcile" else {
             // Unknown / not-our-business envelope kind. Logged on main
             // actor for diagnostic visibility.

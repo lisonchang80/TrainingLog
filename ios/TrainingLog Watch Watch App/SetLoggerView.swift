@@ -144,6 +144,14 @@ struct SetLoggerView: View {
     /// session lifecycle terminates.
     @Environment(\.dismiss) private var dismiss
 
+    /// #6 (2026-07-06) — foreground re-entry hook. watchOS won't start a new
+    /// HKWorkoutSession from the background, so a cast delivered to a
+    /// backgrounded Watch can reach the mount `.task` below with HK unstarted
+    /// (raced / cancelled) → "前景後沒錄 HR". Re-invoking the IDEMPOTENT
+    /// `sessionController.start()` on every foreground guarantees HK is running
+    /// once the user engages the wrist (Q-CORE = A). See `.onChange(of: scenePhase)`.
+    @Environment(\.scenePhase) private var scenePhase
+
     /// D31 (2026-05-29 late) — conflict alert state cache.
     ///
     /// `coordinator.lastReconcile` is a published *event* (the latest
@@ -490,6 +498,20 @@ struct SetLoggerView: View {
             .task {
                 await sessionController.start()
             }
+            // #6 (2026-07-06) — Q-CORE = A (cast = full workout). On every
+            // foreground, ensure HK is running: watchOS can't begin a workout
+            // from the background, so a cast delivered to a backgrounded Watch
+            // may reach here with HK unstarted (the mount `.task` above raced or
+            // was cancelled on the background→foreground transition). `start()`
+            // is idempotent (no-op while already running), so this cheaply
+            // guarantees HR + workout focus the moment the wrist is engaged —
+            // and also covers the case where PickerRootView's foreground
+            // re-route just mounted this view.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await sessionController.start() }
+                }
+            }
             // D29 — start the live-mirror producer. Separate .task so its
             // 15s poll loop runs concurrently with (and independently of)
             // the HK lifecycle .task above; both auto-cancel on unmount.
@@ -719,41 +741,108 @@ struct SetLoggerView: View {
         guard restTimerArmed else { return }
         guard (RestTimerMode(rawValue: restTimerModeRaw) ?? .popup) == .popup else { return }
 
-        // Un-log cancel: the running set left the logged set.
+        // Un-log cancel: the running set left the logged set. UNCONDITIONAL —
+        // a remote (iPhone-mirrored) un-log should still stop a running Watch
+        // timer, so we do NOT filter provenance here.
         let removed = old.subtracting(new)
         if let running = restTimer.runningSetId, removed.contains(running) {
             restTimer.skip()
         }
 
-        // Fresh ✓: start from the newly-added primary (head / solo / working /
-        // warmup — parentSetId == nil). A whole cluster ✓'d at once adds its
-        // head (nil parent) + followers; we start once, off the head.
-        let added = new.subtracting(old)
+        // Fresh ✓: start from the newly-added primary. #1 (2026-07-06) — SKIP
+        // ids whose ✓ came from a remote apply (`applyRemoteSnapshot`): an
+        // iPhone-operator ✓ mirrored onto this Watch must NOT pop the mirror's
+        // OWN rest ("rest 兩邊都跳"); rest belongs to whoever performed the set.
+        // A Watch-LOCAL ✓ (toggleLogged / superset toggleLoggedPair) clears the
+        // remote tag, so it stays and fires normally.
+        let added = Set(
+            new.subtracting(old)
+                .filter { !interactionState.isRemoteLogged(setId: $0) }
+        )
         guard !added.isEmpty else { return }
-        let lookup = restTimerSetLookup()
-        guard let primary = added
-            .compactMap({ lookup[$0] })
-            .first(where: { $0.set.parentSetId == nil })
-        else { return }  // all added rows are cluster followers → no timer
+        guard let target = resolveRestTarget(added: added) else {
+            return  // all added rows are cluster followers → no timer
+        }
         restTimer.start(
-            setId: primary.set.setId,
-            // item 1 (2026-07-03) — a per-exercise rest edit (Watch ⋯ menu OR an
-            // iPhone edit reverse-synced into restOverride) wins over the
-            // immutable base set's denormalised rest.
-            restSec: interactionState.restOverride[primary.seId] ?? primary.set.restSec,
-            exerciseName: primary.name,
-            ordinal: primary.set.ordinal
+            setId: target.setId,
+            restSec: target.restSec,
+            exerciseName: target.name,
+            ordinal: target.ordinal
         )
     }
 
-    /// setId → (set, exercise name, sessionExerciseId) over the live tree
-    /// (snapshot + added). `seId` lets the rest timer consult `restOverride`.
-    private func restTimerSetLookup() -> [String: (set: SessionSnapshotSet, name: String, seId: String)] {
-        var map: [String: (set: SessionSnapshotSet, name: String, seId: String)] = [:]
-        for ex in snapshot.exercises + interactionState.addedExercises {
-            for s in ex.sets { map[s.setId] = (s, ex.exerciseName, ex.sessionExerciseId) }
+    /// #2 (2026-07-06) — resolve the ONE rest-timer target for a fresh ✓.
+    ///
+    /// A SUPERSET pair-✓ (`toggleLoggedPair` logs A.set[i] + B.set[i] together)
+    /// is pinned to the A-side (lower `ordering`) restSec + a paired「A + B」
+    /// label — matching the iPhone `onToggleClusterCycle` and ADR-0019 Q2.4
+    /// (rest off the parent/A; the child's own restSec is ignored). Previously
+    /// this took `.first(where: parentSetId==nil)` over an unordered Set, so the
+    /// timer's exercise name + duration swung nondeterministically between A and
+    /// B — the "超級組 rest 輪跳 AB" bug. A SOLO ✓ keeps the per-exercise
+    /// `restOverride ?? base` rest. Cluster followers (`parentSetId != nil`)
+    /// never drive a timer (they resolve to nil here → the caller returns).
+    private func resolveRestTarget(
+        added: Set<String>
+    ) -> (setId: String, restSec: Int?, name: String, ordinal: Int)? {
+        let exercises = snapshot.exercises + interactionState.addedExercises
+        var setById: [String: SessionSnapshotSet] = [:]
+        var exBySetId: [String: SessionSnapshotExercise] = [:]
+        for ex in exercises {
+            for s in ex.sets {
+                setById[s.setId] = s
+                exBySetId[s.setId] = ex
+            }
         }
-        return map
+        // Grouping by non-nil RS id finds superset PAIRS (a Reusable Superset is
+        // two consecutive exercises sharing the id — ADR-0018 / cardUnits).
+        var rsMembers: [String: [SessionSnapshotExercise]] = [:]
+        for ex in exercises {
+            if let rs = ex.reusableSupersetId, !rs.isEmpty {
+                rsMembers[rs, default: []].append(ex)
+            }
+        }
+        // Candidate primaries (non-follower), in DETERMINISTIC order (ordinal
+        // then setId) — never Set-iteration order, which is what made the pick
+        // swing between A and B.
+        let primaries = added
+            .compactMap { setById[$0] }
+            .filter { $0.parentSetId == nil }
+            .sorted { ($0.ordinal, $0.setId) < ($1.ordinal, $1.setId) }
+        guard let firstPrimary = primaries.first else { return nil }
+        let ownerEx = exBySetId[firstPrimary.setId]
+
+        // Superset? the owning exercise shares a non-nil RS id with a partner.
+        if let owner = ownerEx, let rs = owner.reusableSupersetId, !rs.isEmpty,
+           let members = rsMembers[rs], members.count >= 2 {
+            let sortedMembers = members.sorted { $0.ordering < $1.ordering }
+            let aEx = sortedMembers[0]
+            let bEx = sortedMembers[1]
+            // A-side set of THIS cycle: the added primary owned by aEx (else A's
+            // first added set — covers an uneven-count cycle where only A logged).
+            let aSet =
+                primaries.first(where: {
+                    exBySetId[$0.setId]?.sessionExerciseId == aEx.sessionExerciseId
+                })
+                ?? aEx.sets.first(where: { added.contains($0.setId) })
+                ?? firstPrimary
+            return (
+                setId: aSet.setId,
+                // Pinned to A (parent); ignore B's restSec per ADR-0019 Q2.4.
+                restSec: interactionState.restOverride[aEx.sessionExerciseId] ?? aSet.restSec,
+                name: "\(aEx.exerciseName) + \(bEx.exerciseName)",
+                ordinal: aSet.ordinal
+            )
+        }
+
+        // Solo — per-exercise restOverride wins over the base set's rest (item 1).
+        let seId = ownerEx?.sessionExerciseId ?? ""
+        return (
+            setId: firstPrimary.setId,
+            restSec: interactionState.restOverride[seId] ?? firstPrimary.restSec,
+            name: ownerEx?.exerciseName ?? "",
+            ordinal: firstPrimary.ordinal
+        )
     }
 }
 

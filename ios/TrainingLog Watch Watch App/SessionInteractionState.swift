@@ -278,6 +278,21 @@ final class SessionInteractionState: ObservableObject {
     /// an iPhone-PROVENANCE kind, never a Watch-local one. Not @Published.
     private var remoteKindSetIds: Set<String> = []
 
+    /// PROVENANCE for the rest-timer suppression (#1 device-smoke follow-up
+    /// 2026-07-06). The ids whose current `loggedSetIds` membership was written
+    /// by `applyRemoteSnapshot` (an iPhone-operator ✓ mirrored onto this Watch)
+    /// — as opposed to a Watch-LOCAL ✓ (`toggleLogged` / superset
+    /// `toggleLoggedPair`). `SetLoggerView.handleLoggedChange` fires the rest
+    /// timer for a newly-logged set with NO local-vs-remote discriminator, so an
+    /// iPhone-led ✓ pops the mirror's OWN rest ("rest 兩邊都跳"). Rest belongs to
+    /// whoever performed the set: the guard skips `restTimer.start` for a
+    /// just-logged id in THIS set. Timing-independent (committed alongside
+    /// `loggedSetIds` before SwiftUI's `.onChange` fires), unlike reading the
+    /// producer's transient `applyingRemote` flag. Any LOCAL logging action
+    /// clears the id's remote tag (see `toggleLogged` / `markLocalLogged`). Not
+    /// @Published — pure bookkeeping, no view observes it.
+    private var remoteLoggedSetIds: Set<String> = []
+
     /// Goal 3b (2026-06-26) — the setId whose per-set note is shown in the top
     /// overlay box (covering the HR/time pane) WHILE its row is in long-press
     /// (orange / reorder) mode. nil ⇒ no overlay. `ReorderableRow` pushes the
@@ -357,9 +372,29 @@ final class SessionInteractionState: ObservableObject {
         } else {
             loggedSetIds.insert(setId)
         }
+        // #1 (2026-07-06) — a LOCAL ✓ / un-✓ reclaims provenance from any prior
+        // remote apply, so a Watch-local toggle after an iPhone-mirrored ✓ still
+        // fires its own rest (and un-logging drops the tag too).
+        remoteLoggedSetIds.remove(setId)
         // Per spec line 1593 tap ◯/✓ exits both row + cell Active state.
         activeSetId = nil
         activeCell = nil
+    }
+
+    /// #1 (2026-07-06) — `true` iff this set's current `loggedSetIds` membership
+    /// came from `applyRemoteSnapshot` (an iPhone-operator ✓ mirrored onto this
+    /// Watch), NOT a Watch-local tap. `SetLoggerView.handleLoggedChange` reads
+    /// this to skip firing the mirror's own rest timer for a remote-applied ✓.
+    func isRemoteLogged(setId: String) -> Bool {
+        remoteLoggedSetIds.contains(setId)
+    }
+
+    /// #1 (2026-07-06) — clear the remote-provenance tag for a set that a LOCAL
+    /// logging path mutated directly on `loggedSetIds` (e.g. the superset
+    /// `toggleLoggedPair`, which doesn't route through `toggleLogged`), so its
+    /// local ✓ is not mistaken for a remote apply and still fires rest.
+    func markLocalLogged(setId: String) {
+        remoteLoggedSetIds.remove(setId)
     }
 
     // MARK: - Cell edit (Phase C)
@@ -782,6 +817,7 @@ final class SessionInteractionState: ObservableObject {
         var newRemoteAddedSetIds = remoteAddedSetIds
         var newRemoteRankedSetIds = remoteRankedSetIds
         var newRemoteKindSetIds = remoteKindSetIds
+        var newRemoteLoggedSetIds = remoteLoggedSetIds
         var newRestOverride = restOverride
 
         for (i, ex) in snap.exercises.enumerated() {
@@ -790,7 +826,7 @@ final class SessionInteractionState: ObservableObject {
                 // overlay (the shared renderer reads `state.isLogged(setId)` /
                 // `setRankOverrides[setId]` even for added exercises).
                 for s in ex.sets {
-                    if s.isLogged { newLogged.insert(s.setId) }
+                    if s.isLogged { newLogged.insert(s.setId); newRemoteLoggedSetIds.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
                     if let dr = s.displayRank {
                         newRankOverrides[s.setId] = dr
@@ -863,7 +899,15 @@ final class SessionInteractionState: ObservableObject {
             for s in ex.sets {
                 if let id = resolvedBaseSetId[s.setId], let b = baseById[id] {
                     // resolve snap row → BASE setId → overlay key the renderer reads.
-                    if s.isLogged { newLogged.insert(id) } else { newLogged.remove(id) }
+                    // #1 (2026-07-06) — tag/untag remote provenance in lockstep so
+                    // the mirror's rest timer skips this iPhone-mirrored ✓.
+                    if s.isLogged {
+                        newLogged.insert(id)
+                        newRemoteLoggedSetIds.insert(id)
+                    } else {
+                        newLogged.remove(id)
+                        newRemoteLoggedSetIds.remove(id)
+                    }
                     if let w = s.weight, w != b.weight {
                         newEdited[EditedValueKey(setId: id, field: .weight)] = w
                     }
@@ -949,7 +993,7 @@ final class SessionInteractionState: ObservableObject {
                     a.weight = s.weight
                     a.reps = s.reps
                     newAddedSets[aIdx] = a
-                    if s.isLogged { newLogged.insert(s.setId) }
+                    if s.isLogged { newLogged.insert(s.setId); newRemoteLoggedSetIds.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
                     // rank: write when present, CLEAR a stale iPhone-provenance rank
                     // when the wire stops carrying one, so a frozen override can't
@@ -977,7 +1021,7 @@ final class SessionInteractionState: ObservableObject {
                     // Tag as iPhone-originated so a later revert can prune it
                     // (see the prune above) without touching Watch-local adds.
                     newRemoteAddedSetIds.insert(s.setId)
-                    if s.isLogged { newLogged.insert(s.setId) }
+                    if s.isLogged { newLogged.insert(s.setId); newRemoteLoggedSetIds.insert(s.setId) }
                     if let n = s.notes { newNotes[s.setId] = n }
                     if let dr = s.displayRank {
                         newRankOverrides[s.setId] = dr
@@ -996,6 +1040,10 @@ final class SessionInteractionState: ObservableObject {
         newRemoteRankedSetIds.formIntersection(Set(newRankOverrides.keys))
         // Same hygiene for the kind-provenance tag.
         newRemoteKindSetIds.formIntersection(Set(newKindOverrides.keys))
+        // #1 (2026-07-06) — keep the logged-provenance tag to ids that are still
+        // logged, so an un-logged / vanished id drops its tag (can't grow
+        // unbounded; a later local re-log of that id isn't misread as remote).
+        newRemoteLoggedSetIds.formIntersection(newLogged)
         // Assign once each → ≤ one @Published willSet per field per apply.
         loggedSetIds = newLogged
         editedValues = newEdited
@@ -1007,6 +1055,7 @@ final class SessionInteractionState: ObservableObject {
         remoteAddedSetIds = newRemoteAddedSetIds
         remoteRankedSetIds = newRemoteRankedSetIds
         remoteKindSetIds = newRemoteKindSetIds
+        remoteLoggedSetIds = newRemoteLoggedSetIds
         restOverride = newRestOverride
     }
 

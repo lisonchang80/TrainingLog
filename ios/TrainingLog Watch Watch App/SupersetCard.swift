@@ -303,6 +303,11 @@ struct SupersetCard: View {
         let isOn = state.isLogged(setId: pair.canonicalId)
         for id in ids {
             if isOn { state.loggedSetIds.remove(id) } else { state.loggedSetIds.insert(id) }
+            // #1 (2026-07-06) — a LOCAL superset ✓/un-✓ reclaims provenance from
+            // any prior remote apply, so it fires its own rest. This path mutates
+            // `loggedSetIds` directly (bypassing `toggleLogged`), so clear the tag
+            // here too; `handleLoggedChange` reads `isRemoteLogged` to gate rest.
+            state.markLocalLogged(setId: id)
         }
         state.activeSetId = nil
         state.activeCell = nil

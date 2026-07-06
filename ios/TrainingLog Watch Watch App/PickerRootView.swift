@@ -64,6 +64,14 @@ struct PickerRootView: View {
     /// observe inbound `cast-session` (投影 Watch) via `$pendingCast`.
     @EnvironmentObject private var coordinator: WatchConnectivityCoordinator
 
+    /// #6 (2026-07-06) — foreground re-entry hook. A cast delivered to a
+    /// backgrounded Watch rides the durable TUI and sets `coordinator.pendingCast`
+    /// on wake, but `.onChange(of: pendingCast)` never fires for an already-set
+    /// value and the one-shot `.task` below may have run before the TUI landed
+    /// (the routing race). Re-running `routeCastIfNew` on every foreground closes
+    /// that gap so the cast reliably routes → the set logger mounts → HK starts.
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Id of the session currently open on the wrist (Watch-led OR cast),
     /// nil at the picker root. Drives the cast conflict decision: same id →
     /// no-op, different id → ask before replacing. Cleared on session end.
@@ -187,6 +195,17 @@ struct PickerRootView: View {
             // dedups against `.onChange` via the request token.
             .task {
                 routeCastIfNew(coordinator.pendingCast)
+            }
+            // #6 (2026-07-06) — re-drive cast routing on every foreground. A
+            // cast that arrived while this Watch app was backgrounded set
+            // `pendingCast` on wake, but `.onChange` never fires for an
+            // already-set value and the one-shot `.task` above ran before the
+            // TUI delivered it. On foreground, route it — token-deduped, so an
+            // already-routed cast no-ops → the set logger mounts → HK starts.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    routeCastIfNew(coordinator.pendingCast)
+                }
             }
             // Track the Watch-LED session id so a later cast of a DIFFERENT
             // session is detected as a conflict (a cast of the SAME id no-ops).
