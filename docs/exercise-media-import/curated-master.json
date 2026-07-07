@@ -3029,5 +3029,16 @@
   "img": "placeholder",
   "load_type": null,
   "note": "DB無槓片版；近似Barbell Seated Calf Raise；槓片→其他"
+ },
+ {
+  "part": "背",
+  "zh": "跪姿滑輪下拉",
+  "equip_zh": "滑輪",
+  "en": null,
+  "id": null,
+  "images": null,
+  "img": "placeholder",
+  "load_type": null,
+  "note": "跪姿版滑輪下拉；無 FE-DB 照片 → placeholder；手動加於 v030"
  }
 ]

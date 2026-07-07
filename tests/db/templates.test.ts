@@ -39,8 +39,9 @@ describe('Template + snapshot isolation (slice 3)', () => {
 
   it('migration v003 creates the three template tables (Exercise Library seeded by v001/v002/v006)', async () => {
     const exercises = await listExercises(db);
-    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived).
-    expect(exercises).toHaveLength(233);
+    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived);
+    // v030 added 跪姿滑輪下拉 → 234.
+    expect(exercises).toHaveLength(234);
     // Tables exist if these queries don't throw.
     expect(await listTemplates(db)).toEqual([]);
   });

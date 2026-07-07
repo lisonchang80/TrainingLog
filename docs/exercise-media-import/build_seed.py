@@ -47,6 +47,7 @@ PLACEHOLDER_EN = {
     '機械單側高位划船（反握）': 'Underhand Single-Arm Machine High Row',
     '機械單側划船': 'Single-Arm Machine Row',
     '對握滑輪下拉': 'Neutral-Grip Lat Pulldown',
+    '跪姿滑輪下拉': 'Kneeling Cable Lat Pulldown',
     '單臂直臂下壓': 'Single-Arm Straight-Arm Pulldown',
     '坐姿划船（寬握）': 'Wide-Grip Seated Cable Row',
     '六角槓划船': 'Trap Bar Row',

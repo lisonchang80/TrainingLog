@@ -36,8 +36,9 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
 
   it('seeds the full Exercise Library after v001 + v002 + v006', async () => {
     const exercises = await listExercises(db);
-    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived).
-    expect(exercises).toHaveLength(233);
+    // v028 grew the active built-in library 66 → 233 (206 new, 39 archived);
+    // v030 added 跪姿滑輪下拉 → 234.
+    expect(exercises).toHaveLength(234);
     const names = exercises.map((e) => e.name).sort();
     expect(names).toContain('Bench Press');
     expect(names).toContain('Back Squat');
@@ -186,6 +187,6 @@ describe('Session lifecycle — multi-exercise + summary (slice 2)', () => {
   it('migration is idempotent — re-running keeps the full Exercise Library', async () => {
     await migrate(db);
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(233);
+    expect(exercises).toHaveLength(234);
   });
 });

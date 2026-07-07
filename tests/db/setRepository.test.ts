@@ -26,8 +26,9 @@ describe('setRepository — seed + migration canaries', () => {
     const exercises = await listExercises(db);
     // v001 seeds Bench Press; v002 (slice 2) adds 6 more compound lifts;
     // v006 (slice 6) adds the rest of the Exercise Library; v028 grows the
-    // active built-in library to 233 (206 curated added, 39 archived).
-    expect(exercises).toHaveLength(233);
+    // active built-in library to 233 (206 curated added, 39 archived);
+    // v030 adds 跪姿滑輪下拉 → 234.
+    expect(exercises).toHaveLength(234);
     const bench = exercises.find((e) => e.name === 'Bench Press');
     expect(bench).toMatchObject({
       load_type: 'loaded',
@@ -39,6 +40,6 @@ describe('setRepository — seed + migration canaries', () => {
   it('migration is idempotent — running twice does not create extra exercise rows', async () => {
     await migrate(db); // already ran in beforeEach; this is the second call
     const exercises = await listExercises(db);
-    expect(exercises).toHaveLength(233);
+    expect(exercises).toHaveLength(234);
   });
 });
