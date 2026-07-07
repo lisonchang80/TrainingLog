@@ -199,7 +199,7 @@ export function SetRowContent<S extends SetRowItem>({
       {onTapNumber ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${t('button', 'a11yEditWeight')}, ${set.weight} kg`}
+          accessibilityLabel={`${t('button', 'a11yEditWeight')}, ${displayWeight(set.weight, unit)} ${unit}`}
           onPress={() => onTapNumber(set, 'weight', set.weight)}
           hitSlop={4}
           style={[styles.setInput, compact && styles.setInputCompact]}
