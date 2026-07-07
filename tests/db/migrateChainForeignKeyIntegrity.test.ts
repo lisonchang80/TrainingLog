@@ -27,7 +27,6 @@ import { migrate } from '../../src/db/migrate';
 // Built-in FK targets guaranteed to exist after migrate().
 const EX_BENCH = '00000000-0000-4000-8000-000000000001';
 const EX_SQUAT = '00000000-0000-4000-8000-000000000002';
-const NONE_PROGRAM = '00000000-0000-0000-0000-000000000000';
 
 /**
  * Seed representative data across every major user-owned table, exercising the
