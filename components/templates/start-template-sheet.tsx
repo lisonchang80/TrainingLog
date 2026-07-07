@@ -289,7 +289,7 @@ export function StartTemplateSheet({
         style={styles.avoider}
       >
       <Pressable style={styles.backdrop} onPress={onCancel}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
           <View style={styles.topBar}>
             <Pressable onPress={onCancel} hitSlop={8}>
               <Text style={styles.topBarBtnText}>{t('common', 'backArrow')}</Text>

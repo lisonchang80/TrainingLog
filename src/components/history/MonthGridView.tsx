@@ -274,7 +274,7 @@ export default function MonthGridView() {
         animationType="fade"
         onRequestClose={() => setBackfillDate(null)}>
         <Pressable style={styles.boxBackdrop} onPress={() => setBackfillDate(null)}>
-          <Pressable style={styles.box} onPress={() => {}}>
+          <Pressable style={styles.box} onPress={() => {}} accessibilityViewIsModal>
             <Text style={styles.boxDate}>{backfillDate ?? ''}</Text>
             <Pressable
               accessibilityRole="button"

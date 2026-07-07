@@ -262,7 +262,7 @@ export function BackfillSheet({
         onRequestClose={onCancel}
         onDismiss={() => onClosed?.()}>
         <Pressable style={styles.backdrop} onPress={onCancel}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable style={styles.sheet} onPress={() => {}} accessibilityViewIsModal>
             <View style={styles.topBar}>
               <Pressable onPress={onBack} hitSlop={8}>
                 <Text style={styles.topBarBtnText}>

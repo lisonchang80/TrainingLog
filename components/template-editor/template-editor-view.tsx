@@ -2591,6 +2591,8 @@ function TemplateEditorView() {
                               <View style={styles.supersetRowNoteSlot}>
                                 {rowHasNote ? (
                                   <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel={tt('button', 'a11yOpenNote')}
                                     onPress={() => {
                                       if (parentSet)
                                         openSetNoteEditor(parent.id, parentSet);
@@ -2856,7 +2858,7 @@ function TemplateEditorView() {
           <Pressable
             style={styles.sheetBackdrop}
             onPress={() => setShowColorPicker(false)}>
-            <Pressable style={styles.sheet}>
+            <Pressable style={styles.sheet} accessibilityViewIsModal>
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>{tt('page', 'selectColor')}</Text>
                 <Pressable onPress={() => setShowColorPicker(false)}>
@@ -2896,7 +2898,7 @@ function TemplateEditorView() {
           <Pressable
             style={styles.sheetBackdrop}
             onPress={() => setShowExercisePicker(false)}>
-            <Pressable style={styles.sheet}>
+            <Pressable style={styles.sheet} accessibilityViewIsModal>
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>{tt('page', 'selectExercise')}</Text>
                 <Pressable onPress={() => setShowExercisePicker(false)}>
@@ -2934,7 +2936,7 @@ function TemplateEditorView() {
           <Pressable
             style={styles.sheetBackdrop}
             onPress={() => setNoteEditing(null)}>
-            <Pressable style={styles.sheet}>
+            <Pressable style={styles.sheet} accessibilityViewIsModal>
               <View style={styles.sheetHeader}>
                 <Pressable onPress={() => setNoteEditing(null)}>
                   <Text style={styles.sheetCancel}>{tt('common', 'cancel')}</Text>

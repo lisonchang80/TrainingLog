@@ -49,7 +49,7 @@ export function MgEquipmentPicker({
       animationType="slide"
       onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet}>
+        <Pressable style={styles.sheet} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={12}>
