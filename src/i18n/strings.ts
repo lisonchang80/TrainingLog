@@ -299,6 +299,8 @@ export const strings = {
       // 2026-07-01 a11y sweep — 歷史月曆 ‹ / › 月份切換箭頭。
       a11yPrevMonth: '上個月',
       a11yNextMonth: '下個月',
+      // 2026-07-07 a11y sweep — 模板編輯器 action bar ⋯ 溢出選單（另存/刪除）。
+      a11yMoreMenu: '更多選項',
     },
 
     /** 頁面標題 / step / section header / placeholder text。 */
@@ -1398,6 +1400,8 @@ export const strings = {
       // 2026-07-01 a11y sweep — history calendar ‹ / › month-nav arrows.
       a11yPrevMonth: 'Previous month',
       a11yNextMonth: 'Next month',
+      // 2026-07-07 a11y sweep — template editor action-bar ⋯ overflow menu (save-as/delete).
+      a11yMoreMenu: 'More options',
     },
 
     page: {

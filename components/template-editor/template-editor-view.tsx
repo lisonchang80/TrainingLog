@@ -2797,6 +2797,8 @@ function TemplateEditorView() {
             <Text style={styles.actionBtnText}>{tt('button', 'selectColorAction')}</Text>
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={tt('button', 'a11yMoreMenu')}
             style={styles.actionBtn}
             onPress={() => {
               // overnight #46 第 1 點 — 「通用」變體（program_id IS NULL OR
